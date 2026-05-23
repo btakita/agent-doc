@@ -6,6 +6,13 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Pre-existing scratch comments survive duplicate prompt cleanup.** Closeout,
+  preflight, and route duplicate-prompt cleanup now preserve post-exchange HTML
+  comment lines that were already present in the pre-response baseline/snapshot.
+  The scrub still removes same-cycle duplicate prompt residue and preserves the
+  comment shell, but it no longer empties a user's parked scratch prompt such as
+  the `tsift.md` `#next-steps` comment after the prompt is answered.
+
 - **Answered prompt tails after the exchange boundary are scrubbed before redispatch.**
   Template normalization, preflight, and route cleanup now remove an exact raw
   prompt tail after the latest `agent:boundary` when that prompt block already

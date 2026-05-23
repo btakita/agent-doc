@@ -971,9 +971,6 @@ pub fn normalize_editor_visible_template_structure(doc: &str) -> Result<String> 
     if let Some(cleaned) = remove_duplicate_answered_exchange_prompt_tail(&normalized) {
         normalized = cleaned;
     }
-    if let Some(cleaned) = remove_post_exchange_duplicate_prompt_comments(&normalized) {
-        normalized = cleaned;
-    }
     guard_no_duplicate_prompt_residue_outside_exchange(&normalized)
         .context("template duplicate prompt residue guard failed")?;
 
@@ -1020,6 +1017,19 @@ pub fn normalize_editor_visible_template_structure(doc: &str) -> Result<String> 
 /// This keeps unrelated scratch comments user-owned while cleaning stale editor
 /// residue such as a hidden previous copy of the current prompt.
 pub fn remove_post_exchange_duplicate_prompt_comments(doc: &str) -> Option<String> {
+    remove_post_exchange_duplicate_prompt_comments_preserving(doc, None)
+}
+
+/// Like `remove_post_exchange_duplicate_prompt_comments`, but keeps duplicate-
+/// looking comment lines that were already present in `preserve_doc`.
+///
+/// Closeout, route, and preflight use this as an ownership proof: stale
+/// duplicate residue created during the current response cycle can be scrubbed,
+/// while pre-existing scratch comments below `agent:exchange` remain user-owned.
+pub fn remove_post_exchange_duplicate_prompt_comments_preserving(
+    doc: &str,
+    preserve_doc: Option<&str>,
+) -> Option<String> {
     let components = component::parse(doc).ok()?;
     let exchange = components
         .iter()
@@ -1034,6 +1044,9 @@ pub fn remove_post_exchange_duplicate_prompt_comments(doc: &str) -> Option<Strin
         .filter(|component| component.name != "exchange")
         .map(|component| (component.open_start, component.close_end))
         .collect::<Vec<_>>();
+    let preserved_comment_lines = preserve_doc
+        .map(post_exchange_comment_line_preserve_set)
+        .unwrap_or_default();
 
     let mut replacements = Vec::<(usize, usize, String)>::new();
     for (start, end) in component::find_non_agent_html_comment_ranges(doc) {
@@ -1053,7 +1066,9 @@ pub fn remove_post_exchange_duplicate_prompt_comments(doc: &str) -> Option<Strin
             continue;
         }
         let body = &doc[start + 4..end - 3];
-        let Some(cleaned_body) = strip_duplicate_prompt_comment_body(body, &prompts) else {
+        let Some(cleaned_body) =
+            strip_duplicate_prompt_comment_body(body, &prompts, &preserved_comment_lines)
+        else {
             replacements.push((start, end, empty_html_comment_like(body)));
             continue;
         };
@@ -1071,6 +1086,49 @@ pub fn remove_post_exchange_duplicate_prompt_comments(doc: &str) -> Option<Strin
         cleaned.replace_range(start..end, &replacement);
     }
     Some(cleaned)
+}
+
+fn post_exchange_comment_line_preserve_set(doc: &str) -> HashSet<String> {
+    let Ok(components) = component::parse(doc) else {
+        return HashSet::new();
+    };
+    let Some(exchange) = components
+        .iter()
+        .find(|component| component.name == "exchange")
+    else {
+        return HashSet::new();
+    };
+    let protected_ranges = components
+        .iter()
+        .filter(|component| component.name != "exchange")
+        .map(|component| (component.open_start, component.close_end))
+        .collect::<Vec<_>>();
+
+    let mut preserved = HashSet::new();
+    for (start, end) in component::find_non_agent_html_comment_ranges(doc) {
+        if start < exchange.close_end {
+            continue;
+        }
+        if protected_ranges
+            .iter()
+            .any(|(protected_start, protected_end)| {
+                start >= *protected_start && end <= *protected_end
+            })
+        {
+            continue;
+        }
+        let original = &doc[start..end];
+        if !original.ends_with("-->") {
+            continue;
+        }
+        let body = &doc[start + 4..end - 3];
+        for line in comment_body_lines(body) {
+            if let Some(normalized) = normalize_prompt_comment_text(line) {
+                preserved.insert(normalized);
+            }
+        }
+    }
+    preserved
 }
 
 /// Remove a prompt tail after the latest exchange boundary when that tail is an
@@ -1241,12 +1299,21 @@ pub fn guard_no_duplicate_prompt_residue_outside_exchange(doc: &str) -> Result<(
             .iter()
             .any(|(start, end)| pos >= *start && pos < *end)
     };
+    let ordinary_comment_ranges = component::find_non_agent_html_comment_ranges(doc);
+    let in_ordinary_comment = |pos: usize| {
+        ordinary_comment_ranges
+            .iter()
+            .any(|(start, end)| pos >= *start && pos < *end)
+    };
 
     let mut offset = 0usize;
     for segment in doc.split_inclusive('\n') {
         let line_start = offset;
         offset += segment.len();
-        if line_start < exchange.close_end || in_protected_component(line_start) {
+        if line_start < exchange.close_end
+            || in_protected_component(line_start)
+            || in_ordinary_comment(line_start)
+        {
             continue;
         }
         let trimmed = segment.trim();
@@ -1270,8 +1337,15 @@ fn empty_html_comment_like(body: &str) -> String {
     }
 }
 
-fn strip_duplicate_prompt_comment_body(body: &str, prompts: &[String]) -> Option<String> {
+fn strip_duplicate_prompt_comment_body(
+    body: &str,
+    prompts: &[String],
+    preserved_comment_lines: &HashSet<String>,
+) -> Option<String> {
     if !body.contains('\n') && is_duplicate_prompt_comment_text(body, prompts) {
+        if normalized_comment_line_is_preserved(body, preserved_comment_lines) {
+            return Some(body.to_string());
+        }
         return None;
     }
 
@@ -1280,6 +1354,10 @@ fn strip_duplicate_prompt_comment_body(body: &str, prompts: &[String]) -> Option
     for segment in body.split_inclusive('\n') {
         let line = segment.strip_suffix('\n').unwrap_or(segment);
         if is_duplicate_prompt_comment_text(line, prompts) {
+            if normalized_comment_line_is_preserved(line, preserved_comment_lines) {
+                cleaned.push_str(segment);
+                continue;
+            }
             changed = true;
             continue;
         }
@@ -1294,6 +1372,25 @@ fn strip_duplicate_prompt_comment_body(body: &str, prompts: &[String]) -> Option
     } else {
         Some(cleaned)
     }
+}
+
+fn comment_body_lines(body: &str) -> Vec<&str> {
+    if body.contains('\n') {
+        body.split_inclusive('\n')
+            .map(|segment| segment.strip_suffix('\n').unwrap_or(segment))
+            .collect()
+    } else {
+        vec![body]
+    }
+}
+
+fn normalized_comment_line_is_preserved(
+    line: &str,
+    preserved_comment_lines: &HashSet<String>,
+) -> bool {
+    normalize_prompt_comment_text(line)
+        .map(|normalized| preserved_comment_lines.contains(&normalized))
+        .unwrap_or(false)
 }
 
 fn exchange_prompt_comment_targets(exchange: &str) -> Vec<String> {
@@ -4938,7 +5035,7 @@ Existing answer.
     }
 
     #[test]
-    fn normalize_editor_visible_template_structure_scrubs_duplicate_prompt_html_comment_body() {
+    fn normalize_editor_visible_template_structure_preserves_duplicate_prompt_html_comment_body() {
         let prompt = "The duplicate content corrupting document and duplicate prompt issues happened yet again. Very tired of playing whack-a-mole. Reproduce bugs with tests first that fail and fix the implementation. #spec-test-build-install-commit-push";
         let doc = format!(
             concat!(
@@ -4963,16 +5060,12 @@ Existing answer.
         );
 
         let repaired = normalize_editor_visible_template_structure(&doc)
-            .expect("editor-visible normalization should scrub duplicate prompt residue");
+            .expect("editor-visible normalization should preserve scratch comments");
 
         let duplicate_comment = format!("\n<!--\n{prompt}\n-->\n");
         assert!(
-            !repaired.contains(&duplicate_comment),
-            "editor-visible normalization must scrub duplicate post-exchange prompt text:\n{repaired}"
-        );
-        assert!(
-            repaired.contains("\n<!--\n-->\n\n<!--\nKeep this unrelated scratch note hidden."),
-            "editor-visible normalization must preserve the ordinary HTML comment shell:\n{repaired}"
+            repaired.contains(&duplicate_comment),
+            "editor-visible normalization has no baseline ownership proof and must preserve post-exchange scratch text:\n{repaired}"
         );
         assert!(
             repaired.contains("<!-- agent:backlog -->\n- [ ] keep me"),
@@ -5015,16 +5108,18 @@ Existing answer.
             .expect("editor-visible normalization should preserve mixed scratch comments");
 
         assert!(
-            !repaired.contains(&format!("<!--\n{duplicate_prompt_line}")),
-            "duplicate prompt line should be scrubbed from the mixed comment:\n{repaired}"
+            repaired.contains(&format!("<!--\n{duplicate_prompt_line}")),
+            "editor-visible normalization must not scrub mixed scratch comments without baseline proof:\n{repaired}"
         );
         assert!(
             repaired.contains("Look through the Claude + Codex + agent-doc session logs"),
             "unrelated scratch lines in the same ordinary comment must survive:\n{repaired}"
         );
         assert!(
-            repaired.contains("<!--\n#spec-test-build-install-commit-push\n---\nLook through"),
-            "the mixed comment shell and nonduplicate body lines should be preserved:\n{repaired}"
+            repaired.contains(&format!(
+                "<!--\n{duplicate_prompt_line}\n#spec-test-build-install-commit-push\n---\nLook through"
+            )),
+            "the mixed comment shell and full body should be preserved:\n{repaired}"
         );
     }
 

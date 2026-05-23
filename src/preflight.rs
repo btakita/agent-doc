@@ -370,9 +370,16 @@ fn remove_duplicate_answered_exchange_prompt_tail_for_preflight(file: &Path) -> 
 }
 
 fn remove_post_exchange_duplicate_prompt_comments_for_preflight(file: &Path) -> Result<bool> {
-    let Some(cleaned_doc) = crate::template::remove_post_exchange_duplicate_prompt_comments(
-        &std::fs::read_to_string(file)?,
-    ) else {
+    let current = std::fs::read_to_string(file)?;
+    let snapshot_doc = crate::snapshot::load(file).ok().flatten();
+    let head_doc = crate::git::show_head(file).ok().flatten();
+    let preserve_doc = head_doc.as_deref().or(snapshot_doc.as_deref());
+    let Some(cleaned_doc) =
+        crate::template::remove_post_exchange_duplicate_prompt_comments_preserving(
+            &current,
+            preserve_doc,
+        )
+    else {
         return Ok(false);
     };
 
@@ -4572,6 +4579,55 @@ mod tests {
         assert!(
             !snapshot_after.contains(prompt),
             "snapshot must not absorb the live prompt during preflight:\n{snapshot_after}"
+        );
+    }
+
+    #[test]
+    fn preflight_preserves_duplicate_prompt_comment_from_snapshot() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+        let prompt = "What are #next-steps to improve the sqlitedb graph performance?";
+        let snapshot = format!(
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "❯ {prompt}\n",
+                "<!-- agent:boundary:head -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "###\n\n",
+                "<!--\n",
+                "{prompt}\n",
+                "-->\n\n",
+                "<!-- agent:backlog -->\n",
+                "- [ ] keep me\n",
+                "<!-- /agent:backlog -->\n"
+            ),
+            prompt = prompt
+        );
+        std::fs::write(&doc, &snapshot).unwrap();
+        snapshot::save(&doc, &snapshot).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let changed = remove_post_exchange_duplicate_prompt_comments_for_preflight(&doc).unwrap();
+
+        let file_after = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            !changed,
+            "preflight cleanup should not rewrite baseline-owned scratch comments"
+        );
+        assert!(
+            file_after.contains(&format!("<!--\n{prompt}\n-->")),
+            "preflight must not scrub post-exchange scratch text that already existed in HEAD:\n{file_after}"
         );
     }
 

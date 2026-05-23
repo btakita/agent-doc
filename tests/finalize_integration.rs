@@ -1393,16 +1393,10 @@ fn finalize_preserves_late_comment_tail_edit_outside_exchange_uncommitted() {
 fn finalize_scrubs_duplicate_prompt_html_comment_body_preserving_shell() {
     let (tmp, doc) = setup_session_stream_doc();
     let prompt = "The post-exchange HTML comment block should survive finalize. #spec-test-build-install-commit-push";
-    let shaped = fs::read_to_string(&doc)
+    let baseline_shaped = fs::read_to_string(&doc)
         .unwrap()
-        .replace("❯ Please reply", &format!("❯ {prompt}"))
-        .replace(
-            "<!-- /agent:exchange -->\n\n<!-- agent:pending -->",
-            &format!(
-                "<!-- /agent:exchange -->\n###\n\n<!--\n{prompt}\n-->\n\n<!-- agent:pending -->"
-            ),
-        );
-    fs::write(&doc, shaped).unwrap();
+        .replace("❯ Please reply", &format!("❯ {prompt}"));
+    fs::write(&doc, baseline_shaped).unwrap();
     init_git_repo(tmp.path(), &doc);
     let baseline_content = fs::read_to_string(&doc).unwrap();
     let baseline = write_baseline(tmp.path(), &baseline_content);
@@ -1411,6 +1405,11 @@ fn finalize_scrubs_duplicate_prompt_html_comment_body_preserving_shell() {
         .args(["preflight", doc.to_str().unwrap()])
         .assert()
         .success();
+    let current_with_duplicate = fs::read_to_string(&doc).unwrap().replace(
+        "<!-- /agent:exchange -->\n\n<!-- agent:pending -->",
+        &format!("<!-- /agent:exchange -->\n###\n\n<!--\n{prompt}\n-->\n\n<!-- agent:pending -->"),
+    );
+    fs::write(&doc, current_with_duplicate).unwrap();
 
     agent_doc()
         .current_dir(tmp.path())
@@ -1445,8 +1444,60 @@ fn finalize_scrubs_duplicate_prompt_html_comment_body_preserving_shell() {
         "finalize must scrub duplicate prompt text from ordinary HTML comments in the closeout commit:\n{head}"
     );
     assert!(
-        head.contains(scrubbed_comment_shell),
-        "finalize must preserve the ordinary HTML comment shell in the closeout commit:\n{head}"
+        !head.contains(scrubbed_comment_shell),
+        "concurrent non-component comment residue should stay outside the assistant closeout commit:\n{head}"
+    );
+}
+
+#[test]
+fn finalize_preserves_baseline_prompt_html_comment_body() {
+    let (tmp, doc) = setup_session_stream_doc();
+    let prompt = "What are #next-steps to improve the sqlitedb graph performance?";
+    let shaped = fs::read_to_string(&doc)
+        .unwrap()
+        .replace("❯ Please reply", &format!("❯ {prompt}"))
+        .replace(
+            "<!-- /agent:exchange -->\n\n<!-- agent:pending -->",
+            &format!(
+                "<!-- /agent:exchange -->\n###\n\n<!--\n{prompt}\n-->\n\n<!-- agent:pending -->"
+            ),
+        );
+    fs::write(&doc, shaped).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    let baseline_content = fs::read_to_string(&doc).unwrap();
+    let baseline = write_baseline(tmp.path(), &baseline_content);
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["preflight", doc.to_str().unwrap()])
+        .assert()
+        .success();
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--baseline-file",
+            baseline.to_str().unwrap(),
+            "--stream",
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: sqlitedb graph performance next steps — gpt-5\nAnswered without deleting the parked scratch comment.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success();
+
+    let expected_comment = format!("<!--\n{prompt}\n-->");
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        content.contains(&expected_comment),
+        "pre-existing post-exchange scratch comments must remain visible after closeout:\n{content}"
+    );
+
+    let head = head_blob(tmp.path());
+    assert!(
+        head.contains(&expected_comment),
+        "pre-existing post-exchange scratch comments must remain in the closeout commit:\n{head}"
     );
 }
 

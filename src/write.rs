@@ -3918,6 +3918,14 @@ fn enforce_no_duplicate_prompt_residue(file: &Path, content: &str, context: &str
 }
 
 pub(crate) fn normalize_template_structure_or_fail(content: &str, file: &Path) -> Result<String> {
+    normalize_template_structure_or_fail_preserving(content, file, None)
+}
+
+pub(crate) fn normalize_template_structure_or_fail_preserving(
+    content: &str,
+    file: &Path,
+    preserve_doc: Option<&str>,
+) -> Result<String> {
     let lifted = lift_pending_from_exchange_safe(content, file);
     // Defense-in-depth: merge any duplicate exchange openers that may have
     // survived the patch application phase (e.g., via CRDT/git merge).
@@ -3933,8 +3941,12 @@ pub(crate) fn normalize_template_structure_or_fail(content: &str, file: &Path) -
         &crate::component::strip_backlog_patch_attr(&deduped_openers),
         file,
     );
-    let (normalized, _) =
-        remove_post_exchange_duplicate_prompt_comments_with_log(&normalized, file, "structure");
+    let (normalized, _) = remove_post_exchange_duplicate_prompt_comments_with_log(
+        &normalized,
+        file,
+        "structure",
+        preserve_doc,
+    );
     let (normalized, _) = dedupe_live_prompt_prefix_variants_in_tail(&normalized, file);
     enforce_no_duplicate_prompt_residue(file, &normalized, "structure")?;
     match crate::template::guard_no_conversation_tail_outside_exchange(&normalized) {
@@ -4718,9 +4730,12 @@ fn remove_post_exchange_duplicate_prompt_comments_with_log(
     content: &str,
     file: &Path,
     source: &str,
+    preserve_doc: Option<&str>,
 ) -> (String, bool) {
-    let Some(cleaned) = crate::template::remove_post_exchange_duplicate_prompt_comments(content)
-    else {
+    let Some(cleaned) = crate::template::remove_post_exchange_duplicate_prompt_comments_preserving(
+        content,
+        preserve_doc,
+    ) else {
         return (content.to_string(), false);
     };
     crate::ops_log::log_op(
@@ -5102,7 +5117,8 @@ pub fn run_template(
     let content_ours =
         template::apply_patches_with_overrides(base, &patches, &unmatched, file, &mode_overrides)
             .context("failed to apply template patches")?;
-    let content_ours = normalize_template_structure_or_fail(&content_ours, file)?;
+    let content_ours =
+        normalize_template_structure_or_fail_preserving(&content_ours, file, Some(base))?;
 
     // Re-read file to check for user edits since lock acquisition
     let content_current = std::fs::read_to_string(file)
@@ -5142,7 +5158,8 @@ pub fn run_template(
     )?;
     let cleaned_resolved_backlog_prompts_applied = cleaned_resolved_backlog_prompts.is_some();
     if let Some(cleaned) = cleaned_resolved_backlog_prompts {
-        final_content = normalize_template_structure_or_fail(&cleaned, file)?;
+        final_content =
+            normalize_template_structure_or_fail_preserving(&cleaned, file, Some(base))?;
     }
 
     // Dedup: skip write if merged content is identical to current file (strip boundary markers)
@@ -5436,7 +5453,8 @@ pub fn run_stream(
 
             // Lift pending out of exchange if nested (structural repair)
             content_ours = lift_pending_from_exchange_safe(&content_ours, file);
-            content_ours = normalize_template_structure_or_fail(&content_ours, file)?;
+            content_ours =
+                normalize_template_structure_or_fail_preserving(&content_ours, file, Some(base))?;
 
             // Shrink guard: refuse if new exchange content is dramatically shorter
             check_exchange_shrink_guard(&content_at_start, &content_ours, file)?;
@@ -5777,7 +5795,8 @@ pub fn run_stream(
 
     // Lift pending out of exchange if nested (structural repair)
     content_ours = lift_pending_from_exchange_safe(&content_ours, file);
-    content_ours = normalize_template_structure_or_fail(&content_ours, file)?;
+    content_ours =
+        normalize_template_structure_or_fail_preserving(&content_ours, file, Some(base))?;
 
     // Shrink guard: refuse if new exchange content is dramatically shorter
     check_exchange_shrink_guard(&content_at_start, &content_ours, file)?;
@@ -5842,7 +5861,8 @@ pub fn run_stream(
     )?;
     let cleaned_resolved_backlog_prompts_applied = cleaned_resolved_backlog_prompts.is_some();
     if let Some(cleaned) = cleaned_resolved_backlog_prompts {
-        final_content = normalize_template_structure_or_fail(&cleaned, file)?;
+        final_content =
+            normalize_template_structure_or_fail_preserving(&cleaned, file, Some(base))?;
         crdt_state = crate::crdt::CrdtDoc::from_text(&final_content).encode_state();
     }
 
@@ -6183,7 +6203,8 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     let mut content_ours =
         template::apply_patches_with_overrides(base, &patches, &unmatched, file, &mode_overrides)
             .context("failed to apply template patches")?;
-    content_ours = normalize_template_structure_or_fail(&content_ours, file)?;
+    content_ours =
+        normalize_template_structure_or_fail_preserving(&content_ours, file, Some(base))?;
 
     // Apply frontmatter patch if present
     if let Some(ref yaml) = frontmatter_yaml {
@@ -6339,7 +6360,8 @@ pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
         &mode_overrides,
     )
     .context("failed to apply template patches")?;
-    let content_ours = normalize_template_structure_or_fail(&content_ours, file)?;
+    let content_ours =
+        normalize_template_structure_or_fail_preserving(&content_ours, file, Some(&content))?;
 
     let doc_lock = acquire_doc_lock(file)?;
 
@@ -6627,7 +6649,7 @@ pub(crate) fn dedupe_ipc_snapshot_content(
 ) -> Result<(String, bool)> {
     let mut deduped = dedupe_consecutive_response_blocks(content, file);
     let (comment_deduped, comment_changed) =
-        remove_post_exchange_duplicate_prompt_comments_with_log(&deduped, file, source);
+        remove_post_exchange_duplicate_prompt_comments_with_log(&deduped, file, source, before);
     if comment_changed {
         deduped = comment_deduped;
     }
@@ -8444,7 +8466,7 @@ fn adopt_current_response_without_duplication(
     if let Some(snapshot_doc) = snapshot {
         repaired = normalize_user_prompts_in_exchange_safe(&repaired, base, snapshot_doc, file);
     }
-    repaired = normalize_template_structure_or_fail(&repaired, file)?;
+    repaired = normalize_template_structure_or_fail_preserving(&repaired, file, Some(base))?;
     Ok(Some(repaired))
 }
 
@@ -8460,18 +8482,20 @@ fn normalize_final_template_content(
     if let Some(snapshot_doc) = snapshot {
         normalized = normalize_user_prompts_in_exchange_safe(&normalized, base, snapshot_doc, file);
     }
-    normalized = normalize_template_structure_or_fail(&normalized, file)?;
+    normalized = normalize_template_structure_or_fail_preserving(&normalized, file, Some(base))?;
     if let Some(before) = before_current {
         let (deduped, changed) = dedupe_prompt_lines_against_before(before, &normalized, file);
         if changed {
-            normalized = normalize_template_structure_or_fail(&deduped, file)?;
+            normalized =
+                normalize_template_structure_or_fail_preserving(&deduped, file, Some(base))?;
         }
     }
     if let Some(repaired) =
         repair_response_precedes_prompt_in_exchange(&normalized, response, file, Some(base))?
     {
         normalized = repaired;
-        normalized = normalize_template_structure_or_fail(&normalized, file)?;
+        normalized =
+            normalize_template_structure_or_fail_preserving(&normalized, file, Some(base))?;
     }
     if response_precedes_prompt_in_exchange(&normalized, response, Some(base)) {
         crate::ops_log::log_op(
@@ -10689,17 +10713,19 @@ scratch
             "The duplicate content corrupting document and duplicate prompt issues happened yet again. Very tired of playing whack-a-mole. Reproduce bugs with tests first that fail and fix the implementation. Was this an issue because I didn't restart agent-doc on this document? #spec-test-build-install-commit-push\n",
             "<!-- /agent:exchange -->\n\n",
             "###\n\n",
-            "<!--\n",
-            "The duplicate content corrupting document and duplicate prompt issues happened yet again. Very tired of playing whack-a-mole. Reproduce bugs with tests first that fail and fix the implementation. #spec-test-build-install-commit-push\n",
-            "-->\n\n",
             "<!-- agent:backlog -->\n",
             "- [ ] keep me\n",
             "<!-- /agent:backlog -->\n"
         );
-        let after = before.replace(
-            "<!-- /agent:exchange -->",
-            "### Re: duplicate prompt cleanup — gpt-5\n\nImplemented.\n<!-- agent:boundary:new -->\n<!-- /agent:exchange -->",
-        );
+        let after = before
+            .replace(
+                "<!-- /agent:exchange -->",
+                "### Re: duplicate prompt cleanup — gpt-5\n\nImplemented.\n<!-- agent:boundary:new -->\n<!-- /agent:exchange -->",
+            )
+            .replace(
+                "<!-- agent:backlog -->",
+                "<!--\nThe duplicate content corrupting document and duplicate prompt issues happened yet again. Very tired of playing whack-a-mole. Reproduce bugs with tests first that fail and fix the implementation. #spec-test-build-install-commit-push\n-->\n\n<!-- agent:backlog -->",
+            );
         fs::write(&doc, before).unwrap();
 
         let (repaired, changed) =
@@ -14033,17 +14059,19 @@ Verification:
             "The duplicate content corrupting document and duplicate prompt issues happened yet again. Very tired of playing whack-a-mole. Reproduce bugs with tests first that fail and fix the implementation. Was this an issue because I didn't restart agent-doc on this document? #spec-test-build-install-commit-push\n",
             "<!-- /agent:exchange -->\n\n",
             "###\n\n",
-            "<!--\n",
-            "The duplicate content corrupting document and duplicate prompt issues happened yet again. Very tired of playing whack-a-mole. Reproduce bugs with tests first that fail and fix the implementation. #spec-test-build-install-commit-push\n",
-            "-->\n\n",
             "<!-- agent:backlog -->\n",
             "- [ ] keep me\n",
             "<!-- /agent:backlog -->\n"
         );
-        let merged = base.replace(
-            "<!-- /agent:exchange -->",
-            "### Re: duplicate prompt cleanup — gpt-5\n\nImplemented.\n<!-- agent:boundary:new -->\n<!-- /agent:exchange -->",
-        );
+        let merged = base
+            .replace(
+                "<!-- /agent:exchange -->",
+                "### Re: duplicate prompt cleanup — gpt-5\n\nImplemented.\n<!-- agent:boundary:new -->\n<!-- /agent:exchange -->",
+            )
+            .replace(
+                "<!-- agent:backlog -->",
+                "<!--\nThe duplicate content corrupting document and duplicate prompt issues happened yet again. Very tired of playing whack-a-mole. Reproduce bugs with tests first that fail and fix the implementation. #spec-test-build-install-commit-push\n-->\n\n<!-- agent:backlog -->",
+            );
 
         let repaired =
             normalize_final_template_content(&doc, base, Some(snapshot), None, &merged, None)
@@ -14066,6 +14094,43 @@ Verification:
         assert!(
             repaired.contains("<!-- agent:backlog -->\n- [ ] keep me"),
             "backlog scaffold should remain intact:\n{repaired}"
+        );
+    }
+
+    #[test]
+    fn normalize_final_template_content_preserves_baseline_prompt_html_comment_body() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("doc.md");
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let prompt = "What are #next-steps to improve the sqlitedb graph performance?";
+        let base = format!(
+            concat!(
+                "<!-- agent:exchange patch=append -->\n",
+                "❯ {prompt}\n",
+                "<!-- agent:boundary:head -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "###\n\n",
+                "<!--\n",
+                "{prompt}\n",
+                "-->\n\n",
+                "<!-- agent:backlog -->\n",
+                "- [ ] keep me\n",
+                "<!-- /agent:backlog -->\n"
+            ),
+            prompt = prompt
+        );
+        let merged = base.replace(
+            "<!-- /agent:exchange -->",
+            "### Re: sqlitedb graph performance next steps — gpt-5\n\nImplemented.\n<!-- agent:boundary:new -->\n<!-- /agent:exchange -->",
+        );
+
+        let repaired =
+            normalize_final_template_content(&doc, &base, Some(&base), None, &merged, None)
+                .unwrap();
+
+        assert!(
+            repaired.contains(&format!("<!--\n{prompt}\n-->")),
+            "baseline-owned post-exchange scratch text must not be scrubbed:\n{repaired}"
         );
     }
 

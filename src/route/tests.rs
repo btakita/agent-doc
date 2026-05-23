@@ -181,7 +181,7 @@ fn route_scrubs_duplicate_prompt_comment_before_dispatch() {
         prompt = prompt
     );
 
-    let cleanup = scrub_duplicate_prompt_comments_for_route(&content)
+    let cleanup = scrub_duplicate_prompt_comments_for_route(&content, None)
         .unwrap()
         .expect("route should canonicalize duplicate prompt scratch comments before dispatch");
     let cleaned = cleanup.content;
@@ -194,6 +194,32 @@ fn route_scrubs_duplicate_prompt_comment_before_dispatch() {
     assert!(
         cleaned.contains("\n<!--\n-->\n\n<!--\nKeep this unrelated scratch note hidden."),
         "route must preserve the ordinary comment shell and unrelated scratch comments:\n{cleaned}"
+    );
+}
+
+#[test]
+fn route_preserves_duplicate_prompt_comment_from_snapshot() {
+    let prompt = "What are #next-steps to improve the sqlitedb graph performance?";
+    let content = format!(
+        concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ {prompt}\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "###\n\n",
+            "<!--\n",
+            "{prompt}\n",
+            "-->\n"
+        ),
+        prompt = prompt
+    );
+
+    let cleanup = scrub_duplicate_prompt_comments_for_route(&content, Some(&content)).unwrap();
+
+    assert!(
+        cleanup.is_none(),
+        "route cleanup must preserve snapshot-owned scratch comments"
     );
 }
 
@@ -224,7 +250,7 @@ fn route_preserves_scratch_comment_after_compact_summary_before_dispatch() {
         prompt = prompt
     );
 
-    let cleanup = scrub_duplicate_prompt_comments_for_route(&content)
+    let cleanup = scrub_duplicate_prompt_comments_for_route(&content, None)
         .unwrap()
         .expect("route cleanup should scrub duplicate compact prompt residue");
     let cleaned = cleanup.content;
@@ -264,7 +290,7 @@ fn route_preserves_scratch_comment_when_response_quotes_same_text() {
         scratch = scratch
     );
 
-    let cleanup = scrub_duplicate_prompt_comments_for_route(&content).unwrap();
+    let cleanup = scrub_duplicate_prompt_comments_for_route(&content, None).unwrap();
     let cleaned = cleanup
         .as_ref()
         .map(|cleanup| cleanup.content.as_str())
@@ -295,7 +321,7 @@ fn route_scrubs_duplicate_answered_prompt_tail_before_dispatch() {
         prompt = prompt
     );
 
-    let cleanup = scrub_duplicate_prompt_comments_for_route(&content)
+    let cleanup = scrub_duplicate_prompt_comments_for_route(&content, None)
         .unwrap()
         .expect("route should canonicalize duplicate answered prompt tails before dispatch");
     let cleaned = cleanup.content;
@@ -330,7 +356,7 @@ fn route_rejects_duplicate_prompt_markdown_residue_before_dispatch() {
         prompt = prompt
     );
 
-    let err = scrub_duplicate_prompt_comments_for_route(&content).unwrap_err();
+    let err = scrub_duplicate_prompt_comments_for_route(&content, None).unwrap_err();
 
     assert!(
         err.to_string().contains("duplicate prompt residue"),

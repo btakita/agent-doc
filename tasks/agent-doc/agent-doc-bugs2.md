@@ -20,8 +20,7 @@ queue_active: true
 ## Status
 
 <!-- agent:status patch=replace -->
-
-Top backlog item: #typedrepair. Added #tsiftipc as the concrete tsift.md reproduction fixture.
+Top backlog item: #qguard. Captured auto-queue stall follow-ups; current queued implementation work remains open.
 <!-- /agent:status -->
 
 ## Exchange
@@ -79,13 +78,32 @@ Commands:
 - `sed -n '247,252p' src/agent-doc/specs/07-orchestration-commands.md`
 
 Verification: inspected the implementation and spec paths; no code was changed, so I did not run the test suite.
-<!-- agent:boundary:6bf87516 -->
+❯ What are #next-steps to fix the `agent:queue auto` stall issue?
+### Re: #next-steps for agent:queue auto stall — gpt-5
+
+Captured the next steps in priority order. Top backlog item: #qguard.
+
+The main fix is not just "continue the loop." There is a queue-consumption proof bug first: a non-queue prompt can be answered while `queue_active: true`, and because preflight's explicit baseline already includes that prompt, the closeout can see no prompt diff and consume the queue head anyway. That is why the first follow-up is #qguard.
+
+I also captured follow-ups for repair writes preserving queue state, Codex/direct entrypoints using the binary-owned auto-continuation loop, and an end-to-end fixture that reproduces this exact shape.
+
+Changed paths: session backlog/status only.
+
+Commands:
+- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
+- `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
+- `rg -n "pending_add|pending-add|pending_adds|prepend|beginning" src/agent-doc/src/pending.rs src/agent-doc/src/write.rs src/agent-doc/tests/finalize_integration.rs src/agent-doc/tests/pending_integration.rs`
+- `sed -n '1060,1165p' src/agent-doc/src/write.rs`
+- `sed -n '2130,2225p' src/agent-doc/src/write.rs`
+
+Verification: inspected the closeout/queue-consumption logic and persisted the backlog additions. No source code changed, so I did not run tests.
+<!-- agent:boundary:82dc4d6a -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#edproof]~
 - do [#typedrepair]
@@ -98,6 +116,10 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#qguard] [recommended] Fix queue consumption proof so prompt-only or next-steps closeouts cannot consume an active queue head when the preflight baseline already includes the unrelated prompt; require an exact queue-head prompt match, queue-synthetic diff proof, or explicit done id before consuming.
+- [ ] [#qrepair] [recommended] Make response repair/write --commit queue-neutral: missing-response materialization repairs must preserve the current queue head and auto attribute unless the repair explicitly closes that queue item.
+- [ ] [#qloop] [recommended] Wire Codex/direct agent-doc file invocations into the binary-owned auto-queue continuation loop, or explicitly re-dispatch the next queue head after finalize when queue_active and agent:queue auto remain true.
+- [ ] [#qfixture] [recommended] Add an end-to-end regression for agent:queue auto plus a non-queue #next-steps prompt and repair write, asserting the auto attribute is preserved and the next queue head is not consumed.
 - [ ] [#typedrepair] [recommended] Split write.rs IPC repair outcomes into typed decisions with repaired snapshot content, disk-repair reason, editor bad-state fingerprint, redeliver_editor, and structured ops-log records.
 - [ ] [#repairtests] [recommended] Add deterministic unit and SimWorld coverage for ack-sidecar-only repair, real visible duplicate repair, sidecar normalization divergence, stale source-buffer skips, and post-commit user-follow-up drift.
 - [ ] [#tsiftipc] [recommended] Capture the tsift.md duplicate-content corruption while typing as a named fixture and assert full-document IPC redelivery is skipped without fresh editor-buffer proof.

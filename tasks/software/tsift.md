@@ -31,43 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260523-001050.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260523-002555.md`*
 
 Compacted content:
-- Archived 8 response topic(s): graph performance queue; gdbrowstream queue cleanup; gdbprepstage queue cleanup; 5 more
+- Archived 1 response topic(s): kuzu backend-eval prototype
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ do [#gdbkuzu]. #spec-test-build-install-commit-push
-### Re: kuzu backend-eval prototype — gpt-5
-
-Completed `#gdbkuzu`.
-
-Implemented a dependency-free `kuzu` backend-eval candidate in `src/tsift`, alongside DuckDB/DuckPGQ, FalkorDB, and Ladybug. The candidate uses the existing provider-neutral `GraphStore` row projection path, reports Kuzu-specific projection-load behavior, concurrent-writer/lock behavior, and Rust build/install portability notes, and remains gated behind `graph-db backend-eval` rather than changing SQLite as the correctness substrate.
-
-Changed paths:
-- `src/tsift/src/main.rs`
-- `src/tsift/tests/graph_db_conformance.rs`
-- `src/tsift/SPEC.md`
-- `src/tsift/README.md`
-
-Verification:
-- `cargo test --test graph_db_conformance graph_db_backend_eval_benchmarks_candidate_stores_against_sqlite -- --nocapture`
-- `make check`
-- `cargo build --locked`
-- `cargo install --path . --locked`
-- `tsift --version`
-- `tsift graph-db --path . backend-eval --help`
-- `tsift graph-db --path . --json schema`
-
-CI review:
-- `gh run list --workflow CI --limit 1` in `src/tsift`: latest `tsift` CI run `26315623600` was successful.
-- Root `Agent Doc` latest run `26318080821` has empty-step failures for `tmux-ci` and `check`; `gh run view --job 77481397502 --log` returned `log not found`, so I treated it as an external CI-start blocker rather than a tsift/tmux regression.
-
-Commits:
-- `src/tsift`: `82dac57 feat: add kuzu backend eval candidate`
-- superproject: `36171dc13 chore: pin tsift kuzu backend eval`
-
-Push is queued immediately after this mandatory agent-doc closeout so the session document stays on the finalize path.
-<!-- agent:boundary:3f487d74 -->
+<!-- agent:boundary:3fc1c2c9 -->
 <!-- /agent:exchange -->
 ###
 <!--

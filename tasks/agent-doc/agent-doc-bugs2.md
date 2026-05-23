@@ -14,13 +14,14 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
-Top backlog item: #mxz5. Captured auto-queue stall follow-ups; current queued implementation work remains open.
+
+Resolved #mxz5; current queued implementation work remains open.
 <!-- /agent:status -->
 
 ## Exchange
@@ -33,7 +34,20 @@ Top backlog item: #mxz5. Captured auto-queue stall follow-ups; current queued im
 Compacted content:
 - Archived 3 response topic(s): agent:queue auto stall; #tsiftipc; #narrowpatch
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:398bf5d8 -->
+### Re: #mxz5 — gpt-5
+
+Confirmed: do not push parent `main` as an implicit prerequisite for the superproject gitlink update unless the existing parent-only history is intentionally ready to publish too.
+
+Evidence from this cycle:
+- `git fetch origin` completed, and parent `main` is still `ahead 6` of `origin/main`.
+- The six unpushed parent commits are session/document commits: `dc3ab28c9`, `31e23eefb`, `ce8072deb`, `98269408f`, `39d1f5e3f`, and `6a7edfdac`.
+- The pending parent gitlink diffs for `src/equityfundingsource-dev` and `src/tmux-router` point at commits already present on their submodules' `origin/main`, so the submodule targets themselves are publishable.
+- A future parent gitlink commit made on this `main` branch would be pushed after those six existing commits, so it cannot be published independently from this branch without splitting or cherry-picking.
+
+Outcome: I left parent `main` unpushed and marked `#mxz5` done. The next queue item remains open.
+
+Verification run: `agent-doc preflight`, `agent-doc plan`, `git fetch origin`, `git status -sb`, `git log --oneline --decorate origin/main..HEAD`, `git diff --submodule=log -- src/equityfundingsource-dev src/tmux-router`, and submodule `status -sb` / `branch -vv` checks for both gitlink targets. No code changed, so no build or test suite was run.
+<!-- agent:boundary:394f8d8c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -41,7 +55,7 @@ Compacted content:
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#mxz5]
+- ~do [#mxz5]~
 - do [#qguard]
 - do [#qrepair]
 - do [#qfixture]
@@ -50,7 +64,6 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#mxz5] [recommended] Confirm whether parent main's existing unpushed commits should be pushed before publishing the superproject gitlink update.
 - [ ] [#qguard] [recommended] Fix queue consumption proof so prompt-only or next-steps closeouts cannot consume an active queue head when the preflight baseline already includes the unrelated prompt; require an exact queue-head prompt match, queue-synthetic diff proof, or explicit done id before consuming.
 - [ ] [#qrepair] [recommended] Make response repair/write --commit queue-neutral: missing-response materialization repairs must preserve the current queue head and auto attribute unless the repair explicitly closes that queue item.
 - [ ] [#qfixture] [recommended] Add an end-to-end regression for agent:queue auto plus a non-queue #next-steps prompt and repair write, asserting the auto attribute is preserved and the next queue head is not consumed.

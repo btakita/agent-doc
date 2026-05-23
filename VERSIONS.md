@@ -6,6 +6,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Codex child process launch retries transient executable-busy errors.**
+  The Codex/OpenCode backend now retries child process spawn when Linux returns
+  `ETXTBSY` for a just-written executable. This hardens the streaming resume
+  retry tests and normal child launch path against CI filesystem races without
+  masking other spawn failures.
+
 - **Editor repair cleanup now distinguishes snapshot-only from redelivery.**
   The editor specs now make typed IPC repair decisions explicit: snapshot-only
   repair stays binary-owned, narrow `normalize_prefix_lines` + boundary

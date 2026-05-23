@@ -618,6 +618,34 @@ fn looks_like_opencode_usage_output(output: &str) -> bool {
         || lower.contains("unknown option")
 }
 
+fn is_text_file_busy(err: &std::io::Error) -> bool {
+    #[cfg(unix)]
+    {
+        err.raw_os_error() == Some(libc::ETXTBSY)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = err;
+        false
+    }
+}
+
+fn spawn_agent_command(cmd: &mut Command) -> std::io::Result<std::process::Child> {
+    const TEXT_FILE_BUSY_RETRIES: usize = 3;
+
+    for attempt in 0..=TEXT_FILE_BUSY_RETRIES {
+        match cmd.spawn() {
+            Ok(child) => return Ok(child),
+            Err(err) if is_text_file_busy(&err) && attempt < TEXT_FILE_BUSY_RETRIES => {
+                std::thread::sleep(Duration::from_millis(25 * (attempt as u64 + 1)));
+            }
+            Err(err) => return Err(err),
+        }
+    }
+
+    unreachable!("spawn loop returns on success or final error")
+}
+
 fn wait_with_timeout(
     mut child: std::process::Child,
     timeout: Duration,
@@ -776,11 +804,10 @@ fn prove_codex_child_network_access(
     let codex =
         Codex::new(Some(command.to_string()), Some(probe_args)).with_env(env_map_as_overrides(env));
     let mut cmd = codex.build_command(None, false, None);
-    let mut child = cmd
-        .stdin(std::process::Stdio::piped())
+    cmd.stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
+        .stderr(std::process::Stdio::piped());
+    let mut child = spawn_agent_command(&mut cmd)
         .map_err(|e| anyhow::anyhow!("failed to start {harness} child network probe: {e}"))?;
     if let Some(stdin) = child.stdin.as_mut() {
         Codex::write_prompt_to_child(stdin, &codex_child_network_probe_prompt())?;
@@ -820,7 +847,7 @@ fn prove_opencode_child_network_access(
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
     let output = wait_with_timeout(
-        cmd.spawn()
+        spawn_agent_command(&mut cmd)
             .map_err(|e| anyhow::anyhow!("failed to start {harness} child network probe: {e}"))?,
         CODEX_CHILD_NETWORK_PROBE_TIMEOUT,
         "network",
@@ -914,7 +941,7 @@ fn prove_opencode_child_required_ssh(
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
     let output = wait_with_timeout(
-        cmd.spawn()
+        spawn_agent_command(&mut cmd)
             .map_err(|e| anyhow::anyhow!("failed to start {harness} child SSH probe: {e}"))?,
         Duration::from_secs(30),
         "ssh",
@@ -1057,11 +1084,10 @@ fn prove_codex_child_writable_roots(
     let codex =
         Codex::new(Some(command.to_string()), Some(probe_args)).with_env(env_map_as_overrides(env));
     let mut cmd = codex.build_command(None, false, None);
-    let mut child = cmd
-        .stdin(std::process::Stdio::piped())
+    cmd.stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
+        .stderr(std::process::Stdio::piped());
+    let mut child = spawn_agent_command(&mut cmd)
         .map_err(|e| anyhow::anyhow!("failed to start {harness} child writable-root probe: {e}"))?;
     if let Some(stdin) = child.stdin.as_mut() {
         Codex::write_prompt_to_child(stdin, &codex_child_writable_roots_probe_prompt(roots))?;
@@ -1598,11 +1624,10 @@ impl Codex {
         required_ssh_match_terms: &[String],
     ) -> Result<ParsedCodexResponse> {
         let mut cmd = self.build_command(session_id, false, model);
-        let mut child = cmd
-            .stdin(std::process::Stdio::piped())
+        cmd.stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()?;
+            .stderr(std::process::Stdio::piped());
+        let mut child = spawn_agent_command(&mut cmd)?;
         {
             if let Some(ref mut stdin) = child.stdin {
                 Self::write_prompt_to_child(stdin, prompt)?;
@@ -1693,11 +1718,10 @@ impl Codex {
         model: Option<&str>,
     ) -> Result<StreamProcess> {
         let mut cmd = self.build_command(session_id, false, model);
-        let mut child = cmd
-            .stdin(std::process::Stdio::piped())
+        cmd.stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()?;
+            .stderr(std::process::Stdio::piped());
+        let mut child = spawn_agent_command(&mut cmd)?;
 
         {
             if let Some(ref mut stdin) = child.stdin {
@@ -2193,6 +2217,17 @@ mod tests {
         perms.set_mode(0o755);
         fs::set_permissions(&path, perms).unwrap();
         (dir, dir_path)
+    }
+
+    #[test]
+    fn text_file_busy_detection_matches_unix_os_error() {
+        #[cfg(unix)]
+        assert!(is_text_file_busy(&std::io::Error::from_raw_os_error(
+            libc::ETXTBSY
+        )));
+        assert!(!is_text_file_busy(&std::io::Error::from(
+            std::io::ErrorKind::NotFound
+        )));
     }
 
     fn init_repo(root: &Path) {

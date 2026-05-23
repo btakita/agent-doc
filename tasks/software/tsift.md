@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -125,7 +125,14 @@ Commands/proof: ran `agent-doc --version`, `agent-doc preflight`, `agent-doc rea
 I did not redispatch or rerun the spec/test/build/install/push flow for this queue head. The planning evidence reported `previously_completed=true` for `#gdbtargetsnap`, so this closeout is consuming the reactivated queue entry only.
 
 Commands/proof: ran `agent-doc preflight` and `agent-doc plan`; plan attempted `tsift dispatch-trace` and timed out after 30s, but the partial evidence included `previously_completed=true` and a queue-head drift warning not to redispatch the completed item. Changed paths: session document only. Verification: session status, done archive, and plan evidence confirm this item is already closed; no source build/test run was needed for this idempotent queue-consumption cycle. Escalation: none. Confidence: high.
-<!-- agent:boundary:9c2adee6 -->
+### Re: do #gdbpathprobe — gpt-5
+
+`#gdbpathprobe` is already complete. The session status records it as shipped with `#gdbrefreshcache` and `#gdbtargetsnap`, and `tasks/software/tsift.done.md` has the archived done entry dated 2026-05-23.
+
+I did not redispatch or rerun source work for this queue head. The planning evidence reported `previously_completed=true`, so this closeout is consuming the final reactivated queue entry and letting the queue drain.
+
+Commands/proof: ran `agent-doc preflight` and `agent-doc plan`; plan attempted `tsift dispatch-trace` and timed out after 30s, but the partial evidence included `previously_completed=true` for `#gdbpathprobe`. Changed paths: session document only. Verification: session status, done archive, and plan evidence confirm this item is already closed; no source build/test run was needed for this idempotent queue-consumption cycle. Escalation: none. Confidence: high.
+<!-- agent:boundary:b3d9187b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -133,11 +140,7 @@ Commands/proof: ran `agent-doc preflight` and `agent-doc plan`; plan attempted `
 #spec-test-build-install-commit-push
 -->
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~do [#gdbrefreshcache]~
-- ~do [#gdbtargetsnap]~
-- do [#gdbpathprobe]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

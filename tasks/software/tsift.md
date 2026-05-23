@@ -53,7 +53,15 @@ After those, keep `#gdbvacproof` in review as the operational compaction proof. 
 Context note: `tsift status --json` currently reports the workspace index stale with 1011 stale files and one missing scope, so the first benchmark item should refresh the workspace index before using graph/search evidence as a performance source of truth.
 
 Commands run: `agent-doc preflight`, `agent-doc orchestrate --from-exchange --plan`, `agent-doc plan`, `agent-doc read`, targeted `rg`/`sed`/`jq`, and `tsift status --json`. No code changed, so I did not run the build or test suite.
-<!-- agent:boundary:17e1fbd7 -->
+❯ Where is [#gdbfalkorreal]? I don't see it in the backlog.
+### Re: gdbfalkorreal location — gpt-5
+
+You were right: `#gdbfalkorreal` was not in the active backlog. It was only present in the completed/reaped archive at `tasks/software/tsift.done.md` and still referenced by the inactive queue, so my previous response should not have described it as an active backlog item.
+
+I restored `#gdbfalkorreal` to the active backlog, after the three higher-priority SQLite measurement/prep items. Top backlog id remains `#gdbcurbase`.
+
+Commands run: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, targeted `rg`. No code changed, so I did not run build/tests.
+<!-- agent:boundary:b2e772ae -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -75,6 +83,7 @@ preset #spec-test-build-install-commit-push
 - [ ] [#gdbcurbase] [recommended] Capture the current post-c1c7668 SQLite graph baseline with three backend-eval samples: refresh the workspace/index first, run the bounded tasks/software/tsift.md target and the opt-in full-projection dataset, feed output through metric-digest, update fixtures/graph-db-performance-history.json, and record the top costs before another optimization pass.
 - [ ] [#gdbprepcache] [recommended] Remove the remaining conflict-matrix preparation hotspot by making prepared context, evidence, staged-diff, and impact packets reusable across CLI invocations by source/document/staged-diff watermark, then gate on backend-eval conflict_matrix_preparation and dispatch_trace timings.
 - [ ] [#gdbfullreg] [recommended] Add a full-projection graph performance regression gate: keep the small session-hinted run as smoke coverage, but require opt-in full agent-loop metric-digest evidence before changing SQLite graph query plans or evaluating backend promotion.
+- [ ] [#gdbfalkorreal] [recommended] Keep FalkorDB behind backend-eval and only promote it after a production adapter beats SQLite on full-projection conflict-matrix, evidence, dispatch-trace, path_max_hops, install portability, and lock behavior; current bounded numbers are promising for conflict-matrix but not enough for a backend switch.
 - [/] [#orchdog] [recommended] Dogfood the completed graph-backed agent orchestration stack on a real agent-doc queue run: run refresh -> evidence -> conflict-matrix -> dispatch-trace -> jobs create/collect, compare worker_prompt_packet and worker_result closure fields, and capture any tsift-side fixture gaps. **Dogfood performed 2026-05-21 on `session-share/tasks/root.md` items #x63e + #v4v0; findings recorded in #gdbevid, #cmgr, #gdbidx — see `session-share/tasks/root.md` exchange "graph-backed orchestration dogfood" entry for the full pipeline trace.** **Second dogfood 2026-05-21 against `tasks/software/tsift.md` (preset `#dogfood-tsift`) surfaced 2 new gaps: #cmgrwres and #gdblock.**
 <!-- /agent:backlog -->
 

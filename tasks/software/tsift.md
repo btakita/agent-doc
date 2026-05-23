@@ -71,10 +71,59 @@ Commit / push:
 
 Confidence: high; local verification and install passed, and the remote CI failure is external to this change.
 Escalation: none.
-<!-- agent:boundary:feddd54c -->
+❯ Run the benchmark to assess the performance improvements in the last queue run.
+
+❯ The duplicate content corrupt document bug occurred. Do we need more logic to prevent the full-document ipc?
+❯ #spec-test-build-install-commit-push
+### Re: benchmark and IPC payload guard — gpt-5
+
+Ran the graph backend benchmark and added the IPC payload guard coverage.
+
+Benchmark result:
+- The first full superproject run against `/home/brian/work/btakita/agent-loop` measured the cold/current path: real SQLite total `27,515,453us`, refresh `26,953,139us`, conflict matrix `520,183us`, dispatch trace `2,380us` on `946,233` real graph rows.
+- The gate-required repeated cached samples showed the intended improvement from the last queue run: real SQLite refresh was `317us`, `322us`, `320us`; real SQLite total was `519,721us`, `517,194us`, `538,326us`; dispatch trace stayed under `1ms` in all three samples.
+- `metric-digest` versus `fixtures/graph-db-performance-history.json` reported the latest repeated sample as `real.sqlite.total_duration_micros` improved by `98.16%`, `real.sqlite.refresh.duration_micros` improved by `99.9987%`, and `real.refresh_phase.source_graph_build.duration_micros` improved by `99.9977%`.
+- Candidate backend promotion remains on hold. The repeated digest still showed candidate conflict-matrix regressions (`falkordb` +83.5%, `ladybug` +66.8%, `duckdb-duckpgq` +64.4%), and the promotion gate still requires SQLite parity plus lower time for every measured operation.
+
+Answer on the duplicate-content corruption: I do not think we need a broad new ban on full-document IPC. The narrower invariant is the right one: template response IPC must use component patches whenever explicit patches exist or unmatched response text can be synthesized into an `exchange`/`output` patch. `fullContent` should remain reserved for no-component append-mode fallbacks and operator-owned replacements such as Compact Exchange, with source-buffer proof. I made that contract explicit and added a regression that captures the file-IPC JSON payload for a synthesized exchange patch and proves it omits `fullContent`, clears consumed `unmatched`, and keeps `normalize_prefix_lines` in the patch payload.
+
+Changed paths:
+- `src/agent-doc/SPEC.md`
+- `src/agent-doc/src/write.rs`
+- `src/agent-doc` submodule pointer in the superproject
+
+Verification:
+- `tsift graph-db --json backend-eval`
+- `tsift graph-db --path /home/brian/work/btakita/agent-loop --json backend-eval`
+- `for sample in 1 2 3; do tsift graph-db --path /home/brian/work/btakita/agent-loop --json backend-eval; done`
+- `tsift metric-digest --input /tmp/tsift-backend-eval-agent-loop-3samples-20260523.ndjson --baseline fixtures/graph-db-performance-history.json --json`
+- `git -C src/agent-doc diff --check`
+- `cargo fmt`
+- `cargo test file_ipc_synthesized_exchange_patch_omits_full_content`
+- `make check`
+- `cargo build`
+- `cargo install --path .`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- `make tmux-ci`
+
+CI / tmux evidence:
+- GitHub CI run `26334294637` completed successfully; both `Run make check` and `Run make tmux-ci` passed.
+- Local `make tmux-ci` passed: 228 ignored/tmux integration tests, 0 failures.
+
+Commit / push:
+- agent-doc submodule commit `f9a74962` (`test: guard template ipc payload shape`) pushed to `btakita/agent-doc:20260422/codex-agent-backend`.
+- superproject commit `0f1df940c` (`agent-doc: guard template ipc payload shape`) pushed to `btakita/agent-loop:main`.
+
+Preflight warning carried forward: one legacy gated item still lives in `agent:backlog`; I did not migrate it because it was unrelated to this cycle.
+
+Confidence: high.
+Escalation: none.
+<!-- agent:boundary:76c1983d -->
 <!-- /agent:exchange -->
 ###
 <!--
+
+#spec-test-build-install-commit-push
 -->
 
 <!-- agent:queue -->

@@ -6752,6 +6752,7 @@ struct IpcRepairDecision {
     snap_source: IpcSnapshotSource,
     disk_repair_reason: Option<IpcDiskRepairReason>,
     editor_bad_state: Option<EditorBadStateFingerprint>,
+    normalize_prefix_lines: Vec<String>,
     redeliver_editor: bool,
 }
 
@@ -6762,16 +6763,22 @@ impl IpcRepairDecision {
             snap_source: IpcSnapshotSource::AckContentSidecar,
             disk_repair_reason: None,
             editor_bad_state: None,
+            normalize_prefix_lines: Vec::new(),
             redeliver_editor: false,
         }
     }
 
-    fn content_ours_prefix_fallback(snapshot_content: String, bad_state: String) -> Self {
+    fn content_ours_prefix_fallback(
+        snapshot_content: String,
+        bad_state: String,
+        normalize_prefix_lines: &[String],
+    ) -> Self {
         Self {
             snapshot_content,
             snap_source: IpcSnapshotSource::ContentOurs,
             disk_repair_reason: Some(IpcDiskRepairReason::PrefixDivergence),
             editor_bad_state: Some(EditorBadStateFingerprint::new(bad_state)),
+            normalize_prefix_lines: normalize_prefix_lines.to_vec(),
             redeliver_editor: true,
         }
     }
@@ -6782,6 +6789,7 @@ impl IpcRepairDecision {
             snap_source: IpcSnapshotSource::FileRead,
             disk_repair_reason: None,
             editor_bad_state: None,
+            normalize_prefix_lines: Vec::new(),
             redeliver_editor: false,
         }
     }
@@ -6808,8 +6816,83 @@ impl IpcRepairDecision {
     }
 }
 
+fn normalization_prefix_observation_counts(
+    content: &str,
+    normalize_prefix_lines: &[String],
+) -> (usize, usize) {
+    let target_counts = normalization_target_counts(normalize_prefix_lines);
+    let required = target_counts.values().sum();
+    if required == 0 {
+        return (0, 0);
+    }
+
+    let exchange = component::parse(content)
+        .ok()
+        .and_then(|components| {
+            components
+                .iter()
+                .find(|component| component.name == "exchange")
+                .map(|component| component.content(content).to_string())
+        })
+        .unwrap_or_else(|| content.to_string());
+
+    let mut observed_counts = std::collections::HashMap::<String, usize>::new();
+    for line in exchange_prompt_prefix_eligible_lines(&exchange, Some(&target_counts)) {
+        let Some(stripped) = line.trim_end().strip_prefix("❯ ") else {
+            continue;
+        };
+        if target_counts.contains_key(stripped) {
+            *observed_counts.entry(stripped.to_string()).or_default() += 1;
+        }
+    }
+
+    let observed = target_counts
+        .iter()
+        .map(|(target, required)| {
+            observed_counts
+                .get(target)
+                .copied()
+                .unwrap_or(0)
+                .min(*required)
+        })
+        .sum();
+    (required, observed)
+}
+
+fn duplicate_prompt_line_count(content: &str) -> usize {
+    let exchange = component::parse(content)
+        .ok()
+        .and_then(|components| {
+            components
+                .iter()
+                .find(|component| component.name == "exchange")
+                .map(|component| component.content(content).to_string())
+        })
+        .unwrap_or_else(|| content.to_string());
+
+    let mut counts = std::collections::HashMap::<String, usize>::new();
+    let mut duplicates = 0;
+    for line in exchange_prompt_prefix_eligible_lines(&exchange, None) {
+        let normalized = line
+            .trim_end()
+            .strip_prefix("❯ ")
+            .unwrap_or(line.trim_end())
+            .trim();
+        if normalized.is_empty() {
+            continue;
+        }
+        let count = counts.entry(normalized.to_string()).or_default();
+        *count += 1;
+        if *count > 1 {
+            duplicates += 1;
+        }
+    }
+    duplicates
+}
+
 fn ipc_repair_decision_from_sidecar(
     file: &Path,
+    patch_id: Option<&str>,
     baseline: Option<&str>,
     snap_content: String,
     content_ours: Option<&str>,
@@ -6822,6 +6905,9 @@ fn ipc_repair_decision_from_sidecar(
         if let Some(ours) = content_ours {
             let bad_state = snap_content;
             let fallback = normalized_content_ours_fallback(file, baseline, ours, lines);
+            let (required_prefix_count, observed_prefix_count) =
+                normalization_prefix_observation_counts(&bad_state, lines);
+            let duplicate_prompt_count = duplicate_prompt_line_count(&bad_state);
             eprintln!(
                 "[write] sidecar normalization diverged — falling back to content_ours ({} bytes)",
                 fallback.len()
@@ -6829,11 +6915,19 @@ fn ipc_repair_decision_from_sidecar(
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "sidecar_normalization_fallback file={} snap_source=content_ours reason=prefix_divergence",
-                    file.display()
+                    "sidecar_normalization_fallback file={} patch_id={} snap_source=content_ours reason=prefix_divergence bad_len={} bad_hash={} fallback_len={} fallback_hash={} required_prefix_count={} observed_prefix_count={} duplicate_prompt_count={}",
+                    file.display(),
+                    patch_id.unwrap_or("-"),
+                    bad_state.len(),
+                    crate::ops_log::content_hash(&bad_state),
+                    fallback.len(),
+                    crate::ops_log::content_hash(&fallback),
+                    required_prefix_count,
+                    observed_prefix_count,
+                    duplicate_prompt_count
                 ),
             );
-            return IpcRepairDecision::content_ours_prefix_fallback(fallback, bad_state);
+            return IpcRepairDecision::content_ours_prefix_fallback(fallback, bad_state, lines);
         }
 
         eprintln!(
@@ -6897,6 +6991,7 @@ fn redeliver_full_content_repair_to_editor(
     repaired_content: &str,
     expected_bad_state: &str,
     kind: FullContentRepairRedelivery,
+    source_patch_id: Option<&str>,
 ) -> bool {
     let current_content = match std::fs::read_to_string(file) {
         Ok(content) => content,
@@ -6910,15 +7005,30 @@ fn redeliver_full_content_repair_to_editor(
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "{}_editor_redelivery_skipped file={} skip=read_failed error={}",
+                    "{}_editor_redelivery_skipped file={} patch_id={} skip=read_failed error={}",
                     kind.label(),
                     file.display(),
+                    source_patch_id.unwrap_or("-"),
                     e
                 ),
             );
             return false;
         }
     };
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "{}_editor_redelivery_proof file={} patch_id={} proof_source=bad_editor_state expected_len={} expected_hash={} current_len={} current_hash={} redeliver={}",
+            kind.label(),
+            file.display(),
+            source_patch_id.unwrap_or("-"),
+            expected_bad_state.len(),
+            crate::ops_log::content_hash(expected_bad_state),
+            current_content.len(),
+            crate::ops_log::content_hash(&current_content),
+            current_content == expected_bad_state
+        ),
+    );
     if current_content != expected_bad_state {
         eprintln!(
             "[write] {} editor repair skipped: visible buffer no longer matches the bad state",
@@ -6927,9 +7037,10 @@ fn redeliver_full_content_repair_to_editor(
         crate::ops_log::log_op(
             file,
             &format!(
-                "{}_editor_redelivery_skipped file={} skip=stale_bad_state expected_len={} expected_hash={} current_len={} current_hash={}",
+                "{}_editor_redelivery_skipped file={} patch_id={} skip=stale_bad_state expected_len={} expected_hash={} current_len={} current_hash={}",
                 kind.label(),
                 file.display(),
+                source_patch_id.unwrap_or("-"),
                 expected_bad_state.len(),
                 crate::ops_log::content_hash(expected_bad_state),
                 current_content.len(),
@@ -6949,9 +7060,10 @@ fn redeliver_full_content_repair_to_editor(
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "{}_redelivered_editor file={} bytes={} expected_bad_len={} expected_bad_hash={}",
+                    "{}_redelivered_editor file={} patch_id={} bytes={} expected_bad_len={} expected_bad_hash={}",
                     kind.label(),
                     file.display(),
+                    source_patch_id.unwrap_or("-"),
                     repaired_content.len(),
                     expected_bad_state.len(),
                     crate::ops_log::content_hash(expected_bad_state)
@@ -6964,9 +7076,10 @@ fn redeliver_full_content_repair_to_editor(
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "{}_editor_repair_not_consumed file={} bytes={}",
+                    "{}_editor_repair_not_consumed file={} patch_id={} bytes={}",
                     kind.label(),
                     file.display(),
+                    source_patch_id.unwrap_or("-"),
                     repaired_content.len()
                 ),
             );
@@ -6977,15 +7090,314 @@ fn redeliver_full_content_repair_to_editor(
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "{}_editor_repair_failed file={} error={}",
+                    "{}_editor_repair_failed file={} patch_id={} error={}",
                     kind.label(),
                     file.display(),
+                    source_patch_id.unwrap_or("-"),
                     e
                 ),
             );
             false
         }
     }
+}
+
+fn normalization_repair_candidate_matches(
+    expected_bad_state: &str,
+    repaired_content: &str,
+    normalize_prefix_lines: &[String],
+) -> bool {
+    if normalize_prefix_lines.is_empty() {
+        return false;
+    }
+    let normalized =
+        normalize_exchange_prefixes_for_targets(expected_bad_state, normalize_prefix_lines);
+    strip_boundary_for_dedup(&normalized) == strip_boundary_for_dedup(repaired_content)
+}
+
+fn normalization_repair_payload(
+    canonical: &Path,
+    patch_id: &str,
+    normalize_prefix_lines: &[String],
+    expected_bad_state: &str,
+    include_type: bool,
+) -> serde_json::Value {
+    let proof =
+        crate::flow::document_mutation::FullContentSourceProof::from_content(expected_bad_state);
+    let mut payload = serde_json::json!({
+        "file": canonical.to_string_lossy(),
+        "patches": [],
+        "unmatched": "",
+        "baseline": "",
+        "patch_id": patch_id,
+        "reposition_boundary": true,
+        "preserve_head": true,
+        "normalize_prefix_lines": normalize_prefix_lines,
+        "expected_content_hash": proof.expected_content_hash,
+        "expected_content_len": proof.expected_content_len,
+    });
+    if include_type {
+        payload["type"] = serde_json::Value::String("patch".to_string());
+    }
+    payload
+}
+
+fn verify_normalization_repair_observed(
+    file: &Path,
+    project_root: &Path,
+    patch_id: &str,
+    repaired_content: &str,
+    transport: &str,
+) -> bool {
+    let observed = match poll_ack_content_sidecar(
+        project_root,
+        patch_id,
+        std::time::Duration::from_millis(200),
+        std::time::Duration::from_millis(25),
+    ) {
+        Ok(Some(content)) => content,
+        Ok(None) => std::fs::read_to_string(file).unwrap_or_default(),
+        Err(e) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "sidecar_normalization_fallback_narrow_repair_ack_read_failed file={} patch_id={} transport={} error={}",
+                    file.display(),
+                    patch_id,
+                    transport,
+                    e
+                ),
+            );
+            std::fs::read_to_string(file).unwrap_or_default()
+        }
+    };
+
+    let observed_matches =
+        strip_boundary_for_dedup(&observed) == strip_boundary_for_dedup(repaired_content);
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "sidecar_normalization_fallback_narrow_repair_observed file={} patch_id={} transport={} observed_len={} observed_hash={} expected_len={} expected_hash={} matched={}",
+            file.display(),
+            patch_id,
+            transport,
+            observed.len(),
+            crate::ops_log::content_hash(&observed),
+            repaired_content.len(),
+            crate::ops_log::content_hash(repaired_content),
+            observed_matches
+        ),
+    );
+    observed_matches
+}
+
+fn try_ipc_normalization_repair_patch(
+    file: &Path,
+    repaired_content: &str,
+    expected_bad_state: &str,
+    normalize_prefix_lines: &[String],
+    source_patch_id: Option<&str>,
+) -> Result<bool> {
+    if !normalization_repair_candidate_matches(
+        expected_bad_state,
+        repaired_content,
+        normalize_prefix_lines,
+    ) {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "sidecar_normalization_fallback_narrow_repair_ineligible file={} patch_id={} skip=normalization_only_patch_not_equivalent normalize_targets={}",
+                file.display(),
+                source_patch_id.unwrap_or("-"),
+                normalize_prefix_lines.len()
+            ),
+        );
+        return Ok(false);
+    }
+
+    let current_content = std::fs::read_to_string(file).with_context(|| {
+        format!(
+            "failed to read {} before normalization repair",
+            file.display()
+        )
+    })?;
+    if current_content != expected_bad_state {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "sidecar_normalization_fallback_narrow_repair_skipped file={} patch_id={} skip=stale_bad_state expected_len={} expected_hash={} current_len={} current_hash={}",
+                file.display(),
+                source_patch_id.unwrap_or("-"),
+                expected_bad_state.len(),
+                crate::ops_log::content_hash(expected_bad_state),
+                current_content.len(),
+                crate::ops_log::content_hash(&current_content)
+            ),
+        );
+        return Ok(false);
+    }
+
+    let canonical = file.canonicalize()?;
+    let project_root = resolve_ipc_project_root(&canonical);
+    let patch_id = uuid::Uuid::new_v4().to_string();
+    let payload = normalization_repair_payload(
+        &canonical,
+        &patch_id,
+        normalize_prefix_lines,
+        expected_bad_state,
+        true,
+    );
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "sidecar_normalization_fallback_narrow_repair_attempt file={} patch_id={} source_patch_id={} normalize_targets={} expected_bad_len={} expected_bad_hash={} repaired_len={} repaired_hash={}",
+            file.display(),
+            patch_id,
+            source_patch_id.unwrap_or("-"),
+            normalize_prefix_lines.len(),
+            expected_bad_state.len(),
+            crate::ops_log::content_hash(expected_bad_state),
+            repaired_content.len(),
+            crate::ops_log::content_hash(repaired_content)
+        ),
+    );
+
+    if crate::ipc_socket::is_listener_active(&project_root) {
+        match crate::ipc_socket::send_message(&project_root, &payload) {
+            Ok(Some(_)) => {
+                if verify_normalization_repair_observed(
+                    file,
+                    &project_root,
+                    &patch_id,
+                    repaired_content,
+                    "socket",
+                ) {
+                    crate::ops_log::log_op(
+                        file,
+                        &format!(
+                            "sidecar_normalization_fallback_narrow_repaired_editor file={} patch_id={} transport=socket",
+                            file.display(),
+                            patch_id
+                        ),
+                    );
+                    return Ok(true);
+                }
+                return Ok(false);
+            }
+            Ok(None) => {
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "sidecar_normalization_fallback_narrow_repair_not_consumed file={} patch_id={} transport=socket",
+                        file.display(),
+                        patch_id
+                    ),
+                );
+            }
+            Err(e) => {
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "sidecar_normalization_fallback_narrow_repair_failed file={} patch_id={} transport=socket error={}",
+                        file.display(),
+                        patch_id,
+                        e
+                    ),
+                );
+            }
+        }
+    }
+
+    let patches_dir = project_root.join(".agent-doc/patches");
+    if !patches_dir.exists() {
+        return Ok(false);
+    }
+
+    let hash = snapshot::doc_hash(file)?;
+    let patch_file = patches_dir.join(format!("{hash}.json"));
+    let payload = normalization_repair_payload(
+        &canonical,
+        &patch_id,
+        normalize_prefix_lines,
+        expected_bad_state,
+        false,
+    );
+    atomic_write(&patch_file, &serde_json::to_string_pretty(&payload)?)?;
+
+    let timeout = std::time::Duration::from_secs(2);
+    let poll_interval = std::time::Duration::from_millis(100);
+    let start = std::time::Instant::now();
+    while start.elapsed() < timeout {
+        if !patch_file.exists() {
+            if verify_normalization_repair_observed(
+                file,
+                &project_root,
+                &patch_id,
+                repaired_content,
+                "file",
+            ) {
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "sidecar_normalization_fallback_narrow_repaired_editor file={} patch_id={} transport=file",
+                        file.display(),
+                        patch_id
+                    ),
+                );
+                return Ok(true);
+            }
+            return Ok(false);
+        }
+        std::thread::sleep(poll_interval);
+    }
+    let _ = std::fs::remove_file(&patch_file);
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "sidecar_normalization_fallback_narrow_repair_not_consumed file={} patch_id={} transport=file",
+            file.display(),
+            patch_id
+        ),
+    );
+    Ok(false)
+}
+
+fn redeliver_normalization_fallback_to_editor(
+    file: &Path,
+    repaired_content: &str,
+    expected_bad_state: &str,
+    normalize_prefix_lines: &[String],
+    source_patch_id: Option<&str>,
+) -> bool {
+    match try_ipc_normalization_repair_patch(
+        file,
+        repaired_content,
+        expected_bad_state,
+        normalize_prefix_lines,
+        source_patch_id,
+    ) {
+        Ok(true) => return true,
+        Ok(false) => {}
+        Err(e) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "sidecar_normalization_fallback_narrow_repair_failed file={} patch_id={} error={}",
+                    file.display(),
+                    source_patch_id.unwrap_or("-"),
+                    e
+                ),
+            );
+        }
+    }
+
+    redeliver_full_content_repair_to_editor(
+        file,
+        repaired_content,
+        expected_bad_state,
+        FullContentRepairRedelivery::NormalizationFallback,
+        source_patch_id,
+    )
 }
 
 fn repair_disk_from_ipc_dedupe(file: &Path, content: &str) -> Result<()> {
@@ -7014,10 +7426,15 @@ fn redeliver_ipc_dedupe_to_editor(file: &Path, content: &str, expected_bad_state
         content,
         expected_bad_state,
         FullContentRepairRedelivery::IpcDedupe,
+        None,
     )
 }
 
-fn repair_ipc_decision_visible_state(file: &Path, decision: &IpcRepairDecision) -> Result<()> {
+fn repair_ipc_decision_visible_state(
+    file: &Path,
+    decision: &IpcRepairDecision,
+    patch_id: Option<&str>,
+) -> Result<()> {
     let Some(reason) = decision.disk_repair_reason else {
         return Ok(());
     };
@@ -7031,27 +7448,56 @@ fn repair_ipc_decision_visible_state(file: &Path, decision: &IpcRepairDecision) 
         .as_ref()
         .map(|state| state.hash.as_str())
         .unwrap_or("-");
+    let current = std::fs::read_to_string(file).ok();
     crate::ops_log::log_op(
         file,
         &format!(
-            "ipc_repair_decision file={} snap_source={} repair_reason={} redeliver_editor={} bad_len={} bad_hash={}",
+            "ipc_repair_decision file={} patch_id={} snap_source={} repair_reason={} redeliver_editor={} bad_len={} bad_hash={} repaired_len={} repaired_hash={} current_len={} current_hash={} normalize_targets={} duplicate_prompt_count={}",
             file.display(),
+            patch_id.unwrap_or("-"),
             decision.snap_source.label(),
             reason.label(),
             decision.redeliver_editor,
             bad_len,
-            bad_hash
+            bad_hash,
+            decision.snapshot_content.len(),
+            crate::ops_log::content_hash(&decision.snapshot_content),
+            current.as_deref().map(str::len).unwrap_or(0),
+            current
+                .as_deref()
+                .map(crate::ops_log::content_hash)
+                .unwrap_or_else(|| "-".to_string()),
+            decision.normalize_prefix_lines.len(),
+            duplicate_prompt_line_count(
+                decision
+                    .editor_bad_state
+                    .as_ref()
+                    .map(EditorBadStateFingerprint::content)
+                    .unwrap_or(&decision.snapshot_content)
+            )
         ),
     );
 
     if decision.redeliver_editor
         && let Some(expected_bad_state) = decision.editor_bad_state.as_ref()
-        && redeliver_full_content_repair_to_editor(
-            file,
-            &decision.snapshot_content,
-            expected_bad_state.content(),
-            reason.redelivery_kind(),
-        )
+        && match reason {
+            IpcDiskRepairReason::PrefixDivergence => redeliver_normalization_fallback_to_editor(
+                file,
+                &decision.snapshot_content,
+                expected_bad_state.content(),
+                &decision.normalize_prefix_lines,
+                patch_id,
+            ),
+            IpcDiskRepairReason::IpcDedupe | IpcDiskRepairReason::PrefixDivergenceThenIpcDedupe => {
+                redeliver_full_content_repair_to_editor(
+                    file,
+                    &decision.snapshot_content,
+                    expected_bad_state.content(),
+                    reason.redelivery_kind(),
+                    patch_id,
+                )
+            }
+        }
     {
         return Ok(());
     }
@@ -7419,6 +7865,7 @@ pub fn try_ipc(
                 if let Some(snap_content) = sidecar {
                     let mut repair_decision = ipc_repair_decision_from_sidecar(
                         file,
+                        Some(&patch_id),
                         baseline,
                         snap_content,
                         content_ours,
@@ -7477,7 +7924,7 @@ pub fn try_ipc(
                     if let Some(ref path) = fallback_patch_file {
                         let _ = std::fs::remove_file(path);
                     }
-                    repair_ipc_decision_visible_state(file, &repair_decision)?;
+                    repair_ipc_decision_visible_state(file, &repair_decision, Some(&patch_id))?;
                     crate::ops_log::log_op(
                         file,
                         &format!(
@@ -8211,6 +8658,7 @@ fn write_ipc_and_poll(
                             .filter(|value| !value.is_empty());
                         let decision = ipc_repair_decision_from_sidecar(
                             doc_file,
+                            Some(patch_id),
                             baseline,
                             content,
                             options.content_ours,
@@ -8358,7 +8806,7 @@ fn write_ipc_and_poll(
             ) {
                 return Ok(false);
             }
-            repair_ipc_decision_visible_state(doc_file, &repair_decision)?;
+            repair_ipc_decision_visible_state(doc_file, &repair_decision, Some(patch_id))?;
             crate::ops_log::log_op(
                 doc_file,
                 &format!(
@@ -12886,83 +13334,89 @@ Covered.
     }
 
     #[test]
-    fn normalization_fallback_redelivers_full_content_to_editor() {
-        // A disk-only fallback can leave an editor buffer stale. When the ack
-        // sidecar proves the plugin normalized differently from the binary, the
-        // fallback must be sent back through IPC as a full-content repair.
+    fn normalization_fallback_redelivers_narrow_patch_before_full_content() {
+        // A disk-only fallback can leave an editor buffer stale. If the rejected
+        // editor state differs only by prompt-prefix normalization, the repair
+        // should converge the editor with a narrow normalization patch.
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         std::fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
 
         let doc = dir.path().join("test.md");
-        let original = "\
+        let bad_state = "\
 ---
 session: test
 ---
 
 <!-- agent:exchange patch=append -->
 do #sidecar-diverge. spec-test-build-install-commit-push
-<!-- agent:boundary:test-bnd-001 -->
+### Re: #sidecar-diverge — gpt-5
+
+agent response
+<!-- agent:boundary:test-bnd-002 -->
 <!-- /agent:exchange -->
 ";
-        std::fs::write(&doc, original).unwrap();
-
-        let patch = crate::template::PatchBlock::new("exchange", "agent response");
-        let content_ours = "\
+        let repaired = "\
 ---
 session: test
 ---
 
 <!-- agent:exchange patch=append -->
 ❯ do #sidecar-diverge. spec-test-build-install-commit-push
+### Re: #sidecar-diverge — gpt-5
+
 agent response
 <!-- agent:boundary:test-bnd-002 -->
 <!-- /agent:exchange -->
 ";
+        std::fs::write(&doc, bad_state).unwrap();
         let normalize_prefix_lines =
             vec!["do #sidecar-diverge. spec-test-build-install-commit-push".to_string()];
 
         let call_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let seen_full_content = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let seen_repair_payloads =
+            std::sync::Arc::new(std::sync::Mutex::new(Vec::<serde_json::Value>::new()));
         let listener_root = dir.path().to_path_buf();
         let listener_doc = doc.clone();
         let listener_count = call_count.clone();
-        let listener_full_content = seen_full_content.clone();
+        let listener_repair_payloads = seen_repair_payloads.clone();
         std::fs::create_dir_all(listener_root.join(".agent-doc")).unwrap();
         let _listener = std::thread::spawn(move || {
-            let root_for_handler = listener_root.clone();
             let _ = crate::ipc_socket::start_listener(&listener_root, move |msg| {
                 let v: serde_json::Value = serde_json::from_str(msg).ok()?;
                 listener_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 if let Some(full_content) = v.get("fullContent").and_then(|value| value.as_str()) {
                     let _ = std::fs::write(&listener_doc, full_content);
-                    listener_full_content
-                        .lock()
-                        .unwrap()
-                        .push(full_content.to_string());
+                    listener_repair_payloads.lock().unwrap().push(v.clone());
                     return Some(serde_json::json!({"type": "ack"}).to_string());
                 }
 
-                let patch_id = v.get("patch_id").and_then(|value| value.as_str())?;
-                let bad_sidecar = "\
----
-session: test
----
+                let patches_empty = v
+                    .get("patches")
+                    .and_then(|value| value.as_array())
+                    .is_none_or(|patches| patches.is_empty());
+                if patches_empty
+                    && let Some(lines) = v.get("normalize_prefix_lines").and_then(|value| {
+                        value.as_array().map(|items| {
+                            items
+                                .iter()
+                                .filter_map(|item| item.as_str().map(str::to_string))
+                                .collect::<Vec<_>>()
+                        })
+                    })
+                {
+                    let current = std::fs::read_to_string(&listener_doc).ok()?;
+                    let repaired = normalize_exchange_prefixes_for_targets(&current, &lines);
+                    let _ = std::fs::write(&listener_doc, repaired);
+                    listener_repair_payloads.lock().unwrap().push(v.clone());
+                    return Some(serde_json::json!({"type": "ack"}).to_string());
+                }
 
-<!-- agent:exchange patch=append -->
-do #sidecar-diverge. spec-test-build-install-commit-push
-agent response
-<!-- agent:boundary:test-bnd-002 -->
-<!-- /agent:exchange -->
-";
-                let _ = std::fs::write(&listener_doc, bad_sidecar);
-                let ack_dir = root_for_handler.join(".agent-doc/ack-content");
-                let _ = std::fs::create_dir_all(&ack_dir);
-                let _ = std::fs::write(ack_dir.join(format!("{patch_id}.md")), bad_sidecar);
-                Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
+                Some(serde_json::json!({"type": "ack"}).to_string())
             });
         });
         for _ in 0..100 {
@@ -12976,42 +13430,99 @@ agent response
             "fake socket listener did not start"
         );
 
-        let result = try_ipc(
+        let result = redeliver_normalization_fallback_to_editor(
             &doc,
-            &[patch],
-            "",
-            None,
-            Some(original),
-            Some(content_ours),
-            Some(normalize_prefix_lines.as_slice()),
-            None,
-        )
-        .unwrap();
-        assert!(
-            result.success,
-            "IPC should succeed when plugin consumes patch"
+            repaired,
+            bad_state,
+            &normalize_prefix_lines,
+            Some("source-patch"),
         );
+        assert!(result, "narrow normalization repair should be delivered");
 
         assert!(
-            call_count.load(std::sync::atomic::Ordering::SeqCst) >= 2,
-            "fallback should send a second full-content IPC repair"
+            call_count.load(std::sync::atomic::Ordering::SeqCst) >= 1,
+            "fallback should send a narrow IPC repair"
         );
-        let full_content_payloads = seen_full_content.lock().unwrap();
+        let repair_payloads = seen_repair_payloads.lock().unwrap();
         assert_eq!(
-            full_content_payloads.len(),
+            repair_payloads.len(),
             1,
-            "expected exactly one full-content repair payload"
+            "expected exactly one narrow repair payload"
         );
         assert!(
-            full_content_payloads[0]
-                .contains("❯ do #sidecar-diverge. spec-test-build-install-commit-push"),
-            "full-content repair must carry the authoritative normalized prompt: {}",
-            full_content_payloads[0]
+            repair_payloads[0].get("fullContent").is_none(),
+            "eligible prefix repair should avoid fullContent payloads: {}",
+            repair_payloads[0]
+        );
+        assert_eq!(
+            repair_payloads[0]["normalize_prefix_lines"][0],
+            "do #sidecar-diverge. spec-test-build-install-commit-push"
         );
         let disk = std::fs::read_to_string(&doc).unwrap();
         assert!(
             disk.contains("❯ do #sidecar-diverge. spec-test-build-install-commit-push"),
-            "editor full-content repair should leave disk/editor content normalized: {disk}"
+            "editor narrow repair should leave disk/editor content normalized: {disk}"
+        );
+        let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("sidecar_normalization_fallback_narrow_repaired_editor"),
+            "ops log should record the narrow editor repair:\n{ops_log}"
+        );
+    }
+
+    #[test]
+    fn normalization_fallback_redelivery_skips_when_bad_state_is_stale() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let bad_state = "\
+<!-- agent:exchange patch=append -->
+do #stale. spec-test-build-install-commit-push
+### Re: #stale — gpt-5
+
+Done.
+<!-- /agent:exchange -->
+";
+        let live_state = "\
+<!-- agent:exchange patch=append -->
+do #stale. spec-test-build-install-commit-push
+live prompt typed after sidecar fallback
+<!-- /agent:exchange -->
+";
+        let repaired = "\
+<!-- agent:exchange patch=append -->
+❯ do #stale. spec-test-build-install-commit-push
+### Re: #stale — gpt-5
+
+Done.
+<!-- /agent:exchange -->
+";
+        std::fs::write(&doc, live_state).unwrap();
+
+        let delivered = redeliver_normalization_fallback_to_editor(
+            &doc,
+            repaired,
+            bad_state,
+            &["do #stale. spec-test-build-install-commit-push".to_string()],
+            Some("source-patch"),
+        );
+
+        assert!(
+            !delivered,
+            "normalization fallback redelivery must skip stale bad-state proof"
+        );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), live_state);
+        let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("sidecar_normalization_fallback_narrow_repair_skipped")
+                && ops_log.contains("skip=stale_bad_state")
+                && ops_log.contains("sidecar_normalization_fallback_editor_redelivery_skipped"),
+            "stale proof skip should be logged for narrow and full-content fallback:\n{ops_log}"
         );
     }
 
@@ -16228,6 +16739,7 @@ mod late_fallback_patch_guard_tests {
         let decision = IpcRepairDecision::content_ours_prefix_fallback(
             "fixed snapshot".to_string(),
             "bad editor state".to_string(),
+            &["bad editor state".to_string()],
         );
 
         assert_eq!(decision.snapshot_content, "fixed snapshot");
@@ -16247,6 +16759,7 @@ mod late_fallback_patch_guard_tests {
             bad_state.hash,
             crate::ops_log::content_hash("bad editor state")
         );
+        assert_eq!(decision.normalize_prefix_lines, vec!["bad editor state"]);
     }
 
     #[test]
@@ -16254,6 +16767,7 @@ mod late_fallback_patch_guard_tests {
         let decision = IpcRepairDecision::content_ours_prefix_fallback(
             "prefix fallback with duplicate response".to_string(),
             "visible sidecar before fallback".to_string(),
+            &["visible sidecar before fallback".to_string()],
         )
         .apply_ipc_dedupe(
             "deduped snapshot".to_string(),

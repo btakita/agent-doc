@@ -9,9 +9,13 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 - **IPC repair state is now a typed decision.** Sidecar-normalization fallback
   and duplicate-response IPC dedupe now resolve a single repair decision carrying
   the repaired snapshot content, snapshot source, disk-repair reason, bad editor
-  buffer fingerprint, and explicit editor-redelivery flag before touching disk
-  or sending full-content repair IPC. This keeps stale-editor redelivery, disk
-  repair, and snapshot save behavior on one auditable branch.
+  buffer fingerprint, normalization targets, and explicit editor-redelivery flag
+  before touching disk or sending editor repair IPC. Prefix-only sidecar
+  divergence now tries a narrow `normalize_prefix_lines` + boundary-reposition
+  patch before full-content repair, and repair/redelivery ops logs include patch
+  ids, hashes, prefix counts, duplicate-prompt counts, and stale-proof skips.
+  This keeps stale-editor redelivery, disk repair, and snapshot save behavior on
+  one auditable branch.
 
 - **Pre-existing scratch comments survive duplicate prompt cleanup.** Closeout,
   preflight, and route duplicate-prompt cleanup now preserve post-exchange HTML

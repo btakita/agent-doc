@@ -295,6 +295,7 @@ struct Coverage {
     starting_timeout_records: usize,
     starting_timeout_coalesces: usize,
     prompt_duplicate_repairs: usize,
+    normalization_repair_patches: usize,
     starting_prompt_promotions: usize,
     busy_dispatch_blocks: usize,
     closed_dispatch_blocks: usize,
@@ -372,6 +373,7 @@ impl Coverage {
         self.starting_timeout_records += other.starting_timeout_records;
         self.starting_timeout_coalesces += other.starting_timeout_coalesces;
         self.prompt_duplicate_repairs += other.prompt_duplicate_repairs;
+        self.normalization_repair_patches += other.normalization_repair_patches;
         self.starting_prompt_promotions += other.starting_prompt_promotions;
         self.busy_dispatch_blocks += other.busy_dispatch_blocks;
         self.closed_dispatch_blocks += other.closed_dispatch_blocks;
@@ -757,6 +759,17 @@ impl SimWorld {
             self.coverage.prompt_duplicate_repairs += 1;
         }
         Ok(())
+    }
+
+    fn apply_narrow_normalization_repair(&mut self, normalize_prefix_lines: &[String]) {
+        let repaired = crate::write::normalize_exchange_prefixes_for_targets(
+            &self.doc,
+            normalize_prefix_lines,
+        );
+        if repaired != self.doc {
+            self.doc = repaired;
+            self.coverage.normalization_repair_patches += 1;
+        }
     }
 
     fn stale_full_content_visible_replacement(
@@ -1717,6 +1730,31 @@ fn full_content_source_proof_sim_rejects_stale_editor_buffers() {
             "{source:?} must not apply stale compact/repair/timeout replacement content"
         );
     }
+}
+
+#[test]
+fn normalization_repair_sim_uses_narrow_patch_for_prefix_only_divergence() {
+    let mut world = SimWorld::new(2_011);
+    world.doc = template_doc(
+        "do #simnorm. spec-test-build-install-commit-push\n### Re: #simnorm — gpt-5\n\nDone.\n",
+    );
+
+    world.apply_narrow_normalization_repair(&[
+        "do #simnorm. spec-test-build-install-commit-push".to_string()
+    ]);
+
+    assert_eq!(world.coverage.normalization_repair_patches, 1);
+    assert!(
+        world
+            .doc
+            .contains("❯ do #simnorm. spec-test-build-install-commit-push"),
+        "narrow normalization repair should prefix the live prompt"
+    );
+    assert_eq!(
+        world.doc.matches("### Re: #simnorm — gpt-5").count(),
+        1,
+        "narrow repair must not duplicate the assistant response"
+    );
 }
 
 #[test]

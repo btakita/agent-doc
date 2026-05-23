@@ -6,6 +6,14 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Codex Stop hooks now keep harness-native auto queues moving.** After a
+  clean `finalize` / `session-check`, `codex-stop` now detects an active
+  `agent:queue auto` with a ready next head prompt, blocks final-answer
+  delivery, and tells Codex to invoke `agent-doc <FILE>` again in the same
+  turn. The hook records the requested head and fails closed if a repeated
+  continuation reaches Stop without the queue head advancing, preventing
+  infinite hook loops.
+
 - **Manual queue closeouts can drain explicit done-backed batches.** Strict
   `finalize` / `write --commit` closeouts now consume all contiguous active
   queue head prompts whose `do #id` items were resolved by repeated `--done`

@@ -69,6 +69,8 @@ struct SessionState {
     last_turn_id: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     last_prompt: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_auto_queue_head: Option<String>,
     updated_at: u64,
 }
 
@@ -173,6 +175,7 @@ fn apply_user_prompt_submit(input: &UserPromptSubmitInput) -> Result<()> {
         doc_path: doc_path.display().to_string(),
         last_turn_id: input.turn_id.clone(),
         last_prompt: input.prompt.clone(),
+        last_auto_queue_head: None,
         updated_at: now_secs(),
     };
     for root in roots {
@@ -200,6 +203,15 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
 
     match crate::session_check::inspect(&file)? {
         crate::session_check::SessionCheckStatus::Ok(_) => {
+            if let Some(response) = auto_queue_continuation_response(
+                &file,
+                &cleanup_roots,
+                &loaded_root,
+                &state,
+                input,
+            )? {
+                return Ok(response);
+            }
             clear_state_across_roots(&cleanup_roots, &loaded_root, &input.session_id)?;
             Ok(StopResponse::Continue { continue_: true })
         }
@@ -207,6 +219,15 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
             if !input.stop_hook_active {
                 match attempt_stop_closeout(&file, &state, input)? {
                     StopCloseAttempt::Closed => {
+                        if let Some(response) = auto_queue_continuation_response(
+                            &file,
+                            &cleanup_roots,
+                            &loaded_root,
+                            &state,
+                            input,
+                        )? {
+                            return Ok(response);
+                        }
                         clear_state_across_roots(&cleanup_roots, &loaded_root, &input.session_id)?;
                         return Ok(StopResponse::Continue { continue_: true });
                     }
@@ -251,6 +272,42 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
     }
 }
 
+fn auto_queue_continuation_response(
+    file: &Path,
+    cleanup_roots: &[PathBuf],
+    loaded_root: &Path,
+    state: &SessionState,
+    input: &StopInput,
+) -> Result<Option<StopResponse>> {
+    let Some(prompt) = active_auto_queue_prompt(file)? else {
+        return Ok(None);
+    };
+    if input.stop_hook_active && state.last_auto_queue_head.as_deref() == Some(&prompt) {
+        return Ok(Some(StopResponse::Stop {
+            continue_: false,
+            stop_reason: format!(
+                "agent-doc Stop hook requested auto-queue continuation for {}, but the queue head did not advance after the previous continuation request: {:?}. Run `agent-doc {}` manually or remove `auto` from the queue before ending the turn.",
+                file.display(),
+                prompt,
+                file.display()
+            ),
+        }));
+    }
+    let mut next_state = state.clone();
+    next_state.last_auto_queue_head = Some(prompt.clone());
+    next_state.updated_at = now_secs();
+    save_state_across_roots(cleanup_roots, loaded_root, &next_state)?;
+    Ok(Some(StopResponse::Block {
+        decision: "block",
+        reason: format!(
+            "agent-doc Stop hook kept an active `agent:queue auto` moving for {}. The next queue prompt is {:?}. Continue this turn by running `agent-doc {}` and do not send the final answer yet.",
+            file.display(),
+            prompt,
+            file.display()
+        ),
+    }))
+}
+
 fn attempt_stop_closeout(
     file: &Path,
     state: &SessionState,
@@ -286,6 +343,9 @@ fn attempt_stop_closeout(
         });
     }
 
+    let queue_synthetic_cycle =
+        active_auto_queue_prompt(file)?.is_some() && open_cycle_started_from_unchanged_file(file)?;
+
     let mut note = String::new();
     match payload {
         crate::replay_guard::ReplayPayloadClassification::Replayable(response) => {
@@ -311,6 +371,23 @@ fn attempt_stop_closeout(
         note.push_str(" The hook replayed the response through the normal write path.");
     } else if repair_outcome.repaired() {
         note.push_str(" The hook repaired the pending closeout state before auto-close.");
+    }
+    if queue_synthetic_cycle && (repair_outcome.replayed_response() || repair_outcome.repaired()) {
+        match crate::write::consume_queue_prompt_with_outcome(file) {
+            Ok(Some(outcome)) => {
+                note.push_str(&format!(
+                    " The hook consumed the completed queue head {:?} before commit.",
+                    outcome.consumed_text
+                ));
+            }
+            Ok(None) => {}
+            Err(err) => {
+                note.push_str(&format!(
+                    " The hook wrote or recovered the response but could not consume the completed queue head: {err}."
+                ));
+                return Ok(StopCloseAttempt::StillOpen { note });
+            }
+        }
     }
 
     if !crate::git::is_in_git_repo(file) {
@@ -583,6 +660,19 @@ fn clear_state_across_roots(roots: &[PathBuf], loaded_root: &Path, session_id: &
     Ok(())
 }
 
+fn save_state_across_roots(
+    roots: &[PathBuf],
+    loaded_root: &Path,
+    state: &SessionState,
+) -> Result<()> {
+    let mut all_roots = roots.to_vec();
+    push_unique_root(&mut all_roots, loaded_root.to_path_buf());
+    for root in all_roots {
+        save_state(&root, state)?;
+    }
+    Ok(())
+}
+
 fn load_state(root: &Path, session_id: &str) -> Result<Option<SessionState>> {
     let path = state_path(root, session_id);
     if !path.exists() {
@@ -593,6 +683,76 @@ fn load_state(root: &Path, session_id: &str) -> Result<Option<SessionState>> {
     let state =
         serde_json::from_str(&content).with_context(|| format!("parse {}", path.display()))?;
     Ok(Some(state))
+}
+
+fn active_auto_queue_prompt(file: &Path) -> Result<Option<String>> {
+    let content =
+        std::fs::read_to_string(file).with_context(|| format!("read {}", file.display()))?;
+    let (fm, _) = crate::frontmatter::parse_for_file(&content, file)?;
+    if fm.queue_active != Some(true) {
+        return Ok(None);
+    }
+    let components = crate::component::parse(&content)?;
+    let Some(queue_component) = components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
+        return Ok(None);
+    };
+    if !crate::queue::has_auto_attr(&queue_component.attrs) {
+        return Ok(None);
+    }
+
+    let body = &content[queue_component.open_end..queue_component.close_start];
+    let entries =
+        crate::queue::parse(body).context("codex hook auto queue: failed to parse queue")?;
+    let activation = crate::queue::resolve_activation(&entries, true, false, true);
+    if !activation.active
+        || crate::queue::has_stop_fence_at_head(&activation.entries_after)
+        || crate::queue::time_gate_at_head(&activation.entries_after).is_some()
+    {
+        return Ok(None);
+    }
+
+    if let Some(snapshot_content) = crate::snapshot::load(file)?
+        && let Ok(snapshot_components) = crate::component::parse(&snapshot_content)
+        && let Some(snapshot_queue) = snapshot_components
+            .iter()
+            .find(|component| component.name == "queue")
+    {
+        let snapshot_body = &snapshot_content[snapshot_queue.open_end..snapshot_queue.close_start];
+        if let Ok(snapshot_entries) = crate::queue::parse(snapshot_body) {
+            let snapshot_has_auto = crate::queue::has_auto_attr(&snapshot_queue.attrs);
+            let snapshot_activation =
+                crate::queue::resolve_activation(&snapshot_entries, snapshot_has_auto, false, true);
+            if crate::queue::detect_head_prompt_modified(
+                &snapshot_activation.entries_after,
+                &activation.entries_after,
+            ) {
+                return Ok(None);
+            }
+        }
+    }
+
+    Ok(crate::queue::first_prompt(&activation.entries_after).map(|prompt| prompt.text.clone()))
+}
+
+fn open_cycle_started_from_unchanged_file(file: &Path) -> Result<bool> {
+    let Some(state) = crate::cycle_state::load(file)? else {
+        return Ok(false);
+    };
+    if !state.is_open() {
+        return Ok(false);
+    }
+    Ok(
+        match (&state.normalized_snapshot_hash, &state.normalized_file_hash) {
+            (Some(snapshot), Some(file)) => snapshot == file,
+            _ => match (&state.snapshot_hash, &state.file_hash) {
+                (Some(snapshot), Some(file)) => snapshot == file,
+                _ => false,
+            },
+        },
+    )
 }
 
 pub(crate) fn load_prompt_for_current_session(file: &Path) -> Result<Option<String>> {
@@ -634,6 +794,7 @@ pub(crate) fn record_external_prompt_for_file(
         doc_path: canonical.display().to_string(),
         last_turn_id: String::new(),
         last_prompt: prompt.to_string(),
+        last_auto_queue_head: None,
         updated_at: now_secs(),
     };
     for root in project_roots_for(&canonical) {
@@ -845,6 +1006,33 @@ mod tests {
         doc
     }
 
+    fn write_auto_queue_doc(dir: &tempfile::TempDir, prompts: &[&str]) -> PathBuf {
+        let doc = dir.path().join("task.md");
+        let queue = prompts
+            .iter()
+            .map(|prompt| format!("- {prompt}\n"))
+            .collect::<String>();
+        let content = format!(
+            "---\n\
+session: sid\n\
+agent_doc_format: template\n\
+queue_active: true\n\
+---\n\n\
+## Exchange\n\n\
+<!-- agent:exchange patch=append -->\n\
+### Re: prior — gpt-5\n\n\
+Done.\n\
+<!-- /agent:exchange -->\n\n\
+## Queue\n\n\
+<!-- agent:queue auto -->\n\
+{queue}\
+<!-- /agent:queue -->\n"
+        );
+        fs::write(&doc, &content).unwrap();
+        crate::snapshot::save(&doc, &content).unwrap();
+        doc
+    }
+
     fn write_nested_doc(dir: &tempfile::TempDir) -> PathBuf {
         let nested = dir.path().join("nested");
         fs::create_dir_all(nested.join(".agent-doc")).unwrap();
@@ -1011,6 +1199,7 @@ agent-doc {}\n",
                 doc_path: doc.display().to_string(),
                 last_turn_id: "turn-1".to_string(),
                 last_prompt: format!("agent-doc {}", doc.display()),
+                last_auto_queue_head: None,
                 updated_at: 10,
             },
         )
@@ -1022,6 +1211,7 @@ agent-doc {}\n",
                 doc_path: doc.display().to_string(),
                 last_turn_id: "turn-2".to_string(),
                 last_prompt: "/clear".to_string(),
+                last_auto_queue_head: None,
                 updated_at: 20,
             },
         )
@@ -1047,6 +1237,7 @@ agent-doc {}\n",
                 doc_path: doc.display().to_string(),
                 last_turn_id: "turn-1".to_string(),
                 last_prompt: "/clear".to_string(),
+                last_auto_queue_head: None,
                 updated_at: 20,
             },
         )
@@ -1765,6 +1956,156 @@ agent-doc {}\n",
         assert_eq!(response, StopResponse::Continue { continue_: true });
         let pending = crate::snapshot::pending_path_for(&doc).unwrap();
         assert!(!pending.exists());
+    }
+
+    #[test]
+    fn stop_blocks_clean_closeout_when_auto_queue_has_next_prompt() {
+        let dir = setup_project();
+        let doc = write_auto_queue_doc(&dir, &["do #fix1", "do #fix2"]);
+        init_git_repo(dir.path(), &doc);
+        track_doc(&dir, &doc, "turn-1");
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "Done.".to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        match response {
+            StopResponse::Block { reason, .. } => {
+                assert!(reason.contains("agent:queue auto"), "{reason}");
+                assert!(reason.contains("do #fix1"), "{reason}");
+                assert!(reason.contains("do not send the final answer"), "{reason}");
+            }
+            other => panic!("expected auto-queue continuation block, got {other:?}"),
+        }
+
+        let root = project_root_for(dir.path()).unwrap();
+        let state = load_state(&root, "codex-session").unwrap().unwrap();
+        assert_eq!(state.last_auto_queue_head.as_deref(), Some("do #fix1"));
+    }
+
+    #[test]
+    fn stop_auto_closes_open_cycle_then_blocks_for_next_auto_queue_head() {
+        let dir = setup_project();
+        let doc = write_auto_queue_doc(&dir, &["do #fix1", "do #fix2"]);
+        init_git_repo(dir.path(), &doc);
+        let original = fs::read_to_string(&doc).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
+        track_doc(&dir, &doc, "turn-1");
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: concat!(
+                "<!-- patch:exchange -->\n",
+                "### Re: #fix1 — gpt-5\n\n",
+                "Done.\n",
+                "<!-- /patch:exchange -->\n",
+            )
+            .to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        match response {
+            StopResponse::Block { reason, .. } => {
+                assert!(reason.contains("do #fix2"), "{reason}");
+            }
+            other => panic!("expected auto-queue continuation block, got {other:?}"),
+        }
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(content.contains("### Re: #fix1 — gpt-5"));
+        assert!(content.contains("- ~do #fix1~"));
+        assert!(content.contains("- do #fix2"));
+        let root = project_root_for(dir.path()).unwrap();
+        let state = load_state(&root, "codex-session").unwrap().unwrap();
+        assert_eq!(state.last_auto_queue_head.as_deref(), Some("do #fix2"));
+    }
+
+    #[test]
+    fn stop_fails_closed_when_auto_queue_continuation_makes_no_progress() {
+        let dir = setup_project();
+        let doc = write_auto_queue_doc(&dir, &["do #fix1", "do #fix2"]);
+        init_git_repo(dir.path(), &doc);
+        let root = project_root_for(dir.path()).unwrap();
+        save_state(
+            &root,
+            &SessionState {
+                session_id: "codex-session".to_string(),
+                doc_path: doc.display().to_string(),
+                last_turn_id: "turn-1".to_string(),
+                last_prompt: format!("agent-doc {}", doc.display()),
+                last_auto_queue_head: Some("do #fix1".to_string()),
+                updated_at: 20,
+            },
+        )
+        .unwrap();
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "Done.".to_string(),
+            stop_hook_active: true,
+        })
+        .unwrap();
+
+        match response {
+            StopResponse::Stop {
+                continue_: false,
+                stop_reason,
+            } => {
+                assert!(
+                    stop_reason.contains("queue head did not advance"),
+                    "{stop_reason}"
+                );
+                assert!(stop_reason.contains("do #fix1"), "{stop_reason}");
+            }
+            other => panic!("expected fail-closed no-progress stop, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stop_allows_repeated_auto_queue_blocks_after_head_advances() {
+        let dir = setup_project();
+        let doc = write_auto_queue_doc(&dir, &["do #fix2", "do #fix3"]);
+        init_git_repo(dir.path(), &doc);
+        let root = project_root_for(dir.path()).unwrap();
+        save_state(
+            &root,
+            &SessionState {
+                session_id: "codex-session".to_string(),
+                doc_path: doc.display().to_string(),
+                last_turn_id: "turn-1".to_string(),
+                last_prompt: format!("agent-doc {}", doc.display()),
+                last_auto_queue_head: Some("do #fix1".to_string()),
+                updated_at: 20,
+            },
+        )
+        .unwrap();
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "Done.".to_string(),
+            stop_hook_active: true,
+        })
+        .unwrap();
+
+        match response {
+            StopResponse::Block { reason, .. } => {
+                assert!(reason.contains("do #fix2"), "{reason}");
+            }
+            other => panic!("expected continued auto-queue block, got {other:?}"),
+        }
+        let state = load_state(&root, "codex-session").unwrap().unwrap();
+        assert_eq!(state.last_auto_queue_head.as_deref(), Some("do #fix2"));
     }
 
     #[test]

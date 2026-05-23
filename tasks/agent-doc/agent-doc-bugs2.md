@@ -102,7 +102,26 @@ There are other full-document IPC callers in the codebase, but they are differen
 Those are not what the compact log showed. For this document's recent full-document IPC, the concrete trigger was Compact Exchange's operator mutation path. Normal `finalize` responses after your follow-up questions are going through component patch IPC (`try_ipc_socket` or file IPC), not the full-document compact path.
 
 Verification: `agent-doc preflight`, `agent-doc plan`, source grep for `try_ipc_full_content_operator_mutation_from_source`, and ops-log grep for `full_content_source_buffer_apply:compact_exchange`. No code changes were made.
-<!-- agent:boundary:d47d9682 -->
+❯ What full-document IPC path is causing the duplicate corrupt document & the duplicate prompt issues?
+### Re: duplicate/corrupt full-document IPC path — gpt-5
+
+The full-document IPC path tied to the duplicate-prompt/corrupt-document class is not Compact Exchange. It is the repair redelivery path that runs after a normal component IPC closeout detects bad post-apply content.
+
+There are two concrete repair callers:
+
+- Duplicate prompt repair: `dedupe_ipc_snapshot_content(...)` detects duplicate prompt residue, logs `ipc_prompt_duplicate_repaired`, then calls `redeliver_ipc_dedupe_to_editor(...)`.
+- Prefix/sidecar divergence repair: `verify_sidecar_normalization(...)` fails, the binary builds a `normalized_content_ours_fallback(...)`, then calls `redeliver_normalization_fallback_to_editor(...)`.
+
+Both redelivery functions call `try_ipc_full_content(...)`, which uses `FullContentIpcMode::ResponseFallback` and sends a whole-document `fullContent` payload. That is the full-document IPC path I would treat as relevant to the duplicate/corrupt issue.
+
+The logs support that distinction. On `2026-05-15 10:07:24 EDT`, this document logged `ipc_prompt_duplicate_repaired` immediately followed by `ipc_dedupe_redelivered_editor`. There are also many older `sidecar_normalization_fallback_redelivered_editor` entries for this document starting around `2026-05-09 10:23:13 EDT`. Those are response-fallback full-document repairs, not compact operator mutations.
+
+Compact Exchange also uses full-document IPC, but it logs as `full_content_source_buffer_apply:compact_exchange` and `write_mode=socket_full_content` with `patches=0`. In the recent compact cycle, that path reported `live_exchange_edited=false` and `prompt_text_duplicated=false`, so it is not the evidence trail for the duplicate prompt issue.
+
+So the answer is: the suspect full-document IPC path is `redeliver_ipc_dedupe_to_editor(...)` / `redeliver_normalization_fallback_to_editor(...)` -> `try_ipc_full_content(...)` in `ResponseFallback` mode. The normal trigger is a component IPC apply that produces duplicate prompt residue or sidecar normalization divergence; the full-document IPC is then used as a repair/redelivery mechanism.
+
+Verification: `agent-doc preflight`, `agent-doc plan`, ops-log grep for `ipc_prompt_duplicate_repaired`, `ipc_dedupe_redelivered_editor`, and `sidecar_normalization_fallback_redelivered_editor`, plus source inspection around the redelivery callers. No code changes were made.
+<!-- agent:boundary:ec2fca8e -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -36,7 +36,7 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): SQLite graph performance next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:2f272c5b -->
+<!-- agent:boundary:24837ecf -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +46,7 @@ Compacted content:
 dispatch #spec-test-build-install-commit-push
 - ~do [#gdbsourcebuild]~
 - ~do [#gdbprepreuse]~
-- do [#gdbbenchnorm]
+- ~do [#gdbbenchnorm]~
 - do [#gdbevidlat]
 <!-- /agent:queue -->
 

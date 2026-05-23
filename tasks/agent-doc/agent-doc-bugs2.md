@@ -28,47 +28,12 @@ Implemented #rdec and advanced the auto queue. Top backlog item after closeout s
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260523-020749.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260523-024928.md`*
 
 Compacted content:
-- Archived 7 response topic(s): document staleness and full-content IPC; Compact Exchange trigger; full-document IPC trigger; 4 more
+- Archived 2 response topic(s): #dvre; queue auto and #rdec
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-### Re: #dvre — gpt-5
-
-Implemented #dvre in `src/agent-doc` and committed the non-session repo change as `241919e` (`fix: gate repair full-content redelivery`).
-
-The repair path now gates full-document editor redelivery on the exact bad buffer: IPC dedupe and sidecar-normalization fallback capture the rejected/bad content, only attempt `fullContent` repair when the current buffer still matches that bad state, and send `expected_content_hash` / `expected_content_len` for that bad source rather than for the repaired replacement. If the proof is stale or the editor repair is not consumed, the code falls back to the existing disk/snapshot repair path instead of forcing a stale full-document replacement.
-
-Specs were updated in `editors/SPEC.md` and `editors/PLUGIN-SPEC.md` to document that response-fallback redelivery uses proof for the bad buffer being replaced and skips full-content redelivery when that proof is stale.
-
-Verification:
-- `cargo test -p agent-doc late_fallback_patch_guard_tests -- --nocapture`
-- `make check`
-- Latest GitHub CI run `26319677438`: `Run make tmux-ci` succeeded
-- `make install`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-
-❯ Push will run after this finalize boundary succeeds, so the session document remains on the binary-owned closeout path.
-❯ Why is `agent:queue auto` stopping after the first task is complete?
-### Re: queue auto and #rdec — gpt-5
-
-`agent:queue auto` is stopping after one completed task because the current direct run/finalize path is explicitly single-step resumable. The binary consumes one queue prompt during strict closeout, commits that cycle, prints a continuation diagnostic when prompts remain, and exits. A later `agent-doc <FILE>` invocation synthesizes the next active queue head as the prompt. There is not yet a parent-owned continuation loop that re-enters preflight/finalize until the queue drains. That gap is already captured in `tasks/agent-doc/plan-auto-queue-continuation-after-finalize.md`.
-
-I also completed #rdec in `src/agent-doc`: IPC sidecar-normalization fallback and duplicate-response dedupe now resolve through a typed repair decision carrying repaired snapshot content, snapshot source, disk-repair reason, editor bad-state fingerprint, and explicit `redeliver_editor=true|false`. Both socket IPC and file IPC paths use that decision before editor redelivery or disk repair, and the decision logs `ipc_repair_decision` with the repair reason and bad-state hash/length.
-
-Updated specs document the typed decision contract in `editors/SPEC.md` and `editors/PLUGIN-SPEC.md`, and `VERSIONS.md` has the unreleased note.
-
-Verification:
-- `cargo test -p agent-doc late_fallback_patch_guard_tests -- --nocapture`
-- `make check`
-- Latest GitHub CI run `26321059508`: `Run make check` and `Run make tmux-ci` succeeded
-- `make install`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-
-Commits pushed:
-- `src/agent-doc`: `3f038a9e` (`fix: type ipc repair decisions`)
-- parent `agent-loop`: `282d212a3` (`agent-doc: type ipc repair decisions`)
-<!-- agent:boundary:b7aba7aa -->
+<!-- agent:boundary:cbc7cfce -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -83,7 +48,7 @@ Look through the Claude + Codex + agent-doc session logs for #next-steps to fix 
 #spec-test-build-install-commit-push
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#dvre]~
 - ~do [#rdec]~

@@ -170,8 +170,8 @@ pub fn run(
         if !outcome.dispatched {
             return Ok(());
         }
-        if outcome.queue_consumption.is_some() {
-            completed_queue_items += 1;
+        if let Some(queue_consumption) = outcome.queue_consumption.as_ref() {
+            completed_queue_items += queue_consumption.consumed_count.max(1);
         }
         if !should_continue_auto_queue(file, &outcome, completed_queue_items, no_git)? {
             return Ok(());

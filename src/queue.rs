@@ -401,13 +401,20 @@ pub fn remove_first_prompt(entries: &[QueueEntry]) -> Vec<QueueEntry> {
     result
 }
 
+#[allow(dead_code)]
 pub fn mark_first_prompt_completed(entries: &[QueueEntry]) -> Vec<QueueEntry> {
+    mark_first_n_prompts_completed(entries, 1)
+}
+
+pub fn mark_first_n_prompts_completed(entries: &[QueueEntry], count: usize) -> Vec<QueueEntry> {
     let mut result = Vec::with_capacity(entries.len());
-    let mut marked = false;
+    let mut marked = 0usize;
     for entry in entries {
-        if !marked && let QueueEntry::Prompt(prompt) = entry {
+        if marked < count
+            && let QueueEntry::Prompt(prompt) = entry
+        {
             result.push(QueueEntry::Completed(prompt.clone()));
-            marked = true;
+            marked += 1;
             continue;
         }
         result.push(entry.clone());

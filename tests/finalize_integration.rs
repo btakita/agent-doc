@@ -1736,6 +1736,61 @@ fn finalize_drains_queue_and_removes_dispatch_directive_on_last_prompt() {
 }
 
 #[test]
+fn finalize_consumes_contiguous_queue_items_resolved_by_done_ids() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let baseline_content = "---\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n❯ why did the queue stop?\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\npreset #spec-test-build-install-commit-push\n- do [#cspe]\n- do [#ctes]\n- do [#crem]\n- do [#cobs]\n<!-- /agent:queue -->\n\n<!-- agent:backlog -->\n- [ ] [#cspe] Update specs.\n- [ ] [#ctes] Rewrite tests.\n- [ ] [#crem] Remove obsolete workaround.\n- [ ] [#cobs] Add observability criteria.\n<!-- /agent:backlog -->\n";
+    fs::write(&doc, baseline_content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let current = baseline_content.replace(
+        "<!-- agent:boundary:1234abcd -->",
+        "❯ Handle the whole queued batch in this response.\n<!-- agent:boundary:1234abcd -->",
+    );
+    fs::write(&doc, current).unwrap();
+    let baseline = write_baseline(tmp.path(), baseline_content);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--baseline-file",
+            baseline.to_str().unwrap(),
+            "--done",
+            "cspe",
+            "--done",
+            "ctes",
+            "--done",
+            "crem",
+            "--done",
+            "cobs",
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: queued batch — gpt-5\nChanged paths: specs.md, tests.rs, write.rs, ops.md.\nCommands: cargo test queue_batch.\nVerification: passed.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success()
+        .stderr(predicates::str::contains("[queue] consumed 4 item(s)"))
+        .stderr(predicates::str::contains("[queue] drained"));
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        content.contains("queue_active: false"),
+        "queue_active should clear after all done-backed queue items are consumed:\n{content}"
+    );
+    assert!(
+        content.contains("<!-- agent:queue -->\n<!-- /agent:queue -->"),
+        "drained done-backed queue should be empty:\n{content}"
+    );
+    assert!(
+        !content.contains("- do [#cspe]") && !content.contains("- ~do [#cspe]~"),
+        "drained queue must not retain consumed prompts:\n{content}"
+    );
+}
+
+#[test]
 fn finalize_does_not_consume_when_queue_inactive() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();

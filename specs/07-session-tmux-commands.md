@@ -317,6 +317,8 @@ single-owner actor controls:
   records the clear prompt state so the next reroute can reapply the original
   launch contract. Before contacting tmux or the supervisor, it must record a
   controller operator-command acceptance or fail with the rejected stage. Clear
+  is a session-context operation only: it must not rewrite the session markdown,
+  save a snapshot, or delete live text below an `agent:boundary` marker.
   is an explicit operator action and must not fail solely because direct tmux
   evidence classifies the resolved pane as `alive-busy` or because the current
   pane command is an agent wrapper; ordinary active/status panes are allowed

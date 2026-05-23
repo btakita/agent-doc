@@ -6,6 +6,20 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Manual queue closeouts can drain explicit done-backed batches.** Strict
+  `finalize` / `write --commit` closeouts now consume all contiguous active
+  queue head prompts whose `do #id` items were resolved by repeated `--done`
+  flags, while still stopping before the first unresolved prompt and proving the
+  same queue range against the saved snapshot before mutation. This lets a
+  harness-native response that handled a whole queued batch close the queue in
+  one binary-owned commit instead of leaving later completed queue items behind.
+
+- **Prompt-normalization overruns no longer force-commit.** The
+  `MAX_NORMALIZE_USER_LINES` guard now logs `normalize_threshold_exceeded
+  action=passthrough` and leaves the content unchanged for the typed
+  repair/closeout path, removing the broad force-commit workaround that could
+  absorb unrelated drift from inside prefix normalization.
+
 - **Duplicate-prompt repair now has one write-path pipeline.** Closeout,
   content-ours normalization fallback, and IPC snapshot repair now share a
   canonical duplicate-prompt artifact repair that handles adjacent duplicate

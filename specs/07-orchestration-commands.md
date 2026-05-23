@@ -241,8 +241,8 @@ Before emitting queue state, preflight may:
 
 ### Post-commit queue consumption
 
-- After a successful response closeout, required closeouts mark the first prompt complete in the queue in the same locked read/parse/write cycle.
+- After a successful response closeout, required closeouts mark the first prompt complete in the queue in the same locked read/parse/write cycle. If a manual closeout resolves multiple contiguous queued `do #id` prompts with repeated `--done <id>` flags, it may consume that contiguous done-backed head batch in one closeout; it must stop before the first unresolved queued prompt.
 - Completed prompts remain visible as `- ~prompt text~` while later prompts remain queued.
-- The first prompt must be completable or drainable from both the live document and the snapshot in a provably identical way; otherwise strict closeouts fail before commit.
+- The consumed prompt range must be completable or drainable from both the live document and the snapshot in a provably identical way; otherwise strict closeouts fail before commit.
 - Direct `agent-doc run` / bare-path invocations with `queue_active: true` and no document diff synthesize the active queue head as the prompt diff. For `agent:queue auto`, successful closeout consumes one prompt, commits that item, then continues from a fresh run cycle while the next live queue head is still eligible. Continuation stops without consuming the next prompt when the queue drains, a stop fence or time gate reaches the next live head, the next head changed since the snapshot, or a closeout/session-check/verification step fails; diagnostics name the completed item count, next prompt when known, and stop reason.
 - If the queue drains, the queue body is cleared, `auto` is removed, and `queue_active` is cleared.

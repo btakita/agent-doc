@@ -1080,8 +1080,12 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     let current_content =
         std::fs::read_to_string(file).context("failed to read document for pre-write guards")?;
     guard_no_exchange_compaction_request_between(file, baseline.as_deref(), &current_content)?;
-    let queue_consumption_allowed =
-        should_consume_queue_prompt_for_write(file, baseline.as_deref(), &current_content)?;
+    let queue_consumption_allowed = should_consume_queue_prompt_for_write(
+        file,
+        baseline.as_deref(),
+        &current_content,
+        &options.pending_done,
+    )?;
 
     let write_result = if options.is_ipc {
         run_ipc(file, baseline.as_deref(), write_flags)
@@ -1134,7 +1138,9 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
             CommitMode::None => {}
             CommitMode::BestEffort => {
                 if queue_consumption_allowed {
-                    if let Err(e) = consume_queue_prompt(file) {
+                    if let Err(e) =
+                        consume_queue_prompts_for_done_ids_with_outcome(file, &options.pending_done)
+                    {
                         eprintln!("[queue] warning: consumption failed: {}", e);
                     }
                 } else {
@@ -1145,7 +1151,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
             }
             CommitMode::Required => {
                 if queue_consumption_allowed {
-                    consume_queue_prompt(file)?;
+                    consume_queue_prompts_for_done_ids_with_outcome(file, &options.pending_done)?;
                 } else {
                     eprintln!(
                         "[queue] skipped consumption because the active prompt did not target the queue head"
@@ -2018,6 +2024,7 @@ fn run_closeout_pending_maintenance(file: &Path, commit_mode: CommitMode) -> Res
 /// stripped and `queue_active` is cleared.
 struct QueueConsumptionPlan {
     consumed_text: String,
+    consumed_texts: Vec<String>,
     remaining: usize,
     drained: bool,
     auto: bool,
@@ -2029,11 +2036,13 @@ struct QueueConsumptionPlan {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct QueueConsumptionOutcome {
     pub(crate) consumed_text: String,
+    pub(crate) consumed_count: usize,
     pub(crate) remaining: usize,
     pub(crate) drained: bool,
     pub(crate) auto: bool,
 }
 
+#[allow(dead_code)]
 pub(crate) fn consume_queue_prompt(file: &Path) -> Result<bool> {
     Ok(consume_queue_prompt_with_outcome(file)?.is_some())
 }
@@ -2041,12 +2050,26 @@ pub(crate) fn consume_queue_prompt(file: &Path) -> Result<bool> {
 pub(crate) fn consume_queue_prompt_with_outcome(
     file: &Path,
 ) -> Result<Option<QueueConsumptionOutcome>> {
+    consume_queue_prompts_with_outcome(file, &[])
+}
+
+pub(crate) fn consume_queue_prompts_for_done_ids_with_outcome(
+    file: &Path,
+    done_ids: &[String],
+) -> Result<Option<QueueConsumptionOutcome>> {
+    consume_queue_prompts_with_outcome(file, done_ids)
+}
+
+fn consume_queue_prompts_with_outcome(
+    file: &Path,
+    done_ids: &[String],
+) -> Result<Option<QueueConsumptionOutcome>> {
     // Hold the document lock for the entire read-parse-write cycle to prevent
     // concurrent edits from invalidating parsed offsets (TOCTOU fix).
     let _lock = acquire_doc_lock(file)?;
     let content =
         std::fs::read_to_string(file).context("queue consume: failed to read document")?;
-    let Some(plan) = plan_queue_prompt_consumption(file, &content)? else {
+    let Some(plan) = plan_queue_prompt_consumption(file, &content, done_ids)? else {
         return Ok(None);
     };
 
@@ -2058,14 +2081,24 @@ pub(crate) fn consume_queue_prompt_with_outcome(
 
     let outcome = QueueConsumptionOutcome {
         consumed_text: plan.consumed_text.clone(),
+        consumed_count: plan.consumed_texts.len(),
         remaining: plan.remaining,
         drained: plan.drained,
         auto: plan.auto,
     };
-    eprintln!(
-        "[queue] consumed: {:?} (remaining: {})",
-        plan.consumed_text, plan.remaining
-    );
+    if plan.consumed_texts.len() == 1 {
+        eprintln!(
+            "[queue] consumed: {:?} (remaining: {})",
+            plan.consumed_text, plan.remaining
+        );
+    } else {
+        eprintln!(
+            "[queue] consumed {} item(s): {:?} (remaining: {})",
+            plan.consumed_texts.len(),
+            plan.consumed_texts,
+            plan.remaining
+        );
+    }
     if plan.drained {
         eprintln!("[queue] drained — cleared queue_active");
     } else if plan.auto {
@@ -2091,6 +2124,7 @@ fn should_consume_queue_prompt_for_write(
     file: &Path,
     baseline: Option<&str>,
     current_content: &str,
+    done_ids: &[String],
 ) -> Result<bool> {
     let Some(base) = baseline else {
         return Ok(true);
@@ -2098,7 +2132,12 @@ fn should_consume_queue_prompt_for_write(
     let base_norm = crate::diff::strip_comments(&strip_boundary_for_dedup(base));
     let current_norm = crate::diff::strip_comments(&strip_boundary_for_dedup(current_content));
     let diff_text = crate::diff::unified_diff_from_contents(&base_norm, &current_norm);
-    should_consume_queue_prompt_for_diff_content(file, current_content, diff_text.as_deref())
+    let allowed =
+        should_consume_queue_prompt_for_diff_content(file, current_content, diff_text.as_deref())?;
+    if allowed {
+        return Ok(true);
+    }
+    queue_head_matches_done_ids(current_content, done_ids)
 }
 
 fn should_consume_queue_prompt_for_diff_content(
@@ -2162,8 +2201,82 @@ fn active_queue_head_text(content: &str) -> Result<Option<String>> {
     Ok(crate::queue::first_prompt(&entries).map(|prompt| prompt.text.clone()))
 }
 
+fn queue_head_matches_done_ids(content: &str, done_ids: &[String]) -> Result<bool> {
+    if done_ids.is_empty() {
+        return Ok(false);
+    }
+    let Some(queue_head) = active_queue_head_text(content)? else {
+        return Ok(false);
+    };
+    let Some(head_id) = queue_prompt_done_id(&queue_head) else {
+        return Ok(false);
+    };
+    Ok(done_ids.iter().any(|id| normalize_done_id(id) == head_id))
+}
+
 fn queue_prompt_text_matches(prompt_change: &str, queue_head: &str) -> bool {
     normalize_queue_prompt_text(prompt_change) == normalize_queue_prompt_text(queue_head)
+}
+
+fn queue_prompt_done_id(text: &str) -> Option<String> {
+    let marker = text.find('#')?;
+    let tail = &text[marker + 1..];
+    let id = tail
+        .chars()
+        .take_while(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+        .collect::<String>();
+    if id.is_empty() {
+        None
+    } else {
+        Some(id.to_ascii_lowercase())
+    }
+}
+
+fn normalize_done_id(id: &str) -> String {
+    id.trim()
+        .trim_start_matches('[')
+        .trim_start_matches('#')
+        .trim_end_matches(']')
+        .to_ascii_lowercase()
+}
+
+fn first_n_queue_prompt_texts(entries: &[crate::queue::QueueEntry], count: usize) -> Vec<String> {
+    entries
+        .iter()
+        .filter_map(|entry| match entry {
+            crate::queue::QueueEntry::Prompt(prompt) => Some(prompt.text.clone()),
+            _ => None,
+        })
+        .take(count)
+        .collect()
+}
+
+fn queue_consume_count_for_done_ids(
+    entries: &[crate::queue::QueueEntry],
+    done_ids: &[String],
+) -> usize {
+    if done_ids.is_empty() {
+        return 0;
+    }
+    let done_ids = done_ids
+        .iter()
+        .map(|id| normalize_done_id(id))
+        .collect::<std::collections::HashSet<_>>();
+    let mut count = 0usize;
+    for entry in entries {
+        let crate::queue::QueueEntry::Prompt(prompt) = entry else {
+            continue;
+        };
+        let Some(id) = queue_prompt_done_id(&prompt.text) else {
+            break;
+        };
+        if done_ids.contains(&id) {
+            count += 1;
+            continue;
+        }
+        break;
+    }
+    count
 }
 
 fn normalize_queue_prompt_text(text: &str) -> String {
@@ -2184,6 +2297,7 @@ fn normalize_queue_prompt_text(text: &str) -> String {
 fn plan_queue_prompt_consumption(
     file: &Path,
     content: &str,
+    done_ids: &[String],
 ) -> Result<Option<QueueConsumptionPlan>> {
     let (fm, _) = frontmatter::parse(content)?;
     if fm.queue_active != Some(true) {
@@ -2204,16 +2318,16 @@ fn plan_queue_prompt_consumption(
     let entries =
         crate::queue::parse(body).context("queue consume: failed to parse document queue")?;
 
-    let consumed_text = crate::queue::first_prompt(&entries)
-        .map(|p| p.text.clone())
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "queue consume: queue_active is true but document queue has no prompt to consume"
-            )
-        })?;
+    let consume_count = queue_consume_count_for_done_ids(&entries, done_ids).max(1);
+    let consumed_texts = first_n_queue_prompt_texts(&entries, consume_count);
+    let consumed_text = consumed_texts.first().cloned().ok_or_else(|| {
+        anyhow::anyhow!(
+            "queue consume: queue_active is true but document queue has no prompt to consume"
+        )
+    })?;
 
     let has_auto = crate::queue::has_auto_attr(&comp.attrs);
-    let completed_entries = crate::queue::mark_first_prompt_completed(&entries);
+    let completed_entries = crate::queue::mark_first_n_prompts_completed(&entries, consume_count);
     let remaining = crate::queue::prompts(&completed_entries).len();
     let drained = remaining == 0;
     let new_entries = if drained {
@@ -2260,21 +2374,23 @@ fn plan_queue_prompt_consumption(
     let snap_entries =
         crate::queue::parse(snap_body).context("queue consume: failed to parse snapshot queue")?;
     let snap_has_auto = crate::queue::has_auto_attr(&snap_queue.attrs);
-    let snapshot_head = crate::queue::first_prompt(&snap_entries)
-        .map(|p| p.text.clone())
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "queue consume: queue_active is true but snapshot queue has no prompt to consume"
-            )
-        })?;
-    if snapshot_head != consumed_text {
+    let snapshot_consumed_texts = first_n_queue_prompt_texts(&snap_entries, consume_count);
+    if snapshot_consumed_texts.len() != consumed_texts.len() {
         anyhow::bail!(
-            "queue consume: snapshot head prompt {:?} does not match document head {:?}",
-            snapshot_head,
-            consumed_text
+            "queue consume: snapshot has {} prompt(s) available but document consumed {}",
+            snapshot_consumed_texts.len(),
+            consumed_texts.len()
         );
     }
-    let snap_completed_entries = crate::queue::mark_first_prompt_completed(&snap_entries);
+    if snapshot_consumed_texts != consumed_texts {
+        anyhow::bail!(
+            "queue consume: snapshot head prompts {:?} do not match document head prompts {:?}",
+            snapshot_consumed_texts,
+            consumed_texts
+        );
+    }
+    let snap_completed_entries =
+        crate::queue::mark_first_n_prompts_completed(&snap_entries, consume_count);
     let snap_remaining = crate::queue::prompts(&snap_completed_entries).len();
     let snap_new_entries = if snap_remaining == 0 {
         Vec::new()
@@ -2309,6 +2425,7 @@ fn plan_queue_prompt_consumption(
     if new_snap != snap {
         return Ok(Some(QueueConsumptionPlan {
             consumed_text,
+            consumed_texts,
             remaining,
             drained,
             auto: has_auto,
@@ -2320,6 +2437,7 @@ fn plan_queue_prompt_consumption(
 
     Ok(Some(QueueConsumptionPlan {
         consumed_text,
+        consumed_texts,
         remaining,
         drained,
         auto: has_auto,
@@ -3556,9 +3674,9 @@ pub const MAX_NORMALIZE_USER_LINES: usize = 50;
 /// 2. **Safety rail** — if more than [`MAX_NORMALIZE_USER_LINES`] prefixes
 ///    would be applied, the normalization is discarded (content passes
 ///    through unchanged) and an event is logged.
-/// 3. **Auto-commit recovery** — on overrun, `git::commit(file)` is invoked
-///    to absorb the current working-tree state into the snapshot, giving
-///    the next cycle a clean baseline to diff against.
+/// 3. **No broad recovery side effects** — on overrun, the content passes
+///    through unchanged. The caller's typed repair/closeout path remains
+///    responsible for deciding whether disk, snapshot, or editor state changes.
 ///
 /// This is the call-site-facing entry point for the write path. Tests and
 /// callers that need the pure normalization behavior should continue to
@@ -3612,8 +3730,7 @@ pub fn normalize_user_prompts_in_exchange_safe(
     if applied > MAX_NORMALIZE_USER_LINES {
         eprintln!(
             "[normalize] WARN: {} ❯-prefixes would be applied, exceeds threshold {} for {} — \
-             suspected snapshot/baseline divergence. Force-committing current file to absorb drift; \
-             skipping ❯ prefix application this cycle.",
+             suspected snapshot/baseline divergence. Skipping ❯ prefix application this cycle.",
             applied,
             MAX_NORMALIZE_USER_LINES,
             file.display()
@@ -3621,13 +3738,10 @@ pub fn normalize_user_prompts_in_exchange_safe(
         crate::ops_log::log_op(
             file,
             &format!(
-                "normalize_threshold_exceeded applied={} threshold={} action=force_commit_and_passthrough",
+                "normalize_threshold_exceeded applied={} threshold={} action=passthrough",
                 applied, MAX_NORMALIZE_USER_LINES
             ),
         );
-        if let Err(e) = crate::git::commit(file) {
-            eprintln!("[normalize] WARN: force-commit failed: {}", e);
-        }
         return content.to_string();
     }
 
@@ -12835,8 +12949,40 @@ do #next. spec-test-build-install-commit-push
         // Construct a baseline with >50 unique "user-added" lines relative to the snapshot.
         // The safety rail should refuse to apply ❯ prefix and return content unchanged.
         let tmp = tempfile::TempDir::new().unwrap();
-        let file = tmp.path().join("doc.md");
-        std::fs::write(&file, "").unwrap();
+        let root = tmp.path();
+        std::process::Command::new("git")
+            .current_dir(root)
+            .args(["init", "-q"])
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test User"])
+            .output()
+            .unwrap();
+        let file = root.join("doc.md");
+        std::fs::write(&file, "initial\n").unwrap();
+        std::process::Command::new("git")
+            .current_dir(root)
+            .args(["add", "doc.md"])
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
+        let head_before = std::process::Command::new("git")
+            .current_dir(root)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap()
+            .stdout;
 
         let mut baseline_lines = String::new();
         let mut content_lines = String::new();
@@ -12861,6 +13007,16 @@ do #next. spec-test-build-install-commit-push
         assert!(
             !result.contains("❯ user line"),
             "no ❯ prefix should be applied when threshold exceeded"
+        );
+        let head_after = std::process::Command::new("git")
+            .current_dir(root)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap()
+            .stdout;
+        assert_eq!(
+            head_after, head_before,
+            "normalization overrun must not force-commit the working tree"
         );
     }
 

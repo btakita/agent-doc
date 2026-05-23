@@ -160,6 +160,10 @@ plan path into another `.md` file.
   completes `#id` but omits the matching done mutation. If the item is
   code-complete but blocked on an external gate, prefer
   `--pending-gate <id>` instead of leaving it silently open.
+- If the completed ids are also contiguous head entries in an active
+  `agent:queue`, repeating `--done <id>` for each completed id lets closeout
+  consume that done-backed queue batch in the same commit. The queue still stops
+  before the first unresolved queued prompt.
 - Any response ending with a forward-looking question ("Ready to X?", "Should we A or
   B first?", "Shall I capture Y as a spec?") MUST capture each concrete next-step
   option in the same cycle unless the options are explicitly mutually exclusive and

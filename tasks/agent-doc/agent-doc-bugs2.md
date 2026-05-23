@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -111,20 +111,13 @@ I also updated `src/agent-doc/specs/07-closeout-commands.md` and `src/agent-doc/
 Verification passed locally: focused regression, `git diff --check`, `cargo fmt --check`, `make check`, `cargo build`, `make install`, `agent-doc --version` (`0.33.16`), and `make tmux-ci` (`228 passed`). Remote `btakita/agent-doc` CI run `26342394380` passed `make check` and `make tmux-ci` for commit `5f58660f`. Parent `btakita/agent-loop` run `26342401265` did not start any job steps because GitHub reported the billing/spending-limit blocker, so I treated that as external CI-start failure after local verification.
 
 Pushed commits: `5f58660f test: cover file ipc narrow redelivery` on `btakita/agent-doc` and `c2ebf7730 agent-doc: cover file ipc narrow redelivery` on parent `main`. I left unrelated parent worktree changes untouched.
-<!-- agent:boundary:9995670e -->
+<!-- agent:boundary:00fcf155 -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~do [#edproof]~
-- ~do [#typedrepair]~
-- ~do [#repairtests]~
-- ~do [#tsiftipc]~
-- ~do [#narrowpatch]~
-- do [#repaircleanup]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Pending / Not Built
@@ -134,7 +127,6 @@ preset #spec-test-build-install-commit-push
 - [ ] [#qguard] [recommended] Fix queue consumption proof so prompt-only or next-steps closeouts cannot consume an active queue head when the preflight baseline already includes the unrelated prompt; require an exact queue-head prompt match, queue-synthetic diff proof, or explicit done id before consuming.
 - [ ] [#qrepair] [recommended] Make response repair/write --commit queue-neutral: missing-response materialization repairs must preserve the current queue head and auto attribute unless the repair explicitly closes that queue item.
 - [ ] [#qfixture] [recommended] Add an end-to-end regression for agent:queue auto plus a non-queue #next-steps prompt and repair write, asserting the auto attribute is preserved and the next queue head is not consumed.
-- [ ] [#repaircleanup] [recommended] Update editor specs/tests for snapshot-only repair versus editor-redelivery behavior and remove obsolete workaround branches after typed repair decisions land.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

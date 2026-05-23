@@ -57,16 +57,38 @@ Verification: passed. The focused Rust tests covered stale full-content source g
 CI/tmux evidence: latest GitHub CI run `26334620844` succeeded; its `Run make check` and `Run make tmux-ci` steps both passed.
 
 Push: no source changes were made, so there was nothing to commit or push for `src/agent-doc`.
-<!-- agent:boundary:eeb23a47 -->
+❯ The `agent:queue auto` stopped running after the first task. Why does `agent:queue auto` still stop after completing the first task?
+### Re: agent:queue auto stopping — gpt-5
+
+There are two distinct causes in this document.
+
+First, the real auto-continuation loop exists in `agent-doc run`: after a queue-synthesized prompt closes, `run.rs` calls `should_continue_auto_queue(...)` and starts a fresh run cycle when the next queue head is still eligible. This Codex/manual harness path does not call that loop. It runs `preflight`, `plan`, repo work, and `finalize` once, then stops. So closeout consumes one queue item and reports remaining prompts, but nothing re-enters `agent-doc run` to launch the next queued task automatically.
+
+Second, my repair after the previous closeout made the local state worse: the repair write inserted the missing response body, but because it was a repair `write --commit` without the original queue-head baseline, it also consumed the next queue head. I then restored the queue with `agent-doc patch queue`, and that component patch rewrote the opener as `&lt;!-- agent:queue --&gt;`, stripping the `auto` attribute. Frontmatter still has `queue_active: true`, so preflight currently reports `queue_trigger: persisted` and still sees the restored queue head. But the visible `auto` marker is gone because of that repair step, not because the queue drained.
+
+So the answer is: `agent:queue auto` is not continuing here because the Codex skill workflow is using the manual closeout path, while auto-continuation is implemented in the binary-owned `agent-doc run` loop. The current document also lost the `auto` attribute during my queue repair. The next queued item is still open; this response only explains the queue behavior.
+
+Changed paths: none for source. The session document records this explanation only.
+
+Commands:
+- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
+- `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
+- `rg -n "queue_active|queue_trigger|agent:queue auto|consume_queue|auto queue|queue_prompts" src/agent-doc/src src/agent-doc/specs src/agent-doc/SPEC.md src/agent-doc/README.md src/agent-doc/SKILL.md`
+- `sed -n '330,570p' src/agent-doc/src/run.rs`
+- `sed -n '2020,2130p' src/agent-doc/src/write.rs`
+- `sed -n '247,252p' src/agent-doc/specs/07-orchestration-commands.md`
+
+Verification: inspected the implementation and spec paths; no code was changed, so I did not run the test suite.
+<!-- agent:boundary:d2e2f6cf -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#edproof]~
-- do [#typedrepair]
+- ~do [#typedrepair]~
 - do [#repairtests]
 - do [#tsiftipc]
 - do [#narrowpatch]

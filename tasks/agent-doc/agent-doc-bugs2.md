@@ -28,42 +28,12 @@ Implemented #rdec and advanced the auto queue. Top backlog item after closeout s
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260523-024928.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260523-030654.md`*
 
 Compacted content:
-- Archived 2 response topic(s): #dvre; queue auto and #rdec
+- Archived 1 response topic(s): auto queue continuation after finalize
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ Continue with tasks/agent-doc/plan-auto-queue-continuation-after-finalize.md. #spec-test-build-install-commit-push
-### Re: auto queue continuation after finalize — gpt-5
-
-Implemented `tasks/agent-doc/plan-auto-queue-continuation-after-finalize.md`.
-
-Changed paths:
-- `src/agent-doc/src/run.rs`
-- `src/agent-doc/src/write.rs`
-- `src/agent-doc/src/queue.rs`
-- `src/agent-doc/tests/run_integration.rs`
-- `src/agent-doc/specs/07-orchestration-commands.md`
-
-What changed:
-- Direct `agent-doc run` / bare-path auto queues now continue after each successful closeout when the just-finished cycle came from a synthetic queue prompt.
-- Each item still owns its own response write, queue consumption, commit, and session-check boundary before the next queued prompt launches.
-- Continuation stops with explicit diagnostics on drain, stop fence, time gate, snapshot head mutation, inactive queue, or missing next prompt.
-- Queue stop/time gates now treat completed queue residue and batch directives as non-live head entries, so a stop fence after a completed item can actually halt the next prompt.
-
-Verification:
-- `cargo test queue`
-- `make check`
-- Latest GitHub CI on branch `20260422/codex-agent-backend`: run `26321358802`, job `check`, success; included `Run make tmux-ci` success.
-- `make install`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-
-Commit and push:
-- Submodule `src/agent-doc`: `d36558e9` (`fix: continue auto queues after closeout`) pushed to `origin/20260422/codex-agent-backend`.
-- Superproject: `cec77d62d` (`chore: update agent-doc submodule`) pushed to `origin/main`.
-
-No actionable follow-up backlog items are needed for this cycle. Confidence: high. Escalation: none.
-<!-- agent:boundary:90d3ce69 -->
+<!-- agent:boundary:1284cff0 -->
 <!-- /agent:exchange -->
 ###
 <!--

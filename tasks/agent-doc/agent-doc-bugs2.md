@@ -29,30 +29,12 @@ Resolved #qfixture; auto queue drained.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260523-223726.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260523-224302.md`*
 
 Compacted content:
-- Archived 1 response topic(s): compact exchange full-document IPC
+- Archived 1 response topic(s): log-driven next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ What are #next-steps to find bugs by looking in the Claude, Codex, & agent-doc logs?
-### Re: log-driven next steps — gpt-5
-
-Top backlog item: `#closelog`.
-
-The useful next move is to treat the logs as a regression source, not as one-off debugging output. I sampled `.agent-doc/logs/ops.log`, today's debug log, `cycles.jsonl`, recent Codex session/log SQLite data, `~/.codex/log/codex-tui.log`, the latest Claude project JSONL, and `tsift session-review --next-context`.
-
-The highest-value bug class is closeout/captured-response drift. The ops log contains `interrupted_cycle_detected` 311 times, `already_committed` 166 times, `late_fallback_patch_rejected` 122 times, plus `session_check_interrupted`, `stale_snapshot_reset_drift_blocked`, and `commit_blocked_missing_captured_response`. That is the path most likely to leave a visible console response out of the document or require repair.
-
-The second bug class is route/start reliability. Ops has repeated `route_starting_actor_timeout_coalesced`, `route_cycle_start_missing`, `ipc_socket_sidecar_timeout`, and `run_preflight_timeout`, with `agent-doc-bugs2.md` and `tsift.md` recurring as anchors.
-
-The third class is signal quality. Codex logs currently have 13,281 WARN/ERROR rows; 9,183 are `icon path must not contain '..'` and 3,499 are `maximum of 3 prompts is supported`, which means plugin/skill-loader noise can bury real harness failures. The Claude JSONL is useful for recovery markers like `agent-doc repair`, orphaned prior response, and `session-check ok`, but it should be correlated with ops/cycles by session id and timestamp instead of read manually.
-
-Tsift also flagged the same operational direction: largest prompt turn `243,926` tokens, cached input ratio `97.50%` across `188,683,461` prompt tokens, restart churn `fresh_restart=201 auto_trigger_timeout=23 ctrl_d_restart_loop=15`, and `commit_already_current` appearing `6343` times. Those are good guardrails for finding recurring workflow bugs.
-
-I added backlog items in that order.
-
-Commands/proof: ran `agent-doc --version`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `agent-doc orchestrate --from-exchange --plan`, `tsift status`, `tsift log-digest` over ops/debug logs, `tsift session-review --next-context`, targeted `rg`, `find`, `tail`, and `sqlite3` queries over `.agent-doc`, Codex, and Claude logs. Changed paths: session document/backlog only. Verification: no source code changed, so no build/test suite was run. Escalation: none. Confidence: high.
-<!-- agent:boundary:fbc536f2 -->
+<!-- agent:boundary:074844fe -->
 <!-- /agent:exchange -->
 ###
 <!--

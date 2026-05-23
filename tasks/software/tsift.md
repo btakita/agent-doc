@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -56,20 +56,17 @@ Queue closeout repair: the benchmark requested by this queue item was run and re
 ### Re: Please run a benchmark on the performance improvements for this queue run — gpt-5
 
 Completed. The benchmark result and follow-up are recorded in the preceding `queue benchmark` response. This exact-heading closeout is only to let the `agent:queue auto` guard match and consume the queue head.
-<!-- agent:boundary:bd0ef0d4 -->
+### Re: Please run a benchmark on the performance improvements for this queue run — gpt-5
+
+Queue head consumed via `agent-doc run` after the manual benchmark response had already been finalized. No additional benchmark commands were run in this synthetic closeout.
+<!-- agent:boundary:eaad2e80 -->
 <!-- /agent:exchange -->
 ###
 <!--
 #spec-test-build-install-commit-push
 -->
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~do [#gdbcurbase]~
-- ~do [#gdbprepcache]~
-- ~do [#gdbfullreg]~
-- ~do [#gdbfalkorreal]~
-- Please run a benchmark on the performance improvements for this queue run
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

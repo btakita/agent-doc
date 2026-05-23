@@ -34,7 +34,28 @@ prompt_presets:
 Compacted content:
 - Archived 2 response topic(s): Send inquiry email; Direct draft email send
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:77a1da41 -->
+❯ The images on http://127.0.0.1:8787/about are broken. Please download asset files.
+### Re: About image assets — gpt-5
+
+Downloaded the four missing `/about` team image assets from the `equityfundingsource-assets` R2 bucket into the local gitignored asset cache:
+
+- `public/assets/images/about/judith-krug-team.png`
+- `public/assets/images/about/diko-baghdasarian.png`
+- `public/assets/images/about/april-armas.png`
+- `public/assets/images/about/jessica-rian.png`
+
+Then repacked the Worker static asset bundle so `http://127.0.0.1:8787` serves the new files from `app/equityfundingsource/dist/worker-assets`.
+
+Verification:
+
+- `curl -I http://127.0.0.1:8787/assets/images/about/{judith-krug-team,diko-baghdasarian,april-armas,jessica-rian}.png` returned `200 OK` with `Content-Type: image/png`.
+- `curl -I http://127.0.0.1:8787/about` returned `200 OK`.
+- `bun run check` in `src/equityfundingsource-dev` passed: 30 tests, app build, and worker build.
+- `make check` at the repo root passed.
+- `gh run list --workflow CI --limit 1` found no workflow named `CI`. The available `Agent Doc` workflow’s latest run, `26345829441`, is red, but both `tmux-ci` and `check` jobs have empty step lists and `gh run view --job ... --log` returns `log not found`, so I’m classifying that as an external CI-start blocker rather than a code or tmux regression.
+
+The repo download script (`bin/assets-download.sh`) still needs S3/Boto credentials that are not present in this checkout, so I used the active Wrangler auth path directly for the missing objects.
+<!-- agent:boundary:c0e9c584 -->
 <!-- /agent:exchange -->
 ###
 

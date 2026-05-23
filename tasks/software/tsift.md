@@ -18,8 +18,7 @@ queue_active: false
 ## Status
 
 <!-- agent:status patch=replace -->
-
-Completed: #gdbpostbase, #gdbrowstream, #gdbprepstage, and #gdbenginegate shipped in tsift c0ebfd5 and superproject 851d29aad; #gdbvacproof is gated on missing live Convex transport credentials after local dry-run and compact proof.
+Completed: #gdbrefreshcache, #gdbtargetsnap, and #gdbpathprobe shipped in tsift c1c7668 and superproject f321eabef; GitHub Agent Doc CI is externally blocked before runner startup by the billing/spending-limit annotation.
 <!-- /agent:status -->
 
 ## Spec
@@ -36,21 +35,58 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): SQLite graph performance next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:b12bc8dc -->
+### Re: graph DB refresh cache, scoped snapshots, and path probes — gpt-5
+
+Implemented #gdbrefreshcache, #gdbtargetsnap, and #gdbpathprobe.
+
+Changed paths:
+- `src/tsift/src/main.rs`
+- `src/tsift/src/substrate.rs`
+- `src/tsift/tests/graph_db_conformance.rs`
+- `src/tsift/SPEC.md`
+- `src/tsift/VERSIONS.md`
+- `src/tsift/fixtures/graph-db-operator-examples/agent-orchestration-acceptance-pack.json`
+
+What changed:
+- Added cheap `GraphStore::graph_counts()` and `GraphStore::sample_edge()` probes, with SQLite `COUNT(*)` / `LIMIT 1` implementations and candidate-store parity coverage.
+- Promoted source-watermark cached graph DB reuse into normal `graph-db refresh`, conflict-matrix, and dispatch-trace paths when source rows are unchanged; cached reuse stays disabled when user triggers are present so rollback/failure checks still execute.
+- Replaced full-graph conflict/dispatch preparation with target-scoped snapshots built from target evidence paths, worker context, source handles, worker results, owned files/symbols, and bounded neighborhoods.
+- Updated graph DB conformance tests, fixture counts, SPEC, and VERSIONS for the new behavior.
+
+Verification:
+- `cargo fmt`
+- `cargo test sqlite_store_filters_edges_by_kind_and_paths`
+- `cargo test --test graph_db_conformance` -> 31 passed
+- `make check` -> clippy plus full cargo test passed, including 656 unit tests, 108 `exit_code` tests, and 31 graph DB conformance tests
+- `cargo build`
+- `cargo install --path .`
+- `tsift --version` -> `tsift 0.1.42`
+
+CI / tmux evidence:
+- Checked GitHub Agent Doc run `26324160304`; both `check` and `tmux-ci` jobs failed before runner startup with the billing/spending-limit annotation and no logs. Classified as an external CI-start blocker, not a code or tmux regression.
+
+Commit / push:
+- tsift submodule commit `c1c7668` (`perf: cache scoped graph orchestration`) pushed to `btakita/tsift/main`.
+- superproject submodule-pointer commit `f321eabef` (`tsift: cache scoped graph orchestration`) pushed to `btakita/agent-loop/main`.
+
+Confidence: high; local verification and install passed, and the remote CI failure is external to this change.
+Escalation: none.
+<!-- agent:boundary:feddd54c -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
 <!-- agent:queue -->
+preset #spec-test-build-install-commit-push
+- do [#gdbrefreshcache]
+- do [#gdbtargetsnap]
+- do [#gdbpathprobe]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gdbrefreshcache] [recommended] Promote backend-eval source-watermark cached projection reuse into normal graph-db refresh/conflict-matrix paths: when code-index, session, and summary watermarks match, skip source_graph_build/projection_rows/sqlite temp/property staging and open the existing graph.db read-only; prove with three backend-eval samples covering real.sqlite.refresh, source_graph_build, sqlite_delta_write, and conflict-matrix timings.
-- [ ] [#gdbtargetsnap] [recommended] Make conflict-matrix and dispatch-trace target-scoped instead of loading every graph_nodes/graph_edges row: build the snapshot from resolved targets, evidence paths, owned files/symbols, and direct conflict neighborhoods; keep full-graph snapshots behind an explicit diagnostic path and gate on real.sqlite.conflict_matrix plus dispatch_trace normalized metrics.
-- [ ] [#gdbpathprobe] [recommended] Remove full-edge/full-row scans from backend-eval probe selection by adding GraphStore count and sample-edge APIs backed by SQLite COUNT(*)/LIMIT 1 queries, then retarget path_max_hops/status metrics so they measure SQLite graph operations rather than all_nodes/all_edges setup cost.
 - [/] [#orchdog] [recommended] Dogfood the completed graph-backed agent orchestration stack on a real agent-doc queue run: run refresh -> evidence -> conflict-matrix -> dispatch-trace -> jobs create/collect, compare worker_prompt_packet and worker_result closure fields, and capture any tsift-side fixture gaps. **Dogfood performed 2026-05-21 on `session-share/tasks/root.md` items #x63e + #v4v0; findings recorded in #gdbevid, #cmgr, #gdbidx — see `session-share/tasks/root.md` exchange "graph-backed orchestration dogfood" entry for the full pipeline trace.** **Second dogfood 2026-05-21 against `tasks/software/tsift.md` (preset `#dogfood-tsift`) surfaced 2 new gaps: #cmgrwres and #gdblock.**
 <!-- /agent:backlog -->
 

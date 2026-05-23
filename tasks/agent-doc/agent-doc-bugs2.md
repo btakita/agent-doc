@@ -77,7 +77,32 @@ So the accurate framing is:
 The follow-up prompt after compact was normal post-commit drift: the snapshot stayed at the compact commit, then your new question appeared in the working document and preflight picked it up as the next prompt.
 
 Verification: `agent-doc preflight` and `agent-doc plan`; reused the previous source/log inspection for the compact full-content path. No code changes were made.
-<!-- agent:boundary:e0744444 -->
+❯ What is triggering the full-document IPC?
+### Re: full-document IPC trigger — gpt-5
+
+In the observed case, the trigger is the compact closeout path:
+
+`agent-doc compact ...` -> `apply_compacted_document(...)` -> `try_ipc_full_content_operator_mutation_from_source(...)` -> `try_ipc_full_content_with_mode(..., FullContentIpcMode::OperatorMutation, ...)` -> IPC payload with `fullContent`.
+
+That is why the ops log labels it as:
+
+- `full_content_source_buffer_apply:compact_exchange`
+- `source=try_ipc_full_content_socket`
+- `write_mode=socket_full_content`
+- `patches=0 unmatched_len=0`
+
+The `patches=0` part is expected for this path because it is not sending a template component patch. It is sending an entire replacement document as `fullContent`.
+
+There are other full-document IPC callers in the codebase, but they are different paths:
+
+- response fallback repair: `try_ipc_full_content(...)` with `FullContentIpcMode::ResponseFallback`
+- normalization fallback redelivery: `redeliver_normalization_fallback_to_editor(...)`
+- IPC duplicate-response repair redelivery: `redeliver_ipc_dedupe_to_editor(...)`
+
+Those are not what the compact log showed. For this document's recent full-document IPC, the concrete trigger was Compact Exchange's operator mutation path. Normal `finalize` responses after your follow-up questions are going through component patch IPC (`try_ipc_socket` or file IPC), not the full-document compact path.
+
+Verification: `agent-doc preflight`, `agent-doc plan`, source grep for `try_ipc_full_content_operator_mutation_from_source`, and ops-log grep for `full_content_source_buffer_apply:compact_exchange`. No code changes were made.
+<!-- agent:boundary:d47d9682 -->
 <!-- /agent:exchange -->
 ###
 <!--

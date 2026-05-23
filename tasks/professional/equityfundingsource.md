@@ -89,7 +89,45 @@ For Lucas: Wednesday, May 27, 2026 is too close to rely on Judith paying in time
 If you can cover `$500` personally without creating a more serious problem, I would do that as the bridge. I would not promise Lucas the full `$1,000` by May 27 unless the money is actually in hand. Better to be direct now than to overpromise and damage trust.
 
 Short version: send the invoice today, ask Judith for immediate payment, but operate as if it will not arrive before May 27. Pay Lucas `$500` if you can, negotiate the remaining `$500` with a specific date, and keep the client invoice at a level that actually covers the project economics.
-<!-- agent:boundary:7b63da4e -->
+❯ I need to polish the app a bit before I can present it with a large invoice to judith-krug.
+❯ What are some recommendations?
+
+❯ I need to add a placeholder into /funded-deals. We need an admin portal for the EFS staff to update their funded deals.
+❯ Populate the database with the deals in https://equityfundingsource.pages.dev/portfolio/
+
+❯ Please evaluate the design of the site and make the /funded-deals appropriate with the site styleguide.
+❯ #spec-test-commit-push
+### Re: Funded Deals Polish — gpt-5
+
+Implemented the funded-deals polish work in `src/equityfundingsource-dev`.
+
+What changed:
+
+- Added `/funded-deals` to the public site using the current EFS navy/gold styleguide, real deal images, restrained cards, and the existing public shell.
+- Seeded a new D1 `funded_deals` table from the legacy `https://equityfundingsource.pages.dev/portfolio/` page: 18 records, images, locations, amounts, visibility, and sort order.
+- Added admin staff management at `/portal-admin/funded-deals` with create/edit/hide/reorder/delete controls backed by `/api/admin/funded-deals`.
+- Kept investor opportunities separate from historical public funded deals, so active investment deals still use the existing `investment_deals` flow.
+- Updated the PRD and added test coverage for the seed list, public page rendering, migration, and admin client.
+
+Recommendations before presenting the invoice to Judith:
+
+1. Demo the polished public path first: home page, about page, `/funded-deals`, then the borrower application flow. That frames the invoice around visible value before showing internal portal depth.
+2. Apply the D1 migration and smoke-test the Worker deployment before sending the invoice. The public page has a static fallback, but the admin edit flow depends on the new table existing in D1.
+3. Ask Judith for a quick approval pass on funded-deal copy/images/legal wording. The migrated legacy records are useful, but deal portfolio pages can imply compliance or investor solicitation if the wording is too strong.
+4. Keep the admin portal out of the client-facing narrative unless she asks how updates work. The simple explanation is: "Your team can maintain this list from the admin portal without code changes."
+5. For invoice confidence, highlight concrete outcomes: modernized brand surface, role-based portals, backend-backed forms, investor/admin deal workflows, D1/R2/Worker infrastructure, and now a maintainable funded-deals portfolio.
+
+Verification:
+
+- `bun test` passed: 20 tests, 0 failures.
+- `bun run check` passed after the remote rebase: tests, public build, and worker build all green.
+- Latest root `Agent Doc` GitHub run `26322999068` still failed before runner startup: both `check` and `tmux-ci` jobs had empty step lists and no logs. I classified that as the existing external CI-start blocker, not a code or tmux regression.
+
+Commit/push:
+
+- EFS app repo pushed: `ba137b9` (`feat: add funded deals management`).
+- Parent repo gitlink committed locally: `9b73494a9` (`chore: update equity funding source app`). I will push the parent after this document closeout so the session response commit is included too.
+<!-- agent:boundary:5ee3ea7b -->
 <!-- /agent:exchange -->
 ###
 
@@ -100,6 +138,7 @@ Please directly send the draft email using brian.takita@gmail.com
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- [ ] [#jnzs] [recommended] Before invoicing Judith, run final EFS polish: apply the D1 migration/deploy, smoke-test /funded-deals and /portal-admin/funded-deals on the live Worker, and get Judith's approval on funded-deal images/copy/legal wording.
 - [ ] [#qr72] [recommended] By May 27, 2026, send Lucas a written bridge plan: $500 now from personal funds if available, ask for the remaining $500 to be paid after EFS payment clears or by an agreed near-term date, and invoice EFS immediately for $5,000 with a smaller immediate continuation retainer accepted if Judith pushes back.
 - [ ] [#s62t] [recommended] Prepare EFS invoice with truthful hours/value; Lucas cost is $4,150 (83h @ $50), so floor is 42h/$4,200 and recommended ask is 50-60h/$5,000-$6,000 with any concession as an explicit courtesy credit.
 - [ ] [#37ah] [recommended] Broker portal backend: replace static broker demo data with TMO-backed submit-deal, pipeline, commissions, documents, and notifications

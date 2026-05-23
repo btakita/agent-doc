@@ -49,7 +49,7 @@ Verification:
 Commit / push:
 - Committed the non-session audit file as `e17074f71` (`agent-doc: audit duplicate prompt repairs`).
 - The session repair write is being committed through `agent-doc write --commit`; push comes after this repair commit passes session-check.
-<!-- agent:boundary:27f69d30 -->
+<!-- agent:boundary:c08720aa -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -66,7 +66,6 @@ Look through the Claude + Codex + agent-doc session logs for #next-steps to fix 
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#cuni]
 - do [#cspe]
 - do [#ctes]
 - do [#crem]

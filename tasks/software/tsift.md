@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -111,7 +111,7 @@ So the honest read is mixed but favorable to SQLite for the workload that curren
 SQLite is likely enough if tsift keeps the graph workload bounded, indexed, local, transactional, and projection-cache-friendly. Kuzu or DuckDB/DuckPGQ become more compelling if the product direction shifts toward large analytical graph scans, unbounded/variable-length path workloads, parallel OLAP-style joins, or native graph-query syntax as a user-facing feature. Until a production adapter proves parity, concurrency behavior, install portability, and wins across every backend-eval dataset, SQLite should remain the correctness and local-performance baseline.
 
 Commands/proof: ran `agent-doc preflight`, `agent-doc read`, `agent-doc orchestrate --from-exchange --plan`, `agent-doc plan`, `tsift status --json`, `tsift context-pack`, source/schema inspections with `rg`/`sed`, `tsift graph-db --json --path /home/brian/work/btakita/agent-loop status`, and `tsift graph-db --json --path /home/brian/work/btakita/agent-loop backend-eval --candidate duckdb-duckpgq --candidate kuzu` with focused `jq` extraction. Changed paths: session document/backlog only. Verification: all read/eval commands completed successfully; no source build/test run was needed because this cycle only answered the prompt and added backlog items. Escalation: none. Confidence: high.
-<!-- agent:boundary:43223954 -->
+<!-- agent:boundary:70a6658f -->
 <!-- /agent:exchange -->
 ###
 <!--

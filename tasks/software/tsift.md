@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -35,29 +35,40 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 2 response topic(s): sqlite graph performance next steps; gdbfalkorreal location
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:5c741580 -->
+### Re: graph backend cache queue — gpt-5
+
+Completed the active graph backend queue and pushed it.
+
+- `#gdbprepcache`: added disk-backed conflict-matrix preparation and graph/evidence reuse under `.tsift/conflict-matrix-cache`, with report statuses for `memory_hit`, `disk_hit`, and `computed`. The conformance test now verifies a second CLI invocation hits the disk prep cache and target-scoped graph evidence cache.
+- `#gdbcurbase` and `#gdbfullreg`: refreshed the real agent-loop graph/index state and appended four benchmark reports to `fixtures/graph-db-performance-history.json`: three bounded FalkorDB candidate samples and one `--full-projection` sample.
+- `#gdbfalkorreal`: kept FalkorDB behind `backend-eval`; the new real benchmark still shows the prototype Falkor path regressing on full real graph scans, so this is evidence for holding the gate rather than promotion.
+
+Benchmark notes: `metric-digest` showed conflict-matrix preparation improved about 99%+ on the real agent-loop sample, including a 99.999% per-1k-graph-rows prep-rate improvement. The all-candidate/four-target run stayed too expensive after more than five minutes, so I used repeated single-target Falkor samples plus the full-projection sample for practical evidence. `tsift status --fix --json` still reported the overall workspace index as stale only because the configured `FDE-Project-Interview` scope path is missing; the tsift scope was refreshed.
+
+Verification and release path:
+
+- Local: `cargo check`, focused graph tests, full `make check`, and `cargo install --path .` passed; installed `tsift --version` is `tsift 0.1.42`.
+- CI: tsift run `26345952453` passed both `clippy + test` and live Convex acceptance. The superproject `Agent Doc` run `26345957563` failed before any job steps were allocated for both `check` and `tmux-ci`, so I classified that as an external CI-start blocker rather than a red tmux regression.
+- Commits pushed: `btakita/tsift@dd4a3fc` and superproject `btakita/agent-loop@4459e752a`.
+<!-- agent:boundary:27ba4f5c -->
 <!-- /agent:exchange -->
 ###
 <!--
 #spec-test-build-install-commit-push
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#gdbcurbase]
-- do [#gdbprepcache]
-- do [#gdbfullreg]
-- do [#gdbfalkorreal]
+- ~do [#gdbcurbase]~
+- ~do [#gdbprepcache]~
+- ~do [#gdbfullreg]~
+- ~do [#gdbfalkorreal]~
 - Please run a benchmark on the performance improvements for this queue run
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gdbcurbase] [recommended] Capture the current post-c1c7668 SQLite graph baseline with three backend-eval samples: refresh the workspace/index first, run the bounded tasks/software/tsift.md target and the opt-in full-projection dataset, feed output through metric-digest, update fixtures/graph-db-performance-history.json, and record the top costs before another optimization pass.
-- [ ] [#gdbprepcache] [recommended] Remove the remaining conflict-matrix preparation hotspot by making prepared context, evidence, staged-diff, and impact packets reusable across CLI invocations by source/document/staged-diff watermark, then gate on backend-eval conflict_matrix_preparation and dispatch_trace timings.
-- [ ] [#gdbfullreg] [recommended] Add a full-projection graph performance regression gate: keep the small session-hinted run as smoke coverage, but require opt-in full agent-loop metric-digest evidence before changing SQLite graph query plans or evaluating backend promotion.
-- [ ] [#gdbfalkorreal] [recommended] Keep FalkorDB behind backend-eval and only promote it after a production adapter beats SQLite on full-projection conflict-matrix, evidence, dispatch-trace, path_max_hops, install portability, and lock behavior; current bounded numbers are promising for conflict-matrix but not enough for a backend switch.
 - [/] [#orchdog] [recommended] Dogfood the completed graph-backed agent orchestration stack on a real agent-doc queue run: run refresh -> evidence -> conflict-matrix -> dispatch-trace -> jobs create/collect, compare worker_prompt_packet and worker_result closure fields, and capture any tsift-side fixture gaps. **Dogfood performed 2026-05-21 on `session-share/tasks/root.md` items #x63e + #v4v0; findings recorded in #gdbevid, #cmgr, #gdbidx — see `session-share/tasks/root.md` exchange "graph-backed orchestration dogfood" entry for the full pipeline trace.** **Second dogfood 2026-05-21 against `tasks/software/tsift.md` (preset `#dogfood-tsift`) surfaced 2 new gaps: #cmgrwres and #gdblock.**
 <!-- /agent:backlog -->
 

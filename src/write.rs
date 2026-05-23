@@ -6537,6 +6537,177 @@ fn repair_disk_from_normalization_fallback(file: &Path, fallback: &str) -> Resul
     Ok(())
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum IpcSnapshotSource {
+    AckContentSidecar,
+    ContentOurs,
+    FileRead,
+}
+
+impl IpcSnapshotSource {
+    fn label(self) -> &'static str {
+        match self {
+            Self::AckContentSidecar => "ack_content_sidecar",
+            Self::ContentOurs => "content_ours",
+            Self::FileRead => "file_read",
+        }
+    }
+
+    fn is_ack_content_proven(self) -> bool {
+        matches!(self, Self::AckContentSidecar)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum IpcDiskRepairReason {
+    PrefixDivergence,
+    IpcDedupe,
+    PrefixDivergenceThenIpcDedupe,
+}
+
+impl IpcDiskRepairReason {
+    fn label(self) -> &'static str {
+        match self {
+            Self::PrefixDivergence => "prefix_divergence",
+            Self::IpcDedupe => "ipc_dedupe",
+            Self::PrefixDivergenceThenIpcDedupe => "prefix_divergence_then_ipc_dedupe",
+        }
+    }
+
+    fn redelivery_kind(self) -> FullContentRepairRedelivery {
+        match self {
+            Self::PrefixDivergence => FullContentRepairRedelivery::NormalizationFallback,
+            Self::IpcDedupe | Self::PrefixDivergenceThenIpcDedupe => {
+                FullContentRepairRedelivery::IpcDedupe
+            }
+        }
+    }
+
+    fn merge_with_ipc_dedupe(self) -> Self {
+        match self {
+            Self::PrefixDivergence => Self::PrefixDivergenceThenIpcDedupe,
+            Self::IpcDedupe | Self::PrefixDivergenceThenIpcDedupe => self,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct EditorBadStateFingerprint {
+    content: String,
+    len: usize,
+    hash: String,
+}
+
+impl EditorBadStateFingerprint {
+    fn new(content: String) -> Self {
+        let len = content.len();
+        let hash = crate::ops_log::content_hash(&content);
+        Self { content, len, hash }
+    }
+
+    fn content(&self) -> &str {
+        &self.content
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct IpcRepairDecision {
+    snapshot_content: String,
+    snap_source: IpcSnapshotSource,
+    disk_repair_reason: Option<IpcDiskRepairReason>,
+    editor_bad_state: Option<EditorBadStateFingerprint>,
+    redeliver_editor: bool,
+}
+
+impl IpcRepairDecision {
+    fn ack_content(snapshot_content: String) -> Self {
+        Self {
+            snapshot_content,
+            snap_source: IpcSnapshotSource::AckContentSidecar,
+            disk_repair_reason: None,
+            editor_bad_state: None,
+            redeliver_editor: false,
+        }
+    }
+
+    fn content_ours_prefix_fallback(snapshot_content: String, bad_state: String) -> Self {
+        Self {
+            snapshot_content,
+            snap_source: IpcSnapshotSource::ContentOurs,
+            disk_repair_reason: Some(IpcDiskRepairReason::PrefixDivergence),
+            editor_bad_state: Some(EditorBadStateFingerprint::new(bad_state)),
+            redeliver_editor: true,
+        }
+    }
+
+    fn file_read(snapshot_content: String) -> Self {
+        Self {
+            snapshot_content,
+            snap_source: IpcSnapshotSource::FileRead,
+            disk_repair_reason: None,
+            editor_bad_state: None,
+            redeliver_editor: false,
+        }
+    }
+
+    fn apply_ipc_dedupe(
+        mut self,
+        snapshot_content: String,
+        bad_state_before_dedupe: String,
+    ) -> Self {
+        self.snapshot_content = snapshot_content;
+        self.disk_repair_reason = Some(match self.disk_repair_reason {
+            Some(reason) => reason.merge_with_ipc_dedupe(),
+            None => IpcDiskRepairReason::IpcDedupe,
+        });
+        if self.editor_bad_state.is_none() {
+            self.editor_bad_state = Some(EditorBadStateFingerprint::new(bad_state_before_dedupe));
+        }
+        self.redeliver_editor = self.editor_bad_state.is_some();
+        self
+    }
+
+    fn ack_content_proven(&self) -> bool {
+        self.snap_source.is_ack_content_proven()
+    }
+}
+
+fn ipc_repair_decision_from_sidecar(
+    file: &Path,
+    baseline: Option<&str>,
+    snap_content: String,
+    content_ours: Option<&str>,
+    normalize_prefix_lines: Option<&[String]>,
+) -> IpcRepairDecision {
+    if let Some(lines) = normalize_prefix_lines
+        && !lines.is_empty()
+        && !verify_sidecar_normalization(&snap_content, lines)
+    {
+        if let Some(ours) = content_ours {
+            let bad_state = snap_content;
+            let fallback = normalized_content_ours_fallback(file, baseline, ours, lines);
+            eprintln!(
+                "[write] sidecar normalization diverged — falling back to content_ours ({} bytes)",
+                fallback.len()
+            );
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "sidecar_normalization_fallback file={} snap_source=content_ours reason=prefix_divergence",
+                    file.display()
+                ),
+            );
+            return IpcRepairDecision::content_ours_prefix_fallback(fallback, bad_state);
+        }
+
+        eprintln!(
+            "[write] sidecar normalization diverged but no content_ours available — using sidecar"
+        );
+    }
+
+    IpcRepairDecision::ack_content(snap_content)
+}
+
 #[derive(Clone, Copy, Debug)]
 enum FullContentRepairRedelivery {
     NormalizationFallback,
@@ -6681,19 +6852,6 @@ fn redeliver_full_content_repair_to_editor(
     }
 }
 
-fn redeliver_normalization_fallback_to_editor(
-    file: &Path,
-    fallback: &str,
-    expected_bad_state: &str,
-) -> bool {
-    redeliver_full_content_repair_to_editor(
-        file,
-        fallback,
-        expected_bad_state,
-        FullContentRepairRedelivery::NormalizationFallback,
-    )
-}
-
 fn repair_disk_from_ipc_dedupe(file: &Path, content: &str) -> Result<()> {
     guard_visible_write_idle(file, "ipc_dedupe_repair")?;
     atomic_write(file, content).with_context(|| {
@@ -6713,6 +6871,7 @@ fn repair_disk_from_ipc_dedupe(file: &Path, content: &str) -> Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
 fn redeliver_ipc_dedupe_to_editor(file: &Path, content: &str, expected_bad_state: &str) -> bool {
     redeliver_full_content_repair_to_editor(
         file,
@@ -6720,6 +6879,55 @@ fn redeliver_ipc_dedupe_to_editor(file: &Path, content: &str, expected_bad_state
         expected_bad_state,
         FullContentRepairRedelivery::IpcDedupe,
     )
+}
+
+fn repair_ipc_decision_visible_state(file: &Path, decision: &IpcRepairDecision) -> Result<()> {
+    let Some(reason) = decision.disk_repair_reason else {
+        return Ok(());
+    };
+    let bad_len = decision
+        .editor_bad_state
+        .as_ref()
+        .map(|state| state.len)
+        .unwrap_or(0);
+    let bad_hash = decision
+        .editor_bad_state
+        .as_ref()
+        .map(|state| state.hash.as_str())
+        .unwrap_or("-");
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "ipc_repair_decision file={} snap_source={} repair_reason={} redeliver_editor={} bad_len={} bad_hash={}",
+            file.display(),
+            decision.snap_source.label(),
+            reason.label(),
+            decision.redeliver_editor,
+            bad_len,
+            bad_hash
+        ),
+    );
+
+    if decision.redeliver_editor
+        && let Some(expected_bad_state) = decision.editor_bad_state.as_ref()
+        && redeliver_full_content_repair_to_editor(
+            file,
+            &decision.snapshot_content,
+            expected_bad_state.content(),
+            reason.redelivery_kind(),
+        )
+    {
+        return Ok(());
+    }
+
+    match reason {
+        IpcDiskRepairReason::PrefixDivergence => {
+            repair_disk_from_normalization_fallback(file, &decision.snapshot_content)
+        }
+        IpcDiskRepairReason::IpcDedupe | IpcDiskRepairReason::PrefixDivergenceThenIpcDedupe => {
+            repair_disk_from_ipc_dedupe(file, &decision.snapshot_content)
+        }
+    }
 }
 
 pub(crate) fn dedupe_ipc_snapshot_content(
@@ -7073,57 +7281,34 @@ pub fn try_ipc(
                     std::time::Duration::from_millis(25),
                 )?;
                 if let Some(snap_content) = sidecar {
-                    // Verify sidecar preserved normalize_prefix_lines targets.
-                    // If the plugin's normalization diverged, prefer content_ours.
-                    let (effective_snap, snap_source, repair_disk, mut repair_bad_state) =
-                        if let Some(lines) = normalize_prefix_lines
-                            && !lines.is_empty()
-                            && !verify_sidecar_normalization(&snap_content, lines)
-                        {
-                            if let Some(ours) = content_ours {
-                                let bad_state = snap_content.clone();
-                                let fallback =
-                                    normalized_content_ours_fallback(file, baseline, ours, lines);
-                                eprintln!(
-                                    "[write] sidecar normalization diverged — falling back to content_ours ({} bytes)",
-                                    fallback.len()
-                                );
-                                crate::ops_log::log_op(
-                                    file,
-                                    &format!(
-                                        "sidecar_normalization_fallback file={} snap_source=content_ours reason=prefix_divergence",
-                                        file.display()
-                                    ),
-                                );
-                                (fallback, "content_ours", true, Some(bad_state))
-                            } else {
-                                eprintln!(
-                                    "[write] sidecar normalization diverged but no content_ours available — using sidecar"
-                                );
-                                (snap_content, "ack_content_sidecar", false, None)
-                            }
-                        } else {
-                            (snap_content, "ack_content_sidecar", false, None)
-                        };
+                    let mut repair_decision = ipc_repair_decision_from_sidecar(
+                        file,
+                        baseline,
+                        snap_content,
+                        content_ours,
+                        normalize_prefix_lines,
+                    );
 
-                    let pre_dedupe_snap = effective_snap.clone();
+                    let pre_dedupe_snap = repair_decision.snapshot_content.clone();
                     let (effective_snap, dedupe_repair) = dedupe_ipc_snapshot_content(
                         file,
                         ipc_before_content.as_deref(),
-                        &effective_snap,
-                        snap_source,
+                        &repair_decision.snapshot_content,
+                        repair_decision.snap_source.label(),
                     )?;
-                    if dedupe_repair && repair_bad_state.is_none() {
-                        repair_bad_state = Some(pre_dedupe_snap);
+                    if dedupe_repair {
+                        repair_decision =
+                            repair_decision.apply_ipc_dedupe(effective_snap, pre_dedupe_snap);
+                    } else {
+                        repair_decision.snapshot_content = effective_snap;
                     }
-                    let repair_disk = repair_disk || dedupe_repair;
 
                     let expected_response = response_materialization_probe(patches, unmatched);
                     if !ipc_response_materialized_or_fallback(
                         file,
                         "socket_ack_content",
                         &expected_response,
-                        &effective_snap,
+                        &repair_decision.snapshot_content,
                     ) {
                         return Ok(IpcResult {
                             success: false,
@@ -7134,8 +7319,8 @@ pub fn try_ipc(
 
                     eprintln!(
                         "[write] snapshot from {} ({} bytes)",
-                        snap_source,
-                        effective_snap.len()
+                        repair_decision.snap_source.label(),
+                        repair_decision.snapshot_content.len()
                     );
                     crate::ops_log::log_op(
                         file,
@@ -7143,9 +7328,9 @@ pub fn try_ipc(
                             "ipc_socket_ack_content file={} patch_id={} snap_source={} sidecar_len={} sidecar_hash={} disk_len={} disk_hash={}",
                             file.display(),
                             patch_id,
-                            snap_source,
-                            effective_snap.len(),
-                            crate::ops_log::content_hash(&effective_snap),
+                            repair_decision.snap_source.label(),
+                            repair_decision.snapshot_content.len(),
+                            crate::ops_log::content_hash(&repair_decision.snapshot_content),
                             ipc_before_content.as_deref().map(str::len).unwrap_or(0),
                             ipc_before_content
                                 .as_deref()
@@ -7156,33 +7341,14 @@ pub fn try_ipc(
                     if let Some(ref path) = fallback_patch_file {
                         let _ = std::fs::remove_file(path);
                     }
-                    if repair_disk {
-                        let expected_bad_state = repair_bad_state.as_deref().unwrap_or("");
-                        if dedupe_repair {
-                            if !redeliver_ipc_dedupe_to_editor(
-                                file,
-                                &effective_snap,
-                                expected_bad_state,
-                            ) {
-                                repair_disk_from_ipc_dedupe(file, &effective_snap)?;
-                            }
-                        } else {
-                            if !redeliver_normalization_fallback_to_editor(
-                                file,
-                                &effective_snap,
-                                expected_bad_state,
-                            ) {
-                                repair_disk_from_normalization_fallback(file, &effective_snap)?;
-                            }
-                        }
-                    }
+                    repair_ipc_decision_visible_state(file, &repair_decision)?;
                     crate::ops_log::log_op(
                         file,
                         &format!(
                             "ipc_socket_delivered file={} snap_source={} snap_len={}",
                             file.display(),
-                            snap_source,
-                            effective_snap.len()
+                            repair_decision.snap_source.label(),
+                            repair_decision.snapshot_content.len()
                         ),
                     );
                     if let Some(before) = ipc_before_content.as_deref() {
@@ -7193,12 +7359,12 @@ pub fn try_ipc(
                             Some(&patch_id),
                             baseline,
                             before,
-                            &effective_snap,
+                            &repair_decision.snapshot_content,
                             patches,
                             unmatched,
                         );
                     }
-                    if let Err(e) = snapshot::save(file, &effective_snap) {
+                    if let Err(e) = snapshot::save(file, &repair_decision.snapshot_content) {
                         eprintln!(
                             "[write] WARNING: IPC write succeeded but snapshot save failed: {}. \
                              Commit will auto-recover via divergence detection.",
@@ -7218,10 +7384,11 @@ pub fn try_ipc(
                             &format!(
                                 "snapshot_saved_socket_ipc file={} snap_len={}",
                                 file.display(),
-                                effective_snap.len()
+                                repair_decision.snapshot_content.len()
                             ),
                         );
-                        let crdt_doc = crate::crdt::CrdtDoc::from_text(&effective_snap);
+                        let crdt_doc =
+                            crate::crdt::CrdtDoc::from_text(&repair_decision.snapshot_content);
                         if let Err(e) = snapshot::save_crdt(file, &crdt_doc.encode_state()) {
                             eprintln!("[write] WARNING: CRDT state save failed: {}", e);
                         }
@@ -7893,9 +8060,8 @@ fn write_ipc_and_poll(
                 .get("patch_id")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let mut ack_content_proven = false;
-            let mut repair_bad_state: Option<String> = None;
-            let current_on_disk = if !patch_id.is_empty() {
+            let (current_on_disk, mut repair_decision, ack_content_proven) = if !patch_id.is_empty()
+            {
                 match poll_ack_content_sidecar(
                     options.project_root,
                     patch_id,
@@ -7903,59 +8069,41 @@ fn write_ipc_and_poll(
                     std::time::Duration::from_millis(25),
                 ) {
                     Ok(Some(content)) => {
-                        // Verify sidecar preserved normalize_prefix_lines targets.
-                        if let Some(lines) = options.normalize_prefix_lines
-                            && !lines.is_empty()
-                            && !verify_sidecar_normalization(&content, lines)
-                        {
-                            if let Some(ours) = options.content_ours {
-                                repair_bad_state = Some(content.clone());
-                                let baseline = payload
-                                    .get("baseline")
-                                    .and_then(|value| value.as_str())
-                                    .filter(|value| !value.is_empty());
-                                let fallback = normalized_content_ours_fallback(
-                                    doc_file, baseline, ours, lines,
-                                );
-                                eprintln!(
-                                    "[write] sidecar normalization diverged — falling back to content_ours ({} bytes)",
-                                    fallback.len()
-                                );
-                                crate::ops_log::log_op(
-                                    doc_file,
-                                    &format!(
-                                        "sidecar_normalization_fallback file={} snap_source=content_ours reason=prefix_divergence",
-                                        doc_file.display()
-                                    ),
-                                );
-                                fallback
-                            } else {
-                                eprintln!(
-                                    "[write] sidecar normalization diverged but no content_ours — using sidecar ({} bytes)",
-                                    content.len()
-                                );
-                                ack_content_proven = true;
-                                content
-                            }
-                        } else {
+                        let baseline = payload
+                            .get("baseline")
+                            .and_then(|value| value.as_str())
+                            .filter(|value| !value.is_empty());
+                        let decision = ipc_repair_decision_from_sidecar(
+                            doc_file,
+                            baseline,
+                            content,
+                            options.content_ours,
+                            options.normalize_prefix_lines,
+                        );
+                        if decision.snap_source == IpcSnapshotSource::AckContentSidecar {
                             eprintln!(
                                 "[write] snapshot from ack-content sidecar ({} bytes)",
-                                content.len()
+                                decision.snapshot_content.len()
                             );
-                            ack_content_proven = true;
-                            content
                         }
+                        let ack_content_proven = decision.ack_content_proven();
+                        let snapshot_content = decision.snapshot_content.clone();
+                        (snapshot_content, decision, ack_content_proven)
                     }
                     _ => {
                         eprintln!(
                             "[write] snapshot from file read (ack-content sidecar not available after 500ms)"
                         );
-                        std::fs::read_to_string(doc_file).unwrap_or_default()
+                        let content = std::fs::read_to_string(doc_file).unwrap_or_default();
+                        let decision = IpcRepairDecision::file_read(content.clone());
+                        (content, decision, false)
                     }
                 }
             } else {
                 eprintln!("[write] snapshot from file read (no patch_id for sidecar lookup)");
-                std::fs::read_to_string(doc_file).unwrap_or_default()
+                let content = std::fs::read_to_string(doc_file).unwrap_or_default();
+                let decision = IpcRepairDecision::file_read(content.clone());
+                (content, decision, false)
             };
             let baseline_content = payload
                 .get("baseline")
@@ -8047,15 +8195,18 @@ fn write_ipc_and_poll(
             // Plugin applied the patch — update snapshot as actual post-write disk state.
             // `current_on_disk` is from ack-content sidecar when available, or 200ms file read.
             // Bug 2A fix: snapshot save failure after IPC success is non-fatal.
-            let pre_dedupe_content = current_on_disk.clone();
+            let pre_dedupe_content = repair_decision.snapshot_content.clone();
             let (snap_content, dedupe_repair) = dedupe_ipc_snapshot_content(
                 doc_file,
                 before_content.as_deref(),
-                &current_on_disk,
-                "ipc_file",
+                &repair_decision.snapshot_content,
+                repair_decision.snap_source.label(),
             )?;
-            if dedupe_repair && repair_bad_state.is_none() {
-                repair_bad_state = Some(pre_dedupe_content);
+            if dedupe_repair {
+                repair_decision =
+                    repair_decision.apply_ipc_dedupe(snap_content, pre_dedupe_content);
+            } else {
+                repair_decision.snapshot_content = snap_content;
             }
             if file_ipc_consumed_without_live_exchange_ack(
                 doc_file,
@@ -8066,31 +8217,18 @@ fn write_ipc_and_poll(
                     .and_then(|value| value.as_str())
                     .filter(|value| !value.is_empty()),
                 before_content.as_deref(),
-                &snap_content,
+                &repair_decision.snapshot_content,
                 ack_content_proven,
             ) {
                 return Ok(false);
             }
-            if dedupe_repair {
-                let expected_bad_state = repair_bad_state.as_deref().unwrap_or("");
-                if !redeliver_ipc_dedupe_to_editor(doc_file, &snap_content, expected_bad_state) {
-                    repair_disk_from_ipc_dedupe(doc_file, &snap_content)?;
-                }
-            } else if let Some(expected_bad_state) = repair_bad_state.as_deref()
-                && !redeliver_normalization_fallback_to_editor(
-                    doc_file,
-                    &snap_content,
-                    expected_bad_state,
-                )
-            {
-                repair_disk_from_normalization_fallback(doc_file, &snap_content)?;
-            }
+            repair_ipc_decision_visible_state(doc_file, &repair_decision)?;
             crate::ops_log::log_op(
                 doc_file,
                 &format!(
                     "ipc_file_delivered file={} snap_len={}",
                     doc_file.display(),
-                    snap_content.len()
+                    repair_decision.snapshot_content.len()
                 ),
             );
             if let Some(before) = before_content.as_deref() {
@@ -8128,12 +8266,12 @@ fn write_ipc_and_poll(
                     patch_id,
                     baseline,
                     before,
-                    &snap_content,
+                    &repair_decision.snapshot_content,
                     &payload_patches,
                     unmatched,
                 );
             }
-            if let Err(e) = snapshot::save(doc_file, &snap_content) {
+            if let Err(e) = snapshot::save(doc_file, &repair_decision.snapshot_content) {
                 eprintln!(
                     "[write] WARNING: IPC write succeeded but snapshot save failed: {}. \
                      Commit will auto-recover via divergence detection.",
@@ -8153,10 +8291,10 @@ fn write_ipc_and_poll(
                     &format!(
                         "snapshot_saved_file_ipc file={} snap_len={}",
                         doc_file.display(),
-                        snap_content.len()
+                        repair_decision.snapshot_content.len()
                     ),
                 );
-                let crdt_doc = crate::crdt::CrdtDoc::from_text(&snap_content);
+                let crdt_doc = crate::crdt::CrdtDoc::from_text(&repair_decision.snapshot_content);
                 if let Err(e) = snapshot::save_crdt(doc_file, &crdt_doc.encode_state()) {
                     eprintln!("[write] WARNING: CRDT state save failed: {}", e);
                 }
@@ -15928,9 +16066,9 @@ mod pending_patch_normalization_tests {
 #[cfg(test)]
 mod late_fallback_patch_guard_tests {
     use super::{
-        build_full_content_ipc_payload, cleanup_fallback_patch_files, cycle_already_committed,
-        redeliver_ipc_dedupe_to_editor, try_ipc, try_ipc_full_content,
-        try_ipc_full_content_operator_mutation_from_source,
+        IpcDiskRepairReason, IpcRepairDecision, IpcSnapshotSource, build_full_content_ipc_payload,
+        cleanup_fallback_patch_files, cycle_already_committed, redeliver_ipc_dedupe_to_editor,
+        try_ipc, try_ipc_full_content, try_ipc_full_content_operator_mutation_from_source,
     };
     use crate::snapshot;
     use std::fs;
@@ -15947,6 +16085,60 @@ mod late_fallback_patch_guard_tests {
         let doc = tmp.path().join("doc.md");
         fs::write(&doc, content).unwrap();
         doc
+    }
+
+    #[test]
+    fn ipc_repair_decision_records_prefix_fallback_bad_state() {
+        let decision = IpcRepairDecision::content_ours_prefix_fallback(
+            "fixed snapshot".to_string(),
+            "bad editor state".to_string(),
+        );
+
+        assert_eq!(decision.snapshot_content, "fixed snapshot");
+        assert_eq!(decision.snap_source, IpcSnapshotSource::ContentOurs);
+        assert_eq!(
+            decision.disk_repair_reason,
+            Some(IpcDiskRepairReason::PrefixDivergence)
+        );
+        assert!(decision.redeliver_editor);
+        let bad_state = decision
+            .editor_bad_state
+            .as_ref()
+            .expect("prefix fallback should capture bad editor state");
+        assert_eq!(bad_state.content(), "bad editor state");
+        assert_eq!(bad_state.len, "bad editor state".len());
+        assert_eq!(
+            bad_state.hash,
+            crate::ops_log::content_hash("bad editor state")
+        );
+    }
+
+    #[test]
+    fn ipc_repair_decision_preserves_original_bad_state_when_dedupe_follows_prefix_fallback() {
+        let decision = IpcRepairDecision::content_ours_prefix_fallback(
+            "prefix fallback with duplicate response".to_string(),
+            "visible sidecar before fallback".to_string(),
+        )
+        .apply_ipc_dedupe(
+            "deduped snapshot".to_string(),
+            "prefix fallback with duplicate response".to_string(),
+        );
+
+        assert_eq!(decision.snapshot_content, "deduped snapshot");
+        assert_eq!(decision.snap_source, IpcSnapshotSource::ContentOurs);
+        assert_eq!(
+            decision.disk_repair_reason,
+            Some(IpcDiskRepairReason::PrefixDivergenceThenIpcDedupe)
+        );
+        assert!(decision.redeliver_editor);
+        assert_eq!(
+            decision
+                .editor_bad_state
+                .as_ref()
+                .expect("combined repair should keep original bad editor proof")
+                .content(),
+            "visible sidecar before fallback"
+        );
     }
 
     #[test]

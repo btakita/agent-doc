@@ -132,7 +132,26 @@ Commands/proof: ran `agent-doc preflight` and `agent-doc plan`; plan attempted `
 I did not redispatch or rerun source work for this queue head. The planning evidence reported `previously_completed=true`, so this closeout is consuming the final reactivated queue entry and letting the queue drain.
 
 Commands/proof: ran `agent-doc preflight` and `agent-doc plan`; plan attempted `tsift dispatch-trace` and timed out after 30s, but the partial evidence included `previously_completed=true` for `#gdbpathprobe`. Changed paths: session document only. Verification: session status, done archive, and plan evidence confirm this item is already closed; no source build/test run was needed for this idempotent queue-consumption cycle. Escalation: none. Confidence: high.
-<!-- agent:boundary:b3d9187b -->
+❯ What are the measured performance improvements?
+### Re: measured performance improvements — gpt-5
+
+The big measured win from the last queue run was cached graph reuse on unchanged source rows.
+
+Cold/current superproject baseline on `/home/brian/work/btakita/agent-loop`: real SQLite total `27,515,453us` (`27.5s`), refresh `26,953,139us` (`27.0s`), conflict matrix `520,183us`, dispatch trace `2,380us`, over `946,233` real graph rows.
+
+Three repeated cached samples after the change:
+- real SQLite refresh: `317us`, `322us`, `320us` average `319.7us`
+- real SQLite total: `519,721us`, `517,194us`, `538,326us` average `525,080us` (`0.525s`)
+- dispatch trace: under `1ms` in all three samples
+
+That makes the average total run about `52.4x` faster, a `98.09%` reduction from the cold baseline. Refresh itself went from about `27s` to about `0.00032s`, about `84,300x` faster, a `99.9988%` reduction. `metric-digest` on the latest repeated sample reported `real.sqlite.total_duration_micros` improved `98.16%`, `real.sqlite.refresh.duration_micros` improved `99.9987%`, and `source_graph_build` improved `99.9977%`.
+
+The earlier SQLite hot-path pass had smaller but still useful local wins: `sqlite_delta_write` improved from about `3,856,606us` to `3,237,200us` (`~16%`), real conflict matrix from `37,504us` to `34,979us` (`~6.7%`), real path max-hops from `11,915us` to `11,236us` (`~5.7%`), and the synthetic deep-chain path probe from `219us` to `120us` (`~45%`). The digest for that pass reported `reg:0`, `imp:6`.
+
+Candidate backend promotion stayed on hold: the repeated digest still showed candidate conflict-matrix regressions, so SQLite remains the baseline for this workload.
+
+Commands/proof: ran `agent-doc --version`, `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `rg` and `sed` over the session archive/done file, `git show --stat` for `c1c7668` and `1e53fb8`, and a small arithmetic calculation over the recorded benchmark samples. Changed paths: session document only. Verification: answered from the archived benchmark output and recorded metric-digest values; no source build/test run was needed because this was a documentation response only. Escalation: none. Confidence: high.
+<!-- agent:boundary:d5aa294a -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -31,40 +31,23 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260523-012319.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260523-012725.md`*
 
 Compacted content:
-- Archived 4 response topic(s): sqlitedb graph performance next steps; SQLite graph performance queue; ignored tests and performance report; 1 more
+- Archived 1 response topic(s): SQLite graph performance next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ What are the #next-steps to improve the sqlite graphdb performance?
-### Re: SQLite graph performance next steps — gpt-5
-
-The next pass should move above the SQLite write path. The last queue already completed `#gdbrefreshperf`, `#gdbpathfrontier`, `#gdbstatscache`, and `#gdbresolveidx`; the archived benchmark says those changes cut SQLite delta writes and property staging, but total real runtime still regressed slightly because `source_graph_build` grew and now dominates the run.
-
-I added these follow-ups in priority order:
-
-1. `#gdbsourcebuild` — reduce source graph construction first: markdown/session scanning, source-handle construction, semantic summary reads, and projection row construction.
-2. `#gdbprepreuse` — stop rebuilding shared graph orchestration preparation across backend-eval, conflict-matrix, dispatch-trace, and metric runs.
-3. `#gdbbenchnorm` — normalize graph performance history by graph row counts and use repeated samples before treating small deltas as real.
-4. `#gdbevidlat` — re-measure the indexed evidence resolver, since the last run showed a small evidence latency regression despite the resolver becoming more structurally correct.
-
-Top backlog item: `#gdbsourcebuild`.
-
-I would still keep backend replacement work behind the existing promotion gate. FalkorDB/Kuzu/DuckDB only become relevant after SQLite's current hot path is cheaper and the benchmark still shows an external backend beating SQLite across real refresh-equivalent load, evidence, conflict-matrix, dispatch-trace, synthetic high-degree/deep-chain cases, install portability, and lock behavior.
-
-Changed paths: intended session document/backlog only. Commands: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, targeted `rg`/`sed`/`git status`/`git log` inspection, and `agent-doc finalize`. Verification: no code tests were run because this cycle changed no code; the recommendation is based on the archived real backend-eval report and the current tsift spec/done records. Escalation: none. Confidence: medium-high; the direction is clear, but the next implementation should start with fresh repeated metrics because the last report was one run against a growing graph.
-<!-- agent:boundary:1340ba8b -->
+<!-- agent:boundary:4a133053 -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 dispatch #spec-test-build-install-commit-push
-- do [#gdbrefreshperf]
-- do [#gdbpathfrontier]
-- do [#gdbstatscache]
-- do [#gdbresolveidx]
+- do [#gdbsourcebuild]
+- do [#gdbprepreuse]
+- do [#gdbbenchnorm]
+- do [#gdbevidlat]
 <!-- /agent:queue -->
 
 ## Backlog

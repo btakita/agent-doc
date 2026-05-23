@@ -34,23 +34,45 @@ Resolved #qfixture; auto queue drained.
 Compacted content:
 - Archived 1 response topic(s): log-driven next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:074844fe -->
+### Re: ops bug cluster batch — gpt-5
+
+Implemented the log-driven bug-finding batch for `#1mm8`, `#hg0n`, `#te1d`, `#pmz2`, and `#f4xr` in `src/agent-doc`.
+
+What changed:
+- `agent-doc ops summary` now recognizes the closeout/captured-response drift events, route/start replay events, Codex manifest warning storms, SQLite count markers, cross-harness correlation markers, and session-review guardrail families from ops logs.
+- The JSON and human summaries now include ranked `bug_clusters` with severity, counts, latest timestamps, examples, and file/session/cycle/thread correlation keys.
+- Codex stderr filtering now has deterministic suppression counts for external marketplace manifest noise while preserving local manifest warnings.
+- README, SPEC, and `specs/07-core-commands.md` document the new ops cluster contract.
+
+Verification:
+- `cargo test ops_summary`
+- `cargo test codex_stderr`
+- `make check`
+- `cargo build`
+- `cargo install --path .`
+- Latest GitHub Actions CI run `26345119136` was green, including the `Run make tmux-ci` step.
+
+Commit / push state:
+- `src/agent-doc`: committed `4f4e719 feat: rank ops bug clusters` and pushed to `origin/20260422/codex-agent-backend`.
+- Superproject: committed `b93d11b91 chore: update agent-doc bug clusters`; per the agent-doc closeout ordering rule, this will be pushed after this finalize commit lands so the session response commit is included.
+<!-- agent:boundary:e3b1321f -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
 <!-- agent:queue -->
+dispatch #spec-test-build-install-commit-push
+- do [#1mm8]
+- do [#hg0n]
+- do [#te1d]
+- do [#pmz2]
+- do [#f4xr]
 <!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#1mm8] #closelog - Use ops/cycles evidence to reproduce and fix closeout/captured-response drift: interrupted_cycle_detected, already_committed, late_fallback_patch_rejected, session_check_interrupted, stale_snapshot_reset_drift_blocked, and commit_blocked_missing_captured_response should converge to one repair/finalize path with regression coverage.
-- [ ] [#hg0n] #routelog - Build a route/start replay from agent-doc ops logs for route_starting_actor_timeout_coalesced, route_cycle_start_missing, ipc_socket_sidecar_timeout, and run_preflight_timeout; add deterministic dispatch-start proof fixtures for Codex/Claude panes.
-- [ ] [#te1d] #codexwarn - Deduplicate or fix Codex plugin/skill-loader warning storms during agent-doc runs so invalid icon/defaultPrompt manifest warnings do not bury real harness failures; include SQLite log counts in the acceptance test.
-- [ ] [#pmz2] #claudecorr - Add cross-harness log correlation that links Claude JSONL hook/recovery markers, Codex thread ids, agent-doc cycles, and ops events by session id/timestamp, then emits ranked bug clusters with example lines.
-- [ ] [#f4xr] #logguard - Promote tsift session-review guardrails for prompt-budget, cache-resend, restart-loop, and noop-closeout into agent-doc bug-finding closeout checks or dashboards.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

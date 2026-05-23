@@ -29,57 +29,22 @@ Logged three fresh log-triage follow-ups. No open backlog items.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260523-010515.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260523-012547.md`*
 
 Compacted content:
-- Archived 1 response topic(s): post-exchange scratch comment cleanup
+- Archived 1 response topic(s): stale full-content IPC guard
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ Please fix. This has taken >50 turns and you still fail to fix this issue. FIX THE DANM ISSUE. Please add logging so you can detect when this issue occurs. I'm talking about the duplicate corrupt document & the duplicate prompt issue. It happened as I was typing this prompt. WTF are you doing? Not fixing the issue apparently. Just wasting tokens and time. #spec-test-build-install-commit-push
-### Re: stale full-content IPC guard — gpt-5
-
-Fixed and pushed.
-
-The failure mode I found was at the binary-to-editor full-document handoff: a Compact Exchange/operator full-content replacement could still emit socket/file IPC after the source buffer used to compute that replacement was already stale on disk. Newer editor bridges were supposed to reject by `expected_content_hash`/`expected_content_len`, but the binary could still hand a stale whole-document payload to an older or non-compliant bridge. That matches the observed duplicate/corrupt document and duplicate prompt shape while typing.
-
-I moved the guard into the binary before IPC emission. `try_ipc_full_content_with_mode` now verifies the caller-supplied source buffer against the current disk buffer before socket or file IPC is created. On stale source it refuses delivery, preserves the live document, avoids snapshot save, logs a typed FlowCore block event, and writes an ops-log record named `full_content_source_buffer_rejected` with path, source label, patch id, expected/current hashes, and expected/current byte lengths.
-
-Changed paths:
-
-- `src/agent-doc/src/write.rs`
-- `src/agent-doc/tests/test_cli.rs`
-- `src/agent-doc/specs/07-closeout-commands.md`
-- `src/agent-doc/editors/SPEC.md`
-- `src/agent-doc/editors/PLUGIN-SPEC.md`
-
-Verification:
-
-- `cargo test late_fallback_patch_guard_tests` passed.
-- `cargo test component_compact` passed.
-- `make check` passed, including clippy, all default tests, version sync, and the ignored medium deterministic closeout simulator.
-- `cargo fmt --check` passed.
-- `git -C src/agent-doc diff --check` passed.
-- `make build-release` passed.
-- `make install` passed; installed `agent-doc 0.33.16` and `libagent_doc-0.33.16.so`.
-- I initially gave Cargo two test filters in one command; Cargo rejected that invocation, then I reran the intended test groups separately and they passed.
-
-CI/tmux review:
-
-- Latest pushed root run: `26319684545` for `5cca83e06318a760478dee22ab7d00793789607a`.
-- GitHub reported both `check` and `tmux-ci` jobs failed with empty `steps: []` after about two seconds, so this is an external CI-start failure per the runbook, not a code or tmux regression. Local verification above is the evidence for this cycle.
-
-Commits pushed:
-
-- `src/agent-doc`: `0046ee2a fix: guard stale full-content ipc`, pushed to `origin/20260422/codex-agent-backend`.
-- parent repo: `5cca83e06 agent-doc: guard stale full-content ipc`, pushed to `origin/main`.
-
-Escalation: none.
-
-Confidence: high. The new regression tests cover both file-IPC and socket-IPC stale full-content delivery, including a fake non-compliant listener that would blindly apply `fullContent` if the binary emitted it.
-
-<!-- agent:boundary:b4afc108 -->
+<!-- agent:boundary:4affd287 -->
 <!-- /agent:exchange -->
 ###
 <!--
+Why is agent-doc doing Full-content IPC replacements as I am typing in a prompt? Is there any good reason? It's causing problems that corrupt the document that cannot be fixed apparently...
+---
+Please fix. This has taken >50 turns and you still fail to fix this issue. FIX THE DANM ISSUE. Please add logging so you can detect when this issue occurs. I'm talking about the duplicate corrupt document & the duplicate prompt issue. It happened as I was typing this prompt. WTF are you doing? Not fixing the issue apparently. Just wasting tokens and time. #spec-test-build-install-commit-push
+---
+Look through the Claude + Codex + agent-doc session logs for #next-steps to fix bugs.
+---
+#spec-test-build-install-commit-push
 -->
 
 <!-- agent:queue -->

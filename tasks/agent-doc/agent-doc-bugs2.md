@@ -121,7 +121,25 @@ Compact Exchange also uses full-document IPC, but it logs as `full_content_sourc
 So the answer is: the suspect full-document IPC path is `redeliver_ipc_dedupe_to_editor(...)` / `redeliver_normalization_fallback_to_editor(...)` -> `try_ipc_full_content(...)` in `ResponseFallback` mode. The normal trigger is a component IPC apply that produces duplicate prompt residue or sidecar normalization divergence; the full-document IPC is then used as a repair/redelivery mechanism.
 
 Verification: `agent-doc preflight`, `agent-doc plan`, ops-log grep for `ipc_prompt_duplicate_repaired`, `ipc_dedupe_redelivered_editor`, and `sidecar_normalization_fallback_redelivered_editor`, plus source inspection around the redelivery callers. No code changes were made.
-<!-- agent:boundary:ec2fca8e -->
+❯ Why are `redeliver_ipc_dedupe_to_editor` and `redeliver_normalization_fallback_to_editor` being too eagerly triggered?
+### Re: over-eager repair redelivery — gpt-5
+
+They are too eager because the current write path treats any IPC snapshot repair as proof that the live editor must be repaired with a full-document replacement.
+
+For `redeliver_normalization_fallback_to_editor`, the trigger is strict sidecar verification. `normalize_prefix_lines` is derived from every line the binary prefixed in `content_ours`. After the plugin applies the component patch, `verify_sidecar_normalization(...)` requires the ack-content sidecar to contain the required count of `❯ <target>` occurrences. If one occurrence is missing because of plugin ordering, boundary position, assistant/user-region classification, repeated prompt text, or editor whitespace behavior, the binary falls back to `content_ours`, repairs disk, and unconditionally calls `redeliver_normalization_fallback_to_editor(...)`. The plugin spec even calls out one known failure shape: if normalization happens before boundary cleanup, the prompt can be skipped and the binary will fall back.
+
+For `redeliver_ipc_dedupe_to_editor`, the trigger is broader: `dedupe_ipc_snapshot_content(...)` runs duplicate response-block cleanup, post-exchange duplicate prompt comment cleanup, prompt-count reconciliation against the pre-write exchange, and prefix-variant tail cleanup. If any of those changes the ack sidecar content, the caller treats it as `dedupe_repair=true`, repairs disk, and unconditionally calls `redeliver_ipc_dedupe_to_editor(...)`.
+
+That is the over-eager design problem: the code collapses several different states into one boolean, `repair_disk` / `dedupe_repair`, and then uses that boolean to perform a visible full-document redelivery. It does not first prove that the editor buffer still contains the bad duplicate/prefix state, that the bad state is not just an ack-sidecar/snapshot artifact, or that a narrower component/prefix repair would be insufficient.
+
+The logs match that. On `2026-05-09 10:23:13 EDT`, the sequence was `normalize_user_prompts applied=1` -> `sidecar_normalization_fallback` -> `sidecar_normalization_fallback_redelivered_editor`. On `2026-05-15 10:07:24 EDT`, the sequence was `ipc_prompt_duplicate_repaired` -> `ipc_snapshot_deduped` -> `ipc_dedupe_redelivered_editor`, while the later diagnostic for that write still reported `live_exchange_edited=false`. That points to an IPC/sidecar reconciliation path deciding to redeliver the whole document, not to a proven active live-typing conflict at redelivery time.
+
+So the likely root cause is not that `redeliver_*` itself has complex logic; it has almost none. The eagerness is upstream: snapshot/sidecar repair predicates are too coarse, and any repair delta is promoted to a full-document editor repair.
+
+What should change: separate the decisions. Save a repaired snapshot when needed, but only full-content redeliver when a fresh editor-buffer proof shows the visible buffer still contains the exact bad state. Otherwise skip editor redelivery or send a narrow normalization/reposition patch.
+
+Verification: `agent-doc preflight`, `agent-doc plan`, source inspection of `verify_sidecar_normalization`, `dedupe_ipc_snapshot_content`, and both redelivery call sites, plus ops-log inspection around the May 9 and May 15 repair sequences. No code changes were made.
+<!-- agent:boundary:3ac8384e -->
 <!-- /agent:exchange -->
 ###
 <!--

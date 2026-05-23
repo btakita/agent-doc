@@ -30,37 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260523-190501.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260523-210323.md`*
 
 Compacted content:
-- Archived 7 response topic(s): SQLite graph performance next steps; SQLite graph hot path; First-class SQLite graph entities; 4 more
+- Archived 1 response topic(s): SQLite graph edge entities and benchmark
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-### Re: SQLite graph edge entities and benchmark — gpt-5
-
-Completed `#gdbedgeentity` and `#gdbsqlitepgq`.
-
-For `#gdbedgeentity`, `tsift` now treats graph edges as first-class entities: stable `GraphEdge.id` values are persisted as SQLite `graph_edges.edge_key`, schema version moved to 5, migrations backfill existing edges, and edge properties are materialized into `graph_edge_properties` with an indexed `(key, value, edge_key)` lookup. The `GraphStore` contract now supports edge lookup, edge scans, and incident-edge scans; SQLite pushes edge-kind, cursor, and edge-property filters into SQL. The `graph-db` CLI gained `edge`, `edges`, and `incident` queries, schema output documents edge ids, and conformance now checks SQLite/Convex parity for those paths.
-
-For `#gdbsqlitepgq`, backend-eval now measures `edge_lookup`, `edge_property_scan`, and `incident_edges` across SQLite and the candidate read-only adapters, and the performance gate requires those metrics plus edge-property staging evidence. I added three bounded queue benchmark samples to `fixtures/graph-db-performance-history.json`; the committed samples show SQLite real-projection edge lookup at roughly `286-376 us/1k graph rows`, edge-property scan at `4549-4657 us/1k graph rows`, and incident-edge scan at `610-620 us/1k graph rows`. The candidates still remain on hold because no candidate beats SQLite across every measured operation/dataset while preserving SQLite's install and lock-behavior constraints.
-
-One verification detail from the benchmark request: I also attempted a full agent-loop queue benchmark, but it ran for several minutes without emitting JSON, so I stopped it and used the bounded queue fixture samples plus the backend-eval conformance test as the committed benchmark evidence.
-
-Verification completed:
-
-- `cargo fmt`
-- `git -C src/tsift diff --check`
-- `cargo test` (`658 + 108 + 31` tests passed after formatting)
-- `cargo check`
-- `cargo build`
-- `cargo install --path . --force`
-- `make tmux-ci` in `src/agent-doc` (`228` ignored tmux integration tests passed)
-- Latest GitHub `Agent Doc` run for `33d9ba7a8` failed before any job steps were emitted; both `check` and `tmux-ci` jobs had empty `steps`, and `gh run view --log` returned `log not found`, so I classified it as an external CI-start failure rather than a code/tmux regression.
-
-Pushed commits:
-
-- `src/tsift`: `eb27dc3` (`feat: add graph edge entity queries`)
-- `agent-loop`: `33d9ba7a8` (`chore(submodule): bump tsift edge graph queries`)
-<!-- agent:boundary:c18e7d10 -->
+<!-- agent:boundary:911315a4 -->
 <!-- /agent:exchange -->
 ###
 <!--

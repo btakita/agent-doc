@@ -81,7 +81,37 @@ CI/tmux evidence: `btakita/tsift` CI run `26335419296` passed after push (`clipp
 Commit/push: `src/tsift` commit `1e53fb8` (`perf: optimize sqlite graph hot paths`) was pushed to `origin/main`; superproject commit `261e72084` (`tsift: optimize sqlite graph hot paths`) was pushed to `origin/main`.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:5d395a3b -->
+❯ What are #next-steps to make edges and other graph entities first-class entities in the sqlite graphdb implementation?
+❯ Does a sqlite-backed graphdb have the potential to match the performance of duckdb + kuzu?
+### Re: First-class SQLite graph entities — gpt-5
+
+Top backlog item: `#gdbedgeentity`.
+
+I added two follow-ups, in priority order: `#gdbedgeentity` first, then `#gdbsqlitepgq`.
+
+Edges are already durable rows in SQLite, but they are not first-class enough yet. Today `graph_edges` has `(from_id, to_id, kind)` as the primary key, JSON properties/provenance/freshness, tombstones, and from/to indexes. That is solid storage, but the rest of the API is still node-centered: `GraphStore` has node lookup/kind scans, outgoing edges, scoped edge scans, neighborhoods, and paths, while there is no stable edge id lookup, edge kind scan, incident-edge query, materialized edge-property table, or edge-property filter parity with `graph_node_properties`.
+
+The best next step is not “replace SQLite”; it is to make SQLite’s relational graph model more explicit:
+
+- Add a stable edge id/row key and preserve `(from_id, to_id, kind)` as a uniqueness constraint.
+- Add `graph_edge_properties(edge_id, key, value)` with a covering `(key, value, edge_id)` index, matching the existing node-property pattern.
+- Extend `GraphStore` with edge-first reads: `edge(id)`, `edges_by_kind`, `incident_edges`, edge property filters, and paginated edge scans.
+- Teach `graph-db schema/query/evidence/doctor/drift/compact` to expose and validate those edge identities instead of treating edges as anonymous adjacency rows.
+- Keep conformance tied to SQLite first, then use backend-eval to see whether native DuckDB/DuckPGQ or Kuzu still has a promotion case.
+
+On the performance question: yes, for tsift’s workload SQLite has a realistic chance to match or beat DuckDB/Kuzu, and for the current prototypes it already does on the important graph operations. A current local backend-eval against DuckDB/DuckPGQ and Kuzu reported:
+
+- `path_max_hops`: SQLite `11014us`, DuckDB/DuckPGQ `990345us`, Kuzu `937850us`.
+- `conflict_matrix`: SQLite `520346us`, DuckDB/DuckPGQ `1419599us`, Kuzu `1395479us`.
+- `dispatch_trace`: SQLite `2483us`, DuckDB/DuckPGQ `1226us`, Kuzu `1005us`.
+- `evidence_target_resolution`: SQLite `22225us`, DuckDB/DuckPGQ `856us`, Kuzu `729us`.
+
+So the honest read is mixed but favorable to SQLite for the workload that currently costs real time: bounded traversals and conflict-matrix preparation. DuckDB/Kuzu are faster in a couple of small lookup/report operations, but those are not the dominant hot path right now, and the current adapters are still provider-neutral read-only prototypes rather than production-native storage engines.
+
+SQLite is likely enough if tsift keeps the graph workload bounded, indexed, local, transactional, and projection-cache-friendly. Kuzu or DuckDB/DuckPGQ become more compelling if the product direction shifts toward large analytical graph scans, unbounded/variable-length path workloads, parallel OLAP-style joins, or native graph-query syntax as a user-facing feature. Until a production adapter proves parity, concurrency behavior, install portability, and wins across every backend-eval dataset, SQLite should remain the correctness and local-performance baseline.
+
+Commands/proof: ran `agent-doc preflight`, `agent-doc read`, `agent-doc orchestrate --from-exchange --plan`, `agent-doc plan`, `tsift status --json`, `tsift context-pack`, source/schema inspections with `rg`/`sed`, `tsift graph-db --json --path /home/brian/work/btakita/agent-loop status`, and `tsift graph-db --json --path /home/brian/work/btakita/agent-loop backend-eval --candidate duckdb-duckpgq --candidate kuzu` with focused `jq` extraction. Changed paths: session document/backlog only. Verification: all read/eval commands completed successfully; no source build/test run was needed because this cycle only answered the prompt and added backlog items. Escalation: none. Confidence: high.
+<!-- agent:boundary:43223954 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -99,6 +129,8 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#gdbsqlitepgq] [recommended] After first-class edge/entity support lands, run repeated SQLite vs DuckDB/DuckPGQ vs Kuzu backend-eval samples across real, high-degree, and deep-chain projections; update fixture/history and record the promotion/hold decision.
+- [ ] [#gdbedgeentity] [recommended] Make graph edges and relationship-like projection rows first-class SQLite graph entities: add stable edge ids, materialized edge-property rows, edge/incident/property scan APIs, graph-db schema/CLI coverage, and conformance/performance tests.
 - [/] [#orchdog] [recommended] Dogfood the completed graph-backed agent orchestration stack on a real agent-doc queue run: run refresh -> evidence -> conflict-matrix -> dispatch-trace -> jobs create/collect, compare worker_prompt_packet and worker_result closure fields, and capture any tsift-side fixture gaps. **Dogfood performed 2026-05-21 on `session-share/tasks/root.md` items #x63e + #v4v0; findings recorded in #gdbevid, #cmgr, #gdbidx — see `session-share/tasks/root.md` exchange "graph-backed orchestration dogfood" entry for the full pipeline trace.** **Second dogfood 2026-05-21 against `tasks/software/tsift.md` (preset `#dogfood-tsift`) surfaced 2 new gaps: #cmgrwres and #gdblock.**
 <!-- /agent:backlog -->
 

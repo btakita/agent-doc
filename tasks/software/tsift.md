@@ -58,7 +58,23 @@ Changed paths: none in `src/tsift`; session document only via queue-consumption 
 ### Re: queue closeout repair — gpt-5
 
 Repair-only closeout: the `#gdbbenchnorm` response above is the substantive result. This write syncs the already-consumed queue state while leaving the next queue item open.
-<!-- agent:boundary:afaa6397 -->
+❯ #commit-push
+### Re: evidence resolver latency — gpt-5
+
+Closed `#gdbevidlat`. I kept the indexed SQLite evidence target resolution path, split backend-eval so the `evidence` operation measures evidence packet collection instead of full conflict-matrix graph snapshot materialization, and added a first-class `evidence_target_resolution` operation plus normalized metrics for real, synthetic high-degree, and synthetic deep-chain datasets.
+
+The repeated real/synthetic measurement used three `backend-eval` samples against the live `#gdbevidlat` target with the `kuzu` candidate. The current `metric-digest` comparison for `real.sqlite.evidence.duration_micros_per_1k_graph_rows` improved from the fixture baseline `26.5449` to `1.3564`, a `94.89%` improvement. The new resolver-specific real samples were `346us`, `27824us`, and `357us` raw, averaging `9509us`; normalized average was `10.148us/1k graph rows`. Synthetic resolver normalized averages were `166.82us/1k` for high-degree and `336.81us/1k` for deep-chain.
+
+Changed paths: `src/tsift/SPEC.md`, `src/tsift/src/main.rs`, `src/tsift/tests/graph_db_conformance.rs`, plus the parent `src/tsift` submodule pointer. The session document is updated by this finalize closeout only.
+
+Verification run: `tsift status --fix`; focused `cargo test graph_db_backend_eval_benchmarks_candidate_stores_against_sqlite --test graph_db_conformance`; three-sample backend-eval plus `metric-digest`; `make check`; `cargo build`; `cargo install --path .`; `tsift --version` reported `tsift 0.1.42`. `make check` passed Clippy, 656 unit tests, 108 exit-code tests, and 31 graph-db conformance tests.
+
+CI/tmux evidence: pushed `tsift` commit `27231cb` (`perf: isolate evidence target timing`) to `origin/main`; GitHub Actions CI run `26323503848` passed both `clippy + test` and `live Convex graph acceptance`. The latest root `Agent Doc` workflow run `26323294795` still has empty-step failed `tmux-ci` and `check` jobs, so I classified it as the known external runner-start blocker rather than a code/tmux regression.
+
+Commit/push: `src/tsift` commit `27231cb` is pushed. Parent repo commit `03e9f860b` (`chore: update tsift evidence timing`) is committed locally and will be pushed after this binary-owned document closeout so the session document commit stays on the finalize path.
+
+Escalation: none. Confidence: high; the benchmark now isolates resolver timing, repeated evidence latency is better than the fixture baseline, the full local suite passed, and the pushed `tsift` CI is green.
+<!-- agent:boundary:49e54d76 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -75,7 +91,6 @@ dispatch #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gdbevidlat] [recommended] Re-measure the indexed graph-db evidence resolver with repeated real and synthetic runs, because the last benchmark showed evidence target resolution moving from about 24.9ms to 36.5ms; keep the indexed lookup path only if repeated metric-digest output proves it is neutral or faster under the current graph size.
 - [/] [#orchdog] [recommended] Dogfood the completed graph-backed agent orchestration stack on a real agent-doc queue run: run refresh -> evidence -> conflict-matrix -> dispatch-trace -> jobs create/collect, compare worker_prompt_packet and worker_result closure fields, and capture any tsift-side fixture gaps. **Dogfood performed 2026-05-21 on `session-share/tasks/root.md` items #x63e + #v4v0; findings recorded in #gdbevid, #cmgr, #gdbidx — see `session-share/tasks/root.md` exchange "graph-backed orchestration dogfood" entry for the full pipeline trace.** **Second dogfood 2026-05-21 against `tasks/software/tsift.md` (preset `#dogfood-tsift`) surfaced 2 new gaps: #cmgrwres and #gdblock.**
 <!-- /agent:backlog -->
 

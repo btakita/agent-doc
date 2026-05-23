@@ -100,7 +100,18 @@ Commits pushed:
 - Parent repo: `766a398e2` (`agent-doc: cover tsift IPC stale redelivery`) pushed to `origin/main`.
 
 I staged only the intended non-session path sets for those manual commits. The parent worktree still has unrelated pre-existing dirty files, and I left them untouched.
-<!-- agent:boundary:4c6889c1 -->
+### Re: #narrowpatch — gpt-5
+
+Covered.
+
+I added a file-IPC regression for the prefix-normalization fallback path in `src/agent-doc/src/write.rs`. It proves a rejected sidecar that differs only by prompt-prefix normalization queues a narrow file IPC payload with `patches: []`, `unmatched: ""`, `normalize_prefix_lines`, boundary repositioning, and bad-buffer proof, and that it does not fall back to `fullContent` when the narrow repair is consumed.
+
+I also updated `src/agent-doc/specs/07-closeout-commands.md` and `src/agent-doc/VERSIONS.md` so the narrow-first contract explicitly covers both socket and file IPC before full-content redelivery is allowed.
+
+Verification passed locally: focused regression, `git diff --check`, `cargo fmt --check`, `make check`, `cargo build`, `make install`, `agent-doc --version` (`0.33.16`), and `make tmux-ci` (`228 passed`). Remote `btakita/agent-doc` CI run `26342394380` passed `make check` and `make tmux-ci` for commit `5f58660f`. Parent `btakita/agent-loop` run `26342401265` did not start any job steps because GitHub reported the billing/spending-limit blocker, so I treated that as external CI-start failure after local verification.
+
+Pushed commits: `5f58660f test: cover file ipc narrow redelivery` on `btakita/agent-doc` and `c2ebf7730 agent-doc: cover file ipc narrow redelivery` on parent `main`. I left unrelated parent worktree changes untouched.
+<!-- agent:boundary:9995670e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -112,7 +123,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#typedrepair]~
 - ~do [#repairtests]~
 - ~do [#tsiftipc]~
-- do [#narrowpatch]
+- ~do [#narrowpatch]~
 - do [#repaircleanup]
 <!-- /agent:queue -->
 
@@ -123,7 +134,6 @@ preset #spec-test-build-install-commit-push
 - [ ] [#qguard] [recommended] Fix queue consumption proof so prompt-only or next-steps closeouts cannot consume an active queue head when the preflight baseline already includes the unrelated prompt; require an exact queue-head prompt match, queue-synthetic diff proof, or explicit done id before consuming.
 - [ ] [#qrepair] [recommended] Make response repair/write --commit queue-neutral: missing-response materialization repairs must preserve the current queue head and auto attribute unless the repair explicitly closes that queue item.
 - [ ] [#qfixture] [recommended] Add an end-to-end regression for agent:queue auto plus a non-queue #next-steps prompt and repair write, asserting the auto attribute is preserved and the next queue head is not consumed.
-- [ ] [#narrowpatch] [recommended] Replace eligible prefix-normalization fallback fullContent redeliveries with narrow normalization/reposition patches before using fullContent as a last resort.
 - [ ] [#repaircleanup] [recommended] Update editor specs/tests for snapshot-only repair versus editor-redelivery behavior and remove obsolete workaround branches after typed repair decisions land.
 <!-- /agent:backlog -->
 

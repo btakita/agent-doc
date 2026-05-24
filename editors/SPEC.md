@@ -9,6 +9,10 @@ Common behavior required of all `agent-doc` editor plugins.
 - **Feedback:** Show an immediate in-flight info notification while `agent-doc route` is running, then finish with an inline hint near the cursor. Error notifications persist. If an editor persists exact route failures to disk, a later successful route for the same document must clear that saved diagnostic so obsolete startup/proof failures are not surfaced after recovery.
 - **Availability:** Only enabled when a `.md` file is active.
 
+## 1a. Typing / Live-Buffer Tracking
+
+- **Behavior:** On every markdown document change, plugins must record both the typing debounce event and the editor-visible buffer digest through the shared FFI (`agent_doc_document_changed_digest(file, len, sha256)`). The digest sidecar is not a write authorization channel; it is a fail-closed direct-disk guard so commands such as Compact Exchange can detect an idle but unsaved editor buffer before rewriting the file on disk.
+
 ## 2. Claim for Tmux Pane
 
 - **Trigger:** `Ctrl+Shift+Alt+C` (configurable)

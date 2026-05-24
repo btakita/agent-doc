@@ -3,6 +3,7 @@ package com.github.btakita.agentdoc
 import com.intellij.openapi.editor.event.DocumentEvent
 import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.fileEditor.FileDocumentManager
+import java.security.MessageDigest
 
 /**
  * Tracks document changes and provides debounce via the FFI shared library.
@@ -25,7 +26,12 @@ object TypingTracker : DocumentListener {
         // Forward to FFI debounce tracker
         val lib = AgentDocLib.get()
         if (lib != null) {
-            lib.agent_doc_document_changed(vFile.path)
+            val text = event.document.text
+            lib.agent_doc_document_changed_digest(
+                vFile.path,
+                text.toByteArray(Charsets.UTF_8).size.toLong(),
+                sha256HexUtf8(text),
+            )
             LOG.debug("[native] document_changed: ${vFile.name}")
         } else {
             // Fallback: track locally if FFI unavailable
@@ -76,4 +82,9 @@ object TypingTracker : DocumentListener {
     // Fallback local tracking (used when FFI unavailable or file untracked)
     @Volatile
     private var lastChangeMs: Long = 0
+
+    private fun sha256HexUtf8(content: String): String =
+        MessageDigest.getInstance("SHA-256")
+            .digest(content.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it.toInt() and 0xff) }
 }

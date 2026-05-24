@@ -7,7 +7,10 @@
 //!   edit timestamp per file path.
 //! - Cross-process state: each `document_changed` call also writes a millisecond Unix timestamp
 //!   to `.agent-doc/typing/<hash>` so CLI invocations running in a separate process can detect
-//!   active typing. The hash is derived from the file path string via `DefaultHasher`.
+//!   active typing. Editor plugins may additionally record the visible buffer digest in
+//!   `.agent-doc/live-buffer/<hash>` so CLI direct-disk writes can detect idle-but-unsaved
+//!   editor drift before mutating the file on disk. The hash is derived from the file path string
+//!   via `DefaultHasher`.
 //!   Cross-process writes are best-effort and never block the caller.
 //! - `is_idle` / `await_idle` operate on in-process state (same process as the plugin).
 //! - `is_typing_via_file` / `await_idle_via_file` operate on the file-based indicator (CLI use).
@@ -19,6 +22,10 @@
 //! ## Agentic Contracts
 //! - `document_changed(file: &str)` — records now as last-change time; writes typing indicator
 //!   file (best-effort); never panics.
+//! - `document_changed_with_digest(file, len, hash)` — records typing plus the latest
+//!   editor-visible buffer digest without passing full document content through FFI.
+//! - `live_buffer_diverges_from_content(file, content)` — returns the latest editor-visible
+//!   digest when it differs from the provided disk/expected content.
 //! - `is_idle(file, debounce_ms) -> bool` — `true` if elapsed ≥ `debounce_ms` or file untracked.
 //! - `is_tracked(file) -> bool` — `true` if at least one `document_changed` was recorded.
 //! - `await_idle(file, debounce_ms, timeout_ms) -> bool` — blocks until idle or timeout; 100 ms
@@ -39,6 +46,8 @@
 //!   `is_typing_via_file` returns `false`
 //! - no_indicator_file: nonexistent path → `is_typing_via_file` returns `false`
 
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -69,6 +78,28 @@ pub fn document_changed(file: &str) {
             file, e
         );
     }
+}
+
+/// Record a document change and the editor-visible buffer digest.
+///
+/// Editor integrations should prefer this over `document_changed` when they
+/// can cheaply compute a digest. The CLI uses the digest sidecar to fail closed
+/// before direct disk writes when an editor buffer is idle but still unsaved.
+pub fn document_changed_with_digest(file: &str, content_len: usize, content_hash: &str) {
+    document_changed(file);
+    if let Err(e) = record_live_buffer_digest(file, content_len, content_hash) {
+        eprintln!(
+            "[debounce] live buffer digest write failed for {:?}: {}",
+            file, e
+        );
+    }
+}
+
+/// Compute the SHA-256 hex digest used for live-buffer sidecars.
+pub fn content_hash(content: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(content.as_bytes());
+    format!("{:x}", hasher.finalize())
 }
 
 /// Check if the document has been idle (no changes) for at least `debounce_ms`.
@@ -126,6 +157,18 @@ pub fn await_idle(file: &str, debounce_ms: u64, timeout_ms: u64) -> bool {
 /// Directory for typing indicator files, relative to project root.
 const TYPING_DIR: &str = ".agent-doc/typing";
 
+/// Directory for latest editor-visible buffer digests, relative to project root.
+const LIVE_BUFFER_DIR: &str = ".agent-doc/live-buffer";
+
+/// Latest editor-visible buffer digest for a document.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LiveBufferSnapshot {
+    pub path: String,
+    pub len: usize,
+    pub hash: String,
+    pub timestamp_ms: u128,
+}
+
 /// Write a typing indicator file for the given document path.
 /// The file contains a Unix timestamp (milliseconds) of the last edit.
 fn write_typing_indicator(file: &str) -> std::io::Result<()> {
@@ -138,6 +181,55 @@ fn write_typing_indicator(file: &str) -> std::io::Result<()> {
         .unwrap_or_default()
         .as_millis();
     std::fs::write(&typing_path, now.to_string())
+}
+
+/// Record the latest editor-visible buffer digest for the given document path.
+pub fn record_live_buffer_digest(
+    file: &str,
+    content_len: usize,
+    content_hash: &str,
+) -> std::io::Result<()> {
+    let live_path = live_buffer_snapshot_path(file);
+    if let Some(parent) = live_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let snapshot = LiveBufferSnapshot {
+        path: file.to_string(),
+        len: content_len,
+        hash: content_hash.to_ascii_lowercase(),
+        timestamp_ms: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis(),
+    };
+    let encoded = serde_json::to_string(&snapshot)?;
+    std::fs::write(&live_path, encoded)
+}
+
+/// Return the latest editor-visible buffer digest for a document.
+pub fn live_buffer_snapshot(file: &str) -> Option<LiveBufferSnapshot> {
+    let path = live_buffer_snapshot_path(file);
+    let content = std::fs::read_to_string(path).ok()?;
+    let snapshot: LiveBufferSnapshot = serde_json::from_str(&content).ok()?;
+    if snapshot.path == file {
+        Some(snapshot)
+    } else {
+        None
+    }
+}
+
+/// Return `Some(snapshot)` when the editor-visible buffer digest differs from
+/// the supplied content. Returns `None` when there is no editor-visible sidecar
+/// or when it matches the content.
+pub fn live_buffer_diverges_from_content(file: &str, content: &str) -> Option<LiveBufferSnapshot> {
+    let snapshot = live_buffer_snapshot(file)?;
+    let expected_len = content.len();
+    let expected_hash = content_hash(content);
+    if snapshot.len == expected_len && snapshot.hash.eq_ignore_ascii_case(&expected_hash) {
+        None
+    } else {
+        Some(snapshot)
+    }
 }
 
 /// Compute the typing indicator file path for a document.
@@ -160,6 +252,28 @@ fn typing_indicator_path(file: &str) -> PathBuf {
                 .unwrap_or(std::path::Path::new("."))
                 .to_path_buf();
             return parent.join(TYPING_DIR).join(format!("{:016x}", hash));
+        }
+    }
+}
+
+/// Compute the live-buffer snapshot file path for a document.
+fn live_buffer_snapshot_path(file: &str) -> PathBuf {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    file.hash(&mut hasher);
+    let hash = hasher.finish();
+    let mut dir = PathBuf::from(file);
+    dir.pop();
+    loop {
+        if dir.join(".agent-doc").is_dir() {
+            return dir.join(LIVE_BUFFER_DIR).join(format!("{:016x}", hash));
+        }
+        if !dir.pop() {
+            let parent = PathBuf::from(file)
+                .parent()
+                .unwrap_or(std::path::Path::new("."))
+                .to_path_buf();
+            return parent.join(LIVE_BUFFER_DIR).join(format!("{:016x}", hash));
         }
     }
 }
@@ -350,6 +464,26 @@ mod tests {
 
         // Should detect typing within 2000ms window
         assert!(is_typing_via_file(&doc_str, 2000));
+    }
+
+    #[test]
+    fn live_buffer_digest_records_visible_content() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let agent_doc_dir = tmp.path().join(".agent-doc").join("live-buffer");
+        std::fs::create_dir_all(&agent_doc_dir).unwrap();
+        let doc = tmp.path().join("test-live-buffer.md");
+        std::fs::write(&doc, "disk").unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+        let visible = "disk plus unsaved prompt";
+
+        document_changed_with_digest(&doc_str, visible.len(), &content_hash(visible));
+
+        let snapshot = live_buffer_snapshot(&doc_str).expect("live buffer snapshot");
+        assert_eq!(snapshot.path, doc_str);
+        assert_eq!(snapshot.len, visible.len());
+        assert_eq!(snapshot.hash, content_hash(visible));
+        assert!(live_buffer_diverges_from_content(&doc_str, "disk").is_some());
+        assert!(live_buffer_diverges_from_content(&doc_str, visible).is_none());
     }
 
     #[test]

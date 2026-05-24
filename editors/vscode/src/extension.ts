@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
+import * as crypto from 'crypto';
 import { execFile } from 'child_process';
 import * as native from './native';
 import { createEditorApplyProof, consumeClaimedPatch, isEditorApplyProofCurrent, isPatchAlreadyApplied } from './patchGuard';
@@ -1275,8 +1276,14 @@ class PatchWatcher implements vscode.Disposable {
             if (e.document.languageId === 'markdown' && e.contentChanges.length > 0) {
                 const fsPath = e.document.uri.fsPath;
                 this.lastTypingTime.set(fsPath, Date.now());
+                const text = e.document.getText();
                 // Also record in FFI debounce tracker (shared with JB plugin)
-                native.documentChanged(fsPath, this.patchesDir ? path.dirname(path.dirname(this.patchesDir)) : undefined);
+                native.documentChangedDigest(
+                    fsPath,
+                    Buffer.byteLength(text, 'utf8'),
+                    crypto.createHash('sha256').update(text, 'utf8').digest('hex'),
+                    this.patchesDir ? path.dirname(path.dirname(this.patchesDir)) : undefined,
+                );
             }
         });
 

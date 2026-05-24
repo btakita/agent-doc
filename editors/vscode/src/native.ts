@@ -177,6 +177,7 @@ let _visual_tokens_json: any = null;
 let _is_idle: any = null;
 let _await_idle: any = null;
 let _document_changed: any = null;
+let _document_changed_digest: any = null;
 let _is_tracked: any = null;
 let _resolve_project_path: any = null;
 let _free_string: any = null;
@@ -217,6 +218,7 @@ function bindFunctions(): void {
     _is_idle = lib.func('agent_doc_is_idle', 'bool', ['str', 'int64']);
     _await_idle = lib.func('agent_doc_await_idle', 'bool', ['str', 'int64', 'int64']);
     _document_changed = lib.func('agent_doc_document_changed', 'void', ['str']);
+    _document_changed_digest = lib.func('agent_doc_document_changed_digest', 'void', ['str', 'int64', 'str']);
     _is_tracked = lib.func('agent_doc_is_tracked', 'bool', ['str']);
     _resolve_project_path = lib.func('agent_doc_resolve_project_path', FfiProjectPathType, ['str']);
     _free_string = lib.func('agent_doc_free_string', 'void', ['char*']);
@@ -364,6 +366,20 @@ export function documentChanged(filePath: string, projectRoot?: string): void {
     if (!ensureLoaded(projectRoot)) return;
     bindFunctions();
     _document_changed(filePath);
+}
+
+/**
+ * Record a document change event plus the editor-visible buffer digest.
+ */
+export function documentChangedDigest(
+    filePath: string,
+    contentLen: number,
+    contentHash: string,
+    projectRoot?: string,
+): void {
+    if (!ensureLoaded(projectRoot)) return;
+    bindFunctions();
+    _document_changed_digest(filePath, contentLen, contentHash);
 }
 
 /**

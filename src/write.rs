@@ -4646,6 +4646,36 @@ fn guard_visible_write_idle_and_current(
     expected_current: &str,
 ) -> Result<()> {
     guard_visible_write_idle(file, source)?;
+    let indicator_path = file
+        .canonicalize()
+        .unwrap_or_else(|_| file.to_path_buf())
+        .to_string_lossy()
+        .to_string();
+    if let Some(live) =
+        agent_doc::debounce::live_buffer_diverges_from_content(&indicator_path, expected_current)
+    {
+        crate::flow::proof::log_flow_event(
+            file,
+            crate::flow::document_mutation::visible_write_current_changed_event(source),
+        );
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "visible_write_deferred_live_buffer_changed file={} source={} expected_len={} expected_hash={} live_len={} live_hash={} live_ts={}",
+                file.display(),
+                source,
+                expected_current.len(),
+                crate::ops_log::content_hash(expected_current),
+                live.len,
+                live.hash,
+                live.timestamp_ms
+            ),
+        );
+        anyhow::bail!(
+            "visible editor buffer for {} differs from the expected disk state; save or discard the editor buffer, then retry",
+            file.display()
+        );
+    }
     let actual_current = std::fs::read_to_string(file)
         .with_context(|| format!("failed to re-read {}", file.display()))?;
     if actual_current == expected_current {
@@ -10324,6 +10354,44 @@ scratch
         assert!(log.contains("flow=document_mutation"));
         assert!(log.contains("reason=visible_write_current_changed:test_current_changed"));
         assert!(log.contains("visible_write_deferred_current_changed"));
+    }
+
+    #[test]
+    fn visible_write_guard_blocks_when_idle_editor_buffer_differs_from_disk() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/live-buffer")).unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        let expected = "\
+<!-- agent:exchange patch=append -->
+### Re: old
+<!-- /agent:exchange -->
+";
+        let live_buffer = expected.replace(
+            "<!-- /agent:exchange -->",
+            "prompt typed but not saved\n<!-- /agent:exchange -->",
+        );
+        fs::write(&doc, expected).unwrap();
+        let doc_str = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        agent_doc::debounce::record_live_buffer_digest(
+            &doc_str,
+            live_buffer.len(),
+            &agent_doc::debounce::content_hash(&live_buffer),
+        )
+        .unwrap();
+
+        let err = guard_visible_write_idle_and_current(&doc, "test_live_buffer_changed", expected)
+            .unwrap_err();
+
+        assert!(
+            err.to_string().contains("visible editor buffer"),
+            "expected live-buffer guard error: {err}"
+        );
+        assert_eq!(fs::read_to_string(&doc).unwrap(), expected);
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("flow=document_mutation"));
+        assert!(log.contains("reason=visible_write_current_changed:test_live_buffer_changed"));
+        assert!(log.contains("visible_write_deferred_live_buffer_changed"));
     }
 
     #[test]

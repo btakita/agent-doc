@@ -1547,6 +1547,62 @@ mod tests {
     }
 
     #[test]
+    fn component_compact_direct_fallback_rejects_idle_unsaved_editor_buffer() {
+        let doc = concat!(
+            "---\nagent_doc_session: test-compact-live-buffer\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: topic one\n\nResponse one.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let live_buffer = doc.replace(
+            "<!-- /agent:exchange -->",
+            "prompt typed in JetBrains but not saved\n<!-- /agent:exchange -->",
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.md");
+        std::fs::write(&file, doc).unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("live-buffer")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        snapshot::save(&file, doc).unwrap();
+        let file_str = file.canonicalize().unwrap().to_string_lossy().to_string();
+        agent_doc::debounce::record_live_buffer_digest(
+            &file_str,
+            live_buffer.len(),
+            &agent_doc::debounce::content_hash(&live_buffer),
+        )
+        .unwrap();
+
+        let err = run_component_compact(&file, doc, "exchange", Some("Compacted summary."), false)
+            .unwrap_err();
+
+        assert!(
+            err.to_string().contains("visible editor buffer"),
+            "compact should reject idle unsaved editor drift before disk write: {err}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            doc,
+            "compact must not rewrite disk while the editor-visible buffer is unsaved"
+        );
+        assert_eq!(
+            snapshot::load(&file).unwrap().unwrap(),
+            doc,
+            "failed compact must not advance the snapshot"
+        );
+        let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("visible_write_deferred_live_buffer_changed")
+                && ops_log.contains("source=compact_exchange_direct_write"),
+            "compact live-buffer rejection should be logged:\n{ops_log}"
+        );
+    }
+
+    #[test]
     fn component_compact_direct_fallback_rejects_late_post_exchange_scratch_comment() {
         let prompt = "The post-exchange scratch comment was typed while compact exchange was being computed. #spec-test-build-install-commit-push";
         let doc = concat!(

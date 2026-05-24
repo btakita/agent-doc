@@ -25,6 +25,8 @@
 //! - `agent_doc_reposition_boundary_to_end(doc)`: removes all existing boundary markers and inserts
 //!   a single fresh one at the end of the `exchange` component.
 //! - `agent_doc_document_changed(file_path)`: records a change event for debounce tracking.
+//! - `agent_doc_document_changed_digest(file_path, len, hash)`: records typing plus the latest
+//!   editor-visible buffer digest so CLI direct-disk writes can detect idle unsaved drift.
 //! - `agent_doc_is_tracked(file_path)`: returns whether at least one change event has been recorded
 //!   for the file.
 //! - `agent_doc_is_idle(file_path, debounce_ms)`: non-blocking check — returns `true` if no
@@ -725,6 +727,36 @@ pub unsafe extern "C" fn agent_doc_document_changed(file_path: *const c_char) {
     if let Ok(path) = unsafe { CStr::from_ptr(file_path) }.to_str() {
         crate::debounce::document_changed(path);
     }
+}
+
+/// Record a document change event plus the current editor-visible buffer digest.
+///
+/// Plugins call this on every document modification when they can compute a
+/// SHA-256 content hash. This avoids sending full document content through FFI
+/// while still letting CLI direct-disk writes detect an idle unsaved editor
+/// buffer before writing the file on disk.
+///
+/// # Safety
+///
+/// `file_path` and `content_hash` must be valid, NUL-terminated UTF-8 strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_document_changed_digest(
+    file_path: *const c_char,
+    content_len: i64,
+    content_hash: *const c_char,
+) {
+    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
+        Ok(path) => path,
+        Err(_) => return,
+    };
+    let hash = match unsafe { CStr::from_ptr(content_hash) }.to_str() {
+        Ok(hash) => hash,
+        Err(_) => return,
+    };
+    let Ok(len) = usize::try_from(content_len) else {
+        return;
+    };
+    crate::debounce::document_changed_with_digest(path, len, hash);
 }
 
 /// Check if the document has been tracked (at least one `document_changed` call recorded).

@@ -34,7 +34,44 @@ Resolved #qfixture; auto queue drained.
 Compacted content:
 - Archived 1 response topic(s): full-document IPC duplicate prompt corruption
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:4340efdf -->
+❯ agent-doc on this document writing this prompt & tsift.md had the duplicate content corrupt full-document IPC issue. Please narrow the the conditions to fix this category of bug entirely. #spec-test-build-install-commit-push
+
+❯ The duplicate prompt issue also happened. The duplicate prompt happened after the duplicate content corrupt document...This often happens and can cycle.
+
+❯ This issue is a critical issue. Whatever drives the full-document IPC and the duplicate prompt needs to be significantly narrowed. I would rather not even have it at all. It is only caused problems.
+❯ #spec-test-build-install-commit-push
+### Re: full-document IPC duplicate prompt corruption — gpt-5
+
+Implemented and pushed the full-document IPC scope fix in `src/agent-doc`.
+
+Changed paths:
+- `src/agent-doc/src/write.rs`
+- `src/agent-doc/SPEC.md`
+- `src/agent-doc/specs/07-closeout-commands.md`
+
+What changed:
+- `fullContent` IPC now rejects explicit template documents and any document with parsed `agent:*` component markers before socket/file payload emission, logging `full_content_ipc_scope_rejected scope=<scope>`.
+- Template normalization-only editor IPC now sends narrow normalization data such as `normalize_prefix_lines` without whole-document redelivery.
+- Template/component IPC dedupe repair now uses guarded disk repair when no narrow repair patch exists, instead of re-sending the corrupted whole document to the editor.
+- The functional spec and closeout-command invariants now document the narrowed full-document IPC contract.
+
+Verification:
+- `cargo fmt`
+- `cargo test template_normalization_only_file_ipc_omits_full_content -- --nocapture`
+- `cargo test template_ipc_dedupe_repair_uses_disk_not_full_content_redelivery -- --nocapture`
+- `cargo test full_content -- --nocapture`
+- `cargo test --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --nocapture`
+- `make check`
+- `cargo install --path .`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- GitHub Actions CI run `26363212302` passed: `Run make check` and `Run make tmux-ci` were both green. The only annotation was the upstream Node.js 20 Actions deprecation warning.
+
+Commit and push:
+- Commit: `8346238 fix: narrow full-content IPC scope`
+- Pushed: `origin/20260422/codex-agent-backend`
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:2861e342 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -237,7 +237,27 @@ http://127.0.0.1:8787/admin/signup
 If you still do not see the register link in the browser, the likely issue is browser state, not the Worker env: hard refresh `/admin/login`, open it in a private window, or go straight to `/admin/signup`. The link sits below the admin password form, so it may also just be below the fold depending on the viewport.
 
 Changed paths this cycle: none. Commands run: `tsift status`, `tsift status --fix`, `agent-doc preflight`, `agent-doc plan`, `curl` checks against `/admin/login` and `/admin/signup`, and `ps -ef` to confirm `bun ./bin/dev-worker.ts` / `wrangler dev` are running. Verification: local HTTP checks confirmed signup is enabled and the register link is present in the served HTML.
-<!-- agent:boundary:1db1b758 -->
+❯ I see the /admin/login page. I don't see a way to register. Event with a hard refresh and in Incognito mode.
+### Re: admin register button — gpt-5
+
+You were not missing an env setting. The Worker was serving the signup route and the login HTML did contain the registration link, but the link was too easy to miss because it was a small secondary text link below the login form.
+
+I changed the admin login page so that when `ADMIN_SIGNUP_ENABLED=true`, `/admin/login` now shows a full-width `Create admin account` button directly under `Sign In to Admin`. The gate is still intact: when `ADMIN_SIGNUP_ENABLED` is false, that button is absent and `/admin/signup` still returns 404. Account creation still requires the `ADMIN_GLOBAL_PASSWORD`.
+
+On the running local Worker, I verified:
+
+- `http://127.0.0.1:8787/admin/login` now contains `href="/admin/signup"` and the visible text `Create admin account`.
+- `http://127.0.0.1:8787/admin/signup` returns `200 OK` while your local bootstrap flag is enabled.
+
+Changed paths this cycle:
+
+- `src/equityfundingsource-dev/lib/ui--server--efs/auth/admin_login.ts`
+- `src/equityfundingsource-dev/tests/auth.test.ts`
+
+Commands run: `tsift status`, `tsift status --fix`, `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `ps -ef`, `curl` checks against `/admin/login` and `/admin/signup`, `rg`, `git status --short`, `bun test tests/auth.test.ts`, `make check`, `git diff --check`, `gh workflow list`, and `gh run list --workflow CI --limit 1`.
+
+Verification: focused auth tests passed, `make check` passed with 50 tests plus site and Worker builds, `git diff --check` passed, and local HTTP smoke checks confirmed the visible admin signup button. GitHub Actions note: this repo still has no workflow named `CI`, so there was no remote CI/tmux leg available to inspect.
+<!-- agent:boundary:6702793c -->
 <!-- /agent:exchange -->
 ###
 

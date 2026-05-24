@@ -31,12 +31,11 @@ queue_active: false
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260524-222001.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260524-222009.md`*
 
 Compacted content:
-- Archived 6 response topic(s): R2/TMO Cache; R2 As Dropbox Cache; TMO/R2 Cache Queue; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:2788e3be -->
+<!-- agent:boundary:aa99b450 -->
 <!-- /agent:exchange -->
 ###
 

@@ -36,18 +36,42 @@ queue_active: true
 Compacted content:
 - Archived 1 response topic(s): do [#qakx]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:a6498f2d -->
+### Re: queue do (six backlog items) — opus-4-7
+
+
+Holding the queue rather than batch-resolving. Six items in one cycle under preset `#spec-test-commit-push-deploy` is multi-day repo work (admin dashboard with Cloudflare Access, token-based upload flow, Tier 0 WAF + upload limits, admin investor document workflow, full investor-portal E2E QA), and the planner already flagged this as `risk=high`, `dispatch_mode=manual`, `manual_packet_only=true`. Preflight also surfaced a restart-heavy session-accretion warning ("Restart cleanly from the current committed boundary before continuing"). Marking the queued IDs done without execution would lie about work that has not happened.
+
+Scope notes per queued ID:
+
+- dzmm TMO webhooks — externally blocked. Robert needs to confirm with Mortgage Office whether outbound webhooks are supported. I can draft the question/spec, but cannot resolve it from this side.
+- njsx Tier 0 Cloudflare WAF + upload limits — small/foundational; doable in one cycle (WAF rules, file-size caps, allowed MIME types, rate limits via Cloudflare config + Worker guards).
+- ft47 Token-based document upload flow — moderate; depends on R2_DOCUMENTS namespace already in place; needs token issuance, signed-URL or Worker proxy, expiry, audit logging.
+- yh4b Admin dashboard (Cloudflare Access auth) — moderate-large; needs Access policy, admin route gating, dashboard shell, then per-feature pages.
+- zjbe Admin investor document workflow — large; depends on yh4b and ft47; visibility + review-status controls + publish flow.
+- 9vv3 Investor portal E2E QA — large; depends on most of the above plus TMO simulator and R2 fixtures.
+
+Proposed sequencing for next cycles (one item per turn, smallest-foundational-first):
+
+1. njsx Tier 0 WAF + upload limits (single cycle, narrow scope).
+2. ft47 Token-based upload (depends on R2 + D1 cache already shipped).
+3. yh4b Admin dashboard shell + Cloudflare Access (auth + scaffold; per-feature pages follow).
+4. zjbe Admin investor document workflow (builds on yh4b + ft47).
+5. 9vv3 Investor portal E2E QA (last; covers the above end-to-end).
+6. dzmm parked until Robert hears back from Mortgage Office.
+
+Confirm the order (or override) and I will pick up the first item next cycle with spec + tests + deploy. No queued IDs marked done this cycle; they remain in the auto queue for sequential processing.
+<!-- agent:boundary:a6255304 -->
 <!-- /agent:exchange -->
 ###
 
 <!-- agent:queue auto -->
 preset #spec-test-commit-push-deploy
-[#dzmm]
-[#zjbe]
-[#yh4b]
-[#ft47]
-[#njsx]
-[#9vv3]
+- do [#dzmm]
+- do [#zjbe]
+- do [#yh4b]
+- do [#ft47]
+- do [#njsx]
+- do [#9vv3]
 <!-- /agent:queue -->
 
 ## Backlog

@@ -112,7 +112,45 @@ After a successful admin login, the app redirects to `/portal-admin`, which then
 If no admin account exists yet, use `/admin/signup`. That signup requires the Worker secret `ADMIN_GLOBAL_PASSWORD`; it is intentionally not stored in the repo. Existing admin users can sign in with either their personal admin password or the global admin password. A non-admin account cannot access the admin portal; it will be rejected or redirected to its own role portal.
 
 Verification: checked `lib/ui--server--efs/urls/index.ts`, `app/equityfundingsource/lib/auth/routes.ts`, and `app/equityfundingsource/lib/portal/admin/routes.ts`.
-<!-- agent:boundary:1d7698db -->
+
+❯ http://127.0.0.1:8787/admin is a 404
+❯ http://127.0.0.1:8787/admin/login redirects to the home page.
+
+❯ Is the http://127.0.0.1:8787/admin/signup gated? I don't want anybody on the internet to be able to have an admin account.
+### Re: admin access and signup gate — gpt-5
+
+You were right to question this. Before this change, `/admin` had no route, `/admin/login` redirected a browser with an existing non-admin session back to home, and `/admin/signup` exposed the signup form publicly. The actual admin-account creation POST was gated by `ADMIN_GLOBAL_PASSWORD`, but I agree that a public self-signup form is not the right default.
+
+I tightened the behavior in `src/equityfundingsource-dev`:
+
+- `/admin` and `/admin/` now redirect to `/admin/login`.
+- `/admin/login` now shows the admin login form even if the browser currently has a borrower/investor/broker session; it clears that non-admin session instead of redirecting home. Existing admin sessions still go to `/portal-admin`.
+- `/admin/signup` now returns 404 unless `ADMIN_SIGNUP_ENABLED` is explicitly true.
+- Even when signup is enabled for bootstrap, creating the admin account still requires `ADMIN_GLOBAL_PASSWORD`.
+- Production defaults `ADMIN_SIGNUP_ENABLED = "false"` in `wrangler.toml`; local `.dev.vars.example` enables it only for bootstrap/local setup.
+- The admin login page no longer advertises the signup link unless signup is enabled.
+- Existing admins can create users through `/portal-admin/users`, so public self-signup does not need to stay open after bootstrap.
+
+For your local Worker, restart `bun run dev:worker` before retesting `http://127.0.0.1:8787/admin`. If you are already signed in as a non-admin, the updated `/admin/login` will clear that cookie and render the admin login form.
+
+Changed paths:
+
+- `.dev.vars.example`
+- `wrangler.toml`
+- `app/equityfundingsource/lib/auth/routes.ts`
+- `app/equityfundingsource/lib/auth/session.ts`
+- `lib/ui--server--efs/auth/admin_login.ts`
+- `app/equityfundingsource/bin/cf-secrets-push.ts`
+- `docs/deploy.md`
+- `tests/auth.test.ts`
+
+Verification:
+
+- `bun test tests/auth.test.ts` passed.
+- `make check` passed: 49 tests, production build, Worker build.
+- `git diff --check` passed.
+- CI/tmux note: this repo currently has no GitHub Actions workflows visible to `gh workflow list`; `gh run list --workflow CI --limit 1` reported that no workflow named `CI` exists, so there was no remote CI/tmux leg to inspect.
+<!-- agent:boundary:df8bdccc -->
 <!-- /agent:exchange -->
 ###
 

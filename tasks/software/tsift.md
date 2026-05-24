@@ -49,8 +49,29 @@ I added three graph-performance follow-ups at the front of the backlog, in prior
 I did not add another FalkorDB or max-hop item here because those gates were just closed into explicit hold/measurement criteria. The next useful work is to make the full-projection evidence stable and cheap enough that backend and path-cap decisions are based on clean repeated samples.
 
 Verification: ran `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, refreshed the workspace tsift index with `tsift status --fix`, inspected the current full-projection metric history, and searched the backend-eval/cache/conflict-matrix spec surfaces. No code changed in this cycle, so I did not run the test suite.
+### Re: graph backend-eval cache — gpt-5
 
-<!-- agent:boundary:b69cb833 -->
+Implemented and pushed the tsift backend-eval cache work.
+
+`#gdbcachecompact` is complete. Full-projection backend-eval now writes gzip-compressed v2 cache files, reads compressed files with legacy raw-JSON fallback, reports `full_projection.cache.disk_bytes`, `json_bytes`, `compression_ratio`, `hit`, `pruned_files`, and `pruned_bytes`, requires the cache footprint/hit metrics in the full-projection performance gate, and prunes stale `.json` / `.json.gz` cache artifacts while keeping only the current source-watermark entry. The real agent-loop cold samples compressed about 461.6-461.8 MB of JSON to about 94.2 MB, ratio about `0.204`, and repeatedly pruned the previous stale cache artifact.
+
+`#gdbrowreuse` is complete. Experimental candidate stores now build from borrowed `ConvexProjectionRows` instead of cloning the full row set per backend, and the read-only prototype outgoing-edge index stores edge keys rather than duplicate edge structs.
+
+`#gdbcacheprove` is code-complete but still externally gated for the final real-root cache-hit fixture refresh. I added the direct generated-artifact guard to root markdown traversal and the conformance test now proves a generated `.agent-doc` markdown artifact does not invalidate a full-projection cache hit, while stale raw/compressed pre-fix cache artifacts are pruned. I also ran three post-fix real `agent-loop` full-projection samples; each missed because real source files changed during the run, not because `.agent-doc` or `.tsift` runtime artifacts changed the watermark. The indexed `file_state` evidence during the attempts showed live edits in paths such as `tasks/professional/equityfundingsource.md`, `src/boost-client/tasks/monsterrodholders.md`, `src/session-share/...`, `src/equityfundingsource-dev/...`, and `src/agent-doc/...`. Because of that concurrent source churn, I did not refresh `fixtures/graph-db-performance-history.json` with a mislabeled hit sample.
+
+Commits pushed:
+
+- tsift submodule: `701f099 feat: compact backend eval cache`
+- agent-loop pointer update: `2f1e5f9e6 chore: update tsift backend eval cache` (included in pushed `origin/main`, now past a concurrent agent-doc commit)
+
+Verification:
+
+- `cargo test graph_db_backend_eval_benchmarks_candidate_stores_against_sqlite`
+- `cargo test` in `src/tsift`
+- `make check` at the agent-loop root
+- `cargo install --path . --force` in `src/tsift`
+- GitHub Actions check: latest `Agent Doc` workflow did not start `check` or `tmux-ci` because GitHub reported billing/spending-limit failure, so there were no CI logs to inspect.
+<!-- agent:boundary:d33ce332 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -58,20 +79,21 @@ Verification: ran `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, ref
 
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
+- do [#gdbcacheprove]
+- do [#gdbcachecompact]
+- do [#gdbrowreuse]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gdbcacheprove] [recommended] Run a post-fix real graph-db backend-eval --full-projection cold/cache pair on agent-loop, prove .agent-doc runtime markdown no longer changes the source watermark, prune stale pre-fix .tsift/backend-eval-cache miss artifacts, and refresh fixtures/graph-db-performance-history.json with a cache-hit sample.
-- [ ] [#gdbcachecompact] [recommended] Reduce full-projection backend-eval cache footprint: replace the large JSON projection cache artifacts with a compact row store or cleanup policy, then gate on cache-hit load time, disk bytes, and metric-digest history size.
-- [ ] [#gdbrowreuse] [recommended] Profile full-projection provider-neutral row construction and candidate row-store loading after cache hits are stable, then remove avoidable clone/serde work across SQLite and prototype backend reports.
 - [/] [#orchdog] [recommended] Dogfood the completed graph-backed agent orchestration stack on a real agent-doc queue run: run refresh -> evidence -> conflict-matrix -> dispatch-trace -> jobs create/collect, compare worker_prompt_packet and worker_result closure fields, and capture any tsift-side fixture gaps. **Dogfood performed 2026-05-21 on `session-share/tasks/root.md` items #x63e + #v4v0; findings recorded in #gdbevid, #cmgr, #gdbidx — see `session-share/tasks/root.md` exchange "graph-backed orchestration dogfood" entry for the full pipeline trace.** **Second dogfood 2026-05-21 against `tasks/software/tsift.md` (preset `#dogfood-tsift`) surfaced 2 new gaps: #cmgrwres and #gdblock.**
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#gdbcacheprove] [recommended] Run a post-fix real graph-db backend-eval --full-projection cold/cache pair on agent-loop, prove .agent-doc runtime markdown no longer changes the source watermark, prune stale pre-fix .tsift/backend-eval-cache miss artifacts, and refresh fixtures/graph-db-performance-history.json with a cache-hit sample.
 - [/] [#gdbvacproof] [recommended] Run the real Convex reconciliation plus graph-db compact workflow and capture before/after file size, freelist, tombstone counts, status/doctor timings, and scan-cost deltas so compaction policy is backed by operational evidence.
 <!-- /agent:review -->
 ###

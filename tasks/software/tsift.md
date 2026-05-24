@@ -85,7 +85,34 @@ This cycle is the confirmation and evidence-grounded plan for `#gdbprephot`. The
 
 `#gdbfullreuse`, `#gdbscanproof`, `#gdbperfgate` remain queued and unchanged.
 Response committed (478038491). Confirmed `#gdbprephot` as the start, broke down current `conflict_matrix_preparation` cost from the 3 fixture samples (session_review_compute is 63% of the ~6 s prep), and scoped the queued `do [#gdbprephot]` cycle to land sub-phase timers first so subsequent work is data-driven.
-<!-- agent:boundary:485f6de8 -->
+### Re: `do [#gdbprephot]` — observability + regression gate landed; impl reductions gated — opus-4-7
+
+`#gdbprephot` step 1 (sub-phase timers) and step 4 (regression gate) landed in **tsift 0.1.43 (commit f4fe9db)**; steps 2 (packet reuse) and 3 (narrow `status_index_gate`) were captured earlier in this cycle as the new backlog items `#gdbprephotreuse` and `#gdbprephotgate`, and the parent item is now gated (`[/]`) in review since the optimization deliverables still need fresh sample evidence.
+
+#### What landed
+
+- `src/tsift/src/session_review.rs`: `SessionReviewPhaseTiming { name, duration_micros, detail }`, `compute_with_phases(target)`, and `compute_with_options_and_phases` instrumenting six sub-phases — `target_context_build`, `session_discovery`, `session_digest_total` (sum across loop), `session_cost_total` (sum across loop), `session_aggregation` (loop body minus digest+cost), `report_assembly`. Existing `compute`/`compute_with_options` keep their signatures by discarding the phase vector.
+- `src/tsift/src/main.rs` (`build_context_pack_report_with_profile`): switched `session_review::compute(path)` to `compute_with_phases`; parent `session_review_compute` total is preserved and the six sub-phases are flattened into the same phase vector as `session_review_compute.<sub>` entries.
+- `src/tsift/src/main.rs` (`conflict_matrix_prepared_inputs_cache_hit`): cache-hit path emits all six sub-phases as `0us` with the existing source/document/staged-diff watermark guard detail.
+- `src/tsift/tests/graph_db_conformance.rs`: cold-run backend-eval asserts the six sub-phases exist and stay within ±50ms of the parent; cached-run loop extends the 0-duration + watermark-detail check to all six.
+- `src/tsift/SPEC.md` line 47: phase listing now names the six `session_review_compute.<sub>` entries.
+- `src/tsift/VERSIONS.md` + `Cargo.toml`: 0.1.43 entry and version bump.
+
+#### Verification
+
+- `cargo test --release` → 660 + 108 + 31 = 799 pass (conformance includes the new sub-phase assertions).
+- `cargo build --release` + `cargo install --path .` → `~/.cargo/bin/tsift` replaced with 0.1.43 (`tsift --version` confirms).
+- `git push` tsift → `f4fe9db` on `origin/main`; agent-loop submodule pointer pushed as `639482283`.
+- GitHub Actions CI: run 26374745193 was in progress at finalize time; local suite is authoritative for the regression assertions added this cycle.
+
+#### Why gated, not done
+
+Items 2–3 of the original `#gdbprephot` plan (packet reuse, narrower `status_index_gate`) need fresh real samples under the new timers before any impl is defensible. They are tracked as `#gdbprephotreuse` and `#gdbprephotgate` in the backlog (opened by this cycle — explicitly not being marked done here). The broader three-sample median gate against `fixtures/graph-db-performance-history.json` stays owned by `#gdbperfgate`.
+
+#### Queue
+
+`do [#gdbprephot] / do [#gdbfullreuse] / do [#gdbscanproof] / do [#gdbperfgate]`. With `#gdbprephot` gated, the queue stops on the gate — confirm whether to capture the three-sample baseline next and let the two new items interleave with `#gdbfullreuse`, or keep draining the original queue and treat the new items as parallel backlog.
+<!-- agent:boundary:c389c295 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -103,7 +130,8 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gdbprephot] [recommended] Profile and reduce the remaining conflict-matrix preparation hotspots after the cache fixes: measure session_review_compute, context_pack_diff, impact, and dispatch-trace reuse on repeated real/full-projection runs, then add shared packet reuse or narrower digest paths with metric-digest gates so the cached queue path drops below the current multi-second prep cost without trusting stale ownership.
+- [ ] [#gdbprephotreuse] [recommended] After landing the new sub-phase timers (tsift 0.1.43, conflict_matrix_preparation.session_review_compute.{target_context_build,session_discovery,session_digest_total,session_cost_total,session_aggregation,report_assembly}), capture 3 real and 3 full-projection samples to identify which inner sub-phase dominates the previous 3.3-4.6s cost, then share per-target context/diff packets across session_review_compute -> impact -> context_pack_diff only where the new sub-phase data proves duplicated derivation. Gate with metric-digest comparison against the pre-fix sub-phase medians captured under the new timers.
+- [ ] [#gdbprephotgate] [recommended] Replace prepare_agent_doc_index_gate (tsift src/main.rs:23022) with a metric-digest comparison against the cached preparation key when the input set has not advanced, targeting sub-100ms for status_index_gate vs the current ~0.5-0.7s. Validate with 3-sample median on real and full-projection runs and add a sub-phase regression assertion under conflict_matrix_preparation.status_index_gate before claiming the reduction.
 - [ ] [#gdbfullreuse] [recommended] Make full-projection cache-hit performance the next hard gate: run at least three tsift graph-db --json backend-eval --full-projection cold/cache samples, split source-graph-build, projection-row construction, cache load, compression, and SQLite write phases, then remove clone/serde/cache artifact churn only where those samples show a stable bottleneck.
 - [ ] [#gdbscanproof] [recommended] Re-check SQLite scan plans on the current graph schema before adding another backend: capture EXPLAIN/cardinality evidence for edge_property_scan, incident_edges, kind/neighborhood property filters, and path frontier probes on real plus synthetic high-degree/deep-chain data; add indexes/materialized rows only for proven scan-dominant cases.
 - [ ] [#gdbperfgate] [recommended] Turn graph performance tuning into a repeatable release gate: store metric-digest summaries for default, full-projection, high-degree, and deep-chain runs, require three-sample regression evidence, and keep FalkorDB/Kuzu promotion blocked until they beat the stabilized SQLite gate including projection writes and lock behavior.
@@ -113,6 +141,7 @@ preset #spec-test-build-install-commit-push
 ## Review
 
 <!-- agent:review -->
+- [/] [#gdbprephot] [recommended] Profile and reduce the remaining conflict-matrix preparation hotspots after the cache fixes: measure session_review_compute, context_pack_diff, impact, and dispatch-trace reuse on repeated real/full-projection runs, then add shared packet reuse or narrower digest paths with metric-digest gates so the cached queue path drops below the current multi-second prep cost without trusting stale ownership.
 - [/] [#gdbcacheprove] [recommended] Run a post-fix real graph-db backend-eval --full-projection cold/cache pair on agent-loop, prove .agent-doc runtime markdown no longer changes the source watermark, prune stale pre-fix .tsift/backend-eval-cache miss artifacts, and refresh fixtures/graph-db-performance-history.json with a cache-hit sample.
 - [/] [#gdbvacproof] [recommended] Run the real Convex reconciliation plus graph-db compact workflow and capture before/after file size, freelist, tombstone counts, status/doctor timings, and scan-cost deltas so compaction policy is backed by operational evidence.
 <!-- /agent:review -->

@@ -14,13 +14,13 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
-Landed partial fix for #stuckcycledup (gate + preflight warning); auto queue continues.
+Landed #stuckcycleorphan + #stuckcyclerepair; remaining plan part still pending.
 <!-- /agent:status -->
 
 ## Exchange
@@ -71,16 +71,64 @@ Each new id cites the same plan path so they can be picked up in priority order 
 #### Why gated rather than done
 
 `#stuckcycledup` is the defensive unwedge: it stops the bug from compounding (next finalize will now apply the captured body instead of refusing it) and surfaces the stuck shape in preflight JSON. The full plan calls for orphan-rehydrate prevention (part 3), non-zero repair (part 4), and superseded-by capture state + prune subcommand (part 2). Until those land, a stuck cycle that the harness fails to recover from could still re-apply on the next preflight. Live validation in a real wedge will also confirm the heuristic catches the production shape rather than just the synthetic test cases.
-<!-- agent:boundary:0b0e4d7c -->
+### Re: do [#stuckcycleorphan] + do [#stuckcyclerepair] — opus-4-7
+
+
+Landed both items from the queue's modified head as separate, surgical edits in `repair.rs`.
+
+#### `#stuckcycleorphan` — orphan-rehydrate guard in `repair::run`
+
+Inserted a new guard immediately after the empty-response cleanup and before the existing `response_already_applied(doc_content, response)` dedup. When the active capture's `response_body` is present in HEAD (via `git::show_head`) but absent from the working-tree document, the orphan is discarded instead of re-applied:
+
+- Calls `git::show_head(file)` after confirming the capture branch is active.
+- Reuses `response_already_applied(head_doc, response)` so the HEAD presence check uses the same normalized-line heuristic as the working-tree check.
+- On match: removes the pending file, calls `capture::mark_discarded`, logs `stuck_capture_orphan_discarded file=... response_len=...`, and returns `RepairOutcome::AlreadyApplied` (the same outcome the working-tree branch uses).
+- Failure paths stay non-fatal: an unreadable HEAD (`Ok(None)` or `Err`) falls through to the normal apply path, preserving prior behavior for non-git docs.
+- Comment cites `plan-stuck-cycle-causes-duplicated-uncommitted-response.md`.
+
+This closes the duplicate-response loop noted in the plan: after a different-cycle finalize lands the body in HEAD, the stale capture cannot re-emerge as a second `### Re: ...` block on the next preflight.
+
+#### `#stuckcyclerepair` — non-zero exit on stuck cycle in `repair::repair`
+
+Added a terminal-guard branch at the end of `repair::repair`, after the existing `complete_required_closeout` / session-check branches:
+
+- Calls `flow::closeout::stuck_captured_cycle(file)` (the detector landed in the prior cycle).
+- If `Some(info)` returns: logs a `TerminalGuard / FailedClosed / ResponsePatchbackUncommitted` flow event, writes `repair_stuck_captured_cycle file=... cycle_id=... capture_id=... capture_state=... response_body_len=...` to the ops log, and `anyhow::bail!`s with a message that names the cycle id, capture id, capture state, body length, file path, and the recovery command (`agent-doc write --commit <FILE>`).
+- The message explicitly references the companion gate fix in `cycle_already_committed`, so the harness knows the retry path is now unblocked.
+
+The harness contract: `agent-doc repair` now refuses to claim success when the cycle is wedged. Callers that previously believed the cycle was healthy after a no-op repair will now see a fail-closed bail.
+
+#### Test
+
+`repair::tests::repair_run_discards_orphan_when_captured_body_already_in_head`:
+- Builds a template doc whose committed HEAD already contains the `### Re: orphan-discard — opus-4-7` block plus body.
+- Stages a `save_pending` for the same `<!-- patch:exchange -->` body — the wedged-cycle orphan.
+- Asserts `run` returns `RepairOutcome::AlreadyApplied`, the pending file is removed, and the document contains exactly **one** `### Re: orphan-discard — opus-4-7` heading after repair (no duplication).
+
+I considered adding a sibling test for the `repair::repair` stuck-cycle bail, but synthesizing the exact wedged state (`cycle_state.phase == Committed` + active capture with `Captured`/`WriteApplied` state + HEAD missing the body) requires either a brittle fixture sequence or a new test helper. That helper is the natural companion to the supersession-state work and will be picked up under that follow-up item.
+
+#### Verification
+
+- `cargo test --bin agent-doc repair::` → **44 passed, 0 failed** (orphan-discard test included).
+- `cargo test --bin agent-doc flow::closeout` → **9 passed** (5 prior + 4 from the earlier wedge-detector cycle).
+- `make check` library suite: **2334 passed, 0 failed, 228 ignored** (one more than the prior cycle, matching the new regression test). Integration tests: 13 passed / 1 failed — the failure is still the pre-existing tracked codex bare-run integration.
+- `cargo build --release` clean; `cargo install --path .` replaced `~/.cargo/bin/agent-doc v0.33.16` so tmux-spawned sessions pick up both edits on next spawn. `.bin/agent-doc -> target/release/agent-doc` symlink is also live.
+
+#### Closeout note
+
+Both items resolved this cycle are marked `--done`. The remaining plan-part-2 backlog item (capture supersession state + `agent-doc captures prune --prompt <hash>` subcommand) stays open as the next queue head.
+<!-- agent:boundary:4f8f7baa -->
 <!-- /agent:exchange -->
 ###
 <!--
 Please make auto-compact exchange off by default. Only explicit frontmatter or .agent-doc/config.toml setting should make auto-compact exchange active.
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
-- do [#stuckcycledup]
+- do [#stuckcycleorphan]
+- do [#stuckcyclerepair]
+- do [#stuckcyclesuperseded]
 - do [#runintegcodexbare]
 - do [#jbrsrbusy]
 - do [#jbccfix]
@@ -92,8 +140,6 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#stuckcycleorphan] In preflight step 1 repair, content-hash the captured response body against HEAD before re-applying it as an orphan, and mark hash-matching captures as already_committed (plan part 3). Plan: tasks/agent-doc/plan-stuck-cycle-causes-duplicated-uncommitted-response.md.
-- [ ] [#stuckcyclerepair] Make agent-doc repair exit non-zero with a stuck-cycle diagnostic when the active capture body is absent from HEAD (plan part 4). Plan: tasks/agent-doc/plan-stuck-cycle-causes-duplicated-uncommitted-response.md.
 - [ ] [#stuckcyclesuperseded] Add CaptureState::SupersededBy(<cycle_id>) transitions after a successful different-cycle finalize for the same prompt, plus an agent-doc captures prune --prompt <hash> subcommand (plan part 2). Plan: tasks/agent-doc/plan-stuck-cycle-causes-duplicated-uncommitted-response.md.
 - [ ] [#runintegcodexbare] Triage pre-existing tests/run_integration.rs::codex_bare_run_inside_owning_pane_fails_before_nested_dispatch failure (session-check INTERRUPTED instead of expected recursive-direct-invocation deadlock). Blocks make check for unrelated work.
 - [ ] [#jbrsrbusy] Fix JB Restart Supervisor alive-busy refusal — add --force + JB confirm + harness pre-interrupt; see tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md

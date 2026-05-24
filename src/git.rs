@@ -1609,8 +1609,9 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
     // Warn on significant file/snapshot drift — may indicate an out-of-band write
     // that bypassed the agent-doc write pipeline (snapshot not updated).
     let snap_len = snapshot_content.as_ref().map(|s| s.len()).unwrap_or(0);
-    if snap_len > 0 && file_len > snap_len && post_commit_local_drift.is_none() {
-        let drift = file_len - snap_len;
+    let file_len_after_repair = file_content.len();
+    if snap_len > 0 && file_len_after_repair > snap_len && post_commit_local_drift.is_none() {
+        let drift = file_len_after_repair - snap_len;
         // Log unclassified positive drift for aggregation/root-cause analysis.
         // Classified post-commit local edits have their own markers below.
         crate::ops_log::log_op(
@@ -1620,7 +1621,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
                 file.display(),
                 drift,
                 snap_len,
-                file_len
+                file_len_after_repair
             ),
         );
         if drift > 100 && post_commit_local_drift.is_none() {
@@ -1629,7 +1630,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
                 drift,
                 file.display(),
                 snap_len,
-                file_len
+                file_len_after_repair
             );
             crate::ops_log::log_op(
                 file,
@@ -1638,7 +1639,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
                     file.display(),
                     drift,
                     snap_len,
-                    file_len
+                    file_len_after_repair
                 ),
             );
 
@@ -1648,7 +1649,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             // files with no HEAD entry yet. Tracked documents stay
             // snapshot-selective here so unanswered user prompts cannot be
             // swallowed into the committed snapshot during preflight.
-            if file_len > snap_len * 5
+            if file_len_after_repair > snap_len * 5
                 && let Some(ref snapshot) = snapshot_content
             {
                 let head_exists = head_doc.is_some();
@@ -1656,7 +1657,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
                 if !head_exists && scaffold_snapshot {
                     eprintln!(
                         "[commit] Extreme drift detected ({}x) — re-syncing bootstrap scaffold snapshot from file content",
-                        file_len / snap_len.max(1)
+                        file_len_after_repair / snap_len.max(1)
                     );
                     crate::ops_log::log_op(
                         file,
@@ -1664,7 +1665,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
                             "snapshot_resync file={} old_snap_len={} new_snap_len={}",
                             file.display(),
                             snap_len,
-                            file_len
+                            file_len_after_repair
                         ),
                     );
                     crate::snapshot::save(file, &file_content)?;
@@ -1672,7 +1673,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
                 } else {
                     eprintln!(
                         "[commit] Extreme drift detected ({}x) — NOT re-syncing tracked/non-scaffold snapshot",
-                        file_len / snap_len.max(1)
+                        file_len_after_repair / snap_len.max(1)
                     );
                     crate::ops_log::log_op(
                         file,
@@ -1682,7 +1683,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
                             head_exists,
                             scaffold_snapshot,
                             snap_len,
-                            file_len
+                            file_len_after_repair
                         ),
                     );
                 }
@@ -2018,6 +2019,60 @@ fn vcs_refresh_signal_path(file: &Path) -> Option<PathBuf> {
     Some(signal_file)
 }
 
+fn strip_exchange_prompt_prefixes_for_compare(content: &str) -> String {
+    fn strip_line(line: &str) -> String {
+        let trimmed = line.trim_start();
+        let indent_len = line.len().saturating_sub(trimmed.len());
+        if let Some(rest) = trimmed.strip_prefix("❯ ") {
+            format!("{}{}", &line[..indent_len], rest)
+        } else {
+            line.to_string()
+        }
+    }
+
+    fn strip_lines(content: &str) -> String {
+        let mut stripped = String::with_capacity(content.len());
+        for segment in content.split_inclusive('\n') {
+            let (line, newline) = segment
+                .strip_suffix('\n')
+                .map(|line| (line, "\n"))
+                .unwrap_or((segment, ""));
+            stripped.push_str(&strip_line(line));
+            stripped.push_str(newline);
+        }
+        if !content.ends_with('\n') && content.is_empty() {
+            stripped.clear();
+        }
+        stripped
+    }
+
+    let Ok(components) = crate::component::parse(content) else {
+        return strip_lines(content);
+    };
+    let mut rebuilt = String::with_capacity(content.len());
+    let mut last = 0usize;
+    for comp in components {
+        if comp.open_end < last {
+            continue;
+        }
+        rebuilt.push_str(&content[last..comp.open_end]);
+        if comp.name == "exchange" {
+            rebuilt.push_str(&strip_lines(comp.content(content)));
+        } else {
+            rebuilt.push_str(comp.content(content));
+        }
+        rebuilt.push_str(&content[comp.close_start..comp.close_end]);
+        last = comp.close_end;
+    }
+    rebuilt.push_str(&content[last..]);
+    rebuilt
+}
+
+fn exchange_prompt_prefix_equivalent(left: &str, right: &str) -> bool {
+    strip_exchange_prompt_prefixes_for_compare(left)
+        == strip_exchange_prompt_prefixes_for_compare(right)
+}
+
 fn dedupe_snapshot_and_worktree_before_commit(
     file: &Path,
     snapshot_content: &mut Option<String>,
@@ -2027,27 +2082,25 @@ fn dedupe_snapshot_and_worktree_before_commit(
         return Ok(());
     };
     let deduped_snapshot = crate::dedupe::dedupe_responses(snapshot);
-    if deduped_snapshot == snapshot {
-        return Ok(());
-    }
-
-    eprintln!(
-        "[commit] deduped consecutive duplicate response block(s) before staging {}",
-        file.display()
-    );
-    crate::ops_log::log_op(
-        file,
-        &format!(
-            "commit_pre_stage_dedupe file={} before_commit=true",
+    if deduped_snapshot != snapshot {
+        eprintln!(
+            "[commit] deduped consecutive duplicate response block(s) before staging {}",
             file.display()
-        ),
-    );
-    crate::snapshot::save(file, &deduped_snapshot)?;
-    *snapshot_content = Some(deduped_snapshot);
+        );
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "commit_pre_stage_dedupe file={} before_commit=true",
+                file.display()
+            ),
+        );
+        crate::snapshot::save(file, &deduped_snapshot)?;
+        *snapshot_content = Some(deduped_snapshot);
+    }
 
     let deduped_file = crate::dedupe::dedupe_responses(file_content);
     if deduped_file != *file_content {
-        std::fs::write(file, &deduped_file).with_context(|| {
+        crate::write::atomic_write_pub(file, &deduped_file).with_context(|| {
             format!(
                 "failed to repair duplicate response blocks in {}",
                 file.display()
@@ -2061,6 +2114,39 @@ fn dedupe_snapshot_and_worktree_before_commit(
             ),
         );
         *file_content = deduped_file;
+    }
+
+    if let Some(snapshot) = snapshot_content.as_deref()
+        && let Some(repaired_file) = crate::write::repair_commit_prompt_artifacts_against_snapshot(
+            file,
+            snapshot,
+            file_content,
+        )
+    {
+        let mut snapshot_updated = false;
+        if exchange_prompt_prefix_equivalent(snapshot, &repaired_file) {
+            let clean_snapshot = strip_head_markers(&repaired_file);
+            crate::snapshot::save(file, &clean_snapshot)?;
+            *snapshot_content = Some(clean_snapshot);
+            snapshot_updated = true;
+        }
+        if repaired_file != *file_content {
+            crate::write::atomic_write_pub(file, &repaired_file).with_context(|| {
+                format!(
+                    "failed to repair duplicate prompt artifacts in {}",
+                    file.display()
+                )
+            })?;
+            *file_content = repaired_file;
+        }
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "commit_pre_stage_prompt_duplicate_repaired file={} snapshot_updated={} before_commit=true",
+                file.display(),
+                snapshot_updated
+            ),
+        );
     }
 
     Ok(())
@@ -5195,6 +5281,90 @@ Done.
         assert!(
             !log.contains("post_commit_escaped_tail_cleanup file="),
             "mixed cleanup must not be auto-adopted:\n{log}"
+        );
+    }
+
+    #[test]
+    fn commit_repairs_prompt_prefix_duplicate_drift_before_staging() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        init_repo(root);
+        commit_file(root, "README.md", "# test\n", "initial");
+
+        let doc = root.join("session.md");
+        let head = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:old -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        commit_file(root, "session.md", head, "add doc");
+
+        let prompt = "lucas-huang may not have the necessary packages to use the runbooks. Please add development dependencies so any programmer can use the runbooks.";
+        let snapshot = format!(
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Re: prior — gpt-5\n\n",
+                "Done.\n",
+                "{prompt}\n",
+                "#spec-test-commit-push\n",
+                "<!-- agent:boundary:edf37a04 -->\n",
+                "<!-- /agent:exchange -->\n"
+            ),
+            prompt = prompt
+        );
+        let working = format!(
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Re: prior — gpt-5\n\n",
+                "Done.\n",
+                "❯ {prompt}\n",
+                "{prompt}\n",
+                "#spec-test-commit-push\n",
+                "<!-- agent:boundary:edf37a04 -->\n",
+                "<!-- /agent:exchange -->\n"
+            ),
+            prompt = prompt
+        );
+        crate::snapshot::save(&doc, &snapshot).unwrap();
+        fs::write(&doc, &working).unwrap();
+
+        let did_commit = commit(&doc).expect("prompt duplicate drift should repair and commit");
+        assert!(did_commit);
+
+        let head_after = show_head(&doc).unwrap().unwrap();
+        assert!(
+            head_after.contains(&format!("❯ {prompt}\n#spec-test-commit-push")),
+            "committed prompt should keep one normalized line:\n{head_after}"
+        );
+        assert!(
+            !head_after.contains(&format!("❯ {prompt}\n{prompt}")),
+            "duplicate prompt must not be committed:\n{head_after}"
+        );
+        let working_after = fs::read_to_string(&doc).unwrap();
+        assert!(
+            !working_after.contains(&format!("❯ {prompt}\n{prompt}")),
+            "working tree must be repaired before closeout:\n{working_after}"
+        );
+        let snapshot_after = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            !snapshot_after.contains(&format!("❯ {prompt}\n{prompt}")),
+            "snapshot must be repaired before closeout:\n{snapshot_after}"
+        );
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("commit_pre_stage_prompt_duplicate_repaired file=")
+                && log.contains("snapshot_updated=true"),
+            "commit pre-stage prompt repair should be logged:\n{log}"
+        );
+        assert!(
+            !log.contains("out_of_band_write file="),
+            "repaired prefix duplicate drift must not be left as out-of-band drift:\n{log}"
         );
     }
 

@@ -6,6 +6,15 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Commit closeout repairs live prompt prefix duplicates before staging.**
+  Snapshot-staged commit closeout now runs a narrow in-exchange prompt duplicate
+  repair before staging, collapsing adjacent prefixed/raw copies of prompt text
+  already represented in the snapshot. When the repaired file is only
+  prompt-prefix-equivalent to the snapshot, the snapshot advances to that
+  repaired content so queue-freeze and other prompt-only closeouts do not leave
+  a duplicated prompt in the editor buffer or misclassify it as out-of-band
+  drift.
+
 - **Route/preflight now preserve visible post-exchange scratch comments.**
   Duplicate-prompt cleanup now treats the current visible document as ownership
   proof for ordinary HTML comments below `agent:exchange`, so route, preflight,

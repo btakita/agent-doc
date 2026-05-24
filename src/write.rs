@@ -4310,6 +4310,13 @@ fn repair_duplicate_prompt_artifacts(
         }
     }
 
+    let (adjacent_prefix_deduped, adjacent_prefix_changed) =
+        dedupe_adjacent_prompt_prefix_duplicates(&repaired, file);
+    if adjacent_prefix_changed {
+        repaired = adjacent_prefix_deduped;
+        report.live_prefix_variants = true;
+    }
+
     let (prefix_deduped, prefix_changed) =
         dedupe_live_prompt_prefix_variants_in_tail(&repaired, file);
     if prefix_changed {
@@ -4338,6 +4345,51 @@ fn repair_duplicate_prompt_artifacts(
     }
 
     Ok((repaired, report))
+}
+
+pub(crate) fn repair_commit_prompt_artifacts_against_snapshot(
+    file: &Path,
+    snapshot: &str,
+    current: &str,
+) -> Option<String> {
+    let mut repaired = current.to_string();
+    let mut report = DuplicatePromptRepairReport::default();
+
+    let (prompt_deduped, prompt_changed) =
+        dedupe_prompt_lines_against_before(snapshot, &repaired, file);
+    if prompt_changed {
+        repaired = prompt_deduped;
+        report.prompt_lines_against_before = true;
+    }
+
+    let (adjacent_prefix_deduped, adjacent_prefix_changed) =
+        dedupe_adjacent_prompt_prefix_duplicates(&repaired, file);
+    if adjacent_prefix_changed {
+        repaired = adjacent_prefix_deduped;
+        report.live_prefix_variants = true;
+    }
+
+    let (prefix_deduped, prefix_changed) =
+        dedupe_live_prompt_prefix_variants_in_tail(&repaired, file);
+    if prefix_changed {
+        repaired = prefix_deduped;
+        report.live_prefix_variants = true;
+    }
+
+    if report.changed() {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "duplicate_prompt_artifact_repair file={} source=commit-pre-stage response_blocks=false answered_tail=false post_exchange_comments=false prompt_lines_against_before={} live_prefix_variants={} before_commit=true",
+                file.display(),
+                report.prompt_lines_against_before,
+                report.live_prefix_variants
+            ),
+        );
+        Some(repaired)
+    } else {
+        None
+    }
 }
 
 fn enforce_no_duplicate_prompt_residue(file: &Path, content: &str, context: &str) -> Result<()> {
@@ -5055,7 +5107,16 @@ fn dedupe_live_prompt_prefix_variants_in_tail(content: &str, file: &Path) -> (St
         let Some(right) = lines[idx + 1].normalized.as_deref() else {
             continue;
         };
-        if probable_live_prompt_prefix_variant(left, right) {
+        let left_prefixed = lines[idx].segment.trim_start().starts_with("❯ ");
+        let right_prefixed = lines[idx + 1].segment.trim_start().starts_with("❯ ");
+        if left == right && left_prefixed != right_prefixed {
+            if left_prefixed {
+                lines[idx + 1].remove = true;
+            } else {
+                lines[idx].remove = true;
+            }
+            changed = true;
+        } else if probable_live_prompt_prefix_variant(left, right) {
             lines[idx].remove = true;
             changed = true;
         } else if probable_live_prompt_prefix_variant(right, left) {
@@ -5074,6 +5135,60 @@ fn dedupe_live_prompt_prefix_variants_in_tail(content: &str, file: &Path) -> (St
         .map(|line| line.segment)
         .collect::<String>();
     let repaired_exchange = format!("{}{}", &exchange_content[..tail_start], repaired_tail);
+    let repaired = exchange.replace_content(content, &repaired_exchange);
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "live_prompt_prefix_variant_repaired file={} before_commit=true",
+            file.display()
+        ),
+    );
+    (repaired, true)
+}
+
+fn dedupe_adjacent_prompt_prefix_duplicates(content: &str, file: &Path) -> (String, bool) {
+    let Ok(components) = component::parse(content) else {
+        return (content.to_string(), false);
+    };
+    let Some(exchange) = components
+        .iter()
+        .find(|component| component.name == "exchange")
+    else {
+        return (content.to_string(), false);
+    };
+    let exchange_content = exchange.content(content);
+    let mut lines = exchange_prompt_reconciliation_infos(exchange_content, None);
+    let mut changed = false;
+
+    for idx in 0..lines.len().saturating_sub(1) {
+        if lines[idx].remove || lines[idx + 1].remove {
+            continue;
+        }
+        let Some(left) = lines[idx].normalized.as_deref() else {
+            continue;
+        };
+        let Some(right) = lines[idx + 1].normalized.as_deref() else {
+            continue;
+        };
+        if left == right && lines[idx].prefixed != lines[idx + 1].prefixed {
+            if lines[idx].prefixed {
+                lines[idx + 1].remove = true;
+            } else {
+                lines[idx].remove = true;
+            }
+            changed = true;
+        }
+    }
+
+    if !changed {
+        return (content.to_string(), false);
+    }
+
+    let repaired_exchange = lines
+        .into_iter()
+        .filter(|line| !line.remove)
+        .map(|line| line.segment)
+        .collect::<String>();
     let repaired = exchange.replace_content(content, &repaired_exchange);
     crate::ops_log::log_op(
         file,
@@ -12286,6 +12401,54 @@ scratch
         assert!(log.contains("post_exchange_comments=true"));
         assert!(log.contains("prompt_lines_against_before=true"));
         assert!(log.contains("live_prefix_variants=true"));
+    }
+
+    #[test]
+    fn commit_prompt_repair_dedupes_exact_prefixed_raw_prompt_copy() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("diag.md");
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let prompt = "lucas-huang may not have the necessary packages to use the runbooks. Please add development dependencies so any programmer can use the runbooks.";
+        let snapshot = format!(
+            concat!(
+                "<!-- agent:exchange patch=append -->\n",
+                "{prompt}\n",
+                "#spec-test-commit-push\n",
+                "<!-- agent:boundary:edf37a04 -->\n",
+                "<!-- /agent:exchange -->\n"
+            ),
+            prompt = prompt
+        );
+        let current = format!(
+            concat!(
+                "<!-- agent:exchange patch=append -->\n",
+                "❯ {prompt}\n",
+                "{prompt}\n",
+                "#spec-test-commit-push\n",
+                "<!-- agent:boundary:edf37a04 -->\n",
+                "<!-- /agent:exchange -->\n"
+            ),
+            prompt = prompt
+        );
+        fs::write(&doc, &current).unwrap();
+
+        let repaired =
+            repair_commit_prompt_artifacts_against_snapshot(&doc, &snapshot, &current).unwrap();
+
+        assert!(repaired.contains(&format!("❯ {prompt}\n#spec-test-commit-push")));
+        assert!(
+            !repaired.contains(&format!("❯ {prompt}\n{prompt}")),
+            "commit pre-stage repair should remove the raw duplicate:\n{repaired}"
+        );
+        assert_eq!(
+            normalized_prompt_counts(exchange_content(&repaired).unwrap())
+                .get(prompt)
+                .copied(),
+            Some(1)
+        );
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("source=commit-pre-stage"));
+        assert!(log.contains("prompt_lines_against_before=true"));
     }
 
     #[test]

@@ -30,77 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260524-132906.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260524-141331.md`*
 
 Compacted content:
-- Archived 2 response topic(s): graph-db backend gates; performance differences from last queue run
+- Archived 3 response topic(s): sqlite graph performance next steps; inactive queue residue bug; graph performance backlog next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ What are #next-steps to improve sqlite graph performance?
-### Re: sqlite graph performance next steps — gpt-5
-
-Top active queue item: `#gdbrefreshfast`.
-Top backlog item after this cycle: `#gdbpropscan`.
-
-The current queue is already the right high-level priority order for SQLite graph performance:
-
-1. `#gdbrefreshfast` - keep attacking cold/full refresh first. Cached refresh is now essentially free in the latest recorded comparison, but full projection still spends about `58.790s` in `source_graph_build` and `19.745s` in `projection_rows`, so backend switching should wait until this path is understood.
-2. `#gdbedgescan` - tighten edge lookup and incident/property scan plans next. The standout current read-path cost is `edge_property_scan` at about `3.069s`, so I added `#gdbpropscan` as a focused backlog item to isolate that measurement instead of letting it hide inside the broader edge-scan work.
-3. `#gdbhopcaps` - raise hop caps only after the synthetic deep-chain/high-fanout guards prove the normalized 64/128/256/512-hop timings stay bounded.
-4. `#gdbfalkorgate` - keep FalkorDB behind the native promotion gate. The latest recorded numbers argue against claiming a backend win until projection loading, freshness/parity, lock behavior, and install cost are measured without replaying SQLite rows.
-5. `#gdbvacproof` - keep this as review/gated operational evidence after the latency work, because compact/VACUUM proof affects file size, freelist, and tombstone policy more than the immediate query hot path.
-
-Changed paths: `tasks/software/tsift.md` through `agent-doc finalize` only.
-Commands used: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `agent-doc orchestrate --from-exchange --plan`, `tsift status --fix`, `tsift --envelope context-pack`, `tsift --envelope search`, and targeted `rg`/`sed` reads of the tsift spec, done archive, and compacted exchange archive.
-Verification: no code changed, so I did not run the project test suite; `agent-doc finalize` runs the document write/commit/session-check closeout.
-Escalation: none.
-Confidence: medium-high; this is based on the checked-in/archived performance records, not a fresh benchmark run.
-❯ You read what was leftover in the queue. #agent-doc-bug
-❯ The queue should have been cleared after the last run. #agent-doc-bug
-### Re: inactive queue residue bug — gpt-5
-
-You're right. I treated the stale `agent:queue` body as active priority context even though `queue_active: false`, and that let leftover queue state steer the `#next-steps` answer. The queue should either have been cleared after the prior queue run or treated as inert residue; it should not have been read as the current work order.
-
-Plans created:
-
-- Plan: `tasks/agent-doc/plan-drained-non-auto-queue-cleanup.md`
-- Plan: `tasks/agent-doc/plan-inactive-queue-residue-prompt-target.md`
-
-The first plan covers clearing stale non-auto queue residue after a queue drains. The second plan covers keeping inactive queue edits out of prompt targets and cross-document bug capture.
-
-The queued `do [#gdbpropscan]` stays open. I did not execute it because this cycle was classified as `plan_backlog_only` for `#agent-doc-bug`, and the queue is inactive (`queue_active: false`).
-
-Backlog items added to `tasks/agent-doc/agent-doc-bugs2.md`:
-
-- [ ] [#qresidue] [recommended] Fix inactive `agent:queue` residue being read as active response context; implement `tasks/agent-doc/plan-drained-non-auto-queue-cleanup.md`.
-- [ ] [#qinactive] [recommended] Prevent edits inside inactive `agent:queue` blocks, such as `do [#gdbpropscan]`, from becoming prompt targets or cross-document `#agent-doc-bug` backlog captures; implement `tasks/agent-doc/plan-inactive-queue-residue-prompt-target.md`.
-
-Changed paths: `tasks/agent-doc/plan-inactive-queue-residue-prompt-target.md` committed as `4120f4c52`; `tasks/agent-doc/plan-drained-non-auto-queue-cleanup.md` committed as `e8adb5c`; `tasks/software/tsift.md` and `tasks/agent-doc/agent-doc-bugs2.md` through `agent-doc finalize`.
-Commands used: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `agent-doc orchestrate --from-exchange --plan`, `tsift status --fix`, targeted `rg`/`sed` source reads, `agent-doc write --pending-only`, `git add`, and `git commit` for the non-session plan files.
-Verification: no code changed; I did not run the project test suite. The plan files cite the specific regression tests to add when implementing the fix, and `agent-doc finalize` performs the session write/commit/session-check closeout.
-Escalation: none.
-Confidence: high on the diagnosis and plan boundaries; implementation still needs the planned code/test pass.
-❯ Please add #next-steps to this document's backlog to improve graph performance.
-### Re: graph performance backlog next steps — gpt-5
-
-Added graph-performance next steps to this document's backlog and kept the list in priority order.
-
-Top backlog item: `#gdbpropscan`.
-
-Backlog items added:
-
-- [ ] [#gdbcoldfull] [recommended] Split and reduce full-projection cold rebuild cost: profile `full_projection.source_graph_build` and `projection_rows` separately, cache or incrementally rebuild unchanged session/source/summary rows, and prove the change with three `backend-eval --full-projection` samples plus `metric-digest`.
-- [ ] [#gdbprepwm] [recommended] Stabilize conflict-matrix preparation cache reuse: key prepared context/evidence/staged-diff/impact packets by source/document/staged-diff watermarks, exclude `.tsift/conflict-matrix-cache` artifacts from source watermarks, and gate on repeated `conflict_matrix_preparation`/`dispatch_trace` timings.
-- [ ] [#gdbhopguard] [recommended] Keep hop-cap increases behind path-tier guardrails: add or refresh 64/128/256/512-hop high-fanout/deep-chain fixtures with truncation and query-plan checks before raising user-facing defaults.
-- [ ] [#gdbbackendgate] [recommended] Re-evaluate FalkorDB/Kuzu only after SQLite hot paths are measured: require native projection writes/load, parity, lock behavior, install portability, and full-projection wins before considering backend promotion.
-
-I did not execute the inactive queue. The queue body still contains older items, but `queue_active: false`; this cycle only captured backlog work as requested.
-
-Changed paths: `tasks/software/tsift.md` through `agent-doc finalize` only.
-Commands used: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `agent-doc orchestrate --from-exchange --plan`, `tsift status --fix`, `tsift --envelope search`, and targeted `sed` reads of the prior performance comparison and done archive.
-Verification: no code changed; I did not run the project test suite. `agent-doc finalize` performs the document write/commit/session-check closeout.
-Escalation: none.
-Confidence: high for backlog capture and priority ordering; the items are based on the recorded performance comparison, not a fresh benchmark run.
-<!-- agent:boundary:e39cbffb -->
+<!-- agent:boundary:aca7dcc9 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -1,9 +1,9 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-agent_doc_format: template
-agent_doc_write: crdt
 agent: claude
 claude_model: opus
+agent_doc_format: template
+agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 prompt_presets:
@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -79,13 +79,19 @@ Backlog id: `#jbresstart`.
 than auto-promoting; please confirm whether to add a plan or drop the directive.
 `#jbccfix`, `#jbccreg`, `#jbccdocs` remain in backlog and will be picked up under
 `#spec-test-build-install-commit-push` in a follow-up turn.
-<!-- agent:boundary:bfa04251 -->
+<!-- agent:boundary:677df467 -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
 <!-- agent:queue auto -->
+preset #spec-test-build-install-commit-push
+- do [#jbresstart]
+- do [#jbrsrbusy]
+- do [#jbccfix]
+- do [#jbccreg]
+- do [#jbccdocs]
 <!-- /agent:queue -->
 
 ## Pending / Not Built

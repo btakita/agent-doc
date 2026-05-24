@@ -18075,6 +18075,64 @@ mod late_fallback_patch_guard_tests {
     }
 
     #[test]
+    fn full_content_operator_ipc_rejects_late_post_exchange_scratch_comment() {
+        let tmp = TempDir::new().unwrap();
+        let agent_doc_dir = tmp.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = tmp.path().join("test.md");
+        let prompt = "The full-document IPC scratch comment was typed below exchange after target computation. #spec-test-build-install-commit-push";
+        let source = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: previous — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "###\n\n",
+            "<!--\n",
+            "-->\n"
+        );
+        let live = source.replace("<!--\n-->", &format!("<!--\n{prompt}\n-->"));
+        let target = source.replace(
+            "### Re: previous — gpt-5\n\nDone.\n",
+            "### Session Summary\n\nCompacted.\n",
+        );
+        fs::write(&doc, &live).unwrap();
+
+        let result =
+            try_ipc_full_content_operator_mutation_from_source(&doc, &target, source).unwrap();
+
+        assert!(
+            !result,
+            "operator full-content IPC must not be emitted after a late post-exchange scratch edit"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            live,
+            "stale full-content replacement must preserve the live scratch comment"
+        );
+        assert!(
+            snapshot::load(&doc).unwrap().is_none(),
+            "failed full-content IPC must not save a snapshot"
+        );
+        let patch_count = fs::read_dir(agent_doc_dir.join("patches"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .count();
+        assert_eq!(
+            patch_count, 0,
+            "stale source guard must not hand a full-content patch to file IPC"
+        );
+        let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("full_content_source_buffer_rejected")
+                && ops_log.contains("source=compact_exchange"),
+            "source-buffer rejection should be logged:\n{ops_log}"
+        );
+    }
+
+    #[test]
     fn response_fallback_full_content_rejects_live_drift_before_socket_delivery() {
         use std::sync::{
             Arc,

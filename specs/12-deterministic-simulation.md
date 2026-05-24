@@ -132,6 +132,10 @@ Closeout invariants currently exercised by the simulator:
   write-closeout, and compact-style exchange replacement, while still proving
   generated duplicate comment residue without ownership proof is scrubbed
   line-by-line.
+- Full-document replacement regressions cover late post-exchange scratch-comment
+  edits: compact exchange direct write and full-content IPC source-buffer proof
+  must both reject stale whole-document replacements before saving a snapshot or
+  touching the visible file.
 - Each named closeout fault point has an explicit fail-closed, recovery, or
   no-op outcome.
 

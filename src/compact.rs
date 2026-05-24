@@ -1547,6 +1547,55 @@ mod tests {
     }
 
     #[test]
+    fn component_compact_direct_fallback_rejects_late_post_exchange_scratch_comment() {
+        let prompt = "The post-exchange scratch comment was typed while compact exchange was being computed. #spec-test-build-install-commit-push";
+        let doc = concat!(
+            "---\nagent_doc_session: test-compact-comment-cas\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: topic one\n\nResponse one.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "###\n\n",
+            "<!--\n",
+            "-->\n"
+        );
+        let live = doc.replace("<!--\n-->", &format!("<!--\n{prompt}\n-->"));
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.md");
+        std::fs::write(&file, &live).unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        snapshot::save(&file, doc).unwrap();
+
+        let err = run_component_compact(&file, doc, "exchange", Some("Compacted summary."), false)
+            .unwrap_err();
+
+        assert!(
+            err.to_string().contains("document changed after"),
+            "compact fallback should fail with visible-current CAS error: {err}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            live,
+            "compact fallback must not overwrite scratch comments typed after compaction was computed"
+        );
+        assert_eq!(
+            snapshot::load(&file).unwrap().unwrap(),
+            doc,
+            "failed compact fallback must not advance the snapshot"
+        );
+        let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("visible_write_deferred_current_changed")
+                && ops_log.contains("source=compact_exchange_direct_write"),
+            "compact CAS rejection should be logged:\n{ops_log}"
+        );
+    }
+
+    #[test]
     fn exchange_compact_default_summary_includes_archived_content_digest() {
         let doc = concat!(
             "---\nagent_doc_session: test-summary\nagent_doc_format: template\n---\n\n",

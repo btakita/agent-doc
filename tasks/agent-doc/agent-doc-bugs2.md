@@ -87,7 +87,37 @@ Commands: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `rg`, `sed`
 Verification: no code changes, so I did not run the test suite.
 Escalation: none.
 Confidence: high on the architectural cause; any remaining question is whether every legacy Codex recovery path now consistently calls the replay guard before saving pending replay.
-<!-- agent:boundary:8db7f681 -->
+❯ Does Codex support hooks similar to Claude Code to avoid the extra step? Does Codex support `/agent-doc` commands and would we be able to avoid having to use the path causing the full-document IPC issues?
+### Re: Codex hooks and slash commands — gpt-5
+
+Yes, Codex has hooks here, but they are not the same escape hatch as Claude Code's `/agent-doc` Skill path.
+
+What exists in the installed Codex path:
+
+- `.codex/config.toml` enables `features.hooks = true`.
+- `.codex/hooks.json` wires `UserPromptSubmit` to `agent-doc hook codex-user-prompt-submit`.
+- `.codex/hooks.json` wires `Stop` to `agent-doc hook codex-stop`.
+- The current `codex --help` exposes hook trust controls such as `--dangerously-bypass-hook-trust`, which confirms hooks are a real Codex integration surface in this install.
+
+What does not exist is project-defined slash command parity with Claude Code. The installed Codex runbook and `.codex/AGENTS.md` both say not to type `/agent-doc`; Codex reserves leading slash commands for its own built-ins and rejects project-defined `/agent-doc`. The Codex-native entrypoint is still the normal message form:
+
+`agent-doc <FILE>`
+
+So, can we avoid the path that caused full-document IPC issues? Yes, but not by switching Codex to `/agent-doc`. The safer boundary is:
+
+- use `UserPromptSubmit` only to track the active document and same-message directive body;
+- keep the agent's real response going through explicit `agent-doc finalize` / `agent-doc write --commit` with `patch:exchange`;
+- treat the Codex `Stop` hook as a fail-closed backstop, not the primary write path;
+- make `Stop` replay only validated single-response payloads, and block transcript/full-exchange/full-document payloads before they can touch pending replay.
+
+That means the bad path is not "Codex hooks" in general. It is specifically Stop-hook/direct-chat recovery replaying too much text. The UserPromptSubmit hook is useful and should stay. The Stop hook should either be conservative replay-only-after-validation, or even stricter: block and tell the agent to run `finalize` when the payload shape is not provably one assistant closeout.
+
+Changed paths: none; this was an explanation-only cycle.
+Commands: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `codex --help`, `sed`, `rg`.
+Verification: no code changes, so I did not run tests.
+Escalation: none.
+Confidence: high for the installed Codex behavior in this workspace; lower only for future Codex CLI versions if OpenAI later adds project-defined slash-command support.
+<!-- agent:boundary:54ed93d0 -->
 <!-- /agent:exchange -->
 ###
 <!--

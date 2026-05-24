@@ -111,7 +111,27 @@ The two new regression tests cover both layers of the bug:
 Changed paths this cycle: none beyond this session-document response. The source/spec changes remain the prior pushed commits: `agent-doc` `09ff45c5` and parent `agent-loop` `15479736b`, with current parent `main` containing the `src/agent-doc` pointer at `09ff45c5`.
 
 Commands this cycle: `tsift status`, `tsift index --workspace .`, `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, and this `agent-doc finalize` closeout. Verification this cycle is explanatory only because no source code changed; the fix being explained was already verified by local `make check`, focused regression tests, `cargo install --path .`, and GitHub CI run `26363927689` including `make tmux-ci`. Escalation: none.
-<!-- agent:boundary:4489740a -->
+❯ Please create a document that contains a mermaid with this process. Please create a documentation INDEX.md that will serve as the entry-point to the repo documentation, specs, prds(if any), etc.
+### Re: documentation index and process diagram — gpt-5
+
+Created the requested documentation entry point and Mermaid process document in the `agent-doc` submodule.
+
+Changed paths:
+
+- `src/agent-doc/docs/INDEX.md` - new documentation index for the repo docs, guides, references, specs, development docs, examples, ontology, and PRD status. I did not find any PRD/product-requirements files in the repo, so the PRD section explicitly records that none are currently present.
+- `src/agent-doc/docs/reference/prompt-duplicate-closeout-repair.md` - new reference page with a Mermaid flowchart for the duplicate-prompt/full-content IPC closeout repair process, plus the key invariants and regression tests.
+- `src/agent-doc/docs/SUMMARY.md` - links the new index and process reference into the mdBook navigation.
+
+The Mermaid page documents the full process from user edit through preflight, component-patch/full-content scope choice, IPC materialization, duplicate-prompt repair, commit pre-stage repair, prompt-prefix-equivalent snapshot update, drift measurement, staging, commit, and fail-closed paths.
+
+Verification:
+
+- `git diff --check` passed for the documentation changes.
+- `mdbook build` passed and wrote the HTML book locally; I removed the generated untracked `book/` directory after the build.
+- `cargo run --quiet -- audit-docs` did not pass because it reports a pre-existing managed instruction-surface issue: `/home/brian/work/btakita/agent-loop/AGENTS.md` is stale and asks to run `agent-doc skill install --all` or reinstall the active harness before release. I did not change that instruction surface in this docs-only turn.
+
+Commands used this cycle included `tsift status`, `tsift index --workspace .`, `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, documentation layout inspection, `git diff --check`, `cargo run --quiet -- audit-docs`, and `mdbook build`. Escalation was used only to remove the generated `book/` directory created by the docs build. Confidence is high for the requested docs because the mdBook build includes the new navigation and the new files are linked from `docs/SUMMARY.md`.
+<!-- agent:boundary:4e8addae -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -134,6 +154,7 @@ dispatch #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#rpatch] Fix response patchback recovery so stale-cycle closeout cannot report already committed while a valid visible response patchback remains uncommitted; implement tasks/agent-doc/plan-response-patchback-uncommitted.md.
 - [ ] [#qresidue] [recommended] Fix inactive agent:queue residue being read as active response context; implement tasks/agent-doc/plan-drained-non-auto-queue-cleanup.md.
 - [ ] [#qinactive] [recommended] Prevent edits inside inactive agent:queue blocks, such as do [#gdbpropscan], from becoming prompt targets or cross-document #agent-doc-bug backlog captures; implement tasks/agent-doc/plan-inactive-queue-residue-prompt-target.md.
 <!-- /agent:backlog -->

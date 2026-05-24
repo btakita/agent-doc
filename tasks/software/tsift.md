@@ -153,7 +153,7 @@ The parent plan called for sharing per-target context/diff packets across `sessi
 #### Queue state
 
 Queue head is now `do [#gdbprephotgate]`. The 3-sample baseline data is already in this cycle for its sibling phase `status_index_gate` (not measured per-sub-phase here, just the parent); the next cycle should start by capturing the `conflict_matrix_preparation.status_index_gate` median against the new 0.1.44 numbers before changing the gate path.
-<!-- agent:boundary:ce49a9c6 -->
+<!-- agent:boundary:71e92572 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -162,7 +162,7 @@ What are #next-steps to make the graph faster?
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#gdbprephotgate]
+- ~do [#gdbprephotgate]~
 - do [#gdbfullreuse]
 - do [#gdbscanproof]
 - do [#gdbperfgate]
@@ -171,7 +171,8 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gdbprephotgate] [recommended] Replace prepare_agent_doc_index_gate (tsift src/main.rs:23022) with a metric-digest comparison against the cached preparation key when the input set has not advanced, targeting sub-100ms for status_index_gate vs the current ~0.5-0.7s. Validate with 3-sample median on real and full-projection runs and add a sub-phase regression assertion under conflict_matrix_preparation.status_index_gate before claiming the reduction.
+- [ ] [#gdbgatecold] [recommended] Reduce the cold-path cost of conflict_matrix_preparation.status_index_gate. The in-process cache landed in 0.1.45 covers daemon/multi-call use but does not help single-shot CLI invocations because each helper fires only once per backend-eval pipeline. Three-sample medians attribute the 678ms median to prepare_agent_doc_index_gate (~422ms inspect_search_index + apply_search_index_update) and context_pack_status_reminders (~266ms). Investigate whether inspect_search_index can fast-path a freshness verdict from a cheap watermark check (e.g., index db mtime + source root mtime hash) before any DB open, and whether context_pack_status_reminders can read fewer files. Verify with 3-sample medians under conflict_matrix_preparation.status_index_gate.{prepare_agent_doc_index_gate, context_pack_status_reminders} before claiming reduction.
+- [ ] [#impactprof] [recommended] After conflict_matrix_preparation.session_review_compute dropped from 3719ms to 272ms (#gdbprephotreuse, tsift 0.1.44) and status_index_gate observability landed (#gdbprephotgate, tsift 0.1.45), conflict_matrix_preparation.impact is now the dominant single sibling at 774-810ms median. Profile impact::compute by adding sub-phase timers (mirror the session_review_compute and status_index_gate decomposition pattern), capture a 3-sample baseline under conflict_matrix_preparation.impact.<sub>, then implement the proven inner-call reduction with a metric-digest regression gate.
 - [ ] [#gdbfullreuse] [recommended] Make full-projection cache-hit performance the next hard gate: run at least three tsift graph-db --json backend-eval --full-projection cold/cache samples, split source-graph-build, projection-row construction, cache load, compression, and SQLite write phases, then remove clone/serde/cache artifact churn only where those samples show a stable bottleneck.
 - [ ] [#gdbscanproof] [recommended] Re-check SQLite scan plans on the current graph schema before adding another backend: capture EXPLAIN/cardinality evidence for edge_property_scan, incident_edges, kind/neighborhood property filters, and path frontier probes on real plus synthetic high-degree/deep-chain data; add indexes/materialized rows only for proven scan-dominant cases.
 - [ ] [#gdbperfgate] [recommended] Turn graph performance tuning into a repeatable release gate: store metric-digest summaries for default, full-projection, high-degree, and deep-chain runs, require three-sample regression evidence, and keep FalkorDB/Kuzu promotion blocked until they beat the stabilized SQLite gate including projection writes and lock behavior.

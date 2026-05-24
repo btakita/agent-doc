@@ -54,7 +54,32 @@ Commands used: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `agent
 Verification: no code changed, so I did not run the project test suite; `agent-doc finalize` runs the document write/commit/session-check closeout.
 Escalation: none.
 Confidence: medium-high; this is based on the checked-in/archived performance records, not a fresh benchmark run.
-<!-- agent:boundary:d86a0e31 -->
+❯ You read what was leftover in the queue. #agent-doc-bug
+❯ The queue should have been cleared after the last run. #agent-doc-bug
+### Re: inactive queue residue bug — gpt-5
+
+You're right. I treated the stale `agent:queue` body as active priority context even though `queue_active: false`, and that let leftover queue state steer the `#next-steps` answer. The queue should either have been cleared after the prior queue run or treated as inert residue; it should not have been read as the current work order.
+
+Plans created:
+
+- Plan: `tasks/agent-doc/plan-drained-non-auto-queue-cleanup.md`
+- Plan: `tasks/agent-doc/plan-inactive-queue-residue-prompt-target.md`
+
+The first plan covers clearing stale non-auto queue residue after a queue drains. The second plan covers keeping inactive queue edits out of prompt targets and cross-document bug capture.
+
+The queued `do [#gdbpropscan]` stays open. I did not execute it because this cycle was classified as `plan_backlog_only` for `#agent-doc-bug`, and the queue is inactive (`queue_active: false`).
+
+Backlog items added to `tasks/agent-doc/agent-doc-bugs2.md`:
+
+- [ ] [#qresidue] [recommended] Fix inactive `agent:queue` residue being read as active response context; implement `tasks/agent-doc/plan-drained-non-auto-queue-cleanup.md`.
+- [ ] [#qinactive] [recommended] Prevent edits inside inactive `agent:queue` blocks, such as `do [#gdbpropscan]`, from becoming prompt targets or cross-document `#agent-doc-bug` backlog captures; implement `tasks/agent-doc/plan-inactive-queue-residue-prompt-target.md`.
+
+Changed paths: `tasks/agent-doc/plan-inactive-queue-residue-prompt-target.md` committed as `4120f4c52`; `tasks/agent-doc/plan-drained-non-auto-queue-cleanup.md` committed as `e8adb5c`; `tasks/software/tsift.md` and `tasks/agent-doc/agent-doc-bugs2.md` through `agent-doc finalize`.
+Commands used: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `agent-doc orchestrate --from-exchange --plan`, `tsift status --fix`, targeted `rg`/`sed` source reads, `agent-doc write --pending-only`, `git add`, and `git commit` for the non-session plan files.
+Verification: no code changed; I did not run the project test suite. The plan files cite the specific regression tests to add when implementing the fix, and `agent-doc finalize` performs the session write/commit/session-check closeout.
+Escalation: none.
+Confidence: high on the diagnosis and plan boundaries; implementation still needs the planned code/test pass.
+<!-- agent:boundary:9dde1cf3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -66,6 +91,7 @@ preset #spec-test-build-install-commit-push
 - do [#gdbedgescan]
 - do [#gdbhopcaps]
 - do [#gdbfalkorgate]
+- do [#gdbpropscan]
 <!-- /agent:queue -->
 
 ## Backlog

@@ -1,7 +1,7 @@
 ---
 agent_doc_session: 4602f467-ef2a-4094-a750-5eb533368988
 agent: codex
-claude_model: claude-opus-4-6
+claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
@@ -123,19 +123,31 @@ v0.6.2 published to crates.io
 ### Session Summary
 
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260510-034519.md`*
-<!-- agent:boundary:d282e412 -->
+❯ What are #next-steps to complete phase 4?
+### Re: phase 4 next steps — gpt-5
+I added the Phase 4 follow-up backlog in priority order. Top backlog item: `#p4ix`.
+
+I am treating tag ontology as already code-complete in `tagpath` because the current source has `tagpath ontology`, `src/ontology`, README/SPEC coverage, and tests. The remaining path to complete Phase 4 is: persistent index first, MCP on top of that indexed/queryable surface, WASM packaging, dynamic grammar loading, then release/documentation cleanup.
+
+Proof: checked the current `tagpath` command/source surface with `rg`, `sed`, `git -C src/tagpath status --short`, and `agent-doc plan`; no code changes were made. Verification is document-only through `agent-doc finalize` and its session-check. Escalation: none.
+<!-- agent:boundary:0bf7b229 -->
 <!-- /agent:exchange -->
 ###
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#p4ix] Implement `tagpath index`: write `.naming/index.json` with schema version, config fingerprint, source hashes or mtimes, extracted identifier families, ontology refs, and CLI `index`/`index --check`; add tests for build, stale invalidation, and indexed search.
+- [ ] [#p4mp] Add MCP integration on top of the index: expose parse, normalize-query, lint, search, ontology lookup, and indexed project query tools with JSON schemas plus local smoke tests.
+- [ ] [#p4wm] Add WASM packaging: split native tree-sitter code behind non-wasm features, expose wasm-bindgen APIs for parse, alias, prose, normalize-query, and search-over-rows, then document `wasm-pack` build/test flow.
+- [ ] [#p4dy] Add dynamic grammar loading behind an opt-in native feature: use `libloading`, register runtime tree-sitter grammars from configured directories, and cover version or symbol mismatch errors.
+- [ ] [#p4rl] Finish Phase 4 release hygiene: update the Phase 4 checklist to mark the shipped ontology command complete, sync README/SPEC examples, run full verification, publish the next crate, and update this session status.
 <!-- /agent:backlog -->
 
 ## Completed / Reaped
 
-<!-- agent:pending-done -->
+<!-- agent:done -->
 - 2026-05-09 [#ctxp] Add `context-pack` to `fixtures/tsift-token-savings.json` with raw refs, tagpath family rows, ontology_ref handles, and minimum savings thresholds; mirror the new case in tagpath + tsift fixture tests.
 - 2026-05-09 [#cmpa] Add a tagpath library/CLI compression-report helper that accepts raw symbol rows and emits grouped family previews plus byte/token savings metrics for tsift.
 - 2026-05-09 [#qont] Add query/ontology compactness fixture cases that cover normalize-query input and `.naming/tags` ontology_refs so tsift can keep context-pack refs as handles instead of prose.
-<!-- /agent:pending-done -->
+<!-- /agent:done -->

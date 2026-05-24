@@ -296,14 +296,14 @@ Verification:
 - GitHub Actions/tmux CI note: `gh workflow list` returned no workflows and `gh run list --workflow CI --limit 1` reported no workflow named `CI`, so there was no remote CI/tmux leg to inspect.
 
 Deployment: attempted `bun run deploy:worker`. The Worker build completed, but the Cloudflare deploy step stopped because `CLOUDFLARE_API_TOKEN` is not set in `src/equityfundingsource-dev/.env` or the environment. I added a pending follow-up to set the Cloudflare deploy credentials and rerun the deploy for commit `55b5628`.
-<!-- agent:boundary:81c34726 -->
+<!-- agent:boundary:e2a0accf -->
 <!-- /agent:exchange -->
 ###
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] [#a20z] Set EFS Cloudflare deployment credentials ( and ) in , then rerun  for commit .
+- [ ] [#a20z] Set EFS Cloudflare deployment credentials (CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID) in src/equityfundingsource-dev/.env, then rerun bun run deploy:worker for commit 55b5628.
 - [ ] [#7fx4] OCR ingestion schema/state machine: add provider-neutral document_processing tables for documents, versions, OCR runs, pages/chunks, extracted fields, entity mentions/edges, review decisions, provider cost, and retry/error state.
 - [ ] [#d1h2] OCR provider adapter: process private R2 documents through pluggable parsers starting with Ragie Parse or Workers AI/Claude where appropriate; keep original R2 object as source of truth and persist source page/bounding-box evidence.
 - [ ] [#f5kq] OCR admin review workflow: show extracted fields with source evidence, confidence, and diffable approval/rejection before any TMO borrower, loan, lender, or loan-application writeback.

@@ -84,7 +84,8 @@ Priority sequence inside `#gdbprephot`, narrowest payoff first:
 This cycle is the confirmation and evidence-grounded plan for `#gdbprephot`. The next cycle is the queued `do [#gdbprephot]` and should land step 1 (sub-phase timers) plus at least an initial sample under the new timers so step 2 starts from data, not speculation. Steps 2–4 are separate cycles inside the same backlog item, not all in one shot, to keep each change behind a sample comparison.
 
 `#gdbfullreuse`, `#gdbscanproof`, `#gdbperfgate` remain queued and unchanged.
-<!-- agent:boundary:7e2edd43 -->
+Response committed (478038491). Confirmed `#gdbprephot` as the start, broke down current `conflict_matrix_preparation` cost from the 3 fixture samples (session_review_compute is 63% of the ~6 s prep), and scoped the queued `do [#gdbprephot]` cycle to land sub-phase timers first so subsequent work is data-driven.
+<!-- agent:boundary:485f6de8 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -257,7 +257,9 @@ Changed paths this cycle:
 Commands run: `tsift status`, `tsift status --fix`, `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `ps -ef`, `curl` checks against `/admin/login` and `/admin/signup`, `rg`, `git status --short`, `bun test tests/auth.test.ts`, `make check`, `git diff --check`, `gh workflow list`, and `gh run list --workflow CI --limit 1`.
 
 Verification: focused auth tests passed, `make check` passed with 50 tests plus site and Worker builds, `git diff --check` passed, and local HTTP smoke checks confirmed the visible admin signup button. GitHub Actions note: this repo still has no workflow named `CI`, so there was no remote CI/tmux leg available to inspect.
-<!-- agent:boundary:6702793c -->
+Completing into /admin/signup took me to http://127.0.0.1:8787/portal-admin/loans. It should go to the admin section.
+#spec-test-commit-push-deploy
+<!-- agent:boundary:9abb8cbd -->
 <!-- /agent:exchange -->
 ###
 

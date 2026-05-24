@@ -127,11 +127,24 @@ v0.6.2 published to crates.io
 Compacted content:
 - Archived 1 response topic(s): phase 4 next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-<!-- agent:boundary:f658c5b1 -->
+### Re: agent:queue auto halt — gpt-5
+
+The queued Phase 4 batch did not execute in this cycle. Preflight halted the auto queue with `queue_halted: "item_modified"` because the queue head changed relative to the prior queue snapshot. As part of that safety path, `agent-doc` stripped the `auto` attribute; the five items remain in `agent:queue`, but the queue is now inert until it is explicitly restarted.
+
+No `tagpath` implementation files were changed and no build/test/publish work was run. The intended batch is still visible in priority order: `#p4ix`, `#p4mp`, `#p4wm`, `#p4dy`, `#p4rl` under preset `#spec-test-build-install-commit-push`.
+
+Changed paths: `tasks/software/tagpath.md` only. Verification: `agent-doc preflight`, `agent-doc plan`, and this binary-owned finalize/session-check path. Confidence: high. Escalation: none.
+<!-- agent:boundary:0d950667 -->
 <!-- /agent:exchange -->
 ###
 
 <!-- agent:queue -->
+preset #spec-test-build-install-commit-push
+- do [#p4ix]
+- do [#p4mp]
+- do [#p4wm]
+- do [#p4dy]
+- do [#p4rl]
 <!-- /agent:queue -->
 
 ## Backlog

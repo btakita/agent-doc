@@ -34,7 +34,35 @@ Resolved #qfixture; auto queue drained.
 Compacted content:
 - Archived 4 response topic(s): Codex closeout path; Codex IPC corruption; Codex hooks and slash commands; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:9989266e -->
+### Re: queued agent-doc fixes — gpt-5
+
+Implemented and verified the queued fixes for `#cstop`, `#e86b`, `#rpatch`, `#qresidue`, and `#qinactive`.
+
+Code changes landed in `src/agent-doc`:
+- inactive `agent:queue` additions are suppressed from prompt-target and directive detection unless the queue is active;
+- proven drained non-auto queue residue is cleaned from file and snapshot, while inactive queue residue now emits a warning;
+- stale `preflight_started` repair fails closed when a visible response patchback exists only in the working tree, with a typed `response_patchback_uncommitted` closeout guard reason;
+- generated root instruction-surface audits and sync now tolerate/preserve the project tsift Code Navigation block without masking true custom root edits;
+- regression coverage was added for all of the above, including the CLI inactive-queue case.
+
+Generated agent-doc instruction surfaces were refreshed for Claude Code, Codex, OpenCode, Cursor, and the generic root `AGENTS.md`; the root tsift Code Navigation block is still present after reinstall.
+
+Verification evidence:
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- targeted tests for inactive queue filtering, drained non-auto queue cleanup, uncommitted patchback repair, tsift navigation preservation, and the CLI inactive-queue regression all passed
+- `make check` passed
+- `cargo install --path src/agent-doc --force` installed `agent-doc 0.33.16`
+- `agent-doc skill install --all` reported all harness installs up to date
+- `cargo run --quiet --manifest-path src/agent-doc/Cargo.toml -- audit-docs` passed with 5 mtime advisories
+
+CI evidence: the repository has no workflow named `CI` (`gh run list --workflow CI --limit 1` failed with that message). The active `Agent Doc` workflow run `26371276090` for `19ec3f01b` failed before runner steps started; both `check` and `tmux-ci` jobs had empty step lists, so this is classified as an external CI-start blocker rather than a code or tmux regression. Local `make check` is the successful verification evidence for this cycle.
+
+Commits pushed:
+- `src/agent-doc`: `61f06d5f fix: harden queue and patchback recovery` to `origin/20260422/codex-agent-backend`
+- superproject: `19ec3f01b chore: refresh agent-doc instructions` to `origin/main`
+
+The manual superproject commit included only the generated instruction surfaces and the updated `src/agent-doc` submodule pointer. Pre-existing unrelated dirty files were left untouched. Pushing `main` also pushed the two older local ancestor commits that were already ahead of `origin/main`: `64a75b296` and `2fb33ccbb`.
+<!-- agent:boundary:a3c24b5f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -42,21 +70,16 @@ Compacted content:
 
 <!-- agent:queue -->
 dispatch #spec-test-build-install-commit-push
-- do [#1mm8]
-- do [#hg0n]
-- do [#te1d]
-- do [#pmz2]
-- do [#f4xr]
+- do [#cstop]
+- do [#e86b]
+- do [#rpatch]
+- do [#qresidue]
+- do [#qinactive]
 <!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#cstop] [recommended] Implement the conservative Codex Stop-hook replay path in tasks/agent-doc/plan-cancelled-stop-hook-exchange-replay.md: keep UserPromptSubmit tracking, require explicit finalize/write primary closeout, and block transcript/full-exchange payloads before pending replay.
-- [ ] [#e86b] [recommended] Resolve pre-existing root AGENTS.md managed instruction-surface drift from the tsift code-navigation block so `cargo run --quiet -- audit-docs` can pass.
-- [ ] [#rpatch] Fix response patchback recovery so stale-cycle closeout cannot report already committed while a valid visible response patchback remains uncommitted; implement tasks/agent-doc/plan-response-patchback-uncommitted.md.
-- [ ] [#qresidue] [recommended] Fix inactive agent:queue residue being read as active response context; implement tasks/agent-doc/plan-drained-non-auto-queue-cleanup.md.
-- [ ] [#qinactive] [recommended] Prevent edits inside inactive agent:queue blocks, such as do [#gdbpropscan], from becoming prompt targets or cross-document #agent-doc-bug backlog captures; implement tasks/agent-doc/plan-inactive-queue-residue-prompt-target.md.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

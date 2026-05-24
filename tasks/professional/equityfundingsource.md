@@ -158,7 +158,6 @@ The short replay summary above was recovered from an orphaned `agent-doc` respon
 For durable implementation references, use the EFS implementation commit `ca1b8a6` and the root submodule pointer commit `5b2ed0248`. Later `agent-doc(equityfundingsource)` commits in the root repo are document closeout/repair commits only.
 
 ❯ Please add docs on using the tmo simulator, both in memory and persisted.
-❯ Please add docs on using the tmo simulator, both in memory and persisted.
 ❯ #spec-test-commit-push
 ### Re: TMO simulator docs — gpt-5
 
@@ -193,7 +192,24 @@ Commits pushed:
 - Root repo submodule pointer: `423cb684b Update EFS simulator docs submodule`
 
 The pre-existing untracked `src/equityfundingsource-dev/tmp/` directory was left untouched. Escalation: none. Confidence: high.
-<!-- agent:boundary:efd7665c -->
+Implemented and pushed the TMO simulator docs work.
+
+Updated [docs/TMO/simulator.md](/home/brian/work/btakita/agent-loop/src/equityfundingsource-dev/docs/TMO/simulator.md) with separate in-memory and D1-persisted workflows, including config, `bun run dev:worker`, local D1 migration, curl create/read examples, reset, and clear commands. Also updated the PRD wording and doc coverage test.
+
+Verification passed:
+
+- `bun test tests/tmo-sim.test.ts tests/prd.test.ts`
+- `git diff --check`
+- `make check` with 46 tests plus app and Worker builds
+
+Commits pushed:
+
+- EFS repo: `9eb2531 Document TMO simulator workflows`
+- Root submodule pointer: `423cb684b Update EFS simulator docs submodule`
+- Session closeout: `8e3e7cc0e agent-doc(equityfundingsource): 2026-05-24 09:54:31`
+
+No EFS `CI` workflow or tmux target exists. The pre-existing untracked `src/equityfundingsource-dev/tmp/` directory was left untouched. After my final push, unrelated local agent-doc commits appeared on root `main`; I left them unpushed and untouched.
+<!-- agent:boundary:41de2071 -->
 <!-- /agent:exchange -->
 ###
 

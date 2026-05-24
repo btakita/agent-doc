@@ -16,7 +16,7 @@ prompt_presets:
   '#commit-push-deploy': commit all uncommitted files + push in claudescore-plugin, claudescore.com, and session-share. deploy
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -60,18 +60,47 @@ Proposed sequencing for next cycles (one item per turn, smallest-foundational-fi
 6. dzmm parked until Robert hears back from Mortgage Office.
 
 Confirm the order (or override) and I will pick up the first item next cycle with spec + tests + deploy. No queued IDs marked done this cycle; they remain in the auto queue for sequential processing.
-<!-- agent:boundary:a6255304 -->
+### Re: do [#njsx] — Tier 0 WAF + upload limits — opus-4-7
+
+
+Shipped. njsx complete; queue head advances next cycle.
+
+What changed in `src/equityfundingsource-dev`:
+
+- **`app/equityfundingsource/lib/security/upload_guard.ts`** (new) — Tier 0 policy + helpers. Defaults: 25 MB per file, 100 MB per request, 25 files per request, allowlist of PDF/Office/image/CSV/text MIME types + extensions, file-name sanity (rejects `/`, `\`, NUL, `..`, `.`, >255 chars). `upload_guard_check_content_length_` pre-flights `Content-Length` before `formData()` parses. `upload_guard_check_file_` / `upload_guard_check_files_` return structured `{ status, code, message }` errors (`content_length_too_large` 413, `file_too_large` 413, `file_count_exceeded` 413, `total_size_exceeded` 413, `file_empty` 400, `extension_not_allowed` 415, `mime_type_not_allowed` 415, `file_name_invalid` 400). `upload_rate_limit_check_` consults the `UPLOAD_RATE_LIMITER` binding and falls open when unbound (local dev / staging).
+- **`lib/investor/routes.ts`** — `/api/investor/accreditation/upload` switched from the inline 25 MB check to `upload_guard_check_file_` + `upload_guard_check_content_length_` + `upload_rate_limit_check_` keyed on `investor:<user_id>:accreditation`.
+- **`lib/loan_applications/routes.ts`** — `/api/borrower/loan-applications` and `/api/borrower/loans/:id/documents` both gained content-length, multi-file, and rate-limit checks (session keys `borrower:<user_id>:loan-applications` and `borrower:<user_id>:loan-docs`).
+- **`wrangler.toml`** — added `UPLOAD_RATE_LIMITER` ratelimit binding (`namespace_id = "1001"`, `simple = { limit = 10, period = 60 }`). Cloudflare confirmed the binding on deploy.
+- **`docs/security-tier-0.md`** (new) — full Tier 0 spec: policy table, error codes, the three wired endpoints, and the Cloudflare dashboard rules (managed ruleset, OWASP CRS, three custom WAF rules for bot scans/oversized bodies/banned extensions, an IP-level rate-limit rule, cache-bypass + `X-Robots-Tag` transforms for `/api/*`).
+- **`prds/equity-funding-source-lending-portal-prd.md`** — `### Document Intelligence` now has a `#### Tier 0 — WAF + upload limits` subsection linking to the spec doc and listing defaults and wired endpoints.
+- **`tests/upload-guard.test.ts`** (new) — 25 tests covering every error code (size, count, total, MIME, extension, name, content-length), per-call options override, MIME fallbacks (`application/octet-stream`, empty), rate-limit allow/block/throw/unbound, and source-level assertions that the three routes import and call the guard.
+
+Verification:
+
+- `bun test` — 100 pass / 0 fail across 14 files (518 expect calls). Output includes the deliberate "limiter down" console.error from the throw-recovery test path.
+- `bun run check` (test + build + build:worker) — clean.
+- `bun run deploy:worker` — deployed version `d2cf3382-dec5-4dd4-9991-c1cdc3ae8034` to `https://equityfundingsource.brian-takita.workers.dev`. Wrangler confirmed `env.UPLOAD_RATE_LIMITER (ratelimit)` in the bindings list.
+- Submodule commit `b6df8b1` pushed to `origin/main`.
+- Superproject commit `0467de4c2` (submodule pointer bump) pushed to `origin/main`.
+
+Out of scope for this cycle (documented in `docs/security-tier-0.md` for the next operator pass):
+
+- Applying the three custom WAF rules + IP-level rate-limit rule via the Cloudflare dashboard or API on the `equityfundingsource.com` zone. The Worker layer enforces the same policy in-process, so this is hardening, not a gate.
+- Edge smoke test against a deployed custom domain — current host is `equityfundingsource.brian-takita.workers.dev`; production custom-domain cutover (icebox e1kb) gates this.
+
+Next queued item is the token-based document upload flow. Confirm and I'll pick it up next cycle.
+<!-- agent:boundary:4dd342cb -->
 <!-- /agent:exchange -->
 ###
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-commit-push-deploy
-- do [#dzmm]
-- do [#zjbe]
-- do [#yh4b]
-- do [#ft47]
 - do [#njsx]
+- do [#ft47]
+- do [#yh4b]
+- do [#zjbe]
 - do [#9vv3]
+- do [#dzmm]
 <!-- /agent:queue -->
 
 ## Backlog
@@ -82,7 +111,6 @@ preset #spec-test-commit-push-deploy
 - [ ] [#zjbe] Admin investor document workflow: upload and publish deal due-diligence, investor statements, tax docs, and accreditation files from R2 with visibility and review status controls.
 - [ ] [#yh4b] Admin dashboard (Cloudflare Access auth)
 - [ ] [#ft47] Token-based document upload flow
-- [ ] [#njsx] Tier 0: Cloudflare WAF + upload limits
 - [ ] [#9vv3] Investor portal end-to-end QA: seed and test investor signup, accreditation, published deal documents, funding commitment, admin acceptance, positions, distributions, and statements with TMO simulator plus R2 documents.
 - [ ] [#qr72] [recommended] By May 27, 2026, send Lucas a written bridge plan: $500 now from personal funds if available, ask for the remaining $500 to be paid after EFS payment clears or by an agreed near-term date, and invoice EFS immediately for $5,000 with a smaller immediate continuation retainer accepted if Judith pushes back.
 - [ ] [#s62t] [recommended] Prepare EFS invoice with truthful hours/value; Lucas cost is $4,150 (83h @ $50), so floor is 42h/$4,200 and recommended ask is 50-60h/$5,000-$6,000 with any concession as an explicit courtesy credit.
@@ -135,4 +163,5 @@ preset #spec-test-commit-push-deploy
 - 2026-05-24 [#tmo-cache-model] TMO cache contract: define D1 read-model tables plus R2 raw payload/document object paths, TMO IDs, cursors, checksums, last_synced/stale/deleted state, and conflict policy for portal-visible data.
 - 2026-05-24 [#cf-d1-cache-deploy] Resolve Cloudflare D1 API authorization for account 1e7e194ff8da4ad9e40ce041aea84f76, apply migration 0023_tmo_cache_and_r2_documents.sql, then deploy worker commit 3ada2de.
 - 2026-05-24 [#ck54] Investor portal private document storage: add a separate private R2_DOCUMENTS bucket plus provider-neutral document metadata and authenticated download APIs; treat R2 as the canonical uploaded-document cache and keep Dropbox as a later sync adapter.
+- 2026-05-24 [#njsx] Tier 0: Cloudflare WAF + upload limits
 <!-- /agent:done -->

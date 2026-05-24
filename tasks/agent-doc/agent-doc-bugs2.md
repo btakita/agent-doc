@@ -33,7 +33,37 @@ Resolved #qfixture; auto queue drained.
 
 Compacted content:
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:b89e0abb -->
+❯ When I ran JB `Compact Exchange`, JB had a `File Cache Conflict`.
+
+❯ As I was typing in this prompt, the prompt line was duplicated...and the full-document IPC corrupt document issue occurred. How can we make agent-doc Codex more robust so this does not happen anymore? Are there race conditions? Is the full-document IPC too aggressive?
+
+❯ #spec-test-build-install-commit-push
+### Re: JB Compact Exchange conflict and duplicate prompt prefix — gpt-5
+
+The current failure path was not old full-document response IPC being too aggressive; that fallback is already disabled on the template response path. The remaining race was more specific: `Compact Exchange` could still take the guarded direct-disk write path while JetBrains had an idle but unsaved editor buffer. Typing-idle only proved that edits had stopped, not that the visible editor buffer and disk were the same. That explains both the JetBrains File Cache Conflict and the stale/duplicated prompt-prefix state that could survive around compact exchange.
+
+I changed the closeout path to fail closed on that exact condition. Editor integrations now send a cheap live-buffer digest through FFI on markdown document changes, and direct visible writes, including compact exchange, compare that digest after the typing-idle wait against the content they are about to overwrite. If the editor-visible buffer differs from the expected disk/merge content, the binary logs `visible_write_deferred_live_buffer_changed` / `visible_write_current_changed` and refuses the write with a save-or-discard message instead of corrupting the session document.
+
+I also tightened the JetBrains action itself: JB Compact Exchange now waits for the tracked document to go idle, saves documents through `FileDocumentManager`, and only then invokes the compact command. JetBrains and VS Code both publish the new SHA-256/byte-length digest, and the specs now require this guard for direct disk writes.
+
+Verification completed:
+
+- `cargo fmt`
+- `git diff --check`
+- targeted regressions: `cargo test live_buffer_digest_records_visible_content`, `cargo test visible_write_guard_blocks_when_idle_editor_buffer_differs_from_disk`, `cargo test component_compact_direct_fallback_rejects_idle_unsaved_editor_buffer`
+- full suite: `make check`
+- VS Code: `npm test`, `npm run package`, `agent-doc plugin install --local vscode` installed `agent-doc-0.2.21.vsix`
+- JetBrains: `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin`, `agent-doc plugin install --local jetbrains` installed `agent-doc-jetbrains-0.2.130` to `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`
+- local install: `cargo install --path .`, `cargo build --release --lib`, `agent-doc lib-install`
+- GitHub CI: run `26371267459` passed, including the `make tmux-ci` step
+
+Local commits made before this session-document closeout:
+
+- `src/agent-doc`: `fea1aa7` (`fix: guard compact exchange against unsaved editor buffers`)
+- root gitlink update: `256ccfb` (`chore: update agent-doc submodule`)
+
+Per the agent-doc closeout contract, I am pushing after this finalized document write completes.
+<!-- agent:boundary:d2ef5c66 -->
 <!-- /agent:exchange -->
 ###
 <!--

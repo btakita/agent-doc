@@ -211,7 +211,6 @@ Commits pushed:
 No EFS `CI` workflow or tmux target exists. The pre-existing untracked `src/equityfundingsource-dev/tmp/` directory was left untouched. After my final push, unrelated local agent-doc commits appeared on root `main`; I left them unpushed and untouched.
 
 ❯ lucas-huang may not have the necessary packages to use the runbooks. Please add development dependencies so any programmer can use the runbooks.
-❯ lucas-huang may not have the necessary packages to use the runbooks. Please add development dependencies so any programmer can use the runbooks.
 ❯ #spec-test-commit-push
 ### Re: Runbook development dependencies — gpt-5
 
@@ -255,7 +254,25 @@ Notes:
 - A standalone `bun run typecheck` now gets past the missing `bun-types` failure and exposes existing TypeScript errors, so I did not wire typecheck into `make check` in this scoped dependency fix.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:67f23c16 -->
+Implemented and pushed.
+
+Added root dev dependencies so `bun install` provides the runbook tooling/types: `bun-types`, `typescript`, existing `wrangler`, and `@cloudflare/workers-types`. Also updated the README, TMO simulator runbook, PRD, and simulator test coverage.
+
+Pushed commits:
+
+- EFS repo: `57630c6 Add runbook development dependencies`
+- Root clean submodule pointer: `8087181e4 Update EFS runbook dependency submodule`
+- Session closeout committed locally: `d7c88b919`
+
+Verification passed:
+
+- `bun install`
+- `bun test tests/tmo-sim.test.ts tests/prd.test.ts`
+- `git diff --check`
+- `make check` with 46 tests plus app and Worker builds
+
+No EFS `CI` workflow or tmux target exists. I left the pre-existing `src/equityfundingsource-dev/tmp/` untracked directory untouched and avoided pushing unrelated local root `agent-doc` commits.
+<!-- agent:boundary:c65d2a96 -->
 <!-- /agent:exchange -->
 ###
 

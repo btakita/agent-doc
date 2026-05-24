@@ -64,7 +64,30 @@ Push:
 
 Escalation: none required.
 Confidence: high for the spec/test change; the remaining audit-docs issue is isolated to the pre-existing managed instruction-surface drift described above.
-<!-- agent:boundary:63110f81 -->
+❯ Why does agent-doc Codex have the full-document IPC corruption issue but not agent-doc Claude Code?
+### Re: Codex IPC corruption — gpt-5
+
+The difference is not that Codex should have a separate document-write model. It is that Codex has an extra recovery/input surface before the shared closeout layer, and Claude Code normally does not hit that surface.
+
+Claude Code enters through the slash-command/Skill flow: `/agent-doc <FILE>` produces an explicit response payload, and the session document is mutated by `agent-doc finalize` or `agent-doc write --commit`. Its bridge is mainly a post-write hook/VCS signal. It does not need to capture the final assistant answer out of a generic harness stop event and replay that text.
+
+Codex enters through a plain `agent-doc <FILE>` prompt plus repo-local Codex hooks. The Codex `Stop` hook is a backstop for cases where Codex is about to end while an agent-doc cycle is still open. That hook receives `last_assistant_message`; if that value is a clean single assistant closeout, it can be replayed through repair/finalize. If it is instead a full transcript, full `agent:exchange` dump, prompt lines, or multiple response blocks, replaying it is exactly the full-document corruption class.
+
+So the root cause is the Codex-only Stop-hook/direct-chat recovery path trusting or replaying a broader payload than the normal assistant closeout shape. Claude Code avoids the observed failure because its usual path already has the response body separated from the session transcript before persistence. The right standardization is therefore:
+
+- keep harness-specific launch/routing/capability handling for Codex vs Claude Code;
+- require every harness to hand only final assistant response text to the shared closeout layer;
+- block Codex Stop-hook replay unless `last_assistant_message` validates as one response or one `patch:exchange` closeout;
+- keep full-content editor IPC disabled, including stale fallback files and recovery paths.
+
+This is now reflected in the specs I inspected: `src/agent-doc/specs/codex-support.md`, `src/agent-doc/specs/05-agent-backend.md`, `src/agent-doc/specs/07-closeout-commands.md`, and `src/agent-doc/specs/09-git-integration.md`. The implementation also has `src/agent-doc/src/replay_guard.rs`, which is the right enforcement boundary: ambiguous transcript-shaped payloads should be blocked, not auto-extracted.
+
+Changed paths: none; this was an explanation-only cycle.
+Commands: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `rg`, `sed`.
+Verification: no code changes, so I did not run the test suite.
+Escalation: none.
+Confidence: high on the architectural cause; any remaining question is whether every legacy Codex recovery path now consistently calls the replay guard before saving pending replay.
+<!-- agent:boundary:8db7f681 -->
 <!-- /agent:exchange -->
 ###
 <!--

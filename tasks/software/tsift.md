@@ -30,36 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260523-222948.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260524-123945.md`*
 
 Compacted content:
-- Archived 2 response topic(s): sqlite graph performance next steps; gdbfalkorreal location
+- Archived 4 response topic(s): graph backend cache queue; benchmark queue closeout; Please run a benchmark on the performance improvements for this queue run; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-### Re: graph backend cache queue — gpt-5
-
-Completed the active graph backend queue and pushed it.
-
-- `#gdbprepcache`: added disk-backed conflict-matrix preparation and graph/evidence reuse under `.tsift/conflict-matrix-cache`, with report statuses for `memory_hit`, `disk_hit`, and `computed`. The conformance test now verifies a second CLI invocation hits the disk prep cache and target-scoped graph evidence cache.
-- `#gdbcurbase` and `#gdbfullreg`: refreshed the real agent-loop graph/index state and appended four benchmark reports to `fixtures/graph-db-performance-history.json`: three bounded FalkorDB candidate samples and one `--full-projection` sample.
-- `#gdbfalkorreal`: kept FalkorDB behind `backend-eval`; the new real benchmark still shows the prototype Falkor path regressing on full real graph scans, so this is evidence for holding the gate rather than promotion.
-
-Benchmark notes: `metric-digest` showed conflict-matrix preparation improved about 99%+ on the real agent-loop sample, including a 99.999% per-1k-graph-rows prep-rate improvement. The all-candidate/four-target run stayed too expensive after more than five minutes, so I used repeated single-target Falkor samples plus the full-projection sample for practical evidence. `tsift status --fix --json` still reported the overall workspace index as stale only because the configured `FDE-Project-Interview` scope path is missing; the tsift scope was refreshed.
-
-Verification and release path:
-
-- Local: `cargo check`, focused graph tests, full `make check`, and `cargo install --path .` passed; installed `tsift --version` is `tsift 0.1.42`.
-- CI: tsift run `26345952453` passed both `clippy + test` and live Convex acceptance. The superproject `Agent Doc` run `26345957563` failed before any job steps were allocated for both `check` and `tmux-ci`, so I classified that as an external CI-start blocker rather than a red tmux regression.
-- Commits pushed: `btakita/tsift@dd4a3fc` and superproject `btakita/agent-loop@4459e752a`.
-### Re: benchmark queue closeout — gpt-5
-
-Queue closeout repair: the benchmark requested by this queue item was run and recorded in the immediately preceding response. No additional code or benchmark commands were run in this repair closeout; this entry exists so the auto queue can consume the benchmark prompt cleanly after the earlier pending-add retry path.
-### Re: Please run a benchmark on the performance improvements for this queue run — gpt-5
-
-Completed. The benchmark result and follow-up are recorded in the preceding `queue benchmark` response. This exact-heading closeout is only to let the `agent:queue auto` guard match and consume the queue head.
-### Re: Please run a benchmark on the performance improvements for this queue run — gpt-5
-
-Queue head consumed via `agent-doc run` after the manual benchmark response had already been finalized. No additional benchmark commands were run in this synthetic closeout.
-<!-- agent:boundary:eaad2e80 -->
+<!-- agent:boundary:e55a8b55 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -29,45 +29,12 @@ prompt_presets:
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260524-012242.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260524-130742.md`*
 
 Compacted content:
-- Archived 1 response topic(s): Blog publishing
+- Archived 1 response topic(s): Portal brand home link
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-❯ Please make .sb-brand in the portal pages link to the home page.
-❯ #spec-test-commit-push
-### Re: Portal brand home link — gpt-5
-
-Implemented `.sb-brand` as a home link (`href="/"`) in the borrower, investor, broker, and admin runtime portal sidebars, while preserving the existing sidebar brand styling and preventing generic link hover underlines from applying to the brand mark.
-
-I also updated the three static portal reference HTML files, added the PRD acceptance criterion, and added coverage in `tests/portal-brand.test.ts` plus the PRD test.
-
-Changed paths:
-- `docs/efs_borrower_portal_full.html`
-- `docs/efs_broker_portal_full.html`
-- `docs/efs_investor_portal_full.html`
-- `lib/ui--browser--efs/portal/admin/layout.tsx`
-- `lib/ui--browser--efs/portal/borrower/layout.tsx`
-- `lib/ui--browser--efs/portal/broker/layout.tsx`
-- `lib/ui--browser--efs/portal/investor/layout.tsx`
-- `lib/ui--server--efs/portal.ts`
-- `prds/equity-funding-source-lending-portal-prd.md`
-- `tests/portal-brand.test.ts`
-- `tests/prd.test.ts`
-
-Verification:
-- `bun test tests/portal-brand.test.ts tests/prd.test.ts` — 7 pass.
-- `make check` — 39 pass, app build passed, worker build passed.
-- GitHub Actions: `gh run list --workflow CI --limit 1` reported no workflow named `CI`; `gh workflow list` and `gh run list --limit 5` returned no configured workflows/runs for this repo, so no tmux CI leg was available to inspect.
-
-Commit and push:
-- EFS repo commit: `4be5993 fix: link portal brand to home`.
-- Pushed `main` to `origin`.
-- Existing untracked `tmp/` files in the EFS repo were left uncommitted.
-
-Confidence: high.
-Escalation: none.
-<!-- agent:boundary:8a393ec8 -->
+<!-- agent:boundary:aeabb2b4 -->
 <!-- /agent:exchange -->
 ###
 

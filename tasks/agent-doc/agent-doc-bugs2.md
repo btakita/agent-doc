@@ -29,12 +29,11 @@ Resolved #qfixture; auto queue drained.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260524-200258.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260524-200315.md`*
 
 Compacted content:
-- Archived 1 response topic(s): queued agent-doc fixes
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:316b0e29 -->
+<!-- agent:boundary:b89e0abb -->
 <!-- /agent:exchange -->
 ###
 <!--

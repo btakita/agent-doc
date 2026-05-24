@@ -116,7 +116,28 @@ Completed the cache deploy queue.
 `#ck54` was already implemented in commit `3ada2de`; this cycle confirmed it is live behind the deployed Worker and marked it done. No new repo files changed in this cycle, so there was nothing new to commit or push.
 
 The project `CLOUDFLARE_API_TOKEN` loaded from `passage:btak/equityfundingsource/cloudflare_api_token` still lacks D1 permissions: `cf:d1:list` fails with Cloudflare auth code `10000`, and the token-backed migration path fails with code `7403`. Deployment succeeded by using the existing Wrangler OAuth token, which has `d1:write`; I added a recommended backlog item to update the passage token so future scripted deploys do not need that bypass.
-<!-- agent:boundary:a3feb06c -->
+❯ do [#1v5m]. #spec-test-commit-push-deploy
+### Re: do [#1v5m] — gpt-5
+
+I could not safely complete `#1v5m` from this shell, so I gated it rather than replacing the project token with a short-lived OAuth bearer.
+
+What I verified:
+
+- The current passage-backed project token is active, but `bun run cf:d1:list` still fails with Cloudflare auth code `10000` for D1 access.
+- The same token cannot list Cloudflare token permission groups: `/user/tokens/permission_groups` returns `403` / `9109`.
+- The Wrangler OAuth token can access D1, and it can be forced through `CLOUDFLARE_API_TOKEN` for a one-off command, but `/user/tokens/verify` rejects it as an API token. Storing that OAuth access token in `passage:btak/equityfundingsource/cloudflare_api_token` would just turn the prior OAuth bypass into a project secret, not create the durable API token this backlog item asks for.
+- Official Cloudflare docs describe creating API tokens through `/user/tokens` and resolving permission group IDs through `/user/tokens/permission_groups`; the permission reference lists `API Tokens Edit/Write` as the user-level permission needed to manage tokens and `D1 Read` / `D1 Edit` as the account permissions needed for D1.
+
+Verification:
+
+- `make check` passed: 60 tests, app build, and worker build.
+- No tracked repo files changed in `src/equityfundingsource-dev`; only the pre-existing untracked `tmp/` directory remains.
+- No code commit, push, or deploy was appropriate because no repo code changed and the requested secret rotation is externally blocked.
+
+Manual unblock: create or edit the Cloudflare API token in the dashboard with at least account-scoped D1 Read/Edit plus the existing Worker/R2 permissions used by this project, then update `passage:btak/equityfundingsource/cloudflare_api_token`. After that, `bun run cf:d1:list` should pass without unsetting `CLOUDFLARE_API_TOKEN`.
+
+Sources: [Cloudflare create tokens via API](https://developers.cloudflare.com/fundamentals/api/how-to/create-via-api/), [Cloudflare create token API](https://developers.cloudflare.com/api/resources/user/subresources/tokens/methods/create/), [Cloudflare API token permissions](https://developers.cloudflare.com/fundamentals/api/reference/permissions/).
+<!-- agent:boundary:386aee79 -->
 <!-- /agent:exchange -->
 ###
 
@@ -129,7 +150,6 @@ preset #spec-test-commit-push-deploy
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#1v5m] [recommended] Update passage btak/equityfundingsource/cloudflare_api_token to include Cloudflare D1 read/write permissions so the project cf:d1:* scripts can run without the OAuth bypass.
 - [/] [#dropbox-sync-adapter] Dropbox sync adapter: after Dropbox access is available, push/pull R2_DOCUMENTS with idempotent retries, backfill, tombstone handling, and per-document sync logs.
 - [ ] [#dzmm] TMO webhooks: confirm outbound webhook support (Robert to check with Mortgage Office)
 - [ ] [#qakx] Investor portal document pages: replace static Documents, Statements, and Accreditation fixture data with D1/R2-backed APIs and authenticated upload/request/download flows.
@@ -169,6 +189,7 @@ preset #spec-test-commit-push-deploy
 ## Review
 
 <!-- agent:review -->
+- [/] [#1v5m] [recommended] Update passage btak/equityfundingsource/cloudflare_api_token to include Cloudflare D1 read/write permissions so the project cf:d1:* scripts can run without the OAuth bypass.
 - [/] [#jnzs] [recommended] Await Judith or EFS reviewer approval on funded-deal images, copy, lien-position wording, and legal/disclosure language before invoicing or launch sign-off. Technical D1 migration, Worker deploy, and live funded-deals/admin-route smoke tests completed 2026-05-23.
 <!-- /agent:review -->
 

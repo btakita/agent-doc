@@ -534,6 +534,66 @@ fn write_commit_empty_stdin_adopts_visible_agent_owned_partial_patchback() {
 }
 
 #[test]
+fn write_commit_empty_stdin_repair_preserves_post_exchange_scratch_comment() {
+    let (tmp, doc) = setup_session_stream_doc();
+    let prompt = "The repair write --commit scratch comment should not be deleted. #spec-test-build-install-commit-push";
+    let original = session_stream_doc_content()
+        .replace("❯ Please reply", &format!("❯ {prompt}"))
+        .replace(
+            "<!-- /agent:exchange -->\n\n<!-- agent:pending -->",
+            &format!(
+                "<!-- /agent:exchange -->\n###\n\n<!--\n{prompt}\n#spec-test-build-install-commit-push\n---\nKeep repair scratch notes visible.\n-->\n\n<!-- agent:pending -->"
+            ),
+        );
+    fs::write(&doc, &original).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["write", doc.to_str().unwrap(), "--stream"])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: repair comment ownership — gpt-5\nbody\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .failure();
+
+    let snapshot = only_snapshot_file(tmp.path());
+    fs::write(&snapshot, &original).unwrap();
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["write", "--commit", doc.to_str().unwrap()])
+        .write_stdin("")
+        .assert()
+        .success();
+
+    let expected_comment = format!(
+        "<!--\n{prompt}\n#spec-test-build-install-commit-push\n---\nKeep repair scratch notes visible.\n-->"
+    );
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        content.contains("### Re: repair comment ownership — gpt-5"),
+        "repair should keep the visible response:\n{content}"
+    );
+    assert!(
+        content.contains(&expected_comment),
+        "repair write --commit must preserve owned post-exchange scratch comments:\n{content}"
+    );
+
+    let head = head_blob(tmp.path());
+    assert!(
+        head.contains(&expected_comment),
+        "repair closeout commit must preserve owned scratch comments:\n{head}"
+    );
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["session-check", doc.to_str().unwrap()])
+        .assert()
+        .success();
+}
+
+#[test]
 fn write_commit_empty_stdin_repair_preserves_active_auto_queue_without_done() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();

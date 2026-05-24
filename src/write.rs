@@ -12281,6 +12281,54 @@ scratch
         assert!(repaired.contains("<!-- agent:backlog -->\n- [ ] keep me"));
         let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(log.contains("post_exchange_duplicate_prompt_comment_removed"));
+        assert!(log.contains("duplicate_prompt_artifact_repair"));
+        assert!(log.contains("post_exchange_comments=true"));
+    }
+
+    #[test]
+    fn ipc_snapshot_preserves_owned_post_exchange_prompt_html_comment_body() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("diag.md");
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let prompt = "The post-exchange IPC handoff scratch comment should not be deleted. #spec-test-build-install-commit-push";
+        let before = format!(
+            concat!(
+                "<!-- agent:exchange patch=append -->\n",
+                "❯ {prompt}\n",
+                "<!-- agent:boundary:head -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "###\n\n",
+                "<!--\n",
+                "{prompt}\n",
+                "#spec-test-build-install-commit-push\n",
+                "---\n",
+                "Keep this owned scratch note visible.\n",
+                "-->\n\n",
+                "<!-- agent:backlog -->\n",
+                "- [ ] keep me\n",
+                "<!-- /agent:backlog -->\n"
+            ),
+            prompt = prompt
+        );
+        let after = before.replace(
+        "<!-- /agent:exchange -->",
+        "### Re: IPC handoff — gpt-5\n\nHandled.\n<!-- agent:boundary:new -->\n<!-- /agent:exchange -->",
+    );
+        fs::write(&doc, &before).unwrap();
+
+        let (repaired, changed) =
+            dedupe_ipc_snapshot_content(&doc, Some(&before), &after, "test_ipc").unwrap();
+
+        assert!(
+            !changed,
+            "owned post-exchange comments should not force IPC snapshot repair"
+        );
+        assert!(
+        repaired.contains(&format!(
+            "<!--\n{prompt}\n#spec-test-build-install-commit-push\n---\nKeep this owned scratch note visible.\n-->"
+        )),
+        "IPC ack-content dedupe must preserve owned mixed scratch comments:\n{repaired}"
+    );
     }
 
     #[test]

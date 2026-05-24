@@ -771,6 +771,28 @@ impl SimWorld {
         Ok(())
     }
 
+    fn route_style_duplicate_prompt_cleanup(
+        content: &str,
+        preserve_docs: &[&str],
+    ) -> Result<String> {
+        let mut cleaned = content.to_string();
+        if let Some(tail_cleaned) =
+            crate::template::remove_duplicate_answered_exchange_prompt_tail(&cleaned)
+        {
+            cleaned = tail_cleaned;
+        }
+        if let Some(comment_cleaned) =
+            crate::template::remove_post_exchange_duplicate_prompt_comments_preserving_docs(
+                &cleaned,
+                preserve_docs,
+            )
+        {
+            cleaned = comment_cleaned;
+        }
+        crate::template::guard_no_duplicate_prompt_residue_outside_exchange(&cleaned)?;
+        Ok(cleaned)
+    }
+
     fn apply_narrow_normalization_repair(&mut self, normalize_prefix_lines: &[String]) {
         let repaired = crate::write::normalize_exchange_prefixes_for_targets(
             &self.doc,
@@ -1323,6 +1345,15 @@ impl SimWorld {
         self.doc = component.replace_content(&self.doc, content);
         Ok(())
     }
+
+    fn insert_after_exchange(&mut self, content: &str) -> Result<()> {
+        let exchange = crate::component::parse(&self.doc)?
+            .into_iter()
+            .find(|component| component.name == "exchange")
+            .ok_or_else(|| anyhow!("missing component `exchange`"))?;
+        self.doc.insert_str(exchange.close_end, content);
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -1366,6 +1397,19 @@ fn response_patch(topic: &str) -> String {
 
 fn fallback_response(topic: &str) -> String {
     format!("### Re: {topic} — gpt-5\n\nImplemented and verified through fallback.\n")
+}
+
+fn post_exchange_scratch_comment(prompt: &str) -> String {
+    format!(
+        "\n###\n\n<!--\n{prompt}\n#spec-test-build-install-commit-push\n---\nUse route, preflight, write, IPC, repair, and compact no-delete coverage.\n-->\n"
+    )
+}
+
+fn assert_owned_scratch_comment_preserved(doc: &str, prompt: &str) {
+    assert!(
+        doc.contains(&post_exchange_scratch_comment(prompt)),
+        "owned post-exchange scratch comment must survive:\n{doc}"
+    );
 }
 
 #[derive(Debug)]
@@ -1526,6 +1570,105 @@ fn closeout_sim_medium_seed_corpus_runs_wider_deterministic_budget() {
     assert!(
         coverage.sync_protected_expansions > 0 && coverage.sync_detachable_replacements > 0,
         "medium seed corpus must keep sync expansion/replacement coverage"
+    );
+}
+
+#[test]
+fn post_exchange_comment_ownership_sim_covers_cleanup_and_handoff_paths() {
+    let prompt = "The post-exchange scratch ownership prompt should not be deleted by duplicate cleanup. #spec-test-build-install-commit-push";
+    let file = Path::new("sim.md");
+    let mut world = SimWorld::new(9_901);
+    world.append_to_exchange(&format!("❯ {prompt}\n")).unwrap();
+    world
+        .insert_after_exchange(&post_exchange_scratch_comment(prompt))
+        .unwrap();
+    world.snapshot = world.doc.clone();
+
+    let route_cleaned =
+        SimWorld::route_style_duplicate_prompt_cleanup(&world.doc, &[world.doc.as_str()]).unwrap();
+    assert_eq!(
+        route_cleaned, world.doc,
+        "route-style cleanup must treat the visible document as comment ownership proof"
+    );
+
+    let preflight_cleaned = SimWorld::route_style_duplicate_prompt_cleanup(
+        &world.doc,
+        &[world.doc.as_str(), world.snapshot.as_str()],
+    )
+    .unwrap();
+    assert_eq!(
+        preflight_cleaned, world.doc,
+        "preflight-style recovery must not delete visible scratch comments"
+    );
+
+    let direct_write = crate::write::normalize_template_structure_or_fail_preserving(
+        &world.doc,
+        file,
+        Some(&world.snapshot),
+    )
+    .unwrap();
+    assert_owned_scratch_comment_preserved(&direct_write, prompt);
+
+    let (ipc_handoff, changed) = crate::write::dedupe_ipc_snapshot_content(
+        file,
+        Some(&world.snapshot),
+        &direct_write,
+        "sim_ipc",
+    )
+    .unwrap();
+    assert!(
+        !changed,
+        "IPC/plugin handoff must not rewrite owned scratch comments"
+    );
+    assert_owned_scratch_comment_preserved(&ipc_handoff, prompt);
+
+    let mut repair_world = world;
+    repair_world.captured_response = Some(response_patch("comment ownership"));
+    repair_world.apply_captured_response().unwrap();
+    let repaired_write = crate::write::normalize_template_structure_or_fail_preserving(
+        &repair_world.doc,
+        file,
+        Some(&repair_world.snapshot),
+    )
+    .unwrap();
+    assert_owned_scratch_comment_preserved(&repaired_write, prompt);
+
+    let compacted_exchange = "### Session Summary\n\nCompacted content archived.\n";
+    repair_world
+        .replace_component_content("exchange", compacted_exchange)
+        .unwrap();
+    assert_owned_scratch_comment_preserved(&repair_world.doc, prompt);
+
+    let generated = {
+        let mut generated_world = SimWorld::new(9_902);
+        generated_world
+            .append_to_exchange(&format!("❯ {prompt}\n"))
+            .unwrap();
+        let before = generated_world.doc.clone();
+        generated_world
+            .insert_after_exchange(&post_exchange_scratch_comment(prompt))
+            .unwrap();
+        (before, generated_world.doc)
+    };
+    let (scrubbed, changed) = crate::write::dedupe_ipc_snapshot_content(
+        file,
+        Some(&generated.0),
+        &generated.1,
+        "sim_generated",
+    )
+    .unwrap();
+    assert!(
+        changed,
+        "generated duplicate comment residue without ownership proof must still be scrubbed"
+    );
+    assert!(
+        !scrubbed.contains(&format!("<!--\n{prompt}")),
+        "generated duplicate prompt text should be removed from post-exchange comment residue:\n{scrubbed}"
+    );
+    assert!(
+        scrubbed
+            .contains("Use route, preflight, write, IPC, repair, and compact no-delete coverage."),
+        "unrelated scratch lines in generated mixed comments must remain:\n{scrubbed}"
     );
 }
 

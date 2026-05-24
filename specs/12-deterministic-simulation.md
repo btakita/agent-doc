@@ -126,6 +126,12 @@ Closeout invariants currently exercised by the simulator:
 - Boundary cleanup leaves at most one live exchange boundary marker.
 - IPC snapshot duplicate-prompt repair removes an extra live-typed prompt copy
   before the repaired response crosses the commit boundary.
+- A focused post-exchange scratch-comment ownership fixture preserves visible
+  ordinary comments through route-style cleanup, preflight-style recovery,
+  direct write normalization, IPC/plugin snapshot handoff, repair-style
+  write-closeout, and compact-style exchange replacement, while still proving
+  generated duplicate comment residue without ownership proof is scrubbed
+  line-by-line.
 - Each named closeout fault point has an explicit fail-closed, recovery, or
   no-op outcome.
 

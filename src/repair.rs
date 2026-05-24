@@ -797,7 +797,11 @@ fn repair_template_doc_if_needed(
             &snapshot_content,
             file,
         );
-        repaired = write::normalize_template_structure_or_fail(&repaired, file)?;
+        repaired = write::normalize_template_structure_or_fail_preserving(
+            &repaired,
+            file,
+            Some(&prompt_input),
+        )?;
     }
     let prompt_changed = repaired != prompt_input;
 

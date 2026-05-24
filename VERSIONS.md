@@ -13,7 +13,10 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   mutation. Generated duplicate comment residue can still be scrubbed when it is
   absent from both the baseline/snapshot and the current file used for the
   write, while exact duplicate answered prompt tails inside `agent:exchange`
-  remain auto-cleaned.
+  remain auto-cleaned. The regression suite now includes a SimWorld/integration
+  no-delete matrix across route cleanup, preflight recovery, direct write,
+  IPC/plugin handoff, repair write-commit, compact exchange, and generated
+  residue diagnostics.
 
 - **Compact Exchange no longer emits full-document editor IPC.** Template
   exchange compaction now uses the visible idle + compare-and-swap direct-write

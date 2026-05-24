@@ -1355,6 +1355,57 @@ mod tests {
     }
 
     #[test]
+    fn component_compact_preserves_post_exchange_scratch_comment() {
+        let prompt = "The compact exchange scratch comment should not be deleted. #spec-test-build-install-commit-push";
+        let doc = format!(
+            concat!(
+                "---\nagent_doc_session: test-compact-scratch\nagent_doc_format: template\n---\n\n",
+                "## Exchange\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "❯ {prompt}\n",
+                "### Re: topic one\n\nResponse one.\n\n",
+                "### Re: topic two\n\nResponse two.\n",
+                "<!-- agent:boundary:head -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "###\n\n",
+                "<!--\n",
+                "{prompt}\n",
+                "#spec-test-build-install-commit-push\n",
+                "---\n",
+                "Keep compact scratch notes visible.\n",
+                "-->\n\n",
+                "<!-- agent:backlog -->\n",
+                "- [ ] [#aaaa] keep me\n",
+                "<!-- /agent:backlog -->\n"
+            ),
+            prompt = prompt
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.md");
+        std::fs::write(&file, &doc).unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
+        snapshot::save(&file, &doc).unwrap();
+
+        run_component_compact(&file, &doc, "exchange", Some("Compacted summary."), false).unwrap();
+
+        let result = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            result.contains(&format!(
+                "<!--\n{prompt}\n#spec-test-build-install-commit-push\n---\nKeep compact scratch notes visible.\n-->"
+            )),
+            "compact exchange must leave post-exchange scratch comments outside the compacted component:\n{result}"
+        );
+        let snapshot_after = snapshot::load(&file).unwrap().unwrap();
+        assert!(
+            snapshot_after.contains("Keep compact scratch notes visible."),
+            "compact snapshot should preserve owned post-exchange scratch comments:\n{snapshot_after}"
+        );
+    }
+
+    #[test]
     fn component_compact_uses_guarded_direct_write_when_patches_dir_exists() {
         let doc = concat!(
             "---\nagent_doc_session: test-ipc\nagent_doc_format: template\n---\n\n",

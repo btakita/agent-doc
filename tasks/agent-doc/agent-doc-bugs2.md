@@ -117,7 +117,27 @@ Commands: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `codex --he
 Verification: no code changes, so I did not run tests.
 Escalation: none.
 Confidence: high for the installed Codex behavior in this workspace; lower only for future Codex CLI versions if OpenAI later adds project-defined slash-command support.
-<!-- agent:boundary:54ed93d0 -->
+❯ What are the #next-steps for the recommended path?
+### Re: recommended Codex path next steps — gpt-5
+
+The recommended path is to keep Codex-native invocation, keep Codex hooks, and remove the unsafe part of the recovery surface rather than trying to emulate Claude Code slash commands.
+
+Next steps, in priority order:
+
+1. Make `tasks/agent-doc/plan-cancelled-stop-hook-exchange-replay.md` the implementation plan for the recommended path. The core change is: `UserPromptSubmit` may track active document/directive context, but `Stop` must only replay payloads that validate as one assistant closeout or one `patch:exchange` response.
+2. Audit every Codex Stop/direct-chat recovery entrypoint before `repair::save_pending(...)`. If an entrypoint can save `last_assistant_message`, it must call the replay guard first and block transcript/full-exchange/full-document shapes.
+3. Add regressions around both sides of the boundary: valid single-response Stop payload succeeds; full `agent:exchange`, prompt-line transcript, multiple `### Re:` headings, and full-document dumps are blocked and saved only as diagnostics.
+4. Keep explicit `finalize` / `write --commit` as the primary success path in the Codex instructions. The Stop hook should be a fail-closed backstop, not the normal writer.
+5. After the fix, run targeted Stop-hook tests, broader `src/agent-doc` tests, `make check`, and the tmux/CI leg before closing the implementation item.
+
+I added the top backlog item for this path as `#cstop`, ahead of the existing recommended items.
+
+Changed paths: session document backlog only.
+Commands: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `tsift status --fix`, `sed`, `rg`.
+Verification: no code changes, so I did not run tests.
+Escalation: none.
+Confidence: high; the remaining implementation work is scoped to enforcing the replay guard consistently and proving it with regressions.
+<!-- agent:boundary:063b2879 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -135,6 +155,7 @@ dispatch #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#cstop] [recommended] Implement the conservative Codex Stop-hook replay path in tasks/agent-doc/plan-cancelled-stop-hook-exchange-replay.md: keep UserPromptSubmit tracking, require explicit finalize/write primary closeout, and block transcript/full-exchange payloads before pending replay.
 - [ ] [#e86b] [recommended] Resolve pre-existing root AGENTS.md managed instruction-surface drift from the tsift code-navigation block so `cargo run --quiet -- audit-docs` can pass.
 - [ ] [#rpatch] Fix response patchback recovery so stale-cycle closeout cannot report already committed while a valid visible response patchback remains uncommitted; implement tasks/agent-doc/plan-response-patchback-uncommitted.md.
 - [ ] [#qresidue] [recommended] Fix inactive agent:queue residue being read as active response context; implement tasks/agent-doc/plan-drained-non-auto-queue-cleanup.md.

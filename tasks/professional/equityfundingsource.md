@@ -60,13 +60,56 @@ I would implement the remaining work in this order:
 8. Verify the full investor lifecycle. Seed a borrower/admin/investor path with the TMO simulator: publish a deal, attach R2 due-diligence docs, view them as investor, submit lender-account data, commit funds, accept the fund as admin, confirm positions/dashboard/distributions update, then publish and download a statement.
 
 The key architecture choice is to make R2 the current source of truth for private uploads and treat Dropbox as an optional downstream integration. That avoids blocking on Dropbox credentials and also gives you a staging layer if Dropbox fails later.
-<!-- agent:boundary:3298dfd8 -->
+❯ We do not yet have agent integration to perform OCR. Please carve out #next-steps for OCR integration.
+❯ We may also need a proper DB. Can the sqlite + graphdb approach work? Is tsift useful?
+❯ Should we use convex, neo4j, or another graphdb? Consider costs, effectiveness, and maintenance.
+### Re: OCR integration and database choice — gpt-5
+
+I would not make an interactive agent the OCR engine. OCR should be an app-native async pipeline: upload to private R2, enqueue processing, persist structured OCR/extraction results, send uncertain fields to admin review, and only write to TMO after staff approval. Agents can help inspect/review outputs later, but the portal should not depend on an agent session being present to process documents.
+
+Concrete OCR next steps:
+
+1. Add a document-processing schema around the private R2 document store: `documents`, `document_versions`, `ocr_runs`, `document_pages`, `document_chunks`, `extracted_fields`, `review_items`, `entity_mentions`, and optional `entity_edges`. Keep the original R2 key, content hash, content type, provider, run status, retry count, cost, and source page/bounding-box evidence.
+
+2. Add an async state machine: `uploaded -> screened -> queued -> parsed -> extracted -> review_required -> approved/rejected -> indexed -> tmo_writeback_done`. This matches the PRD requirement that uploaded docs are screened, classified, extracted, reviewed, and only then written to TMO.
+
+3. Build a parser adapter, not a single hard-coded provider. Interface: `parseDocument({ r2Key, contentType, documentType }) -> pages/chunks/elements`. Start with a manual/admin-triggered job before automating every upload.
+
+4. Use Ragie Parse first for hard document OCR if budget allows, because it handles scanned PDFs, tables, forms, key-value pairs, signatures, handwritten notes, and bounding boxes. Keep the output in our D1/R2 schema so Ragie is replaceable.
+
+5. Use cheaper Cloudflare-native steps for early screening: file type/size/MIME, basic classification, embeddings/search, and maybe markdown conversion where it is good enough. Do not send every document to expensive OCR/Claude by default.
+
+6. Add a Claude extraction layer only after parse/OCR has produced page text/elements. Claude should produce typed JSON field candidates with citations back to page/box/chunk ids, not opaque summaries.
+
+7. Build the admin review UI before TMO writeback. Required fields: extracted value, normalized value, confidence, source page/snippet, reviewer decision, reviewer note, and target TMO field. Approval should be explicit per field or grouped review packet.
+
+8. Add cost and safety guardrails: per-document page count cap, per-account daily processing cap, provider timeout/retry limits, PII-aware logs, audit trail, and a manual reprocess button.
+
+Database recommendation: keep D1/SQLite plus R2 as the canonical system for now. It is already deployed in this app, and it is the right shape for portal auth, users, loans, documents, funds, review queues, and audit history. For graph-like behavior, start with normal SQL tables: `entities`, `entity_mentions`, and `entity_edges`. That gives us enough to ask, "which borrowers/properties/docs/deals are related?" without running a second production database.
+
+A full graph database should be a derived index later, not the source of truth. The trigger to add one is when SQL edge tables become painful for real workloads: repeated multi-hop relationship questions, graph visualization/analytics, fraud/relationship analysis, or knowledge-graph queries that are central to Judith's document dashboard. Until then, a separate graph DB mostly adds dual writes, sync bugs, auth duplication, backups, and operational cost.
+
+Provider read:
+
+- D1/R2 is the lowest-maintenance path. Current D1 pricing is usage/row based with no active-instance charge, and the paid plan includes large monthly read/write allowances before overage. R2 has 10 GB-month free, low per-GB storage, request-based Class A/B charges, and no egress fee. Sources: [D1 pricing](https://developers.cloudflare.com/d1/platform/pricing/), [R2 pricing](https://developers.cloudflare.com/r2/pricing/).
+- Cloudflare Vectorize is a good first semantic-search/index layer if we want to stay Cloudflare-native; official examples price even a 50k-vector/200k-query production-ish workload at a few dollars/month before included usage. Source: [Vectorize pricing](https://developers.cloudflare.com/vectorize/platform/pricing/).
+- Ragie is useful for OCR/parse/index if we want quality faster than building the pipeline ourselves. Current public pricing shows Starter at $100/month, Pro at $500/month, included page processing, and per-page overage for fast/hi-res processing. Source: [Ragie pricing](https://www.ragie.ai/pricing), [Ragie Parse](https://www.ragie.ai/parse).
+- Convex is not a graph database. It is a realtime/backend platform. It could be good for a greenfield app, but adopting it here would mean migrating away from the existing Cloudflare Worker/D1 architecture. Current Professional pricing starts at $25/developer/month, with enterprise minimums much higher. Source: [Convex pricing](https://www.convex.dev/pricing).
+- Neo4j is the serious graph option, but not the first move for EFS. AuraDB Professional currently starts at a 1 GB cluster around $65/month and scales from there. Use it only if graph queries become a primary product feature. Source: [Neo4j pricing](https://neo4j.com/pricing/).
+- `tsift` is useful for us as a development and agent-navigation tool, not as the production EFS knowledge store. It can help inspect repo/session/docs and maybe prototype extraction ideas, but it is not tenant-authenticated, admin-reviewable, or designed as the client-facing document index.
+
+My recommended architecture is: D1 for canonical records and review state, R2 for private originals and derived artifacts, Ragie Parse or a pluggable OCR provider for hard parsing, D1 tables for extracted fields/entities/edges, and Ragie/Vectorize as the derived retrieval layer. Defer Neo4j/FalkorDB/Convex until a measured search/relationship workload proves that SQL plus a vector/retrieval layer is insufficient.
+<!-- agent:boundary:4550b8d0 -->
 <!-- /agent:exchange -->
 ###
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- [ ] [#7fx4] OCR ingestion schema/state machine: add provider-neutral document_processing tables for documents, versions, OCR runs, pages/chunks, extracted fields, entity mentions/edges, review decisions, provider cost, and retry/error state.
+- [ ] [#d1h2] OCR provider adapter: process private R2 documents through pluggable parsers starting with Ragie Parse or Workers AI/Claude where appropriate; keep original R2 object as source of truth and persist source page/bounding-box evidence.
+- [ ] [#f5kq] OCR admin review workflow: show extracted fields with source evidence, confidence, and diffable approval/rejection before any TMO borrower, loan, lender, or loan-application writeback.
+- [ ] [#ntcr] Search/index spike: keep D1/R2 canonical and evaluate Ragie index plus Cloudflare Vectorize/SQL edge tables before adopting Neo4j, FalkorDB, Convex, or another separate graph database.
 - [ ] [#ck54] Investor portal private document storage: add a separate private R2_DOCUMENTS bucket plus provider-neutral document metadata and authenticated download APIs; keep Dropbox as a later sync adapter.
 - [ ] [#qakx] Investor portal document pages: replace static Documents, Statements, and Accreditation fixture data with D1/R2-backed APIs and authenticated upload/request/download flows.
 - [ ] [#zjbe] Admin investor document workflow: upload and publish deal due-diligence, investor statements, tax docs, and accreditation files from R2 with visibility and review status controls.

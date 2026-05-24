@@ -217,7 +217,27 @@ bun run dev:worker
 Then retry `http://127.0.0.1:8787/admin/login`. If you still see "Database not found" after restart, the usual causes are: the server is not actually `bun run dev:worker`, another process is bound to port `8787`, or Wrangler is being launched from a different config/state path. The lightweight `bun dev` server on port `4200` is not enough for real auth because it does not provide the D1 binding.
 
 Changed paths this cycle: none in source; only the ignored local Wrangler D1 state was updated. Verification: local migrations ran successfully and a local D1 query confirmed the `users` table exists.
-<!-- agent:boundary:e40d26ea -->
+❯ I have `ADMIN_SIGNUP_ENABLED=true` in .dev.vars but don't see a register link.
+### Re: admin signup link visibility — gpt-5
+
+Your running local Worker is now reading `ADMIN_SIGNUP_ENABLED=true` correctly. I checked both routes directly:
+
+- `http://127.0.0.1:8787/admin/signup` returns `200 OK` and renders `Create admin account`.
+- `http://127.0.0.1:8787/admin/login` includes the lower-page section:
+  - `New administrator?`
+  - link target `/admin/signup`
+  - text `Register admin account`
+
+So you can go directly here now:
+
+```text
+http://127.0.0.1:8787/admin/signup
+```
+
+If you still do not see the register link in the browser, the likely issue is browser state, not the Worker env: hard refresh `/admin/login`, open it in a private window, or go straight to `/admin/signup`. The link sits below the admin password form, so it may also just be below the fold depending on the viewport.
+
+Changed paths this cycle: none. Commands run: `tsift status`, `tsift status --fix`, `agent-doc preflight`, `agent-doc plan`, `curl` checks against `/admin/login` and `/admin/signup`, and `ps -ef` to confirm `bun ./bin/dev-worker.ts` / `wrangler dev` are running. Verification: local HTTP checks confirmed signup is enabled and the register link is present in the served HTML.
+<!-- agent:boundary:1db1b758 -->
 <!-- /agent:exchange -->
 ###
 

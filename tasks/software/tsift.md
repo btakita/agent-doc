@@ -35,22 +35,61 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): sqlite graph performance next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:994b8796 -->
+### Re: graph-db backend gates — gpt-5
+
+Completed the four queued tsift items.
+
+Changed paths:
+- `src/tsift/SPEC.md`
+- `src/tsift/fixtures/graph-db-performance-history.json`
+- `src/tsift/src/main.rs`
+- `src/tsift/src/substrate.rs`
+- `src/tsift/tests/graph_db_conformance.rs`
+
+What changed:
+- `#gdbrefreshfast`: graph-db refresh JSON now distinguishes `cold_source_graph_rebuild` from `cached_source_watermark_reuse`, with conformance coverage proving the source-watermark reuse path.
+- `#gdbedgescan`: SQLite incident scans now use UNIONed `from_id`/`to_id` index probes instead of the old OR predicate; tests compare UNION results against OR semantics and assert the edge lookup, incident, and edge-property scan plans use the intended indexes.
+- `#gdbhopcaps`: backend-eval keeps the user-facing 64-hop default but adds measured 128/256/512-hop tiers on a larger synthetic deep-chain fixture, with metrics and performance-gate fixture coverage for the 512-hop tier.
+- `#gdbfalkorgate`: backend-eval promotion decisions now carry an explicit native FalkorDB gate requiring native projection load, freshness/parity, lock behavior, and install-cost proof before any performance-win claim.
+
+Verification commands:
+- `cargo test --test graph_db_conformance graph_db_backend_eval_benchmarks_candidate_stores_against_sqlite -- --nocapture`
+- `cargo test --test graph_db_conformance graph_db_scale_caps_pagination_paths_doctor_and_sqlite_plans -- --nocapture`
+- `cargo test --test graph_db_conformance graph_db_refresh_and_status_materialize_operator_report -- --nocapture`
+- `make check`
+- `git diff --check`
+- `cargo install --path .`
+- `tsift --version` -> `tsift 0.1.42`
+- `gh run view 26362394169 --json status,conclusion,jobs` -> `completed`, `success`; jobs `clippy + test` and `live Convex graph acceptance` both passed.
+
+CI and tmux evidence:
+- tsift CI run `26362394169` passed after the push.
+- Superproject Agent Doc CI run `26362404104` failed before runner steps were allocated: both `check` and `tmux-ci` jobs had empty `steps`. I’m recording that as the known external CI-start blocker rather than a code or tmux regression.
+
+Commits and push:
+- tsift: `d4b1405 feat: harden graph db backend gates` pushed to `btakita/tsift/main`.
+- superproject: `788b47be2 chore: update tsift graph db gates` pushed to `btakita/agent-loop/main`.
+- Note: the superproject branch head after push is `d13d3d13e`; my superproject change in that push is `788b47be2` and only updates the `src/tsift` submodule pointer.
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:9f9774fa -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
 <!-- agent:queue -->
+preset #spec-test-build-install-commit-push
+- do [#gdbrefreshfast]
+- do [#gdbedgescan]
+- do [#gdbhopcaps]
+- do [#gdbfalkorgate]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gdbrefreshfast] Split and optimize SQLite graph refresh cold path: measure cached vs cold refresh separately, tighten source-watermark no-op reuse, and reduce source_graph_build/projection_rows/sqlite_delta_write costs before backend switching.
-- [ ] [#gdbedgescan] Tighten SQLite edge scan/index plans: add EXPLAIN-plan regression coverage for edge_lookup, incident_edges, and edge_property_scan, and test UNION-based incident scans against the current OR predicate.
-- [ ] [#gdbhopcaps] Raise max-hop caps only behind measured guardrails: keep current defaults, add 64/128/256/512 hop synthetic high-fanout/deep-chain gates, then increase CLI caps if normalized path metrics stay flat.
-- [ ] [#gdbfalkorgate] Add a native FalkorDB promotion gate before claiming performance wins: benchmark write/projection loading, freshness/parity, lock behavior, and operator install cost instead of only read-only rows loaded from SQLite.
 - [/] [#orchdog] [recommended] Dogfood the completed graph-backed agent orchestration stack on a real agent-doc queue run: run refresh -> evidence -> conflict-matrix -> dispatch-trace -> jobs create/collect, compare worker_prompt_packet and worker_result closure fields, and capture any tsift-side fixture gaps. **Dogfood performed 2026-05-21 on `session-share/tasks/root.md` items #x63e + #v4v0; findings recorded in #gdbevid, #cmgr, #gdbidx — see `session-share/tasks/root.md` exchange "graph-backed orchestration dogfood" entry for the full pipeline trace.** **Second dogfood 2026-05-21 against `tasks/software/tsift.md` (preset `#dogfood-tsift`) surfaced 2 new gaps: #cmgrwres and #gdblock.**
 <!-- /agent:backlog -->
 

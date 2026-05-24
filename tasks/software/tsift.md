@@ -73,7 +73,40 @@ Commits and push:
 
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:9f9774fa -->
+❯ What are the performance differences from the last queue run?
+### Re: performance differences from last queue run — gpt-5
+
+I compared the previous queue baseline in tsift commit `c1c7668` (`real-agent-loop-batched-projection-2026-05-22`) with the latest fixture record in `d4b1405` (`real-agent-loop-2026-05-23-falkor-full-projection`). This is a useful comparison, but not a perfect apples-to-apples benchmark: the latest record separates full-projection cost and exercises FalkorDB/full-projection paths, while the older record was the batched projection queue baseline.
+
+Main deltas:
+
+| Metric | Previous | Latest | Delta |
+| --- | ---: | ---: | ---: |
+| Real SQLite total | 29.199s | 3.989s | -86.34% |
+| Real SQLite refresh | 24.414s | 0.462ms | effectively cache-hit reuse |
+| Real SQLite dispatch trace | 1.491s | 5.776ms | -99.61% |
+| Real SQLite evidence | 24.910ms | 1.484ms | -94.04% |
+| Real SQLite 64-hop path | 1.029s | 0.145ms | -99.99% |
+| Real FalkorDB total | 6.170s | 24.157s | +291.51% |
+| Real FalkorDB refresh | 3.238s | 5.546s | +71.30% |
+| Synthetic deep-chain SQLite total | 2.930ms | 20.709ms | +606.79% |
+| Synthetic high-degree SQLite refresh | 25.338ms | 21.320ms | -15.86% |
+| Synthetic high-degree SQLite total | 27.776ms | 33.485ms | +20.55% |
+
+Interpretation:
+
+- The big SQLite real-run win is the source-watermark/cache reuse path: `real.sqlite.refresh.duration_micros` drops from `24,413,795` to `462`. The latest run also records full-projection cost separately, so cold full rebuild is still expensive: `full_projection.source_graph_build` is `58.790s` and `full_projection.projection_rows` is `19.745s`.
+- The hot SQLite query probes are much better in the latest record: dispatch trace, evidence, and 64-hop path all moved from millisecond/second-scale timings into microsecond-to-low-millisecond timings.
+- The latest run adds new metrics that did not exist in the prior queue baseline: real SQLite `edge_lookup` is `291us`, `incident_edges` is `330us`, and `edge_property_scan` is `3.069s`. That last one is now the standout expensive indexed lookup path.
+- The max-hop work changed the synthetic deep-chain fixture shape from `384` graph rows to `640`, so the total slowdown there is expected workload expansion, not a regression against the same dataset. The new SQLite hop timings are still bounded: 128-hop `467us`, 256-hop `890us`, 512-hop `1.650ms`.
+- The FalkorDB numbers argue against promotion without the native adapter. In the latest full-projection record, FalkorDB is slower than the previous bounded/simulated path and far slower than cached SQLite for real-run total time; that matches the new promotion gate.
+
+Changed paths: none for this response.
+Commands used: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `jq` comparisons over `fixtures/graph-db-performance-history.json`, and `git show c1c7668:fixtures/graph-db-performance-history.json`.
+Verification: no code changed; this was a fixture/history comparison only.
+Escalation: none.
+Confidence: medium-high, because the comparison is accurate for the recorded fixture values but the two runs are not identical workload shapes.
+<!-- agent:boundary:1d13f800 -->
 <!-- /agent:exchange -->
 ###
 <!--

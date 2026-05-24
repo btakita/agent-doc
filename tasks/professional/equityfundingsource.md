@@ -40,7 +40,34 @@ Compacted content:
 
 
 Confirmed: ft47 sits in review as gated, follow-up `#0r24` (apply migration 0025 + smoke test once `#1v5m` unblocks) is on backlog. No fresh prompt this cycle — consuming the stale `do [#ft47]` queue head so the next invocation dispatches `#yh4b` (Admin dashboard + Cloudflare Access auth).
-<!-- agent:boundary:ffe09888 -->
+### Re: do [#yh4b] — Admin dashboard + Cloudflare Access auth — opus-4-7
+
+
+Shipped end-to-end. yh4b done; follow-up added for the Cloudflare Access env/app configuration step.
+
+What changed in `src/equityfundingsource-dev`:
+
+- **`lib/admin/routes.ts`** — new `GET /api/admin/dashboard` returns aggregate D1 metrics (`total_users`, `active_loans`, `open_applications`, `pending_lender_requests`, `pending_funds`, `recent_documents` over the trailing 7 days, `open_document_requests`) plus a `access.{team_domain_configured, aud_configured}` chip so the dashboard can show whether CF Access is wired. Each count runs through a `count_` helper that catches per-query failures and falls back to 0 + console.error so a partial schema mismatch never 500s the whole endpoint.
+- **`lib/auth/routes.ts`** — `valid_role_` now accepts `'admin'`, so admins can sign in through the shared `/login/access-callback` Google SSO route. Admin auto-create from a CF Access JWT is gated on `ADMIN_SIGNUP_ENABLED = "true"` (same flag the password signup uses) — a stranger with a valid Google JWT cannot bootstrap an admin account. Existing admin users sign in normally regardless of the flag.
+- **`lib/portal/admin/routes.ts`** — `admin_section_T` and `SECTIONS` add `'dashboard'`; `/portal-admin` root and the unknown-section fallback both now land on the dashboard.
+- **`lib/ui--browser--efs/portal/admin/dashboard.tsx`** (new) — Preact `AdminDashboard` fetches `/api/admin/dashboard`, renders 7 metric tiles + a CF Access status chip; gracefully shows loading and error states.
+- **`lib/ui--browser--efs/portal/admin/index.tsx`** + **`layout.tsx`** — wired through `admin_section_T`, `NAV_ITEMS`, `SECTION_URLS`, `SECTION_ICONS`, and the `section_content` switch so the sidebar shows "Dashboard" as the first item and the default landing.
+- **`prds/equity-funding-source-lending-portal-prd.md`** — `### Admin Portal` now opens with the dashboard + Cloudflare Access contract (metrics list, fault-tolerant counts, `ADMIN_SIGNUP_ENABLED` bootstrap gate).
+- **`tests/admin-dashboard.test.ts`** (new) — 7 tests covering the dashboard endpoint shape (require_admin_ guard, 7 metrics + access chip, 7-day window, fault-tolerant count fallback), CF Access admin flow (`valid_role_` accepts admin, `ADMIN_SIGNUP_ENABLED` bootstrap gate, role-mismatch and suspended branches preserved), the admin portal `'dashboard'` section being the new default, and PRD coverage.
+- **`tests/auth.test.ts`** — existing "renders /portal-admin without redirecting" updated to assert `data-section="dashboard"` (was `"loans"`).
+
+Verification:
+
+- `bun test` — 127 pass / 0 fail (588 expect calls across 16 files).
+- `bun run check` (test + build + build:worker) — clean.
+- `bun run deploy:worker` — deployed Worker versions `8ad0215c-8f2a-4b06-9269-789991e0e705` (backend) → `0abdd8b3-e168-4174-aeb6-7c1113c8aa99` (frontend included) to `https://equityfundingsource.brian-takita.workers.dev`.
+- Submodule commits `8ff9ad7` (backend + CF Access + tests + PRD) and `86ff414` (frontend dashboard section) pushed to `origin/main`.
+- Superproject pointer bumps committed and pushed to `origin/main`.
+
+Operator follow-up (now `#xxxx` on backlog): set `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` on the deployed Worker and configure the Cloudflare Access application that protects `/login/access-callback`. Without those env vars set, the access-callback responds 503 with a "Google sign-in is not yet configured" message — the code path is live but inactive until configured. Existing password-based admin sign-in continues to work today.
+
+Next queue head should be `#zjbe` (Admin investor document workflow).
+<!-- agent:boundary:9112e0f1 -->
 <!-- /agent:exchange -->
 ###
 
@@ -48,7 +75,7 @@ Confirmed: ft47 sits in review as gated, follow-up `#0r24` (apply migration 0025
 preset #spec-test-commit-push-deploy
 - ~do [#njsx]~
 - ~do [#ft47]~
-- do [#yh4b]
+- ~do [#yh4b]~
 - do [#zjbe]
 - do [#9vv3]
 - do [#dzmm]
@@ -57,11 +84,11 @@ preset #spec-test-commit-push-deploy
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#2rpv] Set Cloudflare Access env vars (ACCESS_TEAM_DOMAIN, ACCESS_AUD) on the equityfundingsource Worker and configure the CF Access application that protects /login/access-callback, then verify an admin sign-in via Google SSO.
 - [ ] [#0r24] Apply migration 0025_upload_tokens.sql to remote D1 once review #1v5m unblocks D1 API token permissions, then smoke test POST /api/admin/upload-tokens and POST /api/uploads/by-token/<token> against the live Worker.
 - [/] [#dropbox-sync-adapter] Dropbox sync adapter: after Dropbox access is available, push/pull R2_DOCUMENTS with idempotent retries, backfill, tombstone handling, and per-document sync logs.
 - [ ] [#dzmm] TMO webhooks: confirm outbound webhook support (Robert to check with Mortgage Office)
 - [ ] [#zjbe] Admin investor document workflow: upload and publish deal due-diligence, investor statements, tax docs, and accreditation files from R2 with visibility and review status controls.
-- [ ] [#yh4b] Admin dashboard (Cloudflare Access auth)
 - [ ] [#9vv3] Investor portal end-to-end QA: seed and test investor signup, accreditation, published deal documents, funding commitment, admin acceptance, positions, distributions, and statements with TMO simulator plus R2 documents.
 - [ ] [#qr72] [recommended] By May 27, 2026, send Lucas a written bridge plan: $500 now from personal funds if available, ask for the remaining $500 to be paid after EFS payment clears or by an agreed near-term date, and invoice EFS immediately for $5,000 with a smaller immediate continuation retainer accepted if Judith pushes back.
 - [ ] [#s62t] [recommended] Prepare EFS invoice with truthful hours/value; Lucas cost is $4,150 (83h @ $50), so floor is 42h/$4,200 and recommended ask is 50-60h/$5,000-$6,000 with any concession as an explicit courtesy credit.
@@ -116,4 +143,5 @@ preset #spec-test-commit-push-deploy
 - 2026-05-24 [#ck54] Investor portal private document storage: add a separate private R2_DOCUMENTS bucket plus provider-neutral document metadata and authenticated download APIs; treat R2 as the canonical uploaded-document cache and keep Dropbox as a later sync adapter.
 - 2026-05-24 [#njsx] Tier 0: Cloudflare WAF + upload limits
 - 2026-05-24 [#ft47] Token-based document upload flow
+- 2026-05-24 [#yh4b] Admin dashboard (Cloudflare Access auth)
 <!-- /agent:done -->

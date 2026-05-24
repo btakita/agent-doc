@@ -35,7 +35,38 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 4 response topic(s): graph backend cache queue; benchmark queue closeout; Please run a benchmark on the performance improvements for this queue run; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:e55a8b55 -->
+❯ do [#gdbcachewm]. #spec-test-build-install-commit-push
+### Re: gdbcachewm — gpt-5
+
+Completed `#gdbcachewm`.
+
+Changed paths:
+- `src/tsift/SPEC.md`
+- `src/tsift/src/main.rs`
+- `src/tsift/tests/graph_db_conformance.rs`
+- superproject gitlink `src/tsift`
+
+What changed:
+- Fixed generated-artifact detection so relative index snapshot paths such as `.tsift/conflict-matrix-cache/...` are treated as generated artifacts.
+- Filtered generated `.tsift` and `target` paths out of traversal graph inputs loaded from existing index rows: file nodes, symbols, call edges, and route rows.
+- Updated the spec to state that conflict-matrix cache artifacts are excluded from source watermarks and indexed graph inputs.
+- Added a backend-eval regression that seeds a stale `.tsift/conflict-matrix-cache` index row, proves it is not projected as file/symbol graph input, and proves the second and third backend-eval CLI runs both reuse the conflict-matrix disk cache.
+
+Verification:
+- `cargo test --test graph_db_conformance graph_db_backend_eval_benchmarks_candidate_stores_against_sqlite -- --nocapture` passed.
+- `make check` passed: clippy, 658 unit tests, 108 exit-code integration tests, and 31 graph-db conformance tests.
+- `cargo build` passed.
+- `cargo install --path . --force` installed `tsift v0.1.42` locally.
+- `git diff --check` passed.
+- tsift GitHub `CI` run `26361745103` completed successfully after push.
+- superproject `Agent Doc` run `26361755591` failed before runner steps were allocated; both `tmux-ci` and `check` jobs had empty step lists, so I classified it as the known external CI-start blocker rather than a code or tmux regression.
+
+Commits and push:
+- `btakita/tsift` main: `622a3ff` (`fix: keep conflict matrix cache out of graph inputs`) pushed.
+- `btakita/agent-loop` main: `d1f942331` (`chore: update tsift submodule`) pushed.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:56740ded -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -48,7 +79,6 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gdbcachewm] [recommended] Fix conflict-matrix prep cache self-invalidation seen in the 2026-05-23 queue benchmark: exclude .tsift/conflict-matrix-cache artifacts from source watermarks/indexed graph inputs, then add a repeated backend-eval regression proving the second and third CLI runs hit disk cache for a live target.
 - [/] [#orchdog] [recommended] Dogfood the completed graph-backed agent orchestration stack on a real agent-doc queue run: run refresh -> evidence -> conflict-matrix -> dispatch-trace -> jobs create/collect, compare worker_prompt_packet and worker_result closure fields, and capture any tsift-side fixture gaps. **Dogfood performed 2026-05-21 on `session-share/tasks/root.md` items #x63e + #v4v0; findings recorded in #gdbevid, #cmgr, #gdbidx — see `session-share/tasks/root.md` exchange "graph-backed orchestration dogfood" entry for the full pipeline trace.** **Second dogfood 2026-05-21 against `tasks/software/tsift.md` (preset `#dogfood-tsift`) surfaced 2 new gaps: #cmgrwres and #gdblock.**
 <!-- /agent:backlog -->
 

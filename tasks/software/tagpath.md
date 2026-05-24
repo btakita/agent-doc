@@ -128,7 +128,25 @@ v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-gramm
 Compacted content:
 - Archived 1 response topic(s): queue auto
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-<!-- agent:boundary:3fa2173a -->
+❯ What are #next-steps for tagpath to support tsift and agent-doc?
+### Re: next-steps — opus-4-7
+
+
+**Top of backlog: p5tsi** (tsift integration via `.naming/index.json` as a first-class symbol-graph adapter).
+
+Six items added to the backlog in priority order — the first three matter most because they unblock real tsift and agent-doc workflows; the bottom three are enablers / nice-to-haves.
+
+| Rank | ID | Hook | Why now |
+|------|-----|-----|---------|
+| 1 | p5tsi | tsift integration: `.naming/index.json` becomes tsift's symbol-graph adapter | Tsift currently re-extracts symbols. Tagpath 0.7.0+ has a richer family/ontology index. Wiring tsift envelopes to cite tagpath family handles gives stable refs and removes duplicated extraction. |
+| 2 | p5inc | Incremental indexing (`tagpath index --update`) | Full rebuilds block any "freshness-gated" caller. Tsift refuses stale envelopes; agent-doc cycles need sub-second index repair. Today the index is rebuild-only. |
+| 3 | p5sln | Session-doc tag lint | This session hit the `agent:done archive PATH` bug because the directive parser is hand-rolled. Tagpath lint already knows tag families — a dialect that validates agent-doc components closes the loop and would have failed-closed earlier. |
+| 4 | p5wat | `tagpath watch` | Long-running watcher emitting NDJSON index events. Foundation for live tsift projection and agent-doc editor-side validation. |
+| 5 | p5mcs | MCP helpers `family_by_path`, `lint_session_doc`, `index_handle` | Lets tsift and agent-doc speak to tagpath over the stdio MCP server shipped in 0.8.0 without bespoke wrappers. |
+| 6 | p5wnp [recommended] | Publish wasm-pack tarball to npm | Wasm surface shipped in 0.9.0 but no npm artifact. Required before any JS-side agent-doc / tsift surface can pick it up. |
+
+**Phase 5 framing:** items 1–3 are a coherent "indexing-as-a-platform" arc. Combined deliverable: a tagpath-backed symbol/tag graph that tsift consumes for citations and agent-doc consumes for tag validation. Recommend grouping under the `#spec-test-build-install-commit-push` preset once you're ready to execute.
+<!-- agent:boundary:cf4b49ad -->
 <!-- /agent:exchange -->
 ###
 
@@ -138,6 +156,12 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#p5tsi] tsift integration: publish .naming/index.json as a first-class tsift symbol-graph adapter. Add tagpath index --emit jsonl streaming, stable family handles in the output, and a SPEC contract tsift can target so its envelopes cite tagpath family IDs instead of re-extracting symbols.
+- [ ] [#p5inc] Incremental indexing: tagpath index --update reuses the on-disk index, hashes only changed sources (mtime fast-path + sha256 verify), repairs in well under 1s on large repos. Required for tsift's freshness model and for agent-doc cycles that need live indexes.
+- [ ] [#p5sln] Session-document tag lint: extend tagpath lint with an agent-doc dialect that validates agent:exchange / agent:backlog / agent:done / patch:* tags, catches malformed directives like the agent:done archive=PATH bug hit this session, and refuses to write a finalize until they parse cleanly.
+- [ ] [#p5wat] tagpath watch: long-running watcher that emits index update events on file changes (newline-delimited JSON), suitable for tsift's incremental graph projection and agent-doc tag validators that need to react inside a cycle.
+- [ ] [#p5mcs] MCP convention helpers for tsift and agent-doc: add tagpath mcp tools family_by_path, lint_session_doc, and index_handle so both upstreams can call tagpath without bespoke shell wrappers.
+- [ ] [#p5wnp] [recommended] Publish the wasm-pack tarball to npm (@btakita/tagpath-wasm) so agent-doc front-end surfaces and tsift JS adapters can call parse / alias / normalize_query / search_over_rows in-browser without a native dep.
 <!-- /agent:backlog -->
 
 ## Completed / Reaped

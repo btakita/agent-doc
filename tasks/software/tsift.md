@@ -30,24 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260524-125554.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260524-130428.md`*
 
 Compacted content:
-- Archived 1 response topic(s): gdbcachewm
+- Archived 1 response topic(s): sqlite graph performance next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ What are #next-steps to improve sqlite graph performance?
-### Re: sqlite graph performance next steps — gpt-5
-
-I added four backlog items in priority order. Top backlog item: `#gdbrefreshfast`.
-
-The next useful work is not raising max-hop caps or switching to FalkorDB first. In the current backend-eval digest, SQLite path max-hop is already cheap on this target: `real.sqlite.path_max_hops.duration_micros=58`, and synthetic 128/256-hop cases are `153`/`367` micros. The expensive part is producing and refreshing the graph projection: `real.sqlite.refresh.duration_micros=33167042`, with `source_graph_build=16371621`, `projection_rows=2805160`, and `conflict_matrix_preparation=5271642`. So the first item is to separate cold/cached refresh measurements and make the refresh no-op/source-watermark path reliable and cheap.
-
-FalkorDB should stay behind the backend promotion gate until it has native projection/write evidence. The current benchmark shows candidate read-model improvements in some operations, but the candidates are loaded from SQLite projection rows, so FalkorDB does not yet remove the local SQLite source build or refresh cost.
-
-Commands used: `tsift index .`, `tsift graph-db --path ../../tasks/software/tsift.md --json backend-eval | tsift metric-digest --baseline fixtures/graph-db-performance-history.json`, plus bounded `tsift source-read` inspections of `src/substrate.rs`, `src/main.rs`, `SPEC.md`, and the perf history fixture.
-
-Preflight warning preserved: one legacy gated item (`#orchdog`) still lives in `agent:backlog`; I left it below the new active performance work.
-<!-- agent:boundary:9dc0b5a3 -->
+<!-- agent:boundary:994b8796 -->
 <!-- /agent:exchange -->
 ###
 <!--

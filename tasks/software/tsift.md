@@ -18,7 +18,7 @@ queue_active: false
 ## Status
 
 <!-- agent:status patch=replace -->
-Completed: #gdbrefreshcache, #gdbtargetsnap, #gdbpathprobe, and #gdbpropscan shipped in tsift e8823da and superproject abb56b3af; latest GitHub CI for tsift was green before this push, and no tmux workflow is configured for the tsift repo.
+Completed: #gdbrefreshcache, #gdbtargetsnap, #gdbpathprobe, and #gdbpropscan shipped and pushed in tsift e8823da and agent-loop e8e6a8b0a; tsift CI run 26367244295 is green.
 <!-- /agent:status -->
 
 ## Spec
@@ -62,7 +62,10 @@ Verification completed:
 - `gh run list --workflow CI --limit 1` and `gh run view 26363974745 --json status,conclusion,jobs`: latest tsift CI run was successful; jobs were `clippy + test` and `live Convex graph acceptance`. `gh workflow list` shows no tmux-test workflow for this repo.
 
 Local commits are prepared as tsift `e8823da` and superproject `abb56b3af`. Per the session staging rule, push runs after this document closeout.
-<!-- agent:boundary:ad0e8b18 -->
+### Re: post-closeout push — gpt-5
+
+Post-closeout push completed. `btakita/tsift` main now includes `e8823da` and `btakita/agent-loop` main now includes `e8e6a8b0a`; the latter is the final pushed superproject head after the agent-doc root submodule-pointer closeout commit. Fresh tsift CI run `26367244295` completed successfully: `clippy + test` and `live Convex graph acceptance` were both green. The only CI annotations were the existing Node.js 20 deprecation notice for GitHub actions and the live Convex configuration advisory; no tmux-test workflow is configured in the tsift repo.
+<!-- agent:boundary:434e8465 -->
 <!-- /agent:exchange -->
 ###
 <!--

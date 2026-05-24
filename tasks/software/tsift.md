@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -119,13 +119,13 @@ No new implementation work was needed for `#gdbrefreshdelta`: it was already com
 ### Re: do [#gdbrefreshdelta] — gpt-5
 
 Already completed. The implementation, verification, push, and evidence for `#gdbrefreshdelta` are recorded in the earlier `### Re: #gdbrefreshdelta` response; this response only targets the stale literal queue prompt left in `agent:queue auto`.
-<!-- agent:boundary:381aa48d -->
+<!-- agent:boundary:3595b04c -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

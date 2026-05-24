@@ -99,7 +99,20 @@ Provider read:
 - `tsift` is useful for us as a development and agent-navigation tool, not as the production EFS knowledge store. It can help inspect repo/session/docs and maybe prototype extraction ideas, but it is not tenant-authenticated, admin-reviewable, or designed as the client-facing document index.
 
 My recommended architecture is: D1 for canonical records and review state, R2 for private originals and derived artifacts, Ragie Parse or a pluggable OCR provider for hard parsing, D1 tables for extracted fields/entities/edges, and Ragie/Vectorize as the derived retrieval layer. Defer Neo4j/FalkorDB/Convex until a measured search/relationship workload proves that SQL plus a vector/retrieval layer is insufficient.
-<!-- agent:boundary:4550b8d0 -->
+❯ How do I access the admin section?
+### Re: admin section access — gpt-5
+
+Use the admin-specific login page, not the normal portal login:
+
+- Live/custom domain: `https://www.equityfundingsource.com/admin/login`
+- Local Worker dev: `http://127.0.0.1:8787/admin/login`
+
+After a successful admin login, the app redirects to `/portal-admin`, which then redirects to `/portal-admin/loans`. You can also go directly to `/portal-admin/loans`, but unauthenticated users are sent back to `/login?role=admin` by the guard, so `/admin/login` is the cleaner entry point.
+
+If no admin account exists yet, use `/admin/signup`. That signup requires the Worker secret `ADMIN_GLOBAL_PASSWORD`; it is intentionally not stored in the repo. Existing admin users can sign in with either their personal admin password or the global admin password. A non-admin account cannot access the admin portal; it will be rejected or redirected to its own role portal.
+
+Verification: checked `lib/ui--server--efs/urls/index.ts`, `app/equityfundingsource/lib/auth/routes.ts`, and `app/equityfundingsource/lib/portal/admin/routes.ts`.
+<!-- agent:boundary:1d7698db -->
 <!-- /agent:exchange -->
 ###
 

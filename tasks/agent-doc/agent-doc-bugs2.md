@@ -33,7 +33,16 @@ Resolved #qfixture; auto queue drained.
 
 Compacted content:
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:ce2273ed -->
+❯ What are #next-steps to fix agent-doc bugs?
+❯ JB `Compact Exchange` had a `File Cache Conflict` issue. #next-steps
+### Re: next steps — gpt-5
+
+Top backlog item id: `jbccache`.
+
+I captured the JetBrains `Compact Exchange` `File Cache Conflict` track in the backlog. The priority order is reproduce/isolate, fix the write/cache boundary, add deterministic regression coverage, then update recovery docs.
+
+Changed paths: session document only. Commands run: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, and `agent-doc finalize`. Verification: this response is closing through `finalize --stream`, including the session write/commit guard. Confidence: medium-high for the backlog ordering. Escalation: none.
+<!-- agent:boundary:11cdc3e3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -51,6 +60,10 @@ dispatch #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#jbccache] Reproduce and isolate the JetBrains Compact Exchange File Cache Conflict, including exact CLI/plugin path, editor-cache state, and any concurrent edit timing.
+- [ ] [#jbccfix] Fix the Compact Exchange write/cache boundary so JetBrains never receives a stale or conflicting file-cache snapshot after compact exchange.
+- [ ] [#jbccreg] Add deterministic regression coverage for Compact Exchange cache-conflict handling, including stale snapshot and concurrent user-edit cases where feasible.
+- [ ] [#jbccdocs] Document the Compact Exchange File Cache Conflict recovery path in the JetBrains/harness runbooks after the behavior is fixed.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

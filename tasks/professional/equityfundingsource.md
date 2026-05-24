@@ -296,7 +296,36 @@ Verification:
 - GitHub Actions/tmux CI note: `gh workflow list` returned no workflows and `gh run list --workflow CI --limit 1` reported no workflow named `CI`, so there was no remote CI/tmux leg to inspect.
 
 Deployment: attempted `bun run deploy:worker`. The Worker build completed, but the Cloudflare deploy step stopped because `CLOUDFLARE_API_TOKEN` is not set in `src/equityfundingsource-dev/.env` or the environment. I added a pending follow-up to set the Cloudflare deploy credentials and rerun the deploy for commit `55b5628`.
-<!-- agent:boundary:e2a0accf -->
+❯ How do I go to the admin for the funded-deals and blog posts?
+### Re: funded-deals and blog admin — gpt-5
+
+Sign in through the admin login first:
+
+```text
+http://127.0.0.1:8787/admin/login
+```
+
+After you are signed in as an admin, use these direct local URLs:
+
+```text
+http://127.0.0.1:8787/portal-admin/funded-deals
+http://127.0.0.1:8787/portal-admin/blog-posts
+```
+
+In the admin UI, they are also sidebar items labeled `Funded Deals` and `Blog Posts`.
+
+For production, the corresponding URLs are:
+
+```text
+https://www.equityfundingsource.com/admin/login
+https://www.equityfundingsource.com/portal-admin/funded-deals
+https://www.equityfundingsource.com/portal-admin/blog-posts
+```
+
+If either direct admin URL sends you away from the page, that usually means the current browser session is not an admin session. Go back through `/admin/login`, or sign out/clear the non-admin session and sign in with an admin account.
+
+Changed paths this cycle: none. Commands run: `agent-doc --version`, `tsift status`, `tsift status --fix`, `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `tsift --envelope search`, and `rg` route checks. Verification: source route checks confirmed `/portal-admin/funded-deals` and `/portal-admin/blog-posts` are wired in the admin portal; no tests were run because this was answer-only. Confidence: high. Escalation: none.
+<!-- agent:boundary:dea8b193 -->
 <!-- /agent:exchange -->
 ###
 

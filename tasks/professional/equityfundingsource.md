@@ -89,13 +89,13 @@ Out of scope for this cycle (documented in `docs/security-tier-0.md` for the nex
 - Edge smoke test against a deployed custom domain — current host is `equityfundingsource.brian-takita.workers.dev`; production custom-domain cutover (icebox e1kb) gates this.
 
 Next queued item is the token-based document upload flow. Confirm and I'll pick it up next cycle.
-<!-- agent:boundary:9848651c -->
+<!-- agent:boundary:e60c42d6 -->
 <!-- /agent:exchange -->
 ###
 
 <!-- agent:queue auto -->
 preset #spec-test-commit-push-deploy
-- do [#njsx]
+- ~do [#njsx]~
 - do [#ft47]
 - do [#yh4b]
 - do [#zjbe]

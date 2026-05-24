@@ -48,7 +48,43 @@ Priority order:
 2. `#gdbfullreuse` - make full-projection cold/cache behavior the hard performance gate.
 3. `#gdbscanproof` - prove whether SQLite scan/index plans are still the limiting factor before adding engine work.
 4. `#gdbperfgate` - make the measurement loop repeatable enough to block regressions and backend promotion mistakes.
-<!-- agent:boundary:3e156e06 -->
+
+❯ `#gdbprephot` - reduce the remaining conflict-matrix preparation cost first.
+### Re: `#gdbprephot` confirmed as top — opus-4-7
+
+Confirmed `#gdbprephot` as the next implementation target. Grounding it in the three real/full-projection samples already captured in `fixtures/graph-db-performance-history.json` so the queued `do [#gdbprephot]` cycle starts from measured hotspots rather than guesses.
+
+#### Current `real.refresh_phase.conflict_matrix_preparation` breakdown (3 samples, ms)
+
+| Phase | Sample 1 | Sample 2 | Sample 3 | % of total (avg) |
+|---|---:|---:|---:|---:|
+| `session_review_compute` | 4367 | 4641 | 3348 | **63%** |
+| `impact` | 937 | 935 | 788 | 14% |
+| `status_index_gate` | 533 | 624 | 695 | 9% |
+| `context_pack_diff` | 514 | 539 | 455 | 8% |
+| `preparation_cache_lookup` | 320 | 326 | 251 | 5% |
+| `exploration_materialization` | 21 | 15 | 12 | <1% |
+| `staged_diff` | 1.6 | 1.7 | 1.8 | <1% |
+| `graph_orchestration` | 0.2 | 0.5 | 0.3 | <1% |
+| **Total preparation** | **6696** | **7083** | **5552** | 100% |
+
+`session_review_compute` is the dominant cost — roughly two thirds of preparation, and ~1.0–1.3 s of variance across samples (so it is also the noisy phase). `impact` + `status_index_gate` + `context_pack_diff` together are another ~30%; the cache-lookup and the small phases are not where the multi-second cost lives.
+
+#### Implementation scope for the queued `do [#gdbprephot]` cycle
+
+Priority sequence inside `#gdbprephot`, narrowest payoff first:
+
+1. **Decompose `session_review_compute` further.** Add sub-phase timers for whatever it currently fans out to (review-frontier construction, per-target review-pack assembly, serde/clone of the per-target review packets) so the next sample shows which inner step costs the ~3.3–4.6 s, not just that the whole call did. We cannot cut what we cannot see at finer than 4 s resolution.
+2. **Share packet reuse across `session_review_compute` → `impact` → `context_pack_diff`.** These three phases run consecutively on the same conflict set; if they each re-derive overlapping per-target context/diff packets, the queued path should compute once and hand the same packet down. Likely the largest single win after sub-phase visibility lands.
+3. **Narrower digest path for `status_index_gate`.** ~0.5–0.7 s is too much for a gate that should be a yes/no over a cached status digest. Replace with a metric-digest comparison against the cached preparation key when the input set has not advanced.
+4. **Metric-digest gate guarding the regression.** Once 1–3 land, require a three-sample median for `real.refresh_phase.conflict_matrix_preparation.duration_micros` to come in under a captured pre-fix median, with per-sub-phase regression assertions, so a future change cannot silently re-introduce the cost. Feeds directly into `#gdbperfgate` later.
+
+#### Cycle boundary
+
+This cycle is the confirmation and evidence-grounded plan for `#gdbprephot`. The next cycle is the queued `do [#gdbprephot]` and should land step 1 (sub-phase timers) plus at least an initial sample under the new timers so step 2 starts from data, not speculation. Steps 2–4 are separate cycles inside the same backlog item, not all in one shot, to keep each change behind a sample comparison.
+
+`#gdbfullreuse`, `#gdbscanproof`, `#gdbperfgate` remain queued and unchanged.
+<!-- agent:boundary:7e2edd43 -->
 <!-- /agent:exchange -->
 ###
 <!--

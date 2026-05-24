@@ -128,7 +128,39 @@ v0.6.2 published to crates.io
 Compacted content:
 - Archived 4 response topic(s): queue auto; queue auto; queue auto; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-<!-- agent:boundary:cf542f16 -->
+### Re: queue auto — do [#p4dy] — opus-4-7
+
+
+**Done.** Dynamic tree-sitter grammar loading shipped in tagpath 0.10.0; submodule pointer bumped + pushed.
+
+**Changes (tagpath submodule, f9942fa):**
+- `Cargo.toml` — version `0.9.0 → 0.10.0`; new opt-in feature `dyn-grammar`; optional deps `libloading`, `tree-sitter-language`, `dirs`. Default features unchanged; wasm path untouched.
+- `src/config/mod.rs` — `GrammarsConfig { load_dirs, languages }` + `GrammarEntry { path, symbol, extensions }` with `~` expansion via `dirs`.
+- `src/treesitter/dyn_loader.rs` (new) — loader API: `LoadedGrammar` (keeps `libloading::Library` alive), `DiscoveredGrammar`, `LoadError::{MissingFile, DlOpen, MissingSymbol, AbiMismatch}`. ABI check uses `language.version()` against the tree-sitter min/max compatible range.
+- `src/treesitter/mod.rs` — `extract_with_dyn_grammar()` generic-walker for runtime grammars.
+- `src/extract/mod.rs` — `extract_from_file_with_dyn_grammar()`, `find_dyn_grammar_for_ext()`, `notify_dyn_grammar_used()` (first-use stderr notice, `TAGPATH_QUIET=1`-suppressible). Dynamic grammar wins over compile-time `lang-*` when both match an extension.
+- `src/main.rs` — `tagpath grammars list` (text + json) and `tagpath grammars check`. Without `dyn-grammar`: both commands print a "built without --features dyn-grammar" hint.
+- `tests/test_dyn_grammar.rs` (new) — 7 integration tests + 2 inline loader tests covering `MissingFile`, `DlOpen` (sham `.so`), `discover()` filtering, CLI list/check exit codes.
+- `SPEC.md` — new section 14 "Dynamic grammar loading" (feature flag, config, precedence, ABI, error envelopes, CLI, security note: `load_dirs` is a code-execution boundary).
+- `README.md` — Advanced section with opt-in build command + config snippet.
+
+**Verification:**
+- `cargo fmt` clean.
+- `cargo clippy --all-targets -- -D warnings` clean; `cargo clippy --all-targets --features dyn-grammar -- -D warnings` clean.
+- `cargo test` — **132/132 pass** (default features).
+- `cargo test --features dyn-grammar` — **141/141 pass** (132 + 9 new).
+- `cargo build --target wasm32-unknown-unknown --no-default-features --features wasm` — clean (wasm path still gated correctly).
+- `cargo build --release` + `cargo install --path .` — `~/.cargo/bin/tagpath` replaced 0.9.0 → 0.10.0.
+- Live CLI smoke: `tagpath grammars list` / `check` against a fixture with a sham `.so` — exit codes + error envelopes verified.
+
+**Commits:**
+- tagpath `f9942fa`: `feat: add dynamic tree-sitter grammar loading (p4dy)` → pushed.
+- agent-loop `90c0333`: `tagpath: bump submodule to 0.10.0 (p4dy)` → pushed.
+
+**Known gap:** `LoadError::MissingSymbol` is not exercised end-to-end (would require building a dummy cdylib in the test harness). Documented at the top of `tests/test_dyn_grammar.rs`.
+
+No crates.io publish — release-hygiene queue item owns that. Auto-queue advances next to release hygiene (the last item).
+<!-- agent:boundary:c43821c1 -->
 <!-- /agent:exchange -->
 ###
 
@@ -137,14 +169,13 @@ preset #spec-test-build-install-commit-push
 - ~do [#p4ix]~
 - ~do [#p4mp]~
 - ~do [#p4wm]~
-- do [#p4dy]
+- ~do [#p4dy]~
 - do [#p4rl]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#p4dy] Add dynamic grammar loading behind an opt-in native feature: use `libloading`, register runtime tree-sitter grammars from configured directories, and cover version or symbol mismatch errors.
 - [ ] [#p4rl] Finish Phase 4 release hygiene: update the Phase 4 checklist to mark the shipped ontology command complete, sync README/SPEC examples, run full verification, publish the next crate, and update this session status.
 <!-- /agent:backlog -->
 

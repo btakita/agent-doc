@@ -94,7 +94,9 @@ Notes:
 
 - Simulator state is in memory and resets when the Worker restarts.
 - I left the pre-existing untracked `src/equityfundingsource-dev/tmp/` directory untouched.
-<!-- agent:boundary:6d642bb6 -->
+Is the simulator accurate with in-memory data storage? Can we persist the tmo simulator data storage and easily clear the tmo simulator persisted data?
+#spec-test-commit-push
+<!-- agent:boundary:ae75cc0a -->
 <!-- /agent:exchange -->
 ###
 

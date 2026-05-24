@@ -50,6 +50,8 @@ I fixed that chain in `src/agent-doc`:
 - `SPEC.md` and `specs/07-closeout-commands.md`: documented the new snapshot-staged commit invariant.
 - `VERSIONS.md`: added the unreleased change note.
 
+❯ Please elaborate on the fixes.
+
 Regression coverage added:
 
 - `write::tests::commit_prompt_repair_dedupes_exact_prefixed_raw_prompt_copy`
@@ -73,7 +75,43 @@ Commits pushed:
 - parent `btakita/agent-loop` branch `main`: `15479736b` (`agent-doc: update prompt duplicate repair`)
 
 No escalation was needed. Confidence is tied to the reproduced failure shape: the new integration test models the exact snapshot/raw plus working-tree prefixed/raw duplicate drift that occurred in `equityfundingsource.md`, and current local plus remote CI passed with the tmux leg included.
-<!-- agent:boundary:75c2a94f -->
+### Re: fix elaboration — gpt-5
+
+The fix is not just a local dedupe at the symptom. It closes the route where the duplicate could still be committed after the IPC/write protections had already done their job.
+
+The failure chain was:
+
+1. The editor-visible document ended up with two adjacent copies of the same user prompt line: one normalized as `❯ prompt`, one still raw as `prompt`.
+2. The snapshot represented the same prompt only once, but with different prompt-prefix state.
+3. Commit closeout compared snapshot and working tree, saw positive length drift, logged it as possible out-of-band write, but still staged the snapshot path without running the prompt-artifact repair pipeline.
+4. Existing duplicate response repair did not cover this because it only removed duplicated assistant response blocks, not adjacent prefixed/raw user prompt variants.
+5. Existing full-document IPC tests stayed green because this specific bug was after IPC consumption, at snapshot-staged commit closeout.
+
+The wide part of the fix is that commit closeout now participates in the prompt-artifact repair invariant before staging. The path is:
+
+- `dedupe_snapshot_and_worktree_before_commit` no longer returns after response-block dedupe. It also invokes commit prompt repair against the current snapshot.
+- `repair_commit_prompt_artifacts_against_snapshot` runs a narrow, commit-safe subset of prompt repair: remove duplicate prompt lines already represented by the snapshot, collapse adjacent prefixed/raw copies of the same prompt, and handle the live tail prefix-variant case.
+- `dedupe_adjacent_prompt_prefix_duplicates` specifically catches the live failure shape: normalized prompt text is equal on adjacent lines and exactly one line has the `❯ ` prefix. It keeps the normalized prefixed prompt and removes the raw duplicate.
+- The working tree repair uses the same atomic write helper used elsewhere in the write path, rather than a direct `std::fs::write`.
+- The snapshot is updated only when the repaired working tree is prompt-prefix-equivalent to the snapshot. That keeps the commit path from absorbing arbitrary user edits while still letting prefix-only repair close cleanly.
+- Drift logging now uses the repaired file length. So a repaired duplicate no longer leaves a stale `out_of_band_write` / `drift_warning` record behind.
+
+The full-document IPC side is still intentionally constrained:
+
+- Template/component documents prefer component patches and synthesized exchange patches instead of `fullContent`.
+- Template-mode documents, legacy template/stream paths, and documents containing `agent:*` components reject full-content IPC before socket/file payload emission.
+- Any remaining full-document replacement must carry source-buffer proof before editor apply.
+- The `full_content` test suite covers that guard surface; it passed after the closeout fix.
+
+The two new regression tests cover both layers of the bug:
+
+- `write::tests::commit_prompt_repair_dedupes_exact_prefixed_raw_prompt_copy` proves the commit-safe repair function removes the adjacent raw duplicate and leaves one normalized prompt.
+- `git::tests::commit_repairs_prompt_prefix_duplicate_drift_before_staging` builds the snapshot/working-tree mismatch from the real failure: snapshot has one raw prompt, working tree has `❯ prompt` plus raw `prompt`. It asserts the commit succeeds with one prompt, repairs the working tree and snapshot, logs `commit_pre_stage_prompt_duplicate_repaired snapshot_updated=true`, and does not log `out_of_band_write`.
+
+Changed paths this cycle: none beyond this session-document response. The source/spec changes remain the prior pushed commits: `agent-doc` `09ff45c5` and parent `agent-loop` `15479736b`, with current parent `main` containing the `src/agent-doc` pointer at `09ff45c5`.
+
+Commands this cycle: `tsift status`, `tsift index --workspace .`, `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, and this `agent-doc finalize` closeout. Verification this cycle is explanatory only because no source code changed; the fix being explained was already verified by local `make check`, focused regression tests, `cargo install --path .`, and GitHub CI run `26363927689` including `make tmux-ci`. Escalation: none.
+<!-- agent:boundary:4489740a -->
 <!-- /agent:exchange -->
 ###
 <!--

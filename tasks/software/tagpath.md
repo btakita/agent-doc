@@ -122,19 +122,19 @@ v0.6.2 published to crates.io
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260510-034519.md`*
-❯ What are #next-steps to complete phase 4?
-### Re: phase 4 next steps — gpt-5
-I added the Phase 4 follow-up backlog in priority order. Top backlog item: `#p4ix`.
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260524-220842.md`*
 
-I am treating tag ontology as already code-complete in `tagpath` because the current source has `tagpath ontology`, `src/ontology`, README/SPEC coverage, and tests. The remaining path to complete Phase 4 is: persistent index first, MCP on top of that indexed/queryable surface, WASM packaging, dynamic grammar loading, then release/documentation cleanup.
-
-Proof: checked the current `tagpath` command/source surface with `rg`, `sed`, `git -C src/tagpath status --short`, and `agent-doc plan`; no code changes were made. Verification is document-only through `agent-doc finalize` and its session-check. Escalation: none.
-<!-- agent:boundary:0bf7b229 -->
+Compacted content:
+- Archived 1 response topic(s): phase 4 next steps
+- Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
+<!-- agent:boundary:f658c5b1 -->
 <!-- /agent:exchange -->
 ###
 
-## Pending / Not Built
+<!-- agent:queue -->
+<!-- /agent:queue -->
+
+## Backlog
 
 <!-- agent:backlog -->
 - [ ] [#p4ix] Implement `tagpath index`: write `.naming/index.json` with schema version, config fingerprint, source hashes or mtimes, extracted identifier families, ontology refs, and CLI `index`/`index --check`; add tests for build, stale invalidation, and indexed search.

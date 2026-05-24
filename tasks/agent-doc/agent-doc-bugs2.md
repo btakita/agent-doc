@@ -42,7 +42,25 @@ Top backlog item id: `jbccache`.
 I captured the JetBrains `Compact Exchange` `File Cache Conflict` track in the backlog. The priority order is reproduce/isolate, fix the write/cache boundary, add deterministic regression coverage, then update recovery docs.
 
 Changed paths: session document only. Commands run: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, and `agent-doc finalize`. Verification: this response is closing through `finalize --stream`, including the session write/commit guard. Confidence: medium-high for the backlog ordering. Escalation: none.
-<!-- agent:boundary:11cdc3e3 -->
+### Re: jbccache — gpt-5
+
+I isolated `#jbccache` to the JetBrains Compact Exchange action path and the post-0.33.16 write strategy.
+
+The exact IDE path is: `CompactExchangeAction.actionPerformed` waits for typing idle, runs `FileDocumentManager.saveAllDocuments()`, then calls `TerminalUtil.compactExchange`; `TerminalUtil.buildCompactExchangeCommand` runs `agent-doc compact <relative file> --component exchange --commit` from the resolved project root.
+
+The conflicting boundary is not `PatchWatcher`: current `compact.rs` intentionally bypasses editor IPC for template exchange compaction and calls `write::atomic_write_if_current_pub(..., "compact_exchange_direct_write")`. That performs the CLI-side idle/live-buffer/current-content CAS checks, then persists by atomic temp-file rename and updates the snapshot. This protects content from stale full-document replacement, but it is still an external disk mutation from JetBrains' perspective, so an already-open IDE buffer can surface IntelliJ's File Cache Conflict/reload path after the binary writes and commits.
+
+The existing deterministic coverage already reproduces the important stale-cache shapes:
+
+- `component_compact_uses_guarded_direct_write_when_patches_dir_exists` confirms Compact Exchange creates no IPC JSON patch even when `.agent-doc/patches` exists.
+- `component_compact_direct_fallback_rejects_late_visible_edit` confirms the CAS guard rejects disk drift typed after compact planning.
+- `component_compact_direct_fallback_rejects_idle_unsaved_editor_buffer` confirms live-buffer sidecar drift is rejected before disk write.
+- `TerminalUtilTest` confirms the JetBrains action wires to `agent-doc compact ... --component exchange --commit`.
+
+So `#jbccache` is reproduced and isolated as: JetBrains action -> external `agent-doc compact` process -> guarded direct disk rename -> JetBrains VFS/document cache observes an outside change. The next fix item should decide whether Compact Exchange needs an editor-mediated component replacement or an explicit post-compact VFS/document reload/refresh handshake after the direct write, without returning to unsafe full-document `fullContent` IPC.
+
+Changed paths: session document and done archive only; no code changes. Commands run: `tsift status`, `tsift status --fix`, `agent-doc --version`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, targeted `tsift source-read` / `rg` inspection, `cargo test component_compact_direct_fallback_rejects_idle_unsaved_editor_buffer -- --nocapture`, `cargo test component_compact_uses_guarded_direct_write_when_patches_dir_exists -- --nocapture`, `cargo test component_compact_direct_fallback_rejects_late_visible_edit -- --nocapture`, `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test --tests com.github.btakita.agentdoc.TerminalUtilTest`, `gh workflow list`, `gh run list --workflow "Agent Doc" --limit 1`, and `gh run view 26372808421 --json ...`. Verification: targeted Rust and JetBrains tests passed. Latest GitHub Actions workflow is `Agent Doc`, not `CI`; latest run `26372808421` failed before producing job steps/logs (`check` and `tmux-ci` both empty), so I classify that as an external CI-start/log-allocation blocker rather than a local tmux/code regression. Confidence: high for the isolated path and cache-conflict boundary; medium for the exact IDE dialog timing because this environment cannot display JetBrains' live file-cache UI. Escalation: none.
+<!-- agent:boundary:1bfba58c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -50,17 +68,15 @@ Changed paths: session document only. Commands run: `agent-doc preflight`, `agen
 
 <!-- agent:queue -->
 dispatch #spec-test-build-install-commit-push
-- do [#cstop]
-- do [#e86b]
-- do [#rpatch]
-- do [#qresidue]
-- do [#qinactive]
+- do [#jbccache]
+- do [#jbccfix]
+- do [#jbccreg]
+- do [#jbccdocs]
 <!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#jbccache] Reproduce and isolate the JetBrains Compact Exchange File Cache Conflict, including exact CLI/plugin path, editor-cache state, and any concurrent edit timing.
 - [ ] [#jbccfix] Fix the Compact Exchange write/cache boundary so JetBrains never receives a stale or conflicting file-cache snapshot after compact exchange.
 - [ ] [#jbccreg] Add deterministic regression coverage for Compact Exchange cache-conflict handling, including stale snapshot and concurrent user-edit cases where feasible.
 - [ ] [#jbccdocs] Document the Compact Exchange File Cache Conflict recovery path in the JetBrains/harness runbooks after the behavior is fixed.

@@ -79,7 +79,65 @@ Backlog id: `#jbresstart`.
 than auto-promoting; please confirm whether to add a plan or drop the directive.
 `#jbccfix`, `#jbccreg`, `#jbccdocs` remain in backlog and will be picked up under
 `#spec-test-build-install-commit-push` in a follow-up turn.
-<!-- agent:boundary:677df467 -->
+### Re: dispatch + new #stuckcycledup observation — opus-4-7
+
+Two things happened in parallel:
+
+1. My prior finalize for `do [#jbresstart]` got rejected with "late fallback patch:
+   cycle already committed" — the response body was lost while `--pending-gate jbresstart`
+   went through (you can see it in Review with `[/]`). This is exactly the wedged-cycle
+   pattern you just captured as `#stuckcycledup`.
+2. Now the queue head is still `do [#jbresstart]`, and the planner targets it again
+   even though it's already gated in Review.
+
+#### What I actually did on disk
+
+`src/agent-doc/src/route.rs` is modified (uncommitted) with the `#jbresstart` fix:
+
+- `rescue_from_stash` now returns `bool` (true when pane was moved).
+- `route_via_authoritative_actor` re-runs `promote_starting_authoritative_actor_if_dispatch_ready`
+  and one more `wait_for_authoritative_actor_ready` after a real rescue when the
+  actor was `Starting`. Updates `actor`, `actor_state`, `dispatch_pane` if either
+  promotes to Ready.
+- Three new ops-log events: post_rescue_promoted_ready, post_rescue_ready_after_wait,
+  post_rescue_still_starting.
+- FailClosed bail message appends post-rescue context when applicable.
+
+#### Verification
+
+- `cargo clippy -- -D warnings`: clean.
+- `cargo test --lib`: 2329 passed, 228 ignored, 0 failed.
+- `make test`: **fails on one pre-existing test**. Verified pre-existing via
+  `git stash && cargo test ...` — failure reproduces without my changes. Error
+  surfaces session-check INTERRUPTED instead of expected recursive-direct-invocation
+  deadlock. Already in backlog as runintegcodexbare.
+
+#### What I did NOT complete this cycle (work remains)
+
+- No `cargo install --path .`
+- No `cargo build --release`
+- No VERSIONS.md bump
+- No git commit / push of the route.rs change
+- Backlog items remain open: jbrsrbusy, jbccfix, jbccreg, jbccdocs are NOT done;
+  jbresstart code is staged but install/commit/push remain.
+- Reason: red test suite, and the wedged-cycle pattern is now actively interfering
+  with the finalize/write path for this very document.
+
+#### Recommendation
+
+The wedged-cycle bug needs to land before more agent-doc dispatch work flows
+cleanly through this document — every cycle here is currently at risk of losing
+its response body. Suggest:
+
+1. Run `agent-doc compact tasks/agent-doc/agent-doc-bugs2.md --commit` first
+   (preflight session-accretion flagged 10 cycles in 30 min, 8 no-op closeouts).
+2. Triage the run_integration failure together with the wedged-cycle pattern
+   — both touch finalize/session-check/commit boundary.
+3. After the wedge clears, rerun `make check`, install, commit, push for
+   the staged route.rs change; then continue down the queue.
+
+The remaining backlog ids stay open — none have been validated this cycle.
+<!-- agent:boundary:d928b0d6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -97,12 +155,19 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#jbresstart] Refuse cross-file pane rescue and extend Starting-actor wait after stash recovery; see tasks/agent-doc/plan-jb-route-rescued-stash-pane-starting-actor.md
+- [ ] [#runintegcodexbare] Triage pre-existing tests/run_integration.rs::codex_bare_run_inside_owning_pane_fails_before_nested_dispatch failure (session-check INTERRUPTED instead of expected recursive-direct-invocation deadlock). Blocks make check for unrelated work.
+- [ ] [#stuckcycledup] [recommended] Fix the wedged-cycle pattern where a captured agent-doc cycle stays uncommitted (every finalize/write/repair reports 'late fallback patch: cycle already committed' while the response body is missing from HEAD), and where the eventual successful different-cycle finalize lets the next preflight repair re-apply the stuck capture as an orphan and duplicate the response. Plan: tasks/agent-doc/plan-stuck-cycle-causes-duplicated-uncommitted-response.md. Distinct from plan-empty-response-repair-write and plan-cancelled-stop-hook-exchange-replay.
 - [ ] [#jbrsrbusy] Fix JB Restart Supervisor alive-busy refusal — add --force + JB confirm + harness pre-interrupt; see tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md
 - [ ] [#jbccfix] Fix the Compact Exchange write/cache boundary so JetBrains never receives a stale or conflicting file-cache snapshot after compact exchange.
 - [ ] [#jbccreg] Add deterministic regression coverage for Compact Exchange cache-conflict handling, including stale snapshot and concurrent user-edit cases where feasible.
 - [ ] [#jbccdocs] Document the Compact Exchange File Cache Conflict recovery path in the JetBrains/harness runbooks after the behavior is fixed.
 <!-- /agent:backlog -->
+
+## Review
+
+<!-- agent:review -->
+- [/] [#jbresstart] Refuse cross-file pane rescue and extend Starting-actor wait after stash recovery; see tasks/agent-doc/plan-jb-route-rescued-stash-pane-starting-actor.md
+<!-- /agent:review -->
 
 <!-- agent:icebox -->
 <!-- /agent:icebox -->

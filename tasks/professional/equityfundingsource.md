@@ -31,43 +31,12 @@ queue_active: true
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260524-230036.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260524-233714.md`*
 
 Compacted content:
-- Archived 2 response topic(s): queue do (six backlog items); do [#njsx]
+- Archived 2 response topic(s): gate transition acknowledged; do [#yh4b]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-### Re: gate transition acknowledged — advancing queue past ft47 — opus-4-7
-
-
-Confirmed: ft47 sits in review as gated, follow-up `#0r24` (apply migration 0025 + smoke test once `#1v5m` unblocks) is on backlog. No fresh prompt this cycle — consuming the stale `do [#ft47]` queue head so the next invocation dispatches `#yh4b` (Admin dashboard + Cloudflare Access auth).
-### Re: do [#yh4b] — Admin dashboard + Cloudflare Access auth — opus-4-7
-
-
-Shipped end-to-end. yh4b done; follow-up added for the Cloudflare Access env/app configuration step.
-
-What changed in `src/equityfundingsource-dev`:
-
-- **`lib/admin/routes.ts`** — new `GET /api/admin/dashboard` returns aggregate D1 metrics (`total_users`, `active_loans`, `open_applications`, `pending_lender_requests`, `pending_funds`, `recent_documents` over the trailing 7 days, `open_document_requests`) plus a `access.{team_domain_configured, aud_configured}` chip so the dashboard can show whether CF Access is wired. Each count runs through a `count_` helper that catches per-query failures and falls back to 0 + console.error so a partial schema mismatch never 500s the whole endpoint.
-- **`lib/auth/routes.ts`** — `valid_role_` now accepts `'admin'`, so admins can sign in through the shared `/login/access-callback` Google SSO route. Admin auto-create from a CF Access JWT is gated on `ADMIN_SIGNUP_ENABLED = "true"` (same flag the password signup uses) — a stranger with a valid Google JWT cannot bootstrap an admin account. Existing admin users sign in normally regardless of the flag.
-- **`lib/portal/admin/routes.ts`** — `admin_section_T` and `SECTIONS` add `'dashboard'`; `/portal-admin` root and the unknown-section fallback both now land on the dashboard.
-- **`lib/ui--browser--efs/portal/admin/dashboard.tsx`** (new) — Preact `AdminDashboard` fetches `/api/admin/dashboard`, renders 7 metric tiles + a CF Access status chip; gracefully shows loading and error states.
-- **`lib/ui--browser--efs/portal/admin/index.tsx`** + **`layout.tsx`** — wired through `admin_section_T`, `NAV_ITEMS`, `SECTION_URLS`, `SECTION_ICONS`, and the `section_content` switch so the sidebar shows "Dashboard" as the first item and the default landing.
-- **`prds/equity-funding-source-lending-portal-prd.md`** — `### Admin Portal` now opens with the dashboard + Cloudflare Access contract (metrics list, fault-tolerant counts, `ADMIN_SIGNUP_ENABLED` bootstrap gate).
-- **`tests/admin-dashboard.test.ts`** (new) — 7 tests covering the dashboard endpoint shape (require_admin_ guard, 7 metrics + access chip, 7-day window, fault-tolerant count fallback), CF Access admin flow (`valid_role_` accepts admin, `ADMIN_SIGNUP_ENABLED` bootstrap gate, role-mismatch and suspended branches preserved), the admin portal `'dashboard'` section being the new default, and PRD coverage.
-- **`tests/auth.test.ts`** — existing "renders /portal-admin without redirecting" updated to assert `data-section="dashboard"` (was `"loans"`).
-
-Verification:
-
-- `bun test` — 127 pass / 0 fail (588 expect calls across 16 files).
-- `bun run check` (test + build + build:worker) — clean.
-- `bun run deploy:worker` — deployed Worker versions `8ad0215c-8f2a-4b06-9269-789991e0e705` (backend) → `0abdd8b3-e168-4174-aeb6-7c1113c8aa99` (frontend included) to `https://equityfundingsource.brian-takita.workers.dev`.
-- Submodule commits `8ff9ad7` (backend + CF Access + tests + PRD) and `86ff414` (frontend dashboard section) pushed to `origin/main`.
-- Superproject pointer bumps committed and pushed to `origin/main`.
-
-Operator follow-up (now `#xxxx` on backlog): set `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` on the deployed Worker and configure the Cloudflare Access application that protects `/login/access-callback`. Without those env vars set, the access-callback responds 503 with a "Google sign-in is not yet configured" message — the code path is live but inactive until configured. Existing password-based admin sign-in continues to work today.
-
-Next queue head should be `#zjbe` (Admin investor document workflow).
-<!-- agent:boundary:9112e0f1 -->
+<!-- agent:boundary:6a1330c0 -->
 <!-- /agent:exchange -->
 ###
 

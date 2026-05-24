@@ -190,7 +190,40 @@ Commits:
 - Parent `btakita/agent-loop` branch `main`: `63eb7a30d` (`agent-doc: disable full-content editor ipc`), created locally before this finalize. I will push parent `main` after this binary-owned session document commit so the gitlink and session closeout land together.
 
 Escalation was used only to remove the generated mdBook `book/` directory. Confidence is high for the requested wide fix because the first-party `fullContent` emission path now returns before socket/file payload delivery, the duplicate-prompt suites still pass, and the full local verification suite is green.
-<!-- agent:boundary:69dfc109 -->
+❯ The full-document IPC corruption issue occurred & the duplicate prompt issue followed while writing this prompt. Then the full-document IPC corruption issues happened again..then the duplicate prompt issue.
+
+❯ Then the full-document IPC corruption issue occurred a 3rd then 4th then 5th then 6th time. All while writing this single prompt.
+
+❯ This sequence issue is still not address despite >50 turns attempting to fix the issue. This is absolutely ridiculous.
+❯ Create a separate mermaid identifing the exact logic chain of this sequence of issues.
+
+❯ Please completely disable the full-document IPC write path. I don't want it anymore.
+❯ #spec-test-build-install-commit-push
+### Re: full-document IPC disabled end-to-end — gpt-5
+
+I treated this as a receiver-side bug, not only a binary sender bug. The first-party binary now reaches the `full_content_ipc_disabled` decision without constructing or delivering a `fullContent` payload, and both editor receivers reject legacy or foreign whole-document payloads before any visible document mutation.
+
+Changed paths are scoped to `src/agent-doc`: `src/write.rs`, the JetBrains and VS Code patch watchers/tests, editor specs, closeout docs, `SPEC.md`, `VERSIONS.md`, the FlowCore token budget, and the new Mermaid reference `docs/reference/full-document-ipc-corruption-chain.md`. The Mermaid reference identifies the old corruption chain from stale full-document patch payload to whole-buffer replacement to duplicated/truncated live prompts, then shows the new disabled path.
+
+Committed locally:
+
+- `src/agent-doc` submodule: `905cbff fix: disable full-content IPC receivers`
+- parent repo gitlink: `f542d401e agent-doc: disable full-content IPC receivers`
+
+Verification completed on the final tree:
+
+- `make check`
+- `npm test` in `editors/vscode`
+- `./gradlew test` in `editors/jetbrains`
+- `git diff --check`
+- `mdbook build -d /tmp/agent-doc-mdbook-check`
+- `cargo install --path .`; installed binary reports `agent-doc 0.33.16`
+- latest GitHub Actions CI run `26366861431` is green; its `check` job includes successful `Run make check` and `Run make tmux-ci` steps
+
+`cargo run --quiet -- audit-docs` still fails on the managed instruction-surface blocker for `/home/brian/work/btakita/agent-loop/AGENTS.md`, with the existing instruction to run `agent-doc skill install --all` or reinstall the active harness before release. I did not change that root managed surface in this cycle.
+
+Escalation: none. Confidence: high for disabling the full-document IPC write path end-to-end in first-party code and rejecting old payloads at the receivers.
+<!-- agent:boundary:8dd8afb0 -->
 <!-- /agent:exchange -->
 ###
 <!--

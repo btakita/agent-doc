@@ -150,7 +150,10 @@ Verification passed:
 - `make check` with 46 tests plus app and Worker builds
 
 No GitHub Actions `CI` workflow or `tmux-ci` target exists for this repo. The pre-existing untracked `src/equityfundingsource-dev/tmp/` directory is still untouched.
-<!-- agent:boundary:f986262d -->
+### Re: Closeout correction — gpt-5
+
+The short replay summary above was recovered from an orphaned `agent-doc` response after the full finalized response had already landed. The final pushed root/session-document commit for this cycle is `b358b540d`; the EFS implementation commit remains `ca1b8a6`.
+<!-- agent:boundary:a1a60f7f -->
 <!-- /agent:exchange -->
 ###
 

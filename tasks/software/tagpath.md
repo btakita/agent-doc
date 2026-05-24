@@ -128,14 +128,14 @@ v0.6.2 published to crates.io
 Compacted content:
 - Archived 1 response topic(s): agent:queue auto halt
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-<!-- agent:boundary:2d8f1252 -->
+<!-- agent:boundary:7621135d -->
 <!-- /agent:exchange -->
 ###
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#p4ix]~
-- do [#p4mp]
+- ~do [#p4mp]~
 - do [#p4wm]
 - do [#p4dy]
 - do [#p4rl]
@@ -144,7 +144,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#p4mp] Add MCP integration on top of the index: expose parse, normalize-query, lint, search, ontology lookup, and indexed project query tools with JSON schemas plus local smoke tests.
 - [ ] [#p4wm] Add WASM packaging: split native tree-sitter code behind non-wasm features, expose wasm-bindgen APIs for parse, alias, prose, normalize-query, and search-over-rows, then document `wasm-pack` build/test flow.
 - [ ] [#p4dy] Add dynamic grammar loading behind an opt-in native feature: use `libloading`, register runtime tree-sitter grammars from configured directories, and cover version or symbol mismatch errors.
 - [ ] [#p4rl] Finish Phase 4 release hygiene: update the Phase 4 checklist to mark the shipped ontology command complete, sync README/SPEC examples, run full verification, publish the next crate, and update this session status.
@@ -157,4 +156,5 @@ preset #spec-test-build-install-commit-push
 - 2026-05-09 [#cmpa] Add a tagpath library/CLI compression-report helper that accepts raw symbol rows and emits grouped family previews plus byte/token savings metrics for tsift.
 - 2026-05-09 [#qont] Add query/ontology compactness fixture cases that cover normalize-query input and `.naming/tags` ontology_refs so tsift can keep context-pack refs as handles instead of prose.
 - 2026-05-24 [#p4ix] Implement `tagpath index`: write `.naming/index.json` with schema version, config fingerprint, source hashes or mtimes, extracted identifier families, ontology refs, and CLI `index`/`index --check`; add tests for build, stale invalidation, and indexed search.
+- 2026-05-24 [#p4mp] Add MCP integration on top of the index: expose parse, normalize-query, lint, search, ontology lookup, and indexed project query tools with JSON schemas plus local smoke tests.
 <!-- /agent:done -->

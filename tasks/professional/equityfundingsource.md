@@ -52,7 +52,22 @@ Concrete next steps captured in the backlog:
 3. Cut investor/admin portal APIs over so page requests never depend on live TMO access.
 
 That gets the Portal pages feature complete without OCR while preserving a clean path to OCR later: OCR can enrich cached documents after approval, but it should not block documents, statements, accreditation, positions, distributions, or admin publishing.
-<!-- agent:boundary:602da102 -->
+❯ Make sure the uploaded documents in R2 are the cache for Dropbox syncing. We don't yet have Dropbox access. I agree the TMO cache should be in D1.
+❯ #next-steps
+### Re: R2 As Dropbox Cache — gpt-5
+
+Agreed: uploaded documents should land in R2 first and treat Dropbox as a sync target/source later, not as the portal's primary storage dependency. TMO cache data belongs in D1 for queryable portal state; document binaries and upload originals belong in R2 with D1 metadata.
+
+The near-term design should be:
+
+1. Uploads write bytes to `R2_DOCUMENTS` first.
+2. D1 stores document metadata, ownership, visibility, source, hash, size, MIME type, R2 key, and sync state.
+3. Portal/admin downloads read from R2 only.
+4. Dropbox sync is an adapter that can be added once credentials/access exist.
+5. When Dropbox arrives, sync by content hash/path mapping rather than assuming Dropbox is authoritative.
+
+I captured three concrete next steps in the backlog: define the Dropbox/R2 document cache contract, implement the R2-first upload/download path, and add a gated Dropbox sync adapter item for when access is available. I also edited `#ck54` so the existing private document storage item explicitly says R2 is the canonical uploaded-document cache.
+<!-- agent:boundary:afd898ef -->
 <!-- /agent:exchange -->
 ###
 
@@ -62,8 +77,11 @@ That gets the Portal pages feature complete without OCR while preserving a clean
 - [ ] [#tmo-cache-model] TMO cache contract: define D1 read-model tables plus R2 raw payload/document object paths, TMO IDs, cursors, checksums, last_synced/stale/deleted state, and conflict policy for portal-visible data.
 - [ ] [#tmo-cache-worker] TMO sync Worker: build idempotent manual/scheduled pulls with page cursors, retries, tombstones, sync batches, and D1/R2 writes that do not require TMO during portal requests.
 - [ ] [#portal-cache-api] Portal cache APIs: cut investor/admin portal pages over to cache-only reads with last-synced/stale indicators and an outbox for portal writes that must replay to TMO later.
+- [ ] [#dropbox-cache-contract] Dropbox/R2 document cache contract: define R2 key namespace, D1 document metadata, Dropbox path mapping, content hashes, sync_status, last_dropbox_synced_at, tombstones, and conflict policy for uploaded documents.
+- [ ] [#r2-upload-cache] R2 upload cache path: make token/admin uploads write original bytes to R2 first, persist metadata in D1, and serve portal downloads from R2 even when Dropbox access is unavailable.
+- [ ] [#ck54] Investor portal private document storage: add a separate private R2_DOCUMENTS bucket plus provider-neutral document metadata and authenticated download APIs; treat R2 as the canonical uploaded-document cache and keep Dropbox as a later sync adapter.
+- [/] [#dropbox-sync-adapter] Dropbox sync adapter: after Dropbox access is available, push/pull R2_DOCUMENTS with idempotent retries, backfill, tombstone handling, and per-document sync logs.
 - [ ] [#dzmm] TMO webhooks: confirm outbound webhook support (Robert to check with Mortgage Office)
-- [ ] [#ck54] Investor portal private document storage: add a separate private R2_DOCUMENTS bucket plus provider-neutral document metadata and authenticated download APIs; keep Dropbox as a later sync adapter.
 - [ ] [#qakx] Investor portal document pages: replace static Documents, Statements, and Accreditation fixture data with D1/R2-backed APIs and authenticated upload/request/download flows.
 - [ ] [#zjbe] Admin investor document workflow: upload and publish deal due-diligence, investor statements, tax docs, and accreditation files from R2 with visibility and review status controls.
 - [ ] [#yh4b] Admin dashboard (Cloudflare Access auth)

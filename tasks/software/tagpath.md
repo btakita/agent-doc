@@ -123,44 +123,12 @@ v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-gramm
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260524-230040.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260524-232950.md`*
 
 Compacted content:
-- Archived 4 response topic(s): queue auto; queue auto; queue auto; 1 more
+- Archived 1 response topic(s): queue auto
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-### Re: queue auto — do [#p4dy] — opus-4-7
-
-
-**Done.** Dynamic tree-sitter grammar loading shipped in tagpath 0.10.0; submodule pointer bumped + pushed.
-
-**Changes (tagpath submodule, f9942fa):**
-- `Cargo.toml` — version `0.9.0 → 0.10.0`; new opt-in feature `dyn-grammar`; optional deps `libloading`, `tree-sitter-language`, `dirs`. Default features unchanged; wasm path untouched.
-- `src/config/mod.rs` — `GrammarsConfig { load_dirs, languages }` + `GrammarEntry { path, symbol, extensions }` with `~` expansion via `dirs`.
-- `src/treesitter/dyn_loader.rs` (new) — loader API: `LoadedGrammar` (keeps `libloading::Library` alive), `DiscoveredGrammar`, `LoadError::{MissingFile, DlOpen, MissingSymbol, AbiMismatch}`. ABI check uses `language.version()` against the tree-sitter min/max compatible range.
-- `src/treesitter/mod.rs` — `extract_with_dyn_grammar()` generic-walker for runtime grammars.
-- `src/extract/mod.rs` — `extract_from_file_with_dyn_grammar()`, `find_dyn_grammar_for_ext()`, `notify_dyn_grammar_used()` (first-use stderr notice, `TAGPATH_QUIET=1`-suppressible). Dynamic grammar wins over compile-time `lang-*` when both match an extension.
-- `src/main.rs` — `tagpath grammars list` (text + json) and `tagpath grammars check`. Without `dyn-grammar`: both commands print a "built without --features dyn-grammar" hint.
-- `tests/test_dyn_grammar.rs` (new) — 7 integration tests + 2 inline loader tests covering `MissingFile`, `DlOpen` (sham `.so`), `discover()` filtering, CLI list/check exit codes.
-- `SPEC.md` — new section 14 "Dynamic grammar loading" (feature flag, config, precedence, ABI, error envelopes, CLI, security note: `load_dirs` is a code-execution boundary).
-- `README.md` — Advanced section with opt-in build command + config snippet.
-
-**Verification:**
-- `cargo fmt` clean.
-- `cargo clippy --all-targets -- -D warnings` clean; `cargo clippy --all-targets --features dyn-grammar -- -D warnings` clean.
-- `cargo test` — **132/132 pass** (default features).
-- `cargo test --features dyn-grammar` — **141/141 pass** (132 + 9 new).
-- `cargo build --target wasm32-unknown-unknown --no-default-features --features wasm` — clean (wasm path still gated correctly).
-- `cargo build --release` + `cargo install --path .` — `~/.cargo/bin/tagpath` replaced 0.9.0 → 0.10.0.
-- Live CLI smoke: `tagpath grammars list` / `check` against a fixture with a sham `.so` — exit codes + error envelopes verified.
-
-**Commits:**
-- tagpath `f9942fa`: `feat: add dynamic tree-sitter grammar loading (p4dy)` → pushed.
-- agent-loop `90c0333`: `tagpath: bump submodule to 0.10.0 (p4dy)` → pushed.
-
-**Known gap:** `LoadError::MissingSymbol` is not exercised end-to-end (would require building a dummy cdylib in the test harness). Documented at the top of `tests/test_dyn_grammar.rs`.
-
-No crates.io publish — release-hygiene queue item owns that. Auto-queue advances next to release hygiene (the last item).
-<!-- agent:boundary:bf97d795 -->
+<!-- agent:boundary:3fa2173a -->
 <!-- /agent:exchange -->
 ###
 
@@ -175,9 +143,4 @@ No crates.io publish — release-hygiene queue item owns that. Auto-queue advanc
 ## Completed / Reaped
 
 <!-- agent:done archive=tasks/software/tagpath.done.md -->
-- 2026-05-09 [#ctxp] Add `context-pack` to `fixtures/tsift-token-savings.json` with raw refs, tagpath family rows, ontology_ref handles, and minimum savings thresholds; mirror the new case in tagpath + tsift fixture tests.
-- 2026-05-09 [#cmpa] Add a tagpath library/CLI compression-report helper that accepts raw symbol rows and emits grouped family previews plus byte/token savings metrics for tsift.
-- 2026-05-09 [#qont] Add query/ontology compactness fixture cases that cover normalize-query input and `.naming/tags` ontology_refs so tsift can keep context-pack refs as handles instead of prose.
-- 2026-05-24 [#p4ix] Implement `tagpath index`: write `.naming/index.json` with schema version, config fingerprint, source hashes or mtimes, extracted identifier families, ontology refs, and CLI `index`/`index --check`; add tests for build, stale invalidation, and indexed search.
-- 2026-05-24 [#p4mp] Add MCP integration on top of the index: expose parse, normalize-query, lint, search, ontology lookup, and indexed project query tools with JSON schemas plus local smoke tests.
 <!-- /agent:done -->

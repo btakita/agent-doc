@@ -63,7 +63,27 @@ Commit / push state:
 Escalation: none.
 
 Confidence: high. The regression coverage now pins route/preflight preservation of visible scratch comments, final closeout preservation of current visible comments, and the lower-level generated-residue cleanup path.
-<!-- agent:boundary:ca471e0a -->
+❯ What are the #next-steps to fix the comment deletion issue?
+### Re: comment deletion next steps — gpt-5
+
+Top backlog item: `#cown`.
+
+`#cown` is now the first pending backlog item. Its target is hardening: prove every remaining document mutation path preserves user-authored scratch comments below `&lt;!-- /agent:exchange --&gt;` while still allowing agent-doc-generated duplicate prompt residue to be removed.
+
+For that backlog item, the concrete scope is:
+
+1. Add a deterministic SimWorld or integration fixture that seeds a user-authored HTML comment after the exchange close tag, exercises route cleanup, preflight recovery, finalize/write direct disk, IPC/plugin handoff, repair/write --commit, compact/exchange, and generated-residue cleanup, then asserts the comment body survives.
+2. Extend cleanup diagnostics around `post_exchange_duplicate_prompt_comment_removed` and skipped removals to record the ownership source, such as `baseline`, `snapshot`, `current_visible`, or `generated`, plus enough line/hash/count data to make future deletions attributable.
+3. Update the relevant specs/runbooks once the coverage is in place so the invariant is explicit: ordinary post-exchange comments are user-owned unless the current cycle proves agent-doc generated them.
+
+Changed paths for this cycle: session document/backlog only.
+
+Commands run: `agent-doc orchestrate ... --from-exchange --plan`, `agent-doc plan ...`, `agent-doc read ...`, and `agent-doc finalize ...`.
+
+Verification: no code suite was run because this cycle only answers the `#next-steps` prompt and records pending backlog work.
+
+Escalation: none. Confidence: high for the recommended next step and backlog priority.
+<!-- agent:boundary:b0748a78 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -81,6 +101,7 @@ dispatch #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#cown] Harden the remaining post-exchange comment ownership paths with a SimWorld/integration no-delete fixture covering route cleanup, preflight recovery, finalize/write direct disk, IPC/plugin handoff, repair/write --commit, compact/exchange, and generated duplicate-residue cleanup diagnostics.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

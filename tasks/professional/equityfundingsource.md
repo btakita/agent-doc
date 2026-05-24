@@ -97,7 +97,34 @@ Scope discipline:
 - The smoke script intentionally requires explicit `--investor-cookie` / `--admin-cookie` rather than performing signup → login flows itself; signup-only tests already exist in `tests/auth.test.ts`, and avoiding embedded credentials keeps the script safe to commit and run against production.
 
 Next queue head should be `#dzmm` (TMO webhook confirmation — externally blocked on Robert + Mortgage Office).
-<!-- agent:boundary:59eac639 -->
+### Re: do [#dzmm] — TMO webhooks — opus-4-7
+
+
+Externally blocked, not done — gated. dzmm requires The Mortgage Office to confirm whether outbound webhooks are supported; I cannot answer that from this side. What I can produce is a ready-to-forward technical prompt and a fallback plan, which is what landed this cycle.
+
+What changed in `src/equityfundingsource-dev`:
+
+- **`docs/tmo-webhooks-question.md`** (new) — six-question prompt Robert can paste directly to TMO support: (1) is push supported at all, (2) supported event types + subscription scope, (3) auth (HMAC / mTLS / IP allowlist), (4) payload signing + timestamp skew, (5) retry policy + delivery idempotency, (6) change-feed / `updated_since` polling endpoint if push is unsupported. Includes the implementation plan for both the webhook path (HMAC verification, `tmo_cache_outbox` idempotent dispatch, replay-safe ordering, observability via the existing `[observability]` block) and the polling-fallback path (tightened cron cadence, the existing `POST /api/admin/tmo-sync` admin button, optimistic pending pills) so the eventual response slots into a single follow-up ticket without re-architecting.
+
+Verification:
+
+- `bun test` — last run was 147 pass / 0 fail; no code change this cycle.
+- Submodule commit `9c0caca` ("docs: draft TMO outbound webhook question for Mortgage Office (dzmm)") pushed to `origin/main`.
+- Superproject pointer bump pushed.
+
+Gating rationale: dzmm is "confirm outbound webhook support (Robert to check with Mortgage Office)" — the deliverable is information from TMO, which only Robert can obtain. Marking `--done` would falsely claim I confirmed it. Gating preserves the open state while the follow-up captures the next concrete operator action.
+
+All six items from the original queue are now resolved:
+
+- `#njsx` (Tier 0 WAF + upload limits) — done, deployed
+- `#ft47` (Token-based document upload flow) — gated on remote D1 migration (review `#1v5m`)
+- `#yh4b` (Admin dashboard + CF Access auth) — done, deployed
+- `#zjbe` (Admin investor document workflow) — done, deployed
+- `#9vv3` (Investor portal E2E QA) — done, deployed
+- `#dzmm` (TMO webhooks) — gated on Mortgage Office reply via Robert
+
+Queue exhausted. Awaiting either new directives or external unblock on the three gated items.
+<!-- agent:boundary:db028f45 -->
 <!-- /agent:exchange -->
 ###
 
@@ -114,10 +141,10 @@ preset #spec-test-commit-push-deploy
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#k2xg] Send Robert the six-question TMO outbound webhook prompt in src/equityfundingsource-dev/docs/tmo-webhooks-question.md for him to forward to Mortgage Office, then record the response and decide push vs. tightened polling.
 - [ ] [#2rpv] Set Cloudflare Access env vars (ACCESS_TEAM_DOMAIN, ACCESS_AUD) on the equityfundingsource Worker and configure the CF Access application that protects /login/access-callback, then verify an admin sign-in via Google SSO.
 - [ ] [#0r24] Apply migration 0025_upload_tokens.sql to remote D1 once review #1v5m unblocks D1 API token permissions, then smoke test POST /api/admin/upload-tokens and POST /api/uploads/by-token/<token> against the live Worker.
 - [/] [#dropbox-sync-adapter] Dropbox sync adapter: after Dropbox access is available, push/pull R2_DOCUMENTS with idempotent retries, backfill, tombstone handling, and per-document sync logs.
-- [ ] [#dzmm] TMO webhooks: confirm outbound webhook support (Robert to check with Mortgage Office)
 - [ ] [#qr72] [recommended] By May 27, 2026, send Lucas a written bridge plan: $500 now from personal funds if available, ask for the remaining $500 to be paid after EFS payment clears or by an agreed near-term date, and invoice EFS immediately for $5,000 with a smaller immediate continuation retainer accepted if Judith pushes back.
 - [ ] [#s62t] [recommended] Prepare EFS invoice with truthful hours/value; Lucas cost is $4,150 (83h @ $50), so floor is 42h/$4,200 and recommended ask is 50-60h/$5,000-$6,000 with any concession as an explicit courtesy credit.
 - [ ] [#37ah] [recommended] Broker portal backend: replace static broker demo data with TMO-backed submit-deal, pipeline, commissions, documents, and notifications
@@ -149,6 +176,7 @@ preset #spec-test-commit-push-deploy
 ## Review
 
 <!-- agent:review -->
+- [/] [#dzmm] TMO webhooks: confirm outbound webhook support (Robert to check with Mortgage Office)
 - [/] [#qakx] Investor portal document pages: replace static Documents, Statements, and Accreditation fixture data with D1/R2-backed APIs and authenticated upload/request/download flows.
 - [/] [#1v5m] [recommended] Update passage btak/equityfundingsource/cloudflare_api_token to include Cloudflare D1 read/write permissions so the project cf:d1:* scripts can run without the OAuth bypass.
 - [/] [#jnzs] [recommended] Await Judith or EFS reviewer approval on funded-deal images, copy, lien-position wording, and legal/disclosure language before invoicing or launch sign-off. Technical D1 migration, Worker deploy, and live funded-deals/admin-route smoke tests completed 2026-05-23.

@@ -287,3 +287,67 @@ next preflight diff.
   proves the next `agent-doc <FILE>` invocation fails closed when a prior
   OpenCode-style response body is visible in the exchange section but absent
   from the committed snapshot.
+
+## Recursive Direct-Run Recovery Evidence (#rspcmt9)
+
+### Reproduction
+
+- **Document:** `boost-client/tasks/monsterrodholders.md` checkout incident
+  harness status update
+- **Session:** a9421282, Codex owner pane
+- **Harness:** Codex direct invocation from the pane that already owned the
+  document
+- **Symptom:** `agent-doc <FILE>` tripped the recursive-direct-invocation guard.
+  It committed the existing snapshot state, left the cycle recoverable, and left
+  the visible response patchback dirty in the working tree. A later
+  `agent-doc preflight <FILE>` repaired the stale `preflight_started` cycle but
+  reported the snapshot already matched `HEAD`, then still left the visible
+  status, exchange, and pending-item response patchback uncommitted.
+- **Same class as:** #rspcmt2, #rspcmt3, #rspcmt4, #rspcmt5, #rspcmt6, #rspcmt8
+
+### Root Cause Hypothesis
+
+The stale-cycle recovery path distinguishes "snapshot already committed" from
+"working tree contains later drift", but it does not recognize that the later
+drift can be the response patchback for the interrupted cycle. Because the
+snapshot matches `HEAD`, recovery can close the cycle as already committed even
+though the user-visible response state is still absent from `HEAD`.
+
+### Required Invariant
+
+Recovery must not close a cycle as committed while a valid response patchback for
+that cycle remains uncommitted in the working tree.
+
+If the drift is a provable agent-doc response patchback, recovery should commit
+it through the normal document commit path. If it cannot be proven safe, recovery
+should fail closed with an explicit diagnostic such as
+`response_patchback_uncommitted` instead of reporting an already-committed cycle.
+
+### Implementation Outline
+
+1. Extend stale-cycle recovery to compare `HEAD`, the snapshot, and the current
+   working tree after the recursive direct-run guard fires.
+2. Detect response-patchback-shaped drift in template components, including
+   `agent:exchange`, `agent:status`, and pending-item mutations.
+3. Refuse to classify the cycle as already committed while that drift exists
+   unless it is either committed or explicitly marked as unsafe user drift.
+4. Add a `session-check` failure for committed-cycle records whose document
+   still has uncommitted response patchback drift.
+5. Keep unrelated user edits protected: only auto-commit when the diff can be
+   proven to come from the response patchback path for the active cycle.
+
+### Regression Coverage
+
+Add an integration regression that simulates the observed sequence:
+
+1. A template session document has `HEAD` and snapshot aligned.
+2. The cycle state is left at `preflight_started` by a recursive direct-run
+   guard.
+3. The working tree contains a valid response patchback that mutates status,
+   exchange, and pending items.
+4. `agent-doc preflight` or the recovery entrypoint runs.
+
+Assert that recovery either commits the response patchback and leaves the
+working tree clean, or fails with `response_patchback_uncommitted`. It must not
+return an already-committed success while the response patchback remains
+uncommitted.

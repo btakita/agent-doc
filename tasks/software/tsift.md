@@ -35,11 +35,22 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): gdbcachewm
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:65b7bca9 -->
+❯ What are #next-steps to improve sqlite graph performance?
+### Re: sqlite graph performance next steps — gpt-5
+
+I added four backlog items in priority order. Top backlog item: `#gdbrefreshfast`.
+
+The next useful work is not raising max-hop caps or switching to FalkorDB first. In the current backend-eval digest, SQLite path max-hop is already cheap on this target: `real.sqlite.path_max_hops.duration_micros=58`, and synthetic 128/256-hop cases are `153`/`367` micros. The expensive part is producing and refreshing the graph projection: `real.sqlite.refresh.duration_micros=33167042`, with `source_graph_build=16371621`, `projection_rows=2805160`, and `conflict_matrix_preparation=5271642`. So the first item is to separate cold/cached refresh measurements and make the refresh no-op/source-watermark path reliable and cheap.
+
+FalkorDB should stay behind the backend promotion gate until it has native projection/write evidence. The current benchmark shows candidate read-model improvements in some operations, but the candidates are loaded from SQLite projection rows, so FalkorDB does not yet remove the local SQLite source build or refresh cost.
+
+Commands used: `tsift index .`, `tsift graph-db --path ../../tasks/software/tsift.md --json backend-eval | tsift metric-digest --baseline fixtures/graph-db-performance-history.json`, plus bounded `tsift source-read` inspections of `src/substrate.rs`, `src/main.rs`, `SPEC.md`, and the perf history fixture.
+
+Preflight warning preserved: one legacy gated item (`#orchdog`) still lives in `agent:backlog`; I left it below the new active performance work.
+<!-- agent:boundary:9dc0b5a3 -->
 <!-- /agent:exchange -->
 ###
 <!--
-#spec-test-build-install-commit-push
 -->
 
 <!-- agent:queue -->
@@ -48,6 +59,10 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#gdbrefreshfast] Split and optimize SQLite graph refresh cold path: measure cached vs cold refresh separately, tighten source-watermark no-op reuse, and reduce source_graph_build/projection_rows/sqlite_delta_write costs before backend switching.
+- [ ] [#gdbedgescan] Tighten SQLite edge scan/index plans: add EXPLAIN-plan regression coverage for edge_lookup, incident_edges, and edge_property_scan, and test UNION-based incident scans against the current OR predicate.
+- [ ] [#gdbhopcaps] Raise max-hop caps only behind measured guardrails: keep current defaults, add 64/128/256/512 hop synthetic high-fanout/deep-chain gates, then increase CLI caps if normalized path metrics stay flat.
+- [ ] [#gdbfalkorgate] Add a native FalkorDB promotion gate before claiming performance wins: benchmark write/projection loading, freshness/parity, lock behavior, and operator install cost instead of only read-only rows loaded from SQLite.
 - [/] [#orchdog] [recommended] Dogfood the completed graph-backed agent orchestration stack on a real agent-doc queue run: run refresh -> evidence -> conflict-matrix -> dispatch-trace -> jobs create/collect, compare worker_prompt_packet and worker_result closure fields, and capture any tsift-side fixture gaps. **Dogfood performed 2026-05-21 on `session-share/tasks/root.md` items #x63e + #v4v0; findings recorded in #gdbevid, #cmgr, #gdbidx — see `session-share/tasks/root.md` exchange "graph-backed orchestration dogfood" entry for the full pipeline trace.** **Second dogfood 2026-05-21 against `tasks/software/tsift.md` (preset `#dogfood-tsift`) surfaced 2 new gaps: #cmgrwres and #gdblock.**
 <!-- /agent:backlog -->
 

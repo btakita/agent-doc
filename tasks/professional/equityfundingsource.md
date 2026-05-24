@@ -385,14 +385,68 @@ Verification:
 - GitHub Actions/tmux CI note: `gh workflow list` returned no workflows, and `gh run list --workflow CI --limit 1` reported no workflow named `CI`, so there was no remote CI/tmux leg to inspect.
 
 Changed paths in the EFS source commit: `src/equityfundingsource-dev/docs/deploy.md`. Existing untracked `src/equityfundingsource-dev/tmp/` was left alone. Confidence: high on the docs change and deploy blocker. Escalation: none.
-<!-- agent:boundary:346c7121 -->
+❯ Use the CF api or chromium-bridge to do [#a20z]. Save credentials to passage and update the .env to use passage.
+### Re: Cloudflare credentials and production deploy — gpt-5
+
+Completed `#a20z` for the Worker deployment path.
+
+What changed:
+
+- Stored validated Cloudflare credentials in `passage` at:
+  - `btak/equityfundingsource/cloudflare_api_token`
+  - `btak/equityfundingsource/cloudflare_account_id`
+- Updated the git-ignored EFS `.env` to reference those passage entries instead of containing raw Cloudflare credentials.
+- Added `app/equityfundingsource/bin/cf-env.ts` so EFS Cloudflare scripts resolve `.env` values like `passage:btak/equityfundingsource/cloudflare_api_token` before invoking Wrangler.
+- Updated `cf-deploy`, `cf-wrangler`, `cf-secrets-push`, and the R2 blog seed script to use that loader and stop logging token prefixes.
+- Updated `docs/deploy.md` to document the `passage:` credential pattern.
+
+Committed and pushed in `src/equityfundingsource-dev`:
+
+```text
+7ce187e docs: document admin account setup
+979444b feat: load Cloudflare credentials from passage
+```
+
+Deployment succeeded:
+
+```text
+Uploaded equityfundingsource
+Deployed equityfundingsource triggers
+https://equityfundingsource.brian-takita.workers.dev
+Current Version ID: b43257a5-3f8c-4331-9f7b-8ad4202685ae
+```
+
+Smoke checks against the deployed Worker passed:
+
+```text
+/admin/login              -> 200
+/funded-deals             -> 200
+/blog                     -> 200
+/portal-admin/funded-deals -> 303 to /login?role=admin
+/portal-admin/blog-posts   -> 303 to /login?role=admin
+```
+
+Important boundary: the custom domain is still not cut over. `https://www.equityfundingsource.com/admin/login` still returns Apache/WordPress 404, and Cloudflare API zone lookup for `equityfundingsource.com` returned no zone for the available Cloudflare tokens. I added a new pending item for the custom-domain/DNS cutover.
+
+Verification:
+
+- `bun run cf:whoami` succeeded using `passage:` credentials.
+- Cloudflare token verification succeeded through the Cloudflare API before storing EFS-specific passage entries.
+- `make check` passed: 53 tests plus site build and Worker build.
+- `git -C src/equityfundingsource-dev diff --check` passed.
+- `bun run deploy:worker` completed successfully.
+- Worker smoke checks passed on `equityfundingsource.brian-takita.workers.dev`.
+- GitHub Actions/tmux CI note: `gh workflow list` returned no workflows, and `gh run list --workflow CI --limit 1` reported no workflow named `CI`, so there was no remote CI/tmux leg to inspect.
+
+Changed paths in the EFS source commits: `src/equityfundingsource-dev/docs/deploy.md`, `src/equityfundingsource-dev/app/equityfundingsource/bin/cf-env.ts`, `src/equityfundingsource-dev/app/equityfundingsource/bin/cf-deploy.ts`, `src/equityfundingsource-dev/app/equityfundingsource/bin/cf-wrangler.ts`, `src/equityfundingsource-dev/app/equityfundingsource/bin/cf-secrets-push.ts`, and `src/equityfundingsource-dev/app/equityfundingsource/bin/cf-r2-seed-blog.ts`. Existing untracked `src/equityfundingsource-dev/tmp/` was left alone. Confidence: high on Worker deployment; custom domain remains pending because the domain zone is not available to the current Cloudflare tokens. Escalation: none.
+<!-- agent:boundary:1e1cc7f3 -->
 <!-- /agent:exchange -->
 ###
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] [#a20z] Set EFS Cloudflare deployment credentials (CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID) in src/equityfundingsource-dev/.env, then rerun bun run deploy:worker for src/equityfundingsource-dev commit 7ce187e or latest main.
+- [ ] [#e1kb] Point equityfundingsource.com and www.equityfundingsource.com at the deployed Cloudflare Worker: add/move the zone into Cloudflare or configure equivalent DNS/Workers custom-domain routing, then verify /admin/login, /funded-deals, /blog, /portal-admin/funded-deals, and /portal-admin/blog-posts on the custom domain.
 - [ ] [#7fx4] OCR ingestion schema/state machine: add provider-neutral document_processing tables for documents, versions, OCR runs, pages/chunks, extracted fields, entity mentions/edges, review decisions, provider cost, and retry/error state.
 - [ ] [#d1h2] OCR provider adapter: process private R2 documents through pluggable parsers starting with Ragie Parse or Workers AI/Claude where appropriate; keep original R2 object as source of truth and persist source page/bounding-box evidence.
 - [ ] [#f5kq] OCR admin review workflow: show extracted fields with source evidence, confidence, and diffable approval/rejection before any TMO borrower, loan, lender, or loan-application writeback.
@@ -434,3 +488,9 @@ Changed paths in the EFS source commit: `src/equityfundingsource-dev/docs/deploy
 <!-- agent:review -->
 - [/] [#jnzs] [recommended] Await Judith or EFS reviewer approval on funded-deal images, copy, lien-position wording, and legal/disclosure language before invoicing or launch sign-off. Technical D1 migration, Worker deploy, and live funded-deals/admin-route smoke tests completed 2026-05-23.
 <!-- /agent:review -->
+
+## Completed / Reaped
+
+<!-- agent:done -->
+- 2026-05-24 [#a20z] Set EFS Cloudflare deployment credentials (CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID) in src/equityfundingsource-dev/.env, then rerun bun run deploy:worker for src/equityfundingsource-dev commit 7ce187e or latest main.
+<!-- /agent:done -->

@@ -36,7 +36,42 @@ queue_active: true
 Compacted content:
 - Archived 2 response topic(s): gate transition acknowledged; do [#yh4b]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:6a1330c0 -->
+### Re: do [#zjbe] — Admin investor document workflow — opus-4-7
+
+
+Shipped. Backend complete; admin frontend UI for these endpoints is a follow-up cycle but the API surface is live and Tier 0–guarded.
+
+What changed in `src/equityfundingsource-dev`:
+
+- **`lib/investor/documents_repo.ts`** — new admin helpers: `investor_documents_admin_R_` (cross-user list with `user_id` / `deal_id` / `category` / `status` filters, 500-row cap), `investor_document_update_` (patch name/notes/visibility/action_kind/deal_id), `investor_document_status_update_` (publish/archive — sets/clears `archived_at`), `investor_document_requests_admin_R_` (inbox by status), `investor_document_request_fulfill_` (link to document_id + admin_notes + fulfilled_at), `investor_document_request_reject_`, `investor_accreditation_decision_` (verify/reject with reviewer + optional `expires_at`, preserves prior notes via `COALESCE`).
+- **`lib/admin/routes.ts`** — 10 new admin endpoints, each behind `require_admin_`:
+  - `GET /api/admin/investor-documents` (list)
+  - `POST /api/admin/investor-documents` (multipart upload → R2 → `investor_document_create_`; honors `visibility=shared` override after the default-private insert)
+  - `PATCH /api/admin/investor-documents/:id` (update name/notes/visibility/action_kind/deal_id with strict enum validation)
+  - `POST /api/admin/investor-documents/:id/publish`
+  - `POST /api/admin/investor-documents/:id/archive`
+  - `GET /api/admin/investor-document-requests` (filter by status / user_id)
+  - `POST /api/admin/investor-document-requests/:id/fulfill` (validates `document_id` exists, links + admin_notes)
+  - `POST /api/admin/investor-document-requests/:id/reject` (with admin_notes)
+  - `POST /api/admin/investor-accreditation/:id/decision` (`verified` / `rejected`, optional `ttl_seconds` → `expires_at`, reviewer = current admin)
+  - `GET /api/admin/users/:id/investor-accreditation` (latest verification + valid types)
+- **`prds/equity-funding-source-lending-portal-prd.md`** — `### Admin Portal` opens with a new `#### Admin investor document workflow` block enumerating every endpoint, the upload contract (category + visibility + action_kind), and the Tier 0 rate-limit binding.
+- **`tests/admin-investor-documents.test.ts`** (new) — 12 tests covering the seven new repo helpers (presence + filter wiring + archived_at toggling + accreditation decision shape), all 10 routes, Tier 0 guard composition on upload, document_cache_put_ ordering before insert, enum validation on PATCH, fulfill error paths (missing document_id, 404 unknown doc), accreditation decision allowed-values gate, and PRD coverage.
+
+Verification:
+
+- `bun test` — 139 pass / 0 fail (across 17 files). Includes the deliberate "limiter down" console.error from the existing throw-recovery test.
+- `bun run check` (test + build + build:worker) — clean.
+- `bun run deploy:worker` — deployed Worker version `0c42e603-2b44-44b3-bed5-25151f2fd7af` to `https://equityfundingsource.brian-takita.workers.dev`.
+- Submodule commit `55cf812` pushed to `origin/main`.
+- Superproject pointer bump pushed to `origin/main`.
+
+Out of scope for this cycle (intentional — admin frontend is a separate concern):
+
+- Preact UI for the new endpoints in the admin portal dashboard sidebar / detail panes. The endpoints are API-complete and exercisable today; the frontend wiring can land alongside the existing admin sections without churning this turn.
+
+Next queue head should be `#9vv3` (Investor portal end-to-end QA).
+<!-- agent:boundary:fc5bba30 -->
 <!-- /agent:exchange -->
 ###
 
@@ -45,7 +80,7 @@ preset #spec-test-commit-push-deploy
 - ~do [#njsx]~
 - ~do [#ft47]~
 - ~do [#yh4b]~
-- do [#zjbe]
+- ~do [#zjbe]~
 - do [#9vv3]
 - do [#dzmm]
 <!-- /agent:queue -->
@@ -57,7 +92,6 @@ preset #spec-test-commit-push-deploy
 - [ ] [#0r24] Apply migration 0025_upload_tokens.sql to remote D1 once review #1v5m unblocks D1 API token permissions, then smoke test POST /api/admin/upload-tokens and POST /api/uploads/by-token/<token> against the live Worker.
 - [/] [#dropbox-sync-adapter] Dropbox sync adapter: after Dropbox access is available, push/pull R2_DOCUMENTS with idempotent retries, backfill, tombstone handling, and per-document sync logs.
 - [ ] [#dzmm] TMO webhooks: confirm outbound webhook support (Robert to check with Mortgage Office)
-- [ ] [#zjbe] Admin investor document workflow: upload and publish deal due-diligence, investor statements, tax docs, and accreditation files from R2 with visibility and review status controls.
 - [ ] [#9vv3] Investor portal end-to-end QA: seed and test investor signup, accreditation, published deal documents, funding commitment, admin acceptance, positions, distributions, and statements with TMO simulator plus R2 documents.
 - [ ] [#qr72] [recommended] By May 27, 2026, send Lucas a written bridge plan: $500 now from personal funds if available, ask for the remaining $500 to be paid after EFS payment clears or by an agreed near-term date, and invoice EFS immediately for $5,000 with a smaller immediate continuation retainer accepted if Judith pushes back.
 - [ ] [#s62t] [recommended] Prepare EFS invoice with truthful hours/value; Lucas cost is $4,150 (83h @ $50), so floor is 42h/$4,200 and recommended ask is 50-60h/$5,000-$6,000 with any concession as an explicit courtesy credit.
@@ -113,4 +147,5 @@ preset #spec-test-commit-push-deploy
 - 2026-05-24 [#njsx] Tier 0: Cloudflare WAF + upload limits
 - 2026-05-24 [#ft47] Token-based document upload flow
 - 2026-05-24 [#yh4b] Admin dashboard (Cloudflare Access auth)
+- 2026-05-24 [#zjbe] Admin investor document workflow: upload and publish deal due-diligence, investor statements, tax docs, and accreditation files from R2 with visibility and review status controls.
 <!-- /agent:done -->

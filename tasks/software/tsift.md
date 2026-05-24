@@ -81,13 +81,16 @@ Pushed commits:
 - `agent-loop`: `1e57bc565` (`tsift: bound graph refresh to task scope`)
 
 Non-blocking CI annotations remain for GitHub Actions Node 20 deprecation and the optional live Convex graph URL configuration message.
-<!-- agent:boundary:71917f49 -->
+### Re: recovery closeout — gpt-5
+
+No new task work was requested after the recovery preflight. This closes the annotation-only cycle opened while reaping `#gdbrefreshdelta`; the implementation, verification, pushes, and CI evidence remain in the preceding response.
+<!-- agent:boundary:4389ffba -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - do [#gdbrefreshdelta]
 - do [#gdbcmcache]

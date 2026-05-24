@@ -119,18 +119,13 @@ No new implementation work was needed for `#gdbrefreshdelta`: it was already com
 ### Re: do [#gdbrefreshdelta] — gpt-5
 
 Already completed. The implementation, verification, push, and evidence for `#gdbrefreshdelta` are recorded in the earlier `### Re: #gdbrefreshdelta` response; this response only targets the stale literal queue prompt left in `agent:queue auto`.
-<!-- agent:boundary:cc73a058 -->
+<!-- agent:boundary:381aa48d -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
 <!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- do [#gdbrefreshdelta]
-- do [#gdbcmcache]
-- do [#gdbpathpolicy]
-- do [#gdbengineproof]
 <!-- /agent:queue -->
 
 ## Backlog

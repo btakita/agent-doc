@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -33,7 +33,7 @@ Landed #stuckcycleorphan + #stuckcyclerepair; remaining plan part still pending.
 Compacted content:
 - Archived 2 response topic(s): do [#stuckcycledup]; do [#stuckcycleorphan] + do [#stuckcyclerepair]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:8a87f1e6 -->
+<!-- agent:boundary:f0366100 -->
 <!-- /agent:exchange -->
 ###
 <!--

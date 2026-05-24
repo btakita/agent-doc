@@ -119,7 +119,40 @@ No new implementation work was needed for `#gdbrefreshdelta`: it was already com
 ### Re: do [#gdbrefreshdelta] — gpt-5
 
 Already completed. The implementation, verification, push, and evidence for `#gdbrefreshdelta` are recorded in the earlier `### Re: #gdbrefreshdelta` response; this response only targets the stale literal queue prompt left in `agent:queue auto`.
-<!-- agent:boundary:3595b04c -->
+❯ What is the performance difference from the last queue run?
+### Re: performance difference from last queue run — gpt-5
+
+I compared a fresh bounded `backend-eval` run against the latest fixture baseline, `graph-db backend-eval full-projection agent-loop sample 3`.
+
+The headline is that the current default/bounded queue path is much faster in absolute terms, but it is not an apples-to-apples full-projection comparison. The previous fixture had `952,149` real graph rows; the fresh bounded run had `6,770`. That makes the absolute numbers useful for the current queue path, while the per-1k-row regressions in the digest are mostly denominator artifacts.
+
+Big absolute changes:
+
+- `real.sqlite.total_duration_micros`: `42,012,156` -> `657,167`, about `98.4%` faster.
+- `real.sqlite.refresh.duration_micros`: `41,192,468` -> `647,015`, about `98.4%` faster.
+- `real.refresh_phase.source_graph_build.duration_micros`: `22,361,314` -> `21,101`, about `99.9%` faster.
+- `real.refresh_phase.conflict_matrix_preparation.duration_micros`: `5,551,955` -> `3,885,900`, about `30.0%` faster.
+- `real.refresh_phase.conflict_matrix_preparation.preparation_cache_lookup.duration_micros`: `251,458` -> `1,833`, about `99.3%` faster.
+- `real.refresh_phase.conflict_matrix_preparation.impact.duration_micros`: `788,068` -> `627,748`, about `20.3%` faster.
+- `real.refresh_phase.conflict_matrix_preparation.context_pack_diff.duration_micros`: `455,101` -> `454,969`, effectively flat.
+
+The backend candidates also dropped from multi-second real totals to roughly 22-26 ms in the bounded run:
+
+- DuckDB: `22,189,754` -> `24,533` us.
+- FalkorDB: `15,074,603` -> `26,003` us.
+- Kuzu: `14,335,548` -> `22,335` us.
+- Ladybug: `16,438,877` -> `24,409` us.
+
+Interpretation: the dominant win is the bounded/source-watermark projection path, not a backend-engine improvement. The latest queue path also looks like it fixed the old cache-accounting problem: cache lookup is now around `1.8 ms` instead of carrying hundreds of milliseconds of stale prep cost. When a prep packet is actually computed, though, `session_review_compute`, `context_pack_diff`, and `impact` still dominate; the fresh run still spent about `3.9 s` in conflict-matrix preparation.
+
+I would treat this as a strong improvement for the current default queue path, but not as evidence that cold full-projection performance improved. For that, rerun with `--full-projection` and compare against sample 3 directly.
+
+Verification command used:
+
+```bash
+tsift graph-db --path /home/brian/work/btakita/agent-loop/tasks/software/tsift.md --json backend-eval --candidate duckdb-duckpgq --candidate falkordb --candidate ladybug --candidate kuzu | tsift metric-digest --baseline fixtures/graph-db-performance-history.json
+```
+<!-- agent:boundary:21afe0d8 -->
 <!-- /agent:exchange -->
 ###
 <!--

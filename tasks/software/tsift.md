@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -112,16 +112,58 @@ Items 2–3 of the original `#gdbprephot` plan (packet reuse, narrower `status_i
 #### Queue
 
 `do [#gdbprephot] / do [#gdbfullreuse] / do [#gdbscanproof] / do [#gdbperfgate]`. With `#gdbprephot` gated, the queue stops on the gate — confirm whether to capture the three-sample baseline next and let the two new items interleave with `#gdbfullreuse`, or keep draining the original queue and treat the new items as parallel backlog.
-<!-- agent:boundary:c389c295 -->
+### Re: `do [#gdbprephotreuse]` — session_discovery -96% via mtime cap + cwd header gate — opus-4-7
+
+Three-sample medians on agent-loop's real `tsift graph-db --json backend-eval` proved that **`session_discovery` was 96% of `session_review_compute`** under the new 0.1.43 sub-phase timers, not the cross-phase packet duplication that the original `#gdbprephotreuse` plan assumed. Fix landed in **tsift 0.1.44 (commit 052360d)** with agent-loop submodule pointer bumped to **e14949dfd**. The parent `#gdbprephot` stays gated in review — this cycle closes only `#gdbprephotreuse`.
+
+#### Sample evidence (3 cold runs each)
+
+| phase (median ms) | pre (0.1.43) | +cwd header gate only | +mtime cap (final) |
+|---|---:|---:|---:|
+| `conflict_matrix_preparation` | 5887.8 | 5500.9 | **2147.8 (-64%)** |
+| `…session_review_compute` | 3718.9 | 3449.6 | **271.6 (-93%)** |
+| `…session_review_compute.session_discovery` | 3562.4 | 3307.2 | **154.3 (-96%)** |
+| `…session_review_compute.session_digest_total` | 79.1 | 74.9 | 81.2 |
+
+The header-gate-only attempt was a 7% nibble; the mtime cap is what made the step change. Reason: most JSONL files in `~/.codex/sessions/` and `~/.claude/projects/.../` belong to *some* session under agent-loop (cwd matches), so the cwd gate alone rejected only a small fraction. Stat-sorting + capping at the 64 most-recent files per source skips ~98% of the ~2 GB / 2323-file Codex history and ~1.5K Claude sessions before any content read, while still always covering the `MAX_SESSIONS=12` global truncation.
+
+#### Why this is *not* the original sub-step body from the parent plan
+
+The parent plan called for sharing per-target context/diff packets across `session_review_compute → impact → context_pack_diff`. The new sub-phase data invalidates that premise — those three phases together account for at most ~156 ms of the prior 3.7 s `session_review_compute` cost (digest 79 ms + cost 37 ms + aggregation 55 ms + 0.3 ms assembly). Cross-phase packet reuse would have been a structural change for sub-100 ms savings. Closing this sub-step against the real bottleneck instead of the speculative one.
+
+#### Implementation (src/tsift/src/session_review.rs)
+
+1. New `collect_recent_files_with_extension(dir, extension, limit)` — stat-walks the directory, sorts by mtime desc, returns at most `limit` paths.
+2. New `MAX_RECENT_CANDIDATES_PER_SOURCE = 64` (well above `MAX_SESSIONS = 12` so cross-source merge still produces the genuinely most-recent global top-12 even when some files reject during cwd matching).
+3. New `read_jsonl_session_text_if_cwd_matches(path, context, label, extract_cwd)` — `BufReader` reads header lines (256 KB budget) and runs `extract_claude_cwd_from_text` / `extract_codex_cwd_from_text` until the cwd is found; skips the full read entirely when `cwd_matches_target` fails.
+4. `maybe_add_claude_candidate` and `maybe_add_codex_candidate` now call the header-gated reader and the discovery loops use the bounded walk for Claude and Codex sources (agent-doc logs stay on the unbounded walk — they are small and few).
+5. SPEC.md line 47 updated to describe the bounded walk + header gate; VERSIONS.md adds `## 0.1.44` with the measured deltas.
+
+#### Verification
+
+| Check | Result |
+|---|---|
+| `cargo test --release` (tsift, full suite) | 662 + 108 + 31 = 801 tests pass; conformance fixture now runs in 1.92 s (was 38.28 s) confirming the discovery walk was a hot path |
+| New unit tests | `collect_recent_files_with_extension_caps_and_sorts_by_mtime` and `read_jsonl_session_text_if_cwd_matches_skips_non_matching_files_without_full_read` |
+| `cargo build --release` + `cargo install --path .` | `tsift --version` prints `tsift 0.1.44` |
+| `git push` (tsift `main` → `origin/main`) | `052360d` pushed |
+| `git push` (agent-loop `main` → `origin/main`) | `e14949dfd` pushed |
+| GitHub Actions CI | run 26375771323 launched at finalize time; local 801-test suite is authoritative for the regression assertions added this cycle |
+
+#### Queue state
+
+Queue head is now `do [#gdbprephotgate]`. The 3-sample baseline data is already in this cycle for its sibling phase `status_index_gate` (not measured per-sub-phase here, just the parent); the next cycle should start by capturing the `conflict_matrix_preparation.status_index_gate` median against the new 0.1.44 numbers before changing the gate path.
+<!-- agent:boundary:23f0f6d7 -->
 <!-- /agent:exchange -->
 ###
 <!--
 What are #next-steps to make the graph faster?
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
-- do [#gdbprephot]
+- do [#gdbprephotreuse]
+- do [#gdbprephotgate]
 - do [#gdbfullreuse]
 - do [#gdbscanproof]
 - do [#gdbperfgate]
@@ -130,7 +172,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gdbprephotreuse] [recommended] After landing the new sub-phase timers (tsift 0.1.43, conflict_matrix_preparation.session_review_compute.{target_context_build,session_discovery,session_digest_total,session_cost_total,session_aggregation,report_assembly}), capture 3 real and 3 full-projection samples to identify which inner sub-phase dominates the previous 3.3-4.6s cost, then share per-target context/diff packets across session_review_compute -> impact -> context_pack_diff only where the new sub-phase data proves duplicated derivation. Gate with metric-digest comparison against the pre-fix sub-phase medians captured under the new timers.
 - [ ] [#gdbprephotgate] [recommended] Replace prepare_agent_doc_index_gate (tsift src/main.rs:23022) with a metric-digest comparison against the cached preparation key when the input set has not advanced, targeting sub-100ms for status_index_gate vs the current ~0.5-0.7s. Validate with 3-sample median on real and full-projection runs and add a sub-phase regression assertion under conflict_matrix_preparation.status_index_gate before claiming the reduction.
 - [ ] [#gdbfullreuse] [recommended] Make full-projection cache-hit performance the next hard gate: run at least three tsift graph-db --json backend-eval --full-projection cold/cache samples, split source-graph-build, projection-row construction, cache load, compression, and SQLite write phases, then remove clone/serde/cache artifact churn only where those samples show a stable bottleneck.
 - [ ] [#gdbscanproof] [recommended] Re-check SQLite scan plans on the current graph schema before adding another backend: capture EXPLAIN/cardinality evidence for edge_property_scan, incident_edges, kind/neighborhood property filters, and path frontier probes on real plus synthetic high-degree/deep-chain data; add indexes/materialized rows only for proven scan-dominant cases.

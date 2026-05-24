@@ -79,7 +79,28 @@ Commands used: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `agent
 Verification: no code changed; I did not run the project test suite. The plan files cite the specific regression tests to add when implementing the fix, and `agent-doc finalize` performs the session write/commit/session-check closeout.
 Escalation: none.
 Confidence: high on the diagnosis and plan boundaries; implementation still needs the planned code/test pass.
-<!-- agent:boundary:9dde1cf3 -->
+❯ Please add #next-steps to this document's backlog to improve graph performance.
+### Re: graph performance backlog next steps — gpt-5
+
+Added graph-performance next steps to this document's backlog and kept the list in priority order.
+
+Top backlog item: `#gdbpropscan`.
+
+Backlog items added:
+
+- [ ] [#gdbcoldfull] [recommended] Split and reduce full-projection cold rebuild cost: profile `full_projection.source_graph_build` and `projection_rows` separately, cache or incrementally rebuild unchanged session/source/summary rows, and prove the change with three `backend-eval --full-projection` samples plus `metric-digest`.
+- [ ] [#gdbprepwm] [recommended] Stabilize conflict-matrix preparation cache reuse: key prepared context/evidence/staged-diff/impact packets by source/document/staged-diff watermarks, exclude `.tsift/conflict-matrix-cache` artifacts from source watermarks, and gate on repeated `conflict_matrix_preparation`/`dispatch_trace` timings.
+- [ ] [#gdbhopguard] [recommended] Keep hop-cap increases behind path-tier guardrails: add or refresh 64/128/256/512-hop high-fanout/deep-chain fixtures with truncation and query-plan checks before raising user-facing defaults.
+- [ ] [#gdbbackendgate] [recommended] Re-evaluate FalkorDB/Kuzu only after SQLite hot paths are measured: require native projection writes/load, parity, lock behavior, install portability, and full-projection wins before considering backend promotion.
+
+I did not execute the inactive queue. The queue body still contains older items, but `queue_active: false`; this cycle only captured backlog work as requested.
+
+Changed paths: `tasks/software/tsift.md` through `agent-doc finalize` only.
+Commands used: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `agent-doc orchestrate --from-exchange --plan`, `tsift status --fix`, `tsift --envelope search`, and targeted `sed` reads of the prior performance comparison and done archive.
+Verification: no code changed; I did not run the project test suite. `agent-doc finalize` performs the document write/commit/session-check closeout.
+Escalation: none.
+Confidence: high for backlog capture and priority ordering; the items are based on the recorded performance comparison, not a fresh benchmark run.
+<!-- agent:boundary:e39cbffb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -98,6 +119,10 @@ preset #spec-test-build-install-commit-push
 
 <!-- agent:backlog -->
 - [ ] [#gdbpropscan] [recommended] Isolate the slow SQLite edge_property_scan path from #gdbedgescan: reproduce the latest roughly 3s fixture, capture EXPLAIN plus row-count/cardinality evidence, then prove any materialized edge-property index or scan-shape change with backend-eval and metric-digest before broader backend work.
+- [ ] [#gdbcoldfull] [recommended] Split and reduce full-projection cold rebuild cost: profile full_projection.source_graph_build and projection_rows separately, cache or incrementally rebuild unchanged session/source/summary rows, and prove the change with three backend-eval --full-projection samples plus metric-digest.
+- [ ] [#gdbprepwm] [recommended] Stabilize conflict-matrix preparation cache reuse: key prepared context/evidence/staged-diff/impact packets by source/document/staged-diff watermarks, exclude .tsift/conflict-matrix-cache artifacts from source watermarks, and gate on repeated conflict_matrix_preparation/dispatch_trace timings.
+- [ ] [#gdbhopguard] [recommended] Keep hop-cap increases behind path-tier guardrails: add or refresh 64/128/256/512-hop high-fanout/deep-chain fixtures with truncation and query-plan checks before raising user-facing defaults.
+- [ ] [#gdbbackendgate] [recommended] Re-evaluate FalkorDB/Kuzu only after SQLite hot paths are measured: require native projection writes/load, parity, lock behavior, install portability, and full-projection wins before considering backend promotion.
 - [/] [#orchdog] [recommended] Dogfood the completed graph-backed agent orchestration stack on a real agent-doc queue run: run refresh -> evidence -> conflict-matrix -> dispatch-trace -> jobs create/collect, compare worker_prompt_packet and worker_result closure fields, and capture any tsift-side fixture gaps. **Dogfood performed 2026-05-21 on `session-share/tasks/root.md` items #x63e + #v4v0; findings recorded in #gdbevid, #cmgr, #gdbidx — see `session-share/tasks/root.md` exchange "graph-backed orchestration dogfood" entry for the full pipeline trace.** **Second dogfood 2026-05-21 against `tasks/software/tsift.md` (preset `#dogfood-tsift`) surfaced 2 new gaps: #cmgrwres and #gdblock.**
 <!-- /agent:backlog -->
 

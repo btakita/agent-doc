@@ -963,6 +963,96 @@ pub fn classify_prompt_bearing_changes(diff: &str) -> Vec<PromptBearingChange> {
     suppress_answered_prompt_runs(classify_prompt_bearing_changes_raw(diff))
 }
 
+/// Return a copy of `diff` with user-added lines inside the current
+/// `agent:queue` component removed.
+///
+/// Inactive queue bodies are document state, not fresh prompt input. Callers use
+/// this before extracting prompt targets, slash commands, presets, and
+/// imperative directives when queue activation has not resolved true.
+pub fn suppress_inactive_queue_additions(diff: &str, current_content: &str) -> String {
+    let ranges = queue_line_ranges(current_content);
+    if ranges.is_empty() {
+        return diff.to_string();
+    }
+
+    let mut current_line: Option<usize> = None;
+    let mut filtered = String::new();
+    for line in diff.lines() {
+        if line.starts_with("@@ ") {
+            current_line = hunk_current_start_line(line);
+            filtered.push_str(line);
+            filtered.push('\n');
+            continue;
+        }
+
+        if line.starts_with("--- ") || line.starts_with("+++ ") {
+            filtered.push_str(line);
+            filtered.push('\n');
+            continue;
+        }
+
+        if line.starts_with('+') && !line.starts_with("+++") {
+            let line_no = current_line.unwrap_or(0);
+            if current_line_is_in_ranges(line_no, &ranges) {
+                current_line = current_line.map(|n| n + 1);
+                continue;
+            }
+            current_line = current_line.map(|n| n + 1);
+            filtered.push_str(line);
+            filtered.push('\n');
+            continue;
+        }
+
+        if line.starts_with(' ') {
+            current_line = current_line.map(|n| n + 1);
+        }
+
+        filtered.push_str(line);
+        filtered.push('\n');
+    }
+
+    filtered
+}
+
+fn queue_line_ranges(content: &str) -> Vec<(usize, usize)> {
+    let Ok(components) = component::parse(content) else {
+        return Vec::new();
+    };
+    components
+        .iter()
+        .filter(|component| component.name == "queue")
+        .map(|component| {
+            (
+                line_number_at_byte(content, component.open_start),
+                line_number_at_byte(content, component.close_end.saturating_sub(1)),
+            )
+        })
+        .collect()
+}
+
+fn line_number_at_byte(content: &str, byte_offset: usize) -> usize {
+    let end = byte_offset.min(content.len());
+    content[..end].bytes().filter(|b| *b == b'\n').count() + 1
+}
+
+fn hunk_current_start_line(header: &str) -> Option<usize> {
+    let plus = header
+        .split_whitespace()
+        .find(|part| part.starts_with('+'))?;
+    let number = plus
+        .trim_start_matches('+')
+        .split(',')
+        .next()
+        .unwrap_or_default();
+    number.parse::<usize>().ok()
+}
+
+fn current_line_is_in_ranges(line_no: usize, ranges: &[(usize, usize)]) -> bool {
+    ranges
+        .iter()
+        .any(|(start, end)| line_no >= *start && line_no <= *end)
+}
+
 fn prompt_prefix_lines_from_block(block: &str) -> Vec<PromptPrefixLine> {
     fn fence_open(trimmed: &str) -> Option<(char, usize)> {
         let fc = trimmed.chars().next()?;
@@ -3903,6 +3993,40 @@ Please fix the bug.\n\
     fn detect_queue_trigger_not_on_context_line() {
         let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n do queue\n+other\n";
         assert!(!detect_queue_trigger(diff));
+    }
+
+    #[test]
+    fn suppress_inactive_queue_additions_removes_queue_prompt_lines() {
+        let current = concat!(
+            "---\nqueue_active: false\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: prior — gpt-5\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "dispatch #spec-test-build-install-commit-push\n",
+            "- do [#gdbpropscan]\n",
+            "<!-- /agent:queue -->\n"
+        );
+        let diff = concat!(
+            "--- snapshot\n",
+            "+++ document\n",
+            "@@ -7,5 +7,7 @@\n",
+            " Done.\n",
+            " <!-- /agent:exchange -->\n",
+            " \n",
+            " <!-- agent:queue -->\n",
+            "+dispatch #spec-test-build-install-commit-push\n",
+            "+- do [#gdbpropscan]\n",
+            " <!-- /agent:queue -->\n",
+        );
+
+        let filtered = suppress_inactive_queue_additions(diff, current);
+
+        assert!(!filtered.contains("[#gdbpropscan]"));
+        assert!(!filtered.contains("dispatch #spec-test-build-install-commit-push"));
+        assert!(classify_prompt_bearing_changes(&filtered).is_empty());
+        assert!(extract_imperative_directives(&filtered).is_empty());
     }
 
     #[test]

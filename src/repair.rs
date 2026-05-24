@@ -315,6 +315,7 @@ fn visible_response_patch_from_document(file: &Path, doc_content: &str) -> Resul
 
 pub(crate) const AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR: &str =
     "ambiguous preflight_started patchback";
+pub(crate) const RESPONSE_PATCHBACK_UNCOMMITTED_ERROR: &str = "response_patchback_uncommitted";
 pub(crate) const EMPTY_PREFLIGHT_STARTED_NO_CAPTURE_ERROR: &str =
     "empty preflight_started cycle has no response capture";
 pub(crate) const STALE_EMPTY_PREFLIGHT_TTL_SECS: u64 = 60;
@@ -407,6 +408,24 @@ pub(crate) fn repair_stale_preflight_started_cycle(file: &Path) -> Result<Repair
         && state.normalized_snapshot_hash == current_normalized_snapshot_hash;
 
     if raw_hashes_match || normalized_hashes_match {
+        if !head_already_matches_current_doc(file, &file_content)?
+            && let Some(marker) = crate::session_check::detect_bypassed_response_write(file)?
+        {
+            crate::flow::closeout::log_closeout_guard_event(
+                file,
+                crate::flow::types::FlowStage::TerminalGuard,
+                crate::flow::types::FlowOutcome::FailedClosed,
+                crate::flow::closeout::CloseoutGuardReason::ResponsePatchbackUncommitted,
+            );
+            anyhow::bail!(
+                "{} for {}: stale preflight_started cycle `{}` has visible response patchback drift ({marker}) that is not committed in HEAD. Run `agent-doc write --commit {}` or `agent-doc finalize {}` through the normal closeout path; recovery will not report an already-committed cycle while this response is still only in the working tree.",
+                RESPONSE_PATCHBACK_UNCOMMITTED_ERROR,
+                file.display(),
+                state.cycle_id,
+                file.display(),
+                file.display(),
+            );
+        }
         crate::cycle_state::mark_committed(
             file,
             "repair_preflight_stale_lock",

@@ -865,6 +865,7 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
             Err(e) => {
                 let message = e.to_string();
                 if message.contains(repair::AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR)
+                    || message.contains(repair::RESPONSE_PATCHBACK_UNCOMMITTED_ERROR)
                     || message.contains(repair::EMPTY_PREFLIGHT_STARTED_NO_CAPTURE_ERROR)
                 {
                     anyhow::bail!("{}", e);
@@ -950,6 +951,7 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
         Err(e) => {
             let message = e.to_string();
             if message.contains(repair::AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR)
+                || message.contains(repair::RESPONSE_PATCHBACK_UNCOMMITTED_ERROR)
                 || message.contains(repair::EMPTY_PREFLIGHT_STARTED_NO_CAPTURE_ERROR)
             {
                 anyhow::bail!("{}", e);
@@ -1504,6 +1506,7 @@ pub fn run(file: &Path) -> Result<()> {
         eprintln!("[preflight] queue maintenance warning: {}", e);
         QueueState::default()
     });
+    warnings.extend(queue_state.warnings.clone());
     if diff_result.is_none()
         && let Some(head_prompt) = queue_state.queue_prompts.first()
     {
@@ -1534,9 +1537,23 @@ pub fn run(file: &Path) -> Result<()> {
 
     // Step 4c2: Classify user-authored prompt-bearing changes across prompts, edits,
     // and response/boundary artifacts.
+    let queue_active_for_prompt_extraction =
+        queue_state.queue_active == Some(true) || !queue_state.queue_prompts.is_empty();
+    let prompt_diff_result = diff_result.as_ref().map(|d| {
+        if queue_active_for_prompt_extraction {
+            d.clone()
+        } else {
+            diff::suppress_inactive_queue_additions(d, &diff_result_with_current.current)
+        }
+    });
     let mut prompt_bearing_changes = diff_result
         .as_ref()
-        .map(|d| diff::classify_prompt_bearing_changes(d))
+        .map(|_| {
+            prompt_diff_result
+                .as_deref()
+                .map(diff::classify_prompt_bearing_changes)
+                .unwrap_or_default()
+        })
         .unwrap_or_default();
     if raw_diff.is_some()
         && let Some(harness_only_diff) = harness_diff.as_ref()
@@ -1548,7 +1565,7 @@ pub fn run(file: &Path) -> Result<()> {
     }
     let prompt_targets =
         crate::flow::session_cycle::prompt_targets_from_changes(&prompt_bearing_changes);
-    let mut added_diff_lines = diff_result
+    let mut added_diff_lines = prompt_diff_result
         .as_ref()
         .map(|d| crate::prompt_contract::collect_added_diff_lines(d))
         .unwrap_or_default();
@@ -1568,7 +1585,7 @@ pub fn run(file: &Path) -> Result<()> {
         .unwrap_or_default();
 
     // Step 4d: Extract slash commands from user-added diff lines (classified into skill vs built-in).
-    let mut parsed_commands = diff_result
+    let mut parsed_commands = prompt_diff_result
         .as_ref()
         .map(|d| diff::parse_slash_commands_classified(d))
         .unwrap_or_else(|| diff::ParsedSlashCommands {
@@ -1590,7 +1607,7 @@ pub fn run(file: &Path) -> Result<()> {
     }
     let slash_commands = parsed_commands.skill_commands;
     let builtin_commands = parsed_commands.builtin_commands;
-    let orchestration_request = diff_result
+    let orchestration_request = prompt_diff_result
         .as_ref()
         .and_then(|d| diff::detect_orchestration_request(d))
         .or_else(|| {
@@ -1646,7 +1663,7 @@ pub fn run(file: &Path) -> Result<()> {
         agent_doc::model_tier::component_value_to_tier(v, &harness, &global_config.model)
     });
 
-    let mut prompt_presets_requested = diff_result
+    let mut prompt_presets_requested = prompt_diff_result
         .as_ref()
         .map(|d| diff::detect_prompt_preset_requests(d))
         .unwrap_or_default();
@@ -2198,6 +2215,7 @@ struct QueueState {
     queue_start_at: Option<String>,
     queue_trigger: Option<crate::queue::QueueTrigger>,
     queue_halted: Option<String>,
+    warnings: Vec<PreflightWarning>,
 }
 
 /// Run queue component maintenance: resolve activation, consume start fences,
@@ -2243,6 +2261,7 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
 
     let mut mutated = false;
     let mut current_content = content.clone();
+    let mut queue_warnings = Vec::new();
 
     // Consume start fence if needed
     if activation.consumed_start_fence {
@@ -2330,6 +2349,7 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
                 queue_start_at: None,
                 queue_trigger: activation.trigger,
                 queue_halted: Some("stop_fence".into()),
+                warnings: Vec::new(),
             });
         }
 
@@ -2343,6 +2363,7 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
                 queue_start_at: Some(dt.to_string()),
                 queue_trigger: activation.trigger,
                 queue_halted: None,
+                warnings: Vec::new(),
             });
         }
 
@@ -2415,6 +2436,7 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
                     queue_start_at: None,
                     queue_trigger: activation.trigger,
                     queue_halted: Some("item_modified".into()),
+                    warnings: Vec::new(),
                 });
             }
         }
@@ -2423,10 +2445,17 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
     // Handle queue drain: if the queue has no remaining prompts, clear
     // queue_active, strip auto, and remove completed/directive residue.
     let queue_has_prompts = !crate::queue::prompts(&activation.entries_after).is_empty();
+    let drained_residue = queue_entries_are_drained_residue(&activation.entries_after);
     let need_set_active = activation.active && !persisted_active;
     let need_clear_active = !activation.active && persisted_active && !activation.deferred;
     let need_strip_auto = has_auto && !queue_has_prompts;
-    let need_clear_drained_body = need_strip_auto && !activation.deferred;
+    let need_clear_proven_non_auto_residue = !has_auto
+        && !activation.active
+        && !activation.deferred
+        && drained_residue
+        && snapshot_proves_queue_was_active(file);
+    let need_clear_drained_body =
+        (need_strip_auto || need_clear_proven_non_auto_residue) && !activation.deferred;
 
     if need_clear_drained_body {
         let comps = crate::component::parse(&current_content)?;
@@ -2436,6 +2465,19 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
             mutated = true;
             eprintln!("[preflight] queue: cleared drained queue body");
         }
+    }
+
+    if !activation.active
+        && !activation.deferred
+        && !activation.entries_after.is_empty()
+        && !need_clear_drained_body
+    {
+        queue_warnings.push(PreflightWarning {
+            code: "inactive_queue_residue".to_string(),
+            message: "agent:queue is inactive but still contains directive/item residue; only active queue state is executable priority context".to_string(),
+            document_agent: None,
+            active_harness: None,
+        });
     }
 
     // Strip auto attribute from opening tag when queue drains
@@ -2476,7 +2518,7 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
             let mut new_snap = snap_content.clone();
 
             // Apply queue body change to snapshot
-            if (activation.consumed_start_fence || need_strip_auto)
+            if (activation.consumed_start_fence || need_strip_auto || need_clear_drained_body)
                 && let Ok(snap_comps) = crate::component::parse(&new_snap)
                 && let Some(snap_q) = snap_comps.iter().find(|c| c.name == "queue")
             {
@@ -2509,6 +2551,11 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
             {
                 new_snap = merged;
             } else if need_clear_active
+                && let Ok(merged) = frontmatter::merge_fields(&new_snap, "queue_active: false")
+            {
+                new_snap = merged;
+            }
+            if need_clear_drained_body
                 && let Ok(merged) = frontmatter::merge_fields(&new_snap, "queue_active: false")
             {
                 new_snap = merged;
@@ -2547,7 +2594,47 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
         queue_start_at: activation.start_at,
         queue_trigger: activation.trigger,
         queue_halted: None,
+        warnings: queue_warnings,
     })
+}
+
+fn queue_entries_are_drained_residue(entries: &[crate::queue::QueueEntry]) -> bool {
+    !entries.is_empty()
+        && entries.iter().all(|entry| {
+            matches!(
+                entry,
+                crate::queue::QueueEntry::Completed(_)
+                    | crate::queue::QueueEntry::Preset(_)
+                    | crate::queue::QueueEntry::Dispatch(_)
+            )
+        })
+}
+
+fn snapshot_proves_queue_was_active(file: &Path) -> bool {
+    let Ok(Some(snapshot_content)) = snapshot::load(file) else {
+        return false;
+    };
+    let Ok((fm, _)) = frontmatter::parse(&snapshot_content) else {
+        return false;
+    };
+    if fm.queue_active.unwrap_or(false) {
+        return true;
+    }
+    let Ok(components) = crate::component::parse(&snapshot_content) else {
+        return false;
+    };
+    let Some(queue_component) = components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
+        return false;
+    };
+    let body = &snapshot_content[queue_component.open_end..queue_component.close_start];
+    let Ok(entries) = crate::queue::parse(body) else {
+        return false;
+    };
+    let has_auto = crate::queue::has_auto_attr(&queue_component.attrs);
+    crate::queue::resolve_activation(&entries, has_auto, false, false).active
 }
 
 /// Archive reaped pending items to `agent:done`.
@@ -3497,6 +3584,49 @@ mod tests {
     }
 
     #[test]
+    fn preflight_clears_completed_non_auto_queue_when_snapshot_was_active() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let snapshot_content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "dispatch #spec-test-build-install-commit-push\n",
+            "- ~do [#cspe]~\n",
+            "<!-- /agent:queue -->\n"
+        );
+        let current_content = snapshot_content.replace("queue_active: true", "queue_active: false");
+        std::fs::write(&doc, &current_content).unwrap();
+        snapshot::save(&doc, snapshot_content).unwrap();
+
+        run(&doc).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            updated.contains("<!-- agent:queue -->\n<!-- /agent:queue -->"),
+            "proven drained non-auto queue should be cleared:\n{updated}"
+        );
+        assert!(!updated.contains("dispatch #spec-test-build-install-commit-push"));
+        assert!(!updated.contains("[#cspe]"));
+        assert!(updated.contains("queue_active: false"));
+
+        let snap = snapshot::load(&doc).unwrap().unwrap();
+        assert!(snap.contains("<!-- agent:queue -->\n<!-- /agent:queue -->"));
+        assert!(!snap.contains("dispatch #spec-test-build-install-commit-push"));
+        assert!(!snap.contains("[#cspe]"));
+        assert!(snap.contains("queue_active: false"));
+    }
+
+    #[test]
     fn preflight_does_not_swallow_user_prose_that_mentions_head() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");
@@ -4431,6 +4561,58 @@ mod tests {
             state.phase,
             crate::cycle_state::CyclePhase::PreflightStarted,
             "ambiguous patchback must not be auto-committed"
+        );
+    }
+
+    #[test]
+    fn preflight_started_repair_fails_when_matching_cycle_file_has_uncommitted_patchback() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+        let snapshot = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, snapshot).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let live = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "### Re: topic — gpt-5\n",
+            "Recovered body.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, live).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(live)).unwrap();
+
+        let err = run(&doc).unwrap_err();
+        let message = err.to_string();
+        assert!(
+            message.contains(crate::repair::RESPONSE_PATCHBACK_UNCOMMITTED_ERROR),
+            "expected uncommitted response patchback error, got: {message}"
+        );
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            state.phase,
+            crate::cycle_state::CyclePhase::PreflightStarted,
+            "recovery must not mark the stale cycle committed while HEAD lacks the visible response"
         );
     }
 

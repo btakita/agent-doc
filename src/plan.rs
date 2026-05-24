@@ -190,10 +190,17 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         });
     };
 
-    let prompt_bearing_changes = diff::classify_prompt_bearing_changes(&diff_text);
+    let queue_active_for_prompt_extraction = queue_is_active_for_diff(&content, &diff_text);
+    let prompt_diff_text = if queue_active_for_prompt_extraction {
+        diff_text.clone()
+    } else {
+        diff::suppress_inactive_queue_additions(&diff_text, &content)
+    };
+
+    let prompt_bearing_changes = diff::classify_prompt_bearing_changes(&prompt_diff_text);
     let prompt_targets =
         crate::flow::session_cycle::prompt_targets_from_changes(&prompt_bearing_changes);
-    let added_diff_lines = crate::prompt_contract::collect_added_diff_lines(&diff_text);
+    let added_diff_lines = crate::prompt_contract::collect_added_diff_lines(&prompt_diff_text);
 
     let execution_scope = execution_scope_for_prompt_targets(
         &prompt_targets,
@@ -204,11 +211,11 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     let repo_actions = if execution_scope == ExecutionScope::PlanBacklogOnly {
         Vec::new()
     } else {
-        diff::extract_imperative_directives(&diff_text)
+        diff::extract_imperative_directives(&prompt_diff_text)
     };
-    let orchestration_request = diff::detect_orchestration_request(&diff_text);
-    let exchange_compaction_requested = diff::detect_exchange_compaction_request(&diff_text);
-    let parsed_commands = diff::parse_slash_commands_classified(&diff_text);
+    let orchestration_request = diff::detect_orchestration_request(&prompt_diff_text);
+    let exchange_compaction_requested = diff::detect_exchange_compaction_request(&prompt_diff_text);
+    let parsed_commands = diff::parse_slash_commands_classified(&prompt_diff_text);
     let pending_mutations = pending_mutations_for_doc(
         file,
         &content,
@@ -344,6 +351,31 @@ fn active_queue_prompt_diff(content: &str) -> Option<String> {
     crate::queue::prompts(&activation.entries_after)
         .first()
         .map(|prompt| diff::synthetic_added_lines_diff(&prompt.text, "queue"))
+}
+
+fn queue_is_active_for_diff(content: &str, diff_text: &str) -> bool {
+    let Ok(components) = component::parse(content) else {
+        return false;
+    };
+    let Some(queue_component) = components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
+        return false;
+    };
+    let body = &content[queue_component.open_end..queue_component.close_start];
+    let Ok(entries) = crate::queue::parse(body) else {
+        return false;
+    };
+    let has_auto = crate::queue::has_auto_attr(&queue_component.attrs);
+    let (fm, _) = frontmatter::parse(content).unwrap_or_default();
+    crate::queue::resolve_activation(
+        &entries,
+        has_auto,
+        diff::detect_queue_trigger(diff_text),
+        fm.queue_active.unwrap_or(false),
+    )
+    .active
 }
 
 fn orchestration_mode_arg(mode: diff::OrchestrationRequestMode) -> &'static str {
@@ -971,6 +1003,59 @@ Done.
                 .any(|cmd| cmd.contains("--done oobpmt")),
             "queue do item should require closeout with --done oobpmt: {:?}",
             plan.required_commands
+        );
+    }
+
+    #[test]
+    fn build_plan_ignores_inactive_queue_edit_as_repo_action() {
+        let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");
+        let dir = setup_project();
+        let doc = dir.path().join("plan.md");
+        let baseline = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+queue_active: false
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — gpt-5
+
+Done.
+<!-- /agent:exchange -->
+
+<!-- agent:queue -->
+<!-- /agent:queue -->
+
+<!-- agent:backlog -->
+- [ ] [#gdbpropscan] Inspect graph DB properties.
+<!-- /agent:backlog -->
+"#;
+        let current = baseline.replace(
+            "<!-- agent:queue -->\n<!-- /agent:queue -->",
+            "<!-- agent:queue -->\n- do [#gdbpropscan]\n<!-- /agent:queue -->",
+        );
+        std::fs::write(&doc, current).unwrap();
+        snapshot::save(&doc, baseline).unwrap();
+
+        let plan = build(&doc).unwrap();
+
+        assert!(
+            plan.prompt_targets.is_empty(),
+            "inactive queue edit must not become prompt targets: {:?}",
+            plan.prompt_targets
+        );
+        assert!(
+            plan.repo_actions.is_empty(),
+            "inactive queue edit must not become repo actions: {:?}",
+            plan.repo_actions
+        );
+        assert!(
+            plan.pending_mutations.is_empty(),
+            "inactive queue edit must not resolve or capture pending work: {:?}",
+            plan.pending_mutations
         );
     }
 

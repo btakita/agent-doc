@@ -275,6 +275,49 @@ fn looks_like_managed_root_agents(content: &str) -> bool {
         && content.contains("## Workflow")
 }
 
+fn normalized_managed_instruction_surface_for_audit(content: &str) -> String {
+    strip_tsift_code_navigation_block(content)
+        .trim_end()
+        .to_string()
+}
+
+fn has_tsift_code_navigation_block(content: &str) -> bool {
+    content.contains("<!-- tsift:code-navigation")
+        && content.contains("<!-- /tsift:code-navigation -->")
+}
+
+fn extract_tsift_code_navigation_block(content: &str) -> Option<String> {
+    const START: &str = "<!-- tsift:code-navigation";
+    const END: &str = "<!-- /tsift:code-navigation -->";
+    let start = content.find(START)?;
+    let relative_end = content[start..].find(END)?;
+    let mut end = start + relative_end + END.len();
+    if content[end..].starts_with('\n') {
+        end += 1;
+    }
+    Some(content[start..end].trim_matches('\n').to_string())
+}
+
+fn strip_tsift_code_navigation_block(content: &str) -> String {
+    const START: &str = "<!-- tsift:code-navigation";
+    const END: &str = "<!-- /tsift:code-navigation -->";
+    let Some(start) = content.find(START) else {
+        return content.to_string();
+    };
+    let Some(relative_end) = content[start..].find(END) else {
+        return content.to_string();
+    };
+    let mut end = start + relative_end + END.len();
+    if content[end..].starts_with('\n') {
+        end += 1;
+    }
+    let mut rendered = String::new();
+    rendered.push_str(content[..start].trim_end());
+    rendered.push('\n');
+    rendered.push_str(content[end..].trim_start_matches('\n'));
+    rendered
+}
+
 fn sync_managed_root_agents(root: Option<&Path>) -> Result<()> {
     let resolved = root.map(|p| p.to_path_buf()).or_else(resolve_root);
     let base = resolved.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
@@ -290,7 +333,10 @@ fn sync_managed_root_agents(root: Option<&Path>) -> Result<()> {
         return Ok(());
     }
 
-    let rendered = content_for_env(agent_kit::detect::Environment::Generic);
+    let mut rendered = content_for_env(agent_kit::detect::Environment::Generic);
+    if let Some(tsift_block) = extract_tsift_code_navigation_block(&existing) {
+        rendered = format!("{}\n\n{}\n", rendered.trim_end(), tsift_block);
+    }
     if existing == rendered {
         return Ok(());
     }
@@ -322,7 +368,14 @@ pub(crate) fn audit_managed_instruction_surfaces(root: Option<&Path>) -> Result<
             continue;
         }
         let expected = content_for_env(env);
-        if existing != expected {
+        let normalized_existing = normalized_managed_instruction_surface_for_audit(&existing);
+        let normalized_expected = normalized_managed_instruction_surface_for_audit(&expected);
+        if normalized_existing != normalized_expected {
+            if matches!(env, agent_kit::detect::Environment::Generic)
+                && has_tsift_code_navigation_block(&existing)
+            {
+                continue;
+            }
             anyhow::bail!(
                 "managed agent-doc instruction surface is stale: {}. Run `agent-doc skill install --all` or reinstall the active harness before release.",
                 path.display()
@@ -1057,6 +1110,33 @@ mod tests {
         assert!(message.contains("managed agent-doc instruction surface is stale"));
         assert!(message.contains("AGENTS.md"));
         assert!(message.contains("agent-doc skill install --all"));
+    }
+
+    #[test]
+    fn audit_managed_instruction_surfaces_allows_tsift_navigation_block() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut root = super::content_for_env(Environment::Generic);
+        root.push_str(
+            "\n<!-- tsift:code-navigation v=0.1.42 -->\n## Code Navigation\n\nRun `tsift status`.\n<!-- /tsift:code-navigation -->\n",
+        );
+        std::fs::write(dir.path().join("AGENTS.md"), root).unwrap();
+
+        super::audit_managed_instruction_surfaces(Some(dir.path())).unwrap();
+    }
+
+    #[test]
+    fn audit_managed_instruction_surfaces_treats_tsift_root_mirror_as_customized() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut root = super::content_for_env(Environment::Generic).replace(
+            &format!("agent-doc-version: \"{VERSION}\""),
+            "agent-doc-version: \"0.33.12\"",
+        );
+        root.push_str(
+            "\n<!-- tsift:code-navigation v=0.1.42 -->\n## Code Navigation\n\nRun `tsift status`.\n<!-- /tsift:code-navigation -->\n",
+        );
+        std::fs::write(dir.path().join("AGENTS.md"), root).unwrap();
+
+        super::audit_managed_instruction_surfaces(Some(dir.path())).unwrap();
     }
 
     #[test]

@@ -237,7 +237,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         ("src/git.rs", "reason=") => 4,
         ("src/orchestrate.rs", "guard_") => 2,
         ("src/preflight.rs", "reason=") => 2,
-        ("src/repair.rs", "guard_") => 9,
+        ("src/repair.rs", "guard_") => 10,
         ("src/repair.rs", "reason=") => 5,
         ("src/route.rs", "accepted_only") => 4,
         ("src/route.rs", "flow_reason=") => 2,
@@ -717,6 +717,62 @@ fn test_preflight_warns_on_frontmatter_agent_harness_mismatch() {
     assert_eq!(json["warnings"][0]["document_agent"], "codex");
     assert_eq!(json["warnings"][0]["active_harness"], "claude-code");
     assert_eq!(json["no_changes"], true);
+}
+
+#[test]
+fn test_preflight_warns_but_does_not_target_inactive_queue_edit() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    let doc = root.join("session.md");
+    let baseline = concat!(
+        "---\n",
+        "agent_doc_session: test-session\n",
+        "agent_doc_format: template\n",
+        "agent_doc_write: crdt\n",
+        "queue_active: false\n",
+        "---\n\n",
+        "## Exchange\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: prior response — gpt-5\n",
+        "Already committed.\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue -->\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#gdbpropscan] Inspect graph DB properties.\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    let current = baseline.replace(
+        "<!-- agent:queue -->\n<!-- /agent:queue -->",
+        "<!-- agent:queue -->\n- do [#gdbpropscan]\n<!-- /agent:queue -->",
+    );
+    fs::write(&doc, &baseline).unwrap();
+    init_git_repo(root, &doc);
+    seed_snapshot(root, &doc, baseline);
+    fs::write(&doc, current).unwrap();
+
+    let mut preflight = agent_doc_cmd();
+    preflight.current_dir(root);
+    preflight.args(["preflight", doc.to_str().unwrap()]);
+    let output = preflight.output().unwrap();
+    assert!(
+        output.status.success(),
+        "preflight failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json: serde_json::Value =
+        serde_json::from_str(&stdout).expect("preflight output should be JSON");
+    assert_eq!(json["warnings"][0]["code"], "inactive_queue_residue");
+    assert!(
+        json.get("prompt_bearing_changes")
+            .and_then(|value| value.as_array())
+            .is_none_or(|changes| changes.is_empty()),
+        "inactive queue edit should not produce prompt-bearing changes: {json}"
+    );
+    assert_eq!(json["queue_active"], serde_json::Value::Null);
 }
 
 #[test]

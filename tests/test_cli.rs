@@ -82,6 +82,43 @@ fn test_binary_exists() {
 }
 
 #[test]
+fn test_codex_shared_closeout_spec_invariants() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let codex_support = fs::read_to_string(root.join("specs/codex-support.md")).unwrap();
+    let agent_backend = fs::read_to_string(root.join("specs/05-agent-backend.md")).unwrap();
+    let closeout = fs::read_to_string(root.join("specs/07-closeout-commands.md")).unwrap();
+
+    assert!(
+        codex_support.contains("Codex differs from Claude Code")
+            && codex_support.contains("layers only"),
+        "Codex spec must keep harness differences scoped to launch/routing/backend"
+    );
+    assert!(
+        codex_support.contains("Do not standardize on the Claude Code slash command"),
+        "Codex spec must not prescribe the Claude-only slash/Skill path"
+    );
+    assert!(
+        codex_support.contains("full-content editor IPC disabled"),
+        "Codex spec must preserve the shared full-content IPC ban"
+    );
+    assert!(
+        agent_backend
+            .contains("Agent backends are response producers, not session-document writers"),
+        "backend spec must keep document mutation outside harness backends"
+    );
+    assert!(
+        closeout.contains("## Harness-neutral closeout"),
+        "closeout spec must name the shared harness-neutral closeout boundary"
+    );
+    assert!(
+        closeout.contains("Codex direct")
+            && closeout.contains("Codex Stop hook")
+            && closeout.contains("recovery/backstop inputs"),
+        "closeout spec must route Codex hook recovery through shared finalize/write machinery"
+    );
+}
+
+#[test]
 fn live_tmux_tests_are_not_in_default_development_suite() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let sources = [

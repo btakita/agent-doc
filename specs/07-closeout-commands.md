@@ -4,6 +4,22 @@
 
 This file covers binary-owned response persistence: commit boundaries, patch/write semantics, recovery, and post-write session validation.
 
+## Harness-neutral closeout
+
+The closeout/write path is shared by every harness. Claude Code may enter it
+from a slash-command skill, Codex may enter it from a plain `agent-doc <FILE>`
+prompt plus Codex hooks, and OpenCode may enter it from its command wrapper, but
+the durable response boundary is the same: parse/validate the assistant
+payload, mutate the document through the write pipeline, commit the snapshot,
+and pass `session-check`.
+
+No harness gets a private response patchback path. In particular, Codex direct
+turns and the Codex Stop hook are recovery/backstop inputs to the same
+`finalize` / `write --commit` machinery; they must not commit console text,
+full-document transcript dumps, or editor `fullContent` replacements outside
+that machinery. Harness-specific code may choose how to launch, resume, route,
+or prove capabilities, but it may not change the closeout semantics.
+
 ## commit
 
 `agent-doc commit <FILE>`

@@ -14,6 +14,29 @@ Plan for supporting both Claude Code and Codex (OpenAI) as agent-doc harnesses.
 | `model_tier.rs` | Done | Harness-agnostic tier selection |
 | `config.toml` | Done | `[agents.codex]` section can override command/args |
 
+### Shared Response Persistence
+
+Codex differs from Claude Code at the invocation, routing, and CLI/backend
+layers only. Once a Codex turn has produced a final assistant response, it must
+cross the same binary-owned response persistence path as Claude Code and
+OpenCode:
+
+1. `preflight` / `plan` establish the prompt and execution contract.
+2. The harness/backend returns response text; it does not directly mutate the
+   session document.
+3. `agent-doc finalize <FILE>` or strict `agent-doc write --commit <FILE>`
+   applies the response through the normal template/write pipeline, commit
+   transaction, and `session-check`.
+
+Do not standardize on the Claude Code slash command or Skill-tool path across
+all harnesses. That path is not available to Codex. Standardize on the
+harness-neutral closeout and document-mutation path instead: component patches
+first, full-content editor IPC disabled, guarded disk/snapshot repair when an
+editor IPC patch cannot be proven, and a mandatory commit/session-check
+boundary. If a corruption appears only in Codex sessions, treat it as evidence
+that the Codex invocation, hook recovery, or final-response capture bypassed the
+shared closeout path, not as permission to add a Codex-specific write-back path.
+
 ### Claude-Code-Specific (Coupling Points)
 
 | Component | Coupling | Impact |

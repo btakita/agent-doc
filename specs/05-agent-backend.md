@@ -6,6 +6,15 @@
 
 `fn send(prompt, session_id, fork, model) -> (text, session_id)`
 
+Agent backends are response producers, not session-document writers. Claude
+Code, Codex, OpenCode, and custom backends may differ in process invocation,
+resume flags, JSON schemas, capability probes, and streaming events, but they
+all hand final response text back to the same closeout layer. They must not
+apply editor IPC payloads, write `agent:exchange`, save snapshots, or decide
+that console-visible output is a durable response. The response exists only
+after `agent-doc finalize <FILE>` or strict `agent-doc write --commit <FILE>`
+applies it through the shared write/commit/session-check path.
+
 ## Resolution Order
 
 1. CLI `--agent` flag

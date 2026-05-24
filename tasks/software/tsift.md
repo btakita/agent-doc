@@ -1,6 +1,6 @@
 ---
 agent_doc_session: tsift-v0.1
-agent: codex
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -48,14 +48,19 @@ Priority order:
 2. `#gdbfullreuse` - make full-projection cold/cache behavior the hard performance gate.
 3. `#gdbscanproof` - prove whether SQLite scan/index plans are still the limiting factor before adding engine work.
 4. `#gdbperfgate` - make the measurement loop repeatable enough to block regressions and backend promotion mistakes.
-<!-- agent:boundary:6d2a7c7e -->
+<!-- agent:boundary:3e156e06 -->
 <!-- /agent:exchange -->
 ###
 <!--
 What are #next-steps to make the graph faster?
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+preset #spec-test-build-install-commit-push
+- do [#gdbprephot]
+- do [#gdbfullreuse]
+- do [#gdbscanproof]
+- do [#gdbperfgate]
 <!-- /agent:queue -->
 
 ## Backlog

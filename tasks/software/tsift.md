@@ -35,10 +35,24 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 8 response topic(s): graph performance next steps; #gdbrefreshdelta; recovery closeout; 5 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:eac50e84 -->
+❯ What are #next-steps to make the graph faster?
+### Re: graph performance next steps — gpt-5
+
+I added four follow-up items to the backlog in priority order. Top backlog item: `#gdbprephot`.
+
+The next graph-speed work should start from the remaining measured hotspots, not from a blind max-hop increase or a backend swap. The last closed cycle made the default queue path much faster, but it still left conflict-matrix preparation as the obvious hot area, and it explicitly called out that cold/full-projection proof still needs repeated samples. The gated review items `#gdbcacheprove` and `#gdbvacproof` are still evidence gates; the new backlog items are the implementation-oriented follow-ups after or alongside that proof.
+
+Priority order:
+
+1. `#gdbprephot` - reduce the remaining conflict-matrix preparation cost first.
+2. `#gdbfullreuse` - make full-projection cold/cache behavior the hard performance gate.
+3. `#gdbscanproof` - prove whether SQLite scan/index plans are still the limiting factor before adding engine work.
+4. `#gdbperfgate` - make the measurement loop repeatable enough to block regressions and backend promotion mistakes.
+<!-- agent:boundary:6d2a7c7e -->
 <!-- /agent:exchange -->
 ###
 <!--
+What are #next-steps to make the graph faster?
 -->
 
 <!-- agent:queue -->
@@ -47,6 +61,10 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#gdbprephot] [recommended] Profile and reduce the remaining conflict-matrix preparation hotspots after the cache fixes: measure session_review_compute, context_pack_diff, impact, and dispatch-trace reuse on repeated real/full-projection runs, then add shared packet reuse or narrower digest paths with metric-digest gates so the cached queue path drops below the current multi-second prep cost without trusting stale ownership.
+- [ ] [#gdbfullreuse] [recommended] Make full-projection cache-hit performance the next hard gate: run at least three tsift graph-db --json backend-eval --full-projection cold/cache samples, split source-graph-build, projection-row construction, cache load, compression, and SQLite write phases, then remove clone/serde/cache artifact churn only where those samples show a stable bottleneck.
+- [ ] [#gdbscanproof] [recommended] Re-check SQLite scan plans on the current graph schema before adding another backend: capture EXPLAIN/cardinality evidence for edge_property_scan, incident_edges, kind/neighborhood property filters, and path frontier probes on real plus synthetic high-degree/deep-chain data; add indexes/materialized rows only for proven scan-dominant cases.
+- [ ] [#gdbperfgate] [recommended] Turn graph performance tuning into a repeatable release gate: store metric-digest summaries for default, full-projection, high-degree, and deep-chain runs, require three-sample regression evidence, and keep FalkorDB/Kuzu promotion blocked until they beat the stabilized SQLite gate including projection writes and lock behavior.
 - [/] [#orchdog] [recommended] Dogfood the completed graph-backed agent orchestration stack on a real agent-doc queue run: run refresh -> evidence -> conflict-matrix -> dispatch-trace -> jobs create/collect, compare worker_prompt_packet and worker_result closure fields, and capture any tsift-side fixture gaps. **Dogfood performed 2026-05-21 on `session-share/tasks/root.md` items #x63e + #v4v0; findings recorded in #gdbevid, #cmgr, #gdbidx — see `session-share/tasks/root.md` exchange "graph-backed orchestration dogfood" entry for the full pipeline trace.** **Second dogfood 2026-05-21 against `tasks/software/tsift.md` (preset `#dogfood-tsift`) surfaced 2 new gaps: #cmgrwres and #gdblock.**
 <!-- /agent:backlog -->
 

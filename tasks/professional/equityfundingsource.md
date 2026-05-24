@@ -156,7 +156,9 @@ The short replay summary above was recovered from an orphaned `agent-doc` respon
 ### Re: Commit reference clarification — gpt-5
 
 For durable implementation references, use the EFS implementation commit `ca1b8a6` and the root submodule pointer commit `5b2ed0248`. Later `agent-doc(equityfundingsource)` commits in the root repo are document closeout/repair commits only.
-<!-- agent:boundary:969364de -->
+Please add docs on using the tmo simulator, both in memory and persisted.
+#spec-test-commit-push
+<!-- agent:boundary:f6430ab7 -->
 <!-- /agent:exchange -->
 ###
 

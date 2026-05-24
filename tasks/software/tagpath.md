@@ -146,13 +146,13 @@ Six items added to the backlog in priority order — the first three matter most
 | 6 | p5wnp [recommended] | Publish wasm-pack tarball to npm | Wasm surface shipped in 0.9.0 but no npm artifact. Required before any JS-side agent-doc / tsift surface can pick it up. |
 
 **Phase 5 framing:** items 1–3 are a coherent "indexing-as-a-platform" arc. Combined deliverable: a tagpath-backed symbol/tag graph that tsift consumes for citations and agent-doc consumes for tag validation. Recommend grouping under the `#spec-test-build-install-commit-push` preset once you're ready to execute.
-<!-- agent:boundary:c3466752 -->
+<!-- agent:boundary:5beef4ad -->
 <!-- /agent:exchange -->
 ###
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#p5tsi]
+- ~do [#p5tsi]~
 - do [#p5inc]
 - do [#p5sln]
 - do [#p5wat]
@@ -163,7 +163,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#p5tsi] tsift integration: publish .naming/index.json as a first-class tsift symbol-graph adapter. Add tagpath index --emit jsonl streaming, stable family handles in the output, and a SPEC contract tsift can target so its envelopes cite tagpath family IDs instead of re-extracting symbols.
 - [ ] [#p5inc] Incremental indexing: tagpath index --update reuses the on-disk index, hashes only changed sources (mtime fast-path + sha256 verify), repairs in well under 1s on large repos. Required for tsift's freshness model and for agent-doc cycles that need live indexes.
 - [ ] [#p5sln] Session-document tag lint: extend tagpath lint with an agent-doc dialect that validates agent:exchange / agent:backlog / agent:done / patch:* tags, catches malformed directives like the agent:done archive=PATH bug hit this session, and refuses to write a finalize until they parse cleanly.
 - [ ] [#p5wat] tagpath watch: long-running watcher that emits index update events on file changes (newline-delimited JSON), suitable for tsift's incremental graph projection and agent-doc tag validators that need to react inside a cycle.
@@ -174,4 +173,6 @@ preset #spec-test-build-install-commit-push
 ## Completed / Reaped
 
 <!-- agent:done archive=tasks/software/tagpath.done.md -->
+
+<!-- completed work archived in tasks/software/tagpath.done.md -->
 <!-- /agent:done -->

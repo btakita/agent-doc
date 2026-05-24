@@ -81,7 +81,7 @@ Pushed commits:
 - `agent-loop`: `1e57bc565` (`tsift: bound graph refresh to task scope`)
 
 Non-blocking CI annotations remain for GitHub Actions Node 20 deprecation and the optional live Convex graph URL configuration message.
-<!-- agent:boundary:a3874eaf -->
+<!-- agent:boundary:71917f49 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -98,7 +98,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gdbrefreshdelta] [recommended] Reduce graph refresh/source-graph-build cost first: add or harden incremental source-graph-build/dirty-scope reuse, then prove real and full-projection refresh_phase.source_graph_build plus sqlite.refresh deltas against fixtures/graph-db-performance-history.json.
 - [ ] [#gdbcmcache] [recommended] Convert conflict-matrix preparation cache evidence into the next optimization pass: prove cache hits across repeated CLI invocations, then reduce session_review_compute, status_index_gate, context_pack_diff, and impact timings without broadening stale ownership trust.
 - [ ] [#gdbpathpolicy] [recommended] Do not raise the default path hop cap blindly; add an adaptive or opt-in high-hop policy backed by real/full-projection and synthetic deep-chain 128/256/512 samples, with a regression gate before any higher default is accepted.
 - [ ] [#gdbengineproof] [recommended] Keep FalkorDB/Kuzu/DuckDB/Ladybug behind backend-eval until a native production adapter proves projection writes, freshness/parity, lock behavior, install cost, and faster real/full-projection conflict-matrix/evidence/dispatch-trace/path metrics than SQLite without weakening bundled install semantics.

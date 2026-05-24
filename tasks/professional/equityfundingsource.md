@@ -29,43 +29,12 @@ prompt_presets:
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260523-225835.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260524-012242.md`*
 
 Compacted content:
-- Archived 2 response topic(s): Send inquiry email; Direct draft email send
+- Archived 1 response topic(s): Blog publishing
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-❯ Please create the /blog page with a sample blog post. Please add the ability to create blog posts to the admin section...with the ability to upload content to R2.
-❯ #spec-test-commit-push-deploy
-### Re: Blog publishing — gpt-5
-
-Implemented and deployed the EFS blog publishing work.
-
-What changed:
-- Added public `/blog` and `/blog/:slug` routes with a seeded sample post: `How Private Real Estate Lending Moves Quickly in California`.
-- Added D1 blog metadata via `0021_blog_posts.sql`; post bodies are stored in R2 under keys like `blog/california-private-lending-guide.html`.
-- Added admin blog management at `/portal-admin/blog-posts` and authenticated CRUD API routes under `/api/admin/blog-posts`; create/update writes the post HTML body to R2.
-- Added specs/docs/tests for the blog release path and a `bun run cf:r2:seed-blog` helper for the seeded R2 object.
-
-Changed paths: `src/equityfundingsource-dev` blog/domain/server/browser/admin/API/migration/test/docs files, plus the parent `src/equityfundingsource-dev` gitlink. The pre-existing `src/equityfundingsource-dev/tmp/` directory remains untracked and untouched.
-
-Verification:
-- `bun test tests/blog.test.ts` passed.
-- `bun run check` in `src/equityfundingsource-dev` passed: 35 tests, app build, and Worker build.
-- `make check` at the repo root passed.
-- Latest GitHub `Agent Doc` run `26346430786` is red, but both `tmux-ci` and `check` jobs have empty step lists and `gh run view --job ... --log` returns `log not found`, so I’m classifying it as an external CI-start blocker rather than a code/tmux regression. There is still no workflow named `CI` in this repo.
-
-Deploy proof:
-- Remote D1 migration initially returned Cloudflare timeout `7429`, but verification showed `blog_posts` exists, `d1_migrations` contains `0021_blog_posts.sql`, `SELECT COUNT(*) AS n FROM blog_posts WHERE status = 'published'` returns `1`, and `wrangler d1 migrations list` reports no pending migrations.
-- Remote R2 seed upload completed for `blog/california-private-lending-guide.html`.
-- Worker deployed to `https://equityfundingsource.brian-takita.workers.dev`, version `885b5cb2-65aa-46be-a091-708f1df1e341`.
-- Live smoke checks passed: `/blog` returned `200`, `/blog/california-private-lending-guide` returned `200` with expected article content, `/portal-admin/blog-posts` returned `303` to `/login?role=admin`, and remote R2 object download completed.
-
-Commits pushed:
-- EFS submodule: `35811c1` `feat: add blog publishing`; `0814676` `fix: seed blog content to remote R2`.
-- Parent repo: `ba43b90ab` `efs: add blog publishing`; `95c792a65` `efs: seed blog content to remote R2`.
-
-Escalation: none. Confidence: high.
-<!-- agent:boundary:1ecdb273 -->
+<!-- agent:boundary:12b1e36f -->
 <!-- /agent:exchange -->
 ###
 

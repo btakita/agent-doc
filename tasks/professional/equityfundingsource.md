@@ -96,7 +96,6 @@ Notes:
 - I left the pre-existing untracked `src/equityfundingsource-dev/tmp/` directory untouched.
 
 ❯ Is the simulator accurate with in-memory data storage? Can we persist the tmo simulator data storage and easily clear the tmo simulator persisted data?
-❯ Is the simulator accurate with in-memory data storage? Can we persist the tmo simulator data storage and easily clear the tmo simulator persisted data?
 ❯ #spec-test-commit-push
 ### Re: TMO simulator persistence — gpt-5
 
@@ -131,7 +130,27 @@ Commits pushed:
 - `agent-loop` submodule pointer: `5b2ed0248 Update EFS simulator submodule`
 
 I left the pre-existing untracked `src/equityfundingsource-dev/tmp/` files untouched.
-<!-- agent:boundary:445efff6 -->
+Implemented and pushed.
+
+In short: in-memory was fine for endpoint behavior, but not accurate for TMO persistence/lifecycle. I added optional D1-backed simulator persistence with reset/clear endpoints:
+
+- `TMO_SIM_STORAGE=d1`
+- `GET /tmo-sim/admin/state`
+- `POST /tmo-sim/admin/reset`
+- `DELETE /tmo-sim/admin/state`
+
+Commits pushed:
+
+- EFS repo: `ca1b8a6 Add persistent TMO simulator storage`
+- agent-loop submodule/session docs: `860e39cdc agent-doc(equityfundingsource): 2026-05-24 09:40:34`
+
+Verification passed:
+
+- `bun test tests/tmo-api.test.ts tests/tmo-sim.test.ts`
+- `make check` with 46 tests plus app and Worker builds
+
+No GitHub Actions `CI` workflow or `tmux-ci` target exists for this repo. The pre-existing untracked `src/equityfundingsource-dev/tmp/` directory is still untouched.
+<!-- agent:boundary:f986262d -->
 <!-- /agent:exchange -->
 ###
 

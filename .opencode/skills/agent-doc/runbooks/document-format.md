@@ -36,6 +36,9 @@ The body contains named components delimited by HTML comment markers:
 <!-- agent:backlog -->
 <!-- /agent:backlog -->
 
+<!-- agent:review -->
+<!-- /agent:review -->
+
 <!-- agent:icebox -->
 <!-- /agent:icebox -->
 ```
@@ -46,6 +49,7 @@ The body contains named components delimited by HTML comment markers:
 - `<!-- agent:output -->` — agent responds here when no other target is given.
 - `<!-- agent:exchange -->` — shared conversation surface; user and agent both write inline. Default target for unmatched patches and the canonical location for the response boundary marker.
 - `<!-- agent:backlog -->` — task tracker managed through granular pending ops (see `pending-ops.md`). Legacy alias: `<!-- agent:pending -->`.
+- `<!-- agent:review -->` — code-complete tracked work awaiting human review. `--pending-gate` moves backlog items here as `[/]`; `--pending-ungate` moves them back.
 - `<!-- agent:icebox -->` — project icebox for items parked outside the active backlog. Sits after `agent:backlog` in the default template.
 - `<!-- agent:status -->`, `<!-- agent:log -->`, `<!-- agent:architecture -->`, ... — agent-managed via targeted patch blocks.
 

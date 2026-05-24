@@ -20,13 +20,15 @@ Map orchestration phrasing to `agent-doc orchestrate <FILE> --mode ...` instead 
 | `sequential` | `agent-doc orchestrate <FILE> --mode sequential` | `orchestra`, `orchestrate`, `chain`, `in order`, `one by one`, `sequentially`, `synchronous`, `run these sequentially` |
 | `parallel` | `agent-doc orchestrate <FILE> --mode parallel` | `fan out`, `concurrent`, `at the same time`, `in parallel`, `simultaneously`, `parallelize these` |
 | `dag` | `agent-doc orchestrate <FILE> --mode dag` | `dependency graph`, `depends on`, `after X do Y`, `fan in`, `prerequisite`, `then unblock` |
+| `queue DAG` | `agent-doc orchestrate <FILE> --mode dag --from-queue` | `auto DAG queue`, `schedule the queue`, `run active queue as DAG`, `DAG the queue` |
 
 ## Tie-Breakers
 
-1. If the prompt names explicit dependencies (`after`, `depends on`, `blocked by`), choose `--mode dag`.
-2. Otherwise, if the prompt asks for concurrency (`fan out`, `concurrent`, `simultaneously`), choose `--mode parallel`.
-3. Otherwise, if the prompt asks for ordered batching (`chain`, `in order`, `one by one`, `orchestrate`), choose `--mode sequential`.
-4. If the wording is ambiguous but still clearly asks for orchestration, default to `--mode sequential`.
+1. If the prompt asks to schedule the active queue as a dependency graph, choose `--mode dag --from-queue`.
+2. If the prompt names explicit dependencies (`after`, `depends on`, `blocked by`), choose `--mode dag`.
+3. Otherwise, if the prompt asks for concurrency (`fan out`, `concurrent`, `simultaneously`), choose `--mode parallel`.
+4. Otherwise, if the prompt asks for ordered batching (`chain`, `in order`, `one by one`, `orchestrate`), choose `--mode sequential`.
+5. If the wording is ambiguous but still clearly asks for orchestration, default to `--mode sequential`.
 
 ## Examples
 
@@ -34,3 +36,4 @@ Map orchestration phrasing to `agent-doc orchestrate <FILE> --mode ...` instead 
 - `Chain these prompts without reusing context` → `agent-doc orchestrate <FILE> --mode sequential`
 - `Fan out these benchmark tasks` → `agent-doc orchestrate <FILE> --mode parallel`
 - `Do #bench after #prep, then summarize both` → `agent-doc orchestrate <FILE> --mode dag`
+- `Schedule the active queue as a DAG` → `agent-doc orchestrate <FILE> --mode dag --from-queue`

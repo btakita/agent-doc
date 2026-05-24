@@ -87,7 +87,7 @@ After preflight, run `agent-doc plan <FILE>` and treat `prompt_targets`, `execut
 
 ### 1b. Update pending (template mode)
 
-If `<!-- agent:backlog -->` (or legacy `agent:pending`) exists, mutate it only through granular `agent-doc write` flags: `--pending-add`, `--done <id>`, `--pending-edit "id=text"`, `--pending-reorder`, `--pending-gate`, `--pending-ungate`. Full-replace via `<!-- patch:backlog -->` is rejected; see [runbooks/pending-ops.md](runbooks/pending-ops.md). For `<!-- agent:icebox -->`, use `<!-- replace:icebox -->`.
+If `<!-- agent:backlog -->` (or legacy `agent:pending`) exists, mutate it only through granular `agent-doc write` flags: `--pending-add`, `--done <id>`, `--pending-edit "id=text"`, `--pending-reorder`, `--pending-gate`, `--pending-ungate`, `--review-add`, `--review-edit`. Full-replace via `<!-- patch:backlog -->` / `<!-- patch:review -->` is rejected; see [runbooks/pending-ops.md](runbooks/pending-ops.md). For `<!-- agent:icebox -->`, use `<!-- replace:icebox -->`.
 
 Completed/reaped items live under canonical `<!-- agent:done -->`; legacy `agent:backlog-done` and `agent:pending-done` tags require `agent-doc migrate`.
 
@@ -97,7 +97,7 @@ Completed/reaped items live under canonical `<!-- agent:done -->`; legacy `agent
 
 **Plan-backed pending items:** create the plan file first and include that exact plan file path in the pending text.
 
-**`do #id` closeout rule:** when the user directs `do #id ...`, record the pending outcome before persistence: `--done <id>` if completed, `--pending-gate <id>` if code-complete but externally blocked, or explain concretely why it stays open. `session-check` enforces the `pending_done_guard`.
+**`do #id` closeout rule:** when the user directs `do #id ...`, record the pending outcome before persistence: `--done <id>` if completed, `--pending-gate <id>` if code-complete but awaiting review/external validation, or explain concretely why it stays open. `session-check` enforces the `pending_done_guard`; projects may opt into `review_done_guard` when review must precede done.
 
 ### 2. Persist the response (MANDATORY — never skip)
 
@@ -132,3 +132,29 @@ Document format, frontmatter, component naming, and commit-boundary exceptions: 
 ## Runbooks
 
 Use runbooks for detail that is not needed every turn. Key runbooks: [runbooks/harness-invocation.md](runbooks/harness-invocation.md), [runbooks/planning-dispatch.md](runbooks/planning-dispatch.md), [runbooks/pending-ops.md](runbooks/pending-ops.md), [runbooks/commit.md](runbooks/commit.md), [runbooks/split-spec-files.md](runbooks/split-spec-files.md). `split-spec-files` applies across agent-doc-managed surfaces; custom root files stay opt-in unless they still match the generated baseline. Full catalog: `compact-exchange`, `transfer-extract`, `model-tier-gate`, `command-synonyms`, `compound-task-steering`, `streaming-checkpoints`, `document-format`, `code-enforced-directives`.
+
+<!-- tsift:code-navigation v=0.1.42 -->
+## Code Navigation
+
+Run `tsift status` at session start from the owning repo root. If the task or file lives under a git submodule (for example `src/tsift/...`), switch to that submodule root first so the harness loads the narrower local instructions and repo state instead of the superproject root. If status prints a `run:` recommendation for stale or missing tsift state, run `tsift status --fix` before relying on tsift results; when the harness cannot perform write commands, ask the user to run the printed command instead. Codex projects can install a prompt-time auto-reindex hook with `tsift init --codex`.
+
+Use the commands listed in its `use:` output:
+- `tsift --envelope search <query> --budget normal` — AST-aware hybrid search preview (prefer over grep/rg)
+- `tsift --envelope explain <symbol> --budget normal` — callers, callees, community preview
+- `tsift graph <symbol> --callers` / `--callees` — call graph navigation
+- `tsift summarize <symbol>` — cached summary (only when listed in `use:`)
+- `tsift workflow search` — ordered exact/search/explain/summarize/digest recipe that preserves result handles across expansions
+
+When a search envelope includes `report.scale_guard`, run one of its `narrow_commands` before dispatching parallel agents. The guard means the original result set or corpus is broad enough that fan-out should start from a narrower cited handle, path, or exact query.
+
+Prefer bounded digest commands over raw transcript, diff, and verbose-log reads:
+- `tsift --envelope session-review <path> --next-context --budget normal` or `tsift --envelope context-pack <path> --budget normal` instead of replaying long session docs, JSONL transcripts, or agent-doc runtime logs with `cat`, `tail`, or `sed`.
+- `tsift diff-digest [path]` (`--cached`, `--revision <rev>`) instead of `git diff`, `git show`, or patch-style `git log`.
+- `tsift --envelope __digest-runner --kind test --path . --shell-command '<test command>'` / `tsift --envelope __digest-runner --kind log --path . --shell-command '<build command>'` for noisy test/build/install output, or let the rewrite/hooks create those artifact-backed envelopes for `cargo test`, `pytest`, and verbose cargo commands.
+- If RTK is installed, digest-runner delegates supported generic command families through `rtk rewrite` and records the chosen compact filter in `report.filter` while preserving tsift artifact handles.
+- If your harness does not support Claude-style `PreToolUse` hooks, run `tsift rewrite --run '<command>'` to execute the same envelope-first, artifact-backed tsift equivalent manually.
+
+For local verification, run `make check` before committing. After local changes, check the latest GitHub Actions CI run with `gh run list --workflow CI --limit 1` and fix any failing tests before calling the work complete.
+
+Only read full source files when tsift results are insufficient.
+<!-- /tsift:code-navigation -->

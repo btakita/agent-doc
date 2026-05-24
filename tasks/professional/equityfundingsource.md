@@ -36,14 +36,18 @@ queue_active: true
 Compacted content:
 - Archived 2 response topic(s): queue do (six backlog items); do [#njsx]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:4587d419 -->
+### Re: gate transition acknowledged — advancing queue past ft47 — opus-4-7
+
+
+Confirmed: ft47 sits in review as gated, follow-up `#0r24` (apply migration 0025 + smoke test once `#1v5m` unblocks) is on backlog. No fresh prompt this cycle — consuming the stale `do [#ft47]` queue head so the next invocation dispatches `#yh4b` (Admin dashboard + Cloudflare Access auth).
+<!-- agent:boundary:ffe09888 -->
 <!-- /agent:exchange -->
 ###
 
 <!-- agent:queue auto -->
 preset #spec-test-commit-push-deploy
 - ~do [#njsx]~
-- do [#ft47]
+- ~do [#ft47]~
 - do [#yh4b]
 - do [#zjbe]
 - do [#9vv3]
@@ -53,11 +57,11 @@ preset #spec-test-commit-push-deploy
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#0r24] Apply migration 0025_upload_tokens.sql to remote D1 once review #1v5m unblocks D1 API token permissions, then smoke test POST /api/admin/upload-tokens and POST /api/uploads/by-token/<token> against the live Worker.
 - [/] [#dropbox-sync-adapter] Dropbox sync adapter: after Dropbox access is available, push/pull R2_DOCUMENTS with idempotent retries, backfill, tombstone handling, and per-document sync logs.
 - [ ] [#dzmm] TMO webhooks: confirm outbound webhook support (Robert to check with Mortgage Office)
 - [ ] [#zjbe] Admin investor document workflow: upload and publish deal due-diligence, investor statements, tax docs, and accreditation files from R2 with visibility and review status controls.
 - [ ] [#yh4b] Admin dashboard (Cloudflare Access auth)
-- [ ] [#ft47] Token-based document upload flow
 - [ ] [#9vv3] Investor portal end-to-end QA: seed and test investor signup, accreditation, published deal documents, funding commitment, admin acceptance, positions, distributions, and statements with TMO simulator plus R2 documents.
 - [ ] [#qr72] [recommended] By May 27, 2026, send Lucas a written bridge plan: $500 now from personal funds if available, ask for the remaining $500 to be paid after EFS payment clears or by an agreed near-term date, and invoice EFS immediately for $5,000 with a smaller immediate continuation retainer accepted if Judith pushes back.
 - [ ] [#s62t] [recommended] Prepare EFS invoice with truthful hours/value; Lucas cost is $4,150 (83h @ $50), so floor is 42h/$4,200 and recommended ask is 50-60h/$5,000-$6,000 with any concession as an explicit courtesy credit.
@@ -111,4 +115,5 @@ preset #spec-test-commit-push-deploy
 - 2026-05-24 [#cf-d1-cache-deploy] Resolve Cloudflare D1 API authorization for account 1e7e194ff8da4ad9e40ce041aea84f76, apply migration 0023_tmo_cache_and_r2_documents.sql, then deploy worker commit 3ada2de.
 - 2026-05-24 [#ck54] Investor portal private document storage: add a separate private R2_DOCUMENTS bucket plus provider-neutral document metadata and authenticated download APIs; treat R2 as the canonical uploaded-document cache and keep Dropbox as a later sync adapter.
 - 2026-05-24 [#njsx] Tier 0: Cloudflare WAF + upload limits
+- 2026-05-24 [#ft47] Token-based document upload flow
 <!-- /agent:done -->

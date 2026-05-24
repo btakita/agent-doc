@@ -30,43 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260524-123945.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260524-125554.md`*
 
 Compacted content:
-- Archived 4 response topic(s): graph backend cache queue; benchmark queue closeout; Please run a benchmark on the performance improvements for this queue run; 1 more
+- Archived 1 response topic(s): gdbcachewm
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ do [#gdbcachewm]. #spec-test-build-install-commit-push
-### Re: gdbcachewm — gpt-5
-
-Completed `#gdbcachewm`.
-
-Changed paths:
-- `src/tsift/SPEC.md`
-- `src/tsift/src/main.rs`
-- `src/tsift/tests/graph_db_conformance.rs`
-- superproject gitlink `src/tsift`
-
-What changed:
-- Fixed generated-artifact detection so relative index snapshot paths such as `.tsift/conflict-matrix-cache/...` are treated as generated artifacts.
-- Filtered generated `.tsift` and `target` paths out of traversal graph inputs loaded from existing index rows: file nodes, symbols, call edges, and route rows.
-- Updated the spec to state that conflict-matrix cache artifacts are excluded from source watermarks and indexed graph inputs.
-- Added a backend-eval regression that seeds a stale `.tsift/conflict-matrix-cache` index row, proves it is not projected as file/symbol graph input, and proves the second and third backend-eval CLI runs both reuse the conflict-matrix disk cache.
-
-Verification:
-- `cargo test --test graph_db_conformance graph_db_backend_eval_benchmarks_candidate_stores_against_sqlite -- --nocapture` passed.
-- `make check` passed: clippy, 658 unit tests, 108 exit-code integration tests, and 31 graph-db conformance tests.
-- `cargo build` passed.
-- `cargo install --path . --force` installed `tsift v0.1.42` locally.
-- `git diff --check` passed.
-- tsift GitHub `CI` run `26361745103` completed successfully after push.
-- superproject `Agent Doc` run `26361755591` failed before runner steps were allocated; both `tmux-ci` and `check` jobs had empty step lists, so I classified it as the known external CI-start blocker rather than a code or tmux regression.
-
-Commits and push:
-- `btakita/tsift` main: `622a3ff` (`fix: keep conflict matrix cache out of graph inputs`) pushed.
-- `btakita/agent-loop` main: `d1f942331` (`chore: update tsift submodule`) pushed.
-
-Confidence: high. Escalation: none.
-<!-- agent:boundary:56740ded -->
+<!-- agent:boundary:65b7bca9 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -16,7 +16,7 @@ prompt_presets:
   '#commit-push-deploy': commit all uncommitted files + push in claudescore-plugin, claudescore.com, and session-share. deploy
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -124,18 +124,32 @@ All six items from the original queue are now resolved:
 - `#dzmm` (TMO webhooks) — gated on Mortgage Office reply via Robert
 
 Queue exhausted. Awaiting either new directives or external unblock on the three gated items.
-<!-- agent:boundary:db028f45 -->
+### Re: do [#2rpv] + do [#0r24] — externally blocked — opus-4-7
+
+
+Both items still need Cloudflare dashboard / credential access this Worker session does not have. I retried `#0r24` (D1 migration apply) and it still returns Cloudflare error 7403 — the API token at `passage btak/equityfundingsource/cloudflare_api_token` still lacks D1:Edit, which is the open review item `#1v5m`. `#2rpv` (CF Access env vars + Access application) needs operator work in Cloudflare Zero Trust to create the Access app and copy back the team domain + AUD.
+
+What landed this cycle:
+
+- **`docs/operator-runbook-pending-config.md`** (new) — step-by-step runbook for whoever has dashboard access. Covers:
+  - `#0r24`: exact API token permissions to add (Account → D1 → Edit), `passage` and `.env` updates if the token changes, the `bun run cf:d1:migrate:remote` invocation, and a curl smoke test against `POST /api/admin/upload-tokens` with the expected `{ ok: true, token, url_path, view.status: "active" }` response shape.
+  - `#2rpv`: Zero Trust team-domain setup, the exact Access application configuration (self-hosted, 12 h session, restricted email policy, Google IdP), where to copy AUD and team domain from, the `wrangler.toml` `[vars]` edits, the one-shot `ADMIN_SIGNUP_ENABLED` bootstrap dance for net-new admin accounts (flip to "true" → deploy → sign in once → flip back to "false" → deploy), and a curl smoke that expects a CF Access challenge instead of the current 503.
+  - Explicit out-of-scope list pointing at icebox `#e1kb`, `docs/security-tier-0.md`, and `docs/tmo-webhooks-question.md` so the runbook does not accumulate unrelated work.
+
+Verification:
+
+- `bun run cf:d1:migrate:remote` still fails with `code: 7403, "The given account is not valid or is not authorized to access this service"` — confirms `#1v5m` is still live and the gate on `#0r24` has not moved.
+- Submodule commit `cf2b038` pushed to `origin/main`; superproject pointer bump pushed.
+
+Neither item moves out of "review" this cycle. The follow-up work to forward this runbook to whoever has Cloudflare dashboard access is the operator's call; I won't add a meta-follow-up backlog item for "send the runbook to the owner" since it would just be paperwork on top of paperwork. When the dashboard work completes, retry the smoke tests in the runbook and close `#0r24` / `#2rpv` / `#1v5m` in review.
+<!-- agent:boundary:a8a73747 -->
 <!-- /agent:exchange -->
 ###
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-commit-push-deploy
-- ~do [#njsx]~
-- ~do [#ft47]~
-- ~do [#yh4b]~
-- ~do [#zjbe]~
-- ~do [#9vv3]~
-- do [#dzmm]
+- do [#2rpv]
+- do [#0r24]
 <!-- /agent:queue -->
 
 ## Backlog

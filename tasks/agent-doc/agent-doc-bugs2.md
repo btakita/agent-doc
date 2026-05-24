@@ -64,7 +64,7 @@ Push:
 
 Escalation: none required.
 Confidence: high for the spec/test change; the remaining audit-docs issue is isolated to the pre-existing managed instruction-surface drift described above.
-<!-- agent:boundary:fbb346d8 -->
+<!-- agent:boundary:63110f81 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -82,7 +82,7 @@ dispatch #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#e86b] [recommended] Resolve pre-existing root AGENTS.md managed instruction-surface drift from the tsift code-navigation block so  can pass.
+- [ ] [#e86b] [recommended] Resolve pre-existing root AGENTS.md managed instruction-surface drift from the tsift code-navigation block so `cargo run --quiet -- audit-docs` can pass.
 - [ ] [#rpatch] Fix response patchback recovery so stale-cycle closeout cannot report already committed while a valid visible response patchback remains uncommitted; implement tasks/agent-doc/plan-response-patchback-uncommitted.md.
 - [ ] [#qresidue] [recommended] Fix inactive agent:queue residue being read as active response context; implement tasks/agent-doc/plan-drained-non-auto-queue-cleanup.md.
 - [ ] [#qinactive] [recommended] Prevent edits inside inactive agent:queue blocks, such as do [#gdbpropscan], from becoming prompt targets or cross-document #agent-doc-bug backlog captures; implement tasks/agent-doc/plan-inactive-queue-residue-prompt-target.md.

@@ -97,13 +97,13 @@ presets/               Convention presets (immutable-tag.toml)
 - [x] `/tagpath` Claude Code skill — installed in both repos
 - [x] 72 tests, clippy clean, published to crates.io
 
-### Phase 4 — Index, ontology, dynamic loading, WASM, MCP
+### Phase 4 — Index, ontology, dynamic loading, WASM, MCP ✅ (v0.7.0–v0.10.0)
 
-- [ ] `tagpath index` — persistent index (`.naming/index.json`) for instant queries
-- [ ] Tag ontology — `.naming/tags/*.md` domain vocabulary (philosophy-style)
-- [ ] Dynamic `.so` grammar loading — runtime extensibility via `libloading`
-- [ ] WASM build — feature flag excluding tree-sitter, npm package via `wasm-pack`
-- [ ] MCP tool integration — expose parse/search/lint to coding agents
+- [x] `tagpath index` — persistent index (`.naming/index.json`) for instant queries (v0.7.0)
+- [x] Tag ontology — `.naming/tags/*.md` domain vocabulary (`tagpath ontology` already shipped)
+- [x] Dynamic `.so` grammar loading — runtime extensibility via `libloading`, opt-in `dyn-grammar` feature (v0.10.0)
+- [x] WASM build — `wasm` feature gating tree-sitter behind `cfg(not(target_arch = "wasm32"))`, wasm-bindgen surface (v0.9.0)
+- [x] MCP tool integration — stdio JSON-RPC 2.0 server exposing parse / normalize_query / lint / search / ontology_lookup / indexed_project_query (v0.8.0)
 
 ### Design Decisions
 
@@ -115,7 +115,7 @@ presets/               Convention presets (immutable-tag.toml)
 ## Status
 
 <!-- agent:status patch=replace -->
-v0.6.2 published to crates.io
+v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-grammar)
 <!-- /agent:status -->
 
 ## Exchange

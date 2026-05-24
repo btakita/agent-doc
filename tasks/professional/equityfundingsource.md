@@ -439,14 +439,53 @@ Verification:
 - GitHub Actions/tmux CI note: `gh workflow list` returned no workflows, and `gh run list --workflow CI --limit 1` reported no workflow named `CI`, so there was no remote CI/tmux leg to inspect.
 
 Changed paths in the EFS source commits: `src/equityfundingsource-dev/docs/deploy.md`, `src/equityfundingsource-dev/app/equityfundingsource/bin/cf-env.ts`, `src/equityfundingsource-dev/app/equityfundingsource/bin/cf-deploy.ts`, `src/equityfundingsource-dev/app/equityfundingsource/bin/cf-wrangler.ts`, `src/equityfundingsource-dev/app/equityfundingsource/bin/cf-secrets-push.ts`, and `src/equityfundingsource-dev/app/equityfundingsource/bin/cf-r2-seed-blog.ts`. Existing untracked `src/equityfundingsource-dev/tmp/` was left alone. Confidence: high on Worker deployment; custom domain remains pending because the domain zone is not available to the current Cloudflare tokens. Escalation: none.
-<!-- agent:boundary:1e1cc7f3 -->
+❯ No...the site is the cloudflare site. Not the WP site.
+❯ Please deploy the CF site.
+### Re: Cloudflare Pages deploy — gpt-5
+
+You were right: there is a Cloudflare Pages site for EFS. I found the `equityfundingsource` Pages project in Cloudflare and deployed the static site there.
+
+Pages deployment completed successfully:
+
+```text
+Project: equityfundingsource
+Deployment URL: https://2a1d6427.equityfundingsource.pages.dev
+Production alias: https://equityfundingsource.pages.dev
+```
+
+I also redeployed the Worker again before finding the Pages project:
+
+```text
+Worker URL: https://equityfundingsource.brian-takita.workers.dev
+Worker Version ID: 48b0ed11-f6f3-40e2-a753-449c5b0353b6
+```
+
+Smoke checks passed on the Cloudflare Pages site:
+
+```text
+https://2a1d6427.equityfundingsource.pages.dev/             -> 200
+https://2a1d6427.equityfundingsource.pages.dev/funded-deals -> 200
+https://equityfundingsource.pages.dev/                      -> 200
+https://equityfundingsource.pages.dev/funded-deals          -> 200
+```
+
+I corrected pending item `#e1kb` so it points at Cloudflare Pages custom-domain cutover instead of the Worker-specific wording. The Cloudflare Pages deploy is done; the remaining separate step is attaching `equityfundingsource.com` / `www.equityfundingsource.com` to the Pages project if those hostnames should serve this Pages deployment.
+
+Notes:
+
+- Remote D1 migration was not applied: `bun run cf:d1:migrate:remote` failed with Cloudflare D1 authorization errors for the current token. That did not block the Cloudflare Pages deploy, which is static.
+- No source files changed in this cycle; existing untracked `src/equityfundingsource-dev/tmp/` was left alone.
+- Verification this cycle was deployment/build output plus live HTTP smoke checks. I did not rerun the full test suite because no source changed in this cycle.
+
+Commands run included `agent-doc preflight`, `agent-doc plan`, `bun run cf:d1:migrate:remote`, `bun run deploy:worker`, Cloudflare Pages API inspection, `wrangler pages deploy dist/static --project-name equityfundingsource --branch main`, `curl -I` smoke checks, and git status checks. Confidence: high that the Cloudflare Pages site is deployed. Escalation: none.
+<!-- agent:boundary:776e56ed -->
 <!-- /agent:exchange -->
 ###
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] [#e1kb] Point equityfundingsource.com and www.equityfundingsource.com at the deployed Cloudflare Worker: add/move the zone into Cloudflare or configure equivalent DNS/Workers custom-domain routing, then verify /admin/login, /funded-deals, /blog, /portal-admin/funded-deals, and /portal-admin/blog-posts on the custom domain.
+- [ ] [#e1kb] Point equityfundingsource.com and www.equityfundingsource.com at the Cloudflare Pages project equityfundingsource, then verify / and /funded-deals on the custom domain; if admin routes are expected on the custom domain too, decide whether to route those paths to the Worker or move the dynamic app fully behind the same hostname.
 - [ ] [#7fx4] OCR ingestion schema/state machine: add provider-neutral document_processing tables for documents, versions, OCR runs, pages/chunks, extracted fields, entity mentions/edges, review decisions, provider cost, and retry/error state.
 - [ ] [#d1h2] OCR provider adapter: process private R2 documents through pluggable parsers starting with Ragie Parse or Workers AI/Claude where appropriate; keep original R2 object as source of truth and persist source page/bounding-box evidence.
 - [ ] [#f5kq] OCR admin review workflow: show extracted fields with source evidence, confidence, and diffable approval/rejection before any TMO borrower, loan, lender, or loan-application writeback.

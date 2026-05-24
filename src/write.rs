@@ -69,9 +69,10 @@
 //!   boundary marker are present.
 //!
 //! - `try_ipc_full_content`: like `try_ipc` but sends a full document
-//!   replacement (`fullContent` field) instead of component patches. Used by
-//!   inline-mode documents without component markers. The response-fallback
-//!   variant still skips already committed cycles, while
+//!   replacement (`fullContent` field) instead of component patches. Reserved
+//!   for no-component append-mode documents; template frontmatter or any
+//!   `agent:*` component marker rejects the payload before socket/file IPC.
+//!   The response-fallback variant still skips already committed cycles, while
 //!   `try_ipc_full_content_operator_mutation` is available for fresh operator
 //!   mutations such as Compact Exchange that must reach the editor even after
 //!   the previous response cycle is committed. When the caller supplies the
@@ -8114,6 +8115,14 @@ pub fn try_ipc(
             // fullContent is only safe as a fallback for append-mode (no-component) docs.
             if ipc_patches_json.is_empty()
                 && let Some(ours) = content_ours
+                && full_content_ipc_scope_allows(
+                    file,
+                    FullContentIpcMode::ResponseFallback,
+                    &patch_id,
+                    ours,
+                    ipc_before_content.as_deref(),
+                    ipc_before_content.as_deref(),
+                )
             {
                 socket_payload["fullContent"] = serde_json::Value::String(ours.to_string());
                 attach_full_content_source_proof(
@@ -8433,6 +8442,14 @@ pub fn try_ipc(
         // to apply fullContent (full replacement) and skip patches → duplicate on next cycle.
         if ipc_patches.is_empty()
             && let Some(ours) = content_ours
+            && full_content_ipc_scope_allows(
+                file,
+                FullContentIpcMode::ResponseFallback,
+                &patch_id,
+                ours,
+                ipc_before_content.as_deref(),
+                ipc_before_content.as_deref(),
+            )
         {
             ipc_payload["fullContent"] = serde_json::Value::String(ours.to_string());
             attach_full_content_source_proof(&mut ipc_payload, ipc_before_content.as_deref());
@@ -8586,6 +8603,87 @@ fn full_content_source_label(mode: FullContentIpcMode) -> &'static str {
     }
 }
 
+fn frontmatter_mode_is_explicit_template(mode: &str) -> bool {
+    matches!(
+        mode.trim().to_ascii_lowercase().as_str(),
+        "template" | "stream"
+    )
+}
+
+fn content_declares_template_frontmatter(content: &str) -> bool {
+    frontmatter::parse(content).ok().is_some_and(|(fm, _)| {
+        fm.format == Some(frontmatter::AgentDocFormat::Template)
+            || fm
+                .mode
+                .as_deref()
+                .is_some_and(frontmatter_mode_is_explicit_template)
+    })
+}
+
+fn content_has_agent_components(content: &str) -> bool {
+    component::parse(content)
+        .ok()
+        .is_some_and(|components| !components.is_empty())
+}
+
+fn full_content_ipc_scope_rejection_reason(contents: &[Option<&str>]) -> Option<&'static str> {
+    for content in contents.iter().flatten() {
+        if content_declares_template_frontmatter(content) {
+            return Some("template_frontmatter");
+        }
+        if content_has_agent_components(content) {
+            return Some("agent_component_markers");
+        }
+    }
+    None
+}
+
+fn full_content_ipc_scope_allows(
+    file: &Path,
+    mode: FullContentIpcMode,
+    patch_id: &str,
+    target_content: &str,
+    source_content: Option<&str>,
+    current_content: Option<&str>,
+) -> bool {
+    let reason = full_content_ipc_scope_rejection_reason(&[
+        Some(target_content),
+        source_content,
+        current_content,
+    ]);
+    let Some(reason) = reason else {
+        return true;
+    };
+
+    let source = full_content_source_label(mode);
+    eprintln!(
+        "[write] full-content IPC skipped for {}: {} is not eligible for whole-document editor replacement",
+        file.display(),
+        reason
+    );
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "full_content_ipc_scope_rejected file={} source={} patch_id={} scope={} target_len={} target_hash={} source_len={} source_hash={} current_len={} current_hash={}",
+            file.display(),
+            source,
+            patch_id,
+            reason,
+            target_content.len(),
+            crate::ops_log::content_hash(target_content),
+            source_content.map(str::len).unwrap_or(0),
+            source_content
+                .map(crate::ops_log::content_hash)
+                .unwrap_or_else(|| "-".to_string()),
+            current_content.map(str::len).unwrap_or(0),
+            current_content
+                .map(crate::ops_log::content_hash)
+                .unwrap_or_else(|| "-".to_string())
+        ),
+    );
+    false
+}
+
 fn guard_full_content_source_buffer_current(
     file: &Path,
     mode: FullContentIpcMode,
@@ -8673,6 +8771,17 @@ fn try_ipc_full_content_with_mode(
             ),
         );
         cleanup_fallback_patch_files(file);
+        return Ok(false);
+    }
+
+    if !full_content_ipc_scope_allows(
+        file,
+        mode,
+        &patch_id,
+        content,
+        effective_source_content,
+        before_content.as_deref(),
+    ) {
         return Ok(false);
     }
 
@@ -11799,6 +11908,104 @@ scratch
     }
 
     #[test]
+    fn template_normalization_only_file_ipc_omits_full_content() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let prompt = "do #norm-only. spec-test-build-install-commit-push";
+        let original = format!(
+            "---\nagent_doc_format: template\n---\n\n\
+<!-- agent:exchange patch=append -->\n{prompt}\n<!-- agent:boundary:test -->\n<!-- /agent:exchange -->\n"
+        );
+        let normalized = original.replace(prompt, &format!("❯ {prompt}"));
+        fs::write(&doc, &original).unwrap();
+
+        let seen_payload = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let patches_dir = agent_doc_dir.join("patches");
+        let ack_dir = agent_doc_dir.join("ack-content");
+        let doc_for_watcher = doc.clone();
+        let normalized_for_watcher = normalized.clone();
+        let seen_for_watcher = seen_payload.clone();
+        let watcher = std::thread::spawn(move || {
+            let start = std::time::Instant::now();
+            while start.elapsed() < std::time::Duration::from_secs(3) {
+                let Ok(entries) = fs::read_dir(&patches_dir) else {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                    continue;
+                };
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().and_then(|value| value.to_str()) != Some("json") {
+                        continue;
+                    }
+                    let text = fs::read_to_string(&path).unwrap();
+                    let payload: serde_json::Value = serde_json::from_str(&text).unwrap();
+                    let patch_id = payload
+                        .get("patch_id")
+                        .and_then(|value| value.as_str())
+                        .unwrap()
+                        .to_string();
+                    fs::write(&doc_for_watcher, &normalized_for_watcher).unwrap();
+                    fs::write(
+                        ack_dir.join(format!("{patch_id}.md")),
+                        &normalized_for_watcher,
+                    )
+                    .unwrap();
+                    *seen_for_watcher.lock().unwrap() = Some(payload);
+                    fs::remove_file(path).unwrap();
+                    return true;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            false
+        });
+
+        let prefix_lines = vec![prompt.to_string()];
+        let result = try_ipc(
+            &doc,
+            &[],
+            "",
+            None,
+            Some(&original),
+            Some(&normalized),
+            Some(prefix_lines.as_slice()),
+            Some("patch-template-norm-only-no-full-content"),
+        )
+        .unwrap();
+
+        assert!(watcher.join().unwrap(), "file IPC watcher saw no patch");
+        assert!(
+            result.success,
+            "normalization-only template IPC should accept a narrow payload"
+        );
+        let payload = seen_payload
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("watcher should capture the IPC payload");
+        assert!(
+            payload.get("fullContent").is_none(),
+            "template normalization-only IPC must not send fullContent: {payload}"
+        );
+        assert_eq!(payload["patches"].as_array().unwrap().len(), 0);
+        assert_eq!(payload["unmatched"], "");
+        assert_eq!(payload["normalize_prefix_lines"][0], prompt);
+
+        let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("full_content_ipc_scope_rejected")
+                && ops_log.contains("scope=template_frontmatter"),
+            "template fullContent rejection should be logged:\n{ops_log}"
+        );
+    }
+
+    #[test]
     fn effective_unmatched_cleared_when_synthesis_consumes_content() {
         // When synthesis consumes the unmatched content (patches input was empty,
         // ipc_patches output is non-empty), effective_unmatched should be "".
@@ -12796,7 +13003,7 @@ do #next. spec-test-build-install-commit-push
         // Regression: snapshot has ❯ do but the editor file (baseline) has do without prefix.
         // This happens when the IPC normalization fails to update the editor file.
         // The binary must restore ❯  so the snapshot stays correct and the
-        // next IPC write delivers fullContent with the correct prefix.
+        // next IPC write carries normalize_prefix_lines with the correct prefix target.
         let snapshot = "<!-- agent:exchange patch=append -->\n❯ done\n❯ do\n- [ ] task\n<!-- /agent:exchange -->\n";
         let baseline = "<!-- agent:exchange patch=append -->\n❯ done\ndo\n- [ ] task\n<!-- /agent:exchange -->\n";
         let content = "<!-- agent:exchange patch=append -->\n❯ done\ndo\n- [ ] task\n<!-- agent:boundary:abc123:doc -->\n<!-- /agent:exchange -->\n";
@@ -17621,7 +17828,8 @@ mod late_fallback_patch_guard_tests {
     use super::{
         IpcDiskRepairReason, IpcRepairDecision, IpcSnapshotSource, build_full_content_ipc_payload,
         cleanup_fallback_patch_files, cycle_already_committed, redeliver_ipc_dedupe_to_editor,
-        try_ipc, try_ipc_full_content, try_ipc_full_content_operator_mutation_from_source,
+        repair_ipc_decision_visible_state, try_ipc, try_ipc_full_content,
+        try_ipc_full_content_operator_mutation_from_source,
     };
     use crate::snapshot;
     use std::fs;
@@ -18122,13 +18330,13 @@ mod late_fallback_patch_guard_tests {
             .count();
         assert_eq!(
             patch_count, 0,
-            "stale source guard must not hand a full-content patch to file IPC"
+            "scope/source guards must not hand a full-content patch to file IPC"
         );
         let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
-            ops_log.contains("full_content_source_buffer_rejected")
+            ops_log.contains("full_content_ipc_scope_rejected")
                 && ops_log.contains("source=compact_exchange"),
-            "source-buffer rejection should be logged:\n{ops_log}"
+            "component-scope rejection should be logged before source-buffer proof:\n{ops_log}"
         );
     }
 
@@ -18308,6 +18516,77 @@ mod late_fallback_patch_guard_tests {
                 && ops_log.contains("skip=stale_bad_state"),
             "stale redelivery skip should be logged:\n{ops_log}"
         );
+    }
+
+    #[test]
+    fn template_ipc_dedupe_repair_uses_disk_not_full_content_redelivery() {
+        let tmp = TempDir::new().unwrap();
+        let bad_state = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: issue — gpt-5\nDone.\n",
+            "### Re: issue — gpt-5\nDone.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let repaired = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: issue — gpt-5\nDone.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let doc = doc_in_agent_doc_project(&tmp, bad_state);
+        let agent_doc_dir = tmp.path().join(".agent-doc");
+
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let listener_calls = calls.clone();
+        let listener_doc = doc.clone();
+        let listener_root = tmp.path().to_path_buf();
+        let server = std::thread::spawn(move || {
+            crate::ipc_socket::start_listener(&listener_root, move |msg| {
+                listener_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let payload: serde_json::Value = serde_json::from_str(msg).ok()?;
+                if let Some(full_content) = payload.get("fullContent").and_then(|v| v.as_str()) {
+                    fs::write(&listener_doc, full_content).ok()?;
+                }
+                Some(serde_json::json!({"type": "ack", "status": "ok"}).to_string())
+            })
+            .ok();
+        });
+        for _ in 0..100 {
+            if crate::ipc_socket::is_listener_active(tmp.path()) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(
+            crate::ipc_socket::is_listener_active(tmp.path()),
+            "fake socket listener did not start"
+        );
+
+        let decision = IpcRepairDecision::file_read(bad_state.to_string())
+            .apply_ipc_dedupe(repaired.to_string(), bad_state.to_string());
+        repair_ipc_decision_visible_state(&doc, &decision, Some("source-patch")).unwrap();
+
+        assert_eq!(
+            calls.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "component-scoped template repairs must not send socket fullContent payloads"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            repaired,
+            "template duplicate repair should fall back to guarded disk repair"
+        );
+        let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("full_content_ipc_scope_rejected")
+                && ops_log.contains("scope=template_frontmatter")
+                && ops_log.contains("ipc_dedupe_repaired_working_tree"),
+            "template fullContent rejection and disk repair should be logged:\n{ops_log}"
+        );
+
+        let _ = fs::remove_file(crate::ipc_socket::socket_path(tmp.path()));
+        drop(server);
     }
 
     #[test]

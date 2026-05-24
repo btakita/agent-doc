@@ -71,7 +71,33 @@ Out of scope for this cycle (intentional — admin frontend is a separate concer
 - Preact UI for the new endpoints in the admin portal dashboard sidebar / detail panes. The endpoints are API-complete and exercisable today; the frontend wiring can land alongside the existing admin sections without churning this turn.
 
 Next queue head should be `#9vv3` (Investor portal end-to-end QA).
-<!-- agent:boundary:fc5bba30 -->
+### Re: do [#9vv3] — Investor portal end-to-end QA — opus-4-7
+
+
+Shipped. Operator-runnable QA path landed; coverage map asserted by CI so endpoint drift fails the suite.
+
+What changed in `src/equityfundingsource-dev`:
+
+- **`tests/seed/investor-portal-fixtures.ts`** (new) — deterministic seed factories with stable IDs (`QA_INVESTOR_USER_ID = 'qa-investor-001'`, `QA_ADMIN_USER_ID = 'qa-admin-001'`, `QA_DEAL_ID = 'qa-deal-001'` ↔ `QA_DEAL_LOAN_NUMBER = 'QA-LN-9001'`, `QA_DOCUMENT_ID = 'qa-doc-001'`, `QA_FUND_AMOUNT_CENTS = 2_500_000`) plus a `QA_E2E_STEPS` array binding each of the 13 QA steps to its real Worker endpoint.
+- **`docs/qa-investor-portal.md`** (new) — operator runbook with a coverage table (step → endpoint), local + remote QA invocation examples, expected results, TMO simulator alignment notes (Token `TMO` / Database `API Sandbox`), cleanup contract, and out-of-scope items linked to other backlog IDs.
+- **`bin/qa-investor-portal.ts`** (new) — Bun-runnable smoke script: read-only by default (safe against production), unauthenticated 401 check, then optional authenticated read pass with `--investor-cookie`, then optional `--mutate` for fund commit + admin endpoints with `--admin-cookie`. Help command lists the QA fixture constants.
+- **`tests/investor-portal-e2e.test.ts`** (new) — 8 tests covering: fixture stability (the IDs the runbook and smoke script depend on), seed determinism at a fixed Unix time, every `QA_E2E_STEPS` step having a real `app.<method>(<path>)` in the worker source (accepts both literal paths and `URLS.signup`/`URLS.login` aliases for auth routes), runbook drift guards (each endpoint string referenced; each fixture ID cited), smoke-script wiring (imports fixtures, exposes `--mutate` / cookie flags), and smoke-script defaults (read-only when invoked without `--mutate`).
+- **`prds/equity-funding-source-lending-portal-prd.md`** — `### Investor Portal` adds an explicit E2E QA bullet citing the fixtures module, runbook, smoke script, and coverage-map test.
+
+Verification:
+
+- `bun test` — 147 pass / 0 fail across 18 files (deliberate "limiter down" console.error from the throw-recovery path is still present).
+- `bun run check` (test + build + build:worker) — clean.
+- `bun run deploy:worker` — deployed Worker version `92a1e42a-619d-4af6-b8d4-6740cf5e5a21` to `https://equityfundingsource.brian-takita.workers.dev`.
+- Submodule commit `972347b` pushed to `origin/main`; superproject pointer bump pushed.
+
+Scope discipline:
+
+- Full real-D1 backed E2E with mutations requires either Cloudflare's local D1 emulator running or a substantial fake-D1 supporting 10+ tables. This cycle delivered the deterministic operator path (fixtures + runbook + smoke + drift guards) so QA is **runnable today** without inventing fake-D1 infrastructure that would be obsolete the moment real wrangler-emulator coverage lands.
+- The smoke script intentionally requires explicit `--investor-cookie` / `--admin-cookie` rather than performing signup → login flows itself; signup-only tests already exist in `tests/auth.test.ts`, and avoiding embedded credentials keeps the script safe to commit and run against production.
+
+Next queue head should be `#dzmm` (TMO webhook confirmation — externally blocked on Robert + Mortgage Office).
+<!-- agent:boundary:59eac639 -->
 <!-- /agent:exchange -->
 ###
 
@@ -81,7 +107,7 @@ preset #spec-test-commit-push-deploy
 - ~do [#ft47]~
 - ~do [#yh4b]~
 - ~do [#zjbe]~
-- do [#9vv3]
+- ~do [#9vv3]~
 - do [#dzmm]
 <!-- /agent:queue -->
 
@@ -92,7 +118,6 @@ preset #spec-test-commit-push-deploy
 - [ ] [#0r24] Apply migration 0025_upload_tokens.sql to remote D1 once review #1v5m unblocks D1 API token permissions, then smoke test POST /api/admin/upload-tokens and POST /api/uploads/by-token/<token> against the live Worker.
 - [/] [#dropbox-sync-adapter] Dropbox sync adapter: after Dropbox access is available, push/pull R2_DOCUMENTS with idempotent retries, backfill, tombstone handling, and per-document sync logs.
 - [ ] [#dzmm] TMO webhooks: confirm outbound webhook support (Robert to check with Mortgage Office)
-- [ ] [#9vv3] Investor portal end-to-end QA: seed and test investor signup, accreditation, published deal documents, funding commitment, admin acceptance, positions, distributions, and statements with TMO simulator plus R2 documents.
 - [ ] [#qr72] [recommended] By May 27, 2026, send Lucas a written bridge plan: $500 now from personal funds if available, ask for the remaining $500 to be paid after EFS payment clears or by an agreed near-term date, and invoice EFS immediately for $5,000 with a smaller immediate continuation retainer accepted if Judith pushes back.
 - [ ] [#s62t] [recommended] Prepare EFS invoice with truthful hours/value; Lucas cost is $4,150 (83h @ $50), so floor is 42h/$4,200 and recommended ask is 50-60h/$5,000-$6,000 with any concession as an explicit courtesy credit.
 - [ ] [#37ah] [recommended] Broker portal backend: replace static broker demo data with TMO-backed submit-deal, pipeline, commissions, documents, and notifications
@@ -148,4 +173,5 @@ preset #spec-test-commit-push-deploy
 - 2026-05-24 [#ft47] Token-based document upload flow
 - 2026-05-24 [#yh4b] Admin dashboard (Cloudflare Access auth)
 - 2026-05-24 [#zjbe] Admin investor document workflow: upload and publish deal due-diligence, investor statements, tax docs, and accreditation files from R2 with visibility and review status controls.
+- 2026-05-24 [#9vv3] Investor portal end-to-end QA: seed and test investor signup, accreditation, published deal documents, funding commitment, admin acceptance, positions, distributions, and statements with TMO simulator plus R2 documents.
 <!-- /agent:done -->

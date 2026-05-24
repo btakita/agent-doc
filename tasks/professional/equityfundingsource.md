@@ -156,9 +156,44 @@ The short replay summary above was recovered from an orphaned `agent-doc` respon
 ### Re: Commit reference clarification — gpt-5
 
 For durable implementation references, use the EFS implementation commit `ca1b8a6` and the root submodule pointer commit `5b2ed0248`. Later `agent-doc(equityfundingsource)` commits in the root repo are document closeout/repair commits only.
-Please add docs on using the tmo simulator, both in memory and persisted.
-#spec-test-commit-push
-<!-- agent:boundary:f6430ab7 -->
+
+❯ Please add docs on using the tmo simulator, both in memory and persisted.
+❯ Please add docs on using the tmo simulator, both in memory and persisted.
+❯ #spec-test-commit-push
+### Re: TMO simulator docs — gpt-5
+
+Added a fuller TMO simulator runbook covering both storage modes.
+
+Changed paths:
+
+- `src/equityfundingsource-dev/docs/TMO/simulator.md`
+- `src/equityfundingsource-dev/prds/equity-funding-source-lending-portal-prd.md`
+- `src/equityfundingsource-dev/tests/tmo-sim.test.ts`
+- `src/equityfundingsource-dev` submodule pointer in the root repo
+
+What changed:
+
+- Expanded `docs/TMO/simulator.md` with common simulator configuration, `.dev.vars`/shell setup, `bun run dev:worker`, direct `/tmo-sim` smoke tests, and the app-side `TMO_API_BASE_URL` relationship.
+- Added a dedicated in-memory workflow with create/read/state/reset/clear curl examples and the lifecycle caveat.
+- Added a dedicated persisted D1 workflow with `bun run cf:d1:migrate:local`, `TMO_SIM_STORAGE=d1`, restart persistence, reset vs delete semantics, and remote migration guidance.
+- Updated the PRD baseline line to call out the documented in-memory and D1-persisted workflows.
+- Tightened the simulator test so the docs must keep the in-memory workflow, persisted workflow, local D1 migration command, reset endpoint, and clear endpoint documented.
+
+Verification:
+
+- `bun test tests/tmo-sim.test.ts tests/prd.test.ts` passed: 9 tests.
+- `git diff --check` passed.
+- `make check` passed: 46 tests, app build, and Worker build.
+- `gh run list --workflow CI --limit 1` reported no workflow named `CI`; `gh workflow list` returned no workflows.
+- `rg -n "tmux-ci|tmux" Makefile app lib tests package.json` found no tmux CI target in the EFS repo.
+
+Commits pushed:
+
+- EFS repo: `9eb2531 Document TMO simulator workflows`
+- Root repo submodule pointer: `423cb684b Update EFS simulator docs submodule`
+
+The pre-existing untracked `src/equityfundingsource-dev/tmp/` directory was left untouched. Escalation: none. Confidence: high.
+<!-- agent:boundary:efd7665c -->
 <!-- /agent:exchange -->
 ###
 

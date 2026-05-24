@@ -12,13 +12,13 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
-Completed: #gdbrefreshcache, #gdbtargetsnap, #gdbpathprobe, and #gdbpropscan shipped and pushed in tsift e8823da and agent-loop e8e6a8b0a; tsift CI run 26367244295 is green.
+Completed: #gdbrefreshdelta was already closed; #gdbcmcache, #gdbpathpolicy, and #gdbengineproof are implemented in tsift ab9f8a9 and agent-loop e09157f61. Local verification passed (`make check`, `cargo build`, `cargo install --path .`); latest tsift CI run 26372477579 is green.
 <!-- /agent:status -->
 
 ## Spec
@@ -84,13 +84,42 @@ Non-blocking CI annotations remain for GitHub Actions Node 20 deprecation and th
 ### Re: recovery closeout — gpt-5
 
 No new task work was requested after the recovery preflight. This closes the annotation-only cycle opened while reaping `#gdbrefreshdelta`; the implementation, verification, pushes, and CI evidence remain in the preceding response.
-<!-- agent:boundary:4389ffba -->
+### Re: #gdbrefreshdelta — gpt-5
+
+`#gdbrefreshdelta` was already completed in the prior cycle, so I treated this stale queue head as already resolved and moved on to the remaining live queue items.
+
+### Re: queued graph eval cache gates — gpt-5
+
+Completed the remaining queued graph performance items: `#gdbcmcache`, `#gdbpathpolicy`, and `#gdbengineproof`.
+
+What changed:
+- Conflict-matrix cache hits now report the reused `session_review_compute`, `status_index_gate`, `context_pack_diff`, `exploration_materialization`, `graph_orchestration`, `staged_diff`, and `impact` phases as skipped `0us` work, with each phase detail preserving the source/document/staged-diff watermark guard. The actual disk/memory hit cost remains in `preparation_cache_lookup`.
+- `backend-eval` now exposes an explicit path-hop policy and requires real 128/256/512-hop metrics, in addition to the existing synthetic deep-chain tiers, before any higher default path cap can be justified.
+- DuckDB/DuckPGQ, FalkorDB, Ladybug, and Kuzu all stay on `hold_native_adapter_required`; prototype timings are evidence only until a native adapter proves projection writes/load, SQLite parity, install portability, and lock behavior.
+- Updated `SPEC.md`, `README.md`, and `VERSIONS.md` to match the cache-hit, hop-policy, and backend-promotion contracts.
+
+Verification:
+- `cargo test --test graph_db_conformance graph_db_backend_eval_benchmarks_candidate_stores_against_sqlite`
+- `cargo test --test graph_db_conformance conflict_matrix_cli_composes_planner_evidence_and_worker_ownership`
+- `make check`
+- `cargo build`
+- `cargo install --path .`
+- Latest GitHub Actions `CI` run `26372477579` was green: `live Convex graph acceptance` and `clippy + test` both passed. The workflow has no separate tmux job.
+
+Commits prepared before session-document closeout:
+- `src/tsift`: `ab9f8a9` (`perf: tighten graph eval cache gates`)
+- `agent-loop`: `e09157f61` (`tsift: tighten graph eval cache gates`)
+
+Changed paths: `src/tsift/README.md`, `src/tsift/SPEC.md`, `src/tsift/VERSIONS.md`, `src/tsift/src/main.rs`, `src/tsift/tests/graph_db_conformance.rs`, and the root `src/tsift` submodule pointer. Push follows after this binary-owned document closeout.
+
+Confidence: high. Escalation: none. Preflight still reported one legacy gated backlog item living in `agent:backlog`; I left that migration alone because it was outside this queue batch.
+<!-- agent:boundary:83a27d86 -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - do [#gdbrefreshdelta]
 - do [#gdbcmcache]
@@ -101,9 +130,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gdbcmcache] [recommended] Convert conflict-matrix preparation cache evidence into the next optimization pass: prove cache hits across repeated CLI invocations, then reduce session_review_compute, status_index_gate, context_pack_diff, and impact timings without broadening stale ownership trust.
-- [ ] [#gdbpathpolicy] [recommended] Do not raise the default path hop cap blindly; add an adaptive or opt-in high-hop policy backed by real/full-projection and synthetic deep-chain 128/256/512 samples, with a regression gate before any higher default is accepted.
-- [ ] [#gdbengineproof] [recommended] Keep FalkorDB/Kuzu/DuckDB/Ladybug behind backend-eval until a native production adapter proves projection writes, freshness/parity, lock behavior, install cost, and faster real/full-projection conflict-matrix/evidence/dispatch-trace/path metrics than SQLite without weakening bundled install semantics.
 - [/] [#orchdog] [recommended] Dogfood the completed graph-backed agent orchestration stack on a real agent-doc queue run: run refresh -> evidence -> conflict-matrix -> dispatch-trace -> jobs create/collect, compare worker_prompt_packet and worker_result closure fields, and capture any tsift-side fixture gaps. **Dogfood performed 2026-05-21 on `session-share/tasks/root.md` items #x63e + #v4v0; findings recorded in #gdbevid, #cmgr, #gdbidx — see `session-share/tasks/root.md` exchange "graph-backed orchestration dogfood" entry for the full pipeline trace.** **Second dogfood 2026-05-21 against `tasks/software/tsift.md` (preset `#dogfood-tsift`) surfaced 2 new gaps: #cmgrwres and #gdblock.**
 <!-- /agent:backlog -->
 

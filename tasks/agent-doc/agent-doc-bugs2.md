@@ -131,15 +131,69 @@ Verification:
 - `cargo run --quiet -- audit-docs` did not pass because it reports a pre-existing managed instruction-surface issue: `/home/brian/work/btakita/agent-loop/AGENTS.md` is stale and asks to run `agent-doc skill install --all` or reinstall the active harness before release. I did not change that instruction surface in this docs-only turn.
 
 Commands used this cycle included `tsift status`, `tsift index --workspace .`, `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, documentation layout inspection, `git diff --check`, `cargo run --quiet -- audit-docs`, and `mdbook build`. Escalation was used only to remove the generated `book/` directory created by the docs build. Confidence is high for the requested docs because the mdBook build includes the new navigation and the new files are linked from `docs/SUMMARY.md`.
-<!-- agent:boundary:4e8addae -->
+❯ The full-document IPC corruption occurred while typing in this prompt.
+
+❯ Re: your chain of thought from a previous turn...I do not want "narrow fixes". I want "wide fixes" to make this issue go away. If there is blowback from restricting the intended usage of the full-document IPC, that is ok. I want the duplicate prompt + full-document IPC corruption to go away using a "wide fix". If the entire full-document IPC path needs to be effectively be disabled, do it. We can fix the repair issues later.
+❯ > • I’m going to make the commit path participate in the duplicate-prompt repair pipeline. The narrow fix is: before
+❯ staging a snapshot, if the live file only has an extra adjacent prefixed/raw copy of prompt text already represented
+❯ in the snapshot, repair the working tree and advance the snapshot to the same prompt-prefix-equivalent content
+❯ instead of logging drift and leaving the duplicate behind.
+❯ ---
+❯ Should docs/INDEX.md really be docs/README.md?
+### Re: wide full-document IPC fix — gpt-5
+
+I took the wide fix you asked for: the first-party binary no longer emits whole-document editor IPC replacements.
+
+The new behavior is:
+
+- Template/component documents still reject `fullContent` on scope and log `full_content_ipc_scope_rejected`.
+- Otherwise eligible full-document paths now log `full_content_ipc_disabled`, return `false`, and fall back to the guarded disk/snapshot repair path.
+- The committed-cycle terminal cleanup guard still runs before the disabled-path return, so stale fallback patch files are still cleaned up and claimed.
+- Socket/file IPC normalization paths no longer add `fullContent` even when there are no component patches.
+- Legacy or foreign `fullContent` payload handling remains documented as source-proof guarded, but the CLI itself is not using that path.
+
+I also changed the documentation entry point from `docs/INDEX.md` to `docs/README.md`. Yes, `README.md` is the better fit here: it is the conventional directory entry point, works naturally with GitHub/GitLab browsing, and can still be linked from `docs/SUMMARY.md` for mdBook navigation.
+
+Changed paths in `src/agent-doc`:
+
+- `src/write.rs`
+- `tests/test_cli.rs`
+- `SPEC.md`
+- `VERSIONS.md`
+- `docs/README.md`
+- `docs/SUMMARY.md`
+- `docs/reference/prompt-duplicate-closeout-repair.md`
+- `editors/PLUGIN-SPEC.md`
+- `editors/SPEC.md`
+- `specs/07-closeout-commands.md`
+- `specs/07-core-commands.md`
+- `specs/08-session-routing.md`
+- `specs/12-deterministic-simulation.md`
+
+Verification:
+
+- `cargo fmt` passed.
+- `cargo test full_content` passed.
+- `cargo test duplicate_prompt` passed.
+- `git diff --check` passed.
+- `mdbook build` passed; the generated `book/` output was removed afterward.
+- `cargo test --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted` passed after updating the expected FlowCore guard budget.
+- `make check` passed, including clippy, the full Rust suite, integration suites, and the deterministic closeout simulation.
+- `cargo install --path .` passed and installed `agent-doc 0.33.16` locally.
+- Latest GitHub CI check before closeout was successful: workflow `CI`, run `26363927689`, completed `2026-05-24T14:29:35Z` on branch `20260422/codex-agent-backend`.
+
+One release audit remains blocked by the pre-existing managed instruction surface issue: `cargo run --quiet -- audit-docs` still reports stale `/home/brian/work/btakita/agent-loop/AGENTS.md` and asks for `agent-doc skill install --all` or active-harness reinstall before release. I did not change that instruction surface in this fix.
+
+Commits:
+
+- `btakita/agent-doc` branch `20260422/codex-agent-backend`: `39104f38` (`fix: disable full-content editor ipc`), pushed.
+- Parent `btakita/agent-loop` branch `main`: `63eb7a30d` (`agent-doc: disable full-content editor ipc`), created locally before this finalize. I will push parent `main` after this binary-owned session document commit so the gitlink and session closeout land together.
+
+Escalation was used only to remove the generated mdBook `book/` directory. Confidence is high for the requested wide fix because the first-party `fullContent` emission path now returns before socket/file payload delivery, the duplicate-prompt suites still pass, and the full local verification suite is green.
+<!-- agent:boundary:69dfc109 -->
 <!-- /agent:exchange -->
 ###
 <!--
-Re: your chain of thought from the previous turn...I do not want "narrow fixes". I want "wide fixes" to make this issue go away. If there is blowback from restricting the intended usage of the full-document IPC, that is ok. I want the duplicate prompt + full-document IPC corruption to go away using a "wide fix". If the entire full-document IPC path needs to be effectively be disabled, do it. We can fix the repair issues later.
-> • I’m going to make the commit path participate in the duplicate-prompt repair pipeline. The narrow fix is: before
-  staging a snapshot, if the live file only has an extra adjacent prefixed/raw copy of prompt text already represented
-  in the snapshot, repair the working tree and advance the snapshot to the same prompt-prefix-equivalent content
-  instead of logging drift and leaving the duplicate behind.
 -->
 
 <!-- agent:queue -->

@@ -29,12 +29,11 @@ Resolved #qfixture; auto queue drained.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260524-210802.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260524-210841.md`*
 
 Compacted content:
-- Archived 1 response topic(s): JB Compact Exchange conflict and duplicate prompt prefix
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:612a3b5f -->
+<!-- agent:boundary:ce2273ed -->
 <!-- /agent:exchange -->
 ###
 <!--

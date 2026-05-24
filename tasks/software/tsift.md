@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -153,16 +153,15 @@ The parent plan called for sharing per-target context/diff packets across `sessi
 #### Queue state
 
 Queue head is now `do [#gdbprephotgate]`. The 3-sample baseline data is already in this cycle for its sibling phase `status_index_gate` (not measured per-sub-phase here, just the parent); the next cycle should start by capturing the `conflict_matrix_preparation.status_index_gate` median against the new 0.1.44 numbers before changing the gate path.
-<!-- agent:boundary:23f0f6d7 -->
+<!-- agent:boundary:ce49a9c6 -->
 <!-- /agent:exchange -->
 ###
 <!--
 What are #next-steps to make the graph faster?
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#gdbprephotreuse]
 - do [#gdbprephotgate]
 - do [#gdbfullreuse]
 - do [#gdbscanproof]

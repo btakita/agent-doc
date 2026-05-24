@@ -92,7 +92,8 @@ When the queue drains to empty: `auto` is stripped from the opening tag, `queue_
 - **Fail-closed proof for required closeouts:** When `queue_active: true`, required closeouts must be able to prove the same head prompt, or same contiguous done-backed head prompts, were completed or drained from both the live file and the snapshot before mutating either side. Missing/malformed queue state, missing snapshot state, or file/snapshot head mismatch aborts the closeout before commit.
 - **Stop fence at head:** If the next entry is `--- stop`, preflight halts the queue (strips `auto`, clears `queue_active`), consumes the fence, and emits `queue_halted: "stop_fence"`. No prompt is dispatched.
 - **Time gate at head:** If the next entry is `--- start at <time>` and the time hasn't arrived, preflight emits `queue_deferred: true` and skips the cycle. When the time arrives, the fence is consumed and the next prompt dispatches.
-- **Item modified:** If the head prompt's text differs between snapshot and file (user edited it between cycles), preflight halts with `queue_halted: "item_modified"`. The user must restart the queue explicitly.
+- **Item modified:** If the head prompt's text differs between snapshot and file for a queue that was already active in the snapshot, preflight halts with `queue_halted: "item_modified"`. The user must restart the queue explicitly.
+- **New activation snapshot:** If the queue was inactive in the snapshot and the current file newly activates it with `auto`, a start fence, or an exchange trigger, the current queue body is the operator-authored input for this cycle. Preflight must not treat the changed head as an item-modified halt; it persists the newly activated queue body and `queue_active: true` to the snapshot so closeout can prove and consume the same head prompt.
 - **Appended items:** New items added after the head prompt are not a halt — only the next-to-consume item triggers change detection.
 
 **Parsing rules:**

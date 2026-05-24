@@ -237,7 +237,8 @@ Before emitting queue state, preflight may:
 - persist `queue_active`
 - halt on a stop fence
 - halt on a future time gate
-- halt when the current head prompt was edited since the snapshot
+- halt when the current head prompt was edited since the snapshot for a queue that was already active
+- snapshot a newly activated queue body as the closeout baseline instead of treating the changed head as an edit to in-flight work
 
 ### Post-commit queue consumption
 

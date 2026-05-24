@@ -6,6 +6,14 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Newly activated auto queues no longer stall as modified in-flight work.**
+  Preflight now treats a queue that was inactive in the snapshot and newly
+  activated by the current document as operator-authored input, snapshots the
+  activated queue body as the closeout baseline, and reserves
+  `queue_halted: "item_modified"` for queues already active in the snapshot.
+  This prevents intentional queue rewrites plus `auto` from stripping the
+  auto attribute before the first queued item can run.
+
 - **Full-document editor IPC is disabled end-to-end.** The binary no longer
   emits `fullContent` socket/file IPC payloads, even for no-component append
   fallbacks, repair redelivery, or operator mutations. Scope rejection still

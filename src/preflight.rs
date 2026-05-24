@@ -2258,6 +2258,7 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
 
     let activation =
         crate::queue::resolve_activation(&entries, has_auto, exchange_triggered, persisted_active);
+    let snapshot_was_active = snapshot_proves_queue_was_active(file);
 
     let mut mutated = false;
     let mut current_content = content.clone();
@@ -2367,8 +2368,12 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
             });
         }
 
-        // Change detection: compare head prompt between snapshot and file
-        if let Ok(Some(snap_content)) = snapshot::load(file)
+        // Change detection: compare head prompt between snapshot and file, but
+        // only for a queue that was already active. A newly auto/start/request
+        // activated queue is operator-authored input for this cycle, not an
+        // in-flight queue item edit.
+        if snapshot_was_active
+            && let Ok(Some(snap_content)) = snapshot::load(file)
             && let Ok(snap_comps) = crate::component::parse(&snap_content)
             && let Some(snap_q) = snap_comps.iter().find(|c| c.name == "queue")
         {
@@ -2446,6 +2451,7 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
     // queue_active, strip auto, and remove completed/directive residue.
     let queue_has_prompts = !crate::queue::prompts(&activation.entries_after).is_empty();
     let drained_residue = queue_entries_are_drained_residue(&activation.entries_after);
+    let need_sync_newly_activated_queue_snapshot = activation.active && !snapshot_was_active;
     let need_set_active = activation.active && !persisted_active;
     let need_clear_active = !activation.active && persisted_active && !activation.deferred;
     let need_strip_auto = has_auto && !queue_has_prompts;
@@ -2508,64 +2514,91 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
         eprintln!("[preflight] queue: cleared queue_active");
     }
 
-    // Persist mutations to both file and snapshot
+    // Persist file mutations.
     if mutated {
         std::fs::write(file, &current_content)
             .with_context(|| format!("failed to write queue updates to {}", file.display()))?;
+    }
 
-        // Update snapshot surgically
-        if let Ok(Some(snap_content)) = snapshot::load(file) {
-            let mut new_snap = snap_content.clone();
+    // Persist snapshot mutations. For newly activated queues, sync the queue
+    // component from the visible document into the snapshot so later closeout
+    // consumption can prove the same head prompt in both places.
+    if (mutated || need_sync_newly_activated_queue_snapshot)
+        && let Ok(Some(snap_content)) = snapshot::load(file)
+    {
+        let mut new_snap = snap_content.clone();
 
-            // Apply queue body change to snapshot
-            if (activation.consumed_start_fence || need_strip_auto || need_clear_drained_body)
-                && let Ok(snap_comps) = crate::component::parse(&new_snap)
-                && let Some(snap_q) = snap_comps.iter().find(|c| c.name == "queue")
+        if need_sync_newly_activated_queue_snapshot
+            && let Ok(current_comps) = crate::component::parse(&current_content)
+            && let Some(current_q) = current_comps
+                .iter()
+                .find(|component| component.name == "queue")
+            && let Ok(snap_comps) = crate::component::parse(&new_snap)
+            && let Some(snap_q) = snap_comps
+                .iter()
+                .find(|component| component.name == "queue")
+        {
+            let queue_region = &current_content[current_q.open_start..current_q.close_end];
+            let mut rebuilt = String::with_capacity(new_snap.len() + queue_region.len());
+            rebuilt.push_str(&new_snap[..snap_q.open_start]);
+            rebuilt.push_str(queue_region);
+            rebuilt.push_str(&new_snap[snap_q.close_end..]);
+            new_snap = rebuilt;
+        }
+
+        // Apply queue body change to snapshot
+        if !need_sync_newly_activated_queue_snapshot
+            && (activation.consumed_start_fence || need_strip_auto || need_clear_drained_body)
+            && let Ok(snap_comps) = crate::component::parse(&new_snap)
+            && let Some(snap_q) = snap_comps.iter().find(|c| c.name == "queue")
+        {
+            let new_body = if need_clear_drained_body {
+                String::new()
+            } else {
+                crate::queue::render(&activation.entries_after)
+            };
+            new_snap = snap_q.replace_content(&new_snap, &new_body);
+
+            if need_strip_auto
+                && let Ok(snap_comps2) = crate::component::parse(&new_snap)
+                && let Some(snap_q2) = snap_comps2.iter().find(|c| c.name == "queue")
             {
-                let new_body = if need_clear_drained_body {
-                    String::new()
-                } else {
-                    crate::queue::render(&activation.entries_after)
-                };
-                new_snap = snap_q.replace_content(&new_snap, &new_body);
-
-                if need_strip_auto
-                    && let Ok(snap_comps2) = crate::component::parse(&new_snap)
-                    && let Some(snap_q2) = snap_comps2.iter().find(|c| c.name == "queue")
-                {
-                    let raw_tag = &new_snap[snap_q2.open_start..snap_q2.open_end];
-                    let new_tag = crate::queue::strip_auto_from_tag(raw_tag);
-                    if new_tag != raw_tag {
-                        let mut rebuilt = String::with_capacity(new_snap.len());
-                        rebuilt.push_str(&new_snap[..snap_q2.open_start]);
-                        rebuilt.push_str(&new_tag);
-                        rebuilt.push_str(&new_snap[snap_q2.open_end..]);
-                        new_snap = rebuilt;
-                    }
+                let raw_tag = &new_snap[snap_q2.open_start..snap_q2.open_end];
+                let new_tag = crate::queue::strip_auto_from_tag(raw_tag);
+                if new_tag != raw_tag {
+                    let mut rebuilt = String::with_capacity(new_snap.len());
+                    rebuilt.push_str(&new_snap[..snap_q2.open_start]);
+                    rebuilt.push_str(&new_tag);
+                    rebuilt.push_str(&new_snap[snap_q2.open_end..]);
+                    new_snap = rebuilt;
                 }
             }
+        }
 
-            // Apply frontmatter change to snapshot
-            if need_set_active
-                && let Ok(merged) = frontmatter::merge_fields(&new_snap, "queue_active: true")
-            {
-                new_snap = merged;
-            } else if need_clear_active
-                && let Ok(merged) = frontmatter::merge_fields(&new_snap, "queue_active: false")
-            {
-                new_snap = merged;
-            }
-            if need_clear_drained_body
-                && let Ok(merged) = frontmatter::merge_fields(&new_snap, "queue_active: false")
-            {
-                new_snap = merged;
-            }
+        // Apply frontmatter change to snapshot
+        if need_set_active
+            && let Ok(merged) = frontmatter::merge_fields(&new_snap, "queue_active: true")
+        {
+            new_snap = merged;
+        } else if need_sync_newly_activated_queue_snapshot
+            && let Ok(merged) = frontmatter::merge_fields(&new_snap, "queue_active: true")
+        {
+            new_snap = merged;
+        } else if need_clear_active
+            && let Ok(merged) = frontmatter::merge_fields(&new_snap, "queue_active: false")
+        {
+            new_snap = merged;
+        }
+        if need_clear_drained_body
+            && let Ok(merged) = frontmatter::merge_fields(&new_snap, "queue_active: false")
+        {
+            new_snap = merged;
+        }
 
-            if new_snap != snap_content
-                && let Err(e) = snapshot::save(file, &new_snap)
-            {
-                eprintln!("[preflight] queue: snapshot sync warning: {}", e);
-            }
+        if new_snap != snap_content
+            && let Err(e) = snapshot::save(file, &new_snap)
+        {
+            eprintln!("[preflight] queue: snapshot sync warning: {}", e);
         }
     }
 
@@ -3539,6 +3572,113 @@ mod tests {
             crate::cycle_state::CyclePhase::PreflightStarted,
             "active queue prompt should open a cycle even when the file matches the snapshot"
         );
+    }
+
+    #[test]
+    fn preflight_new_auto_queue_from_inactive_snapshot_does_not_halt_on_changed_head() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let snapshot_content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: false\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "dispatch #spec-test-build-install-commit-push\n",
+            "- do [#oldhead]\n",
+            "<!-- /agent:queue -->\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#newhead] Run the newly queued head.\n",
+            "- [ ] [#nexthead] Run the next queued item.\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        let current_content = snapshot_content
+            .replace("<!-- agent:queue -->", "<!-- agent:queue auto -->")
+            .replace("- do [#oldhead]", "- do [#newhead]\n- do [#nexthead]");
+        std::fs::write(&doc, &current_content).unwrap();
+        snapshot::save(&doc, snapshot_content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+
+        assert_eq!(state.queue_active, Some(true));
+        assert_eq!(state.queue_halted, None);
+        assert_eq!(
+            state.queue_prompts,
+            vec!["do [#newhead]".to_string(), "do [#nexthead]".to_string()]
+        );
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(updated.contains("queue_active: true"));
+        assert!(updated.contains("<!-- agent:queue auto -->"));
+        assert!(updated.contains("- do [#newhead]"));
+        assert!(!updated.contains("- do [#oldhead]"));
+
+        let snap = snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            snap.contains("queue_active: true")
+                && snap.contains("<!-- agent:queue auto -->")
+                && snap.contains("- do [#newhead]")
+                && !snap.contains("- do [#oldhead]"),
+            "newly activated queue must be snapshotted as the closeout baseline:\n{snap}"
+        );
+
+        let done_ids = vec!["newhead".to_string()];
+        let outcome =
+            crate::write::consume_queue_prompts_for_done_ids_with_outcome(&doc, &done_ids)
+                .unwrap()
+                .expect("newly activated queue head should be consumable");
+        assert_eq!(outcome.consumed_count, 1);
+        assert_eq!(outcome.remaining, 1);
+
+        let consumed = std::fs::read_to_string(&doc).unwrap();
+        assert!(consumed.contains("- ~do [#newhead]~"));
+        assert!(consumed.contains("- do [#nexthead]"));
+    }
+
+    #[test]
+    fn preflight_halts_when_already_active_queue_head_changes() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let snapshot_content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#oldhead]\n",
+            "- do [#nexthead]\n",
+            "<!-- /agent:queue -->\n"
+        );
+        let current_content = snapshot_content.replace("- do [#oldhead]", "- do [#newhead]");
+        std::fs::write(&doc, &current_content).unwrap();
+        snapshot::save(&doc, snapshot_content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+
+        assert_eq!(state.queue_active, Some(false));
+        assert_eq!(state.queue_halted.as_deref(), Some("item_modified"));
+        assert!(state.queue_prompts.is_empty());
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(updated.contains("queue_active: false"));
+        assert!(updated.contains("<!-- agent:queue -->"));
+        assert!(!updated.contains("agent:queue auto"));
+        assert!(updated.contains("- do [#newhead]"));
     }
 
     #[test]

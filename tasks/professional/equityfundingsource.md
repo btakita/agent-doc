@@ -31,65 +31,12 @@ queue_active: true
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260524-224019.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260524-230036.md`*
 
 Compacted content:
-- Archived 1 response topic(s): do [#qakx]
+- Archived 2 response topic(s): queue do (six backlog items); do [#njsx]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-### Re: queue do (six backlog items) — opus-4-7
-
-
-Holding the queue rather than batch-resolving. Six items in one cycle under preset `#spec-test-commit-push-deploy` is multi-day repo work (admin dashboard with Cloudflare Access, token-based upload flow, Tier 0 WAF + upload limits, admin investor document workflow, full investor-portal E2E QA), and the planner already flagged this as `risk=high`, `dispatch_mode=manual`, `manual_packet_only=true`. Preflight also surfaced a restart-heavy session-accretion warning ("Restart cleanly from the current committed boundary before continuing"). Marking the queued IDs done without execution would lie about work that has not happened.
-
-Scope notes per queued ID:
-
-- dzmm TMO webhooks — externally blocked. Robert needs to confirm with Mortgage Office whether outbound webhooks are supported. I can draft the question/spec, but cannot resolve it from this side.
-- njsx Tier 0 Cloudflare WAF + upload limits — small/foundational; doable in one cycle (WAF rules, file-size caps, allowed MIME types, rate limits via Cloudflare config + Worker guards).
-- ft47 Token-based document upload flow — moderate; depends on R2_DOCUMENTS namespace already in place; needs token issuance, signed-URL or Worker proxy, expiry, audit logging.
-- yh4b Admin dashboard (Cloudflare Access auth) — moderate-large; needs Access policy, admin route gating, dashboard shell, then per-feature pages.
-- zjbe Admin investor document workflow — large; depends on yh4b and ft47; visibility + review-status controls + publish flow.
-- 9vv3 Investor portal E2E QA — large; depends on most of the above plus TMO simulator and R2 fixtures.
-
-Proposed sequencing for next cycles (one item per turn, smallest-foundational-first):
-
-1. njsx Tier 0 WAF + upload limits (single cycle, narrow scope).
-2. ft47 Token-based upload (depends on R2 + D1 cache already shipped).
-3. yh4b Admin dashboard shell + Cloudflare Access (auth + scaffold; per-feature pages follow).
-4. zjbe Admin investor document workflow (builds on yh4b + ft47).
-5. 9vv3 Investor portal E2E QA (last; covers the above end-to-end).
-6. dzmm parked until Robert hears back from Mortgage Office.
-
-Confirm the order (or override) and I will pick up the first item next cycle with spec + tests + deploy. No queued IDs marked done this cycle; they remain in the auto queue for sequential processing.
-### Re: do [#njsx] — Tier 0 WAF + upload limits — opus-4-7
-
-
-Shipped. njsx complete; queue head advances next cycle.
-
-What changed in `src/equityfundingsource-dev`:
-
-- **`app/equityfundingsource/lib/security/upload_guard.ts`** (new) — Tier 0 policy + helpers. Defaults: 25 MB per file, 100 MB per request, 25 files per request, allowlist of PDF/Office/image/CSV/text MIME types + extensions, file-name sanity (rejects `/`, `\`, NUL, `..`, `.`, >255 chars). `upload_guard_check_content_length_` pre-flights `Content-Length` before `formData()` parses. `upload_guard_check_file_` / `upload_guard_check_files_` return structured `{ status, code, message }` errors (`content_length_too_large` 413, `file_too_large` 413, `file_count_exceeded` 413, `total_size_exceeded` 413, `file_empty` 400, `extension_not_allowed` 415, `mime_type_not_allowed` 415, `file_name_invalid` 400). `upload_rate_limit_check_` consults the `UPLOAD_RATE_LIMITER` binding and falls open when unbound (local dev / staging).
-- **`lib/investor/routes.ts`** — `/api/investor/accreditation/upload` switched from the inline 25 MB check to `upload_guard_check_file_` + `upload_guard_check_content_length_` + `upload_rate_limit_check_` keyed on `investor:<user_id>:accreditation`.
-- **`lib/loan_applications/routes.ts`** — `/api/borrower/loan-applications` and `/api/borrower/loans/:id/documents` both gained content-length, multi-file, and rate-limit checks (session keys `borrower:<user_id>:loan-applications` and `borrower:<user_id>:loan-docs`).
-- **`wrangler.toml`** — added `UPLOAD_RATE_LIMITER` ratelimit binding (`namespace_id = "1001"`, `simple = { limit = 10, period = 60 }`). Cloudflare confirmed the binding on deploy.
-- **`docs/security-tier-0.md`** (new) — full Tier 0 spec: policy table, error codes, the three wired endpoints, and the Cloudflare dashboard rules (managed ruleset, OWASP CRS, three custom WAF rules for bot scans/oversized bodies/banned extensions, an IP-level rate-limit rule, cache-bypass + `X-Robots-Tag` transforms for `/api/*`).
-- **`prds/equity-funding-source-lending-portal-prd.md`** — `### Document Intelligence` now has a `#### Tier 0 — WAF + upload limits` subsection linking to the spec doc and listing defaults and wired endpoints.
-- **`tests/upload-guard.test.ts`** (new) — 25 tests covering every error code (size, count, total, MIME, extension, name, content-length), per-call options override, MIME fallbacks (`application/octet-stream`, empty), rate-limit allow/block/throw/unbound, and source-level assertions that the three routes import and call the guard.
-
-Verification:
-
-- `bun test` — 100 pass / 0 fail across 14 files (518 expect calls). Output includes the deliberate "limiter down" console.error from the throw-recovery test path.
-- `bun run check` (test + build + build:worker) — clean.
-- `bun run deploy:worker` — deployed version `d2cf3382-dec5-4dd4-9991-c1cdc3ae8034` to `https://equityfundingsource.brian-takita.workers.dev`. Wrangler confirmed `env.UPLOAD_RATE_LIMITER (ratelimit)` in the bindings list.
-- Submodule commit `b6df8b1` pushed to `origin/main`.
-- Superproject commit `0467de4c2` (submodule pointer bump) pushed to `origin/main`.
-
-Out of scope for this cycle (documented in `docs/security-tier-0.md` for the next operator pass):
-
-- Applying the three custom WAF rules + IP-level rate-limit rule via the Cloudflare dashboard or API on the `equityfundingsource.com` zone. The Worker layer enforces the same policy in-process, so this is hardening, not a gate.
-- Edge smoke test against a deployed custom domain — current host is `equityfundingsource.brian-takita.workers.dev`; production custom-domain cutover (icebox e1kb) gates this.
-
-Next queued item is the token-based document upload flow. Confirm and I'll pick it up next cycle.
-<!-- agent:boundary:e60c42d6 -->
+<!-- agent:boundary:4587d419 -->
 <!-- /agent:exchange -->
 ###
 

@@ -186,7 +186,38 @@ bun run dev:worker
 For production, do the same idea but keep the window short: deploy with `ADMIN_SIGNUP_ENABLED = "true"`, make sure `ADMIN_GLOBAL_PASSWORD` is set as a Cloudflare Worker secret, create the bootstrap admin at `https://www.equityfundingsource.com/admin/signup`, then immediately set `ADMIN_SIGNUP_ENABLED = "false"` and redeploy. Do not leave public admin signup enabled.
 
 Changed paths this cycle: none; this was an answer-only turn. Commands run: `tsift status`, `tsift status --fix`, `agent-doc preflight`, `agent-doc read`, `agent-doc plan`. Verification: not applicable because no code changed in this cycle.
-<!-- agent:boundary:220feaed -->
+❯ /admin/login is getting a Database not found error. Should the dev db be the local sqlite db?
+### Re: local dev database for admin login — gpt-5
+
+Yes. In local Worker dev, the app should use Wrangler/Miniflare's local D1 database, which is SQLite-backed and stored under `src/equityfundingsource-dev/.wrangler/state/v3/d1/`. It should not use the remote Cloudflare D1 database unless you explicitly pass `--remote`.
+
+I applied the local migrations now:
+
+```bash
+cd /home/brian/work/btakita/agent-loop/src/equityfundingsource-dev
+bun run cf:d1:migrate:local
+```
+
+That succeeded and applied the pending local migrations. I also verified the local D1 has the auth table:
+
+```bash
+cd /home/brian/work/btakita/agent-loop/src/equityfundingsource-dev/app/equityfundingsource
+bun run cf -- d1 execute equityfundingsource --local -c ../../wrangler.toml --command "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'users'"
+```
+
+The query returned `users`, so the local auth schema exists now.
+
+Next step: stop and restart the local Worker:
+
+```bash
+cd /home/brian/work/btakita/agent-loop/src/equityfundingsource-dev
+bun run dev:worker
+```
+
+Then retry `http://127.0.0.1:8787/admin/login`. If you still see "Database not found" after restart, the usual causes are: the server is not actually `bun run dev:worker`, another process is bound to port `8787`, or Wrangler is being launched from a different config/state path. The lightweight `bun dev` server on port `4200` is not enough for real auth because it does not provide the D1 binding.
+
+Changed paths this cycle: none in source; only the ignored local Wrangler D1 state was updated. Verification: local migrations ran successfully and a local D1 query confirmed the `users` table exists.
+<!-- agent:boundary:e40d26ea -->
 <!-- /agent:exchange -->
 ###
 

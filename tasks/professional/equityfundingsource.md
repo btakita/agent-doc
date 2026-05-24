@@ -153,7 +153,10 @@ No GitHub Actions `CI` workflow or `tmux-ci` target exists for this repo. The pr
 ### Re: Closeout correction — gpt-5
 
 The short replay summary above was recovered from an orphaned `agent-doc` response after the full finalized response had already landed. The final pushed root/session-document commit for this cycle is `b358b540d`; the EFS implementation commit remains `ca1b8a6`.
-<!-- agent:boundary:a1a60f7f -->
+### Re: Commit reference clarification — gpt-5
+
+For durable implementation references, use the EFS implementation commit `ca1b8a6` and the root submodule pointer commit `5b2ed0248`. Later `agent-doc(equityfundingsource)` commits in the root repo are document closeout/repair commits only.
+<!-- agent:boundary:969364de -->
 <!-- /agent:exchange -->
 ###
 

@@ -1,5 +1,6 @@
 # Summary
 
+[Documentation README](README.md)
 [Introduction](introduction.md)
 
 # Getting Started
@@ -28,4 +29,5 @@
 - [Specification](reference/specs.md)
 - [Flow Map](reference/flow-map.md)
 - [IPC](reference/ipc.md)
+- [Prompt Duplicate Closeout Repair](reference/prompt-duplicate-closeout-repair.md)
 - [Changelog](reference/changelog.md)

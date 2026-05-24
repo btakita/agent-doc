@@ -6,6 +6,14 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Full-document editor IPC is disabled by default.** The binary no longer
+  emits `fullContent` socket/file IPC payloads, even for no-component append
+  fallbacks, repair redelivery, or operator mutations. Scope rejection still
+  logs for template/component documents, committed-cycle cleanup still runs for
+  stale fallback patches, and otherwise eligible paths log
+  `full_content_ipc_disabled` before falling back to guarded disk/snapshot
+  repair.
+
 - **Commit closeout repairs live prompt prefix duplicates before staging.**
   Snapshot-staged commit closeout now runs a narrow in-exchange prompt duplicate
   repair before staging, collapsing adjacent prefixed/raw copies of prompt text
@@ -56,22 +64,21 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   The editor specs now make typed IPC repair decisions explicit: snapshot-only
   repair stays binary-owned, narrow `normalize_prefix_lines` + boundary
   reposition payloads stay on the normal patch path, and full-content redelivery
-  still requires non-stale bad-state proof. VS Code and JetBrains tests now pin
-  the narrow repair shape so pure-reposition shortcuts cannot absorb it.
+  is disabled in the first-party binary. VS Code and JetBrains tests now pin the
+  narrow repair shape so pure-reposition shortcuts cannot absorb it.
 
 - **File IPC sidecar-normalization fallback now has narrow repair coverage.**
   The file-IPC fallback path is covered by a regression proving prefix-only
   sidecar divergence queues a `patches: []` repair with `normalize_prefix_lines`,
-  boundary repositioning, and stale-buffer proof before any `fullContent`
-  replacement is allowed. The closeout spec now calls out socket and file IPC
-  as the same narrow-first contract.
+  boundary repositioning, and stale-buffer proof. The closeout spec now calls
+  out socket and file IPC as the same narrow-first contract and disables
+  full-content redelivery.
 
 - **The tsift.md duplicate-content IPC incident is now a named regression.** A
   focused fixture models stale duplicate-response repair planning while the
   visible `tasks/software/tsift.md` buffer receives a new prompt. The regression
-  proves response-fallback full-document redelivery skips socket/file IPC without
-  fresh bad-state proof, leaves the live buffer untouched, and logs the stale
-  proof decision.
+  proves response-fallback full-document redelivery skips socket/file IPC,
+  leaves the live buffer untouched, and logs the disabled/stale proof decision.
 
 - **Codex Stop hooks now keep harness-native auto queues moving.** After a
   clean `finalize` / `session-check`, `codex-stop` now detects an active
@@ -256,17 +263,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   content is preserved for explicit recovery instead of being reordered or
   duplicated during closeout.
 
-- **Full-content editor IPC now proves the source buffer before replacement.**
-  The binary stamps every `fullContent` socket/file IPC payload with a
-  `patch_id`, expected source-buffer hash, and byte length. JetBrains and VS
-  Code reject the whole-document replacement when the live editor/VFS buffer no
-  longer matches that source, so compact/repair/full-content retries cannot
-  clobber prompt text typed after the payload was computed. The file-IPC poller
-  also refuses to save a snapshot when a consumed full-content patch did not
-  leave the exact requested document. The source-buffer proof is now built and
-  evaluated through `flow::document_mutation` as the shared visible-replacement
-  contract. Bumped local plugin builds to JetBrains
-  `0.2.127` and VS Code `0.2.20`.
+- **Legacy full-content editor IPC proof remains defensive.** The binary keeps
+  source-buffer proof helpers and the editor plugins still reject legacy/foreign
+  whole-document replacements when the live editor/VFS buffer does not match
+  the expected hash and byte length, but first-party CLI paths now skip
+  `fullContent` emission by default and use guarded disk/snapshot repair.
+  Bumped local plugin builds to JetBrains `0.2.127` and VS Code `0.2.20`.
 
 - **FlowCore now has an executable guard/proof regression gate.**
   Routed-reopen prompt-ready and dispatch-proof failure reasons now pass through

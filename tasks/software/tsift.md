@@ -35,7 +35,22 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 2 response topic(s): graph performance next steps; graph backend-eval cache
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:fdda0d61 -->
+❯ What are #next-steps to improve graph performance?
+### Re: graph performance next steps — gpt-5
+
+I added four follow-up items to the backlog in priority order. Top backlog item: `#gdbrefreshdelta`.
+
+The strongest next move is refresh cost, not higher hop caps or a backend swap. The current three-sample history shows the largest remaining costs in `real.sqlite.refresh`, `real.refresh_phase.source_graph_build`, full-projection source graph build, and conflict-matrix preparation. SQLite path probes are already cheap at 128/256/512 on the real and full-projection samples, while the prototype backends are still slower on those path tiers and are held by the existing promotion gate.
+
+Priority order:
+
+1. `#gdbrefreshdelta` - reduce source-graph-build / refresh cost first and prove it against `fixtures/graph-db-performance-history.json`.
+2. `#gdbcmcache` - make the conflict-matrix preparation cache evidence actionable, focused on `session_review_compute`, `status_index_gate`, `context_pack_diff`, and `impact`.
+3. `#gdbpathpolicy` - do not raise the default max-hop cap blindly; use adaptive or opt-in high-hop behavior with 128/256/512 regression gates.
+4. `#gdbengineproof` - keep FalkorDB and the other prototypes behind backend-eval until a native production adapter beats SQLite across real/full-projection operations without weakening install or locking behavior.
+
+The existing gated review items `#gdbcacheprove` and `#gdbvacproof` still look like evidence gates rather than new backlog work.
+<!-- agent:boundary:17870c8b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -43,14 +58,15 @@ Compacted content:
 
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
-- do [#gdbcacheprove]
-- do [#gdbcachecompact]
-- do [#gdbrowreuse]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#gdbrefreshdelta] [recommended] Reduce graph refresh/source-graph-build cost first: add or harden incremental source-graph-build/dirty-scope reuse, then prove real and full-projection refresh_phase.source_graph_build plus sqlite.refresh deltas against fixtures/graph-db-performance-history.json.
+- [ ] [#gdbcmcache] [recommended] Convert conflict-matrix preparation cache evidence into the next optimization pass: prove cache hits across repeated CLI invocations, then reduce session_review_compute, status_index_gate, context_pack_diff, and impact timings without broadening stale ownership trust.
+- [ ] [#gdbpathpolicy] [recommended] Do not raise the default path hop cap blindly; add an adaptive or opt-in high-hop policy backed by real/full-projection and synthetic deep-chain 128/256/512 samples, with a regression gate before any higher default is accepted.
+- [ ] [#gdbengineproof] [recommended] Keep FalkorDB/Kuzu/DuckDB/Ladybug behind backend-eval until a native production adapter proves projection writes, freshness/parity, lock behavior, install cost, and faster real/full-projection conflict-matrix/evidence/dispatch-trace/path metrics than SQLite without weakening bundled install semantics.
 - [/] [#orchdog] [recommended] Dogfood the completed graph-backed agent orchestration stack on a real agent-doc queue run: run refresh -> evidence -> conflict-matrix -> dispatch-trace -> jobs create/collect, compare worker_prompt_packet and worker_result closure fields, and capture any tsift-side fixture gaps. **Dogfood performed 2026-05-21 on `session-share/tasks/root.md` items #x63e + #v4v0; findings recorded in #gdbevid, #cmgr, #gdbidx — see `session-share/tasks/root.md` exchange "graph-backed orchestration dogfood" entry for the full pipeline trace.** **Second dogfood 2026-05-21 against `tasks/software/tsift.md` (preset `#dogfood-tsift`) surfaced 2 new gaps: #cmgrwres and #gdblock.**
 <!-- /agent:backlog -->
 

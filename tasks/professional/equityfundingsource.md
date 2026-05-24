@@ -209,9 +209,53 @@ Commits pushed:
 - Session closeout: `8e3e7cc0e agent-doc(equityfundingsource): 2026-05-24 09:54:31`
 
 No EFS `CI` workflow or tmux target exists. The pre-existing untracked `src/equityfundingsource-dev/tmp/` directory was left untouched. After my final push, unrelated local agent-doc commits appeared on root `main`; I left them unpushed and untouched.
-lucas-huang may not have the necessary packages to use the runbooks. Please add development dependencies so any programmer can use the runbooks.
-#spec-test-commit-push
-<!-- agent:boundary:edf37a04 -->
+
+❯ lucas-huang may not have the necessary packages to use the runbooks. Please add development dependencies so any programmer can use the runbooks.
+❯ lucas-huang may not have the necessary packages to use the runbooks. Please add development dependencies so any programmer can use the runbooks.
+❯ #spec-test-commit-push
+### Re: Runbook development dependencies — gpt-5
+
+Added root-level development dependencies so Lucas and other programmers can use the documented local runbooks after `mise install` and `bun install`, without relying on global `wrangler` or `tsc` installs.
+
+Changed paths:
+
+- `src/equityfundingsource-dev/package.json`
+- `src/equityfundingsource-dev/README.md`
+- `src/equityfundingsource-dev/docs/TMO/simulator.md`
+- `src/equityfundingsource-dev/prds/equity-funding-source-lending-portal-prd.md`
+- `src/equityfundingsource-dev/tests/tmo-sim.test.ts`
+- `src/equityfundingsource-dev` submodule pointer in the root repo
+
+What changed:
+
+- Added root dev dependencies for `bun-types` and `typescript`; `wrangler` and `@cloudflare/workers-types` remain root dev dependencies.
+- Documented that runbook command dependencies are repo-local and installed by `bun install`.
+- Added a TMO simulator runbook prerequisite section covering `mise install`, `bun install`, and the repo-local Wrangler wrapper.
+- Updated the PRD acceptance baseline so local runbooks are expected to work from declared development dependencies.
+- Extended simulator doc coverage to assert the prerequisite docs and root dependency contract.
+
+Verification:
+
+- `bun install` completed successfully.
+- `bun pm ls --depth 0 | rg "bun-types|typescript|wrangler"` showed `bun-types@1.3.14`, `typescript@5.9.3`, and `wrangler@4.87.0` installed at the root.
+- `bun test tests/tmo-sim.test.ts tests/prd.test.ts` passed: 9 tests.
+- `git diff --check` passed.
+- `make check` passed: 46 tests, app build, and Worker build.
+- `gh run list --workflow CI --limit 1` reported no workflow named `CI`; `rg -n "tmux-ci|tmux" Makefile app lib tests package.json` found no tmux target.
+
+Commits pushed:
+
+- EFS repo: `57630c6 Add runbook development dependencies`
+- Root repo clean submodule pointer: `8087181e4 Update EFS runbook dependency submodule`
+
+Notes:
+
+- I pushed the root submodule pointer through a clean temporary worktree so the unrelated local root `agent-doc` commits were not pushed.
+- The pre-existing untracked `src/equityfundingsource-dev/tmp/` directory was left untouched.
+- A standalone `bun run typecheck` now gets past the missing `bun-types` failure and exposes existing TypeScript errors, so I did not wire typecheck into `make check` in this scoped dependency fix.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:67f23c16 -->
 <!-- /agent:exchange -->
 ###
 

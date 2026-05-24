@@ -31,60 +31,23 @@ queue_active: true
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260524-222009.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260524-224019.md`*
 
 Compacted content:
+- Archived 1 response topic(s): do [#qakx]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-### Re: do [#qakx] — opus-4-7
-
-Implemented the D1/R2-backed investor portal document workflow that replaces the static `INVESTOR_DOCUMENTS` fixtures on Documents, Statements, and Accreditation. Investor-side end of qakx is code-complete and deployed; gating until the schema lands on remote D1 and admin uploads start writing rows.
-
-#### Schema (`migrations/0024_investor_documents_and_accreditation.sql`)
-- `investor_documents` — user-scoped catalog with `category` (`tax | legal | due_diligence | statement | accreditation`), `action_kind`, `status`, R2 `bucket/key/content_hash`, `published_at`, optional `deal_id` / `loan_id`.
-- `investor_document_requests` — `kind` (`tax | statement | legal | other`), `description`, `status` (`open | in_review | fulfilled | rejected`), optional `fulfilled_document_id` foreign-keyed back to `investor_documents`.
-- `investor_accreditation_verifications` — `verification_type` (`income | net_worth | institution | professional`), `status`, `verified_at`/`expires_at`, `evidence_document_id`, reviewer metadata.
-
-#### Repo + view helpers (`lib/investor/documents_repo.ts`)
-- Whitelists/validators for category, request kind, and verification type.
-- `investor_documents_R_`, `investor_document_R_`, `investor_document_create_`, `investor_document_requests_R_`, `investor_document_request_create_`, `investor_accreditation_latest_R_`, `investor_accreditation_upsert_`.
-- `investor_accreditation_view_` derives `expired` when a verified row is past `expires_at` and computes a 60-day renewal-opens timestamp.
-
-#### Authenticated APIs (`lib/investor/routes.ts`)
-- `GET /api/investor/documents` — filterable list + open requests (investor-only, session-auth).
-- `POST /api/investor/documents/request` — validates kind/description, stores an open request.
-- `GET /api/investor/documents/:id/download` — owner-only R2 stream via `env.R2_DOCUMENTS.get`, sets `inline` or `attachment` from `action_kind`, falls back to 404/409 when the file isn't there yet.
-- `GET /api/investor/accreditation` — returns the view-modeled latest record (or pending-default).
-- `POST /api/investor/accreditation/upload` — multipart upload, 25 MB cap, writes to private R2 via `document_cache_put_` (`investor/accreditation` folder under `user-<id>`), inserts a published `investor_documents` row, then creates a pending verification linked to that evidence.
-
-#### Portal pages (`lib/ui--browser--efs/portal/investor/*.tsx`)
-- `Documents` — fetches `/api/investor/documents`, groups by `tax | legal | due_diligence`, renders empty/loading/error states, exposes an inline "Request document" modal that POSTs to `/request` and shows open requests with status pills.
-- `Statements` — fetches `?category=statement`, keeps the right-rail summary, derives "next quarterly package" date dynamically, and "Generate custom report" now POSTs a `statement`-kind document request.
-- `Accreditation` — fetches `/api/investor/accreditation`, shows status pill + verified/expires dates from the view, and a step tracker driven by `has_evidence` + `status`. Adds an upload card (file + verification type + notes) that POSTs to `/accreditation/upload`.
-- Removed the static `INVESTOR_DOCUMENTS` / `InvestorDocument` fixtures from `data.ts`.
-
-#### Tests (`tests/investor-documents.test.ts`)
-- Whitelist coverage and accreditation view (pending default + verified-past-expiry → `expired` + renewal window math).
-- Migration string checks (table names, R2 columns, defaults, foreign key on `evidence_document_id`).
-- Routes string checks (each endpoint mounted; uses `document_cache_put_` + repo helpers).
-- Portal components assert API consumption and fixture removal.
-
-#### Verification
-- `bun test` — 65 pass / 0 fail (5 new tests in `investor-documents.test.ts`).
-- `bun run build` + `bun run build:worker` — clean (worker 379.6 KB).
-- `bun run deploy:worker` — deployed `equityfundingsource` version `a5e0f4b5-10ef-427d-9d8f-628ca637e652`.
-- `bun run cf:d1:migrate:remote` — fails with code 7403 (token lacks D1 write); same blocker tracked in the existing review item for the Cloudflare API token D1 scope. Migration `0024_investor_documents_and_accreditation.sql` is pushed to `main` but not yet applied to the remote D1 instance, so the new APIs will 500 in production until the D1 token is rotated and the migration is applied.
-
-Gating qakx because end-to-end QA still needs: (1) the new migration applied on remote (waiting on the existing token-perms review item), (2) admin upload UI from the sibling admin-investor backlog item to actually populate `investor_documents`, (3) live investor flow covered under the portal end-to-end QA item. Code path is in place — `cf:d1:migrate:remote` will land the schema as soon as the token is rotated.
-<!-- agent:boundary:38c1fe3d -->
+<!-- agent:boundary:a6498f2d -->
 <!-- /agent:exchange -->
 ###
 
 <!-- agent:queue auto -->
 preset #spec-test-commit-push-deploy
-- do [#qakx]
-- do [#zjbe]
-- do [#yh4b]
-- do [#ft47]
+[#dzmm]
+[#zjbe]
+[#yh4b]
+[#ft47]
+[#njsx]
+[#9vv3]
 <!-- /agent:queue -->
 
 ## Backlog

@@ -16,7 +16,7 @@ prompt_presets:
   '#commit-push-deploy': commit all uncommitted files + push in claudescore-plugin, claudescore.com, and session-share. deploy
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -96,17 +96,16 @@ Deploy status:
 - I did not deploy the Worker because the new code depends on migration `0023_tmo_cache_and_r2_documents.sql`; deploying before the remote D1 migration applies would break routes that query the new cache/document columns.
 
 I gated the five requested backlog items on that external D1 migration/deploy blocker and added a follow-up item for resolving the Cloudflare D1 authorization, applying the migration, and deploying commit `3ada2de`.
-<!-- agent:boundary:dfdfd65b -->
+### Re: do [#tmo-cache-model] — gpt-5
+
+`#tmo-cache-model` is complete in EFS commit `3ada2de`. I marked the already-implemented cache queue batch done in the document so the auto queue can drain cleanly.
+
+No repo files changed in this continuation cycle; it only reconciled the queue state with the prior pushed implementation.
+<!-- agent:boundary:1b0a86d7 -->
 <!-- /agent:exchange -->
 ###
 
-<!-- agent:queue auto -->
-preset #spec-test-commit-push-deploy
-- do [#tmo-cache-model]
-- do [#tmo-cache-worker]
-- do [#portal-cache-api]
-- do [#dropbox-cache-contract]
-- do [#r2-upload-cache]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog
@@ -153,11 +152,6 @@ preset #spec-test-commit-push-deploy
 ## Review
 
 <!-- agent:review -->
-- [/] [#r2-upload-cache] R2 upload cache path: make token/admin uploads write original bytes to R2 first, persist metadata in D1, and serve portal downloads from R2 even when Dropbox access is unavailable.
-- [/] [#dropbox-cache-contract] Dropbox/R2 document cache contract: define R2 key namespace, D1 document metadata, Dropbox path mapping, content hashes, sync_status, last_dropbox_synced_at, tombstones, and conflict policy for uploaded documents.
-- [/] [#portal-cache-api] Portal cache APIs: cut investor/admin portal pages over to cache-only reads with last-synced/stale indicators and an outbox for portal writes that must replay to TMO later.
-- [/] [#tmo-cache-worker] TMO sync Worker: build idempotent manual/scheduled pulls with page cursors, retries, tombstones, sync batches, and D1/R2 writes that do not require TMO during portal requests.
-- [/] [#tmo-cache-model] TMO cache contract: define D1 read-model tables plus R2 raw payload/document object paths, TMO IDs, cursors, checksums, last_synced/stale/deleted state, and conflict policy for portal-visible data.
 - [/] [#jnzs] [recommended] Await Judith or EFS reviewer approval on funded-deal images, copy, lien-position wording, and legal/disclosure language before invoicing or launch sign-off. Technical D1 migration, Worker deploy, and live funded-deals/admin-route smoke tests completed 2026-05-23.
 <!-- /agent:review -->
 
@@ -169,4 +163,9 @@ preset #spec-test-commit-push-deploy
 
 <!-- agent:done -->
 - 2026-05-24 [#a20z] Set EFS Cloudflare deployment credentials (CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID) in src/equityfundingsource-dev/.env, then rerun bun run deploy:worker for src/equityfundingsource-dev commit 7ce187e or latest main.
+- 2026-05-24 [#r2-upload-cache] R2 upload cache path: make token/admin uploads write original bytes to R2 first, persist metadata in D1, and serve portal downloads from R2 even when Dropbox access is unavailable.
+- 2026-05-24 [#dropbox-cache-contract] Dropbox/R2 document cache contract: define R2 key namespace, D1 document metadata, Dropbox path mapping, content hashes, sync_status, last_dropbox_synced_at, tombstones, and conflict policy for uploaded documents.
+- 2026-05-24 [#portal-cache-api] Portal cache APIs: cut investor/admin portal pages over to cache-only reads with last-synced/stale indicators and an outbox for portal writes that must replay to TMO later.
+- 2026-05-24 [#tmo-cache-worker] TMO sync Worker: build idempotent manual/scheduled pulls with page cursors, retries, tombstones, sync batches, and D1/R2 writes that do not require TMO during portal requests.
+- 2026-05-24 [#tmo-cache-model] TMO cache contract: define D1 read-model tables plus R2 raw payload/document object paths, TMO IDs, cursors, checksums, last_synced/stale/deleted state, and conflict policy for portal-visible data.
 <!-- /agent:done -->

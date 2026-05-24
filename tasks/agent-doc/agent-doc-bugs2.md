@@ -60,10 +60,68 @@ The existing deterministic coverage already reproduces the important stale-cache
 So `#jbccache` is reproduced and isolated as: JetBrains action -> external `agent-doc compact` process -> guarded direct disk rename -> JetBrains VFS/document cache observes an outside change. The next fix item should decide whether Compact Exchange needs an editor-mediated component replacement or an explicit post-compact VFS/document reload/refresh handshake after the direct write, without returning to unsafe full-document `fullContent` IPC.
 
 Changed paths: session document and done archive only; no code changes. Commands run: `tsift status`, `tsift status --fix`, `agent-doc --version`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, targeted `tsift source-read` / `rg` inspection, `cargo test component_compact_direct_fallback_rejects_idle_unsaved_editor_buffer -- --nocapture`, `cargo test component_compact_uses_guarded_direct_write_when_patches_dir_exists -- --nocapture`, `cargo test component_compact_direct_fallback_rejects_late_visible_edit -- --nocapture`, `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test --tests com.github.btakita.agentdoc.TerminalUtilTest`, `gh workflow list`, `gh run list --workflow "Agent Doc" --limit 1`, and `gh run view 26372808421 --json ...`. Verification: targeted Rust and JetBrains tests passed. Latest GitHub Actions workflow is `Agent Doc`, not `CI`; latest run `26372808421` failed before producing job steps/logs (`check` and `tmux-ci` both empty), so I classify that as an external CI-start/log-allocation blocker rather than a local tmux/code regression. Confidence: high for the isolated path and cache-conflict boundary; medium for the exact IDE dialog timing because this environment cannot display JetBrains' live file-cache UI. Escalation: none.
-<!-- agent:boundary:1bfba58c -->
+❯ The agent:queue stalled. #spec-test-build-install-commit-push
+### Re: queue stall — gpt-5
+
+Fixed the stalled `agent:queue` activation path.
+
+Root cause: preflight was treating a newly reactivated queue as if it were already in-flight work. When the current document changed an inactive queue into an `auto` queue with a different head item, preflight compared that head against the stale inactive snapshot, halted with `item_modified`, stripped `auto`, and left inactive queue residue instead of dispatching the first queued item.
+
+Changed paths:
+
+- `src/agent-doc/src/preflight.rs`
+- `src/agent-doc/specs/02-document-format.md`
+- `src/agent-doc/specs/07-orchestration-commands.md`
+- `src/agent-doc/VERSIONS.md`
+- parent gitlink: `src/agent-doc`
+
+Behavior now:
+
+- Head-item modification halts only apply when the queue was already active in the snapshot.
+- A newly activated queue is treated as operator-authored input for the current cycle.
+- Preflight snapshots the newly activated queue body and `queue_active: true`, so closeout can prove and consume the same head prompt.
+- The old active-queue edit guard is still covered and still halts fail-closed.
+
+Verification:
+
+- `cargo test preflight_new_auto_queue_from_inactive_snapshot_does_not_halt_on_changed_head -- --nocapture`
+- `cargo test preflight_halts_when_already_active_queue_head_changes -- --nocapture`
+- `make check`
+- `cargo install --path .`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- `git diff --check`
+
+CI/tmux evidence:
+
+- Latest pushed GitHub Actions run `26374290084` failed before runner steps were available: both `check` and `tmux-ci` jobs have empty `steps`, and `gh run view 26374290084 --log-failed` returned `log not found: 77631742498`.
+- I classified that as an external CI-start/log-allocation blocker, not a code or tmux regression, and used the local full verification above as the actionable evidence.
+
+Commits and pushes:
+
+- Submodule commit pushed to `btakita/agent-doc` branch `20260422/codex-agent-backend`: `ec932657 fix: avoid stalling newly activated queues`
+- Parent repo commit pushed to `btakita/agent-loop` branch `main`: `8fce4c220 agent-doc: update submodule for queue activation fix`
+
+Escalation: none.
+
+Confidence: high. The regression test recreates the stalled inactive-snapshot-to-auto-queue transition and proves the resulting head item can be consumed by closeout; the companion test preserves the fail-closed halt for an already active queue whose head was edited.
+<!-- agent:boundary:48927d18 -->
 <!-- /agent:exchange -->
 ###
 <!--
+JB `Restart Supervisor Process` error
+```
+agent-doc command failed (exit 1): Error: session_restart refused for /home/brian/work/btakita/agent-loop/tasks/software/tsift.md because pane %13 is alive-busy (source=authoritative_actor, current_command=agent-doc, tail="gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 30% used"). Run `agent-doc session status /home/brian/work/btakita/agent-loop/tasks/software/tsift.md` and wait for an idle prompt, or inspect/stop the pane explicitly before clearing or restarting it.
+```
+---
+JB `Run Agent Doc` on tsift.md error:
+```
+resync: stash pane %11 is registered in its own project root — skipping kill
+[route] debounce OK — file idle for 26.2s and typing indicator idle
+[route] target tmux session: 0
+[route] Pane %33 is in stash window 'stash', rescuing to agent-doc window
+[route] Rescued pane %33 via join-pane
+Error: authoritative actor generation 9 for tasks/software/tagpath.md owns pane %33 but route will not inject a new trigger because the authoritative actor is still starting (waited 8s for codex startup). Wait for the pane to show a dispatch-ready prompt (`prompt_ready=true`), then rerun `agent-doc tasks/software/tagpath.md`. If the pane stays stuck, restart the owner with `agent-doc start tasks/software/tagpath.md`.
+```
 -->
 
 <!-- agent:queue -->

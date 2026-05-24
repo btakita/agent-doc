@@ -209,7 +209,9 @@ Commits pushed:
 - Session closeout: `8e3e7cc0e agent-doc(equityfundingsource): 2026-05-24 09:54:31`
 
 No EFS `CI` workflow or tmux target exists. The pre-existing untracked `src/equityfundingsource-dev/tmp/` directory was left untouched. After my final push, unrelated local agent-doc commits appeared on root `main`; I left them unpushed and untouched.
-<!-- agent:boundary:41de2071 -->
+lucas-huang may not have the necessary packages to use the runbooks. Please add development dependencies so any programmer can use the runbooks.
+#spec-test-commit-push
+<!-- agent:boundary:edf37a04 -->
 <!-- /agent:exchange -->
 ###
 

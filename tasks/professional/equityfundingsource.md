@@ -94,9 +94,44 @@ Notes:
 
 - Simulator state is in memory and resets when the Worker restarts.
 - I left the pre-existing untracked `src/equityfundingsource-dev/tmp/` directory untouched.
-Is the simulator accurate with in-memory data storage? Can we persist the tmo simulator data storage and easily clear the tmo simulator persisted data?
-#spec-test-commit-push
-<!-- agent:boundary:ae75cc0a -->
+
+❯ Is the simulator accurate with in-memory data storage? Can we persist the tmo simulator data storage and easily clear the tmo simulator persisted data?
+❯ Is the simulator accurate with in-memory data storage? Can we persist the tmo simulator data storage and easily clear the tmo simulator persisted data?
+❯ #spec-test-commit-push
+### Re: TMO simulator persistence — gpt-5
+
+In-memory storage is accurate for the simulator's TMO endpoint shape, auth headers, JSON envelope, and single-worker read/write flows. It is not lifecycle-accurate for real TMO: real TMO persists across restarts and clients, while in-memory simulator writes disappear when the Worker restarts or a different isolate handles traffic.
+
+I added optional persisted simulator storage and clear/reset controls.
+
+- `TMO_SIM_STORAGE=d1` stores one simulator JSON snapshot per TMO `Database` header in the new `tmo_sim_state` D1 table.
+- `GET /tmo-sim/admin/state` reports storage mode and row counts.
+- `POST /tmo-sim/admin/reset` resets the active simulated database back to seeded data and persists that seed when D1 mode is enabled.
+- `DELETE /tmo-sim/admin/state` deletes the active persisted snapshot; the next request reseeds it.
+- Admin helpers use the same `Token` and `Database` headers as simulated TMO calls.
+
+Changed paths:
+
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/tmo-sim/routes.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/migrations/0022_tmo_sim_state.sql`
+- `src/equityfundingsource-dev/docs/TMO/simulator.md`
+- `src/equityfundingsource-dev/tests/tmo-sim.test.ts`
+- Plus the prior simulator integration paths for `TMO_API_BASE_URL`, Worker mounting, `.env.example`, PRD, and TMO API wrapper tests.
+
+Verification:
+
+- `bun test tests/tmo-api.test.ts tests/tmo-sim.test.ts` passed: 11 tests.
+- `make check` passed: 46 tests, app build, and Worker build.
+- `gh run list --workflow CI --limit 1` reported no workflow named `CI`; `gh workflow list` returned no workflows.
+- No `tmux-ci` target or tmux workflow exists in `src/equityfundingsource-dev`.
+
+Commits pushed:
+
+- `src/equityfundingsource-dev`: `ca1b8a6 Add persistent TMO simulator storage`
+- `agent-loop` submodule pointer: `5b2ed0248 Update EFS simulator submodule`
+
+I left the pre-existing untracked `src/equityfundingsource-dev/tmp/` files untouched.
+<!-- agent:boundary:445efff6 -->
 <!-- /agent:exchange -->
 ###
 

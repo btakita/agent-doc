@@ -150,7 +150,43 @@ Verification:
 - `make check` passed: 49 tests, production build, Worker build.
 - `git diff --check` passed.
 - CI/tmux note: this repo currently has no GitHub Actions workflows visible to `gh workflow list`; `gh run list --workflow CI --limit 1` reported that no workflow named `CI` exists, so there was no remote CI/tmux leg to inspect.
-<!-- agent:boundary:df8bdccc -->
+❯ How do I create an admin account?
+### Re: create an admin account — gpt-5
+
+Use `/admin/signup` only as a temporary bootstrap path. In the tightened code, that route is intentionally closed unless `ADMIN_SIGNUP_ENABLED` is explicitly true.
+
+For local dev:
+
+1. In `src/equityfundingsource-dev/.dev.vars`, make sure these exist:
+
+```env
+AUTH_SECRET=<local random secret>
+ADMIN_GLOBAL_PASSWORD=<private bootstrap password>
+ADMIN_SIGNUP_ENABLED=true
+```
+
+2. If the local D1 database is fresh, apply migrations:
+
+```bash
+bun run cf:d1:migrate:local
+```
+
+3. Start or restart the Worker:
+
+```bash
+bun run dev:worker
+```
+
+4. Open `http://127.0.0.1:8787/admin/signup`.
+
+5. Enter the new admin's name, email, personal password, and the `ADMIN_GLOBAL_PASSWORD` value from `.dev.vars`. After submit, it should sign in and redirect to `/portal-admin`.
+
+6. After the admin account exists, set `ADMIN_SIGNUP_ENABLED=false` and restart the Worker. From then on, create admin or staff users from `/portal-admin/users` while signed in as an admin.
+
+For production, do the same idea but keep the window short: deploy with `ADMIN_SIGNUP_ENABLED = "true"`, make sure `ADMIN_GLOBAL_PASSWORD` is set as a Cloudflare Worker secret, create the bootstrap admin at `https://www.equityfundingsource.com/admin/signup`, then immediately set `ADMIN_SIGNUP_ENABLED = "false"` and redeploy. Do not leave public admin signup enabled.
+
+Changed paths this cycle: none; this was an answer-only turn. Commands run: `tsift status`, `tsift status --fix`, `agent-doc preflight`, `agent-doc read`, `agent-doc plan`. Verification: not applicable because no code changed in this cycle.
+<!-- agent:boundary:220feaed -->
 <!-- /agent:exchange -->
 ###
 

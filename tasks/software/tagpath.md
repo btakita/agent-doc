@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 
@@ -160,23 +160,16 @@ Compacted content:
 **Known gap:** `LoadError::MissingSymbol` is not exercised end-to-end (would require building a dummy cdylib in the test harness). Documented at the top of `tests/test_dyn_grammar.rs`.
 
 No crates.io publish — release-hygiene queue item owns that. Auto-queue advances next to release hygiene (the last item).
-<!-- agent:boundary:c43821c1 -->
+<!-- agent:boundary:bf97d795 -->
 <!-- /agent:exchange -->
 ###
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~do [#p4ix]~
-- ~do [#p4mp]~
-- ~do [#p4wm]~
-- ~do [#p4dy]~
-- do [#p4rl]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#p4rl] Finish Phase 4 release hygiene: update the Phase 4 checklist to mark the shipped ontology command complete, sync README/SPEC examples, run full verification, publish the next crate, and update this session status.
 <!-- /agent:backlog -->
 
 ## Completed / Reaped

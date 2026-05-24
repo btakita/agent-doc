@@ -325,7 +325,27 @@ https://www.equityfundingsource.com/portal-admin/blog-posts
 If either direct admin URL sends you away from the page, that usually means the current browser session is not an admin session. Go back through `/admin/login`, or sign out/clear the non-admin session and sign in with an admin account.
 
 Changed paths this cycle: none. Commands run: `agent-doc --version`, `tsift status`, `tsift status --fix`, `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `tsift --envelope search`, and `rg` route checks. Verification: source route checks confirmed `/portal-admin/funded-deals` and `/portal-admin/blog-posts` are wired in the admin portal; no tests were run because this was answer-only. Confidence: high. Escalation: none.
-<!-- agent:boundary:dea8b193 -->
+❯ Is this deployed to production?
+### Re: production deployment status — gpt-5
+
+No, not on the custom production domain yet.
+
+The code for the admin funded-deals and blog-posts screens was committed and pushed in `src/equityfundingsource-dev`, but the last deploy attempt stopped because `CLOUDFLARE_API_TOKEN` was not set. Pending item `#a20z` remains open for setting the Cloudflare deployment credentials and rerunning the deploy.
+
+I also checked the live custom domain just now:
+
+```text
+https://www.equityfundingsource.com/admin/login               -> 404 from Apache/WordPress
+https://www.equityfundingsource.com/portal-admin/blog-posts   -> 404 from Apache/WordPress
+https://www.equityfundingsource.com/portal-admin/funded-deals -> WordPress redirects to /funded-deals/
+```
+
+The apex domain redirects into the same `www` WordPress site. So production is still the old WordPress/Apache host, not the Cloudflare Worker app with `/admin/login`, `/portal-admin/funded-deals`, and `/portal-admin/blog-posts`.
+
+The remaining deployment work is to provide `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` in `src/equityfundingsource-dev/.env`, rerun the Worker deploy from `src/equityfundingsource-dev`, then point `equityfundingsource.com` / `www.equityfundingsource.com` at the Worker instead of the current WordPress origin.
+
+Changed paths this cycle: none. Commands run: `agent-doc --version`, `tsift status`, `tsift status --fix`, `agent-doc preflight`, `agent-doc plan`, `curl -I` checks against production admin URLs, `rg` config/docs checks, and `git status --short --branch` in `src/equityfundingsource-dev`. Verification: production HTTP headers confirm the custom domain is still serving Apache/WordPress responses rather than Worker admin routes; no tests were run because this was answer-only. Confidence: high for the custom domain status. Escalation: none.
+<!-- agent:boundary:dce0b6c9 -->
 <!-- /agent:exchange -->
 ###
 

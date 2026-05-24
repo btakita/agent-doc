@@ -50,14 +50,49 @@ Priority order:
 4. `#gdbengineproof` - keep FalkorDB and the other prototypes behind backend-eval until a native production adapter beats SQLite across real/full-projection operations without weakening install or locking behavior.
 
 The existing gated review items `#gdbcacheprove` and `#gdbvacproof` still look like evidence gates rather than new backlog work.
-<!-- agent:boundary:17870c8b -->
+### Re: #gdbrefreshdelta — gpt-5
+
+Implemented and pushed the bounded graph-refresh path for task-document backend eval.
+
+What changed:
+- `src/tsift/src/main.rs` now infers a matching workspace scope from agent-doc task paths like `tasks/software/tsift.md`, so backend eval uses the `tsift` scoped index/source watermark instead of falling back to the root-wide graph.
+- Session-hinted traversal projections skip global indexed call-edge materialization. The normal `--full-projection` guard still exercises the complete graph path.
+- Backend-eval phase detail now records the bounded session projection decision and whether global indexed edges were skipped.
+- Added focused coverage for task-path scope inference and skipped global call edges, plus updated graph-db backend eval conformance expectations.
+- Updated `SPEC.md` to document the path-hinted workspace-scope behavior and full-projection guard boundary.
+
+Performance evidence from real runs:
+- Scoped real run after the index refresh produced `real_graph_rows=6786`; the first `sqlite_refresh` was `21642852us` because it cleaned up the previous root-wide graph tombstones.
+- Steady-state scoped real run reused the current projection with `real_sqlite_refresh=302us`, `real_source_graph_build=302us`, and `real_projection_rows=0`.
+- Cold full-projection guard still built the complete graph: `full_projection_graph_rows=953330`, `full_projection_source_graph_build=63533412us`, `full_projection_sqlite_refresh=41844703us`.
+- Cached full-projection guard hit the disk cache: `full_projection_cache_hit=1`, `full_projection_source_graph_build=0`, `full_projection_projection_rows=0`.
+
+Verification:
+- `cargo test agent_doc_task_path_infers_matching_workspace_scope`
+- `cargo test session_hinted_traversal_skips_global_call_edges`
+- `cargo test graph_db_backend_eval_benchmarks_candidate_stores_against_sqlite`
+- `make check`
+- `cargo build`
+- `cargo install --path .`
+- GitHub Actions `tsift` CI run `26372477579` passed both `live Convex graph acceptance` and `clippy + test`. The root repo has no workflow named `CI`. The CI job list did not include a separate tmux leg.
+
+Pushed commits:
+- `src/tsift`: `7dad614` (`perf: bound graph refresh to task scope`)
+- `agent-loop`: `1e57bc565` (`tsift: bound graph refresh to task scope`)
+
+Non-blocking CI annotations remain for GitHub Actions Node 20 deprecation and the optional live Convex graph URL configuration message.
+<!-- agent:boundary:a3874eaf -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
+- do [#gdbrefreshdelta]
+- do [#gdbcmcache]
+- do [#gdbpathpolicy]
+- do [#gdbengineproof]
 <!-- /agent:queue -->
 
 ## Backlog

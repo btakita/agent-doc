@@ -34,7 +34,67 @@ prompt_presets:
 Compacted content:
 - Archived 1 response topic(s): Portal brand home link
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:aeabb2b4 -->
+❯ Please create a Simulation Mortgage Office API based on our existing knowledge and https://developers.themortgageoffice.com/
+
+❯ We have access to the TMO sandbox using brian.takita@gmail.com for today. Tomorrow we will lose access so we need to simulation to continue work during the week.
+### Re: TMO simulator API — gpt-5
+
+Implemented a local Simulation Mortgage Office API for EFS development.
+
+What changed:
+
+- Added `app/equityfundingsource/lib/tmo-sim/routes.ts`, mounted at `/tmo-sim` when `TMO_SIM_ENABLED=1`.
+- Added `TMO_API_BASE_URL` support to the shared TMO wrapper and the borrower/admin call paths that previously hard-coded `https://api.themortgageoffice.com`.
+- Seeded an in-memory TMO-style sandbox with loan, application, funding, attachment, payment schedule, borrower, product, and lender endpoints.
+- Preserved TMO's JSON response envelope: `{ Data, ErrorMessage, ErrorNumber, Status }`.
+- Added simulator docs at `docs/TMO/simulator.md` and `.env.example` entries.
+- Added tests for the simulator lifecycle and API base URL switching.
+- Tightened payment-schedule XML parsing to handle both documented `System.Data.DataTable` rows and the live sandbox's `Table` diffgram rows.
+
+Local simulator setup:
+
+```bash
+TMO_SIM_ENABLED=1
+TMO_API_BASE_URL=http://127.0.0.1:8787/tmo-sim
+TMO_API_TOKEN=TMO
+TMO_DATABASE=API Sandbox
+```
+
+Example:
+
+```bash
+curl http://127.0.0.1:8787/tmo-sim/LOS.svc/GetLoans \
+  -H 'Token: TMO' \
+  -H 'Database: API Sandbox'
+```
+
+External reference checked: [TMO API docs](https://developers.themortgageoffice.com/) and the public API docs/runtime at [api.absws.com](https://api.absws.com/). I also sampled live sandbox `GET GetLoans`, `GET GetProducts`, and `GET GetLoan/1007` with the documented sandbox headers; no live write calls were made.
+
+Changed paths:
+
+- `src/equityfundingsource-dev/.env.example`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/admin/routes.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/loan_applications/routes.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/tmo-api/index.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/tmo-sim/routes.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/worker.ts`
+- `src/equityfundingsource-dev/docs/TMO/simulator.md`
+- `src/equityfundingsource-dev/tests/tmo-api.test.ts`
+- `src/equityfundingsource-dev/tests/tmo-sim.test.ts`
+
+Verification:
+
+- `bun test tests/tmo-api.test.ts tests/tmo-sim.test.ts` passed.
+- `make check` passed: 43 tests, app build, and Worker build.
+- `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`; `gh workflow list` returned no workflows.
+- `bunx tsc --noEmit` was attempted, but the current install is missing the configured `bun-types` type definition package, so that typecheck cannot run in this checkout as-is.
+- No `tmux-ci` target or `.github` workflow exists in `src/equityfundingsource-dev`; local `make check` is the available project verification path.
+
+Notes:
+
+- Simulator state is in memory and resets when the Worker restarts.
+- I left the pre-existing untracked `src/equityfundingsource-dev/tmp/` directory untouched.
+<!-- agent:boundary:6d642bb6 -->
 <!-- /agent:exchange -->
 ###
 

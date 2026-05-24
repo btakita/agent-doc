@@ -257,15 +257,53 @@ Changed paths this cycle:
 Commands run: `tsift status`, `tsift status --fix`, `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `ps -ef`, `curl` checks against `/admin/login` and `/admin/signup`, `rg`, `git status --short`, `bun test tests/auth.test.ts`, `make check`, `git diff --check`, `gh workflow list`, and `gh run list --workflow CI --limit 1`.
 
 Verification: focused auth tests passed, `make check` passed with 50 tests plus site and Worker builds, `git diff --check` passed, and local HTTP smoke checks confirmed the visible admin signup button. GitHub Actions note: this repo still has no workflow named `CI`, so there was no remote CI/tmux leg available to inspect.
-Completing into /admin/signup took me to http://127.0.0.1:8787/portal-admin/loans. It should go to the admin section.
+
+❯ Completing into /admin/signup took me to http://127.0.0.1:8787/portal-admin/loans. It should go to the admin section.
 #spec-test-commit-push-deploy
-<!-- agent:boundary:9abb8cbd -->
+### Re: admin bootstrap landing — gpt-5
+
+Fixed the admin bootstrap landing behavior. New admins created through `/admin/signup` now receive a `303` to `/portal-admin`, and `/portal-admin` renders the default admin portal shell directly instead of immediately changing the browser URL to `/portal-admin/loans`.
+
+I also kept the previous security behavior intact: public admin signup is still hidden and returns 404 unless `ADMIN_SIGNUP_ENABLED=true`, the login page only shows the `Create admin account` button while that flag is enabled, and creating the account still requires `ADMIN_GLOBAL_PASSWORD`.
+
+Updated spec/tests as requested by `#spec-test-commit-push-deploy`:
+
+- PRD now states that temporary admin bootstrap signup must be explicitly gated and land new admins on `/portal-admin` without forcing a subsection URL.
+- Auth tests now cover `/admin` redirects, signup gating, the visible bootstrap button, signup POST redirect to `/portal-admin`, and direct `/portal-admin` rendering for authenticated admins.
+
+Changed paths in the EFS source commit:
+
+- `src/equityfundingsource-dev/.dev.vars.example`
+- `src/equityfundingsource-dev/app/equityfundingsource/bin/cf-secrets-push.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/auth/routes.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/auth/session.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/portal/admin/routes.ts`
+- `src/equityfundingsource-dev/docs/deploy.md`
+- `src/equityfundingsource-dev/lib/ui--server--efs/auth/admin_login.ts`
+- `src/equityfundingsource-dev/prds/equity-funding-source-lending-portal-prd.md`
+- `src/equityfundingsource-dev/tests/auth.test.ts`
+- `src/equityfundingsource-dev/tests/prd.test.ts`
+- `src/equityfundingsource-dev/wrangler.toml`
+
+Commit/push: committed in `src/equityfundingsource-dev` as `55b5628` (`fix: keep admin bootstrap on portal root`) and pushed to `origin/main`.
+
+Verification:
+
+- `bun test tests/auth.test.ts` passed: 10 tests.
+- `bun test tests/prd.test.ts` passed: 5 tests.
+- `make check` passed after rebase: 53 tests plus site build and Worker build.
+- `git diff --check` passed.
+- GitHub Actions/tmux CI note: `gh workflow list` returned no workflows and `gh run list --workflow CI --limit 1` reported no workflow named `CI`, so there was no remote CI/tmux leg to inspect.
+
+Deployment: attempted `bun run deploy:worker`. The Worker build completed, but the Cloudflare deploy step stopped because `CLOUDFLARE_API_TOKEN` is not set in `src/equityfundingsource-dev/.env` or the environment. I added a pending follow-up to set the Cloudflare deploy credentials and rerun the deploy for commit `55b5628`.
+<!-- agent:boundary:81c34726 -->
 <!-- /agent:exchange -->
 ###
 
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- [ ] [#a20z] Set EFS Cloudflare deployment credentials ( and ) in , then rerun  for commit .
 - [ ] [#7fx4] OCR ingestion schema/state machine: add provider-neutral document_processing tables for documents, versions, OCR runs, pages/chunks, extracted fields, entity mentions/edges, review decisions, provider cost, and retry/error state.
 - [ ] [#d1h2] OCR provider adapter: process private R2 documents through pluggable parsers starting with Ragie Parse or Workers AI/Claude where appropriate; keep original R2 object as source of truth and persist source page/bounding-box evidence.
 - [ ] [#f5kq] OCR admin review workflow: show extracted fields with source evidence, confidence, and diffable approval/rejection before any TMO borrower, loan, lender, or loan-application writeback.

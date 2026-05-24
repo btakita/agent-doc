@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as fs from 'fs';
 import { execFile } from 'child_process';
 import * as native from './native';
-import { createEditorApplyProof, consumeClaimedPatch, isEditorApplyProofCurrent, isFullContentExpectedBufferCurrent, isPatchAlreadyApplied } from './patchGuard';
+import { createEditorApplyProof, consumeClaimedPatch, isEditorApplyProofCurrent, isPatchAlreadyApplied } from './patchGuard';
 import { appendPatchAlreadyPresent, isPureRepositionSignal } from './patchPlan';
 import { annotateExchangeHeadingsAgainstBaseline, repositionBoundaryToEnd, repositionBoundaryToEndPreserveHead } from './reposition';
 import {
@@ -1359,6 +1359,12 @@ class PatchWatcher implements vscode.Disposable {
                 return;
             }
 
+            if ((patch.fullContent ?? '') !== '') {
+                this.outputChannel.appendLine(`PatchWatcher: full content IPC is disabled, deleting stale/foreign ${path.basename(uri.fsPath)}`);
+                try { fs.unlinkSync(uri.fsPath); } catch { /* already consumed */ }
+                return;
+            }
+
             // Handle reposition-only signals with typing debounce
             if (isPureRepositionSignal(patch)) {
                 this.repositionBoundaryWithDebounce(
@@ -1522,33 +1528,9 @@ class PatchWatcher implements vscode.Disposable {
             document.positionAt(baselineContent.length),
         );
 
-        // Full content replacement — only for append-mode documents without component patches.
-        // When component patches are present, use the patch path instead so the response
-        // is applied correctly. Applying fullContent alongside patches would replace the
-        // document before patches run, causing the response to be lost or duplicated.
-        if (patch.fullContent != null && patch.fullContent !== '' && patch.patches.length === 0) {
-            const content = baselineContent;
-            if (!this.verifyApplyProof(document, proof, patch.file, 'full content', patchFilePath)) {
-                return false;
-            }
-            if (!isFullContentExpectedBufferCurrent(content, patch.expected_content_hash, patch.expected_content_len)) {
-                this.outputChannel.appendLine(`PatchWatcher: full content source buffer proof mismatch for ${patch.file}; rejecting patch`);
-                if (patchFilePath) {
-                    this.schedulePatchRetry(patchFilePath);
-                }
-                return false;
-            }
-            if (patch.fullContent !== content) {
-                const edit = new vscode.WorkspaceEdit();
-                edit.replace(fileUri, fullRange, patch.fullContent);
-                const ok = await vscode.workspace.applyEdit(edit);
-                if (!ok) {
-                    this.outputChannel.appendLine(`PatchWatcher: WorkspaceEdit failed for full content replacement`);
-                    return false;
-                }
-            }
-            await document.save();
-            return true;
+        if (patch.fullContent != null && patch.fullContent !== '') {
+            this.outputChannel.appendLine(`PatchWatcher: full content IPC is disabled for ${patch.file}; rejecting patch`);
+            return false;
         }
 
         // Component-based patching (template/stream-mode documents)

@@ -98,16 +98,19 @@ describe('patchGuard', () => {
         assert.strictEqual(isFullContentExpectedBufferCurrent('before', expectedHash, expectedLen + 1), false);
     });
 
-    it('checks the apply proof before component and full-content visible writes', () => {
+    it('rejects full-content visible writes and still guards component writes', () => {
         const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
-        const fullContentIdx = source.indexOf("this.verifyApplyProof(document, proof, patch.file, 'full content'");
-        const fullContentSourceProofIdx = source.indexOf('isFullContentExpectedBufferCurrent(content, patch.expected_content_hash, patch.expected_content_len)');
-        const fullEditIdx = source.indexOf('edit.replace(fileUri, fullRange, patch.fullContent)');
+        const fullContentDeleteIdx = source.indexOf('full content IPC is disabled, deleting stale/foreign');
+        const fullContentRejectIdx = source.indexOf('full content IPC is disabled for ${patch.file}; rejecting patch');
+        const fullContentVisibleEditIdx = source.indexOf('edit.replace(fileUri, fullRange, patch.fullContent)');
+        const fullContentProofIdx = source.indexOf("this.verifyApplyProof(document, proof, patch.file, 'full content'");
         const componentProofIdx = source.indexOf("this.verifyApplyProof(document, proof, patch.file, 'component patch'");
         const componentEditIdx = source.indexOf('edit.replace(fileUri, fullRange, content)');
 
-        assert.ok(fullContentIdx >= 0 && fullContentIdx < fullEditIdx);
-        assert.ok(fullContentSourceProofIdx >= 0 && fullContentSourceProofIdx < fullEditIdx);
+        assert.ok(fullContentDeleteIdx >= 0);
+        assert.ok(fullContentRejectIdx >= 0);
+        assert.strictEqual(fullContentVisibleEditIdx, -1);
+        assert.strictEqual(fullContentProofIdx, -1);
         assert.ok(componentProofIdx >= 0 && componentProofIdx < componentEditIdx);
     });
 });

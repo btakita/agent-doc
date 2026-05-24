@@ -133,9 +133,10 @@
 //!   the document.
 //! - Advisory file lock (`flock`) serialises concurrent writes to the same
 //!   document; the lock is dropped immediately after `atomic_write`.
-//! - `try_ipc` / `try_ipc_full_content` return `false` immediately (no I/O
-//!   wait) when `.agent-doc/patches/` does not exist — callers may invoke them
-//!   unconditionally without performance cost when no plugin is active.
+//! - `try_ipc` returns `false` immediately (no I/O wait) when
+//!   `.agent-doc/patches/` does not exist. `try_ipc_full_content` always
+//!   returns `false` after cleanup/diagnostic guards because whole-document IPC
+//!   is disabled.
 //! - IPC writes include `reposition_boundary: true` so the plugin moves the
 //!   boundary marker to end-of-exchange in the same Document API transaction as
 //!   the patch, avoiding a second round-trip.
@@ -8624,13 +8625,12 @@ pub enum FullContentIpcMode {
     OperatorMutation,
 }
 
-/// Attempt to write full document content via IPC.
+/// Disabled full-document editor IPC path.
 ///
-/// Like `try_ipc()` but replaces the entire document content instead of
-/// applying component patches. Used by append-mode documents that don't
-/// have `<!-- agent:name -->` component markers.
-///
-/// Returns `Ok(true)` if the plugin consumed the patch, `Ok(false)` on timeout.
+/// This function intentionally never emits socket or file IPC payloads. It
+/// keeps the terminal committed-cycle cleanup guard and diagnostic logging so
+/// callers can fall back to the guarded disk/snapshot path without handing the
+/// editor a whole-document replacement.
 #[allow(dead_code)]
 pub fn try_ipc_full_content(file: &Path, content: &str) -> Result<bool> {
     try_ipc_full_content_with_mode(file, content, FullContentIpcMode::ResponseFallback, None)
@@ -8668,51 +8668,11 @@ pub fn try_ipc_full_content_operator_mutation_from_source(
     )
 }
 
-fn build_full_content_ipc_payload(
-    canonical: &Path,
-    content: &str,
-    patch_id: &str,
-    before_content: Option<&str>,
-    include_type: bool,
-) -> serde_json::Value {
-    let mut payload = serde_json::json!({
-        "file": canonical.to_string_lossy(),
-        "patches": [],
-        "unmatched": "",
-        "fullContent": content,
-        "patch_id": patch_id,
-    });
-    if include_type {
-        payload["type"] = serde_json::Value::String("patch".to_string());
-    }
-    attach_full_content_source_proof(&mut payload, before_content);
-    payload
-}
-
-fn attach_full_content_source_proof(payload: &mut serde_json::Value, before_content: Option<&str>) {
-    if payload
-        .get("fullContent")
-        .and_then(|value| value.as_str())
-        .is_none_or(|value| value.is_empty())
-    {
-        return;
-    }
-    if let Some(proof) = crate::flow::document_mutation::full_content_source_proof(before_content) {
-        payload["expected_content_hash"] = serde_json::Value::String(proof.expected_content_hash);
-        payload["expected_content_len"] =
-            serde_json::Value::Number(serde_json::Number::from(proof.expected_content_len));
-    }
-}
-
 fn full_content_source_label(mode: FullContentIpcMode) -> &'static str {
     match mode {
         FullContentIpcMode::ResponseFallback => "response_fallback",
         FullContentIpcMode::OperatorMutation => "compact_exchange",
     }
-}
-
-fn full_content_ipc_disabled_by_default() -> bool {
-    true
 }
 
 fn log_full_content_ipc_disabled(
@@ -8830,68 +8790,18 @@ fn full_content_ipc_scope_allows(
     false
 }
 
-fn guard_full_content_source_buffer_current(
-    file: &Path,
-    mode: FullContentIpcMode,
-    patch_id: &str,
-    source_content: Option<&str>,
-    current_content: Option<&str>,
-) -> bool {
-    let Some(source_content) = source_content else {
-        return true;
-    };
-    let proof =
-        crate::flow::document_mutation::FullContentSourceProof::from_content(source_content);
-    let source = full_content_source_label(mode);
-    let current = current_content.unwrap_or("");
-    let decision = crate::flow::document_mutation::decide_full_content_visible_replacement(
-        current,
-        Some(&proof),
-    );
-    crate::flow::proof::log_flow_event(
-        file,
-        crate::flow::document_mutation::full_content_visible_replacement_event(decision, source),
-    );
-    if decision == crate::flow::document_mutation::FullContentVisibleReplacementDecision::Apply {
-        return true;
-    }
-
-    eprintln!(
-        "[write] full-content IPC skipped for {}: source buffer changed before delivery",
-        file.display()
-    );
-    crate::ops_log::log_op(
-        file,
-        &format!(
-            "full_content_source_buffer_rejected file={} source={} patch_id={} expected_len={} expected_hash={} current_len={} current_hash={} reason=stale_source_buffer",
-            file.display(),
-            source,
-            patch_id,
-            proof.expected_content_len,
-            proof.expected_content_hash,
-            current_content.map(str::len).unwrap_or(0),
-            current_content
-                .map(crate::ops_log::content_hash)
-                .unwrap_or_else(|| "-".to_string())
-        ),
-    );
-    false
-}
-
 fn try_ipc_full_content_with_mode(
     file: &Path,
     content: &str,
     mode: FullContentIpcMode,
     source_content: Option<&str>,
 ) -> Result<bool> {
-    let canonical = file.canonicalize()?;
-    let project_root = resolve_ipc_project_root(&canonical);
+    let _canonical = file.canonicalize()?;
     let before_content = std::fs::read_to_string(file).ok();
     let effective_source_content = match (mode, source_content) {
         (FullContentIpcMode::ResponseFallback, None) => Some(content),
         _ => source_content,
     };
-    let proof_content = effective_source_content.or(before_content.as_deref());
     let patch_id = uuid::Uuid::new_v4().to_string();
 
     if mode == FullContentIpcMode::ResponseFallback
@@ -8931,117 +8841,15 @@ fn try_ipc_full_content_with_mode(
         return Ok(false);
     }
 
-    if full_content_ipc_disabled_by_default() {
-        log_full_content_ipc_disabled(
-            file,
-            mode,
-            &patch_id,
-            content,
-            effective_source_content,
-            before_content.as_deref(),
-        );
-        return Ok(false);
-    }
-
-    if !guard_full_content_source_buffer_current(
+    log_full_content_ipc_disabled(
         file,
         mode,
         &patch_id,
+        content,
         effective_source_content,
         before_content.as_deref(),
-    ) {
-        return Ok(false);
-    }
-
-    // Try socket IPC first
-    if crate::ipc_socket::is_listener_active(&project_root) {
-        let socket_payload =
-            build_full_content_ipc_payload(&canonical, content, &patch_id, proof_content, true);
-        match crate::ipc_socket::send_message(&project_root, &socket_payload) {
-            Ok(Some(_ack)) => {
-                eprintln!("[write] socket IPC full content delivered");
-                let snap_content = match poll_ack_content_sidecar(
-                    &project_root,
-                    &patch_id,
-                    std::time::Duration::from_millis(200),
-                    std::time::Duration::from_millis(25),
-                ) {
-                    Ok(Some(content)) => content,
-                    _ => content.to_string(),
-                };
-                if snap_content != content {
-                    eprintln!(
-                        "[write] socket IPC full-content patch consumed but final content does not match payload — falling back to non-socket write"
-                    );
-                    crate::ops_log::log_op(
-                        file,
-                        &format!(
-                            "full_content_ipc_post_apply_mismatch file={} expected_len={} actual_len={} transport=socket",
-                            file.display(),
-                            content.len(),
-                            snap_content.len()
-                        ),
-                    );
-                    return Ok(false);
-                }
-                if let Some(before) = before_content.as_deref() {
-                    log_exchange_write_diagnostic(
-                        file,
-                        "try_ipc_full_content_socket",
-                        "socket_full_content",
-                        Some(&patch_id),
-                        None,
-                        before,
-                        &snap_content,
-                        &[],
-                        "",
-                    );
-                }
-                snapshot::save(file, &snap_content)?;
-                let crdt_doc = crate::crdt::CrdtDoc::from_text(&snap_content);
-                snapshot::save_crdt(file, &crdt_doc.encode_state())?;
-                return Ok(true);
-            }
-            Ok(None) => {
-                eprintln!(
-                    "[write] socket IPC full content sent but no ack — falling back to file IPC"
-                );
-            }
-            Err(e) => {
-                eprintln!(
-                    "[write] socket IPC full content failed: {} — falling back to file IPC",
-                    e
-                );
-            }
-        }
-    }
-
-    let hash = snapshot::doc_hash(file)?;
-    let patches_dir = project_root.join(".agent-doc/patches");
-
-    // Only attempt file-based IPC if the patches directory exists (plugin has started)
-    if !patches_dir.exists() {
-        return Ok(false);
-    }
-
-    let patch_file = patches_dir.join(format!("{}.json", hash));
-
-    let mut ipc_payload =
-        build_full_content_ipc_payload(&canonical, content, &patch_id, proof_content, false);
-    ipc_payload["baseline"] = serde_json::Value::String(String::new());
-
-    write_ipc_and_poll(
-        &patch_file,
-        &ipc_payload,
-        file,
-        0,
-        IpcPollOptions {
-            content_ours: Some(content),
-            normalize_prefix_lines: None,
-            project_root: &project_root,
-            guard_committed_cycle: mode == FullContentIpcMode::ResponseFallback,
-        },
-    )
+    );
+    Ok(false)
 }
 
 struct IpcPollOptions<'a> {
@@ -18032,14 +17840,12 @@ mod pending_patch_normalization_tests {
 #[cfg(test)]
 mod late_fallback_patch_guard_tests {
     use super::{
-        IpcDiskRepairReason, IpcRepairDecision, IpcSnapshotSource, build_full_content_ipc_payload,
-        cleanup_fallback_patch_files, cycle_already_committed, redeliver_ipc_dedupe_to_editor,
-        repair_ipc_decision_visible_state, try_ipc, try_ipc_full_content,
-        try_ipc_full_content_operator_mutation_from_source,
+        IpcDiskRepairReason, IpcRepairDecision, IpcSnapshotSource, cleanup_fallback_patch_files,
+        cycle_already_committed, redeliver_ipc_dedupe_to_editor, repair_ipc_decision_visible_state,
+        try_ipc, try_ipc_full_content, try_ipc_full_content_operator_mutation_from_source,
     };
     use crate::snapshot;
     use std::fs;
-    use std::path::Path;
     use tempfile::TempDir;
 
     fn doc_in_agent_doc_project(tmp: &TempDir, content: &str) -> std::path::PathBuf {
@@ -18407,31 +18213,6 @@ mod late_fallback_patch_guard_tests {
         assert!(
             !ops_log.contains("socket_full_content"),
             "full-content socket diagnostic must not be emitted after committed-cycle skip"
-        );
-    }
-
-    #[test]
-    fn full_content_ipc_payload_carries_source_buffer_identity() {
-        let payload = build_full_content_ipc_payload(
-            Path::new("/tmp/session.md"),
-            "after",
-            "patch-123",
-            Some("before"),
-            true,
-        );
-
-        assert_eq!(payload["type"], "patch");
-        assert_eq!(payload["file"], "/tmp/session.md");
-        assert_eq!(payload["fullContent"], "after");
-        assert_eq!(payload["patch_id"], "patch-123");
-        let expected_hash = crate::ops_log::content_hash("before");
-        assert_eq!(
-            payload["expected_content_hash"].as_str(),
-            Some(expected_hash.as_str())
-        );
-        assert_eq!(
-            payload["expected_content_len"].as_u64(),
-            Some("before".len() as u64)
         );
     }
 
@@ -18865,7 +18646,7 @@ mod late_fallback_patch_guard_tests {
     }
 
     #[test]
-    fn socket_full_content_is_disabled_before_source_buffer_guard() {
+    fn socket_full_content_is_disabled_before_payload_delivery() {
         use std::sync::{
             Arc,
             atomic::{AtomicUsize, Ordering},

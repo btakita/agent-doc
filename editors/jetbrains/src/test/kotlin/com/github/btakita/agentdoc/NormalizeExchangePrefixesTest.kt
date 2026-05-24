@@ -1,5 +1,7 @@
 package com.github.btakita.agentdoc
 
+import java.nio.file.Files
+import java.nio.file.Paths
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -151,6 +153,19 @@ Already applied.
         assertTrue(fullContentExpectedBufferMatchesUtil(before, hash, len))
         assertFalse(fullContentExpectedBufferMatchesUtil("before\nlive prompt", hash, len))
         assertFalse(fullContentExpectedBufferMatchesUtil(before, hash, len + 1))
+    }
+
+    @Test
+    fun `plugin rejects full content patch application paths`() {
+        val sourcePath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
+        ).first { Files.exists(it) }
+        val source = Files.readString(sourcePath)
+
+        assertTrue(source.contains("full-content IPC is disabled"))
+        assertFalse(source.contains("document.setText(patch.fullContent)"))
+        assertFalse(source.contains("setBinaryContent(patch.fullContent"))
     }
 
     @Test

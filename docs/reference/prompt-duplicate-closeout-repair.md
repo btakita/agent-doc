@@ -18,6 +18,7 @@ flowchart TD
   fullContentReject["Reject fullContent IPC for template/component scope"]
   sourceProof{"Would caller need fullContent IPC?"}
   fullContentDisabled["Return false; fullContent IPC disabled"]
+  receiverDisabled["Editor plugins reject/delete any fullContent payload"]
   guardedDisk["Guarded disk/snapshot fallback"]
   editorApply["Editor/socket/file IPC applies patch"]
   sidecar["ACK sidecar provides materialized content"]
@@ -39,7 +40,7 @@ flowchart TD
   userEdit --> preflight --> response --> ipcScope
   ipcScope -- "yes" --> componentPatch --> fullContentReject --> editorApply
   ipcScope -- "no" --> sourceProof
-  sourceProof -- "yes" --> fullContentDisabled --> guardedDisk --> writeRepair
+  sourceProof -- "yes" --> fullContentDisabled --> receiverDisabled --> guardedDisk --> writeRepair
   sourceProof -- "no" --> guardedDisk
   editorApply --> sidecar --> writeRepair --> snapshot --> commitStart
   commitStart --> responseDedupe --> promptRepair --> prefixVariant
@@ -59,6 +60,8 @@ flowchart TD
 - Whole-document IPC is disabled in the first-party binary. Any path that would
   emit `fullContent` logs `full_content_ipc_disabled`, returns `false`, and lets
   the caller use the guarded disk/snapshot path.
+- Editor plugins also reject or delete legacy/foreign `fullContent` payloads
+  without applying them. Source-buffer proof is diagnostic-only.
 - Write paths that touch `agent:exchange` run duplicate-prompt repair before
   snapshot trust.
 - Commit closeout repeats the safe prompt repair subset before staging. This

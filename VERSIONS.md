@@ -6,13 +6,16 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
-- **Full-document editor IPC is disabled by default.** The binary no longer
+- **Full-document editor IPC is disabled end-to-end.** The binary no longer
   emits `fullContent` socket/file IPC payloads, even for no-component append
   fallbacks, repair redelivery, or operator mutations. Scope rejection still
   logs for template/component documents, committed-cycle cleanup still runs for
   stale fallback patches, and otherwise eligible paths log
   `full_content_ipc_disabled` before falling back to guarded disk/snapshot
-  repair.
+  repair. JetBrains and VS Code now also reject or delete legacy/foreign
+  `fullContent` payloads without applying whole-document editor replacements.
+  Added a separate Mermaid reference for the repeated corruption chain. Bumped
+  local plugin builds to JetBrains `0.2.129` and VS Code `0.2.21`.
 
 - **Commit closeout repairs live prompt prefix duplicates before staging.**
   Snapshot-staged commit closeout now runs a narrow in-exchange prompt duplicate
@@ -263,11 +266,10 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   content is preserved for explicit recovery instead of being reordered or
   duplicated during closeout.
 
-- **Legacy full-content editor IPC proof remains defensive.** The binary keeps
-  source-buffer proof helpers and the editor plugins still reject legacy/foreign
-  whole-document replacements when the live editor/VFS buffer does not match
-  the expected hash and byte length, but first-party CLI paths now skip
-  `fullContent` emission by default and use guarded disk/snapshot repair.
+- **Legacy full-content editor IPC proof remains diagnostic.** The binary keeps
+  source-buffer proof helpers, but first-party CLI paths now skip `fullContent`
+  emission by default and editor plugins no longer apply legacy/foreign
+  whole-document replacements.
   Bumped local plugin builds to JetBrains `0.2.127` and VS Code `0.2.20`.
 
 - **FlowCore now has an executable guard/proof regression gate.**

@@ -30,7 +30,7 @@ The patch watcher receives document updates from `agent-doc write --ipc` and app
 2. Open the target document via editor API (`FileDocumentManager` for JB, `workspace.openTextDocument` for VSCode).
 3. Wait for the shared typing debounce before computing or applying an editor-visible mutation. If the bounded wait times out, do not mutate the document; leave file-watch patches for retry and let socket delivery fail closed.
 4. Capture an editor apply proof from the exact buffer content and editor generation (`Document.modificationStamp` / `TextDocument.version`). Re-check the proof immediately before every visible mutation. If the buffer text or generation changed, reject the patch without ACK so live typing cannot be overwritten by a stale IPC apply.
-5. If `fullContent` is non-empty: replace entire document content (inline-mode documents).
+5. If `fullContent` is non-empty: do not mutate the editor buffer. File-watch payloads may be deleted as disabled stale/foreign patches so they cannot retry indefinitely; socket payloads fail closed.
 6. Otherwise, apply structured patches:
    a. Apply `frontmatter` field: merge YAML key/value pairs into existing frontmatter block (`---\n...\n---\n`). Preserve key order; append new keys.
    b. Apply `patches[]` array: for each `{component, content}`, find the matching component markers and apply content according to mode.
@@ -225,8 +225,8 @@ Three states must be reconciled:
   ],
   "unmatched": "Content that didn't match any component",
   "frontmatter": "key: value\nanother_key: value",
-  "fullContent": "Complete document replacement (mutually exclusive with patches)",
-  "expected_content_hash": "SHA-256 hex of the editor buffer the binary read before fullContent",
+  "fullContent": "Disabled legacy complete document replacement; plugins must not apply it",
+  "expected_content_hash": "Historical source-buffer proof for disabled fullContent payloads",
   "expected_content_len": 123
 }
 ```
@@ -235,8 +235,8 @@ Three states must be reconciled:
 - `patches` (required): Array of component-level patches. May be empty.
 - `unmatched` (required): Content that didn't match a named component. Falls back to `exchange` then `output`.
 - `frontmatter` (optional): YAML key/value pairs to merge into the document's frontmatter.
-- `fullContent` (optional): Legacy/foreign complete document replacement. First-party CLI paths no longer emit this field.
-- `expected_content_hash` / `expected_content_len` (optional for legacy payloads, required for any `fullContent` payload): the `flow::document_mutation` source-buffer proof for the text used to build `fullContent`. Plugins must compare the current editor buffer's UTF-8 SHA-256 and byte length to these fields before applying a full-document replacement; mismatches reject the patch without acknowledgement.
+- `fullContent` (optional): Disabled legacy/foreign complete document replacement. First-party CLI paths no longer emit this field, and plugins must not apply it when present.
+- `expected_content_hash` / `expected_content_len` (optional): historical source-buffer proof fields for legacy `fullContent` payloads. They are no longer authorization to replace the document.
 
 ### 4.2 Future: CRDT State Exchange
 
@@ -248,7 +248,7 @@ Three states must be reconciled:
 
 - **Never swallow errors silently.** Every failure must produce a log entry at minimum.
 - **Log to editor-visible output:** JetBrains `Logger` (visible in `idea.log` with debug enabled), VSCode `OutputChannel` (visible in Output panel).
-- **Leave IPC files on failure** so the CLI detects the timeout and can report the error.
+- **Leave IPC files on failure** so the CLI detects the timeout and can report the error. Disabled `fullContent` file-watch payloads are the exception: delete them as stale/foreign patches after logging so they cannot keep retrying against a live editor buffer.
 - **Content hash verification** (optional): Compare document content hash before and after patch application to detect race conditions with concurrent edits.
 - **Graceful degradation:** If a component marker is not found during patch application, skip that patch entry and log a warning. Do not abort the entire patch.
 
@@ -271,7 +271,7 @@ Each plugin implementation should have tests (or manual test procedures) coverin
 2. **Patch application -- append mode:** New content is appended after existing content, before the close marker.
 3. **Patch application -- prepend mode:** New content is inserted after the open marker, before existing content.
 4. **Component matching with inline attributes:** `<!-- agent:exchange patch=append -->` is correctly parsed; mode is extracted from attributes. `mode=append` also works as a backward-compatible alias.
-5. **Legacy full content replacement:** `fullContent` field replaces entire document only when source-buffer proof passes; first-party CLI paths should not emit it.
+5. **Disabled full content replacement:** `fullContent` payloads are logged and ignored/deleted without applying a whole-document replacement.
 6. **Frontmatter merge:** New keys are appended, existing keys are updated, key order is preserved.
 7. **Missing component graceful fallback:** Patch for a non-existent component is skipped without error; `unmatched` falls back from `exchange` to `output`.
 8. **File-not-found retry:** Target file not in VFS triggers 200ms wait + VFS refresh + retry.

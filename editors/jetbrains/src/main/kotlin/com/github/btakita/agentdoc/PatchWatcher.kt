@@ -291,6 +291,10 @@ class PatchWatcher(private val project: Project) : Disposable {
                     LOG.info("[socket] dedup: patch_id ${patch.patchId} already applied — skipping")
                     return true
                 }
+                if (!patch.fullContent.isNullOrEmpty()) {
+                    LOG.warn("[socket] full-content IPC is disabled; rejecting patch_id ${patch.patchId} for ${patch.file}")
+                    return false
+                }
                 if (!awaitIdleBeforeDocumentMutation(patch.file, "socket patch")) {
                     return false
                 }
@@ -427,6 +431,12 @@ class PatchWatcher(private val project: Project) : Disposable {
             // patch_id dedup: if socket IPC already applied this logical write, skip.
             if (isAlreadyApplied(patch.patchId)) {
                 LOG.info("[patch-watcher] dedup: patch_id ${patch.patchId} already applied via socket — deleting: ${patchFile.name}")
+                patchFile.delete()
+                return
+            }
+
+            if (!patch.fullContent.isNullOrEmpty()) {
+                LOG.warn("[patch-watcher] full-content IPC is disabled; deleting stale/foreign patch file: ${patchFile.name}")
                 patchFile.delete()
                 return
             }
@@ -598,41 +608,9 @@ class PatchWatcher(private val project: Project) : Disposable {
         val content = document.text
         val proof = EditorApplyProof(content, document.modificationStamp)
 
-        // Full content replacement — only for append-mode documents without component patches.
-        // When component patches are present, use the patch path instead: it applies
-        // normalize_prefix_lines + patches correctly without clobbering the response.
-        // Sending fullContent alongside patches caused the plugin to bypass patches and
-        // replace the document with a version that may not include the new response,
-        // leading to duplicates on the next cycle.
-        if (!patch.fullContent.isNullOrEmpty() && patch.patches.isEmpty()) {
-            if (!applyProofStillCurrent(proof, document, patch.file, "full content")) {
-                return false
-            }
-            if (!fullContentExpectedBufferMatchesUtil(content, patch.expectedContentHash, patch.expectedContentLen)) {
-                LOG.warn("[patch-watcher] full content source buffer proof mismatch for ${patch.file}; rejecting")
-                return false
-            }
-            if (patch.fullContent == content) {
-                LOG.warn("Patch produced no changes for ${patch.file}")
-                writeAckContent(patch.patchId, document.text, patch.file)
-                return true
-            }
-            var wrote = false
-            WriteCommandAction.runWriteCommandAction(project, "Agent Doc Patch", null, {
-                if (!editorApplyProofStillCurrentUtil(proof, document.text, document.modificationStamp)) {
-                    LOG.warn("[patch-watcher] stale editor generation during full content patch for ${patch.file}; rejecting")
-                    return@runWriteCommandAction
-                }
-                document.setText(patch.fullContent)
-                wrote = true
-                LOG.info("Patch applied (full content) to ${patch.file}")
-            })
-            if (!wrote) {
-                return false
-            }
-            FileDocumentManager.getInstance().saveDocument(document)
-            writeAckContent(patch.patchId, document.text, patch.file)
-            return true
+        if (!patch.fullContent.isNullOrEmpty()) {
+            LOG.warn("[patch-watcher] full-content IPC is disabled; rejecting patch_id ${patch.patchId} for ${patch.file}")
+            return false
         }
 
         // Component-based patching (template/stream-mode documents)
@@ -740,21 +718,9 @@ class PatchWatcher(private val project: Project) : Disposable {
         try {
             val content = String(targetFile.contentsToByteArray(), targetFile.charset)
 
-            // Full content replacement — only for append-mode documents without component patches.
-            // Same guard as the Document path: skip fullContent when patches are present.
-            if (!patch.fullContent.isNullOrEmpty() && patch.patches.isEmpty()) {
-                if (!fullContentExpectedBufferMatchesUtil(content, patch.expectedContentHash, patch.expectedContentLen)) {
-                    LOG.warn("[patch-watcher] VFS full content source buffer proof mismatch for ${patch.file}; rejecting")
-                    return false
-                }
-                if (patch.fullContent != content) {
-                    ApplicationManager.getApplication().runWriteAction {
-                        targetFile.setBinaryContent(patch.fullContent.toByteArray(targetFile.charset))
-                    }
-                    LOG.info("VFS patch applied (full content) to ${patch.file}")
-                    writeAckContent(patch.patchId, patch.fullContent, patch.file)
-                }
-                return true
+            if (!patch.fullContent.isNullOrEmpty()) {
+                LOG.warn("[patch-watcher] VFS full-content IPC is disabled; rejecting patch_id ${patch.patchId} for ${patch.file}")
+                return false
             }
 
             // Component-based patching
@@ -1229,7 +1195,7 @@ data class IpcPatch(
     val normalizePrefixLines: List<String> = emptyList(),
     /** UUID identifying this patch — used for ack-content sidecar and claimed-patches sentinel. */
     val patchId: String? = null,
-    /** Source-buffer proof from the binary for fullContent replacements. */
+    /** Historical source-buffer proof for disabled fullContent payloads. */
     val expectedContentHash: String? = null,
     val expectedContentLen: Int? = null,
 )

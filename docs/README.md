@@ -36,6 +36,9 @@ material.
 - [Flow Map](reference/flow-map.md) - FlowCore ownership map and typed event
   migration plan.
 - [IPC](reference/ipc.md) - editor IPC architecture and fallback behavior.
+- [Full-Document IPC Corruption Chain](reference/full-document-ipc-corruption-chain.md)
+  - separate Mermaid logic chain for repeated full-document IPC corruption and
+  the end-to-end disabled path.
 - [Prompt Duplicate Closeout Repair](reference/prompt-duplicate-closeout-repair.md)
   - Mermaid process diagram for the disabled full-content IPC path and
   duplicate-prompt closeout repair.

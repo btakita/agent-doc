@@ -1,9 +1,9 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-agent_doc_format: template
-agent_doc_write: crdt
 agent: claude
 claude_model: opus
+agent_doc_format: template
+agent_doc_write: crdt
 codex_args: -s danger-full-access
 links:
 - ./judith-krug.md
@@ -16,7 +16,7 @@ prompt_presets:
   '#commit-push-deploy': commit all uncommitted files + push in claudescore-plugin, claudescore.com, and session-share. deploy
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -35,14 +35,16 @@ queue_active: false
 
 Compacted content:
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:aa99b450 -->
+<!-- agent:boundary:027ee0dc -->
 <!-- /agent:exchange -->
 ###
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-commit-push-deploy
-- do [#cf-d1-cache-deploy]
-- do [#ck54]
+- do [#qakx]
+- do [#zjbe]
+- do [#yh4b]
+- do [#ft47]
 <!-- /agent:queue -->
 
 ## Backlog

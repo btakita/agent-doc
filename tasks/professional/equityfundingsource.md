@@ -36,8 +36,33 @@ queue_active: false
 Compacted content:
 - Archived 3 response topic(s): do [#2rpv]; queue advance past gated 2rpv; do [#0r24]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-do [#37ah]. #spec-test-commit-push-deploy
-<!-- agent:boundary:231b8496 -->
+❯ do [#37ah]. #spec-test-commit-push-deploy
+### Re: do [#37ah] — Broker portal backend — opus-4-7
+
+
+Shipped to Worker; gated on the same remote D1 migration blocker as ft47. Broker endpoints will 500 until 0026 applies remotely; everything else is in HEAD and tested.
+
+What landed in `src/equityfundingsource-dev`:
+
+- `migrations/0026_broker_portal.sql` (new) — `broker_deals` + `broker_commissions` with the submit→funded lifecycle, indexes, and ON DELETE CASCADE foreign keys.
+- `lib/broker/repo.ts` (new) — typed CRUD + `broker_dashboard_metrics_` (active_deals / pipeline_value / earned_ytd_cents / pending_fee_cents / docs_needed). YTD starts at Jan 1 UTC; counts are fault-tolerant.
+- `lib/broker/routes.ts` (new) — 9 endpoints behind `require_broker_` / `require_admin_`: dashboard, pipeline, submit-a-deal (lenient `$350,000` / `20%` parsing), broker status PATCH (admin-reserved statuses rejected), commissions, notifications, admin status POST, admin commission create, admin mark-paid.
+- `app/index.server.ts` — mounts `broker_api_routes__mount(app)`.
+- PRD `### Broker Portal` opens with a new `#### Broker portal backend` subsection documenting each endpoint, role split, and schema.
+- `tests/broker-portal.test.ts` (new) — 12 tests covering enums, migration shape, metrics shape + UTC-year window, every route mount, role guards, submit-deal validation, broker-cannot-promote gate, admin-only counterparts, currency parsing, worker wiring, and PRD coverage.
+
+Verification:
+
+- `bun test` — 161 pass / 0 fail (19 files).
+- `bun run check` — clean.
+- `bun run cf:d1:migrate:local` — applied 0026 locally.
+- `bun run deploy:worker` — Worker version `140ee584-7e09-48ec-bbc9-d72c64bcd719`.
+- Submodule commit `1a05655` + superproject pointer bump pushed to `origin/main`.
+
+Gating: same `#1v5m` D1 token blocker. Follow-up backlog item already records the apply-0026 + smoke-test action paired with 0025.
+
+Out of scope (intentional): frontend swap from `BROKER_METRICS` / `BROKER_DEALS` / `BROKER_COMMISSIONS` static arrays to `fetch('/api/broker/...')`; TMO `NewLoanApplication` from `POST /api/broker/deals` (admin promotion remains the existing `/api/admin/loans/:id/deal` flow).
+<!-- agent:boundary:309fbf31 -->
 <!-- /agent:exchange -->
 ###
 

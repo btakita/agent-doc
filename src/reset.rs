@@ -2,17 +2,22 @@
 //!
 //! ## Spec
 //! - Resets a session document to a clean state by clearing the agent conversation resume pointer and deleting or rebuilding associated state files.
-//! - `run(file)` performs three operations in sequence:
+//! - `run(file, from_current, preserve_session)` performs three operations in sequence:
 //!   1. Reads YAML frontmatter, sets `resume` to `None` (clears the conversation ID), rewrites the frontmatter while preserving all other fields and the document body.
 //!   2. Deletes the snapshot file via `snapshot::delete`, or with `--from-current` saves the current markdown as the snapshot.
 //!   3. Deletes the CRDT state file via `snapshot::delete_crdt`, or with `--from-current` rebuilds it from the current markdown.
+//! - `--from-current --preserve-session` is non-destructive: it leaves the
+//!   markdown, resume pointer, cycle state, and capture chain untouched while
+//!   refreshing snapshot/CRDT/baseline sidecars from the visible file.
 //! - The `session` frontmatter field (routing key) is intentionally preserved; only `resume` (conversation continuity pointer) is cleared.
 //! - After reset, the next `agent-doc submit` or `agent-doc stream` starts a fresh agent conversation.
 //!
 //! ## Agentic Contracts
-//! - `run(file, from_current)` — returns `Err` if the file is missing or any I/O operation fails; returns `Ok(())` on success with a confirmation message on stderr.
+//! - `run(file, from_current, preserve_session)` — returns `Err` if the file is missing or any I/O operation fails; returns `Ok(())` on success with a confirmation message on stderr.
 //! - Callers may rely on snapshot and CRDT state being absent after a default reset.
 //! - Callers may rely on snapshot and CRDT state matching the visible markdown after `--from-current`.
+//! - Callers may rely on `--from-current --preserve-session` not rewriting the
+//!   document or clearing `resume`.
 //! - Session identity (`session` field) is unaffected; document routing continues to work after reset.
 //!
 //! ## Evals
@@ -22,19 +27,35 @@
 //! - snapshot_deleted: snapshot exists before reset → absent after successful run
 //! - crdt_deleted: CRDT state exists before reset → absent after successful run
 //! - from_current_rebuilds_snapshot_and_crdt: `--from-current` saves current markdown to both state sidecars
+//! - preserve_session_from_current_keeps_document_and_sidecars: `--from-current
+//!   --preserve-session` leaves the document/capture/cycle files intact and
+//!   refreshes snapshot/CRDT/baseline
 
 use anyhow::Result;
+use std::io::Write;
 use std::path::Path;
 
 use crate::{frontmatter, snapshot};
 
-pub fn run(file: &Path, from_current: bool) -> Result<()> {
+pub fn run(file: &Path, from_current: bool, preserve_session: bool) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
+    if preserve_session && !from_current {
+        anyhow::bail!("--preserve-session requires --from-current");
+    }
+
+    let content = std::fs::read_to_string(file)?;
+    if preserve_session {
+        rebuild_sidecars_from_current(file, &content, true)?;
+        eprintln!(
+            "Reset sidecars for {} from current file while preserving session state",
+            file.display()
+        );
+        return Ok(());
+    }
 
     // Clear agent conversation ID (resume) — keep session (routing key)
-    let content = std::fs::read_to_string(file)?;
     let (mut fm, body) = frontmatter::parse(&content)?;
     fm.resume = None;
     let updated = frontmatter::write(&fm, body)?;
@@ -42,9 +63,7 @@ pub fn run(file: &Path, from_current: bool) -> Result<()> {
     let updated_content = std::fs::read_to_string(file)?;
 
     if from_current {
-        snapshot::save(file, &updated_content)?;
-        let crdt = crate::crdt::CrdtDoc::from_text(&updated_content).encode_state();
-        snapshot::save_crdt(file, &crdt)?;
+        rebuild_sidecars_from_current(file, &updated_content, false)?;
         eprintln!(
             "Reset session for {} and rebuilt snapshot/CRDT from current file",
             file.display()
@@ -58,6 +77,28 @@ pub fn run(file: &Path, from_current: bool) -> Result<()> {
 
         eprintln!("Reset session for {}", file.display());
     }
+    Ok(())
+}
+
+fn rebuild_sidecars_from_current(file: &Path, content: &str, save_baseline: bool) -> Result<()> {
+    snapshot::save(file, content)?;
+    let crdt = crate::crdt::CrdtDoc::from_text(content).encode_state();
+    snapshot::save_crdt(file, &crdt)?;
+    if save_baseline {
+        save_baseline_from_current(file, content)?;
+    }
+    Ok(())
+}
+
+fn save_baseline_from_current(file: &Path, content: &str) -> Result<()> {
+    let baseline_path = snapshot::baseline_path_for(file)?;
+    if let Some(parent) = baseline_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut tmp =
+        tempfile::NamedTempFile::new_in(baseline_path.parent().unwrap_or_else(|| Path::new(".")))?;
+    tmp.write_all(content.as_bytes())?;
+    tmp.persist(&baseline_path).map_err(|e| e.error)?;
     Ok(())
 }
 
@@ -77,7 +118,7 @@ mod tests {
         snapshot::save(&doc, "stale snapshot").unwrap();
         snapshot::save_crdt(&doc, b"stale crdt").unwrap();
 
-        run(&doc, true).unwrap();
+        run(&doc, true, false).unwrap();
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(!updated.contains("resume: old"));
@@ -87,5 +128,68 @@ mod tests {
             .unwrap()
             .to_text();
         assert_eq!(crdt_text, updated);
+    }
+
+    #[test]
+    fn preserve_session_from_current_keeps_document_and_sidecars() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/crdt")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/baselines")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/state/cycles")).unwrap();
+        let doc = dir.path().join("session.md");
+        let current = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nresume: keep-me\n---\n\nBody\n";
+        std::fs::write(&doc, current).unwrap();
+        snapshot::save(&doc, "stale snapshot").unwrap();
+        snapshot::save_crdt(&doc, b"stale crdt").unwrap();
+        std::fs::write(snapshot::baseline_path_for(&doc).unwrap(), "stale baseline").unwrap();
+
+        let hash = snapshot::doc_hash(&doc).unwrap();
+        let cycle_path = dir
+            .path()
+            .join(".agent-doc/state/cycles")
+            .join(format!("{hash}.json"));
+        let cycle_state = r#"{"cycle_id":"cycle-keep","phase":"preflight_started"}"#;
+        std::fs::write(&cycle_path, cycle_state).unwrap();
+        let capture_dir = dir.path().join(".agent-doc/captures").join(&hash);
+        std::fs::create_dir_all(&capture_dir).unwrap();
+        let capture_path = capture_dir.join("capture-keep.json");
+        let capture_state = r#"{"capture_id":"capture-keep","state":"committed"}"#;
+        std::fs::write(&capture_path, capture_state).unwrap();
+
+        run(&doc, true, true).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(updated, current);
+        assert!(updated.contains("resume: keep-me"));
+        assert_eq!(snapshot::load(&doc).unwrap().unwrap(), current);
+        assert_eq!(
+            std::fs::read_to_string(snapshot::baseline_path_for(&doc).unwrap()).unwrap(),
+            current
+        );
+        let crdt_state = snapshot::load_crdt(&doc).unwrap().unwrap();
+        let crdt_text = crate::crdt::CrdtDoc::decode_state(&crdt_state)
+            .unwrap()
+            .to_text();
+        assert_eq!(crdt_text, current);
+        assert_eq!(std::fs::read_to_string(&cycle_path).unwrap(), cycle_state);
+        assert_eq!(
+            std::fs::read_to_string(&capture_path).unwrap(),
+            capture_state
+        );
+    }
+
+    #[test]
+    fn preserve_session_requires_from_current() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "---\nagent_doc_session: test\n---\n\nBody\n").unwrap();
+
+        let err = run(&doc, false, true).unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("--preserve-session requires --from-current")
+        );
     }
 }

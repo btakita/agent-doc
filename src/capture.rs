@@ -439,7 +439,9 @@ pub fn validate_replay(file: &Path, capture: &CaptureRecord) -> Result<()> {
         .with_context(|| format!("failed to read {} for capture replay", file.display()))?;
     let current_file_hash = crate::ops_log::content_hash(&current_file);
     let current_snapshot = crate::snapshot::load(file)?;
-    let current_snapshot_hash = current_snapshot.as_deref().map(crate::ops_log::content_hash);
+    let current_snapshot_hash = current_snapshot
+        .as_deref()
+        .map(crate::ops_log::content_hash);
 
     let file_mismatch = capture.file_hash.as_deref() != Some(current_file_hash.as_str());
     let snapshot_mismatch = capture.snapshot_hash != current_snapshot_hash;
@@ -467,12 +469,14 @@ pub fn validate_replay(file: &Path, capture: &CaptureRecord) -> Result<()> {
 
     if file_mismatch {
         anyhow::bail!(
-            "captured response baseline no longer matches current document for {}",
+            "captured response baseline no longer matches current document for {}. Rebuild sidecars without clearing session state: `agent-doc reset --from-current --preserve-session {}`",
+            file.display(),
             file.display()
         );
     }
     anyhow::bail!(
-        "captured response snapshot no longer matches current baseline for {}",
+        "captured response snapshot no longer matches current baseline for {}. Rebuild sidecars without clearing session state: `agent-doc reset --from-current --preserve-session {}`",
+        file.display(),
         file.display()
     );
 }
@@ -860,6 +864,10 @@ mod tests {
         std::fs::write(&doc, "body changed").unwrap();
         let err = validate_replay(&doc, &capture).unwrap_err();
         assert!(err.to_string().contains("baseline no longer matches"));
+        assert!(
+            err.to_string()
+                .contains("agent-doc reset --from-current --preserve-session")
+        );
     }
 
     /// Phase 2 of #adoc-baseline-drift-after-user-commit: when the captured
@@ -878,8 +886,7 @@ mod tests {
 
         // User committed a benign edit: added an unrelated backlog item but
         // left the response body untouched.
-        let after_user_commit =
-            "## Exchange\n\nold body\n### Re: topic — gpt-5\n\nIntact response body.\n\n## Backlog\n\n- new item added by user\n";
+        let after_user_commit = "## Exchange\n\nold body\n### Re: topic — gpt-5\n\nIntact response body.\n\n## Backlog\n\n- new item added by user\n";
         std::fs::write(&doc, after_user_commit).unwrap();
         crate::snapshot::save(&doc, after_user_commit).unwrap();
         assert_ne!(
@@ -955,11 +962,8 @@ mod tests {
         let original = "## Exchange\n\nold body\n### Re: topic — gpt-5\n\nOriginal response.\n";
         std::fs::write(&doc, original).unwrap();
         crate::snapshot::save(&doc, original).unwrap();
-        let capture = capture_response(
-            &doc,
-            "### Re: topic — gpt-5\n\nOriginal response.\n",
-        )
-        .unwrap();
+        let capture =
+            capture_response(&doc, "### Re: topic — gpt-5\n\nOriginal response.\n").unwrap();
 
         // User clobbered the response body — true corruption, not benign.
         let damaged = "## Exchange\n\nold body\n";

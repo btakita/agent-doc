@@ -82,6 +82,8 @@ Two modes:
 
 `agent-doc reset <FILE>` clears the saved session id and deletes the snapshot/CRDT state for the document. `agent-doc reset --from-current <FILE>` clears the saved session id and rebuilds both sidecars from the current visible markdown, which is the recovery path after manually cleaning a document whose persisted snapshot/CRDT state is stale.
 
+`agent-doc reset --from-current --preserve-session <FILE>` is the non-destructive recovery for baseline drift after a manual user commit: it refreshes the snapshot, CRDT state, and preflight baseline from the current visible markdown while leaving the document frontmatter, cycle state, and capture history untouched.
+
 ## clean
 
 `agent-doc clean <FILE>` squashes all `agent-doc:` commits for the file into one via `git reset --soft`.

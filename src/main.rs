@@ -417,6 +417,9 @@ enum Commands {
         /// Rebuild snapshot and CRDT state from the current visible markdown
         #[arg(long)]
         from_current: bool,
+        /// With --from-current, preserve resume/session metadata and capture history
+        #[arg(long)]
+        preserve_session: bool,
     },
     /// Squash session git history into one commit
     Clean {
@@ -1597,7 +1600,11 @@ fn main() -> anyhow::Result<()> {
                 diff::run(&file, wait)
             }
         }
-        Commands::Reset { file, from_current } => reset::run(&file, from_current),
+        Commands::Reset {
+            file,
+            from_current,
+            preserve_session,
+        } => reset::run(&file, from_current, preserve_session),
         Commands::Clean { file, archive } => clean::run(&file, archive),
         Commands::AuditDocs { root } => audit_docs::run(root.as_deref()),
         Commands::Gc { root, dry_run } => {

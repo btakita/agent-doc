@@ -12,19 +12,19 @@ fn agent_doc() -> Command {
 }
 
 fn template_doc_content() -> String {
-    "---\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\n---\n\n<!-- agent:exchange -->\n❯ Please reply\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n".to_string()
+    "---\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\n---\n\n<!-- agent:exchange -->\n❯ Please reply\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n".to_string()
 }
 
 fn session_template_doc_content() -> String {
-    "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\n---\n\n<!-- agent:exchange -->\n❯ Please reply\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n".to_string()
+    "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\n---\n\n<!-- agent:exchange -->\n❯ Please reply\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n".to_string()
 }
 
 fn session_stream_doc_content() -> String {
-    "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\nagent: codex\nmodel: gpt-5\n---\n\n<!-- agent:exchange -->\n❯ Please reply\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n".to_string()
+    "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\nagent: codex\nmodel: gpt-5\n---\n\n<!-- agent:exchange -->\n❯ Please reply\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n".to_string()
 }
 
 fn session_stream_auto_queue_doc_content() -> String {
-    "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\nagent: codex\nmodel: gpt-5\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n❯ #next-steps\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue auto -->\n- do #fix1\n- do #fix2\n<!-- /agent:queue -->\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n".to_string()
+    "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\nagent: codex\nmodel: gpt-5\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n❯ #next-steps\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue auto -->\n- do #fix1\n- do #fix2\n<!-- /agent:queue -->\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n".to_string()
 }
 
 fn setup_template_doc() -> (TempDir, PathBuf) {
@@ -145,8 +145,8 @@ fn enable_strict_pending_capture(doc: &Path) {
 fn insert_pending_item(doc: &Path, item: &str) {
     let current = fs::read_to_string(doc).unwrap();
     let updated = current.replace(
-        "<!-- agent:pending -->\n<!-- /agent:pending -->\n",
-        &format!("<!-- agent:pending -->\n{item}<!-- /agent:pending -->\n"),
+        "<!-- agent:backlog -->\n<!-- /agent:backlog -->\n",
+        &format!("<!-- agent:backlog -->\n{item}<!-- /agent:backlog -->\n"),
     );
     fs::write(doc, updated).unwrap();
 }
@@ -540,9 +540,9 @@ fn write_commit_empty_stdin_repair_preserves_post_exchange_scratch_comment() {
     let original = session_stream_doc_content()
         .replace("❯ Please reply", &format!("❯ {prompt}"))
         .replace(
-            "<!-- /agent:exchange -->\n\n<!-- agent:pending -->",
+            "<!-- /agent:exchange -->\n\n<!-- agent:backlog -->",
             &format!(
-                "<!-- /agent:exchange -->\n###\n\n<!--\n{prompt}\n#spec-test-build-install-commit-push\n---\nKeep repair scratch notes visible.\n-->\n\n<!-- agent:pending -->"
+                "<!-- /agent:exchange -->\n###\n\n<!--\n{prompt}\n#spec-test-build-install-commit-push\n---\nKeep repair scratch notes visible.\n-->\n\n<!-- agent:backlog -->"
             ),
         );
     fs::write(&doc, &original).unwrap();
@@ -650,7 +650,7 @@ fn write_commit_empty_stdin_with_pending_add_commits_pending_only_change() {
     let (tmp, doc) = setup_session_stream_doc();
     fs::write(
         &doc,
-        "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\nagent: codex\nmodel: gpt-5\n---\n\n<!-- agent:exchange -->\n### Re: already handled — gpt-5\nDone.\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n",
+        "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\nagent: codex\nmodel: gpt-5\n---\n\n<!-- agent:exchange -->\n### Re: already handled — gpt-5\nDone.\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n",
     )
     .unwrap();
     init_git_repo(tmp.path(), &doc);
@@ -696,7 +696,7 @@ fn write_commit_empty_stdin_with_done_commits_pending_only_reap() {
     let (tmp, doc) = setup_session_stream_doc();
     fs::write(
         &doc,
-        "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\nagent: codex\nmodel: gpt-5\n---\n\n<!-- agent:exchange -->\n### Re: already handled — gpt-5\nDone.\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:pending -->\n- [ ] [#done1] Close the loop\n<!-- /agent:pending -->\n",
+        "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\nagent: codex\nmodel: gpt-5\n---\n\n<!-- agent:exchange -->\n### Re: already handled — gpt-5\nDone.\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:backlog -->\n- [ ] [#done1] Close the loop\n<!-- /agent:backlog -->\n",
     )
     .unwrap();
     init_git_repo(tmp.path(), &doc);
@@ -868,8 +868,8 @@ fn finalize_rejects_status_only_response_for_natural_language_pending_task() {
     let original = fs::read_to_string(&doc).unwrap();
     let baseline = write_baseline(tmp.path(), &original);
     let edited = original.replace(
-        "<!-- agent:pending -->\n<!-- /agent:pending -->\n",
-        "<!-- agent:pending -->\n- [ ] [#n8q4] Fix the cross-repo `no-permissions-bypass` miss now dominating benchmark MAE\n<!-- /agent:pending -->\n",
+        "<!-- agent:backlog -->\n<!-- /agent:backlog -->\n",
+        "<!-- agent:backlog -->\n- [ ] [#n8q4] Fix the cross-repo `no-permissions-bypass` miss now dominating benchmark MAE\n<!-- /agent:backlog -->\n",
     );
     fs::write(&doc, edited).unwrap();
 
@@ -1063,9 +1063,9 @@ fn finalize_pending_add_multiple_flags_keep_cli_order_at_top() {
 
     let content = fs::read_to_string(&doc).unwrap();
     let pending = content
-        .split("<!-- agent:pending -->\n")
+        .split("<!-- agent:backlog -->\n")
         .nth(1)
-        .and_then(|rest| rest.split("\n<!-- /agent:pending -->").next())
+        .and_then(|rest| rest.split("\n<!-- /agent:backlog -->").next())
         .unwrap();
     let first = pending.find("[#first] first task").unwrap();
     let second = pending.find("[#second] second task").unwrap();
@@ -1249,8 +1249,8 @@ fn finalize_reaps_completed_pending_items_in_same_closeout_commit() {
     );
     let current = fs::read_to_string(&doc).unwrap();
     let updated = current.replace(
-        "<!-- /agent:pending -->\n",
-        "<!-- /agent:pending -->\n\n<!-- agent:done -->\n<!-- /agent:done -->\n",
+        "<!-- /agent:backlog -->\n",
+        "<!-- /agent:backlog -->\n\n<!-- agent:done -->\n<!-- /agent:done -->\n",
     );
     fs::write(&doc, &updated).unwrap();
     init_git_repo(tmp.path(), &doc);
@@ -1374,8 +1374,8 @@ fn finalize_pending_done_is_noop_when_item_was_already_reaped() {
     let (tmp, doc) = setup_session_template_doc();
     let current = fs::read_to_string(&doc).unwrap();
     let updated = current.replace(
-        "<!-- /agent:pending -->\n",
-        "<!-- /agent:pending -->\n\n<!-- agent:done -->\n- 2026-05-09 [#done1] Close the loop\n<!-- /agent:done -->\n",
+        "<!-- /agent:backlog -->\n",
+        "<!-- /agent:backlog -->\n\n<!-- agent:done -->\n- 2026-05-09 [#done1] Close the loop\n<!-- /agent:done -->\n",
     );
     fs::write(&doc, updated).unwrap();
     init_git_repo(tmp.path(), &doc);
@@ -1529,8 +1529,8 @@ fn finalize_fails_closed_on_concurrent_prompt_added_after_baseline() {
 fn finalize_preserves_late_comment_tail_edit_outside_exchange_uncommitted() {
     let (tmp, doc) = setup_session_stream_doc();
     let shaped = fs::read_to_string(&doc).unwrap().replace(
-        "<!-- /agent:exchange -->\n\n<!-- agent:pending -->",
-        "<!-- /agent:exchange -->\n###\n\n<!--\nold parked note\n-->\n\n<!-- agent:pending -->",
+        "<!-- /agent:exchange -->\n\n<!-- agent:backlog -->",
+        "<!-- /agent:exchange -->\n###\n\n<!--\nold parked note\n-->\n\n<!-- agent:backlog -->",
     );
     fs::write(&doc, shaped).unwrap();
     init_git_repo(tmp.path(), &doc);
@@ -1603,8 +1603,8 @@ fn finalize_preserves_current_duplicate_prompt_html_comment_body() {
         .assert()
         .success();
     let current_with_duplicate = fs::read_to_string(&doc).unwrap().replace(
-        "<!-- /agent:exchange -->\n\n<!-- agent:pending -->",
-        &format!("<!-- /agent:exchange -->\n###\n\n<!--\n{prompt}\n-->\n\n<!-- agent:pending -->"),
+        "<!-- /agent:exchange -->\n\n<!-- agent:backlog -->",
+        &format!("<!-- /agent:exchange -->\n###\n\n<!--\n{prompt}\n-->\n\n<!-- agent:backlog -->"),
     );
     fs::write(&doc, current_with_duplicate).unwrap();
 
@@ -1645,9 +1645,9 @@ fn finalize_preserves_baseline_prompt_html_comment_body() {
         .unwrap()
         .replace("❯ Please reply", &format!("❯ {prompt}"))
         .replace(
-            "<!-- /agent:exchange -->\n\n<!-- agent:pending -->",
+            "<!-- /agent:exchange -->\n\n<!-- agent:backlog -->",
             &format!(
-                "<!-- /agent:exchange -->\n###\n\n<!--\n{prompt}\n-->\n\n<!-- agent:pending -->"
+                "<!-- /agent:exchange -->\n###\n\n<!--\n{prompt}\n-->\n\n<!-- agent:backlog -->"
             ),
         );
     fs::write(&doc, shaped).unwrap();
@@ -1692,11 +1692,11 @@ fn finalize_preserves_baseline_prompt_html_comment_body() {
 // --- Phase 3: Queue consumption integration tests ---
 
 fn queue_doc_content() -> String {
-    "---\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n❯ describe the project\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n- do #fix1\n- do #fix2\n- run tests\n<!-- /agent:queue -->\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n".to_string()
+    "---\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n❯ describe the project\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n- do #fix1\n- do #fix2\n- run tests\n<!-- /agent:queue -->\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n".to_string()
 }
 
 fn queue_doc_content_with_dispatch() -> String {
-    "---\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n❯ describe the project\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\ndispatch #spec-test-build-install-commit-push\n- do [#has9]\n- do [#5pr6]\n<!-- /agent:queue -->\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n".to_string()
+    "---\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n❯ describe the project\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\ndispatch #spec-test-build-install-commit-push\n- do [#has9]\n- do [#5pr6]\n<!-- /agent:queue -->\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n".to_string()
 }
 
 #[test]
@@ -1892,7 +1892,7 @@ fn finalize_drains_queue_and_clears_active_on_last_prompt() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
     let doc = tmp.path().join("session.md");
-    let single_prompt = "---\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n❯ prior prompt\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue auto -->\n- describe the project\n<!-- /agent:queue -->\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n";
+    let single_prompt = "---\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n❯ prior prompt\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue auto -->\n- describe the project\n<!-- /agent:queue -->\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n";
     fs::write(&doc, single_prompt).unwrap();
     init_git_repo(tmp.path(), &doc);
 
@@ -1942,7 +1942,7 @@ fn finalize_drains_queue_and_removes_dispatch_directive_on_last_prompt() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
     let doc = tmp.path().join("session.md");
-    let content = "---\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n❯ describe the project\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\ndispatch #spec-test-build-install-commit-push\n- do [#has9]\n<!-- /agent:queue -->\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n";
+    let content = "---\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n❯ describe the project\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\ndispatch #spec-test-build-install-commit-push\n- do [#has9]\n<!-- /agent:queue -->\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n";
     fs::write(&doc, content).unwrap();
     init_git_repo(tmp.path(), &doc);
 
@@ -2047,7 +2047,7 @@ fn finalize_does_not_consume_when_queue_inactive() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
     let doc = tmp.path().join("session.md");
-    let inactive = "---\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\n---\n\n<!-- agent:exchange -->\n❯ describe the project\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n- do #fix1\n<!-- /agent:queue -->\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n";
+    let inactive = "---\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\n---\n\n<!-- agent:exchange -->\n❯ describe the project\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n- do #fix1\n<!-- /agent:queue -->\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n";
     fs::write(&doc, inactive).unwrap();
     init_git_repo(tmp.path(), &doc);
 
@@ -2140,7 +2140,7 @@ fn finalize_fails_closed_when_active_queue_component_is_missing() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
     let doc = tmp.path().join("session.md");
-    let content = "---\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n❯ describe the project\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n";
+    let content = "---\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n❯ describe the project\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n";
     fs::write(&doc, content).unwrap();
     init_git_repo(tmp.path(), &doc);
 
@@ -2175,7 +2175,7 @@ fn finalize_fails_closed_when_active_queue_is_malformed() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
     let doc = tmp.path().join("session.md");
-    let content = "---\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n❯ describe the project\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\nnot a queue entry\n<!-- /agent:queue -->\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n";
+    let content = "---\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n❯ describe the project\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\nnot a queue entry\n<!-- /agent:queue -->\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n";
     fs::write(&doc, content).unwrap();
     init_git_repo(tmp.path(), &doc);
 

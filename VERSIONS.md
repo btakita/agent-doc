@@ -6,6 +6,40 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **JetBrains plugin (0.2.131) now emits `already_applied` socket-IPC acks
+  via the new FFI v2 listener.** When the plugin's apply path detects that
+  the incoming patch produces no structural change against the live editor
+  buffer (response body already present from a prior socket retry, the
+  in-process dedup cache, or the force-disk sentinel), it returns
+  `2 → {"type":"ack","status":"error","reason":"already_applied"}` instead
+  of `1 → status:ok`. The binary's `is_already_applied_error` gate then
+  skips the file-IPC fallback that would otherwise stack a duplicate
+  `### Re:` heading on top of the live buffer. New FFI export
+  `agent_doc_start_ipc_listener_v2(project_root, callback)`; the v1 export
+  remains for older plugins. JB plugin prefers v2 and falls back to v1 on
+  binaries that don't export it (`UnsatisfiedLinkError` / `NoSuchMethodError`).
+  Closes `#ipcpluginalready`.
+
+- **File-IPC fallback hash-skips response patches that are already applied
+  to the live buffer.** Defense-in-depth complement to the `already_applied`
+  socket-IPC gate (and to `#ipcpluginalready` until every plugin emits the
+  signal). In `try_ipc`, when the patches are response-bearing (contain at
+  least one `### Re:` heading) and `apply_patches(current, patches)` is a
+  structural no-op against the live file (boundary markers excluded), the
+  file-IPC fallback short-circuits as success without writing the patch
+  file. Non-response (prompt/component) patches still flow through the
+  existing path so its no-ack guard for unacknowledged live-edit IPC stays
+  authoritative. New test `try_ipc_file_fallback_skips_when_patches_already_applied_to_live_buffer`.
+  Closes `#ipcfilehashskip`.
+
+- **Test fixture migration: `agent:pending` → `agent:backlog`.** The
+  `tagpath lint --dialect agent-doc` gate added in the prior release
+  blocked the deprecated `agent:pending` component name. Migrated 31 sites
+  in `tests/finalize_integration.rs` and 4 sites in `tests/run_integration.rs`
+  to the canonical name; 30 previously-failing integration tests now pass.
+  `tests/pending_integration.rs` keeps the legacy alias intentionally
+  (those tests exercise the alias migration path). Closes `#ipclegacyfix`.
+
 - **SimWorld regression coverage for the IPC corruption + duplicate response
   race when the user types into the post-`/agent:exchange` scratch comment
   during finalize.** New deterministic scenario in `src/sim_world.rs` exercises

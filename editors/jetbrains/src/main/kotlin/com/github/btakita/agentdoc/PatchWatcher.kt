@@ -45,6 +45,7 @@ class PatchWatcher(private val project: Project) : Disposable {
         val patchesDir: File,
         @Volatile var watchThread: Thread? = null,
         @Volatile var ipcCallback: AgentDocLib.IpcMessageCallback? = null,
+        @Volatile var ipcCallbackV2: AgentDocLib.IpcMessageCallbackV2? = null,
     )
 
     /** Registered roots, keyed by absolute path. Written through [registerRoot]. */
@@ -58,6 +59,22 @@ class PatchWatcher(private val project: Project) : Disposable {
 
     /** Boundary reposition requests delayed because the target document is still being edited. */
     private val scheduledRepositionRetries = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    /**
+     * Signal that the most recent successful [applyPatch] / [applyPatchViaVfs]
+     * call was structurally a no-op against the live buffer (response was
+     * already present). Read by the v2 socket callback path to map the outcome
+     * to `already_applied` so the binary skips the file-IPC fallback.
+     *
+     * Set inside the apply functions immediately before returning `true` from
+     * the `result == content` branch; reset to `false` at the start of the v2
+     * callback path. Safe because `invokeAndWait` blocks the FFI thread until
+     * the EDT closure completes, so reads/writes do not race.
+     *
+     * Plan: tasks/agent-doc/plan-ipc-corruption-and-duplicate-during-typing.md
+     * `#ipcpluginalready`.
+     */
+    @Volatile private var lastApplyWasNoOp = false
 
     @Volatile private var running = false
 
@@ -195,11 +212,39 @@ class PatchWatcher(private val project: Project) : Disposable {
             return
         }
 
+        // Prefer the v2 listener so we can emit `already_applied` acks. Older
+        // binaries do not export v2 — fall back to v1 silently.
+        // Plan: tasks/agent-doc/plan-ipc-corruption-and-duplicate-during-typing.md
+        // `#ipcpluginalready`.
+        val callbackV2 = object : AgentDocLib.IpcMessageCallbackV2 {
+            override fun invoke(message: Pointer): Int {
+                return try {
+                    val json = message.getString(0)
+                    handleSocketMessageV2(json)
+                } catch (e: Exception) {
+                    LOG.warn("[socket] callback error", e)
+                    0
+                }
+            }
+        }
+        val v2Started = try {
+            lib.agent_doc_start_ipc_listener_v2(state.root, callbackV2)
+        } catch (_: UnsatisfiedLinkError) {
+            false
+        } catch (_: NoSuchMethodError) {
+            false
+        }
+        if (v2Started) {
+            state.ipcCallbackV2 = callbackV2
+            LOG.info("[socket] IPC listener v2 started via FFI for ${state.root}")
+            return
+        }
+
         val callback = object : AgentDocLib.IpcMessageCallback {
             override fun invoke(message: Pointer): Boolean {
                 return try {
                     val json = message.getString(0)
-                    handleSocketMessage(json)
+                    handleSocketMessageV2(json) == 1
                 } catch (e: Exception) {
                     LOG.warn("[socket] callback error", e)
                     false
@@ -210,7 +255,7 @@ class PatchWatcher(private val project: Project) : Disposable {
 
         val started = lib.agent_doc_start_ipc_listener(state.root, callback)
         if (started) {
-            LOG.info("[socket] IPC listener started via FFI for ${state.root}")
+            LOG.info("[socket] IPC listener v1 started via FFI for ${state.root} (binary lacks v2)")
         } else {
             LOG.warn("[socket] Failed to start IPC listener via FFI for ${state.root}")
         }
@@ -277,34 +322,50 @@ class PatchWatcher(private val project: Project) : Disposable {
      * Called on the FFI listener thread — dispatches to EDT for Document API operations.
      * Returns true if handled, false on error.
      */
-    private fun handleSocketMessage(json: String): Boolean {
-        val type = extractStringField(json, "type") ?: return false
+    /**
+     * Handle a socket IPC message and return the v2 ack outcome.
+     *
+     * Return values match the FFI v2 contract:
+     * - 0 → ack `{"status":"error"}` (apply failed)
+     * - 1 → ack `{"status":"ok"}` (apply succeeded with content change)
+     * - 2 → ack `{"status":"error","reason":"already_applied"}` (patch text
+     *   already present in live buffer; binary skips file-IPC fallback so a
+     *   duplicate response heading cannot land)
+     *
+     * Plan: tasks/agent-doc/plan-ipc-corruption-and-duplicate-during-typing.md
+     * `#ipcpluginalready`.
+     */
+    private fun handleSocketMessageV2(json: String): Int {
+        val type = extractStringField(json, "type") ?: return 0
 
         return when (type) {
             "patch" -> {
-                val patch = parsePatchJson(json) ?: return false
+                val patch = parsePatchJson(json) ?: return 0
                 if (isClaimedByForceDisk(patch.patchId, patch.file)) {
-                    LOG.info("[socket] dedup: sentinel exists for patch_id ${patch.patchId} — skipping apply")
-                    return true
+                    LOG.info("[socket] dedup: sentinel exists for patch_id ${patch.patchId} — emitting already_applied")
+                    return APPLY_ALREADY_APPLIED
                 }
                 if (isAlreadyApplied(patch.patchId)) {
-                    LOG.info("[socket] dedup: patch_id ${patch.patchId} already applied — skipping")
-                    return true
+                    LOG.info("[socket] dedup: patch_id ${patch.patchId} already applied — emitting already_applied")
+                    return APPLY_ALREADY_APPLIED
                 }
                 if (!patch.fullContent.isNullOrEmpty()) {
                     LOG.warn("[socket] full-content IPC is disabled; rejecting patch_id ${patch.patchId} for ${patch.file}")
-                    return false
+                    return APPLY_FAILED
                 }
                 if (!awaitIdleBeforeDocumentMutation(patch.file, "socket patch")) {
-                    return false
+                    return APPLY_FAILED
                 }
                 var applied = false
+                var wasNoOp = false
                 ApplicationManager.getApplication().invokeAndWait {
                     // Re-check under EDT to avoid TOCTOU race with file watcher
                     if (isAlreadyApplied(patch.patchId)) {
-                        LOG.info("[socket] dedup (EDT): patch_id ${patch.patchId} already applied — skipping")
+                        LOG.info("[socket] dedup (EDT): patch_id ${patch.patchId} already applied — emitting already_applied")
+                        wasNoOp = true
                         return@invokeAndWait
                     }
+                    lastApplyWasNoOp = false
                     applied = try {
                         applyPatch(patch)
                     } catch (e: Exception) {
@@ -313,14 +374,11 @@ class PatchWatcher(private val project: Project) : Disposable {
                     }
                     if (applied) {
                         recordApplied(patch.patchId)
+                        wasNoOp = lastApplyWasNoOp
+                        lastApplyWasNoOp = false
                     }
                 }
-                if (applied) {
-                    // Clean up any stale patch file for this document to prevent the file
-                    // watcher from applying the same content again (double-apply prevention).
-                    // Resolve the root by walking up from the doc path — this handles submodule
-                    // roots whose patches live in `<submodule>/.agent-doc/patches/`, not the
-                    // parent project's `.agent-doc/patches/`.
+                if (applied || wasNoOp) {
                     val root = resolveRootFor(patch.file) ?: project.basePath
                     if (root != null) {
                         val hash = docHash(patch.file)
@@ -331,22 +389,26 @@ class PatchWatcher(private val project: Project) : Disposable {
                         }
                     }
                 }
-                applied
+                when {
+                    !applied && !wasNoOp -> APPLY_FAILED
+                    wasNoOp -> APPLY_ALREADY_APPLIED
+                    else -> APPLY_APPLIED
+                }
             }
             "reposition" -> {
-                val file = extractStringField(json, "file") ?: return false
+                val file = extractStringField(json, "file") ?: return APPLY_FAILED
                 val boundaryId = extractStringField(json, "boundary_id")
                 val preserveHead = extractBooleanField(json, "preserve_head")
                 repositionBoundaryViaDocument(file, boundaryId, preserveHead)
-                true
+                APPLY_APPLIED
             }
             "vcs_refresh" -> {
                 refreshVcs()
-                true
+                APPLY_APPLIED
             }
             else -> {
                 LOG.warn("[socket] Unknown message type: $type")
-                false
+                APPLY_FAILED
             }
         }
     }
@@ -665,6 +727,7 @@ class PatchWatcher(private val project: Project) : Disposable {
         if (result == content) {
             LOG.warn("Patch produced no changes for ${patch.file}")
             writeAckContent(patch.patchId, document.text, patch.file)
+            lastApplyWasNoOp = true
             return true
         }
 
@@ -776,6 +839,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                 LOG.info("VFS patch applied to ${patch.file} (${result.length - content.length} chars changed)")
             } else {
                 LOG.warn("VFS patch produced no changes for ${patch.file}")
+                lastApplyWasNoOp = true
             }
             writeAckContent(patch.patchId, result, patch.file)
             return true
@@ -1130,6 +1194,10 @@ class PatchWatcher(private val project: Project) : Disposable {
     companion object {
         private val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(PatchWatcher::class.java)
         private val instances = mutableMapOf<Project, PatchWatcher>()
+
+        const val APPLY_FAILED = 0
+        const val APPLY_APPLIED = 1
+        const val APPLY_ALREADY_APPLIED = 2
 
         /**
          * Check if a patch file is stale (already applied in a previous cycle).

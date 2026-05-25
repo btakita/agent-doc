@@ -177,6 +177,23 @@ interface AgentDocLib : Library {
      */
     fun agent_doc_start_ipc_listener(project_root: String, callback: IpcMessageCallback): Boolean
 
+    /**
+     * V2 of [agent_doc_start_ipc_listener] with extended ack-result encoding.
+     *
+     * The callback returns one of:
+     * - `0` → ack `{"type":"ack","status":"error"}` (apply failed)
+     * - `1` → ack `{"type":"ack","status":"ok"}` (apply succeeded)
+     * - `2` → ack `{"type":"ack","status":"error","reason":"already_applied"}`
+     *
+     * Plugins prefer v2 so the binary can recognise `already_applied` and skip
+     * the file-IPC fallback that would otherwise stack a duplicate response
+     * heading on top of the live buffer. Falls back to v1 on older binaries.
+     *
+     * Plan: tasks/agent-doc/plan-ipc-corruption-and-duplicate-during-typing.md
+     * `#ipcpluginalready`.
+     */
+    fun agent_doc_start_ipc_listener_v2(project_root: String, callback: IpcMessageCallbackV2): Boolean
+
     /** Stop the IPC socket listener by removing the socket file. */
     fun agent_doc_stop_ipc_listener(project_root: String)
 
@@ -208,6 +225,15 @@ interface AgentDocLib : Library {
     interface IpcMessageCallback : Callback {
         /** Called with each JSON message. Return true if handled, false on error. */
         fun invoke(message: Pointer): Boolean
+    }
+
+    /**
+     * V2 callback interface for socket IPC messages with already-applied signal.
+     * Return one of: 0=error, 1=ok, 2=already_applied. See
+     * [agent_doc_start_ipc_listener_v2] for the wire-level ack mapping.
+     */
+    interface IpcMessageCallbackV2 : Callback {
+        fun invoke(message: Pointer): Int
     }
 
     /**

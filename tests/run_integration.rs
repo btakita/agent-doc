@@ -208,7 +208,7 @@ fn write_claude_config(root: &Path, script: &Path) -> PathBuf {
 }
 
 fn template_doc() -> String {
-    "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n❯ Please reply\n<!-- /agent:exchange -->\n\n## Pending\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n".to_string()
+    "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n❯ Please reply\n<!-- /agent:exchange -->\n\n## Pending\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n".to_string()
 }
 
 fn append_doc() -> String {
@@ -246,11 +246,11 @@ fn seed_snapshot(root: &Path, doc: &Path) {
 }
 
 fn template_doc_with_model() -> String {
-    "---\nagent_doc_format: template\nagent_doc_write: crdt\nmodel: gpt-5\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n❯ Please reply\n<!-- /agent:exchange -->\n\n## Pending\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n".to_string()
+    "---\nagent_doc_format: template\nagent_doc_write: crdt\nmodel: gpt-5\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n❯ Please reply\n<!-- /agent:exchange -->\n\n## Pending\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n".to_string()
 }
 
 fn active_auto_queue_doc() -> String {
-    "---\nagent_doc_format: template\nagent_doc_write: crdt\nagent: mock\nmodel: gpt-5\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue auto -->\n- do #fix1\n- do #fix2\n- do #fix3\n<!-- /agent:queue -->\n\n## Pending\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n".to_string()
+    "---\nagent_doc_format: template\nagent_doc_write: crdt\nagent: mock\nmodel: gpt-5\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue auto -->\n- do #fix1\n- do #fix2\n- do #fix3\n<!-- /agent:queue -->\n\n## Pending\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n".to_string()
 }
 
 #[test]
@@ -384,7 +384,7 @@ fn run_auto_queue_stop_fence_halts_continuation_before_next_prompt() {
     let doc = tmp.path().join("session.md");
     fs::write(
         &doc,
-        "---\nagent_doc_format: template\nagent_doc_write: crdt\nagent: mock\nmodel: gpt-5\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue auto -->\n- do #fix1\n--- stop\n- do #fix2\n<!-- /agent:queue -->\n\n## Pending\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n",
+        "---\nagent_doc_format: template\nagent_doc_write: crdt\nagent: mock\nmodel: gpt-5\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue auto -->\n- do #fix1\n--- stop\n- do #fix2\n<!-- /agent:queue -->\n\n## Pending\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n",
     )
     .unwrap();
     init_git_repo(tmp.path(), &doc);

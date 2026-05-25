@@ -8711,6 +8711,54 @@ pub fn try_ipc(
         );
     }
 
+    // Defense-in-depth dedupe gate for the file-IPC fallback when delivering
+    // a response patch. When the plugin already applied the response via a
+    // prior socket retry whose ack-write was slow, applying the same response
+    // patch through file IPC would land a duplicate `### Re:` heading on top
+    // of the live buffer.
+    //
+    // The socket-IPC path catches this via `ipc_socket::is_already_applied_error`
+    // when the plugin sends `{"type":"ack","status":"error","reason":"already_applied"}`.
+    // Until every plugin emits that ack (`#ipcpluginalready`), the file-IPC
+    // fallback hash-compares response-patch outcomes against the current file:
+    // if applying the response patches to the current file is a structural
+    // no-op (boundary markers excluded), skip the write so the duplicate
+    // cannot land.
+    //
+    // Scope: only response-bearing patches (contain at least one `### Re:`
+    // heading). Pure prompt/component patches fall through to the existing
+    // path, which has its own no-ack guard for unacknowledged live-edit IPC.
+    //
+    // Plan: tasks/agent-doc/plan-ipc-corruption-and-duplicate-during-typing.md
+    // Phase 2 (remaining) / `[#ipcfilehashskip]`.
+    if !patches.is_empty()
+        && patches
+            .iter()
+            .any(|patch| patch.content.contains("### Re:"))
+        && let Ok(current) = std::fs::read_to_string(file)
+        && let Ok(after_apply) = crate::template::apply_patches(&current, patches, "", file)
+        && strip_boundary_for_dedup(&after_apply) == strip_boundary_for_dedup(&current)
+    {
+        eprintln!(
+            "[write] file IPC fallback: patches already present in live buffer — skipping file IPC write (defense-in-depth dedupe)"
+        );
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "file_ipc_fallback_skip_already_applied file={} patch_id={} patches={}",
+                file.display(),
+                patch_id,
+                patches.len()
+            ),
+        );
+        cleanup_fallback_patch_files(file);
+        return Ok(IpcResult {
+            success: true,
+            patch_id,
+            skipped_committed_cycle: false,
+        });
+    }
+
     let success = write_ipc_and_poll(
         &patch_file,
         &ipc_payload,
@@ -11060,6 +11108,74 @@ scratch
                 final_content
             ),
             final_content
+        );
+    }
+
+    #[test]
+    fn try_ipc_file_fallback_skips_when_patches_already_applied_to_live_buffer() {
+        // Plan: tasks/agent-doc/plan-ipc-corruption-and-duplicate-during-typing.md
+        // `[#ipcfilehashskip]` defense-in-depth dedupe gate.
+        //
+        // When the live file already contains the response body (e.g. via a
+        // prior socket-IPC retry whose sidecar ack arrived late), the file-IPC
+        // fallback must hash-compare patch outcome vs current and skip the
+        // write so it does not stack a duplicate `### Re:` heading.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let already_applied_content = concat!(
+            "---\nsession: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: topic — gpt-5\n\n",
+            "Implemented.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, already_applied_content).unwrap();
+
+        // Build a patch whose application against the current file is a no-op
+        // (replace exchange with the same content it already has).
+        let exchange_body = "### Re: topic — gpt-5\n\nImplemented.\n";
+        let patch = crate::template::PatchBlock::new("exchange", exchange_body);
+
+        let started = std::time::Instant::now();
+        let result = try_ipc(&doc, &[patch], "", None, None, None, None, None).unwrap();
+        let elapsed = started.elapsed();
+
+        assert!(
+            result.success,
+            "already-applied file-IPC fallback must short-circuit as success"
+        );
+        assert!(
+            elapsed < std::time::Duration::from_secs(1),
+            "skip path must not block on the 2s IPC timeout: elapsed={:?}",
+            elapsed
+        );
+
+        let patches_dir = agent_doc_dir.join("patches");
+        let leftover: Vec<_> = fs::read_dir(&patches_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .collect();
+        assert!(
+            leftover.is_empty(),
+            "skip path must clean up any fallback patch files left around"
+        );
+
+        let live_after = fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            live_after, already_applied_content,
+            "skip path must not mutate the live file"
+        );
+
+        let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("file_ipc_fallback_skip_already_applied"),
+            "skip event must be logged for audit:\n{ops_log}"
         );
     }
 

@@ -1036,6 +1036,58 @@ pub unsafe extern "C" fn agent_doc_start_ipc_listener(
     1
 }
 
+/// V2 of [`agent_doc_start_ipc_listener`] with extended ack-result encoding.
+///
+/// The callback returns one of three values:
+/// - `0` → ack `{"type":"ack","status":"error"}` (apply failed)
+/// - `1` → ack `{"type":"ack","status":"ok"}` (apply succeeded)
+/// - `2` → ack `{"type":"ack","status":"error","reason":"already_applied"}`
+///   (plugin detected the patch is already in the live buffer and chose NOT
+///   to re-apply; binary skips the file-IPC fallback so a duplicate response
+///   heading cannot land).
+///
+/// Plugins should prefer v2 when available. Existing plugins built against
+/// [`agent_doc_start_ipc_listener`] keep working unchanged.
+///
+/// Plan: tasks/agent-doc/plan-ipc-corruption-and-duplicate-during-typing.md
+/// `[#ipcpluginalready]`.
+///
+/// # Safety
+///
+/// Same as [`agent_doc_start_ipc_listener`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_start_ipc_listener_v2(
+    project_root: *const c_char,
+    callback: extern "C" fn(message: *const c_char) -> i32,
+) -> i32 {
+    let root_str = match unsafe { CStr::from_ptr(project_root) }.to_str() {
+        Ok(s) => s.to_string(),
+        Err(_) => return 0,
+    };
+    let root_path = std::path::PathBuf::from(&root_str);
+
+    std::thread::spawn(move || {
+        let result = crate::ipc_socket::start_listener(&root_path, move |msg| {
+            let c_msg = match CString::new(msg) {
+                Ok(c) => c,
+                Err(_) => return Some(r#"{"type":"ack","status":"error"}"#.to_string()),
+            };
+            match callback(c_msg.as_ptr()) {
+                1 => Some(r#"{"type":"ack","status":"ok"}"#.to_string()),
+                2 => Some(
+                    r#"{"type":"ack","status":"error","reason":"already_applied"}"#.to_string(),
+                ),
+                _ => Some(r#"{"type":"ack","status":"error"}"#.to_string()),
+            }
+        });
+        if let Err(e) = result {
+            eprintln!("[ffi] IPC listener v2 error: {}", e);
+        }
+    });
+
+    1
+}
+
 /// Stop the IPC socket listener by removing the socket file.
 ///
 /// The listener thread will exit on its next accept() call when the socket

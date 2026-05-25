@@ -33,7 +33,7 @@ Landed #stuckcycleorphan + #stuckcyclerepair; remaining plan part still pending.
 Compacted content:
 - Archived 2 response topic(s): do [#stuckcycledup]; do [#stuckcycleorphan] + do [#stuckcyclerepair]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:3ce17993 -->
+<!-- agent:boundary:c41ef1d5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -43,7 +43,7 @@ Please make auto-compact exchange off by default. Only explicit frontmatter or .
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#stuckcyclesuperseded]~
-- do [#runintegcodexbare]
+- ~do [#runintegcodexbare]~
 - do [#jbrsrbusy]
 - do [#jbccfix]
 - do [#jbccreg]
@@ -54,7 +54,6 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#runintegcodexbare] Triage pre-existing tests/run_integration.rs::codex_bare_run_inside_owning_pane_fails_before_nested_dispatch failure (session-check INTERRUPTED instead of expected recursive-direct-invocation deadlock). Blocks make check for unrelated work.
 - [ ] [#jbrsrbusy] Fix JB Restart Supervisor alive-busy refusal — add --force + JB confirm + harness pre-interrupt; see tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md
 - [ ] [#jbccfix] Fix the Compact Exchange write/cache boundary so JetBrains never receives a stale or conflicting file-cache snapshot after compact exchange.
 - [ ] [#jbccreg] Add deterministic regression coverage for Compact Exchange cache-conflict handling, including stale snapshot and concurrent user-edit cases where feasible.

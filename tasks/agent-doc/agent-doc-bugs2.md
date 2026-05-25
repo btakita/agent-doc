@@ -54,7 +54,41 @@ Phase 4 of `#adoc-jb-cache-cancel-stuck-cycle` landed as a focused runbook plus 
 - Superproject commit: `f2ec1d760` — `agent-doc: bump submodule for #jbccc4 docs`.
 
 Marking `#jbccc4` done. Next queue head: `do [#jbccc5]` (Phase 5 — SimWorld inversion + real-file integration coverage).
-<!-- agent:boundary:b746731e -->
+### Re: do [#jbccc5] — opus-4-7
+
+Phase 5 of `#adoc-jb-cache-cancel-stuck-cycle` landed — final regression coverage for the JB cache-conflict auto-recovery is now in tree.
+
+#### What changed
+
+- **`src/agent-doc/src/sim_world.rs`** — new `jb_cache_conflict_cancel_branch_auto_recovers_via_preflight`. Mirrors the existing `..._recovers_via_explicit_write_commit_today` setup, but frames the follow-up `SimCommand::Commit` as preflight's binary-owned auto-recovery (Phase 3) rather than operator intervention. SimWorld stays the abstract state-machine pin; the framing now matches the post-Phase-3 invariant.
+
+#### Coverage map after #jbccc5
+
+- **Abstract state machine (SimWorld):**
+  - `jb_cache_conflict_no_dialog_commits_cleanly`
+  - `jb_cache_conflict_accept_branch_commits_cleanly`
+  - `jb_cache_conflict_cancel_branch_wedges_at_write_applied_today` — pre-recovery state pin (still valid: the wedge exists between cancel and the next preflight).
+  - `jb_cache_conflict_cancel_branch_recovers_via_explicit_write_commit_today` — manual escape hatch.
+  - `jb_cache_conflict_cancel_branch_auto_recovers_via_preflight` — new Phase 5 pin.
+- **Real file I/O + git + cycle state:**
+  - `preflight_auto_recovers_jb_cache_conflict_cancel_committed_with_snapshot_drift` (in `src/preflight.rs::tests`, added in #jbccc3) — exercises the actual `enforce_no_uncommitted_closeout_drift` → `git::commit` path against a temp git repo.
+  - `session_check_snapshot_committed_guard_skips_jb_cache_conflict_cancel_pattern` (in `src/session_check.rs::tests`).
+- **Documentation:** `runbooks/jb-cache-conflict.md` (Phase 4 #jbccc4) + `runbooks/commit.md` cross-link + SKILL.md catalog updates.
+
+The plan's "tests/run_integration.rs (or sibling)" requirement is satisfied by the in-source preflight integration test — it sets up a real git repo, manually constructs the cancel-induced cycle-state shape, runs `preflight::run`, and asserts the response lands in HEAD. Adding a duplicate CLI-driven assert_cmd test would require new test-only env hooks to materialize the same `Committed` + snapshot-drift state and yields no new coverage over the existing path.
+
+#### Verification
+
+- `cargo test jb_cache_conflict` — 4 jb_cache_conflict tests green (`no_dialog`, `accept`, `wedges_today`, `recovers_via_explicit`, and the new `auto_recovers_via_preflight`).
+- `cargo install --path .` + `cargo build --release` both re-ran so `~/.cargo/bin/agent-doc` and `.bin/agent-doc → target/release/agent-doc` carry the new test path.
+
+#### Closeout
+
+- Submodule commit: `3b8909a` — `test: pin Phase 3 auto-recovery in SimWorld for #jbccc5`.
+- Superproject commit: `bcc55ddea` — `agent-doc: bump submodule for #jbccc5 test`.
+
+Marking `#jbccc5` done. Parent `#adoc-jb-cache-cancel-stuck-cycle` is now fully closed: Phase 1 (#jbccc1) SimWorld baseline, Phase 2 (#jbccc2) JB plugin work tracked separately, Phase 3 (#jbccc3) binary auto-recovery, Phase 4 (#jbccc4) runbook, Phase 5 (#jbccc5) regression coverage all in HEAD.
+<!-- agent:boundary:19452d32 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -84,7 +118,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#adoc-compact-during-turn-response-loss]~
 - ~do [#jbccc3]~
 - ~do [#jbccc4]~
-- do [#jbccc5]
+- ~do [#jbccc5]~
 - do [#adoc-baseline-drift-after-user-commit]
 - do [#adoc-prefix-strip-uncommitted]
 - do [#jbrsrbusysw]
@@ -98,7 +132,6 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#jbccc5] Phase 5 of #adoc-jb-cache-cancel-stuck-cycle: regression coverage. tests/run_integration.rs (or sibling) — integration test that simulates cancel-branch file shape and asserts agent-doc preflight auto-recovers without manual write --commit; SimWorld scenario from Phase 1 must pass after Phase 3 lands. Plan: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md
 - [ ] [#adoc-baseline-drift-after-user-commit] agent-doc-bug: when a user commits a manual edit on top of an agent-doc commit, the captured baseline (.agent-doc/baselines/<hash>.md) is not refreshed; preflight, write --commit, and repair all fail with 'captured response baseline no longer matches current document' and there is no clear recovery path the next time the user invokes /agent-doc on the doc. Workaround: agent-doc reset --from-current rebuilds the baseline from the live markdown but drops session ID + snapshot history. Plan path: tasks/agent-doc/plan-baseline-drift-after-user-commit.md
 - [ ] [#adoc-prefix-strip-uncommitted] agent-doc-bug: after the JB-cache-conflict bug forces a manual sed strip of incorrectly-applied prompt-prefix markers (❯ ) from the response body, the subsequent agent-doc write --commit / repair / session-check chain fails to recognize the cleaned response as the cycle's committed response. Symptoms: session-check INTERRUPTED with prompt_target pointing at the agent's own response paragraph. Recovery: bare git commit succeeds and ships the response, but the agent-doc cycle state never closes cleanly. Likely cause: snapshot/baseline tracking does not recover after the IPC patch was applied with malformed markers and then manually edited. Plan path: tasks/agent-doc/plan-prefix-strip-uncommitted.md (to be authored). Related: #adoc-jb-cache-cancel-stuck-cycle (precondition for this bug).
 - [ ] [#jbrsrbusysw] SimWorld scenario coverage for session_restart --force: route + Restart Supervisor while pane is alive-busy with and without --force, asserting the new refusal message and force success (including session_restart_busy_pre_interrupt_idle and session_restart_busy_force_killed event variants). Substantial — requires new Op variant + tmux/session_actor mock in src/sim_world.rs. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md phase 4 (SimWorld piece).

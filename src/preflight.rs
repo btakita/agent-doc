@@ -1015,6 +1015,60 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
 }
 
 fn enforce_no_uncommitted_closeout_drift(file: &Path) -> Result<()> {
+    // Phase 3 (#jbccc3): JB File Cache Conflict cancel auto-recovery.
+    //
+    // When the binary-owned write path applied the response (snapshot has it,
+    // working tree mirrors snapshot) but the commit boundary never landed
+    // (HEAD lacks it), run `git::commit` instead of bailing. This converts a
+    // wedged cycle that previously required manual `agent-doc write --commit`
+    // into a transparent recovery on the next preflight, while still failing
+    // closed if the commit attempt itself errors out.
+    //
+    // `session_check::detect_uncommitted_closeout_drift` already returns
+    // `Ok(None)` for the same pattern, but the drift will recur on the next
+    // call until something actually commits — that "something" lives here.
+    if crate::session_check::detect_jb_cache_conflict_cancel_recoverable(file)? {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "jb_cache_conflict_cancel_auto_recovery_attempt file={}",
+                file.display()
+            ),
+        );
+        eprintln!(
+            "[preflight] jb_cache_conflict_cancel: response written but not committed for {} — running auto-commit",
+            file.display()
+        );
+        match crate::git::commit(file) {
+            Ok(_) => {
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "jb_cache_conflict_cancel_auto_recovery_succeeded file={}",
+                        file.display()
+                    ),
+                );
+                return Ok(());
+            }
+            Err(e) => {
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "jb_cache_conflict_cancel_auto_recovery_failed file={} error={}",
+                        file.display(),
+                        e.to_string().replace('\n', " ")
+                    ),
+                );
+                eprintln!(
+                    "[preflight] jb_cache_conflict_cancel auto-commit failed for {}: {}",
+                    file.display(),
+                    e
+                );
+                // Fall through to the standard drift-bail path below so the
+                // operator still sees the actionable recovery hint.
+            }
+        }
+    }
     if let Some(message) = crate::session_check::detect_uncommitted_closeout_drift(file)? {
         crate::ops_log::log_op(
             file,
@@ -4259,6 +4313,77 @@ mod tests {
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
         assert_eq!(state.last_event, "commit_success");
+    }
+
+    /// Phase 3 (#jbccc3): the jb_cache_conflict_cancel pattern leaves a cycle
+    /// marked `Committed` while the snapshot still has the visible response
+    /// and `HEAD` does not — the commit boundary never actually landed (e.g.
+    /// the user canceled the JB File Cache Conflict dialog mid-IPC, or a
+    /// sibling compact-exchange closed the cycle while a separate `finalize`
+    /// race lost its write). Without recovery, `preflight` bails on the next
+    /// invocation. With Phase 3, the recoverable pattern triggers an
+    /// automatic `git::commit` and the cycle lands cleanly.
+    #[test]
+    fn preflight_auto_recovers_jb_cache_conflict_cancel_committed_with_snapshot_drift() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+
+        let original = "---\nsession: test\n---\n\n## User\n\nHello\n";
+        std::fs::write(&doc, original).unwrap();
+        snapshot::save(&doc, original).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        // Simulate the post-cancel state: snapshot and working tree both
+        // contain the response, HEAD does not, cycle is marked Committed.
+        let patched =
+            "---\nsession: test\n---\n\n## User\n\nHello\n\n## Assistant\n\nReply\n";
+        std::fs::write(&doc, patched).unwrap();
+        snapshot::save(&doc, patched).unwrap();
+        crate::cycle_state::mark_write_applied(
+            &doc,
+            "write_template",
+            Some(patched),
+            Some(patched),
+        )
+        .unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(patched), Some(patched))
+            .unwrap();
+        let pre_state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(pre_state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert!(matches!(
+            crate::git::verify_snapshot_committed(&doc).unwrap(),
+            crate::git::SnapshotCommitStatus::SnapshotDiffersFromHead { .. }
+        ));
+        assert!(
+            crate::session_check::detect_jb_cache_conflict_cancel_recoverable(&doc).unwrap(),
+            "preconditions: cancel pattern should be detected before recovery"
+        );
+
+        run(&doc).unwrap();
+
+        assert!(matches!(
+            crate::git::verify_snapshot_committed(&doc).unwrap(),
+            crate::git::SnapshotCommitStatus::Committed
+        ));
+        let show = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:session.md"])
+            .output()
+            .unwrap();
+        assert!(
+            String::from_utf8_lossy(&show.stdout).contains("Reply"),
+            "HEAD should now contain the response after auto-recovery"
+        );
     }
 
     #[test]

@@ -275,6 +275,16 @@ fn check_snapshot_committed_guard(file: &Path) -> Result<GuardResult> {
             snapshot_len,
             head_len,
         } => {
+            // Phase 3 (#jbccc3): silently treat the auto-recoverable cancel
+            // pattern as a non-error here. Standalone `session-check` is then
+            // free to surface OK while preflight runs the binary-owned commit
+            // through `enforce_no_uncommitted_closeout_drift`. Without this
+            // skip, the guard would still bail with the misleading "cycle
+            // state is committed but the snapshot does not match HEAD"
+            // message that masks the JB cache-conflict cancel root cause.
+            if detect_jb_cache_conflict_cancel_recoverable(file)? {
+                return Ok(GuardResult::None);
+            }
             let side_effects = tracked_side_effect_note(file)?;
             let msg = format!(
                 "[session-check] INTERRUPTED: cycle state is committed but the snapshot does not match HEAD in the owning repo (snapshot_len={}, head_len={}). The response patchback is visible but was never committed{} {}",
@@ -397,12 +407,60 @@ fn tracked_side_effect_note(file: &Path) -> Result<String> {
     Ok(note)
 }
 
+/// Phase 3 (#jbccc3): JB File Cache Conflict cancel auto-recovery detection.
+///
+/// Returns true when the document is in the recoverable post-write pre-commit
+/// shape: the cycle is at `WriteApplied` (or already-marked `Committed` whose
+/// commit boundary never landed in `HEAD`), the snapshot has the visible
+/// response, `HEAD` does not, and the working tree matches the snapshot
+/// modulo transient `(HEAD)` / boundary markers (no live exchange edits beyond
+/// the response). When this returns true, `git::commit(file)` reliably closes
+/// the cycle and `session_check` must avoid misclassifying the same state as
+/// a `likely_direct_response_patchback`.
+///
+/// See `tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md` Phase 3.
+pub(crate) fn detect_jb_cache_conflict_cancel_recoverable(file: &Path) -> Result<bool> {
+    let Some(state) = crate::cycle_state::load(file)? else {
+        return Ok(false);
+    };
+    if !matches!(
+        state.phase,
+        crate::cycle_state::CyclePhase::WriteApplied | crate::cycle_state::CyclePhase::Committed
+    ) {
+        return Ok(false);
+    }
+    if !matches!(
+        crate::git::verify_snapshot_committed(file)?,
+        crate::git::SnapshotCommitStatus::SnapshotDiffersFromHead { .. }
+    ) {
+        return Ok(false);
+    }
+    let doc = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {}", file.display()))?;
+    let Some(snapshot) = crate::snapshot::load(file)? else {
+        return Ok(false);
+    };
+    let normalized_doc = crate::git::normalize_transient_agent_doc_markers(&doc);
+    let normalized_snapshot = crate::git::normalize_transient_agent_doc_markers(&snapshot);
+    Ok(normalized_doc == normalized_snapshot)
+}
+
 pub(crate) fn detect_uncommitted_closeout_drift(file: &Path) -> Result<Option<String>> {
     if crate::git::repair_committed_historical_snapshot_drift(file)?.is_some() {
         return Ok(None);
     }
     if let Some(drift) = crate::git::submodule_pointer_drift(file)? {
         return Ok(Some(parent_submodule_pointer_message(&drift, file)));
+    }
+    // Phase 3 (#jbccc3): jb_cache_conflict_cancel is auto-recoverable through
+    // `git::commit`. Skip the lower-precision `detect_bypassed_response_write`
+    // and `SnapshotDiffersFromHead` paths below so neither this caller nor
+    // standalone `session-check` accuses the user of a direct patchback when
+    // the binary-owned write path actually applied the response but the commit
+    // boundary never landed. Preflight's `enforce_no_uncommitted_closeout_drift`
+    // separately runs `git::commit` to close the cycle.
+    if detect_jb_cache_conflict_cancel_recoverable(file)? {
+        return Ok(None);
     }
     if let Some(marker) = detect_bypassed_response_write(file)? {
         return Ok(Some(format!(
@@ -4491,12 +4549,91 @@ Body\n\
             .output()
             .unwrap();
 
-        // Simulate: write applied a response to the snapshot but commit never happened
+        // Simulate: write applied a response to the snapshot but commit never
+        // happened AND the user typed a new prompt on top, so the working tree
+        // diverges from the snapshot. This is the "true direct patchback"
+        // shape — distinct from the Phase 3 (#jbccc3) jb_cache_conflict_cancel
+        // pattern (doc ≈ snapshot) which is now auto-recoverable.
+        let snapshot_content = "---\nagent_doc_session: test\n---\n\n## Exchange\n\nold body\n### Re: test\nresponse\n";
+        let working_tree = "---\nagent_doc_session: test\n---\n\n## Exchange\n\nold body\n### Re: test\nresponse\n\n❯ extra user prompt that diverges from snapshot\n";
+        fs::write(&doc, working_tree).unwrap();
+        crate::snapshot::save(&doc, snapshot_content).unwrap();
+
+        // Mark cycle as committed (simulating a bug where cycle_state lied)
+        crate::cycle_state::start_preflight(&doc, Some(old_content), Some(old_content)).unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(snapshot_content),
+            Some(snapshot_content),
+        )
+        .unwrap();
+
+        let status = inspect(&doc).unwrap();
+        match status {
+            SessionCheckStatus::Interrupted(msg) => {
+                assert!(
+                    msg.contains("snapshot does not match HEAD")
+                        || msg.contains("uncommitted exchange changes")
+                        || msg.contains("unresolved prompt-bearing"),
+                    "expected uncommitted closeout guard failure, got: {msg}"
+                );
+            }
+            SessionCheckStatus::Ok(msg) => {
+                panic!("expected Interrupted, got Ok: {msg}");
+            }
+        }
+    }
+
+    /// Phase 3 (#jbccc3): the jb_cache_conflict_cancel pattern — cycle marked
+    /// Committed, snapshot has the response, HEAD does not, working tree
+    /// matches snapshot — must now be reported as OK by session-check so
+    /// preflight can transparently auto-commit on the next invocation. Before
+    /// Phase 3 this same shape surfaced as "snapshot does not match HEAD"
+    /// (misclassifying the JB-cache-conflict cancel as a missing commit).
+    #[test]
+    fn session_check_snapshot_committed_guard_skips_jb_cache_conflict_cancel_pattern() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("doc.md");
+        let old_content = "---\nagent_doc_session: test\n---\n\n## Exchange\n\nold body\n";
+        fs::write(&doc, old_content).unwrap();
+        crate::snapshot::save(&doc, old_content).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "doc.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        // Cancel pattern: snapshot and working tree both have the response,
+        // HEAD does not, cycle marked Committed.
         let new_content = "---\nagent_doc_session: test\n---\n\n## Exchange\n\nold body\n### Re: test\nresponse\n";
         fs::write(&doc, new_content).unwrap();
         crate::snapshot::save(&doc, new_content).unwrap();
-
-        // Mark cycle as committed (simulating a bug where cycle_state lied)
         crate::cycle_state::start_preflight(&doc, Some(old_content), Some(old_content)).unwrap();
         crate::cycle_state::mark_committed(
             &doc,
@@ -4506,18 +4643,15 @@ Body\n\
         )
         .unwrap();
 
+        assert!(
+            detect_jb_cache_conflict_cancel_recoverable(&doc).unwrap(),
+            "preconditions: cancel pattern must be detected"
+        );
         let status = inspect(&doc).unwrap();
-        match status {
-            SessionCheckStatus::Interrupted(msg) => {
-                assert!(
-                    msg.contains("snapshot does not match HEAD"),
-                    "expected snapshot-committed guard failure, got: {msg}"
-                );
-            }
-            SessionCheckStatus::Ok(msg) => {
-                panic!("expected Interrupted, got Ok: {msg}");
-            }
-        }
+        assert!(
+            matches!(status, SessionCheckStatus::Ok(_)),
+            "expected Ok (auto-recoverable), got: {status:?}"
+        );
     }
 
     #[test]
@@ -4575,20 +4709,17 @@ Body\n\
             .output()
             .unwrap();
 
+        // No cycle state, response heading present, snapshot ≠ HEAD, side
+        // effects exist. Phase 3 (#jbccc3) only auto-recovers when the cycle
+        // is at WriteApplied or Committed — without any cycle state, the
+        // bypassed_response_write path still fires and must keep emitting the
+        // side-effect recovery hint so the operator can diagnose the broken
+        // closeout.
         let new_content = "---\nagent_doc_session: test\n---\n\n## Exchange\n\nold body\n### Re: create today's news — codex\nresponse\n";
         fs::write(&doc, new_content).unwrap();
         crate::snapshot::save(&doc, new_content).unwrap();
         fs::write(&news_index, "new news index\n").unwrap();
         fs::write(&news_day, "new daily news\n").unwrap();
-
-        crate::cycle_state::start_preflight(&doc, Some(new_content), Some(new_content)).unwrap();
-        crate::cycle_state::mark_committed(
-            &doc,
-            "commit_success",
-            Some(new_content),
-            Some(new_content),
-        )
-        .unwrap();
 
         let status = inspect(&doc).unwrap();
         match status {

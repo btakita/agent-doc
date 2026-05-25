@@ -195,7 +195,25 @@ Brian
 ```
 
 I would not include the long technical checklist from the earlier draft. It makes the invoice feel harder to approve. This version says enough to justify the $5,000 while keeping the ask clean.
-<!-- agent:boundary:84953a55 -->
+❯ Please note that I can demo the work.
+### Re: Add demo note to invoice email — gpt-5
+
+Add this sentence to the email body after the paragraph that starts “The remaining items are mostly business/setup decisions”:
+
+```text
+I can also demo the completed work live so you can see exactly what is already in place and where the next decisions fit.
+```
+
+With that included, the closing can stay simple:
+
+```text
+Net 14 is fine on this invoice. I can also demo the completed work live so you can see exactly what is already in place and where the next decisions fit.
+
+Brian
+```
+
+I would keep it to one sentence. It gives Judith and Robert confidence that the work is real and reviewable without turning the invoice into a technical walkthrough.
+<!-- agent:boundary:ef2aef6f -->
 <!-- /agent:exchange -->
 ###
 <!--

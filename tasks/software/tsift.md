@@ -35,7 +35,34 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 6 response topic(s): do [#cachelookupshift]; do [#gdbvacconvex]; queue updated; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:688e6181 -->
+### Re: #convexscopedeval closed — full-graph default, --scope as escape hatch — opus-4-7
+
+Decision landed (tsift `f328770`, superproject `3c9fcfc08`, v0.1.57). `make check` clean, install upgraded.
+
+#### Verdict — full-graph default, `--scope` escape hatch
+Now that `#convexsnapshotscale` (v0.1.56) shipped cursor pagination, the scale rationale for scoped-default is gone. Decision matrix in `plans/convexscopedeval-evidence.md`: 4 of 7 considerations favor full-graph (mental model, cross-submodule queries on Convex side, operational reach, alignment with new snapshot transport); 3 favor scoped (failure isolation, partial-failure recovery, mirrors workspace structure). Tie-breaker: operational reach — full-graph means one configured `TSIFT_CONVEX_GRAPH_URL` reconciles the whole project; scoped would require multiple deployments or a discriminator-by-scope schema, neither shipped today.
+
+`--scope <name>` stays valid as the supported escape hatch for: (a) reconciling one submodule independently mid-flight, (b) very-large multi-deployment projects, (c) partial-failure replay where only one scope needs re-sync.
+
+#### Default `--chunk-size` lowered 100 → 50
+Operational consequence of choosing full-graph default: applies cover more rows per run, so the per-chunk budget needs to be tighter by default. Default 50 keeps `upsertEdges` under the Convex isolate's 99 MiB carry-over budget on the demo schema; operators with optimized upsert mutations can raise it back. CLI help string explains the rationale.
+
+#### Surface
+- `src/main.rs:401` — `chunk_size` clap default `"100"` → `"50"` with rationale in the doc comment.
+- `SPEC.md` `tsift convex-sync` paragraph — documents full-graph default, chunk-size rationale, three escape-hatch scenarios.
+- `VERSIONS.md` `## 0.1.57` entry.
+- `plans/convexscopedeval-evidence.md` — decision matrix, code changes, follow-ups.
+
+#### Sibling work in same commit
+The 0.1.57 commit also lands `#p6tsifullfederated` — `tsift search --federated` now annotates each per-scope hit against that scope's own tagpath project instead of the workspace root. Test `search_federated_json_annotates_handles_from_per_scope_tagpath_indexes` covers an alpha+beta workspace.
+
+#### Queue advances
+Next: `complete [#gdbvacproof]`. Both prerequisites are now in:
+- `#convexsnapshotscale` (v0.1.56) — paginated snapshot
+- `#convexscopedeval` (v0.1.57) — full-graph default + safer chunk-size
+
+So the Convex half of `#gdbvacproof` can run end-to-end: full-graph reconcile via paginated `--remote-snapshot`, `--apply` with the new safer default, then `tsift graph-db --path . compact --apply --prune-tombstones --confirmed-convex-reconciled --json` with metric capture.
+<!-- agent:boundary:395bf5b4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -47,14 +74,13 @@ preset #spec-test-build-install-commit-push
 - ~do [#cachelookupshift]~
 - ~do [#gdbvacconvex]~
 - ~do [#convexsnapshotscale]~
-- do [#convexscopedeval]
+- ~do [#convexscopedeval]~
 - complete [#gdbvacproof]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#convexscopedeval] Decide whether tsift convex-sync should ship a scope-bounded default that promotes per-submodule reconciliation as the supported large-graph workflow, or whether the full-graph workflow waits on #convexsnapshotscale. Per-scope sync against the self-hosted backend (chunk-size 50) was end-to-end verified at the tsift scope (4767 nodes + 28427 edges, 665/665 receipts); full superproject sync hit the 99 MiB isolate carry-over limit at chunk-size 100.
 - [/] [#orchdog] [recommended] Dogfood the completed graph-backed agent orchestration stack on a real agent-doc queue run: run refresh -> evidence -> conflict-matrix -> dispatch-trace -> jobs create/collect, compare worker_prompt_packet and worker_result closure fields, and capture any tsift-side fixture gaps. **Dogfood performed 2026-05-21 on `session-share/tasks/root.md` items #x63e + #v4v0; findings recorded in #gdbevid, #cmgr, #gdbidx — see `session-share/tasks/root.md` exchange "graph-backed orchestration dogfood" entry for the full pipeline trace.** **Second dogfood 2026-05-21 against `tasks/software/tsift.md` (preset `#dogfood-tsift`) surfaced 2 new gaps: #cmgrwres and #gdblock.**
 <!-- /agent:backlog -->
 

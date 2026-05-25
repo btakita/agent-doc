@@ -276,7 +276,38 @@ Built demoable MVP versions of the admin, investor, broker, and borrower portals
 ```
 
 That is accurate and defensible.
-<!-- agent:boundary:1f6b1b55 -->
+❯ Can I demo the portals using the cache db + R2 for uploads? Do the messages in the portals persist?
+### Re: Cache/R2 demo + message persistence — gpt-5
+
+Yes, you can demo the portals using the cache DB and R2-backed uploads, but with clear boundaries.
+
+Demo-safe with the current D1/R2 setup:
+
+- Borrower application submission and document upload: uploads write original bytes to `R2_DOCUMENTS` first and persist document metadata in D1. Dropbox is no longer required for the demo path; Dropbox sync can remain a later adapter.
+- Borrower additional document uploads/downloads: also use R2-backed document cache paths.
+- Investor documents and accreditation uploads: backed by D1/R2 document records and R2 object storage.
+- Admin investor-document uploads/publication/review: backed by D1/R2 and safe to demo as persisted admin workflow.
+- Token-based document uploads: backed by D1 token metadata plus R2 document storage.
+- Investor/admin read flows that depend on TMO state: designed to read from the local D1/R2 TMO cache rather than requiring live TMO during page requests.
+- Broker dashboard/pipeline/documents/commissions/submit-a-deal: core pages are API-backed now and demoable from D1-backed broker records.
+
+Caveats for the demo:
+
+- Use demo/test users and demo data because uploads are real persistent objects in R2/D1 on the environment you use.
+- Do not present rate sheets or pre-qual as fully live; those broker screens still have static/local guidance pieces.
+- Do not present borrower payment, payment history, or loan-summary post-funding flows as fully live; those still include mock/static TMO/payment content.
+
+Messages:
+
+- Notifications persist. The app has a D1-backed `notifications` table and `/api/notifications` + `/api/notifications/read` routes, so portal notification rows and read/unread state are persistent.
+- Chat-style portal messages do not persist yet. The borrower `Messages` screen currently uses local `MOCK` data plus `useState`; a typed message is only added in browser memory and disappears on reload. I did not find a D1 messages table or `/api/messages` persistence route.
+
+So for a client demo, I would say:
+
+```text
+The portal workflow, document uploads, document review, notifications, and cache-backed TMO views are demoable and persistent. The secure messaging screen is currently a UI prototype, not a persisted communication channel yet.
+```
+<!-- agent:boundary:aff7c5e0 -->
 <!-- /agent:exchange -->
 ###
 <!--

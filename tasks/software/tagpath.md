@@ -123,58 +123,16 @@ v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-gramm
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260525-043453.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260525-051642.md`*
 
 Compacted content:
-- Archived 3 response topic(s): next-steps; queue auto; queue auto
+- Archived 1 response topic(s): do [#p6sklsym] [#p6lintbnd]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-### Re: do [#p6sklsym] [#p6lintbnd] — opus-4-7
-
-
-Both queue items shipped.
-
-#### #p6sklsym — symlink co-installed skills
-
-Replaced three identical agent-loop skill copies with relative symlinks to the submodule canonicals:
-
-- `.claude/skills/tagpath/SKILL.md` → `../../../src/tagpath/.claude/skills/tagpath/SKILL.md`
-- `.claude/skills/email/SKILL.md` → `../../../src/corky/.claude/skills/email/SKILL.md`
-- `.claude/skills/linkedin/SKILL.md` → `../../../src/corky/.claude/skills/linkedin/SKILL.md`
-
-Skipped two skills whose parent/child copies diverge — recorded as new follow-up backlog items (NOT completed this cycle):
-
-- `agent-doc` parent (v0.34.0, freshly installed) vs submodule (v0.33.16) — new id `p6sklsymagentdoc`
-- `corky` parent vs submodule (different command listing format) — new id `p6sklsymcorky`
-
-#### #p6lintbnd — relax agent-doc/malformed-boundary
-
-Investigated the conflict. The lint rule rejected anything with non-hex characters in the boundary id, but `agent_doc::new_boundary_id_with_summary` emits the form `hex:slug` (e.g. `a0cfeb34:boundary-fix`). The colon and slug dashes failed the all-hex check.
-
-Chose to **relax the rule** rather than change the binary's format — the summary suffix is a real product feature that aids human scanning, and dropping it would lose information.
-
-Updated `src/lint/agent_doc.rs` to accept `hex(:slug)?` where the slug is non-empty lowercase alphanumeric + dashes (matching what the slugifier produces). Added six unit tests: plain hex, hex:slug, non-hex prefix (rejects), empty id (rejects), uppercase slug (rejects), trailing-colon empty slug (rejects). Updated SPEC.md §16.3 rule description accordingly.
-
-#### Verification
-
-- `cargo test` — 234 passed across 15 suites
-- `cargo clippy --all-targets -- -D warnings` — clean (fixed one `unnecessary_map_or` lint to `is_none_or`)
-- `cargo build --release && cargo install --path .` — installed at `~/.cargo/bin/tagpath`
-- Smoke test on the live doc: `tagpath lint tasks/software/tagpath.md --dialect agent-doc` → "No agent-doc tag violations found"
-- Smoke test on synthetic hex:slug form → passes
-- Smoke test on `zzz` non-hex form → fires as expected with updated message
-- tagpath CI run kicked off
-
-#### Commits
-
-- `src/tagpath`: `a89ba7e feat(lint): accept <hex>:<slug> boundary form (p6lintbnd)` — pushed to main
-- `agent-loop`: `38cfc05f0 skills: symlink tagpath/email/linkedin to submodule canonicals (p6sklsym)` — pushed to main (includes the src/tagpath pointer bump)
-
-Note on versioning: tagpath Cargo.toml is at 0.18.0 locally but crates.io tops out at 0.10.0 and there's no v0.18.0 tag — the publish gap is independent of this change and not part of this preset.
-<!-- agent:boundary:821612ff -->
+<!-- agent:boundary:a74a7202 -->
 <!-- /agent:exchange -->
 ###
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#p6tsi]~
 - ~do [#p6adf]~

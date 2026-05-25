@@ -16,7 +16,7 @@
 //!   - `POST /save` → body = full document text; calls `write --commit`,
 //!     returns JSON with the new HEAD short SHA.
 //!   - `GET /events` → Server-Sent Events stream with `ready`, `doc-changed`,
-//!     and `doc-error` events.
+//!     `agent-response`, and `doc-error` events.
 //!   - `GET /healthz` → `ok`.
 //!
 //! ## Agentic Contracts
@@ -26,8 +26,9 @@
 //!   `--tls-key` are provided.
 //! - No async — sequential per-connection via `tiny_http` (project rule:
 //!   no tokio).
-//! - Writes never bypass `write --commit`; the in-process write path is not
-//!   reused here so the commit boundary stays in one place.
+//! - Browser writes use plain git commits only when no agent-doc response cycle
+//!   is open for the document; during an open cycle they close through
+//!   `agent-doc write --commit --origin serve`.
 //! - When `write --commit` exits nonzero, the HTTP response surfaces the
 //!   stderr verbatim so the operator sees the actionable error.
 //!
@@ -41,7 +42,7 @@ use serde::Serialize;
 use std::collections::{BTreeMap, VecDeque};
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -838,6 +839,14 @@ struct DocFingerprint {
     modified_ms: Option<u128>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PartialResponseFingerprint {
+    cycle_id: String,
+    response_sha256: String,
+    checkpoint_count: u64,
+    updated_at: u64,
+}
+
 fn read_doc_fingerprint(doc: &Path) -> Result<DocFingerprint> {
     let content = std::fs::read_to_string(doc)
         .with_context(|| format!("failed to read {}", doc.display()))?;
@@ -865,6 +874,39 @@ fn doc_event_payload(doc: &Path, fingerprint: &DocFingerprint) -> serde_json::Va
     })
 }
 
+fn active_partial_response(doc: &Path) -> Result<Option<crate::capture::PartialCaptureRecord>> {
+    let Some(state) = crate::cycle_state::load(doc)? else {
+        return Ok(None);
+    };
+    if !state.is_open() {
+        return Ok(None);
+    }
+    crate::capture::load_partial_by_cycle(doc, &state.cycle_id)
+}
+
+fn partial_response_fingerprint(
+    record: &crate::capture::PartialCaptureRecord,
+) -> PartialResponseFingerprint {
+    PartialResponseFingerprint {
+        cycle_id: record.cycle_id.clone(),
+        response_sha256: record.response_sha256.clone(),
+        checkpoint_count: record.checkpoint_count,
+        updated_at: record.updated_at,
+    }
+}
+
+fn partial_response_payload(record: &crate::capture::PartialCaptureRecord) -> serde_json::Value {
+    serde_json::json!({
+        "path": record.file,
+        "cycle_id": record.cycle_id,
+        "checkpoint_id": record.checkpoint_id,
+        "checkpoint_count": record.checkpoint_count,
+        "updated_at": record.updated_at,
+        "response_sha256": record.response_sha256,
+        "response_body": record.response_body,
+    })
+}
+
 fn format_sse_event(event: &str, payload: serde_json::Value) -> String {
     format!("event: {event}\ndata: {payload}\n\n")
 }
@@ -873,6 +915,7 @@ struct SsePollStream {
     doc: PathBuf,
     interval: Duration,
     last: Option<DocFingerprint>,
+    last_partial: Option<PartialResponseFingerprint>,
     buffer: VecDeque<u8>,
     sent_ready: bool,
 }
@@ -887,6 +930,7 @@ impl SsePollStream {
             doc,
             interval,
             last: None,
+            last_partial: None,
             buffer: VecDeque::new(),
             sent_ready: false,
         }
@@ -917,12 +961,30 @@ impl SsePollStream {
     }
 
     fn poll_once(&mut self) -> Result<bool> {
+        let mut emitted = false;
         let fingerprint = read_doc_fingerprint(&self.doc)?;
-        if self.last.as_ref() == Some(&fingerprint) {
+        if self.last.as_ref() != Some(&fingerprint) {
+            self.last = Some(fingerprint.clone());
+            self.enqueue_event("doc-changed", doc_event_payload(&self.doc, &fingerprint));
+            emitted = true;
+        }
+        if self.poll_partial_response()? {
+            emitted = true;
+        }
+        Ok(emitted)
+    }
+
+    fn poll_partial_response(&mut self) -> Result<bool> {
+        let Some(record) = active_partial_response(&self.doc)? else {
+            self.last_partial = None;
+            return Ok(false);
+        };
+        let fingerprint = partial_response_fingerprint(&record);
+        if self.last_partial.as_ref() == Some(&fingerprint) {
             return Ok(false);
         }
-        self.last = Some(fingerprint.clone());
-        self.enqueue_event("doc-changed", doc_event_payload(&self.doc, &fingerprint));
+        self.last_partial = Some(fingerprint);
+        self.enqueue_event("agent-response", partial_response_payload(&record));
         Ok(true)
     }
 
@@ -1019,35 +1081,53 @@ fn handle_save(
         );
     }
 
-    if let Err(e) = std::fs::write(&doc, &body) {
-        return respond(
-            request,
-            &format!("failed to write {}: {e}\n", doc.display()),
-            "text/plain; charset=utf-8",
-            StatusCode(500),
-        );
-    }
-
-    // Web-editor user edits commit through plain git for the Phase 1 MVP.
-    // This intentionally does not enter the agent-doc cycle/capture/snapshot
-    // machinery — that path is reserved for agent responses going through
-    // `write --commit` / `finalize`. Future phases hooking the editor up to
-    // live cycles (Phase 6 in plan-web-interface.md) will route through
-    // those boundaries instead.
-    if let Err(e) = git_commit_user_edit(&doc) {
-        return respond(
-            request,
-            &format!("git commit failed: {e}\n"),
-            "text/plain; charset=utf-8",
-            StatusCode(500),
-        );
-    }
+    let active_cycle = match active_cycle_in_scope(&doc) {
+        Ok(active) => active,
+        Err(e) => {
+            return respond(
+                request,
+                &format!("failed to inspect active cycle: {e}\n"),
+                "text/plain; charset=utf-8",
+                StatusCode(500),
+            );
+        }
+    };
+    let commit_mode = if active_cycle {
+        if let Err(e) = write_and_close_active_cycle(&doc, &body) {
+            return respond(
+                request,
+                &format!("agent-doc write --commit failed: {e}\n"),
+                "text/plain; charset=utf-8",
+                StatusCode(500),
+            );
+        }
+        "agent-doc write --commit"
+    } else {
+        if let Err(e) = std::fs::write(&doc, &body) {
+            return respond(
+                request,
+                &format!("failed to write {}: {e}\n", doc.display()),
+                "text/plain; charset=utf-8",
+                StatusCode(500),
+            );
+        }
+        if let Err(e) = git_commit_user_edit(&doc) {
+            return respond(
+                request,
+                &format!("git commit failed: {e}\n"),
+                "text/plain; charset=utf-8",
+                StatusCode(500),
+            );
+        }
+        "git"
+    };
 
     let head = git_head_short(&doc).unwrap_or_else(|_| "<unknown>".to_string());
     let payload = serde_json::json!({
         "ok": true,
         "head": head,
         "bytes": body.len(),
+        "commit_mode": commit_mode,
     });
     respond(
         request,
@@ -1055,6 +1135,36 @@ fn handle_save(
         "application/json; charset=utf-8",
         StatusCode(200),
     )
+}
+
+fn active_cycle_in_scope(doc: &Path) -> Result<bool> {
+    Ok(crate::cycle_state::load(doc)?.is_some_and(|state| state.is_open()))
+}
+
+fn write_and_close_active_cycle(doc: &Path, body: &str) -> Result<()> {
+    crate::write::atomic_write_pub(doc, body)
+        .with_context(|| format!("failed to write {}", doc.display()))?;
+    let binary = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("agent-doc"));
+    let output = Command::new(binary)
+        .args(["write", "--commit", "--origin", "serve"])
+        .arg(doc)
+        .stdin(Stdio::null())
+        .output()
+        .context("failed to run agent-doc write --commit")?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        anyhow::bail!(
+            "{}{}",
+            stderr.trim(),
+            if stdout.trim().is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", stdout.trim())
+            }
+        );
+    }
+    Ok(())
 }
 
 fn git_commit_user_edit(doc: &Path) -> Result<()> {
@@ -1257,9 +1367,60 @@ mod tests {
     }
 
     #[test]
+    fn serve_sse_stream_emits_active_partial_agent_response() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let doc = root.join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: live\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        crate::snapshot::save(&doc, content).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        let mut writer =
+            crate::capture::PartialCheckpointWriter::with_interval(&doc, Duration::ZERO);
+        writer
+            .maybe_checkpoint("### Re: live — gpt-5\n\nPartial response")
+            .unwrap();
+
+        let mut stream = SsePollStream::with_interval(doc, Duration::from_millis(1));
+        let mut buf = vec![0; 8192];
+        let _ = stream.read(&mut buf).unwrap();
+        let n = stream.read(&mut buf).unwrap();
+        let event = String::from_utf8_lossy(&buf[..n]);
+
+        assert!(event.contains("event: agent-response\n"), "got {event:?}");
+        assert!(event.contains("Partial response"), "got {event:?}");
+    }
+
+    #[test]
+    fn serve_detects_open_cycle_for_write_commit_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let doc = root.join("session.md");
+        std::fs::write(&doc, "# Session\n").unwrap();
+
+        assert!(!active_cycle_in_scope(&doc).unwrap());
+        crate::cycle_state::start_preflight(&doc, Some("# Session\n"), Some("# Session\n"))
+            .unwrap();
+        assert!(active_cycle_in_scope(&doc).unwrap());
+        crate::cycle_state::mark_committed(&doc, "test", Some("# Session\n"), Some("# Session\n"))
+            .unwrap();
+        assert!(!active_cycle_in_scope(&doc).unwrap());
+    }
+
+    #[test]
     fn serve_index_html_subscribes_to_sse_doc_changed_events() {
         assert!(INDEX_HTML.contains("new EventSource(docUrl(\"/events\"))"));
         assert!(INDEX_HTML.contains("doc-changed"));
+        assert!(INDEX_HTML.contains("agent-response"));
     }
 
     #[test]

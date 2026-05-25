@@ -31,6 +31,10 @@
     .tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-bottom: 1px solid #232735; }
     .tabs button { border-radius: 0; padding: 8px 6px; background: transparent; color: var(--muted); border-right: 1px solid #232735; }
     .tabs button.active { color: var(--fg); background: #1b202a; }
+    .live-response { max-height: 34%; min-height: 92px; border-bottom: 1px solid #232735; display: flex; flex-direction: column; }
+    .live-response[hidden] { display: none; }
+    .live-response .component-meta { flex-shrink: 0; }
+    .live-response pre { flex: 1; min-height: 0; margin: 0; overflow: auto; padding: 10px; white-space: pre-wrap; overflow-wrap: anywhere; color: #d8dee9; background: #10141b; font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace; }
     .panels { min-height: 0; flex: 1; overflow: hidden; }
     agent-doc-component { display: block; height: 100%; }
     agent-doc-component[hidden] { display: none; }
@@ -62,6 +66,10 @@
       <textarea id="editor" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" wrap="soft"></textarea>
     </section>
     <aside class="inspector" aria-label="Document components">
+      <section class="live-response" id="liveResponse" hidden>
+        <div class="component-meta" id="liveResponseMeta">agent response</div>
+        <pre id="liveResponseBody"></pre>
+      </section>
       <div class="tabs" id="tabs" role="tablist" aria-label="Document components">
         <button class="active" data-panel="exchange" type="button">exchange</button>
         <button data-panel="backlog" type="button">backlog</button>
@@ -95,6 +103,9 @@
     const headEl = document.getElementById("head");
     const dirtyEl = document.getElementById("dirty");
     const tabs = document.getElementById("tabs");
+    const liveResponse = document.getElementById("liveResponse");
+    const liveResponseMeta = document.getElementById("liveResponseMeta");
+    const liveResponseBody = document.getElementById("liveResponseBody");
 
     let savedContent = "";
     let saving = false;
@@ -319,7 +330,7 @@
         const result = await r.json();
         savedContent = editor.value;
         headEl.textContent = "HEAD " + (result.head || "—");
-        setStatus("saved (HEAD " + result.head + ")", "ok");
+        setStatus("saved via " + (result.commit_mode || "git") + " (HEAD " + result.head + ")", "ok");
         loadProjection();
       } catch (e) {
         setStatus("save failed: " + e.message, "err");
@@ -346,6 +357,19 @@
           return;
         }
         loadDoc("file changed on disk; reloading…");
+      });
+      events.addEventListener("agent-response", (e) => {
+        try {
+          const payload = JSON.parse(e.data || "{}");
+          liveResponse.hidden = false;
+          liveResponseMeta.textContent = "agent response · " +
+            (payload.cycle_id || "cycle") + " · " +
+            (payload.checkpoint_count || 0);
+          liveResponseBody.textContent = payload.response_body || "";
+          setStatus("agent response streaming", "ok");
+        } catch (_) {
+          setStatus("agent response stream error", "err");
+        }
       });
       events.addEventListener("doc-error", (e) => {
         try {

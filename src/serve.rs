@@ -34,6 +34,7 @@
 //! - `serve_sse_stream_emits_doc_changed_after_file_mutation`
 
 use anyhow::{Context, Result};
+use serde::Serialize;
 use std::collections::VecDeque;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -124,6 +125,7 @@ fn handle_request(request: tiny_http::Request, doc: &Path) -> Result<()> {
                 StatusCode(200),
             )
         }
+        (Method::Get, "/api/projection") => handle_projection(request, doc),
         (Method::Get, "/events") => handle_events(request, doc),
         (Method::Post, "/save") => handle_save(request, doc),
         _ => respond(
@@ -132,6 +134,68 @@ fn handle_request(request: tiny_http::Request, doc: &Path) -> Result<()> {
             "text/plain; charset=utf-8",
             StatusCode(404),
         ),
+    }
+}
+
+fn handle_projection(request: tiny_http::Request, doc: &Path) -> Result<()> {
+    let body = std::fs::read_to_string(doc)
+        .with_context(|| format!("failed to read {}", doc.display()))?;
+    let projection = build_projection(&body)?;
+    respond(
+        request,
+        &serde_json::to_string(&projection)?,
+        "application/json; charset=utf-8",
+        StatusCode(200),
+    )
+}
+
+#[derive(Debug, Serialize)]
+struct ServeProjection {
+    components: Vec<ServeProjectionComponent>,
+}
+
+#[derive(Debug, Serialize)]
+struct ServeProjectionComponent {
+    name: &'static str,
+    present: bool,
+    lines: usize,
+    items: usize,
+    content: String,
+}
+
+fn build_projection(doc: &str) -> Result<ServeProjection> {
+    let components = crate::component::parse(doc)?;
+    let names = ["exchange", "backlog", "queue", "review"];
+    Ok(ServeProjection {
+        components: names
+            .into_iter()
+            .map(|name| projection_component(doc, &components, name))
+            .collect(),
+    })
+}
+
+fn projection_component(
+    doc: &str,
+    components: &[crate::component::Component],
+    name: &'static str,
+) -> ServeProjectionComponent {
+    let component = components.iter().find(|component| match name {
+        "backlog" => crate::component::is_backlog_component(&component.name),
+        "review" => crate::component::is_review_component(&component.name),
+        _ => component.name == name,
+    });
+    let content = component
+        .map(|component| component.content(doc).trim_matches('\n').to_string())
+        .unwrap_or_default();
+    ServeProjectionComponent {
+        name,
+        present: component.is_some(),
+        lines: content.lines().count(),
+        items: content
+            .lines()
+            .filter(|line| line.trim_start().starts_with("- ["))
+            .count(),
+        content,
     }
 }
 
@@ -482,5 +546,38 @@ mod tests {
     fn serve_index_html_subscribes_to_sse_doc_changed_events() {
         assert!(INDEX_HTML.contains("new EventSource(\"/events\")"));
         assert!(INDEX_HTML.contains("doc-changed"));
+    }
+
+    #[test]
+    fn serve_projection_extracts_component_summaries() {
+        let doc = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ hello\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#one] One\n",
+            "- [x] [#two] Two\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do #one\n",
+            "<!-- /agent:queue -->\n"
+        );
+
+        let projection = build_projection(doc).unwrap();
+        let backlog = projection
+            .components
+            .iter()
+            .find(|component| component.name == "backlog")
+            .unwrap();
+        assert!(backlog.present);
+        assert_eq!(backlog.items, 2);
+        assert!(backlog.content.contains("[#one] One"));
+
+        let review = projection
+            .components
+            .iter()
+            .find(|component| component.name == "review")
+            .unwrap();
+        assert!(!review.present);
     }
 }

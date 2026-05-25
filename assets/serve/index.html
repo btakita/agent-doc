@@ -16,8 +16,25 @@
     button { background: var(--accent); color: #fff; border: 0; border-radius: 4px; padding: 6px 14px; font-size: 13px; cursor: pointer; font-weight: 600; }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
     button.secondary { background: #2a2f3a; color: var(--fg); }
-    textarea { flex: 1; width: 100%; background: #0b0d11; color: var(--fg); border: 0; padding: 16px; font: 13px/1.5 ui-monospace, "SF Mono", Menlo, monospace; resize: none; outline: none; tab-size: 2; }
+    .workspace { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 340px; }
+    .editor-shell { min-width: 0; min-height: 0; display: grid; grid-template-columns: 56px minmax(0, 1fr); background: #0b0d11; }
+    .gutter { padding: 16px 10px; color: #5c6370; background: #11141a; border-right: 1px solid #232735; font: 13px/1.5 ui-monospace, "SF Mono", Menlo, monospace; text-align: right; overflow: hidden; user-select: none; white-space: pre; }
+    textarea { width: 100%; height: 100%; background: #0b0d11; color: var(--fg); border: 0; padding: 16px; font: 13px/1.5 ui-monospace, "SF Mono", Menlo, monospace; resize: none; outline: none; tab-size: 2; line-height: 1.5; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .inspector { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: #12151c; border-left: 1px solid #232735; }
+    .tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-bottom: 1px solid #232735; }
+    .tabs button { border-radius: 0; padding: 8px 6px; background: transparent; color: var(--muted); border-right: 1px solid #232735; }
+    .tabs button.active { color: var(--fg); background: #1b202a; }
+    .panels { min-height: 0; flex: 1; overflow: hidden; }
+    agent-doc-component { display: block; height: 100%; }
+    agent-doc-component[hidden] { display: none; }
+    .component-panel { height: 100%; display: flex; flex-direction: column; min-height: 0; }
+    .component-meta { display: flex; gap: 12px; padding: 8px 10px; color: var(--muted); border-bottom: 1px solid #232735; font: 11px/1.4 ui-monospace, monospace; }
+    .component-content { flex: 1; min-height: 0; margin: 0; overflow: auto; padding: 12px; white-space: pre-wrap; overflow-wrap: anywhere; color: #d8dee9; font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace; }
     .footer { padding: 6px 12px; background: #181b22; border-top: 1px solid #232735; color: var(--muted); font-size: 11px; font-family: ui-monospace, monospace; display: flex; gap: 16px; flex-shrink: 0; }
+    @media (max-width: 900px) {
+      .workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 220px; }
+      .inspector { border-left: 0; border-top: 1px solid #232735; }
+    }
   </style>
 </head>
 <body>
@@ -27,7 +44,26 @@
     <button id="reload" class="secondary" title="Discard unsaved edits and reload from disk">reload</button>
     <button id="save" disabled>save (Ctrl+S)</button>
   </header>
-  <textarea id="editor" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off"></textarea>
+  <main class="workspace">
+    <section class="editor-shell" aria-label="Markdown editor">
+      <pre class="gutter" id="gutter" aria-hidden="true">1</pre>
+      <textarea id="editor" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" wrap="soft"></textarea>
+    </section>
+    <aside class="inspector" aria-label="Document components">
+      <div class="tabs" id="tabs" role="tablist" aria-label="Document components">
+        <button class="active" data-panel="exchange" type="button">exchange</button>
+        <button data-panel="backlog" type="button">backlog</button>
+        <button data-panel="queue" type="button">queue</button>
+        <button data-panel="review" type="button">review</button>
+      </div>
+      <div class="panels">
+        <agent-doc-component data-name="exchange"></agent-doc-component>
+        <agent-doc-component data-name="backlog" hidden></agent-doc-component>
+        <agent-doc-component data-name="queue" hidden></agent-doc-component>
+        <agent-doc-component data-name="review" hidden></agent-doc-component>
+      </div>
+    </aside>
+  </main>
   <div class="footer">
     <span id="bytes">0 bytes</span>
     <span id="head">HEAD —</span>
@@ -36,16 +72,37 @@
 
   <script>
     const editor = document.getElementById("editor");
+    const gutter = document.getElementById("gutter");
     const status = document.getElementById("status");
     const saveBtn = document.getElementById("save");
     const reloadBtn = document.getElementById("reload");
     const bytesEl = document.getElementById("bytes");
     const headEl = document.getElementById("head");
     const dirtyEl = document.getElementById("dirty");
+    const tabs = document.getElementById("tabs");
 
     let savedContent = "";
     let saving = false;
     let events = null;
+
+    class AgentDocComponent extends HTMLElement {
+      set data(component) {
+        const state = component.present ? "present" : "missing";
+        const content = component.present ? component.content : "component missing";
+        this.innerHTML = "";
+        const panel = document.createElement("section");
+        panel.className = "component-panel";
+        const meta = document.createElement("div");
+        meta.className = "component-meta";
+        meta.textContent = `${component.name} · ${state} · ${component.lines} lines · ${component.items} items`;
+        const pre = document.createElement("pre");
+        pre.className = "component-content";
+        pre.textContent = content;
+        panel.append(meta, pre);
+        this.append(panel);
+      }
+    }
+    customElements.define("agent-doc-component", AgentDocComponent);
 
     function setStatus(text, cls) {
       status.textContent = text;
@@ -57,6 +114,12 @@
       saveBtn.disabled = saving || !dirty;
       dirtyEl.textContent = dirty ? "● unsaved" : "";
       bytesEl.textContent = editor.value.length + " bytes";
+    }
+
+    function updateGutter() {
+      const lineCount = Math.max(1, editor.value.split("\n").length);
+      gutter.textContent = Array.from({ length: lineCount }, (_, i) => String(i + 1)).join("\n");
+      gutter.scrollTop = editor.scrollTop;
     }
 
     function hasUnsavedEdits() {
@@ -73,8 +136,35 @@
         editor.value = text;
         setStatus(reason ? "reloaded from disk" : "loaded", "ok");
         updateDirty();
+        updateGutter();
+        loadProjection();
       } catch (e) {
         setStatus("load failed: " + e.message, "err");
+      }
+    }
+
+    async function loadProjection() {
+      try {
+        const r = await fetch("/api/projection", { cache: "no-store" });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const projection = await r.json();
+        renderProjection(projection);
+      } catch (e) {
+        setStatus("component projection failed: " + e.message, "err");
+      }
+    }
+
+    function renderProjection(projection) {
+      for (const panel of document.querySelectorAll("agent-doc-component")) {
+        const name = panel.dataset.name;
+        const component = projection.components.find((item) => item.name === name) || {
+          name,
+          present: false,
+          lines: 0,
+          items: 0,
+          content: "",
+        };
+        panel.data = component;
       }
     }
 
@@ -97,6 +187,7 @@
         savedContent = editor.value;
         headEl.textContent = "HEAD " + (result.head || "—");
         setStatus("saved (HEAD " + result.head + ")", "ok");
+        loadProjection();
       } catch (e) {
         setStatus("save failed: " + e.message, "err");
       } finally {
@@ -134,7 +225,23 @@
       };
     }
 
-    editor.addEventListener("input", updateDirty);
+    tabs.addEventListener("click", (e) => {
+      const button = e.target.closest("button[data-panel]");
+      if (!button) return;
+      for (const tab of tabs.querySelectorAll("button")) {
+        tab.classList.toggle("active", tab === button);
+      }
+      for (const panel of document.querySelectorAll("agent-doc-component")) {
+        panel.hidden = panel.dataset.name !== button.dataset.panel;
+      }
+    });
+    editor.addEventListener("input", () => {
+      updateDirty();
+      updateGutter();
+    });
+    editor.addEventListener("scroll", () => {
+      gutter.scrollTop = editor.scrollTop;
+    });
     saveBtn.addEventListener("click", saveDoc);
     reloadBtn.addEventListener("click", () => {
       if (editor.value !== savedContent &&

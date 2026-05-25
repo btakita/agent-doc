@@ -116,7 +116,27 @@ Cold delta beats the ~200 ms target; warm delta proves the duplicate inspect was
 - `cargo install --path .` → upgraded `~/.cargo/bin/tsift` to 0.1.48
 
 Sibling user commit `cd9c678` (tagpath consumer contract, v0.1.47) landed during the packet run; this work piles on top at v0.1.48 with a dedicated VERSIONS.md entry. The next two queue items remain gated for their own cycles per planner's `parallelizable: False`.
-<!-- agent:boundary:bbe9f0d6 -->
+❯ Can the following tasks be completed?
+❯ - [#gdbprephot]
+❯ - [#gdbvacproof]
+### Re: Can the following tasks be completed? — opus-4-7
+
+#### #gdbprephot — yes, in flight
+Dispatched as a focused packet. Profiles the four named hot paths (`session_review_compute`, `context_pack_diff`, `impact` with non-empty changes, `dispatch_trace` reuse) on 3 default + 3 `--full-projection` runs (now that v0.1.48 scope-guard is in), identifies the dominant residual phase, applies the minimal fix (shared packet reuse OR narrower digest, no process-wide cache per `#gdbgatecold` history), extends the `perf_gate` module with a metric-digest gate that fails closed on regression without trusting stale ownership, and bumps to v0.1.49. ~1-1.5 h.
+
+#### #gdbvacproof — partial only, with a precise blocker
+Two halves:
+
+- **Compact half (will run after #gdbprephot finishes):** `tsift graph-db --path . compact` dry-run + `--apply`, capture before/after file size, freelist (`PRAGMA freelist_count`), tombstone counts, `status` / `doctor` timings, and scan-cost deltas. All local SQLite. Will run myself once the packet returns — sequencing after the benchmark window avoids contention on `.tsift/graph.db`.
+- **Convex reconciliation half (blocked):** `tsift convex-sync --remote-snapshot --apply` requires a deployed Convex instance with `CONVEX_URL` + auth. `examples/convex-graph/` ships the schema/mutations/HTTP-actions package but the tree has no `.env` and no live deployment is configured. Tombstone-prune is also gated behind `--confirmed-convex-reconciled` for exactly this reason. Captured the unblocking step as new backlog item `#gdbvacconvex`.
+
+#### Plan for this turn
+1. Wait for `#gdbprephot` packet.
+2. Aggregate its proof, run `make check`, `cargo install --path .`.
+3. Run the `#gdbvacproof` compact half, capture before/after metrics into `plans/gdbvacproof-evidence.md`.
+4. Commit + push tsift (one combined commit covering both items) + superproject submodule pointer.
+5. Finalize with `--done gdbprephot`. Hold off on `--done gdbvacproof` since only the compact half is covered; leave it gated, with `#gdbvacconvex` capturing the Convex deployment prerequisite.
+<!-- agent:boundary:b24cfac1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -129,6 +149,7 @@ What are #next-steps to make the graph faster?
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#gdbvacconvex] Deploy examples/convex-graph via npx convex dev against Brian's Convex account so tsift convex-sync --remote-snapshot --apply and tsift graph-db compact --prune-tombstones --confirmed-convex-reconciled can be exercised end-to-end (blocks the Convex half of #gdbvacproof).
 - [/] [#orchdog] [recommended] Dogfood the completed graph-backed agent orchestration stack on a real agent-doc queue run: run refresh -> evidence -> conflict-matrix -> dispatch-trace -> jobs create/collect, compare worker_prompt_packet and worker_result closure fields, and capture any tsift-side fixture gaps. **Dogfood performed 2026-05-21 on `session-share/tasks/root.md` items #x63e + #v4v0; findings recorded in #gdbevid, #cmgr, #gdbidx — see `session-share/tasks/root.md` exchange "graph-backed orchestration dogfood" entry for the full pipeline trace.** **Second dogfood 2026-05-21 against `tasks/software/tsift.md` (preset `#dogfood-tsift`) surfaced 2 new gaps: #cmgrwres and #gdblock.**
 <!-- /agent:backlog -->
 

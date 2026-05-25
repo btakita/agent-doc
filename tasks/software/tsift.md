@@ -35,7 +35,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 10 response topic(s): #gdbfullreuse + #gdbscanproof + #gdbperfgate landed; review item #gdbcacheprove closed; #gdbgatecold packet in flight; 7 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:3d212877 -->
+### Re: do [#cachelookupshift] — opus-4-7
+
+Dispatched as a focused packet. Investigates why `preparation_cache_lookup` (~250 ms) never hits across consecutive `tsift graph-db backend-eval` runs on agent-loop — runs a pair, captures the watermark hash inputs, identifies the drifting input (likely a path slipping past `traversal_relative_path_is_generated_artifact` or a directory mtime entering the hash per the `#gdbgatecold` history), applies the minimal stable fix or stops with a "no fix — by design" verdict, then verifies cache-hit on a post-fix consecutive pair. Bumps to v0.1.51 if a fix lands. Hard regression-safety: `search_timeout_reports_reindex_when_index_turns_stale_during_worker_run` must stay green.
+
+Awaiting the packet's proof block before `make check` + `cargo install --path .` + commit + push + finalize with `--done cachelookupshift`.
+<!-- agent:boundary:f1876bae -->
 <!-- /agent:exchange -->
 ###
 <!--

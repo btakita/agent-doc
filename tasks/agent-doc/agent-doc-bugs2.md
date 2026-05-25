@@ -148,14 +148,61 @@ Landed Phase 3 of `#cclooploop` (the SKILL.md auto-loop instruction itself). Sub
 - Phase 5 — installed SKILL.md regression test, `runbooks/harness-invocation.md` documentation.
 
 **Note for this turn:** the new auto-loop only takes effect after the user runs `agent-doc skill install --harness claude --reload restart` to refresh the installed SKILL.md, then restarts Claude Code so the agent re-reads it. Until then, this session continues with the prior manual-invocation behavior. Next queue head after this closes is `do [#ipcdupfin23]`.
-<!-- agent:boundary:7baf014a -->
+
+### Re: do Phases 1 + 5 in tasks/agent-doc/plan-ipc-corruption-and-duplicate-during-typing.md — opus-4-7
+
+Landed Phases 1 + 5. Submodule `2e8a155`, superproject pointer `9586b39b2`, both pushed.
+
+#### Phase 1 — Deterministic SimWorld repro
+
+Added `finalize_with_typing_in_post_exchange_comment_and_already_applied_ack_does_not_duplicate_response` in `src/sim_world.rs:2222`. Models the exact race from the plan:
+
+1. Document baseline = exchange with `do #ipcdup. ...` prompt + the HTML scratch comment below `</agent:exchange>` that the user is actively typing into.
+2. The plugin already applied the response patch to its live buffer (via a prior socket retry whose ack write was slow).
+3. The retry ack is the protocol's dedupe signal: `{"type":"ack","status":"error","reason":"already_applied"}`.
+4. `ipc_socket::classify_ack` correctly returns `AckClassification::AlreadyApplied`; `ipc_socket::is_already_applied_error` correctly recognises the wrapped error so the write path can skip the file-IPC fallback.
+5. Assertions: single `### Re: closeout — gpt-5` heading + post-exchange scratch comment preserved (via the existing `assert_owned_scratch_comment_preserved` helper).
+6. Counterfactual branch: if the gate ever regresses and the file-IPC fallback runs anyway, `dedupe_ipc_snapshot_content` still collapses the duplicate. This guards both layers of defense.
+
+#### Phase 5 — Regression coverage
+
+- New SimWorld scenario above (Phase 1).
+- Pre-existing unit tests on the new socket-ack reason field (8 tests in `src/ipc_socket.rs::tests` cover classify_ack + is_already_applied_error matrix) already in HEAD.
+- Two new integration-style tests in `src/write.rs::late_fallback_patch_guard_tests` covering the wrapper that the four `run` / `stream` / `write` call sites use:
+  - `recover_empty_response_for_strict_closeout_lands_dedupe_only_drift_through_binary_commit` — strict closeout + empty stdin + dedupe-only working-tree drift commits through the binary path (one new git commit, HEAD holds the deduped response).
+  - `recover_empty_response_for_strict_closeout_refuses_when_not_strict_closeout` — non-strict path stays read-only.
+
+#### Drive-by fix
+
+- `src/skill.rs:1622` — `generated_harness_content_shares_hot_path_outside_invocation` was failing on clean HEAD because the prior `0ad612ec feat(skill): Claude Code SKILL.md auto-loops /agent-doc while queue active` added the Claude-only `## Auto-loop while queue is active (Claude Code)` section without teaching this test to strip it before comparing across harnesses. Now strips it like the existing `## Invocation` strip.
+
+#### Verification
+
+- `cargo test --bin agent-doc` → 2369 passed, 0 failed (was 2365 passed, 1 failed before this turn).
+- `cargo build --release` clean.
+- `cargo install --path .` → `~/.cargo/bin/agent-doc` v0.34.0 replaced.
+- `.bin/agent-doc` symlink target rebuilt via `cargo build --release`.
+
+#### Pre-existing breakage flagged
+
+`make check` surfaces 27 `tests/finalize_integration.rs` failures at the new tagpath lint gate (introduced in `845ddfd6` two cycles ago). The fixtures still use the deprecated `agent:pending` component name; the lint gate now blocks it. Confirmed by re-running the same suite on stashed HEAD — failure count identical (`18 passed; 27 failed`). Filed as `#ipclegacyfix` in the backlog. Out of scope for this turn (Phases 1 + 5 only).
+
+#### Backlog touched
+
+- Added `[#ipclegacyfix]` at the top of `agent:backlog`.
+
+Next queue head after this closes: `do [#jbccfix]`.
+<!-- agent:boundary:ff6d50aa -->
 <!-- /agent:exchange -->
 ###
 <!--
 As I was typing into the comment below `/agent:exchange`, the full-document IPC corruption happened, then the duplicate line happened, then the full-document IPC corruption happened again.
 #spec-test-build-install-commit-push
 ---
-Please make auto-compact exchange off by default. Only explicit frontmatter or .agent-doc/config.toml setting should make auto-compact exchange active.
+JB `Restart Supervisor Process` error:
+```
+agent-doc command failed (exit 1): Error: session_restart refused for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md because the authoritative actor is still starting and the document changed after the last committed cycle. Wait for a dispatch-ready prompt (`prompt_ready=true`) and retry, or run `agent-doc session status /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` to inspect the pane.
+```
 -->
 
 <!-- agent:queue auto -->
@@ -175,6 +222,7 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#ipclegacyfix] Update tests/finalize_integration.rs fixtures to use canonical agent:backlog instead of legacy agent:pending component name. Pre-existing breakage: 27 integration tests now fail at the tagpath lint gate (landed in 845ddfd6) because the fixtures use the deprecated alias. Mechanical change across ~31 sites; opt-in lint disable via agent_doc_lint_dialect: off in fixture frontmatter is the lighter alternative if migration coverage tests legitimately need the legacy name.
 - [ ] [#ipcpluginalready] JetBrains plugin + VS Code extension emit {"type":"ack","status":"error","reason":"already_applied"} when their PatchWatcher detects the incoming patch text is already present in the live buffer. Until plugins send this, the binary-side gate landed in submodule 3d445a03 is dormant. Kotlin work in editors/jetbrains/, TypeScript work in editors/vscode/.
 - [ ] [#ipcfilehashskip] File-IPC fallback should hash-compare the live file's response-suffix against the response body and skip the write when they already match. Defense-in-depth complement to #ipcpluginalready in case plugins don't (yet) send the already_applied ack.
 - [ ] [#jbrsrbusysw] SimWorld scenario coverage for session_restart --force: route + Restart Supervisor while pane is alive-busy with and without --force, asserting the new refusal message and force success (including session_restart_busy_pre_interrupt_idle and session_restart_busy_force_killed event variants). Substantial — requires new Op variant + tmux/session_actor mock in src/sim_world.rs. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md phase 4 (SimWorld piece).

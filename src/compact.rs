@@ -1603,6 +1603,68 @@ mod tests {
     }
 
     #[test]
+    fn component_compact_rejects_stale_editor_cache_when_snapshot_is_stale() {
+        let stale_snapshot = concat!(
+            "---\nagent_doc_session: test-compact-stale-cache\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: topic one\n\nResponse one.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = stale_snapshot.replace(
+            "<!-- /agent:exchange -->",
+            "### Re: topic two\n\nResponse two.\n<!-- /agent:exchange -->",
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.md");
+        std::fs::write(&file, &current).unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("live-buffer")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        snapshot::save(&file, stale_snapshot).unwrap();
+        let file_str = file.canonicalize().unwrap().to_string_lossy().to_string();
+        agent_doc::debounce::record_live_buffer_digest(
+            &file_str,
+            stale_snapshot.len(),
+            &agent_doc::debounce::content_hash(stale_snapshot),
+        )
+        .unwrap();
+
+        let err = run_component_compact(
+            &file,
+            &current,
+            "exchange",
+            Some("Compacted summary."),
+            false,
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string().contains("visible editor buffer"),
+            "compact should reject a stale editor cache before writing: {err}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            current,
+            "compact must not overwrite the current file when JetBrains still advertises stale cache content"
+        );
+        assert_eq!(
+            snapshot::load(&file).unwrap().unwrap(),
+            stale_snapshot,
+            "failed compact must not advance a stale snapshot"
+        );
+        let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("visible_write_deferred_live_buffer_changed")
+                && ops_log.contains("source=compact_exchange_direct_write"),
+            "stale-cache compact rejection should be logged:\n{ops_log}"
+        );
+    }
+
+    #[test]
     fn component_compact_direct_fallback_rejects_late_post_exchange_scratch_comment() {
         let prompt = "The post-exchange scratch comment was typed while compact exchange was being computed. #spec-test-build-install-commit-push";
         let doc = concat!(

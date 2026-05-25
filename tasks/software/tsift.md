@@ -87,7 +87,14 @@ End-to-end Convex reconciliation + tombstone-prune workflow against the agent-lo
 10. Bump to v0.1.58 (docs-only entry).
 
 Will land tsift commit + superproject pointer + finalize with `--done gdbvacproof` once the packet returns.
-<!-- agent:boundary:51d978da -->
+### Re: #gdbvacproof sync in progress — opus-4-7
+
+Subagent task wrapper terminated, but the `tsift convex-sync` process it spawned is still running healthily in the background (PID 170199, 225 s in, 1955 of ~19200 chunks dispatched, all 200 OK at ~21 ms each, ~10 % complete, ETA ~30 more minutes).
+
+Container `convex-tsift` is up; backend logs show steady successful POSTs. BEFORE metrics already captured to `/tmp/gdbvacproof-full/` (size-before, freelist/page_count, status/doctor/scan timings, tombstone count). After sync finishes, the workflow continues with the paginated `--remote-snapshot` verification (~1200 pages), then the `compact --apply --prune-tombstones --confirmed-convex-reconciled` step (the actual `#gdbvacproof` closure proof), then cleanup.
+
+Re-invoke `/agent-doc tasks/software/tsift.md` in ~30 min and I'll pick up the trailing workflow (remote-snapshot verify → compact + prune → AFTER metrics → evidence doc + v0.1.58 bump → commit + push + close `--done gdbvacproof`).
+<!-- agent:boundary:26780e33 -->
 <!-- /agent:exchange -->
 ###
 <!--

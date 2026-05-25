@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -606,7 +606,33 @@ Commits:
 - parent repo: `90835bc7f` (`bump agent-doc compact cache docs`), pushed to `origin/main`.
 
 Escalation: none. Existing unrelated dirty files in the parent repo and submodule were left untouched.
-<!-- agent:boundary:cb941d51 -->
+### Re: #planperphase — gpt-5
+
+Implemented the per-phase backlog ID convention for plan-backed work.
+
+Changed:
+- `src/agent-doc/SKILL.md` now tells harness users to prefer one backlog ID per actionable phase for multi-phase implementation work, while keeping the parent plan file as context.
+- `src/agent-doc/runbooks/pending-ops.md` adds the fuller authoring guidance: one flush-left backlog item per actionable phase, stable custom IDs, queue entries and closeouts target concrete phase IDs, and `--pending-gate` is for that specific phase being blocked by review or an external signal.
+- `src/agent-doc/src/skill.rs` now covers that guidance in bundled and installed-runbook invariants. The file also carries rustfmt-only cleanup required by the current formatter.
+
+Verification:
+- `cargo test bundled_skill_contains_pending_capture_rules` passed.
+- `cargo test pending_ops_runbook_content_covers_plan_backed_items` passed.
+- `cargo test installed_harness_pending_ops_runbooks_cover_plan_backed_items` passed.
+- `cargo test rendered_harness_content_stays_compact` passed after folding the convention into the existing compact skill line.
+- Final `make check` passed in `src/agent-doc`.
+- During iteration, Cargo rejected one incorrect multi-filter `cargo test` invocation and `cargo fmt --check` rejected an attempted trim of rustfmt output; both were corrected before the final passing suite.
+
+Commits:
+- `src/agent-doc`: `52c5c1c1` (`docs: prefer per-phase backlog ids`), pushed to `origin/20260422/codex-agent-backend`.
+- parent repo: `ae4dcf6d6` (`bump agent-doc per-phase backlog docs`).
+
+CI:
+- Latest `agent-doc` CI run `26417380045` for head `52c5c1c1` is in progress: setup, checkout, dependency checkouts, tmux install, and toolchain steps passed; `Run make check` is in progress and `Run make tmux-ci` is pending.
+- Parent repo has no workflow named `CI`.
+
+Unrelated dirty files in the parent repo and `src/agent-doc` submodule were left untouched.
+<!-- agent:boundary:7a0fdf2b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -630,48 +656,12 @@ Error: authoritative actor generation 30 for tasks/professional/equityfundingsou
 ```
 -->
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~do [#crdtrespfx]~
-- ~do [#queueadvgated]~
-- ~do [#jbrsrbusysim]~
-- ~do [#cclooploop]~
-- ~do [#ipcdupfin23]~
-- ~do [#ccloopguard]~
-- ~do [#p6skillinstallreconcile]~
-- ~do [#agent-doc-commit-sibling]~
-- ~do [#adcs-binary]~
-- ~do [#adoc-jb-cache-cancel-stuck-cycle]~
-- ~do [#jbccc1]~
-- ~do [#jbccc2]~
-- ~do [#adoc-compact-during-turn-response-loss]~
-- ~do [#jbccc3]~
-- ~do [#jbccc4]~
-- ~do [#jbccc5]~
-- ~do [#adoc-baseline-drift-after-user-commit]~
-- ~do [#adoc-prefix-strip-uncommitted]~
-- ~do [#adoc-bdauc-simworld]~
-- ~do [#adoc-bdauc-preserve-session]~
-- ~do [#adoc-prefix-strip-session-check-whitelist]~
-- ~do [#adoc-bdauc-runbook]~
-- ~do [#adoc-bdauc-integration]~
-- ~do [#adoc-web-sse]~
-- ~do [#adoc-web-codemirror]~
-- ~do [#adoc-web-multidoc]~
-- ~do [#adoc-web-auth]~
-- ~do [#adoc-web-live-cycle]~
-- ~do [#jbrsrbusysw]~
-- ~do [#jbrsrbusyide]~
-- ~do [#jbccfix]~
-- ~do [#jbccreg]~
-- ~do [#jbccdocs]~
-- do [#planperphase]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#planperphase] Convention: split multi-phase plans into per-phase backlog IDs (e.g. #crdtrespfx1, #crdtrespfx2) instead of one parent ID that gets pending-gated. Lets queue auto-strike honor per-phase progress. Lower priority — the convention is opt-in for authors. [recommended]
 <!-- /agent:backlog -->
 
 ## Review

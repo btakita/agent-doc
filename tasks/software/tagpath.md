@@ -182,7 +182,7 @@ Filesystem-dependent rules (#9, #12) are gated behind `--fs-checks` so the defau
 - agent-loop `294c164`: `tagpath: bump submodule to 0.14.0 (p5sln)` → pushed.
 
 Auto-queue advances next to `tagpath watch`.
-<!-- agent:boundary:fb728c7c -->
+<!-- agent:boundary:11e596e5 -->
 <!-- /agent:exchange -->
 ###
 
@@ -192,7 +192,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#p5inc]~
 - ~do [#p5xfast]~
 - ~do [#p5sln]~
-- do [#p5wat]
+- ~do [#p5wat]~
 - do [#p5mcs]
 - do [#p5wnp]
 <!-- /agent:queue -->
@@ -200,7 +200,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#p5wat] tagpath watch: long-running watcher that emits index update events on file changes (newline-delimited JSON), suitable for tsift's incremental graph projection and agent-doc tag validators that need to react inside a cycle.
 - [ ] [#p5mcs] MCP convention helpers for tsift and agent-doc: add tagpath mcp tools family_by_path, lint_session_doc, and index_handle so both upstreams can call tagpath without bespoke shell wrappers.
 - [ ] [#p5wnp] [recommended] Publish the wasm-pack tarball to npm (@btakita/tagpath-wasm) so agent-doc front-end surfaces and tsift JS adapters can call parse / alias / normalize_query / search_over_rows in-browser without a native dep.
 <!-- /agent:backlog -->

@@ -52,7 +52,27 @@ SimWorld extension is a real feature build (Op variants + mocks for tmux pane st
 
 #### Queue
 Next head after this closes: `do [#jbccfix]` (Compact Exchange write/cache boundary fix — needs an investigation/plan cycle first; no plan file yet).
-<!-- agent:boundary:7fb8aa96 -->
+❯ Why is the queue still stalling? #spec-test-build-install-commit-push
+### Re: Why is the queue still stalling? — opus-4-7
+
+The queue isn't stalling at the binary level. Last cycle consumed `do [#jbrsrbusysim]` cleanly and advanced the queue (`queue_prompts: ["do [#jbccfix]", "do [#jbccreg]", "do [#jbccdocs]", "do [#planperphase]"]` in this preflight). What you're observing is the cycle-per-invocation pattern of Claude Code, not a queue defect.
+
+#### How auto-queue continuation actually works
+
+- **Codex** has a `Stop` hook in `.codex/hooks.json` that, after a successful closeout with `queue_active: true` + `agent:queue auto` + a ready next head, blocks the final answer and instructs the agent to invoke `agent-doc <FILE>` again **in the same turn**. The next head dispatches without operator intervention. See `specs/07-orchestration-commands.md:249`.
+- **Claude Code** has no equivalent Stop hook for this. Each `agent-doc <FILE>` invocation runs **one** preflight → dispatch → finalize cycle, then the turn ends. The queue head advances at the end of the cycle (`[queue] consumed` log line), but the next dispatch requires a fresh invocation — either you typing `agent-doc <FILE>` again, or a Claude Code automation layer (e.g. `/loop`) driving the re-invocation.
+- **OpenCode** is in the same shape as Claude Code today; no Stop hook for queue continuation.
+
+So the visible "stall" is the gap between the end of one Claude Code turn and your next manual invocation. Each turn IS advancing the queue.
+
+#### Options to make it auto-loop in Claude Code
+
+1. **Use `/loop`** — invoke `/loop agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` and the harness re-runs the skill on its self-paced cadence. The queue will drain across turns without manual re-invocation.
+2. **Switch to Codex for queue-heavy sessions** — the Codex Stop hook gives same-turn continuation.
+3. **File a follow-up** to add a Claude Code Stop-hook equivalent for `agent-doc` (would need API surface from the Claude Code harness; not currently available). Out of scope for the binary itself.
+
+Per the `#spec-test-build-install-commit-push` preset, no spec/test/build/install/commit/push action is appropriate this cycle — the question is about workflow mechanics, not a code change. Next queue head remains `do [#jbccfix]` and will dispatch on the next `agent-doc <FILE>` invocation.
+<!-- agent:boundary:433aa6a2 -->
 <!-- /agent:exchange -->
 ###
 <!--

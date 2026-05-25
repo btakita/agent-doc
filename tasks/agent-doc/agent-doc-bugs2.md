@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -236,8 +236,32 @@ I'd land this as `#adoc-web-multidoc` (Phase 4) + `#adoc-web-sse` (Phase 2) comb
 4. Replace `index.html` with a two-pane layout (nav + editor) that subscribes to SSE.
 5. Keep all writes flowing through plain `git add`/`commit` (Phase 1 contract) until Phase 6 hooks live cycles.
 
-About a day of focused work; want me to start?
-<!-- agent:boundary:8d7bf655 -->
+❯ About a day of focused work; want me to start?
+❯ Can the web server be run on a directory and auto-detect all agent documents, listening to the filesystem for add, remove, update documents, and with navigation?
+### Re: directory-mode web server — gpt-5
+
+Yes. The current `agent-doc serve <FILE>` MVP can grow into `agent-doc serve <DIR>` cleanly without changing the core response-cycle semantics. I would make directory mode a first-class server mode: if the argument is a directory, the server scans that root, keeps an in-memory session-document index, exposes navigation, and pushes filesystem changes to connected browsers.
+
+The detection path should be conservative:
+
+- Read `.agent-doc/sessions.json` first and include registered session documents.
+- Walk `*.md` files under the served directory and include only files that look like agent-doc sessions, e.g. frontmatter with `agent_doc_session:`, `agent_doc_format:`, or the legacy session marker.
+- Cache classification by path plus mtime so normal navigation does not repeatedly parse every file.
+
+The live-update path should use `notify` for create / modify / remove events, debounce bursts around 200 ms, then reclassify the affected file and publish an SSE event on `/events`. Browser tabs can update the navigation immediately; if the currently open document changed on disk, the editor should reload or show a conflict prompt if it has unsaved local edits. For network filesystems or watcher errors, fall back to a short polling loop rather than making directory mode unreliable.
+
+Navigation should come from a simple JSON projection:
+
+- `GET /api/docs` returns session docs with relative path, display title, last modified time, and optional state badges.
+- `GET /doc?path=<rel-path>` reads the selected document.
+- `POST /save?path=<rel-path>` saves the selected document through the same Phase 1 plain-git write path.
+- `GET /events` streams `doc-added`, `doc-removed`, and `doc-changed` events.
+- The browser URL can use `#/<rel-path>` so back/forward navigation works without adding server-side routing complexity.
+
+This is basically the useful intersection of the existing `#adoc-web-sse` and `#adoc-web-multidoc` backlog items. I would implement them together because the navigation is much more valuable when it stays current as files are added, removed, renamed, or finalized by another tool.
+
+No code changes in this cycle; this was a design answer. The next implementation unit should be a combined directory-mode/SSE pass over `serve.rs` and `assets/serve/index.html`, with focused tests around document classification, path containment, watcher-driven index updates, and save-path validation.
+<!-- agent:boundary:43e04f73 -->
 <!-- /agent:exchange -->
 ###
 <!--

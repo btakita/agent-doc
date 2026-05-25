@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -170,7 +170,7 @@ That is a separate small change but touches enough files that it deserves its ow
 
 - `#jbrsrbusysim` — SimWorld + telemetry coverage now unblocked by this cycle.
 - New backlog entry needed for the auto-compact-default flip; capturing it via `--pending-add` on this finalize so the work isn't lost.
-<!-- agent:boundary:d77ea5e4 -->
+<!-- agent:boundary:686b825d -->
 <!-- /agent:exchange -->
 ###
 <!--

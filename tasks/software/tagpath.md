@@ -197,6 +197,8 @@ Three independent fix paths — picking one is operator judgment:
 2. **Switch to git source**: `git = "https://github.com/btakita/tagpath", branch = "main"`. Loses the local-dev convenience.
 3. **Publish tagpath 0.18 and drop the override**: cleanest long-term, but tagpath crates.io tops out at 0.10.0 — the publish gap noted in `#p6lintbnd`.
 
+❯ Can we publish tagpath 0.11 instead?
+
 #### What I did NOT do
 
 - No `git merge` or `git push` on agent-doc main
@@ -210,7 +212,38 @@ The previous finalize attempt left nine stale `superseded`-state capture sidecar
 #### Queue handling
 
 Auto-loop stops here. Backlog now has `#p6adfcitagpath` (the CI fix) at the top; `#p6adfmerge` lives under Review with `[/]` waiting for CI to clear. Remaining unblocked queue (`#p6tsifull`, `#p6tspub`, `#p6skl`, `#p6ren`, `#p6meta`) is yours to reorder or restart at will.
-<!-- agent:boundary:c243d992 -->
+### Re: Can we publish tagpath 0.11 instead? — opus-4-7
+
+Yes — and it's the cleanest option.
+
+#### Why 0.11 works
+
+- crates.io tops out at **v0.10.0**.
+- Local tags: **v0.1.0 → v0.6.2 → v0.10.0**. No tags exist for v0.11 through v0.18 — they were never released, just bumped in `Cargo.toml`.
+- Only **12 commits** between v0.10.0 and HEAD, so the gap is small in commit terms even though Cargo.toml has marched ahead by 8 minor versions.
+- Your MEMORY rule on this ("unpublished tags: move the tag forward to HEAD rather than bumping to a new version") applies directly. There are no tags to move, but the same logic says we don't owe v0.11–v0.18 a real release.
+
+#### What it would take
+
+1. **Bump `Cargo.toml` down**: `0.18.0 → 0.11.0`. Same for `pyproject.toml`.
+2. **Update `VERSIONS.md`** with one consolidated v0.11.0 entry summarizing all the work since v0.10.0 (MCP install helper, lint relaxation, ontology, dyn-grammar, WASM, etc.).
+3. **Publish**: `git tag v0.11.0 && git push origin v0.11.0 && cargo publish` — PyPI fires automatically.
+4. **Update agent-doc dependency** from `version = "0.18"` to `version = "0.11"` in `src/agent-doc/Cargo.toml`. After this, the path override can be dropped entirely → no more "tagpath sibling missing" CI failures → `#p6adfmerge` unblocks.
+
+#### One thing to confirm before bumping down
+
+Anything that *publicly imports* `tagpath` and pins the version in its own manifest needs the new number too. Quick survey:
+
+- `src/tsift/Cargo.toml` → `tagpath = { path = "../tagpath", version = "0.18" }` per `#p6tspub` backlog text. Will need the same bump.
+- agent-doc Cargo.toml (already noted above).
+- I should grep the workspace for other `tagpath = ` entries before publishing.
+
+#### Recommendation
+
+Bump `tagpath` to **0.11.0**, publish, then update both `src/agent-doc` and `src/tsift` Cargo.toml to `version = "0.11"`. That single move retires `#p6adfcitagpath` (CI sees a real crates.io version, drops the path override) AND `#p6tspub` (same fix unblocks tsift's publish path).
+
+Want me to do the bump + publish in the next cycle? If yes, the natural ordering is: tagpath 0.11.0 publish → agent-doc Cargo.toml update → tsift Cargo.toml update → then proceed with `#p6adfmerge`.
+<!-- agent:boundary:15ada67a -->
 <!-- /agent:exchange -->
 ###
 
@@ -225,6 +258,8 @@ preset #spec-test-build-install-commit-push
 - ~do [#p6sklsymagentdoc]~
 - ~do [#p6sklsymcorky]~
 - ~do [#p6adfmerge]~
+- do [#p6sklsymadocrunbooks]
+- do [#p6adfcitagpath]
 - do [#p6tsifull]
 - do [#p6tspub]
 - do [#p6skl]

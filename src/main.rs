@@ -112,6 +112,7 @@ mod resync;
 mod route;
 mod run;
 mod security;
+mod serve;
 mod session_accretion;
 mod session_actor;
 mod session_actor_cmd;
@@ -707,6 +708,17 @@ enum Commands {
     SessionCheck {
         /// Path to the session document
         file: PathBuf,
+    },
+    /// Serve a localhost HTTP markdown editor for the session document (Phase 1 MVP — see tasks/agent-doc/plan-web-interface.md)
+    Serve {
+        /// Path to the session document
+        file: PathBuf,
+        /// Bind host (default: 127.0.0.1)
+        #[arg(long)]
+        host: Option<String>,
+        /// Bind port (default: 7333)
+        #[arg(long)]
+        port: Option<u16>,
     },
     /// Print document content to stdout (full file or a single named component).
     Read {
@@ -1925,6 +1937,9 @@ fn main() -> anyhow::Result<()> {
             }
         },
         Commands::SessionCheck { file } => session_check::run(&file),
+        Commands::Serve { file, host, port } => {
+            serve::run(serve::ServeOptions::new(file, host, port))
+        }
         Commands::Read { file, component } => read::run(&file, component.as_deref()),
         Commands::ResponseToc {
             file,

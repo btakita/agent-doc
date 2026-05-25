@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>agent-doc</title>
+  <style>
+    :root { --bg: #0f1115; --fg: #e6e6e6; --muted: #888; --accent: #4ea1ff; --warn: #ffb454; --err: #ff6b6b; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, sans-serif; height: 100vh; display: flex; flex-direction: column; }
+    header { display: flex; gap: 12px; align-items: center; padding: 8px 12px; background: #181b22; border-bottom: 1px solid #232735; flex-shrink: 0; }
+    header h1 { font-size: 14px; margin: 0; font-weight: 600; }
+    header .status { color: var(--muted); flex: 1; font-family: ui-monospace, monospace; font-size: 12px; }
+    header .status.ok { color: #6cdf6c; }
+    header .status.warn { color: var(--warn); }
+    header .status.err { color: var(--err); }
+    button { background: var(--accent); color: #fff; border: 0; border-radius: 4px; padding: 6px 14px; font-size: 13px; cursor: pointer; font-weight: 600; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button.secondary { background: #2a2f3a; color: var(--fg); }
+    textarea { flex: 1; width: 100%; background: #0b0d11; color: var(--fg); border: 0; padding: 16px; font: 13px/1.5 ui-monospace, "SF Mono", Menlo, monospace; resize: none; outline: none; tab-size: 2; }
+    .footer { padding: 6px 12px; background: #181b22; border-top: 1px solid #232735; color: var(--muted); font-size: 11px; font-family: ui-monospace, monospace; display: flex; gap: 16px; flex-shrink: 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>agent-doc</h1>
+    <div class="status" id="status">loading…</div>
+    <button id="reload" class="secondary" title="Discard unsaved edits and reload from disk">reload</button>
+    <button id="save" disabled>save (Ctrl+S)</button>
+  </header>
+  <textarea id="editor" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off"></textarea>
+  <div class="footer">
+    <span id="bytes">0 bytes</span>
+    <span id="head">HEAD —</span>
+    <span id="dirty"></span>
+  </div>
+
+  <script>
+    const editor = document.getElementById("editor");
+    const status = document.getElementById("status");
+    const saveBtn = document.getElementById("save");
+    const reloadBtn = document.getElementById("reload");
+    const bytesEl = document.getElementById("bytes");
+    const headEl = document.getElementById("head");
+    const dirtyEl = document.getElementById("dirty");
+
+    let savedContent = "";
+    let saving = false;
+
+    function setStatus(text, cls) {
+      status.textContent = text;
+      status.className = "status " + (cls || "");
+    }
+
+    function updateDirty() {
+      const dirty = editor.value !== savedContent;
+      saveBtn.disabled = saving || !dirty;
+      dirtyEl.textContent = dirty ? "● unsaved" : "";
+      bytesEl.textContent = editor.value.length + " bytes";
+    }
+
+    async function loadDoc() {
+      setStatus("loading…");
+      try {
+        const r = await fetch("/doc", { cache: "no-store" });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const text = await r.text();
+        savedContent = text;
+        editor.value = text;
+        setStatus("loaded", "ok");
+        updateDirty();
+      } catch (e) {
+        setStatus("load failed: " + e.message, "err");
+      }
+    }
+
+    async function saveDoc() {
+      if (saving) return;
+      saving = true;
+      saveBtn.disabled = true;
+      setStatus("saving via agent-doc write --commit…");
+      try {
+        const r = await fetch("/save", {
+          method: "POST",
+          headers: { "Content-Type": "text/markdown; charset=utf-8" },
+          body: editor.value,
+        });
+        if (!r.ok) {
+          const err = await r.text();
+          throw new Error(err.split("\n")[0] || ("HTTP " + r.status));
+        }
+        const result = await r.json();
+        savedContent = editor.value;
+        headEl.textContent = "HEAD " + (result.head || "—");
+        setStatus("saved (HEAD " + result.head + ")", "ok");
+      } catch (e) {
+        setStatus("save failed: " + e.message, "err");
+      } finally {
+        saving = false;
+        updateDirty();
+      }
+    }
+
+    editor.addEventListener("input", updateDirty);
+    saveBtn.addEventListener("click", saveDoc);
+    reloadBtn.addEventListener("click", () => {
+      if (editor.value !== savedContent &&
+          !confirm("Discard unsaved edits and reload from disk?")) return;
+      loadDoc();
+    });
+    document.addEventListener("keydown", (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+        e.preventDefault();
+        if (!saveBtn.disabled) saveDoc();
+      }
+    });
+
+    loadDoc();
+  </script>
+</body>
+</html>

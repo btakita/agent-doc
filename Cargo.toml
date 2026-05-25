@@ -57,6 +57,7 @@ alacritty_terminal = "0.26"
 signal-hook = "0.3"
 rusqlite = { version = "0.32", features = ["bundled"] }
 tagpath = { version = "0.11.1", default-features = false }
+tiny_http = "0.12"
 
 [dev-dependencies]
 assert_cmd = "2"

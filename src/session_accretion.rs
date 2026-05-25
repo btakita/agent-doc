@@ -109,10 +109,18 @@ fn inspect_at(file: &Path, content: &str, now: u64) -> Result<SessionAccretionRe
     let (exchange_lines, response_sections) = exchange_metrics(content);
     let (recent_committed_cycles, recent_noop_closeouts) = recent_cycle_metrics(file, now)?;
     let startup_miss_active = crate::startup_miss::load(file)?.is_some();
-    let session_id = crate::frontmatter::parse_for_file(content, file)
-        .ok()
-        .and_then(|(fm, _)| fm.session.map(|s| s.trim().to_string()))
+    let parsed_frontmatter = crate::frontmatter::parse_for_file(content, file).ok();
+    let session_id = parsed_frontmatter
+        .as_ref()
+        .and_then(|(fm, _)| fm.session.as_ref().map(|s| s.trim().to_string()))
         .filter(|s| !s.is_empty());
+    let auto_compact_opt_in = parsed_frontmatter
+        .as_ref()
+        .map(|(fm, _)| fm.auto_compact.is_some())
+        .unwrap_or(false)
+        || crate::project_config::load_project_for_doc(file)
+            .agent_doc_auto_compact
+            .is_some();
     let recent_restart_count = session_id
         .as_deref()
         .map(|session_id| recent_restart_metrics(file, session_id, now))
@@ -188,10 +196,17 @@ fn inspect_at(file: &Path, content: &str, now: u64) -> Result<SessionAccretionRe
             || recent_committed_cycles >= WARN_RECENT_COMMITTED_CYCLES
             || recent_noop_closeouts >= WARN_RECENT_NOOP_CLOSEOUTS
         {
-            guidance.push(format!(
-                "Run `agent-doc compact {} --commit` before another large turn.",
-                file.display()
-            ));
+            if auto_compact_opt_in {
+                guidance.push(format!(
+                    "Run `agent-doc compact {} --commit` before another large turn.",
+                    file.display()
+                ));
+            } else {
+                guidance.push(format!(
+                    "Exchange is large; ask the user before compacting. Auto-compact requires an explicit `agent_doc_auto_compact` opt-in in frontmatter or `.agent-doc/config.toml` (currently off). If the user approves, run `agent-doc compact {} --commit`.",
+                    file.display()
+                ));
+            }
         }
         if recent_restart_count >= WARN_RESTART_EVENTS
             || startup_miss_active
@@ -467,6 +482,85 @@ mod tests {
                 .iter()
                 .any(|line| line.contains("agent-doc compact")),
             "expected compact guidance, got {:?}",
+            report.guidance
+        );
+        assert!(
+            report
+                .guidance
+                .iter()
+                .any(|line| line.contains("ask the user") && line.contains("agent_doc_auto_compact")),
+            "expected opt-in gated compact guidance when agent_doc_auto_compact is unset, got {:?}",
+            report.guidance
+        );
+        assert!(
+            !report
+                .guidance
+                .iter()
+                .any(|line| line.starts_with("Run `agent-doc compact")),
+            "auto-compact must be off by default; should not emit imperative compact guidance without opt-in, got {:?}",
+            report.guidance
+        );
+    }
+
+    #[test]
+    fn inspect_emits_imperative_compact_guidance_when_auto_compact_opt_in() {
+        let exchange_lines = (0..170)
+            .map(|idx| format!("line {idx}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let content = format!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nagent_doc_auto_compact: 180\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n{exchange_lines}\n<!-- /agent:exchange -->\n"
+        );
+        let (_dir, doc) = setup_doc(&content);
+
+        let report = inspect(&doc).unwrap();
+
+        assert_eq!(report.level, SessionAccretionLevel::Warn);
+        assert!(
+            report
+                .guidance
+                .iter()
+                .any(|line| line.starts_with("Run `agent-doc compact")),
+            "expected imperative compact guidance when frontmatter opts in, got {:?}",
+            report.guidance
+        );
+        assert!(
+            !report
+                .guidance
+                .iter()
+                .any(|line| line.contains("ask the user")),
+            "opt-in caller should not get the gated phrasing, got {:?}",
+            report.guidance
+        );
+    }
+
+    #[test]
+    fn inspect_emits_imperative_compact_guidance_when_project_config_opt_in() {
+        let exchange_lines = (0..170)
+            .map(|idx| format!("line {idx}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let content = format!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n{exchange_lines}\n<!-- /agent:exchange -->\n"
+        );
+        let (dir, doc) = setup_doc(&content);
+        let config_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        std::fs::write(
+            config_dir.join("config.toml"),
+            "agent_doc_auto_compact = 180\n",
+        )
+        .unwrap();
+
+        let report = inspect(&doc).unwrap();
+
+        assert_eq!(report.level, SessionAccretionLevel::Warn);
+        assert!(
+            report
+                .guidance
+                .iter()
+                .any(|line| line.starts_with("Run `agent-doc compact")),
+            "expected imperative compact guidance when project config opts in, got {:?}",
             report.guidance
         );
     }

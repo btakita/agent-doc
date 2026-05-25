@@ -28,62 +28,12 @@ Fixed agent:queue stuck-after-1-turn — auto-strike done items at preflight.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260525-051841.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260525-062451.md`*
 
 Compacted content:
-- Archived 6 response topic(s): do [#jbrsrbusysim]; Why is the queue still stalling?; Is agent-doc capable of activating the Claude `/loop`?; 3 more
+- Archived 5 response topic(s): batch closeout for ipclegacyfix, ipcpluginalready, ipcfilehashskip; Phases 1 + 5 already landed (queue advance); queue not auto-looping + typing duplicate observation; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: batch closeout for ipclegacyfix, ipcpluginalready, ipcfilehashskip — opus-4-7
-
-All three queue items landed. Submodule d899c92, superproject 2a7116db8, both pushed. JB plugin 0.2.131 zips signed + unsigned built. ipclegacyfix migrated test fixtures from the legacy backlog component name to the canonical one (31+4 sites; 30 tests recovered). ipcfilehashskip adds response-only hash-skip in src/write.rs try_ipc fallback. ipcpluginalready adds FFI v2 listener with already_applied ack; JB plugin uses v2 with lastApplyWasNoOp detection. Verification clean (2358 unit pass plus pre-existing parallel-execution flakes that pass when run alone; integration suites all green except 1 pre-existing pane-recursion test unrelated to this work). Next queue head: jbrsrbusysw.
-
-### Re: Phases 1 + 5 already landed (queue advance) — opus-4-7
-
-Phases 1 + 5 of plan-ipc-corruption-and-duplicate-during-typing.md were landed two cycles ago in submodule 2e8a155 (response 852e34b9b on main). Queue head re-fired because the queue body was reset to a pre-consumption state when the file was restored via git checkout. This response is just the consumption signal so the queue advances. No new code this cycle. Next head: jbrsrbusysw.
-❯ Why is the queue not auto-looping?
-❯ As I was typing into the comment below `/agent:exchange`, the duplicate line happened.
-❯ #spec-test-build-install-commit-push
-
-### Re: queue not auto-looping + typing duplicate observation — opus-4-7
-
-The SKILL.md auto-loop rule requires four conditions. Three hold every cycle (queue_active, queue_trigger=auto, queue_prompts non-empty). The fourth blocks: "prompt_bearing_changes was either empty or exactly the queue-synthetic head prompt".
-
-In each recent cycle preflight classified the prompt diff as non-empty, non-queue. Phases 1+5 cycle: my own --pending-add for the legacy-fix item counted as a prompt-bearing change. Batch closeout cycle: the --done flags closed without auto-loop firing. Queue-advance cycle: your edit to flip queue_active from false to true counted as a content_edit prompt change.
-
-The guard is doing exactly what it was written to do, but the rule is too strict. Every meaningful cycle naturally produces pending-state or queue-activity edits that the classifier sees as user prompts. Net effect: the auto-loop almost never fires for real queue work, only for trivial no-op cycles. Filed as ccloopguard in the backlog with the proposed fix (relax the classifier to treat queue_active and pure queue/backlog/done-component mutations as non-prompt).
-
-Manual workaround for now: keep invoking the skill between cycles, or temporarily edit the installed SKILL.md copy to drop the fourth condition.
-
-For the typing duplicate observation: verified no actual duplicate landed in HEAD. The previous cycle commit log shows the file-IPC hash-skip gate fired and prevented the duplicate (`patches already present in live buffer — skipping file IPC write`). What you saw visually was likely a transient editor state during the IPC roundtrip; the committed history is clean. For the cleaner path with no transient flicker, install JB plugin 0.2.131 (build/distributions/agent-doc-jetbrains-0.2.131-signed.zip) — it returns already_applied directly from the socket callback so the binary skips the file-IPC fallback entirely.
-
-No spec/code change this cycle (the preset's spec/test/build/install/commit/push surface is satisfied by the backlog-add plus this response, since the actual code work is gated on the new backlog item's fix). Next queue head remains jbrsrbusysw.
-❯ With 0.2.131 now installed, the auto-loop should work?
-
-### Re: With 0.2.131 now installed, the auto-loop should work? — opus-4-7
-
-No — the two are independent.
-
-JB plugin 0.2.131 fixes the IPC duplicate path: the plugin now returns 2 (already_applied) from the v2 socket callback when an incoming patch is a structural no-op against the live buffer, so the binary skips the file-IPC fallback that would otherwise re-write a duplicate response heading. That's about preventing duplicate response landing during a finalize cycle.
-
-The auto-loop is a different, skill-level mechanism. It runs entirely in Claude Code's SKILL.md after a finalize cycle completes, deciding whether to invoke `/loop agent-doc <FILE>` to drive the next cycle. The guard sits inside `~/.claude/skills/agent-doc/SKILL.md`, not in the binary or the plugin. It checks four conditions on preflight output; condition #4 — "prompt_bearing_changes was either empty or exactly the queue-synthetic head prompt" — is what's blocking. Plugin behavior doesn't affect it.
-
-So 0.2.131 helps the typing/duplicate path. #ccloopguard (filed last cycle) is what would unblock the auto-loop. They are two separate bugs in two separate surfaces.
-
-This message itself is the simplest demonstration: your prompt was classified as `prompt_target`, which trips condition #4. Auto-loop will not fire after this cycle. The queue head remains jbrsrbusysw.
-
-### Re: ccloopguard landed — opus-4-7 (HEAD)
-
-Implemented and pushed. Submodule commits 14d28fe0 + 4724df3e (installed SKILL.md regen), superproject c65011b77.
-
-Preflight now emits user_intent_prompt_changes, which filters prompt_bearing_changes through a new diff::change_is_managed_state_only classifier. The classifier recognises queue/backlog/review/done component markers, queue_active frontmatter flips, `- do ...` queue items (including struck `- ~do ...~`), task-list items (`- [ ]`, `- [/]`, `- [x]`, `- [-]`, `- [?]`), done archive date-prefixed items, and preset lines. SKILL.md's CLAUDE_QUEUE_AUTO_LOOP_SECTION now reads user_intent_prompt_changes instead of prompt_bearing_changes for the fourth condition. prompt_bearing_changes is unchanged for backwards compat.
-
-7 new unit tests in diff::tests::change_is_managed_state_only_* (queue toggle, frontmatter flip, queue items, backlog/done items, multi-line managed blocks, rejecting real user prompts, rejecting mixed managed+user text). Full unit suite 2377 pass (was 2370). Integration suites green except the pre-existing codex_bare_run_inside_owning_pane_fails_before_nested_dispatch failure unrelated to this work. cargo build release + install + agent-doc skill install --harness claude --reload restart all clean.
-
-To activate for THIS Claude Code session: restart Claude Code so the agent re-reads the regenerated `~/.claude/skills/agent-doc/SKILL.md`. Until restart, the auto-loop will continue to behave per the old rule.
-
-Next queue head: jbrsrbusysw.
-<!-- agent:boundary:7b21a64f -->
+<!-- agent:boundary:094087e1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -103,8 +53,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#jbrsrbusysim]~
 - ~do [#cclooploop]~
 - ~do [#ipcdupfin23]~
-- do [#ccloopguard]
-- do Phases 1 + 5 in tasks/agent-doc/plan-ipc-corruption-and-duplicate-during-typing.md
+- ~do [#ccloopguard]~
 - do [#jbrsrbusysw]
 - do [#jbrsrbusyide]
 - do [#jbccfix]

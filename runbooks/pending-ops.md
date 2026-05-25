@@ -140,6 +140,15 @@ agent-doc write plan.md \
 That keeps the backlog self-describing: the pending line already tells the next
 cycle which concrete plan file exists and should be opened.
 
+For multi-phase implementation plans, prefer one flush-left backlog item per
+actionable phase with a stable custom id (for example `#crdtrespfx1`,
+`#crdtrespfx2`) instead of one parent id that gets repeatedly
+`--pending-gate`d after partial progress. The parent plan file can remain the
+overview, but queue entries and closeouts should target the concrete phase ids.
+Use `--pending-gate` when that specific phase is code-complete and waiting on
+review or an external signal, not merely because later phases in the same plan
+remain open.
+
 If the document is being used collaboratively, treat that cross-document read as
 a security boundary. Shared docs should carry both
 `agent_doc_collaboration: shared` and an auditable

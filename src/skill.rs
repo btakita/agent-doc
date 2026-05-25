@@ -558,12 +558,11 @@ fn install_runbooks_for(env: agent_kit::detect::Environment, root: Option<&Path>
     let entries = std::fs::read_dir(&runbooks_dir)
         .with_context(|| format!("read runbooks dir {}", runbooks_dir.display()))?;
     for entry in entries {
-        let entry = entry.with_context(|| {
-            format!("read runbooks dir entry under {}", runbooks_dir.display())
-        })?;
-        let file_type = entry.file_type().with_context(|| {
-            format!("inspect runbook entry {}", entry.path().display())
-        })?;
+        let entry = entry
+            .with_context(|| format!("read runbooks dir entry under {}", runbooks_dir.display()))?;
+        let file_type = entry
+            .file_type()
+            .with_context(|| format!("inspect runbook entry {}", entry.path().display()))?;
         if !file_type.is_file() {
             continue;
         }
@@ -579,11 +578,7 @@ fn install_runbooks_for(env: agent_kit::detect::Environment, root: Option<&Path>
         }
         std::fs::remove_file(&path)
             .with_context(|| format!("reap stale runbook {}", path.display()))?;
-        eprintln!(
-            "[{}] reaped stale runbook → {}",
-            env,
-            path.display()
-        );
+        eprintln!("[{}] reaped stale runbook → {}", env, path.display());
     }
 
     Ok(())
@@ -1101,9 +1096,7 @@ mod tests {
         let installed: std::collections::HashSet<String> = std::fs::read_dir(&runbooks_dir)
             .unwrap()
             .filter_map(|entry| entry.ok())
-            .filter(|entry| {
-                entry.path().extension().and_then(|s| s.to_str()) == Some("md")
-            })
+            .filter(|entry| entry.path().extension().and_then(|s| s.to_str()) == Some("md"))
             .filter_map(|entry| entry.file_name().to_str().map(|s| s.to_string()))
             .collect();
         let canonical: std::collections::HashSet<String> = super::BUNDLED_RUNBOOKS
@@ -1150,14 +1143,8 @@ mod tests {
     fn install_runbooks_reaps_for_codex_and_opencode() {
         let dir = tempfile::tempdir().unwrap();
         for (env, rel) in [
-            (
-                Environment::Codex,
-                ".codex/runbooks",
-            ),
-            (
-                Environment::OpenCode,
-                ".opencode/skills/agent-doc/runbooks",
-            ),
+            (Environment::Codex, ".codex/runbooks"),
+            (Environment::OpenCode, ".opencode/skills/agent-doc/runbooks"),
         ] {
             let runbooks_dir = dir.path().join(rel);
             std::fs::create_dir_all(&runbooks_dir).unwrap();
@@ -1230,6 +1217,8 @@ mod tests {
             assert!(content.contains("include that exact plan"));
             assert!(content.contains("file path in the item text"));
             assert!(content.contains("plan-spec2-rollout.md"));
+            assert!(content.contains("one flush-left backlog item per"));
+            assert!(content.contains("queue entries and closeouts should target"));
         }
     }
 
@@ -1569,6 +1558,8 @@ mod tests {
         assert!(SKILL_TEMPLATE.contains("[recommended]"));
         assert!(SKILL_TEMPLATE.contains("beginning of `agent:backlog`"));
         assert!(SKILL_TEMPLATE.contains("adjacent to its predecessor"));
+        assert!(SKILL_TEMPLATE.contains("multi-phase implementation work"));
+        assert!(SKILL_TEMPLATE.contains("prefer one backlog ID per actionable phase"));
         assert!(SKILL_TEMPLATE.contains("`do #id` closeout rule"));
         assert!(SKILL_TEMPLATE.contains("--done <id>"));
         assert!(SKILL_TEMPLATE.contains("pending_done_guard"));
@@ -2026,6 +2017,8 @@ mod tests {
         assert!(content.contains("include that exact plan"));
         assert!(content.contains("file path in the item text"));
         assert!(content.contains("plan-spec2-rollout.md"));
+        assert!(content.contains("one flush-left backlog item per"));
+        assert!(content.contains("queue entries and closeouts should target"));
     }
 
     #[test]

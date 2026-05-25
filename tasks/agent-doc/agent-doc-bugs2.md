@@ -88,7 +88,34 @@ The plan's "tests/run_integration.rs (or sibling)" requirement is satisfied by t
 - Superproject commit: `bcc55ddea` — `agent-doc: bump submodule for #jbccc5 test`.
 
 Marking `#jbccc5` done. Parent `#adoc-jb-cache-cancel-stuck-cycle` is now fully closed: Phase 1 (#jbccc1) SimWorld baseline, Phase 2 (#jbccc2) JB plugin work tracked separately, Phase 3 (#jbccc3) binary auto-recovery, Phase 4 (#jbccc4) runbook, Phase 5 (#jbccc5) regression coverage all in HEAD.
-<!-- agent:boundary:19452d32 -->
+### Re: do [#adoc-baseline-drift-after-user-commit] — opus-4-7
+
+Drafted the plan; not implementing the fix in this auto-loop iteration since the engineering surface is 5 phases across capture/repair/preflight/reset/runbooks and parallels the structure I just landed for the JB cache-conflict parent.
+
+#### Diagnosis (brief)
+
+- The strict gate fires in `src/capture.rs:437` `validate_replay`: it compares whole-file SHA-256 hashes. Any manual user commit on top — including a benign one that touches backlog text outside the captured response body — invalidates replay.
+- Same gate is consumed transitively by `repair::run` (`src/repair.rs:1396`), `preflight`, and `write --commit` flows. The only sanctioned recovery is `agent-doc reset --from-current`, which is destructive (drops session id + snapshot history + `agent-doc undo` chain).
+- This is a different shape from the previous parent bug: that one was about the binary's own write path landing without commit. This bug is about a user-driven manual commit landing on top of an already-clean cycle, and the captured baseline never refreshing to absorb it.
+
+#### Plan filed
+
+`tasks/agent-doc/plan-baseline-drift-after-user-commit.md` covers five phases:
+
+1. **SimWorld** scenario with three drift branches: benign outside-response drift (auto-refresh), inside-response drift mismatch (fail closed), inside-response drift matches normalized (adopt).
+2. **Binary** — `validate_replay` classifies benign-drift / normalized-match / corruption and auto-refreshes the baseline + capture hashes for the safe cases.
+3. **`agent-doc reset --from-current --preserve-session`** — non-destructive recovery that keeps session id, snapshot history, and capture chain.
+4. **Documentation** — new baseline-drift runbook, SKILL.md catalog.
+5. **Regression coverage** — SimWorld + an in-source preflight integration test mirroring the just-landed Phase 3 pattern (real git + cycle state).
+
+#### Status of the parent item
+
+Staying open in `agent:backlog`. The plan path is now resolvable; implementation across phases is the next move and would be cleanest split into per-phase IDs per the `#planperphase` recommendation.
+
+#### Closeout
+
+Superproject commit: `b9f4c4971`. No submodule change this turn (plan lives in the parent repo).
+<!-- agent:boundary:7cac6d03 -->
 <!-- /agent:exchange -->
 ###
 <!--

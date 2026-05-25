@@ -47,6 +47,10 @@ Mode resolution precedence (highest first):
 
 The error message preserves tagpath's CLI format — `<path>:<line>:<col> <severity>: <message> [<rule>]` with an optional `hint:` line — so the fix can be made and re-finalized in a single round-trip. See tagpath SPEC §16 (agent-doc dialect) for the full rule catalog. The integration lives in `src/lint_gate.rs` and is wired through `src/write.rs::run_command` for `finalize` / `write --commit`, and `src/stream.rs::run` for `stream`.
 
+## JetBrains File Cache Conflict
+
+When the IDE surfaces a File Cache Conflict dialog mid-IPC and the user cancels, `preflight` auto-recovers the wedge via the binary-owned commit boundary when the working tree still matches the snapshot. The cancel-branch contract, the auto-recovery preconditions, and the manual fallback for cases auto-recovery declines live in [jb-cache-conflict.md](jb-cache-conflict.md).
+
 ## Anti-Patterns
 
 - Do **not** stop after bare `agent-doc write` for a final response.

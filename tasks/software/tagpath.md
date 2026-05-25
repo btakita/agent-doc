@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 
@@ -239,27 +239,41 @@ Verification:
 Commits:
 - `btakita/tagpath@d51aed6` pushed to `main`.
 - Parent submodule pointer committed locally as `agent-loop@0ca2dadc8`; I will push the parent commit after this document finalize, per the agent-doc closeout rule.
-<!-- agent:boundary:aac624bc -->
+### Re: #p6meta — gpt-5
+
+Implemented `tagpath meta-index <workspace-root>` for workspace-level aggregation of existing per-project `.naming/index.json` files.
+
+What changed:
+- Added `tagpath meta-index [<WORKSPACE_ROOT>] [--output <PATH>] [--format text|json]`.
+- Added `src/meta_index.rs` with `MetaIndex` JSON schema, atomic writer/reader, workspace-scoped `meta:fam:*` and `meta:mem:*` handles, and indexed family search helpers.
+- Default output is `<workspace-root>/.naming/meta-index.json`; the command reads existing child indexes and does not rebuild them.
+- Added integration coverage for sibling project aggregation and write/read round trips.
+- Updated README and SPEC docs for the new command and schema.
+
+Commits:
+- tagpath: `e626a386ec0f16639737ff0fcee2689baec3ddff` (`feat: add workspace meta-index`)
+- agent-loop parent pointer: `3c63841ba` (`tagpath: add workspace meta-index`)
+
+Verification:
+- `cargo test --test test_meta_index`
+- `cargo test`
+- `cargo clippy`
+- `cargo install --path .`
+- `tagpath meta-index . --format text --output /tmp/tagpath-meta-index-installed-smoke.json`
+- root `make check` passed on rerun
+- GitHub Actions tagpath CI run `26412942039` passed; only annotation is the existing Node.js 20 actions deprecation warning for `actions/checkout@v4`.
+<!-- agent:boundary:af91a6a4 -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~do [#tpauditscope]~
-- ~do [#tpauditpolicy]~
-- ~do [#commhxstrong]~
-- ~do [#p6tspub]~
-- ~do [#p6ren]~
-- ~do [#mixconv]~
-- do [#p6meta]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#p6meta] [recommended] agent-loop meta-index: aggregate per-submodule .naming/index.json files into a top-level handle registry so cross-repo searches resolve. New CLI: tagpath meta-index <workspace-root>. Useful once 2+ siblings adopt tagpath.
 <!-- /agent:backlog -->
 
 ## Review

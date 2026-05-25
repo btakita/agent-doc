@@ -33,7 +33,7 @@ Fixed agent:queue stuck-after-1-turn — auto-strike done items at preflight.
 Compacted content:
 - Archived 5 response topic(s): do [#ipcdupfinalize] Phase 4 + scope honesty on the rest; do [#jbrunstart] Phase 1; response was not completed. #agent-doc-bug. finish turn; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:d7ebfb6c -->
+<!-- agent:boundary:36cc9f37 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -60,7 +60,7 @@ Please make auto-compact exchange off by default. Only explicit frontmatter or .
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#crdtrespfx]~
-- do [#queueadvgated]
+- ~do [#queueadvgated]~
 - do [#jbrsrbusysim]
 - do [#jbccfix]
 - do [#jbccreg]
@@ -71,7 +71,6 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog auto -->
-- [ ] [#queueadvgated] preflight::run_queue_maintenance should auto-strike queue-head prompts whose [#id] is in agent:review with the pending-gate marker [/], in addition to the existing agent:done strike. Unblocks queue stalls when a do-item lands a contained phase but the larger plan still has open phases. Files: src/agent-doc/src/preflight.rs (collect_agent_review_gated_ids + extend strike_done_queue_head_prompts), SPEC.md. Plan: tasks/agent-doc/plan-queue-auto-advance-past-pending-gate.md
 - [ ] [#planperphase] Convention: split multi-phase plans into per-phase backlog IDs (e.g. #crdtrespfx1, #crdtrespfx2) instead of one parent ID that gets pending-gated. Lets queue auto-strike honor per-phase progress. Lower priority — the convention is opt-in for authors. [recommended]
 - [ ] [#jbrsrbusysim] SimWorld + IDE telemetry coverage for session_restart --force path, including session_restart_busy_pre_interrupt_idle and session_restart_busy_force_killed event variants (plan phase 4). Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md.
 - [ ] [#jbccfix] Fix the Compact Exchange write/cache boundary so JetBrains never receives a stale or conflicting file-cache snapshot after compact exchange.

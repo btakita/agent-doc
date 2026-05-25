@@ -567,7 +567,22 @@ Focused verification passed:
 - `cargo test full_content_operator_ipc_is_disabled_before_source_buffer_delivery`
 
 No repo code changes were needed for this item; the dedicated regression and runbook follow-ups remain queued as `#jbccreg` and `#jbccdocs`.
-<!-- agent:boundary:d14b2e92 -->
+### Re: #jbccreg — gpt-5
+
+Added deterministic Compact Exchange cache-conflict coverage in `src/agent-doc/src/compact.rs`: `component_compact_rejects_stale_editor_cache_when_snapshot_is_stale` now models a stale saved snapshot plus a stale JetBrains live-buffer digest and proves compact fails closed before overwriting the current file or advancing the snapshot.
+
+Verification passed:
+- `cargo fmt --check`
+- `cargo test component_compact_rejects_stale_editor_cache_when_snapshot_is_stale`
+- `cargo test component_compact_direct_fallback_rejects`
+- `make check` (rerun after final test cleanup; includes full Rust suite and medium SimWorld corpus)
+
+Commits pushed:
+- `src/agent-doc`: `fc97024` (`test: cover compact stale editor cache`)
+- parent gitlink: `e789aec9d` (`bump agent-doc compact cache regression`)
+
+CI: agent-doc run `26416687771` for `fc97024` is in progress; setup/checkout/dependency checkout/tmux install/toolchain steps passed, `make check` is running, and `make tmux-ci` is pending. Parent repo has no `CI` workflow.
+<!-- agent:boundary:fb535d90 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -624,7 +639,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#jbrsrbusysw]~
 - ~do [#jbrsrbusyide]~
 - ~do [#jbccfix]~
-- do [#jbccreg]
+- ~do [#jbccreg]~
 - do [#jbccdocs]
 - do [#planperphase]
 <!-- /agent:queue -->
@@ -633,7 +648,6 @@ preset #spec-test-build-install-commit-push
 
 <!-- agent:backlog -->
 - [ ] [#planperphase] Convention: split multi-phase plans into per-phase backlog IDs (e.g. #crdtrespfx1, #crdtrespfx2) instead of one parent ID that gets pending-gated. Lets queue auto-strike honor per-phase progress. Lower priority — the convention is opt-in for authors. [recommended]
-- [ ] [#jbccreg] Add deterministic regression coverage for Compact Exchange cache-conflict handling, including stale snapshot and concurrent user-edit cases where feasible.
 - [ ] [#jbccdocs] Document the Compact Exchange File Cache Conflict recovery path in the JetBrains/harness runbooks after the behavior is fixed.
 <!-- /agent:backlog -->
 

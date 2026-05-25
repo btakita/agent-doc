@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 
@@ -128,18 +128,44 @@ v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-gramm
 Compacted content:
 - Archived 1 response topic(s): do [#p6sklsym] [#p6lintbnd]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-<!-- agent:boundary:f013ab5e -->
+### Re: do [#p6sklsymagentdoc] — opus-4-7
+
+
+Shipped.
+
+Synced `src/agent-doc/.claude/skills/agent-doc/SKILL.md` from the freshly-installed agent-loop copy (v0.33.16 → v0.34.0, 20 inserts / 6 deletes), then replaced the agent-loop copy with a relative symlink into the submodule. Single source of truth now lives in the submodule.
+
+#### Verification
+
+- Symlink resolves: `head -5 .claude/skills/agent-doc/SKILL.md` shows v0.34.0 frontmatter
+- File mode changed `100644 → 120000` in the commit, confirming symlink
+
+#### Commits
+
+- `src/agent-doc` (branch `20260422/codex-agent-backend`): `c76a26b skill: sync agent-doc SKILL.md to v0.34.0 (p6sklsymagentdoc)` — pushed
+- `agent-loop`: `4dfbd9896 skills: symlink agent-doc SKILL.md to submodule canonical (p6sklsymagentdoc)` — pushed to main (includes the src/agent-doc pointer bump)
+
+#### Follow-up surfaced
+
+The runbooks under `.claude/skills/agent-doc/runbooks/` (commit.md, harness-invocation.md, etc.) are also duplicated, but the submodule doesn't have an equivalent `.claude/skills/agent-doc/runbooks/` directory — they only live in the source `src/agent-doc/runbooks/` and get materialized at install time. Recorded as `#p6sklsymadocrunbooks` for a focused decision later.
+
+#### Release-flow implication
+
+Per the original backlog text: now that the symlink is in place, future `agent-doc skill install --harness claude` runs in agent-loop will write through the symlink into the submodule, dirtying it. The install loop needs to either commit the submodule + bump the pointer, or skip writing when the target is a symlink whose contents already match. Captured in the original `p6sklsymagentdoc` backlog text; no new item.
+<!-- agent:boundary:8840b065 -->
 <!-- /agent:exchange -->
 ###
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#p6tsi]~
 - ~do [#p6adf]~
 - ~do [#p6mcr]~
 - ~do [#p6adfstream]~
-- do [#p6sklsym]
-- do [#p6lintbnd]
+- ~do [#p6sklsym]~
+- ~do [#p6lintbnd]~
+- ~do [#p6sklsymagentdoc]~
+- do [#p6sklsymcorky]
 - do [#p6adfmerge]
 - do [#p6tsifull]
 - do [#p6tspub]
@@ -151,7 +177,7 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 (<!-- agent:backlog -->
-- [ ] [#p6sklsymagentdoc] Reconcile and symlink agent-doc SKILL.md: agent-loop/.claude/skills/agent-doc/SKILL.md (v0.34.0, freshly installed) diverges from src/agent-doc/.claude/skills/agent-doc/SKILL.md (v0.33.16). Copy the newer agent-loop content into the submodule, commit src/agent-doc, then symlink the agent-loop copy. After this, agent-doc skill install --harness claude will write through the symlink to the submodule — adjust the release flow to commit the submodule pointer as part of the install loop.
+- [ ] [#p6sklsymadocrunbooks] After agent-doc SKILL.md symlinking (p6sklsymagentdoc), check whether the runbooks under agent-loop/.claude/skills/agent-doc/runbooks/ should also be symlinked. Source of truth lives in src/agent-doc/runbooks/ but installed copies are in src/agent-doc/.claude/skills/agent-doc/runbooks/ (created by agent-doc skill install, so currently absent from the submodule). Either install once into the submodule and symlink, or leave install owning the parent copy and accept the duplication.
 - [ ] [#p6sklsymcorky] Reconcile and symlink corky SKILL.md: agent-loop/.claude/skills/corky/SKILL.md and src/corky/.claude/skills/corky/SKILL.md diverge substantively (different command listing format — terse one-liners vs prose paragraphs). Pick a canonical version (submodule is the natural home), reconcile, then symlink the agent-loop copy. Same pattern applies to corky's sub-skills if they drift in the future.
 - [ ] [#p6adfmerge] Merge agent-doc feature branch 20260422/codex-agent-backend to main: the p6adf commit (845ddfd6) and prior p4*/p5* prep ride on this branch. agent-loop superproject already tracks feature-branch commits, but agent-doc main is behind and will need a sweep before any external consumer pulls.
 - [ ] [#p6tsifull] Wire the remaining tsift consumer surfaces to the tagpath adapter: graph, explain, communities, path, federated-search. The adapter (src/tsift/src/tagpath_adapter.rs) and annotate helper are already public; each command needs TagpathSearchOpts plumbing + a per-row annotation pass + tagpath_handle field on StoredSymbol / StoredEdge / community report structs. Mechanical follow-up to p6tsi which only wired tsift search.

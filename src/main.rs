@@ -67,6 +67,7 @@ mod focus;
 mod fs_util;
 mod gc;
 mod git;
+mod git_sibling;
 mod harness;
 mod harness_prompt;
 mod heuristics;
@@ -301,6 +302,18 @@ struct WriteArgs {
     /// `[lint] dialect` > default (`warn`).
     #[arg(long = "lint", value_name = "MODE")]
     lint: Option<String>,
+    /// Cross-repo sibling commit driven by this cycle (repeatable).
+    /// After the session-document commit lands, stage and commit the named
+    /// sibling working tree with a `Session-Doc:` git trailer auto-injected
+    /// (URL points at the just-committed session-document blob). Stage the
+    /// sibling's files before invoking `finalize` / `write --commit`. Pair
+    /// each `--commit-sibling` with one `--commit-sibling-message` in the
+    /// same order.
+    #[arg(long = "commit-sibling", value_name = "REPO")]
+    commit_sibling: Vec<PathBuf>,
+    /// Commit message for each `--commit-sibling` (repeatable, positional pairing).
+    #[arg(long = "commit-sibling-message", value_name = "MSG")]
+    commit_sibling_message: Vec<String>,
 }
 
 #[derive(Subcommand)]
@@ -1808,6 +1821,8 @@ fn main() -> anyhow::Result<()> {
                     pending_only: args.pending_only,
                     status: args.status,
                     lint_override,
+                    commit_sibling: args.commit_sibling,
+                    commit_sibling_message: args.commit_sibling_message,
                 },
                 if commit {
                     write::CommitMode::BestEffort
@@ -1847,6 +1862,8 @@ fn main() -> anyhow::Result<()> {
                     pending_only: args.pending_only,
                     status: args.status,
                     lint_override,
+                    commit_sibling: args.commit_sibling,
+                    commit_sibling_message: args.commit_sibling_message,
                 },
                 write::CommitMode::Required,
             )

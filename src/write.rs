@@ -263,6 +263,12 @@ pub struct CommandOptions {
     /// Optional CLI override for the agent-doc lint gate. `None` means
     /// "no CLI override; use frontmatter/config/default precedence".
     pub lint_override: Option<crate::lint_gate::LintCliMode>,
+    /// Cross-repo sibling commits to run after a successful session-doc commit.
+    /// Must align positionally with `commit_sibling_message`. Empty vector means
+    /// "no sibling commits".
+    pub commit_sibling: Vec<PathBuf>,
+    /// Commit message for each `commit_sibling` entry (same length, same order).
+    pub commit_sibling_message: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -964,6 +970,18 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     if !options.pending_add_to.len().is_multiple_of(2) {
         anyhow::bail!("--pending-add-to expects repeated FILE TEXT pairs");
     }
+    if options.commit_sibling.len() != options.commit_sibling_message.len() {
+        anyhow::bail!(
+            "--commit-sibling and --commit-sibling-message must be repeated the same number of times in positional pairs (got {} sibling(s), {} message(s))",
+            options.commit_sibling.len(),
+            options.commit_sibling_message.len()
+        );
+    }
+    if !options.commit_sibling.is_empty() && commit_mode == CommitMode::None {
+        anyhow::bail!(
+            "--commit-sibling requires --commit (or `agent-doc finalize`); the sibling trailer URL needs the session-document commit sha"
+        );
+    }
     let commit_mode = resolve_commit_mode(file, commit_mode, options.pending_only)?;
     if commit_mode == CommitMode::Required && !crate::git::is_in_git_repo(file) {
         if is_session_document(file)? {
@@ -1175,7 +1193,17 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     }
 
     let commit_result = if write_result.is_ok() {
-        finalize_commit(file, commit_mode)
+        let primary = finalize_commit(file, commit_mode);
+        if primary.is_ok() && !options.commit_sibling.is_empty() {
+            let pairs: Vec<(std::path::PathBuf, String)> = options
+                .commit_sibling
+                .iter()
+                .cloned()
+                .zip(options.commit_sibling_message.iter().cloned())
+                .collect();
+            crate::git_sibling::commit_siblings_for_session_doc(file, &pairs)?;
+        }
+        primary
     } else {
         Ok(())
     };

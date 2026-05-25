@@ -128,7 +128,7 @@ v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-gramm
 Compacted content:
 - Archived 3 response topic(s): next-steps; queue auto; queue auto
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-<!-- agent:boundary:4d893e04 -->
+<!-- agent:boundary:f5552359 -->
 <!-- /agent:exchange -->
 ###
 
@@ -137,7 +137,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#p6tsi]~
 - ~do [#p6adf]~
 - ~do [#p6mcr]~
-- do [#p6adfstream]
+- ~do [#p6adfstream]~
 - do [#p6adfmerge]
 - do [#p6tsifull]
 - do [#p6tspub]
@@ -149,8 +149,8 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 (<!-- agent:backlog -->
+- [ ] [#p6lintbnd] Tagpath agent-doc lint rule agent-doc/malformed-boundary fires on UUID-format boundary markers emitted by the agent-doc binary itself. Stream-commit smoke surfaced this when the gate started running on streamed responses — pre-existing finding now visible. Decide: relax the rule to accept UUID dashes, or change the binary's boundary format to hex-only. Either side; just align them so the gate stays trustworthy on real-world session docs.
 - [ ] [#p6sklsym] Symlink the agent-loop .claude/skills/tagpath/SKILL.md to src/tagpath/.claude/skills/tagpath/SKILL.md so future updates only need one edit. Currently both copies are maintained by hand and drift is inevitable. Mirror the same approach for the other co-installed skills (tsift, agent-doc, etc.) if they exhibit the same duplication.
-- [ ] [#p6adfstream] Instrument agent-doc Stream subcommand with the lint gate from p6adf: src/stream.rs has its own write loop that bypasses the finalize/write --commit gate path. Mirror the lint_gate call at stream commit time so streaming responses can't sneak malformed directives past the boundary.
 - [ ] [#p6adfmerge] Merge agent-doc feature branch 20260422/codex-agent-backend to main: the p6adf commit (845ddfd6) and prior p4*/p5* prep ride on this branch. agent-loop superproject already tracks feature-branch commits, but agent-doc main is behind and will need a sweep before any external consumer pulls.
 - [ ] [#p6tsifull] Wire the remaining tsift consumer surfaces to the tagpath adapter: graph, explain, communities, path, federated-search. The adapter (src/tsift/src/tagpath_adapter.rs) and annotate helper are already public; each command needs TagpathSearchOpts plumbing + a per-row annotation pass + tagpath_handle field on StoredSymbol / StoredEdge / community report structs. Mechanical follow-up to p6tsi which only wired tsift search.
 - [ ] [#p6tspub] Restore tsift crates.io publishability after p6tsi: tsift now depends on tagpath via path = ../tagpath. Replace with version = "0.17.1" (or whatever ships first) before any tsift release. Already gated by the sift-publish blocker so no immediate regression, but track here.

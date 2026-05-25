@@ -291,7 +291,44 @@ agent-doc itself does **not** call the tagpath adapter directly. It consumes tsi
 | 5 | External references | No-data (by design) | Working as intended |
 
 Item 1 is the only one that can emit a **wrong** handle today; the rest are conservative no-handle outcomes. Adding it to the backlog now so it lands before `[#p6tsifullfederated]` — fixing collision-disambiguation first lets the federated work assume a per-name handle resolution that is at least file-correct.
-<!-- agent:boundary:41c94efb -->
+❯ Add #next-steps to fix remaining lossy data.
+### Re: Add #next-steps to fix remaining lossy data — opus-4-7
+
+Re-read the five loss modes from the prior turn and the current backlog to find what is still uncovered.
+
+| Mode | Status before this turn |
+|------|-------------------------|
+| 1. Name-collision wrong-handle | Tracked as `[#commhx]` |
+| 2. Cross-scope blind spot | Tracked as `[#p6tsifullfederated]` |
+| 3. Index drift (recall, bounded) | Diagnosed via `tagpath_index_stale: true` on **stderr only** — consumers reading the JSON envelope never see it. Real gap. |
+| 4. Walker divergence (tsift vs tagpath source walks) | **Not tracked anywhere.** Real gap. |
+| 5. External references | By design, no work needed. |
+
+Added two new items to close the remaining lossy surface, then reordered the backlog so the lossy-fix path comes first (correctness → recall → diagnostic → lint policy → feature work).
+
+#### New backlog items
+
+- `[#tpstdiag]` — Surface the tagpath stale-index signal into the structured `tsift --envelope` / `--json` output. Today `annotate_*_with_tagpath` only emits `tagpath_index_stale: true (reason=…)` on stderr; tsift / agent-doc consumers reading the JSON response cannot see the diagnostic and therefore cannot decide to re-run with `--tagpath-strict` or trigger a rebuild. Add a top-level `tagpath_index_stale: true` + `tagpath_stale_reason` field to the envelope when any of the helpers reported `stale=true`. Touches `cmd_search`, `cmd_path`, `cmd_explain`, `cmd_graph`, `cmd_communities`, and the budget-mode reports. Tests: extend `tests/exit_code.rs` with a stale-index fixture (mutate a source file after `write_fresh_tagpath_index`, assert the JSON carries the new field).
+
+- `[#tpaudit]` — Reconcile tsift's tree-sitter source walk against tagpath's `.naming.toml` walk and surface the diff. Today silent recall loss happens when tagpath's `[exclude]` or `extends` skip files / languages that tsift indexes; the tsift symbols in those files get no handle even with a fresh tagpath index. New CLI: `tsift audit tagpath [--path .] [--scope <name>] [--json]` that reports (a) tsift symbols whose definition file is outside the tagpath source set, (b) tagpath families whose source files no longer exist in tsift's `index.db`, and (c) the policy hints (excluded paths, language coverage gaps). Tests: extend `tests/exit_code.rs` with a fixture where `.naming.toml` excludes a path tsift still indexes.
+
+#### Reordered backlog (lossy-fix priority first)
+
+Reorder via `--pending-reorder commhx,p6tsifullfederated,tpstdiag,tpaudit,mixconv,p6tspub,p6ren,p6meta` so the order is:
+
+1. `[#commhx]` — Mode 1, correctness loss (wrong handle). Highest priority because it is the only mode that can emit incorrect data; the rest are conservative no-handle outcomes.
+2. `[#p6tsifullfederated]` — Mode 2, recall loss across workspace scopes. Completes the symbol-graph triplet rollout, blocks meaningful workspace use.
+3. `[#tpstdiag]` — Mode 3 diagnostic gap. Cheap to add and unblocks future automation (e.g. agent-doc retry/rebuild flow on stale).
+4. `[#tpaudit]` — Mode 4, walker divergence audit. New surface; lower urgency than the other three because it is user-config drift, not a code bug.
+5. `[#mixconv]` (recommended) — lint policy for mixed conventions within a single identifier. Quality-of-life, not lossy.
+6. `[#p6tspub]` — administrative (restore crates.io publishability before any tsift release). Already gated by the sift-publish blocker, so not time-critical.
+7. `[#p6ren]` — feature work (`tagpath rename`). Not lossy, not blocking.
+8. `[#p6meta]` (recommended) — feature work (meta-index). Cross-repo nice-to-have.
+
+#### Top of backlog
+
+`[#commhx]`
+<!-- agent:boundary:0303b038 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -327,8 +364,10 @@ preset #spec-test-build-install-commit-push
 
 (<!-- agent:backlog -->
 - [ ] [#commhx] Name-collision wrong-handle in `resolve_tagpath_handles_for_names` (src/tsift/src/main.rs:3438). When two symbols share a name across files (e.g. `main` in `bin/foo/main.rs` and `bin/bar/main.rs`), the resolver picks the first `db.symbol_info` row by `(file, line)` and calls `adapter.handle_for_member(abs, name)` against that file. Result: silent wrong-handle for the community member, or silent no-handle when the wrong file is not in the tagpath index. Cheap fix: iterate every symbol_info row and pick the first that returns a handle. Stronger fix: disambiguate via call-graph caller_file evidence inside the same community. Should land before the federated subitem (p6tsifullfederated) so federated work can assume a per-name file-correct resolution. Tests: extend tests/exit_code.rs path/explain/graph/communities with a name-collision fixture (two files defining `main`).
-- [ ] [#mixconv] [recommended] tagpath lint policy that tolerates mixed conventions within a single identifier (e.g. `createUserProfile_v2`). Today `parser::detect_convention` classifies any identifier containing `_` as snake-family, so the camelCase-plus-suffix shape lint-fails in a camelCase-only context with `create_user_profile_v2` as the suggested fix. Add a per-context `tolerate_mixed = true` or top-level `lint.allow_mixed_within_identifier` policy that compares tag-equivalence rather than convention-equivalence. Single-file change in `src/lint/mod.rs:79`. Tests: extend `tests/lint.rs` with mixed-within-identifier cases.
 - [ ] [#p6tsifullfederated] Subitem of p6tsifull. Wire tagpath adapter into tsift search --federated (workspace-scoped search across multiple scoped index.db files). Most complex of the five — federated search loops over scopes; adapter load must respect per-scope project_root. Defer until p6tsifullpath/explain/graph/communities establish the per-command template.
+- [ ] [#tpstdiag] Surface the tagpath stale-index signal into the structured `tsift --envelope` / `--json` output. Today `annotate_*_with_tagpath` only emits `tagpath_index_stale: true (reason=…)` on stderr; tsift / agent-doc consumers reading the JSON response cannot see the diagnostic and therefore cannot decide to re-run with `--tagpath-strict` or trigger a rebuild. Add a top-level `tagpath_index_stale: true` + `tagpath_stale_reason` field to the envelope when any of the helpers reported `stale=true`. Touches `cmd_search`, `cmd_path`, `cmd_explain`, `cmd_graph`, `cmd_communities`, and the budget-mode reports. Tests: extend `tests/exit_code.rs` with a stale-index fixture (mutate a source file after `write_fresh_tagpath_index`, assert the JSON carries the new field).
+- [ ] [#tpaudit] Reconcile tsift tree-sitter source walk against tagpath `.naming.toml` walk and surface the diff. Today silent recall loss happens when tagpath `[exclude]` or `extends` skip files / languages that tsift indexes; the tsift symbols in those files get no handle even with a fresh tagpath index. New CLI: `tsift audit tagpath [--path .] [--scope <name>] [--json]` that reports (a) tsift symbols whose definition file is outside the tagpath source set, (b) tagpath families whose source files no longer exist in tsift index.db, and (c) the policy hints (excluded paths, language coverage gaps). Tests: extend `tests/exit_code.rs` with a fixture where `.naming.toml` excludes a path tsift still indexes.
+- [ ] [#mixconv] [recommended] tagpath lint policy that tolerates mixed conventions within a single identifier (e.g. `createUserProfile_v2`). Today `parser::detect_convention` classifies any identifier containing `_` as snake-family, so the camelCase-plus-suffix shape lint-fails in a camelCase-only context with `create_user_profile_v2` as the suggested fix. Add a per-context `tolerate_mixed = true` or top-level `lint.allow_mixed_within_identifier` policy that compares tag-equivalence rather than convention-equivalence. Single-file change in `src/lint/mod.rs:79`. Tests: extend `tests/lint.rs` with mixed-within-identifier cases.
 - [ ] [#p6tspub] Restore tsift crates.io publishability after p6tsi: tsift now depends on tagpath via path = ../tagpath. Replace with version = "0.17.1" (or whatever ships first) before any tsift release. Already gated by the sift-publish blocker so no immediate regression, but track here.
 - [ ] [#p6ren] tagpath rename <old> <new>: cross-file, cross-convention identifier rename using the index. Walks every member of the matching family, rewrites in-place in each source convention (snake/camel/Pascal/kebab/UPPER/Ada). Foundation for the agent-loop intent-preserving refactor vision.
 - [ ] [#p6meta] [recommended] agent-loop meta-index: aggregate per-submodule .naming/index.json files into a top-level handle registry so cross-repo searches resolve. New CLI: tagpath meta-index <workspace-root>. Useful once 2+ siblings adopt tagpath.

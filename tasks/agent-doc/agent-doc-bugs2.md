@@ -88,10 +88,38 @@ The data is already there: preflight emits `queue_active`, `queue_trigger`, and 
 **Tradeoffs to consider before implementing:**
 - `/loop` self-paces dynamically. The next cycle will fire on its own cadence, not the same turn. That's still progress vs the current "you re-type each cycle" pattern, but it's not the same-turn continuation Codex's Stop hook gives.
 - Auto-loop on `queue_active` could surprise the user when the queue is long. Should there be a maximum-iterations gate or an explicit `queue_auto_claude_loop` opt-in in frontmatter?
+❯ The queue should complete by default. Frontmatter can limit the iterations.
 - Termination: when the queue drains, the loop instruction should stop scheduling. That's a one-line "if `queue_prompts.len() == 0`, do not invoke `/loop`" rule.
 
 Want me to file this as a backlog item (`#cclooploop` or similar) with a plan covering: SKILL.md addition, frontmatter opt-in flag, max-iterations gate, and termination rule? I'll need your call on the opt-in default (off by default = explicit opt-in; on by default = surprise risk).
-<!-- agent:boundary:5d1e1ef3 -->
+
+❯ Add #next-steps
+❯ As I was typing into the comment below `/agent:exchange`, the full-document IPC corruption happened, then the duplicate line happened.
+❯ #spec-test-build-install-commit-push
+### Re: queue should complete by default + #next-steps for IPC corruption recurrence — opus-4-7
+
+
+Items already appended by the previous finalize attempt (both `[#cclooploop]` and `[#ipcdupfin23]` are in `agent:backlog` now).
+
+#### What was filed
+- **`[#cclooploop]`** — Claude Code SKILL.md auto-loops `/agent-doc <FILE>` while queue is active. Default ON, frontmatter `agent_doc_queue_max_iterations: <n>` caps iterations (unset = unlimited, env hard-cap 50 prevents runaway). Plan covers iteration counter signal in preflight, frontmatter/project-config cap, Claude-specific SKILL.md auto-loop instruction (Codex/OpenCode skip), termination + safety rules, docs + tests. Plan: `tasks/agent-doc/plan-claude-code-queue-auto-loop.md`.
+- **`[#ipcdupfin23]`** — Re-elevate `#ipcdupfinalize` Phases 2 + 3. The user just hit the same IPC corruption again (typing into post-exchange comment → full-document IPC corruption + duplicate line). Phase 4 of the parent plan landed (`recover_dedupe_only_drift`), but Phases 1 (SimWorld repro), 2 (socket-IPC `ack=error` reason field for `already_applied` short-circuit), 3 (typing-guard around IPC retries during finalize), and 5 (regression coverage) are still open. Phases 2 + 3 are the direct fix for the recurrence. Parent plan: `tasks/agent-doc/plan-ipc-corruption-and-duplicate-during-typing.md`.
+
+#### Priority-ordered backlog
+
+1. **`[#ipcdupfin23]`** — recurring user-visible corruption; blocks closeout repeatedly across sessions. Highest priority.
+2. **`[#cclooploop]`** — directly addresses the "queue stalls between Claude Code turns" workflow complaint. Plan is concrete.
+3. **`[#jbccfix]`** — Compact Exchange write/cache boundary fix (current queue head). Needs investigation cycle first.
+4. **`[#jbccreg]`** — regression coverage for `#jbccfix`. Gated behind it.
+5. **`[#jbccdocs]`** — runbook for `#jbccfix`. Gated behind it.
+6. **`[#jbrsrbusysw]`** — SimWorld scenario for `session_restart --force`. Substantial standalone.
+7. **`[#jbrsrbusyide]`** — JB plugin IDE telemetry for `session_restart` events. Kotlin work.
+8. **`[#planperphase]` `[recommended]`** — process convention, no code change.
+
+**Top of backlog: `[#ipcdupfin23]`**
+
+Note: the active queue head is `do [#jbccfix]` (existing queue order). The priority-ordered list reflects engineering priority; if you want the queue to actually attack `#ipcdupfin23` first, re-edit the queue head — otherwise the queue will advance to `#jbccfix` next cycle per its current order.
+<!-- agent:boundary:c54ef66a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -115,6 +143,8 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#cclooploop] Claude Code SKILL.md auto-loops /agent-doc <FILE> via the Skill tool while queue_active && queue_trigger=auto && queue_prompts non-empty. Default: ON (queue auto-completes). Frontmatter agent_doc_queue_max_iterations: Option<usize> caps iterations (unset = unlimited; env hard-cap 50 prevents runaway). Plan: tasks/agent-doc/plan-claude-code-queue-auto-loop.md
+- [ ] [#ipcdupfin23] Re-elevate #ipcdupfinalize Phases 2 + 3 — recurring IPC corruption + duplicate response when user types into a post-exchange comment during finalize. Phase 2: socket-IPC ack=error reason field so already_applied short-circuits file-IPC re-write. Phase 3: typing-guard around IPC retries during finalize. Parent plan: tasks/agent-doc/plan-ipc-corruption-and-duplicate-during-typing.md (Phase 4 landed; Phases 1, 2, 3, 5 still open; the user just hit this corruption again — Phases 2+3 are the direct fix).
 - [ ] [#jbrsrbusysw] SimWorld scenario coverage for session_restart --force: route + Restart Supervisor while pane is alive-busy with and without --force, asserting the new refusal message and force success (including session_restart_busy_pre_interrupt_idle and session_restart_busy_force_killed event variants). Substantial — requires new Op variant + tmux/session_actor mock in src/sim_world.rs. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md phase 4 (SimWorld piece).
 - [ ] [#jbrsrbusyide] JB plugin IDE-side telemetry for session_restart --force: surface session_restart_force_used, session_restart_busy_pre_interrupt_idle, and session_restart_busy_force_killed events in the IntelliJ notification area or Logcat so users can see the recovery path the binary took. Kotlin work in editors/jetbrains/. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md phase 4 (IDE piece).
 - [ ] [#planperphase] Convention: split multi-phase plans into per-phase backlog IDs (e.g. #crdtrespfx1, #crdtrespfx2) instead of one parent ID that gets pending-gated. Lets queue auto-strike honor per-phase progress. Lower priority — the convention is opt-in for authors. [recommended]

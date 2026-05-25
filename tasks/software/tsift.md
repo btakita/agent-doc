@@ -184,7 +184,32 @@ Once that returns a clean sync report, `#gdbvacconvex` is closable and the Conve
 Per your "scaffold + stop at auth" choice, I held off on `git add` / `git commit` / `git push` so the working tree stays inspectable before you authenticate. The `#gdbprephot` packet is still running in parallel; once both it returns and your `npx convex dev` lands, I'll do one aggregated commit + push that covers `#gdbprephot`'s code/version-bump + the scaffold + any post-deploy `convex-sync` proof.
 
 If you'd rather I commit the scaffold now as a separate atom (lower risk of mixing scopes), say so and I'll do that immediately.
-<!-- agent:boundary:7e19bf0f -->
+### Re: #gdbvacproof partial (local compact half) landed — opus-4-7
+
+Evidence committed: tsift `af7c3ae`, superproject `c8d9ca732`. `#gdbvacproof` stays in review — only the local-compact half has proof; the Convex half remains gated behind `#gdbvacconvex`.
+
+#### Local compact apply on agent-loop superproject `.tsift/graph.db`
+
+| Metric | Before | After | Δ |
+| --- | ---: | ---: | ---: |
+| File size | 1.69 GiB (1,810,817,024 B) | 1.49 GiB (1,600,466,944 B) | **-200.6 MiB (-11.6 %)** |
+| `PRAGMA freelist_count` | 14,655 | 0 | -14,655 (100 % reclaimed) |
+| `PRAGMA page_count` | 442,094 | 390,739 | -51,355 pages |
+| Live rows | 962,211 | 962,211 | 0 |
+| Tombstone rows | 781,653 | 781,653 | 0 (prune skipped — Convex reconciliation required) |
+| `tsift graph-db status --json` warm | — | 1 ms | — |
+| `tsift graph-db doctor --json` post-apply | — | 2.3 s | — |
+| `compact --apply` wall time (WAL checkpoint + VACUUM) | — | 3.17 s | — |
+
+Full evidence at `src/tsift/plans/gdbvacproof-evidence.md`.
+
+#### What's still gated behind `#gdbvacconvex`
+- `--prune-tombstones --confirmed-convex-reconciled` cannot run safely until a Convex consumer has reconciled the 781,653 retained tombstones. Pruning before then breaks the eventual-consistency contract with any Convex client of `examples/convex-graph/{schema,graph,http}.ts`.
+- Once `npx convex dev` against `examples/convex-graph-app/` lands and a sync reports no drift, the second half of `#gdbvacproof` closes with: `tsift convex-sync . --remote-snapshot --apply --json` → `tsift graph-db --path . compact --apply --prune-tombstones --confirmed-convex-reconciled --json` → re-capture scan + doctor timings post-prune. Expected additional ~200-300 MiB reclaim once the 781 k tombstone rows themselves go.
+
+#### Pre-existing scaffold note
+`src/tsift/examples/convex-graph-app/` (created earlier this turn) is **still untracked** per your "do NOT install/commit/push until after deploy works" direction. It will be committed in the cycle that closes `#gdbvacconvex` (after your interactive `npx convex dev` confirms the live deployment works).
+<!-- agent:boundary:04f32dbb -->
 <!-- /agent:exchange -->
 ###
 <!--

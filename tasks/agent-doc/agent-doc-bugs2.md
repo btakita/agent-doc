@@ -170,7 +170,7 @@ That is a separate small change but touches enough files that it deserves its ow
 
 - `#jbrsrbusysim` — SimWorld + telemetry coverage now unblocked by this cycle.
 - New backlog entry needed for the auto-compact-default flip; capturing it via `--pending-add` on this finalize so the work isn't lost.
-<!-- agent:boundary:89485eb8 -->
+<!-- agent:boundary:d77ea5e4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -190,6 +190,7 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#autocompactoff] Make auto-compact exchange off by default. Absent agent_doc_auto_compact in frontmatter and .agent-doc/config.toml must resolve to false (currently defaults to true via session-accretion guidance). Files: frontmatter.rs (resolve_*), project_config.rs (auto_compact_exchange field default), compact.rs (trigger sites), preflight.rs (accretion guidance). Update README + SPEC + tests covering the prior default. Recommended.
 - [ ] [#jbrsrbusysim] SimWorld + IDE telemetry coverage for session_restart --force path, including session_restart_busy_pre_interrupt_idle and session_restart_busy_force_killed event variants (plan phase 4). Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md.
 - [ ] [#jbccfix] Fix the Compact Exchange write/cache boundary so JetBrains never receives a stale or conflicting file-cache snapshot after compact exchange.
 - [ ] [#jbccreg] Add deterministic regression coverage for Compact Exchange cache-conflict handling, including stale snapshot and concurrent user-edit cases where feasible.

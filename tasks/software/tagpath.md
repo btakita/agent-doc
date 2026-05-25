@@ -217,7 +217,29 @@ Verification:
 Commits:
 - `btakita/tagpath@3b34185` pushed to `main`.
 - Parent submodule pointer committed locally as `agent-loop@92a1afda8`; I will push the parent commit after this document finalize, per the agent-doc closeout rule.
-<!-- agent:boundary:312883fe -->
+### Re: do #mixconv — gpt-5
+
+Implemented the mixed-convention lint policy as a top-level config option: `[lint] allow_mixed_within_identifier = true`.
+
+Code changes:
+- Added `LintConfig` to `.naming.toml` parsing and config inheritance.
+- Updated lint convention checks so the mixed policy suppresses violations only when the identifier has a genuinely mixed surface, such as `createUserProfile_v2`, and parsing it under the expected convention produces the same tag list.
+- Kept plain wrong-convention identifiers flagged, so `ParseName` still fails under a `snake_case` function rule even when the mixed policy is enabled.
+- Documented the config surface in `README.md` and `SPEC.md`.
+- Added regression tests for default failure, policy success, and the plain-wrong-convention guard.
+
+Verification:
+- `cargo test lint::tests::test_lint_`
+- `cargo test`
+- `cargo clippy`
+- `cargo install --path .`
+- `make check`
+- GitHub Actions CI for `btakita/tagpath@d51aed6` passed: run `26412376372`, job `check` in 46s. The only annotation was the existing Node 20 deprecation notice for `actions/checkout@v4`.
+
+Commits:
+- `btakita/tagpath@d51aed6` pushed to `main`.
+- Parent submodule pointer committed locally as `agent-loop@0ca2dadc8`; I will push the parent commit after this document finalize, per the agent-doc closeout rule.
+<!-- agent:boundary:aac624bc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -230,14 +252,13 @@ preset #spec-test-build-install-commit-push
 - ~do [#commhxstrong]~
 - ~do [#p6tspub]~
 - ~do [#p6ren]~
-- do [#mixconv]
+- ~do [#mixconv]~
 - do [#p6meta]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#mixconv] [recommended] tagpath lint policy that tolerates mixed conventions within a single identifier (e.g. `createUserProfile_v2`). Today `parser::detect_convention` classifies any identifier containing `_` as snake-family, so the camelCase-plus-suffix shape lint-fails in a camelCase-only context with `create_user_profile_v2` as the suggested fix. Add a per-context `tolerate_mixed = true` or top-level `lint.allow_mixed_within_identifier` policy that compares tag-equivalence rather than convention-equivalence. Single-file change in `src/lint/mod.rs:79`. Tests: extend `tests/lint.rs` with mixed-within-identifier cases.
 - [ ] [#p6meta] [recommended] agent-loop meta-index: aggregate per-submodule .naming/index.json files into a top-level handle registry so cross-repo searches resolve. New CLI: tagpath meta-index <workspace-root>. Useful once 2+ siblings adopt tagpath.
 <!-- /agent:backlog -->
 

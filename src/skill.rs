@@ -201,6 +201,10 @@ const BUNDLED_RUNBOOKS: &[(&str, &str)] = &[
         "manual-job-packets.md",
         include_str!("../runbooks/manual-job-packets.md"),
     ),
+    (
+        "baseline-drift.md",
+        include_str!("../runbooks/baseline-drift.md"),
+    ),
 ];
 
 /// Current binary version (from Cargo.toml).
@@ -1844,6 +1848,20 @@ mod tests {
                 .iter()
                 .any(|(name, _)| *name == "split-spec-files.md"),
             "split-spec-files.md should be in BUNDLED_RUNBOOKS"
+        );
+    }
+
+    #[test]
+    fn bundled_runbooks_include_baseline_drift_runbook() {
+        assert!(
+            BUNDLED_RUNBOOKS
+                .iter()
+                .any(|(name, _)| *name == "baseline-drift.md"),
+            "baseline-drift.md should be in BUNDLED_RUNBOOKS"
+        );
+        assert!(
+            SKILL_TEMPLATE.contains("baseline-drift"),
+            "SKILL.md should list baseline-drift in the runbook catalog"
         );
     }
 

@@ -34,4 +34,5 @@ The JetBrains plugin should not queue the IPC write before showing the dialog, a
 ## See Also
 
 - `runbooks/commit.md` — overall closeout / repair ordering.
+- `runbooks/baseline-drift.md` — manual-commit baseline drift and preserve-session reset.
 - `tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md` — full plan with phases 1–5 and the deterministic SimWorld scenarios.

@@ -51,6 +51,10 @@ The error message preserves tagpath's CLI format — `<path>:<line>:<col> <sever
 
 When the IDE surfaces a File Cache Conflict dialog mid-IPC and the user cancels, `preflight` auto-recovers the wedge via the binary-owned commit boundary when the working tree still matches the snapshot. The cancel-branch contract, the auto-recovery preconditions, and the manual fallback for cases auto-recovery declines live in [jb-cache-conflict.md](jb-cache-conflict.md).
 
+## Baseline Drift After Manual Commits
+
+When a user lands a manual commit to the session document after an agent-doc closeout, `preflight` may auto-refresh the captured baseline only when the drift is outside the captured response body and outside the active cycle's owned component scope. If drift overlaps owned response content, use the fail-closed diagnostic and the non-destructive recovery command from [baseline-drift.md](baseline-drift.md): `agent-doc reset --from-current --preserve-session <FILE>`.
+
 ## Anti-Patterns
 
 - Do **not** stop after bare `agent-doc write` for a final response.

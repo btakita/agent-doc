@@ -197,6 +197,10 @@ const BUNDLED_RUNBOOKS: &[(&str, &str)] = &[
         "split-spec-files.md",
         include_str!("../runbooks/split-spec-files.md"),
     ),
+    (
+        "manual-job-packets.md",
+        include_str!("../runbooks/manual-job-packets.md"),
+    ),
 ];
 
 /// Current binary version (from Cargo.toml).
@@ -518,11 +522,24 @@ fn runbooks_rel_path(env: &agent_kit::detect::Environment) -> std::path::PathBuf
 }
 
 /// Install bundled runbooks for a specific environment.
+///
+/// Reconciles the target directory against the canonical embedded set:
+/// - Writes missing or out-of-date `.md` files from `BUNDLED_RUNBOOKS`.
+/// - Reaps any `.md` files in the target directory that are not in the
+///   canonical set, so the on-disk set converges to the embedded set across
+///   upgrades (renames, deletions, splits).
+///
+/// Non-`.md` files are left alone — only the install-managed runbook surface
+/// is reconciled.
 fn install_runbooks_for(env: agent_kit::detect::Environment, root: Option<&Path>) -> Result<()> {
     let resolved = root.map(|p| p.to_path_buf()).or_else(resolve_root);
     let base = resolved.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
     let runbooks_dir = base.join(runbooks_rel_path(&env));
     std::fs::create_dir_all(&runbooks_dir)?;
+
+    let canonical_names: std::collections::HashSet<&str> =
+        BUNDLED_RUNBOOKS.iter().map(|(name, _)| *name).collect();
+
     for (name, content) in BUNDLED_RUNBOOKS {
         let path = runbooks_dir.join(name);
         let needs_write = !path.exists()
@@ -533,6 +550,38 @@ fn install_runbooks_for(env: agent_kit::detect::Environment, root: Option<&Path>
             std::fs::write(&path, content)?;
         }
     }
+
+    let entries = std::fs::read_dir(&runbooks_dir)
+        .with_context(|| format!("read runbooks dir {}", runbooks_dir.display()))?;
+    for entry in entries {
+        let entry = entry.with_context(|| {
+            format!("read runbooks dir entry under {}", runbooks_dir.display())
+        })?;
+        let file_type = entry.file_type().with_context(|| {
+            format!("inspect runbook entry {}", entry.path().display())
+        })?;
+        if !file_type.is_file() {
+            continue;
+        }
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("md") {
+            continue;
+        }
+        let Some(file_name) = path.file_name().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        if canonical_names.contains(file_name) {
+            continue;
+        }
+        std::fs::remove_file(&path)
+            .with_context(|| format!("reap stale runbook {}", path.display()))?;
+        eprintln!(
+            "[{}] reaped stale runbook → {}",
+            env,
+            path.display()
+        );
+    }
+
     Ok(())
 }
 
@@ -1014,6 +1063,112 @@ mod tests {
         let content = std::fs::read_to_string(&runbook_path).unwrap();
         assert!(content.contains("agent-doc compact <FILE> --component exchange --commit"));
         assert!(content.contains("VCS refresh signal"));
+    }
+
+    #[test]
+    fn install_runbooks_reaps_stale_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let runbooks_dir = dir.path().join(".claude/skills/agent-doc/runbooks");
+        std::fs::create_dir_all(&runbooks_dir).unwrap();
+
+        let sentinel = runbooks_dir.join("sentinel-stale.md");
+        std::fs::write(&sentinel, "# stale runbook removed in a later release\n").unwrap();
+        let plugin_install = runbooks_dir.join("plugin-install.md");
+        std::fs::write(&plugin_install, "# stale runbook\n").unwrap();
+        let kept_non_md = runbooks_dir.join("README.txt");
+        std::fs::write(&kept_non_md, "non-md file should survive\n").unwrap();
+
+        super::install_runbooks_for(Environment::ClaudeCode, Some(dir.path())).unwrap();
+
+        assert!(
+            !sentinel.exists(),
+            "sentinel stale runbook should be reaped: {}",
+            sentinel.display()
+        );
+        assert!(
+            !plugin_install.exists(),
+            "stale plugin-install.md should be reaped"
+        );
+        assert!(
+            kept_non_md.exists(),
+            "non-md files in runbooks dir must not be reaped"
+        );
+
+        let installed: std::collections::HashSet<String> = std::fs::read_dir(&runbooks_dir)
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                entry.path().extension().and_then(|s| s.to_str()) == Some("md")
+            })
+            .filter_map(|entry| entry.file_name().to_str().map(|s| s.to_string()))
+            .collect();
+        let canonical: std::collections::HashSet<String> = super::BUNDLED_RUNBOOKS
+            .iter()
+            .map(|(name, _)| name.to_string())
+            .collect();
+        assert_eq!(
+            installed, canonical,
+            "post-install runbook set must match canonical embedded set"
+        );
+    }
+
+    #[test]
+    fn install_runbooks_is_no_op_on_clean_tree() {
+        let dir = tempfile::tempdir().unwrap();
+        super::install_runbooks_for(Environment::ClaudeCode, Some(dir.path())).unwrap();
+
+        let runbooks_dir = dir.path().join(".claude/skills/agent-doc/runbooks");
+        let first: Vec<(String, std::time::SystemTime)> = std::fs::read_dir(&runbooks_dir)
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .filter_map(|entry| {
+                let mtime = entry.metadata().ok()?.modified().ok()?;
+                let name = entry.file_name().to_str()?.to_string();
+                Some((name, mtime))
+            })
+            .collect();
+
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        super::install_runbooks_for(Environment::ClaudeCode, Some(dir.path())).unwrap();
+
+        for (name, mtime_before) in &first {
+            let path = runbooks_dir.join(name);
+            let mtime_after = std::fs::metadata(&path).unwrap().modified().unwrap();
+            assert_eq!(
+                *mtime_before, mtime_after,
+                "second install must not rewrite unchanged runbook {}",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn install_runbooks_reaps_for_codex_and_opencode() {
+        let dir = tempfile::tempdir().unwrap();
+        for (env, rel) in [
+            (
+                Environment::Codex,
+                ".codex/runbooks",
+            ),
+            (
+                Environment::OpenCode,
+                ".opencode/skills/agent-doc/runbooks",
+            ),
+        ] {
+            let runbooks_dir = dir.path().join(rel);
+            std::fs::create_dir_all(&runbooks_dir).unwrap();
+            let sentinel = runbooks_dir.join("legacy-runbook.md");
+            std::fs::write(&sentinel, "# legacy\n").unwrap();
+
+            super::install_runbooks_for(env, Some(dir.path())).unwrap();
+
+            assert!(
+                !sentinel.exists(),
+                "stale runbook under {} should be reaped",
+                rel
+            );
+            assert!(runbooks_dir.join("commit.md").exists());
+        }
     }
 
     #[test]

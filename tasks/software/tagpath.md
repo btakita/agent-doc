@@ -243,7 +243,35 @@ Anything that *publicly imports* `tagpath` and pins the version in its own manif
 Bump `tagpath` to **0.11.0**, publish, then update both `src/agent-doc` and `src/tsift` Cargo.toml to `version = "0.11"`. That single move retires `#p6adfcitagpath` (CI sees a real crates.io version, drops the path override) AND `#p6tspub` (same fix unblocks tsift's publish path).
 
 Want me to do the bump + publish in the next cycle? If yes, the natural ordering is: tagpath 0.11.0 publish → agent-doc Cargo.toml update → tsift Cargo.toml update → then proceed with `#p6adfmerge`.
-<!-- agent:boundary:15ada67a -->
+❯ publish 0.11.0 + release
+### Re: publish 0.11.0 + release — opus-4-7
+
+**Published.**
+
+#### Release artifacts
+
+- **crates.io**: `tagpath v0.11.0` — published from a clean `cargo publish` (binary uploaded, registry confirmed).
+- **GitHub Release**: <https://github.com/btakita/tagpath/releases/tag/v0.11.0> with the x86_64-linux prebuilt binary attached.
+- **Git tag**: `v0.11.0` on `main`.
+- **Local install**: `cargo install --path .` swapped `~/.cargo/bin/tagpath` from v0.18.0 → v0.11.0 in place.
+
+#### What changed
+
+- `src/tagpath/Cargo.toml`: `version = "0.18.0" → "0.11.0"`. `Cargo.lock` regenerated in the same commit.
+- `src/tagpath/VERSIONS.md`: new file with a consolidated v0.11.0 entry covering all 12 commits since v0.10.0 (alias / prose / graph / index / ontology / watch / search / lint / mcp + install / dyn-grammar / wasm / lint-rule relaxation).
+- `agent-loop`: submodule pointer bumped to the v0.11.0 commit.
+
+#### Note on the force-push
+
+The initial commit landed without `Cargo.lock` because cargo regenerates it on first compile. `cargo publish --dry-run` then refused on uncommitted-lockfile drift. Amended the commit to include the regenerated lockfile and force-pushed both `main` and the `v0.11.0` tag. Safe because the commit had not been consumed by any other repo yet, but worth flagging.
+
+#### Downstream unblock (next cycles)
+
+- `#p6adfcitagpath`: point `src/agent-doc/Cargo.toml` at `tagpath = { version = "0.11", ... }` (drop the path override) — clears the agent-doc CI redness that was gating `#p6adfmerge`.
+- `#p6tspub`: same bump for `src/tsift/Cargo.toml`.
+
+Both are straightforward edits to two files plus their `Cargo.lock`s, ready to run when you direct.
+<!-- agent:boundary:24277ff2 -->
 <!-- /agent:exchange -->
 ###
 

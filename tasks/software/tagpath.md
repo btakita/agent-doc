@@ -123,88 +123,12 @@ v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-gramm
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260525-012602.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260525-022241.md`*
 
 Compacted content:
-- Archived 1 response topic(s): queue auto
+- Archived 2 response topic(s): queue auto; do [#p5lic]. #spec-test-build-install-commit-push
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-### Re: queue auto — do [#p5wnp] — opus-4-7
-
-
-**Done.** wasm-pack build pipeline shipped in tagpath 0.17.0; submodule pointer bumped + pushed. npm publish stays a manual gate per the session rule. One follow-up captured: missing root LICENSE file (p5lic) — easy fix, please address before you `npm publish`.
-
-**What was delivered (build prep + verification, not publish):**
-
-- `scripts/build-wasm.sh` — executable; runs `wasm-pack build` for three targets (bundler, nodejs, web), merges into one `pkg/`, generates `package.json` deterministically from `Cargo.toml`. Re-runnable.
-- `pkg-smoke/smoke.mjs` — Node smoke test that imports the nodejs target and calls every binding: `parse`, `alias`, `prose`, `normalize_query`, `search_over_rows`. All 5 green; output: `smoke: all 5 bindings OK`.
-- `.github/workflows/wasm-build.yml` — CI installs wasm-pack, runs the build script + smoke test, uploads `pkg/` as a workflow artifact. Proves the package keeps building without any publish gate.
-- `.gitignore` — `pkg/`, `pkg-bundler/`, `pkg-nodejs/`, `pkg-web/`, `pkg-smoke/node_modules/` (generated artifacts).
-- `SPEC.md` §13.5 — Publish flow subsection: build script, three targets, pkg layout, smoke test, manual npm publish gate.
-- `README.md` — `npm install @btakita/tagpath-wasm` + Node + bundler usage snippets.
-
-**pkg/ layout (total 692 KiB):**
-```
-pkg/
-  package.json          # name=@btakita/tagpath-wasm, version=0.17.0, "exports" map
-  README.md
-  tagpath.d.ts          # merged type defs
-  bundler/  ~248 KiB    # tagpath.js + tagpath_bg.{js,wasm} + .d.ts
-  nodejs/   ~244 KiB    # CJS shim + package.json{type:commonjs} override
-  web/      ~248 KiB    # ESM shim
-```
-
-**Build gotchas resolved (worth knowing):**
-1. wasm-pack 0.15 errors on a second `--release` (release is default on stable).
-2. wasm-pack misinterprets unrecognized args as cargo EXTRA_OPTIONS — keep its flags before the path arg.
-3. `[lib].name = "tagpath"` produces `tagpath.{js,d.ts}` (not `tagpath_wasm.*`); script + smoke + SPEC updated.
-4. nodejs target is CJS; merged `pkg/package.json` declares `type: module`. Fixed via a per-directory `pkg/nodejs/package.json` override.
-5. `serde-wasm-bindgen` serializes Rust `BTreeMap` as JS `Map`, not plain object — smoke test reads via `Map.has()` with object fallback.
-
-**Verification:**
-- `cargo fmt` + clippy clean on default and `dyn-grammar`.
-- `cargo test` — **213/213 pass**. `cargo test --features dyn-grammar` — **222/222 pass**.
-- `cargo build --target wasm32-unknown-unknown --no-default-features --features wasm` — clean.
-- `cargo build --release` + `cargo install --path . --force` — `~/.cargo/bin/tagpath` at 0.17.0.
-- `./scripts/build-wasm.sh` — all three wasm-pack targets succeeded (each printed `📦 Your wasm pkg is ready to publish`).
-- `node pkg-smoke/smoke.mjs` — exit 0, all 5 bindings verified.
-
-**Commits:**
-- tagpath `3717c88`: `feat: wasm-pack build for @btakita/tagpath-wasm (p5wnp)` → pushed.
-- agent-loop `21c448e`: `tagpath: bump submodule to 0.17.0 (p5wnp)` → pushed.
-
-**Manual gate (your step, when ready):**
-```
-cd src/tagpath && ./scripts/build-wasm.sh && node pkg-smoke/smoke.mjs
-cd pkg && npm login && npm publish --access public   # scoped package needs --access public on first publish
-```
-
-**Follow-up captured:** p5lic — add a root `LICENSE-MIT` file. Both the wasm-pack tarball and any future crates.io publish currently ship without an actual license file even though `license = "MIT"` is set in `Cargo.toml`.
-
-**Auto-queue drained.** Phase 5 prep complete: 7 cycles (p5tsi, p5inc, p5xfast, p5sln, p5wat, p5mcs, p5wnp), 7 minor releases (0.11.0 → 0.17.0), test baseline grew from 132 → 213 default / 222 with `dyn-grammar`, zero regressions.
-❯ do [#p5lic]. #spec-test-build-install-commit-push
-### Re: do [#p5lic]. #spec-test-build-install-commit-push — opus-4-7
-
-
-**Done.** `LICENSE-MIT` added; tagpath bumped 0.17.0 → 0.17.1; submodule pointer bumped + pushed. The npm tarball and any future crates.io publish will now ship with an actual license file.
-
-**Changes (tagpath submodule, 6a5a106):**
-- `LICENSE-MIT` (new) — standard MIT text, `Copyright (c) 2026 Brian Takita`.
-- `Cargo.toml` — added `license-file = "LICENSE-MIT"` next to the existing `license = "MIT"` so packaging tools pick it up explicitly; version `0.17.0 → 0.17.1`.
-- `Cargo.lock` — refreshed.
-
-**Verification:**
-- `cargo build --release` — clean.
-- `cargo test` — **213/213 pass** (no behavior change, sanity gate).
-- `cargo install --path . --force` — `~/.cargo/bin/tagpath` at 0.17.1.
-
-**Commits:**
-- tagpath `6a5a106`: `chore: add LICENSE-MIT (p5lic)` → pushed.
-- agent-loop `7373245`: `tagpath: bump submodule to 0.17.1 (p5lic)` → pushed.
-
-Skipped wasm-pack rebuild this cycle — the `pkg/` will pick up the new LICENSE-MIT on the next `./scripts/build-wasm.sh` run before publish.
-
-**Session accretion warning:** exchange is at 62 lines (warn level). Recommend `agent-doc compact tasks/software/tagpath.md --commit` before the next non-trivial turn so the context stays manageable. I have not auto-compacted (frontmatter doesn't opt-in).
-<!-- agent:boundary:9a7150e2 -->
+<!-- agent:boundary:69bfbfed -->
 <!-- /agent:exchange -->
 ###
 

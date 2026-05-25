@@ -127,7 +127,7 @@ The Phase 3 item that covers extending `backfill-updates.sh` in the four sibling
 - Parent `#agent-doc-commit-sibling` — stays gated until `#adcs-convention` lands and `#adcs-scripts` ships in session-share. Both of those will need their own sessions in those repos.
 
 Not invoking `/loop`. Queue is `queue_halted: item_modified` from your prompt.
-<!-- agent:boundary:09f088a3 -->
+<!-- agent:boundary:21019b94 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -164,7 +164,6 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#adcs-convention] Phase 4 of #agent-doc-commit-sibling: author tasks/docs.md (in session-share) with the cross-repo Session-Doc trailer convention — format, when to use, migration story, link to plan and #cross-repo-sessiondoc-trailer. Plan: tasks/agent-doc/plan-commit-sibling.md
 - [ ] [#jbccc1] Phase 1 of #adoc-jb-cache-cancel-stuck-cycle: deterministic SimWorld repro for File Cache Conflict cancel. Add a SimCommand variant or scenario test FinalizeWithJbCacheConflictCancel modeling the three branches (no dialog, accept, cancel) explicitly; cancel branch produces response-on-disk, snapshot != HEAD, cycle phase write_applied; asserted to fail today (failing baseline) and pass once Phase 3 lands. Plan: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md
 - [ ] [#jbccc2] Phase 2 of #adoc-jb-cache-cancel-stuck-cycle: JB plugin undo-on-cancel. editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt — defer the write until user resolves the File Cache Conflict dialog (never queue change beforehand); on Cancel return 0/2 from socket IPC callback; on file-IPC cancel leave patch file in place. Plan: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md
 - [ ] [#jbccc3] Phase 3 of #adoc-jb-cache-cancel-stuck-cycle: binary detect + tailored recovery. src/preflight.rs, src/repair.rs, src/write.rs, src/session_check.rs — distinguish post-commit local drift from jb_cache_conflict_cancel (cycle phase write_applied + working-tree response matches captured body + snapshot != HEAD + no live exchange edits beyond response); preflight recovered=true auto-runs the equivalent of agent-doc write --commit; session_check stops surfacing likely_direct_response_patchback for this pattern. Plan: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md

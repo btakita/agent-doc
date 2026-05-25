@@ -136,6 +136,11 @@ Closeout invariants currently exercised by the simulator:
   edits: compact exchange direct write must reject stale whole-document
   replacements, and full-content IPC attempts must be disabled before socket/file
   payload emission.
+- Baseline-drift replay coverage pins the three user-commit branches:
+  benign edits outside the captured response auto-refresh replay hashes,
+  edits inside the committed response fail closed, and user-normalized response
+  bodies that still match the captured response after prompt-prefix stripping are
+  adopted.
 - Each named closeout fault point has an explicit fail-closed, recovery, or
   no-op outcome.
 

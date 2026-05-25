@@ -6,7 +6,7 @@
 
 use anyhow::{Result, anyhow, bail};
 use std::collections::BTreeSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 const FAST_CORPUS_SEEDS: std::ops::Range<u64> = 0..512;
@@ -1412,6 +1412,35 @@ fn assert_owned_scratch_comment_preserved(doc: &str, prompt: &str) {
     );
 }
 
+fn setup_baseline_drift_capture(
+    seed: u64,
+    response: &str,
+) -> (
+    tempfile::TempDir,
+    PathBuf,
+    crate::capture::CaptureRecord,
+    SimWorld,
+) {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = dir.path().join("doc.md");
+    let mut world = SimWorld::new(seed);
+    world.apply(SimCommand::EditPrompt).unwrap();
+    std::fs::write(&doc, &world.doc).unwrap();
+    crate::snapshot::save(&doc, &world.doc).unwrap();
+    let capture = crate::capture::capture_response(&doc, response).unwrap();
+    (dir, doc, capture, world)
+}
+
+fn apply_response_and_save_current(doc: &Path, world: &mut SimWorld, response: &str) -> Result<()> {
+    world.captured_response = Some(response.to_string());
+    world.apply_captured_response()?;
+    world.apply(SimCommand::Commit)?;
+    std::fs::write(doc, &world.doc)?;
+    crate::snapshot::save(doc, &world.doc)?;
+    Ok(())
+}
+
 #[derive(Debug)]
 struct CorpusRun {
     coverage: Coverage,
@@ -2297,6 +2326,96 @@ fn finalize_with_typing_in_post_exchange_comment_and_already_applied_ack_does_no
         "dedupe recovery must collapse the duplicated response heading down to one"
     );
     assert_owned_scratch_comment_preserved(&deduped, prompt);
+}
+
+// -------- #adoc-bdauc-simworld: deterministic SimWorld coverage for baseline
+// drift after a manual user commit. See
+// tasks/agent-doc/plan-baseline-drift-after-user-commit.md.
+
+#[test]
+fn baseline_drift_benign_user_commit_outside_response_auto_refreshes() {
+    let response = response_patch("baseline drift");
+    let (dir, doc, capture, mut world) = setup_baseline_drift_capture(2026_05_25 + 10, &response);
+    apply_response_and_save_current(&doc, &mut world, &response).unwrap();
+
+    world
+        .replace_component_content(
+            "backlog",
+            "- [ ] [#tigersim] Implement the simulator MVP\n- [ ] [#manual] User-added follow-up outside the captured response\n",
+        )
+        .unwrap();
+    std::fs::write(&doc, &world.doc).unwrap();
+    crate::snapshot::save(&doc, &world.doc).unwrap();
+
+    crate::capture::validate_replay(&doc, &capture)
+        .expect("benign user commit outside response must auto-refresh");
+
+    let refreshed = crate::capture::load_active(&doc).unwrap().unwrap();
+    assert_eq!(
+        refreshed.file_hash.as_deref(),
+        Some(crate::ops_log::content_hash(&world.doc).as_str()),
+        "file hash should refresh to the user-committed document"
+    );
+    assert_eq!(
+        refreshed.snapshot_hash.as_deref(),
+        Some(crate::ops_log::content_hash(&world.doc).as_str()),
+        "snapshot hash should refresh to the user-committed baseline"
+    );
+    let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+    assert!(
+        ops_log.contains("capture_baseline_refreshed_for_benign_drift"),
+        "benign drift refresh should be auditable:\n{ops_log}"
+    );
+}
+
+#[test]
+fn baseline_drift_user_edit_inside_committed_response_fails_closed() {
+    let response = response_patch("baseline drift");
+    let (_dir, doc, capture, mut world) = setup_baseline_drift_capture(2026_05_25 + 11, &response);
+    apply_response_and_save_current(&doc, &mut world, &response).unwrap();
+
+    world.doc = world.doc.replace(
+        "Implemented and verified.",
+        "User rewrote the committed response.",
+    );
+    std::fs::write(&doc, &world.doc).unwrap();
+    crate::snapshot::save(&doc, &world.doc).unwrap();
+
+    let err = crate::capture::validate_replay(&doc, &capture)
+        .expect_err("editing the committed response body must fail closed");
+    assert!(
+        err.to_string().contains("baseline no longer matches")
+            || err.to_string().contains("snapshot no longer matches"),
+        "expected fail-closed baseline drift error; got: {err}"
+    );
+}
+
+#[test]
+fn baseline_drift_user_edit_matches_normalized_response_adopts() {
+    let response = "<!-- patch:exchange -->\n### Re: baseline drift normalized — gpt-5\n\nImplemented and verified.\n❯ Submodule pointer updated.\n<!-- /patch:exchange -->\n";
+    let (_dir, doc, capture, mut world) = setup_baseline_drift_capture(2026_05_25 + 12, response);
+    apply_response_and_save_current(&doc, &mut world, response).unwrap();
+
+    world.doc = world
+        .doc
+        .replace("❯ Submodule pointer updated.", "Submodule pointer updated.");
+    std::fs::write(&doc, &world.doc).unwrap();
+    crate::snapshot::save(&doc, &world.doc).unwrap();
+
+    crate::capture::validate_replay(&doc, &capture)
+        .expect("user-normalized response body should be adopted");
+
+    let refreshed = crate::capture::load_active(&doc).unwrap().unwrap();
+    assert_eq!(
+        refreshed.file_hash.as_deref(),
+        Some(crate::ops_log::content_hash(&world.doc).as_str()),
+        "file hash should reflect the normalized user-cleaned response"
+    );
+    assert_eq!(
+        refreshed.snapshot_hash.as_deref(),
+        Some(crate::ops_log::content_hash(&world.doc).as_str()),
+        "snapshot hash should reflect the normalized user-cleaned response"
+    );
 }
 
 // -------- #jbccc1: deterministic SimWorld scenario for the JB File Cache Conflict

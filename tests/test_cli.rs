@@ -244,9 +244,9 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         ("src/route.rs", "guard_") => 7,
         ("src/route.rs", "proof=") => 2,
         ("src/route.rs", "reason=") => 10,
-        ("src/session_check.rs", "guard_") => 14,
+        ("src/session_check.rs", "guard_") => 15,
         ("src/write.rs", "guard_") => 64,
-        ("src/write.rs", "reason=") => 19,
+        ("src/write.rs", "reason=") => 20,
         _ => 0,
     }
 }

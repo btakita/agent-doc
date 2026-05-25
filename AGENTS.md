@@ -254,7 +254,7 @@ subsequent merges. Compacted via `agent-doc compact` to GC tombstones.
 
 agent-doc extends the existence kernel vocabulary with domain-specific terms. See the full ontology table in [README.md](README.md#domain-ontology).
 
-<!-- tsift:code-navigation v=0.1.42 -->
+<!-- tsift:code-navigation v=0.1.61 -->
 ## Code Navigation
 
 Run `tsift status` at session start from the owning repo root. If the task or file lives under a git submodule (for example `src/tsift/...`), switch to that submodule root first so the harness loads the narrower local instructions and repo state instead of the superproject root. If status prints a `run:` recommendation for stale or missing tsift state, run `tsift status --fix` before relying on tsift results; when the harness cannot perform write commands, ask the user to run the printed command instead. Codex projects can install a prompt-time auto-reindex hook with `tsift init --codex`.
@@ -275,7 +275,7 @@ Prefer bounded digest commands over raw transcript, diff, and verbose-log reads:
 - If RTK is installed, digest-runner delegates supported generic command families through `rtk rewrite` and records the chosen compact filter in `report.filter` while preserving tsift artifact handles.
 - If your harness does not support Claude-style `PreToolUse` hooks, run `tsift rewrite --run '<command>'` to execute the same envelope-first, artifact-backed tsift equivalent manually.
 
-For local verification, run `make check` before committing. CI owns the wider ignored deterministic simulation corpus via `make ci-full`; after local changes, check the latest GitHub Actions CI run with `gh run list --workflow CI --limit 1` and fix any failing tests before calling the work complete.
+For local verification, run `make check` before committing. After local changes, check the latest GitHub Actions CI run with `gh run list --workflow CI --limit 1` and fix any failing tests before calling the work complete.
 
 Only read full source files when tsift results are insufficient.
 <!-- /tsift:code-navigation -->

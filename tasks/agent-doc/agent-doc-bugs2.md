@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -60,7 +60,7 @@ I left `#adoc-jb-cache-cancel-stuck-cycle` in review. It still depends on `#jbcc
 ❯ Verification: `make check` passed in `src/agent-doc` via tsift digest artifact `tart-9a435fb3ee`; `make install` completed and installed `agent-doc 0.34.0` plus `libagent_doc-0.34.0.so`; latest GitHub Actions CI run `26421124683` on `20260422/codex-agent-backend` is successful, including `Run make tmux-ci`.
 
 ❯ Changed paths: session document closeout only, with done-archive updates handled by `agent-doc finalize --done`; no non-session repo files were manually staged or committed. The existing `src/agent-doc` formatting-only working tree drift was left untouched. Confidence: high for the two done review items; high for leaving the cache-cancel parent gated. Escalation: none.
-<!-- agent:boundary:e12a6509 -->
+<!-- agent:boundary:58e86e52 -->
 <!-- /agent:exchange -->
 ###
 <!--

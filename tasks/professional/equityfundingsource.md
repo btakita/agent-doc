@@ -88,6 +88,8 @@ Changed/configured:
 
 Important scope note: Cloudflare Access is live with one-time PIN, not a Google Workspace IdP. The Worker only needs a valid CF Access JWT, so the callback is now protected and verifiable; true Google Workspace SSO still depends on Google admin credentials.
 
+❯ What are the Google admin credentials for?
+
 Verification:
 - `bun run cf:whoami` passed with the new EFS token and only the EFS Cloudflare account visible.
 - `bun run cf:d1:migrations:list:remote` passed: no migrations to apply.
@@ -98,7 +100,18 @@ Verification:
 - GitHub Actions check: this repo has no `.github` workflows and `gh run list --workflow CI --limit 1` reports no workflow named `CI`.
 
 References used for the Cloudflare API shape: [Zero Trust organization create](https://developers.cloudflare.com/api/resources/zero_trust/subresources/organizations/methods/create/), [Access application create](https://developers.cloudflare.com/api/resources/zero_trust/subresources/access/subresources/applications/methods/create/), and [One-time PIN IdP setup](https://developers.cloudflare.com/cloudflare-one/integrations/identity-providers/one-time-pin/).
-<!-- agent:boundary:b5fc4e67 -->
+### Re: Google admin credentials — gpt-5
+
+The Google admin credentials are not needed for the current `workers.dev` production state. D1, Worker deploy, and Cloudflare Access with one-time PIN are already configured without them.
+
+They are for later Google-owned integrations:
+
+- True Google Workspace SSO in Cloudflare Access: configure a Google Workspace IdP/OAuth app, consent/scopes, and domain or group restrictions so admins log in with EFS Google accounts instead of one-time PIN.
+- EFS email sending: configure the official Google Workspace mailbox, SMTP relay, app/OAuth credentials, sender identity, and DNS alignment if the app sends from an `@equityfundingsource.com` address.
+- Google Calendar integration: create/connect the Google Cloud project/OAuth client or service-account delegation needed for booking links, calendar events, invitations, and availability sync.
+
+I would not ask Robert to send a raw Google super-admin password in chat. The cleaner path is a screen share, temporary admin access, or having Robert perform the admin-console steps while we provide the exact values to paste. If we do receive any credential material, it should go into the password manager/secrets path, be least-privilege where possible, and be rotated after setup.
+<!-- agent:boundary:acce62c8 -->
 <!-- /agent:exchange -->
 ###
 <!--

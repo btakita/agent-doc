@@ -123,112 +123,12 @@ v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-gramm
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260525-022241.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260525-043453.md`*
 
 Compacted content:
-- Archived 2 response topic(s): queue auto; do [#p5lic]. #spec-test-build-install-commit-push
+- Archived 3 response topic(s): next-steps; queue auto; queue auto
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-❯ What are #next-steps for tagpath to assist with tsift and agent-doc?
-### Re: next-steps — opus-4-7
-
-
-**Top of backlog: p6tsi** (tsift adoption of the tagpath consumer contract). That's the single item that converts the Phase 5 platform work into actual user value — without it, all the indexing / watch / handle plumbing sits unused.
-
-Six items added to the backlog, priority order:
-
-| Rank | ID | Hook | Why |
-|------|-----|-----|-----|
-| 1 | p6tsi | Tsift adopts tagpath as symbol-graph source | Phase 5 shipped the contract; this is the sibling-repo work that consumes it. Highest leverage by far — every tagpath feature we built lights up the moment tsift wires in. |
-| 2 | p6adf | Agent-doc finalize calls `tagpath lint --dialect agent-doc` | The lint shipped in 0.14.0 only fires if invoked manually. Wiring it into finalize closes the `archive=PATH` bug class permanently — the malformed directive never reaches a snapshot. |
-| 3 | p6mcr | `tagpath mcp install` helper | The 9 MCP tools exist but every consumer has to hand-craft a config block. A scaffolder for Claude Desktop / Codex / OpenCode / Cursor drops setup friction to one command. |
-| 4 | p6skl | Update `.claude/skills/tagpath/SKILL.md` | Skill is stale (v0.5.0, pre-Phase-4 surface). Claude Code can't recommend features it doesn't know about. Refresh covers index / watch / lint / MCP / sidecar. |
-| 5 | p6ren | `tagpath rename` cross-convention refactor | The agent-loop integration vision ("intent-preserving refactoring") needs this. Index + handles already do the heavy lifting; rename is a thin writer on top. |
-| 6 | p6meta [recommended] | agent-loop meta-index across submodules | Once 2+ siblings adopt tagpath, a top-level handle registry makes cross-repo navigation work. Wait until p6tsi proves the contract before building this. |
-
-**Framing — what's shipped vs what's needed:** Phases 4 and 5 built the entire tagpath platform (index, MCP, WASM, dyn-grammar, handles, JSONL, sidecar, incremental update, watch, agent-doc lint dialect, wasm-pack publish, LICENSE). Phase 6 should be **adoption-driven**: each item is a sibling-repo or consumer-facing integration that proves the platform pays off. p6tsi first; everything else can run in parallel after.
-❯ Did [#p6tsi] implement the wiring into tsift or does tsift.md need an item added to its backlog?
-### Re: queue auto — do [#p6adf] — opus-4-7
-
-
-**Done.** Agent-doc finalize and write --commit gates shipped in agent-doc 0.34.0 (commit `845ddfd6` on feature branch). The `&lt;!-- agent:done archive PATH --&gt;` bug class now fails closed at the session-doc boundary, not deep inside the snapshot path. **Concrete proof:** a malformed fixture run through finalize errors with `bad.md:11:1 error: attribute archive on agent:done is missing =value [agent-doc/malformed-attr]` and a `try archive=<value>` fix hint — no commit happens.
-
-**Integration choice: library call (Option A).** Added `tagpath = { path = "../tagpath", default-features = false }` to agent-doc's `Cargo.toml`. `tagpath::lint::agent_doc::lint_agent_doc` was already pub-exposed; no tagpath-side edit required. Library call beats subprocess: ~0ms gate overhead vs 5-50ms shell-out, type-safe error envelope.
-
-**Four-mode resolution chain (CLI > frontmatter > config > default=warn):**
-| Source | Knob |
-|---|---|
-| CLI | `--lint=off|warn|strict` on finalize / write |
-| Frontmatter | `agent_doc_lint_dialect: off|warn|strict` |
-| Workspace `.agent-doc/config.toml` | `[lint] dialect = "off|warn|strict"` |
-| Default | `warn` (errors block; warnings surface on stderr) |
-
-**Changes (agent-doc submodule, 845ddfd6):**
-- `src/lint_gate.rs` (NEW, 363 lines) — gate logic + 10 unit tests.
-- `src/main.rs` — module registration + `--lint` CLI flag parsing.
-- `src/write.rs` — `lint_override` field + gate calls in pending_only + main paths.
-- `src/frontmatter.rs` — `LintDialectMode` enum + `agent_doc_lint_dialect` field.
-- `src/project_config.rs` — `LintConfig` struct + `[lint]` field.
-- `Cargo.toml` — tagpath dep + bump `0.33.x → 0.34.0`; `Cargo.lock` refreshed; `pyproject.toml` synced.
-- `VERSIONS.md` — changelog entry.
-- `runbooks/commit.md` — new "Lint Gate" section.
-
-**Verification:**
-- `cargo fmt` + `cargo clippy --all-targets` — my files clean; pre-existing warnings in `session_check.rs`/`sync.rs`/`route.rs`/`agent/codex.rs` are unrelated.
-- `cargo test --bin agent-doc lint_gate` — **10/10 pass**.
-- `cargo test --bin agent-doc -- --test-threads=1` — **2369/0 pass** (12 parallel-run flakes are pre-existing PoisonError / harness_prompt_lock issues, pass individually and serially).
-- `cargo build --release` + `cargo install --path .` — `~/.cargo/bin/agent-doc` at 0.34.0.
-
-**Live smoke:**
-- `agent-doc 0.34.0 preflight tasks/software/tagpath.md` → passes (this doc is clean).
-- Malformed fixture (`&lt;!-- agent:done archive tasks/x.done.md --&gt;` missing `=`) → finalize fail-closes with the lint-gate error above. Same fixture + `--lint=off` → bypasses gate, caught later by the existing deeper guard (proves the new gate IS the boundary-level shortcut for the same bug class).
-
-**Commits:**
-- agent-doc `845ddfd6` on `20260422/codex-agent-backend`: `feat: finalize gate calls tagpath lint --dialect agent-doc (p6adf)` → pushed.
-- agent-loop `2e4f411`: `phase 6: agent-doc finalize gate calls tagpath lint (p6adf)` → pushed (bumps agent-doc submodule).
-
-**Two follow-ups captured:**
-- `p6adfstream` — agent-doc Stream subcommand bypasses the gate (separate write loop in `src/stream.rs`). Mechanical mirror of the lint_gate call at stream commit time.
-- `p6adfmerge` — feature branch `20260422/codex-agent-backend` carries this + prior Phase 4/5 prep. Needs a merge sweep to agent-doc main before any external consumer pulls.
-
-Auto-queue advances next to MCP install helper (`p6mcr`).
-### Re: queue auto — do [#p6skl] — opus-4-7
-
-
-**Done.** `tagpath` skill refreshed for the 0.18.0 surface in both the canonical `src/tagpath/.claude/skills/tagpath/SKILL.md` and the agent-loop mirror. The skill description that Claude Code matches against ("Parse, search, lint, **index, and serve** tag-based identifiers...") now reflects what shipped through Phase 4 and Phase 5.
-
-**Coverage added (was missing from the v0.5.0 skill):**
-- `normalize-query`, `family`, `compression-report`, `ontology` (commands that already existed but weren't documented).
-- `index` — full subcommand surface (`--update`, `--check`, `--force-full`, `--emit jsonl`, `--schema-version`) + the `fam:`/`mem:` handle semantics.
-- `watch` — NDJSON event stream (`hello` / `ready` / `index_update` / `lint_finding` / `shutdown`), debounce, single-instance lock.
-- `grammars list/check` (`dyn-grammar` opt-in feature).
-- `mcp serve` + the `install` helper covering all 5 harnesses (`--list`, `--print`, `--apply`, `--uninstall`).
-- `lint --dialect agent-doc|auto|identifier` + `--fs-checks` + `--rule`.
-- `search --index` flag (instant index-backed search).
-- Three new Use Cases: **cross-tool symbol graph** (tsift adapter), **session-doc tag enforcement** (agent-doc finalize gate), **MCP one-command install**.
-- Key Concepts updated with handle derivation and SPEC §15 cross-link.
-
-**Layout:** the file is 198 lines (was 130). Restructured Commands section so related surfaces sit together (index right next to watch, lint right next to extract).
-
-**Changes (tagpath submodule, 1e6cdb9):**
-- `.claude/skills/tagpath/SKILL.md` — full refresh (105 insertions / 37 deletions).
-
-**Changes (agent-loop):**
-- `.claude/skills/tagpath/SKILL.md` — mirrored from canonical copy.
-- `src/tagpath` — bumped to `1e6cdb9` (docs-only; no version bump).
-
-**Verification:**
-- `diff -q` between the two copies → identical.
-- Skill-tool listing in this session already picks up the new description ("Parse, search, lint, index, and serve...") — confirms Claude Code reload sees the change.
-- No code change → no test run needed (this is docs-only).
-
-**Commits:**
-- tagpath `1e6cdb9`: `docs: refresh tagpath skill for 0.18.0 surface (p6skl)` → pushed.
-- agent-loop `8f421a7`: `phase 6: refresh tagpath skill for 0.18.0 surface (p6skl)` → pushed.
-
-**Follow-up captured:** `p6sklsym` — symlink the agent-loop mirror to the canonical copy so future updates only need one edit. Same pattern likely applies to `tsift`, `agent-doc`, and the other co-installed skills if they show similar duplication.
-
-Auto-queue advances next to `tagpath rename` (`p6ren`).
-<!-- agent:boundary:c069c099 -->
+<!-- agent:boundary:dd22ede1 -->
 <!-- /agent:exchange -->
 ###
 

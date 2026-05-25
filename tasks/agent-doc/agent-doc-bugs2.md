@@ -66,7 +66,7 @@ Marking the parent `#adoc-baseline-drift-after-user-commit` done — the wedge n
 - `cargo install --path .` + `cargo build --release` both ran; tmux + symlinked release binaries refreshed.
 
 Plan: `tasks/agent-doc/plan-baseline-drift-after-user-commit.md`.
-### Re: do [#adoc-prefix-strip-uncommitted] — opus-4-7 (HEAD)
+### Re: do [#adoc-prefix-strip-uncommitted] — opus-4-7
 
 User-facing wedge closed — `validate_replay` now accepts the user-cleaned response body when a JB cache-conflict spill landed spurious `❯ ` markers and the user stripped them.
 
@@ -95,7 +95,7 @@ This implements the spirit of plan Phase 3 ("tighten the captured response contr
 - `cargo install --path .` + `cargo build --release` both ran.
 
 Plan: `tasks/agent-doc/plan-prefix-strip-uncommitted.md`.
-<!-- agent:boundary:d2e44e2f -->
+<!-- agent:boundary:446ee7d4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -127,7 +127,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#jbccc4]~
 - ~do [#jbccc5]~
 - ~do [#adoc-baseline-drift-after-user-commit]~
-- do [#adoc-prefix-strip-uncommitted]
+- ~do [#adoc-prefix-strip-uncommitted]~
 - do [#adoc-bdauc-simworld]
 - do [#adoc-bdauc-preserve-session]
 - do [#adoc-bdauc-runbook]
@@ -143,6 +143,7 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#adoc-prefix-strip-session-check-whitelist] Phase 1 of #adoc-prefix-strip-uncommitted: session_check.detect_bypassed_response_write false-positives on legitimate response prose lines (treats them as 'bare prompt target missing ❯ '). When a fresh preflight_started cycle just rotated mid-turn and has a visible response body but no capture/pending, the heuristic still flags the response as a likely_direct_response_patchback. Need to recognize and whitelist this shape (e.g., when the diff insert is bracketed by a legit ### Re: heading and the prose differs only by the absence of ❯ prefixes). Demonstrated live during the #adoc-prefix-strip-uncommitted cycle closeout — required bare git commit + reset --from-current fallback. Plan: tasks/agent-doc/plan-prefix-strip-uncommitted.md (Phase 1).
 - [ ] [#adoc-bdauc-simworld] SimWorld scenario coverage for #adoc-baseline-drift-after-user-commit Phase 1: model the three drift branches (benign outside-response, inside-response-mismatch, inside-response-matches-normalized) in src/sim_world.rs. Plan: tasks/agent-doc/plan-baseline-drift-after-user-commit.md (Phase 1).
 - [ ] [#adoc-bdauc-preserve-session] agent-doc reset --from-current --preserve-session: non-destructive recovery that rebuilds the baseline but keeps session id, snapshot history, and capture chain. Today's --from-current is destructive. Plan: tasks/agent-doc/plan-baseline-drift-after-user-commit.md (Phase 3).
 - [ ] [#adoc-bdauc-runbook] Document baseline-drift recovery: new runbooks/baseline-drift.md (or extend jb-cache-conflict.md cross-link), SKILL.md catalog mirrors, runbooks/commit.md reference. Plan: tasks/agent-doc/plan-baseline-drift-after-user-commit.md (Phase 4).

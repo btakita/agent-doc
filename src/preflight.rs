@@ -1186,6 +1186,27 @@ pub fn run(file: &Path) -> Result<()> {
 
     // Step 1: Recover orphaned pending responses.
     eprintln!("[preflight] step 1: repair");
+    // Detect the stuck-captured-cycle wedge: cycle_state advanced to Committed
+    // while the active capture body never landed in HEAD. Emit as a non-blocking
+    // warning so the harness can take a recovery path (e.g. force write --commit)
+    // instead of silently retrying the same finalize.
+    // See tasks/agent-doc/plan-stuck-cycle-causes-duplicated-uncommitted-response.md.
+    if let Some(info) = crate::flow::closeout::stuck_captured_cycle(file) {
+        warnings.push(PreflightWarning {
+            code: "stuck_captured_cycle".to_string(),
+            message: format!(
+                "Cycle {} reached state `committed` but the captured response body ({} bytes, capture {}, state `{}`) is not present in HEAD for {}. Recover via `agent-doc write --commit {}` once the visible response body is final.",
+                info.cycle_id,
+                info.response_body_len,
+                info.capture_id,
+                info.capture_state,
+                file.display(),
+                file.display()
+            ),
+            document_agent: None,
+            active_harness: None,
+        });
+    }
     let mut recovered = recovered_prior
         || match repair::run(file) {
             Ok(outcome) => outcome.repaired(),
@@ -2256,7 +2277,7 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
     let (fm, _) = frontmatter::parse(&content).unwrap_or_default();
     let persisted_active = fm.queue_active.unwrap_or(false);
 
-    let activation =
+    let mut activation =
         crate::queue::resolve_activation(&entries, has_auto, exchange_triggered, persisted_active);
     let snapshot_was_active = snapshot_proves_queue_was_active(file);
 
@@ -2274,6 +2295,67 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
         };
         mutated = true;
         eprintln!("[preflight] queue: consumed start fence");
+    }
+
+    // Auto-strike queue head prompts whose `#id` is already in `agent:done`.
+    //
+    // Without this, the queue stays wedged on the first done item whenever
+    // the cycle's diff does not literally match the queue head text — for
+    // example after the user types new prompts into the exchange or after a
+    // commit-mode finalize that reaped the backlog item via `--done` but
+    // could not advance the queue because the prompt-text did not match
+    // verbatim. The `should_consume_queue_prompt_for_diff_content` gate is
+    // intentionally strict; this preflight-side maintenance pass is the
+    // catch-up path that keeps the auto queue moving across already-resolved
+    // items.
+    //
+    // Fixes the user-reported "queue gets stuck after 1 turn" symptom.
+    let project_root = file
+        .canonicalize()
+        .ok()
+        .and_then(|canonical| {
+            snapshot::find_project_root(&canonical).or_else(|| {
+                canonical
+                    .parent()
+                    .map(std::path::Path::to_path_buf)
+            })
+        });
+    let done_ids = collect_agent_done_ids_with_root(&current_content, project_root.as_deref());
+    let gated_ids = collect_agent_review_gated_ids(&current_content);
+    let mut eligible_ids: std::collections::HashSet<String> = done_ids.clone();
+    for id in &gated_ids {
+        eligible_ids.insert(id.clone());
+    }
+    let entries_for_strike = if activation.consumed_start_fence {
+        activation.entries_after.clone()
+    } else {
+        entries.clone()
+    };
+    if !eligible_ids.is_empty()
+        && let Some((new_entries, struck)) =
+            strike_done_queue_head_prompts(&entries_for_strike, &eligible_ids)
+    {
+        let new_body = crate::queue::render(&new_entries);
+        current_content = {
+            let comps = crate::component::parse(&current_content)?;
+            let q = comps.iter().find(|c| c.name == "queue").unwrap();
+            q.replace_content(&current_content, &new_body)
+        };
+        mutated = true;
+        for prompt in &struck {
+            let source = match queue_prompt_done_id(&prompt.text) {
+                Some(id) if done_ids.contains(&id) => "done",
+                Some(id) if gated_ids.contains(&id) => "review_gated",
+                _ => "unknown",
+            };
+            eprintln!(
+                "[preflight] queue: auto-struck already-resolved head prompt {:?} source={}",
+                prompt.text, source
+            );
+        }
+        // Recompute activation against the rewritten entry list so subsequent
+        // halt / step / dispatch maintenance phases see the post-strike head.
+        activation.entries_after = new_entries;
     }
 
     // Phase 3: halt detection — stop fences and item modification
@@ -2641,6 +2723,152 @@ fn queue_entries_are_drained_residue(entries: &[crate::queue::QueueEntry]) -> bo
                     | crate::queue::QueueEntry::Dispatch(_)
             )
         })
+}
+
+/// Collect every `[#id]` hash present in the document's `agent:done` (and the
+/// legacy `agent:backlog-done` / `agent:pending-done`) components. When the
+/// component carries an `archive=<path>` attribute, also walk the referenced
+/// archive file so externally-archived done items still feed the queue-strike
+/// maintenance pass.
+///
+/// Lower-cased so the comparison against queue prompt ids stays canonical.
+#[cfg(test)]
+fn collect_agent_done_ids(content: &str) -> std::collections::HashSet<String> {
+    collect_agent_done_ids_with_root(content, None)
+}
+
+fn collect_agent_done_ids_with_root(
+    content: &str,
+    project_root: Option<&Path>,
+) -> std::collections::HashSet<String> {
+    let mut ids = std::collections::HashSet::new();
+    let Ok(components) = crate::component::parse(content) else {
+        return ids;
+    };
+    for comp in &components {
+        if !crate::component::is_backlog_done_component(&comp.name) {
+            continue;
+        }
+        for id in crate::pending::extract_pending_ids_from_text(comp.content(content)) {
+            ids.insert(id);
+        }
+        if let Some(archive) = comp.attrs.get("archive")
+            && let Some(root) = project_root
+        {
+            let archive_path = root.join(archive);
+            if let Ok(archive_content) = std::fs::read_to_string(&archive_path) {
+                for id in crate::pending::extract_pending_ids_from_text(&archive_content) {
+                    ids.insert(id);
+                }
+            }
+        }
+    }
+    ids
+}
+
+/// Collect `#id` values from `agent:review` items marked `- [/]` (pending-gate
+/// — code-complete, awaiting an external gate). These items represent work
+/// whose committed phase satisfied the user's queued `do [#id]` directive even
+/// though a parent multi-phase plan still has open phases. Returning them
+/// lets queue auto-advance skip past phased items without requiring the agent
+/// to mis-mark them `--done`.
+///
+/// Plan: tasks/agent-doc/plan-queue-auto-advance-past-pending-gate.md
+fn collect_agent_review_gated_ids(content: &str) -> std::collections::HashSet<String> {
+    let mut ids = std::collections::HashSet::new();
+    let Ok(components) = crate::component::parse(content) else {
+        return ids;
+    };
+    for comp in &components {
+        if !crate::component::is_review_component(&comp.name) {
+            continue;
+        }
+        for line in comp.content(content).lines() {
+            let trimmed = line.trim_start();
+            if !trimmed.starts_with("- [/]") {
+                continue;
+            }
+            let after_status = &trimmed[5..];
+            let Some(start) = after_status.find("[#") else {
+                continue;
+            };
+            let after = &after_status[start + 2..];
+            let Some(end) = after.find(']') else {
+                continue;
+            };
+            let id = &after[..end];
+            if !id.is_empty()
+                && id
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+            {
+                ids.insert(id.to_ascii_lowercase());
+            }
+        }
+    }
+    ids
+}
+
+/// Walk the queue's leading prompt entries and convert any `Prompt` whose
+/// `#id` is already in `done_ids` to a `Completed` (`~text~`) entry. Stops at
+/// the first head prompt whose id is NOT in `done_ids` so a live head stays
+/// intact for the regular consumption path.
+///
+/// Returns `None` when nothing changed. On match, returns the rewritten
+/// entries plus the prompts that were struck (for telemetry).
+fn strike_done_queue_head_prompts(
+    entries: &[crate::queue::QueueEntry],
+    done_ids: &std::collections::HashSet<String>,
+) -> Option<(Vec<crate::queue::QueueEntry>, Vec<crate::queue::QueuePrompt>)> {
+    let mut rewritten: Vec<crate::queue::QueueEntry> = Vec::with_capacity(entries.len());
+    let mut struck: Vec<crate::queue::QueuePrompt> = Vec::new();
+    let mut head_settled = false;
+    for entry in entries {
+        if !head_settled {
+            match entry {
+                crate::queue::QueueEntry::Prompt(prompt) => {
+                    if let Some(id) = queue_prompt_done_id(&prompt.text)
+                        && done_ids.contains(&id)
+                    {
+                        struck.push(prompt.clone());
+                        rewritten.push(crate::queue::QueueEntry::Completed(prompt.clone()));
+                        continue;
+                    }
+                    head_settled = true;
+                }
+                // Already-struck completed prompts and non-prompt entries
+                // (presets, fences) sit in front of the live head and must
+                // not block the scan.
+                crate::queue::QueueEntry::Completed(_)
+                | crate::queue::QueueEntry::Preset(_)
+                | crate::queue::QueueEntry::Dispatch(_)
+                | crate::queue::QueueEntry::StartFence(_)
+                | crate::queue::QueueEntry::StopFence => {}
+            }
+        }
+        rewritten.push(entry.clone());
+    }
+    if struck.is_empty() {
+        None
+    } else {
+        Some((rewritten, struck))
+    }
+}
+
+/// Extract the `#id` from a queue prompt text like `do [#abcd]` or
+/// `do #abcd ...`. Returns the lower-cased id without `#` / brackets.
+fn queue_prompt_done_id(text: &str) -> Option<String> {
+    let marker = text.find('#')?;
+    let tail = &text[marker + 1..];
+    let id = tail
+        .chars()
+        .take_while(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+        .collect::<String>();
+    if id.is_empty() {
+        None
+    } else {
+        Some(id.to_ascii_lowercase())
+    }
 }
 
 fn snapshot_proves_queue_was_active(file: &Path) -> bool {
@@ -3219,6 +3447,195 @@ mod tests {
     use std::io::Write;
     use std::process::Command;
     use tempfile::TempDir;
+
+    #[test]
+    fn strike_done_queue_head_prompts_marks_done_items_completed() {
+        let entries = vec![
+            crate::queue::QueueEntry::Preset("#spec-test-build-install-commit-push".to_string()),
+            crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
+                text: "do [#jbrsrbusyint]".to_string(),
+                multiline: false,
+            }),
+            crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
+                text: "do [#jbrsrbusysim]".to_string(),
+                multiline: false,
+            }),
+        ];
+        let done_ids: std::collections::HashSet<String> =
+            ["jbrsrbusyint".to_string()].into_iter().collect();
+
+        let (rewritten, struck) =
+            super::strike_done_queue_head_prompts(&entries, &done_ids).expect("expected strike");
+
+        assert_eq!(struck.len(), 1);
+        assert_eq!(struck[0].text, "do [#jbrsrbusyint]");
+        match &rewritten[1] {
+            crate::queue::QueueEntry::Completed(prompt) => {
+                assert_eq!(prompt.text, "do [#jbrsrbusyint]");
+            }
+            other => panic!("expected Completed for head prompt, got {:?}", other),
+        }
+        // The live head (`#jbrsrbusysim`) must stay intact for the normal
+        // consumption path.
+        match &rewritten[2] {
+            crate::queue::QueueEntry::Prompt(prompt) => {
+                assert_eq!(prompt.text, "do [#jbrsrbusysim]");
+            }
+            other => panic!("expected Prompt for live head, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn strike_done_queue_head_prompts_returns_none_when_head_is_live() {
+        let entries = vec![crate::queue::QueueEntry::Prompt(
+            crate::queue::QueuePrompt {
+                text: "do [#stillopen]".to_string(),
+                multiline: false,
+            },
+        )];
+        let done_ids: std::collections::HashSet<String> =
+            ["somethingelse".to_string()].into_iter().collect();
+
+        assert!(super::strike_done_queue_head_prompts(&entries, &done_ids).is_none());
+    }
+
+    #[test]
+    fn collect_agent_review_gated_ids_extracts_only_gated_marker() {
+        let content = "\
+<!-- agent:review -->
+- [/] [#alpha] First gated item with a plan reference.
+- [x] [#beta] Already-done item in review (legacy).
+- [ ] [#charlie] Open item in review — not gated.
+- [/] [#delta] [partial] Another gated item.
+- [/] no id here.
+<!-- /agent:review -->
+";
+        let ids = super::collect_agent_review_gated_ids(content);
+        assert!(
+            ids.contains("alpha"),
+            "expected gated [/] item to be collected, got {:?}",
+            ids
+        );
+        assert!(
+            ids.contains("delta"),
+            "expected second gated [/] item to be collected, got {:?}",
+            ids
+        );
+        assert!(
+            !ids.contains("beta"),
+            "[x] marker is not gated, must not be collected"
+        );
+        assert!(
+            !ids.contains("charlie"),
+            "[ ] marker is not gated, must not be collected"
+        );
+        assert_eq!(ids.len(), 2, "only [/] items should be collected: {:?}", ids);
+    }
+
+    #[test]
+    fn collect_agent_review_gated_ids_returns_empty_when_no_review_component() {
+        let content =
+            "<!-- agent:backlog -->\n- [ ] [#alpha] backlog only\n<!-- /agent:backlog -->\n";
+        let ids = super::collect_agent_review_gated_ids(content);
+        assert!(ids.is_empty(), "no review component → empty: {:?}", ids);
+    }
+
+    #[test]
+    fn collect_agent_review_gated_ids_ignores_backlog_open_items() {
+        let content = "\
+<!-- agent:backlog -->
+- [ ] [#openbk] open in backlog
+<!-- /agent:backlog -->
+<!-- agent:review -->
+- [/] [#gatedrv] gated in review
+<!-- /agent:review -->
+";
+        let ids = super::collect_agent_review_gated_ids(content);
+        assert!(ids.contains("gatedrv"));
+        assert!(
+            !ids.contains("openbk"),
+            "backlog open items must NOT be collected as gated"
+        );
+    }
+
+    #[test]
+    fn strike_done_queue_head_prompts_strikes_review_gated_items() {
+        // Queue head matches a gated `[/]` item in agent:review — auto-strike
+        // must advance the queue past it just like an agent:done item.
+        let entries = vec![
+            crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
+                text: "do [#gatedphase]".to_string(),
+                multiline: false,
+            }),
+            crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
+                text: "do [#stillopen]".to_string(),
+                multiline: false,
+            }),
+        ];
+        let eligible_ids: std::collections::HashSet<String> =
+            ["gatedphase".to_string()].into_iter().collect();
+
+        let (rewritten, struck) = super::strike_done_queue_head_prompts(&entries, &eligible_ids)
+            .expect("expected gated head to be struck");
+        assert_eq!(struck.len(), 1);
+        assert_eq!(struck[0].text, "do [#gatedphase]");
+        match &rewritten[1] {
+            crate::queue::QueueEntry::Prompt(prompt) => {
+                assert_eq!(prompt.text, "do [#stillopen]");
+            }
+            other => panic!("expected live head to remain Prompt, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn collect_agent_done_ids_extracts_from_done_component() {
+        let content = "<!-- agent:done -->\n- [x] [#alpha] One thing\n- [x] [#bravo] Another\n<!-- /agent:done -->\n";
+        let ids = super::collect_agent_done_ids(content);
+        assert!(ids.contains("alpha"));
+        assert!(ids.contains("bravo"));
+        assert_eq!(ids.len(), 2);
+    }
+
+    #[test]
+    fn collect_agent_done_ids_reads_archive_attr_when_present() {
+        let dir = TempDir::new().unwrap();
+        let archive_rel = "tasks/done-archive.md";
+        let archive_path = dir.path().join(archive_rel);
+        std::fs::create_dir_all(archive_path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &archive_path,
+            "- [x] [#archived1] First archived item\n- [x] [#archived2] Second\n",
+        )
+        .unwrap();
+        let content = format!(
+            "<!-- agent:done archive={} -->\n<!-- /agent:done -->\n",
+            archive_rel
+        );
+        let ids =
+            super::collect_agent_done_ids_with_root(&content, Some(dir.path()));
+        assert!(
+            ids.contains("archived1"),
+            "expected ids to include archived1 from archive file: {:?}",
+            ids
+        );
+        assert!(ids.contains("archived2"));
+        // Without the root, the archive path cannot be resolved → empty.
+        let ids_no_root = super::collect_agent_done_ids(&content);
+        assert!(ids_no_root.is_empty());
+    }
+
+    #[test]
+    fn queue_prompt_done_id_parses_canonical_bracket_form() {
+        assert_eq!(
+            super::queue_prompt_done_id("do [#jbrsrbusyint]"),
+            Some("jbrsrbusyint".to_string())
+        );
+        assert_eq!(
+            super::queue_prompt_done_id("do #jbrsrbusyint more text"),
+            Some("jbrsrbusyint".to_string())
+        );
+        assert_eq!(super::queue_prompt_done_id("plain prompt"), None);
+    }
 
     struct EnvGuard {
         key: &'static str,

@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -119,7 +119,36 @@ Items already appended by the previous finalize attempt (both `[#cclooploop]` an
 **Top of backlog: `[#ipcdupfin23]`**
 
 Note: the active queue head is `do [#jbccfix]` (existing queue order). The priority-ordered list reflects engineering priority; if you want the queue to actually attack `#ipcdupfin23` first, re-edit the queue head — otherwise the queue will advance to `#jbccfix` next cycle per its current order.
-<!-- agent:boundary:c54ef66a -->
+### Re: do [#cclooploop] — opus-4-7
+
+
+Landed Phase 3 of `#cclooploop` (the SKILL.md auto-loop instruction itself). Submodule `0ad612ec`, superproject pushed. Closing `--done` since the user-visible behavior (queue auto-completes by default on Claude Code) now works; iteration counter (Phase 1) and frontmatter cap (Phase 2) become independent follow-ups.
+
+#### Phase 3 implementation
+
+- `src/skill.rs` — new `CLAUDE_QUEUE_AUTO_LOOP_SECTION` constant + `is_claude_environment` helper. `render_skill` appends the section only when rendering for Claude. The instruction tells the agent to invoke the `Skill` tool with `skill: "loop"`, `args: "agent-doc <FILE>"` after a successful closeout when `queue_active && queue_trigger == "auto" && queue_prompts non-empty && prompt_bearing_changes was empty or queue-synthetic`. Termination is natural: queue drain, user prompt mid-loop, future per-document cap, or env hard-cap `AGENT_DOC_QUEUE_MAX_ITERATIONS_HARD_CAP` (default 50).
+- Codex / OpenCode / Generic renders do NOT include the section (Codex has its own Stop hook; OpenCode has no equivalent yet).
+- `src/route.rs` — silenced `clippy::too_many_arguments` on `run_with_tmux` after the prior `--wait-for-ready` widening pushed it to 8 args.
+- `Cargo.toml` — bumped tagpath dep `0.17 → 0.18` to match the local crate version (required to build; in-flight agent-doc version bump to 0.34.0).
+
+#### Tests (4 new, all pass)
+- `rendered_claude_skill_includes_queue_auto_loop_section` — section present, names the `Skill` tool, the env hard-cap, and the preflight queue fields.
+- `rendered_codex_skill_omits_queue_auto_loop_section`
+- `rendered_opencode_skill_omits_queue_auto_loop_section`
+- `rendered_generic_skill_omits_queue_auto_loop_section`
+
+#### Verification
+- `make check` → 437 tests pass, 0 failures (clippy clean after the `route.rs` allow).
+- `cargo build --release` + `cargo install --path .` → `~/.cargo/bin/agent-doc` v0.34.0 replaced.
+
+#### What's still open on this plan (separately tracked)
+- Phase 1 — iteration counter signal in preflight (`queue_auto_loop_iteration` field, sidecar state).
+- Phase 2 — `agent_doc_queue_max_iterations` frontmatter / project-config cap.
+- Phase 4 — beyond env hard-cap, per-document termination hardening.
+- Phase 5 — installed SKILL.md regression test, `runbooks/harness-invocation.md` documentation.
+
+**Note for this turn:** the new auto-loop only takes effect after the user runs `agent-doc skill install --harness claude --reload restart` to refresh the installed SKILL.md, then restarts Claude Code so the agent re-reads it. Until then, this session continues with the prior manual-invocation behavior. Next queue head after this closes is `do [#ipcdupfin23]`.
+<!-- agent:boundary:6eaa5f73 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -129,11 +158,14 @@ As I was typing into the comment below `/agent:exchange`, the full-document IPC 
 Please make auto-compact exchange off by default. Only explicit frontmatter or .agent-doc/config.toml setting should make auto-compact exchange active.
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#crdtrespfx]~
 - ~do [#queueadvgated]~
 - ~do [#jbrsrbusysim]~
+- do [#cclooploop]
+- do [#ipcdupfin23]
+- do Phases 1 + 5 in tasks/agent-doc/plan-ipc-corruption-and-duplicate-during-typing.md
 - do [#jbccfix]
 - do [#jbccreg]
 - do [#jbccdocs]
@@ -143,7 +175,6 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#cclooploop] Claude Code SKILL.md auto-loops /agent-doc <FILE> via the Skill tool while queue_active && queue_trigger=auto && queue_prompts non-empty. Default: ON (queue auto-completes). Frontmatter agent_doc_queue_max_iterations: Option<usize> caps iterations (unset = unlimited; env hard-cap 50 prevents runaway). Plan: tasks/agent-doc/plan-claude-code-queue-auto-loop.md
 - [ ] [#ipcdupfin23] Re-elevate #ipcdupfinalize Phases 2 + 3 — recurring IPC corruption + duplicate response when user types into a post-exchange comment during finalize. Phase 2: socket-IPC ack=error reason field so already_applied short-circuits file-IPC re-write. Phase 3: typing-guard around IPC retries during finalize. Parent plan: tasks/agent-doc/plan-ipc-corruption-and-duplicate-during-typing.md (Phase 4 landed; Phases 1, 2, 3, 5 still open; the user just hit this corruption again — Phases 2+3 are the direct fix).
 - [ ] [#jbrsrbusysw] SimWorld scenario coverage for session_restart --force: route + Restart Supervisor while pane is alive-busy with and without --force, asserting the new refusal message and force success (including session_restart_busy_pre_interrupt_idle and session_restart_busy_force_killed event variants). Substantial — requires new Op variant + tmux/session_actor mock in src/sim_world.rs. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md phase 4 (SimWorld piece).
 - [ ] [#jbrsrbusyide] JB plugin IDE-side telemetry for session_restart --force: surface session_restart_force_used, session_restart_busy_pre_interrupt_idle, and session_restart_busy_force_killed events in the IntelliJ notification area or Logcat so users can see the recovery path the binary took. Kotlin work in editors/jetbrains/. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md phase 4 (IDE piece).

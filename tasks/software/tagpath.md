@@ -214,7 +214,7 @@ Last cycle's response flagged this as the open shape decision: promote `Communit
 
 - `[#p6tsifullfederated]` — last symbol-graph surface. Federated search loops over scopes; adapter `try_load` must run per-scope against each `project_root` (each scope owns its own `.naming/index.json`). Most complex of the five because there's no single project root.
 - After that: `[#p6tspub]` (publish prep — restore tsift crates.io publishability by replacing `path = "../tagpath"` with `version = "..."`).
-<!-- agent:boundary:84ef81d2 -->
+<!-- agent:boundary:fac4442a -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 
@@ -192,15 +192,15 @@ Then runs `tsift search --scope alpha --json scoped_helper` and asserts the resu
 
 Every search-routing branch (default / scoped / federated / inferred-scope) now resolves handles against the correct tagpath project root.
 Every search-routing branch (default / scoped / federated / inferred-scope) now resolves handles against the correct tagpath project root.
-<!-- agent:boundary:7b524eb2 -->
+<!-- agent:boundary:eaaa248b -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#p6tsifullscoped]
+- ~do [#p6tsifullscoped]~
 - do [#tpauditscope]
 - do [#tpauditpolicy]
 - do [#commhxstrong]

@@ -438,23 +438,102 @@ pub fn validate_replay(file: &Path, capture: &CaptureRecord) -> Result<()> {
     let current_file = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {} for capture replay", file.display()))?;
     let current_file_hash = crate::ops_log::content_hash(&current_file);
-    if capture.file_hash.as_deref() != Some(current_file_hash.as_str()) {
+    let current_snapshot = crate::snapshot::load(file)?;
+    let current_snapshot_hash = current_snapshot.as_deref().map(crate::ops_log::content_hash);
+
+    let file_mismatch = capture.file_hash.as_deref() != Some(current_file_hash.as_str());
+    let snapshot_mismatch = capture.snapshot_hash != current_snapshot_hash;
+
+    if !file_mismatch && !snapshot_mismatch {
+        return Ok(());
+    }
+
+    // Phase 2 of #adoc-baseline-drift-after-user-commit: when the captured
+    // response body is still present in the working tree (intact), treat the
+    // hash mismatch as benign drift — a user committed something on top of
+    // the prior agent-doc commit but did not touch the response body. Refresh
+    // the capture's file/snapshot hashes from the current state and proceed.
+    //
+    // Plan: tasks/agent-doc/plan-baseline-drift-after-user-commit.md
+    if response_body_intact_in_current(file, &capture.response_body, &current_file)? {
+        refresh_replay_baseline(
+            file,
+            capture,
+            &current_file_hash,
+            current_snapshot_hash.as_deref(),
+        )?;
+        return Ok(());
+    }
+
+    if file_mismatch {
         anyhow::bail!(
             "captured response baseline no longer matches current document for {}",
             file.display()
         );
     }
+    anyhow::bail!(
+        "captured response snapshot no longer matches current baseline for {}",
+        file.display()
+    );
+}
 
-    let current_snapshot_hash = crate::snapshot::load(file)?
-        .as_deref()
-        .map(crate::ops_log::content_hash);
-    if capture.snapshot_hash != current_snapshot_hash {
-        anyhow::bail!(
-            "captured response snapshot no longer matches current baseline for {}",
-            file.display()
-        );
+/// Returns true when the captured `response_body` is still contiguously
+/// present in the current document (modulo blank-line / transient marker
+/// normalization). Defers to `repair::response_already_applied` so the same
+/// presence check protects both the orphaned-response repair gate and the
+/// baseline auto-refresh path.
+fn response_body_intact_in_current(
+    file: &Path,
+    response_body: &str,
+    current_file: &str,
+) -> Result<bool> {
+    if response_body.trim().is_empty() {
+        return Ok(false);
     }
+    let _ = file; // reserved for richer structural checks (#adoc-bdauc Phase 2 stretch goals)
+    Ok(crate::repair::response_already_applied(
+        current_file,
+        response_body,
+    ))
+}
 
+/// Refresh the capture record's `file_hash` and `snapshot_hash` to match the
+/// current state, after `response_body_intact_in_current` confirmed the
+/// drift is benign. Logged via `ops_log` so the recovery is auditable.
+fn refresh_replay_baseline(
+    file: &Path,
+    capture: &CaptureRecord,
+    current_file_hash: &str,
+    current_snapshot_hash: Option<&str>,
+) -> Result<()> {
+    let mut record = capture.clone();
+    let mut changed = false;
+    if record.file_hash.as_deref() != Some(current_file_hash) {
+        record.file_hash = Some(current_file_hash.to_string());
+        changed = true;
+    }
+    if record.snapshot_hash.as_deref() != current_snapshot_hash {
+        record.snapshot_hash = current_snapshot_hash.map(str::to_string);
+        changed = true;
+    }
+    if !changed {
+        return Ok(());
+    }
+    record.updated_at = now_secs();
+    write_record(file, &record)?;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "capture_baseline_refreshed_for_benign_drift file={} capture_id={}",
+            file.display(),
+            record.capture_id
+        ),
+    );
+    eprintln!(
+        "[capture] benign drift detected for {} — refreshed capture baseline (capture_id={})",
+        file.display(),
+        record.capture_id
+    );
     Ok(())
 }
 
@@ -776,6 +855,78 @@ mod tests {
         std::fs::write(&doc, "body changed").unwrap();
         let err = validate_replay(&doc, &capture).unwrap_err();
         assert!(err.to_string().contains("baseline no longer matches"));
+    }
+
+    /// Phase 2 of #adoc-baseline-drift-after-user-commit: when the captured
+    /// `response_body` is still intact in the current document, `validate_replay`
+    /// auto-refreshes the capture's `file_hash` / `snapshot_hash` instead of
+    /// bailing — this is the user-committed-on-top benign-drift recovery path.
+    #[test]
+    fn validate_replay_refreshes_baseline_when_response_intact_after_user_commit() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        let original = "## Exchange\n\nold body\n";
+        std::fs::write(&doc, original).unwrap();
+        crate::snapshot::save(&doc, original).unwrap();
+        let response = "### Re: topic — gpt-5\n\nIntact response body.\n";
+        let capture = capture_response(&doc, response).unwrap();
+
+        // User committed a benign edit: added an unrelated backlog item but
+        // left the response body untouched.
+        let after_user_commit =
+            "## Exchange\n\nold body\n### Re: topic — gpt-5\n\nIntact response body.\n\n## Backlog\n\n- new item added by user\n";
+        std::fs::write(&doc, after_user_commit).unwrap();
+        crate::snapshot::save(&doc, after_user_commit).unwrap();
+        assert_ne!(
+            crate::ops_log::content_hash(after_user_commit),
+            capture.file_hash.clone().unwrap()
+        );
+
+        validate_replay(&doc, &capture).expect("benign drift must auto-refresh");
+
+        let refreshed = load_active(&doc).unwrap().unwrap();
+        assert_eq!(
+            refreshed.file_hash.as_deref(),
+            Some(crate::ops_log::content_hash(after_user_commit).as_str()),
+            "file_hash should be refreshed to current"
+        );
+        assert_eq!(
+            refreshed.snapshot_hash.as_deref(),
+            Some(crate::ops_log::content_hash(after_user_commit).as_str()),
+            "snapshot_hash should be refreshed to current"
+        );
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("capture_baseline_refreshed_for_benign_drift"),
+            "refresh must be logged for audit:\n{log}"
+        );
+    }
+
+    /// Even with benign-drift refresh enabled, a divergence that actually
+    /// removes or rewrites the captured response body must still fail closed.
+    #[test]
+    fn validate_replay_still_bails_when_response_body_removed_from_current() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        let original = "## Exchange\n\nold body\n### Re: topic — gpt-5\n\nOriginal response.\n";
+        std::fs::write(&doc, original).unwrap();
+        crate::snapshot::save(&doc, original).unwrap();
+        let capture = capture_response(
+            &doc,
+            "### Re: topic — gpt-5\n\nOriginal response.\n",
+        )
+        .unwrap();
+
+        // User clobbered the response body — true corruption, not benign.
+        let damaged = "## Exchange\n\nold body\n";
+        std::fs::write(&doc, damaged).unwrap();
+
+        let err = validate_replay(&doc, &capture).unwrap_err();
+        assert!(
+            err.to_string().contains("baseline no longer matches")
+                || err.to_string().contains("snapshot no longer matches"),
+            "expected the existing fail-closed message; got: {err}"
+        );
     }
 
     #[test]

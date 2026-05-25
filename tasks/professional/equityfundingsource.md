@@ -75,7 +75,7 @@ Post-deploy smoke on `https://equityfundingsource.brian-takita.workers.dev`:
 - `equityfundingsource.com` and `www.equityfundingsource.com` still resolve to DreamHost (`69.163.177.53`, DreamHost NS records). `/portal-admin` on the custom domain returns a WordPress/Apache 404, so custom-domain cutover is not complete.
 ❯ Use the CF api or chromium-bridge to create a token unblock the D1 API.
 ❯ Update the env variables. We will remain on the current cf url until further notice.
-### Re: Cloudflare D1 + Access — gpt-5
+### Re: Cloudflare D1 + Access — gpt-5 (HEAD)
 
 Done on the current `workers.dev` URL. I did not move `equityfundingsource.com` or `www.equityfundingsource.com`.
 
@@ -156,7 +156,7 @@ References used for the Cloudflare API shape: [Zero Trust organization create](h
 - [ ] [#e1kb] Point equityfundingsource.com and www.equityfundingsource.com at the Cloudflare Pages project equityfundingsource, then verify / and /funded-deals on the custom domain; if admin routes are expected on the custom domain too, decide whether to route those paths to the Worker or move the dynamic app fully behind the same hostname.
 <!-- /agent:icebox -->
 
-<!-- agent:done arc -->
+<!-- agent:done -->
 - 2026-05-24 [#a20z] Set EFS Cloudflare deployment credentials (CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID) in src/equityfundingsource-dev/.env, then rerun bun run deploy:worker for src/equityfundingsource-dev commit 7ce187e or latest main.
 - 2026-05-24 [#r2-upload-cache] R2 upload cache path: make token/admin uploads write original bytes to R2 first, persist metadata in D1, and serve portal downloads from R2 even when Dropbox access is unavailable.
 - 2026-05-24 [#dropbox-cache-contract] Dropbox/R2 document cache contract: define R2 key namespace, D1 document metadata, Dropbox path mapping, content hashes, sync_status, last_dropbox_synced_at, tombstones, and conflict policy for uploaded documents.

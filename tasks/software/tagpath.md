@@ -128,7 +128,42 @@ v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-gramm
 Compacted content:
 - Archived 1 response topic(s): do [#p6tsifull]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-<!-- agent:boundary:d8b42916 -->
+### Re: do [#p6tsifullpath] — opus-4-7
+
+Wired the tagpath consumer adapter into `tsift path` and shipped as **tsift v0.1.51** (commit `e7d3c4f`, superproject pointer `8030b12`).
+
+#### What changed
+
+- **CLI surface (src/tsift/src/main.rs):** new `--no-tagpath` and `--tagpath-strict` flags on `Commands::Path`, plumbed into `cmd_path` as a `TagpathSearchOpts` argument that mirrors `tsift search`.
+- **Annotation pass (src/tsift/src/main.rs):** new public helper `annotate_path_nodes_with_tagpath(nodes, db, root, opts)` resolves each symbol's file via `db.symbol_info(name)` (first definition wins) and consults the loaded `TagpathAdapter`. Same Loaded / Stale / Missing matrix as `annotate_hits_with_tagpath`, with stale falling back to a stderr diagnostic (or hard error under `--tagpath-strict`).
+- **Per-row carrier (src/tsift/src/graph.rs):** `PathResult.path` is now `Vec<PathNode>` where `PathNode { name, tagpath_handle?: Option<String> }`. `tagpath_handle` is serde-skipped when `None`, so JSON stays compact on unannotated runs.
+- **Human output:** unchanged chain layout; nodes with a resolved handle now print as `name  [mem:…]`.
+
+#### BREAKING note (recorded in VERSIONS.md 0.1.51)
+
+`tsift path --json` previously emitted `path` as `["a","b","c"]`. It now emits `[{"name":"a"},{"name":"b","tagpath_handle":"mem:…"},…]`. Consumers should read `.name` per node and may optionally read `.tagpath_handle` for citation. Aligns the `path` row with the `SymbolHit`/`StoredSymbol` pattern that the rest of `p6tsifull` will follow on graph / explain / communities / federated.
+
+#### Test coverage (src/tsift/tests/exit_code.rs)
+
+- `path_json_reports_shortest_symbol_chain` — updated to assert the new object shape and that no `tagpath_handle` field appears when no tagpath index exists in the fixture.
+- `path_json_omits_handles_when_no_tagpath_flag_set` — builds a fresh tagpath index in the fixture, asserts `--no-tagpath` suppresses all handles.
+- `path_json_annotates_nodes_with_tagpath_handles_when_index_is_fresh` — builds a fresh tagpath index, asserts every node carries a `mem:` handle on the default code path.
+- New helper `write_fresh_tagpath_index` drives `tagpath::index::build` + `write` to set up the fixture without shelling out.
+- Existing `graph::tests::path_*` unit tests adapted (added `path_names` helper) and `cmd_path` unit tests pass `TagpathSearchOpts::default()`.
+
+#### Verification
+
+- `cargo test` ⇒ 853 passed across 5 suites (`exit_code` 110, bin 687, conformance 31, perf_gate 21, scan_plan 4).
+- `cargo clippy --all-targets --no-deps -- -D warnings` ⇒ clean (2 pre-existing patch-not-used warnings only).
+- `cargo build --release && cargo install --path .` ⇒ `tsift 0.1.51` live in `~/.cargo/bin/tsift`; `tsift path --help` exposes the new flags.
+- Latest GitHub CI on tsift (run 26385486618) is failing pre-existing for `tagpath` path-dep unavailability on the standalone checkout — unrelated to this change (tracked under `p6tspub`).
+
+#### Pending follow-up
+
+- `[#p6tsifullexplain]` next in queue — same template, larger blast radius (definitions + callers + callees + community each need annotation).
+- `[#p6tsifullgraph]` / `[#p6tsifullcommunities]` / `[#p6tsifullfederated]` ordered behind it.
+- `StoredEdge.tagpath_handle` field still unowned — likely lands with `[#p6tsifullgraph]` as the backlog hint suggests.
+<!-- agent:boundary:6e74230b -->
 <!-- /agent:exchange -->
 ###
 

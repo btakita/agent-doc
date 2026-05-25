@@ -1353,7 +1353,12 @@ pub fn run(file: &Path) -> Result<RepairOutcome> {
     // This prevents double-apply when the pending file was left behind after a successful
     // IPC write (e.g., IPC timeout path exits with code 75 without calling clear_pending,
     // but the plugin already applied the content via the IPC patch file).
-    if response_already_applied(&doc_content, &response) {
+    let response_already_present = response_already_applied(&doc_content, &response)
+        || response_already_applied_after_prefix_strip(&doc_content, &response);
+    if response_already_present {
+        if let Some(ref capture) = capture {
+            crate::capture::validate_replay(&canonical, capture)?;
+        }
         eprintln!(
             "[repair] Response already present in document — skipping apply, cleaning up pending file"
         );
@@ -1363,7 +1368,10 @@ pub fn run(file: &Path) -> Result<RepairOutcome> {
             .unwrap_or(true);
         let snapshot_missing_response = snapshot::load(file)?
             .as_deref()
-            .map(|snapshot_doc| !response_already_applied(snapshot_doc, &response))
+            .map(|snapshot_doc| {
+                !response_already_applied(snapshot_doc, &response)
+                    && !response_already_applied_after_prefix_strip(snapshot_doc, &response)
+            })
             .unwrap_or(true);
         if (state_is_open || visible_response_recovery.is_some()) && snapshot_missing_response {
             snapshot::save(file, &repaired_doc)?;

@@ -4387,6 +4387,99 @@ mod tests {
     }
 
     #[test]
+    fn preflight_refreshes_capture_after_user_committed_baseline_drift() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+
+        let original = concat!(
+            "---\n",
+            "session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ do #bdauc\n",
+            "<!-- agent:boundary:test -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#bdauc] Baseline drift task\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        std::fs::write(&doc, original).unwrap();
+        snapshot::save(&doc, original).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: #bdauc — gpt-5\n\n",
+            "Implemented and verified.\n",
+            "❯ Submodule pointer updated.\n",
+            "<!-- /patch:exchange -->\n"
+        );
+        let capture = crate::capture::capture_response(&doc, response).unwrap();
+
+        let current = original
+            .replace(
+                "<!-- agent:boundary:test -->",
+                concat!(
+                    "### Re: #bdauc — gpt-5\n\n",
+                    "Implemented and verified.\n",
+                    "Submodule pointer updated.\n",
+                    "<!-- agent:boundary:test -->"
+                ),
+            )
+            .replace(
+                "- [ ] [#bdauc] Baseline drift task\n",
+                concat!(
+                    "- [ ] [#bdauc] Baseline drift task\n",
+                    "- [ ] [#manual] User committed unrelated follow-up\n"
+                ),
+            );
+        std::fs::write(&doc, &current).unwrap();
+        snapshot::save(&doc, &current).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "manual baseline drift", "--no-verify"])
+            .output()
+            .unwrap();
+
+        run(&doc).unwrap();
+
+        let refreshed = crate::capture::load_by_id(&doc, &capture.capture_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            refreshed.file_hash.as_deref(),
+            Some(crate::ops_log::content_hash(&current).as_str()),
+            "preflight should refresh the capture file hash before replay"
+        );
+        assert_eq!(
+            refreshed.snapshot_hash.as_deref(),
+            Some(crate::ops_log::content_hash(&current).as_str()),
+            "preflight should refresh the capture snapshot hash before replay"
+        );
+        let log = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("capture_baseline_refreshed_for_benign_drift"),
+            "preflight must drive validate_replay's baseline refresh path:\n{log}"
+        );
+    }
+
+    #[test]
     fn preflight_resumes_commit_when_write_landed_without_open_cycle_state() {
         let dir = setup_project();
         let root = dir.path();

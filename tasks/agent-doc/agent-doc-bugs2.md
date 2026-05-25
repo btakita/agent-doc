@@ -100,10 +100,65 @@ Backlog items still open (no work this cycle):
 - jb-compact-cache-reg / jb-compact-cache-docs — gated behind the cache fix landing.
 
 Pick the next one to tackle.
-<!-- agent:boundary:a164e538 -->
+### Re: #queueautoadvance + #autocompactoff (spec+test+build+install+commit+push) — opus-4-7
+
+
+Done — closed both. Four backlog items remain open (see end of response).
+
+#### queue auto-advance — already in HEAD
+- Implementation lives at `src/agent-doc/src/preflight.rs:2251` (`run_queue_maintenance`), `:2730` (`collect_agent_done_ids_with_root`), `:2766` (`strike_done_queue_head_prompts`), with tests `strike_done_queue_head_prompts_marks_done_items_completed` (`:3399`) and `strike_done_queue_head_prompts_returns_none_when_head_is_live` (`:3436`). No code change needed this cycle — just closing the backlog item.
+
+#### auto-compact off by default — landed in submodule `6c0d69a`, superproject `7dac31be`
+Root cause: spec at `specs/07-closeout-commands.md:140` and runbook `runbooks/compact-exchange.md:8` already say auto-compact must be off by default, but `session_accretion::inspect_at` was emitting the imperative `Run agent-doc compact <FILE> --commit` guidance whether or not the user had opted in. Agents reading that guidance could auto-execute compact without any explicit `agent_doc_auto_compact` setting — which is what kept compacting plan.md / agent-doc-bugs2.md across recent sessions.
+
+Fix:
+- `src/session_accretion.rs:inspect_at` now reads `agent_doc_auto_compact` from frontmatter (`fm.auto_compact`) and from project config (`load_project_for_doc(file).agent_doc_auto_compact`). When neither is set, the compact guidance becomes: `"Exchange is large; ask the user before compacting. Auto-compact requires an explicit agent_doc_auto_compact opt-in in frontmatter or .agent-doc/config.toml (currently off). If the user approves, run agent-doc compact <FILE> --commit."` — non-imperative, names the missing opt-in, tells the agent to ask. When the opt-in is present, the existing imperative phrasing is preserved.
+- Tests in `src/session_accretion.rs`:
+  - `inspect_warns_on_large_exchange` tightened to assert the gated phrasing AND that no imperative `Run \`agent-doc compact` line appears without opt-in.
+  - New `inspect_emits_imperative_compact_guidance_when_auto_compact_opt_in` — frontmatter sets `agent_doc_auto_compact: 180`, asserts imperative phrasing returns.
+  - New `inspect_emits_imperative_compact_guidance_when_project_config_opt_in` — `.agent-doc/config.toml` sets `agent_doc_auto_compact = 180`, asserts imperative phrasing returns.
+- `specs/07-closeout-commands.md:140` extended: when opt-in absent, `session_accretion.guidance` must not emit imperative compact text; must instead emit gated phrasing that names the missing opt-in.
+- `runbooks/compact-exchange.md` "When to compact" section gained a bullet describing the gated reminder.
+
+Verification:
+- `make check` (clippy -D warnings + full test suite) → exit 0.
+- `cargo test --bin agent-doc session_accretion::tests::inspect` → 6 passed, 0 failed (including the 2 new tests).
+- `cargo build --release` → success.
+- `cargo install --path .` → replaced `~/.cargo/bin/agent-doc` v0.33.16.
+- `.bin/agent-doc` symlink → `target/release/agent-doc` (rebuilt).
+
+Commit + push:
+- Submodule `src/agent-doc` on branch `20260422/codex-agent-backend`: commit `6c0d69a`, pushed.
+- Superproject `main`: commit `7dac31be`, pushed.
+- Selective stage: only `src/session_accretion.rs`, `specs/07-closeout-commands.md`, `runbooks/compact-exchange.md` in the submodule commit — other working-tree modifications from prior in-flight work were left untouched.
+
+Backlog items still open (no work this cycle):
+- jb-restart-busy-sim — SimWorld + IDE telemetry for `session_restart --force`; plan at `tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md` phase 4.
+- jb-compact-cache-fix — Compact Exchange write/cache boundary fix; needs an investigation/plan cycle next.
+- jb-compact-cache-reg / jb-compact-cache-docs — gated behind the cache fix landing.
+
+Pick the next one to tackle.
+<!-- agent:boundary:684dc9a2 -->
 <!-- /agent:exchange -->
 ###
 <!--
+`As I was typing into the comment below `/agent:exchange`, the full-document IPC corruption happened, then the duplicate line happened, then the full-document IPC corruption happened again.
+#spec-test-build-install-commit-push
+---
+JB `Run Agent Doc` on docs.md had an error
+```
+resync: stash pane %23 is registered in its own project root — skipping kill
+resync: stash pane %11 is registered in its own project root — skipping kill
+resync: stash pane %28 is registered in its own project root — skipping kill
+resync: stash pane %33 is registered in its own project root — skipping kill
+resync: stash pane %13 is registered in its own project root — skipping kill
+resync: stash pane %26 is registered in its own project root — skipping kill
+[route] debounce OK — file idle for 22.1s and typing indicator idle
+[route] target tmux session: 0
+Error: authoritative actor generation 56 for tasks/docs.md owns pane %39 but route will not inject a new trigger because the authoritative actor is still starting (waited 10s for claude startup). Wait for the pane to show a dispatch-ready prompt (`prompt_ready=true`), then rerun `agent-doc tasks/docs.md`. If the pane stays stuck, restart the owner with `agent-doc start tasks/docs.md`.
+```
+#spec-test-build-install-commit-push
+---
 Please make auto-compact exchange off by default. Only explicit frontmatter or .agent-doc/config.toml setting should make auto-compact exchange active.
 -->
 
@@ -120,8 +175,6 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#queueautoadvance] agent:queue auto-strikes head prompts whose [#id] is in agent:done (including the archive=<path> file when set). Lands in preflight::run_queue_maintenance via collect_agent_done_ids_with_root + strike_done_queue_head_prompts. Unblocks the user-reported stuck-after-1-turn symptom.
-- [ ] [#autocompactoff] Make auto-compact exchange off by default. Absent agent_doc_auto_compact in frontmatter and .agent-doc/config.toml must resolve to false (currently defaults to true via session-accretion guidance). Files: frontmatter.rs (resolve_*), project_config.rs (auto_compact_exchange field default), compact.rs (trigger sites), preflight.rs (accretion guidance). Update README + SPEC + tests covering the prior default. Recommended.
 - [ ] [#jbrsrbusysim] SimWorld + IDE telemetry coverage for session_restart --force path, including session_restart_busy_pre_interrupt_idle and session_restart_busy_force_killed event variants (plan phase 4). Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md.
 - [ ] [#jbccfix] Fix the Compact Exchange write/cache boundary so JetBrains never receives a stale or conflicting file-cache snapshot after compact exchange.
 - [ ] [#jbccreg] Add deterministic regression coverage for Compact Exchange cache-conflict handling, including stale snapshot and concurrent user-edit cases where feasible.

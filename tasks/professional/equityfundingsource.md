@@ -163,7 +163,20 @@ Proof:
 - Verification: no code changed, so no build/test suite was run.
 - Confidence: high on the split between local broker work and Cloudflare-gated operator work.
 - Escalation: none.
-<!-- agent:boundary:851ede71 -->
+❯ Add #next-steps to implement the items I mentioned.
+### Re: add next steps — gpt-5
+
+Added `#next-steps` as the implementation umbrella for the items from the prior answer. I kept the split explicit: broker portal frontend API wiring is the local code task, while the D1 migrations and Cloudflare Access verification stay gated on Cloudflare token/account setup.
+
+Proof:
+- Changed paths: `tasks/professional/equityfundingsource.md` only, through `agent-doc finalize` backlog mutation and response persistence.
+- Commands: `agent-doc --version`, `tsift status`, `tsift status --fix`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `agent-doc finalize`.
+- Verification: no source code changed, so no build/test suite was run.
+- Confidence: high.
+- Escalation: none.
+
+Preflight warning carried forward: one legacy gated backlog item still lives in `agent:backlog`; that needs a separate `agent-doc migrate` cycle if you want it moved into review.
+<!-- agent:boundary:80a15c34 -->
 <!-- /agent:exchange -->
 ###
 
@@ -173,8 +186,8 @@ Proof:
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#next-steps] Implement the concrete EFS next steps: replace broker portal frontend demo arrays with live API-backed state/loading/error flows; after review #1v5m updates the Cloudflare token, apply D1 migrations 0025/0026 and smoke test upload/broker APIs; after the Cloudflare Access app is provisioned, set ACCESS_TEAM_DOMAIN/ACCESS_AUD and verify Google SSO; then cut over equityfundingsource.com and smoke test /, /funded-deals, and admin routing.
 - [ ] [#k2xg] Send Robert the six-question TMO outbound webhook prompt in src/equityfundingsource-dev/docs/tmo-webhooks-question.md for him to forward to Mortgage Office, then record the response and decide push vs. tightened polling.
-- [/] [#dropbox-sync-adapter] Dropbox sync adapter: after Dropbox access is available, push/pull R2_DOCUMENTS with idempotent retries, backfill, tombstone handling, and per-document sync logs.
 - [ ] [#qr72] [recommended] By May 27, 2026, send Lucas a written bridge plan: $500 now from personal funds if available, ask for the remaining $500 to be paid after EFS payment clears or by an agreed near-term date, and invoice EFS immediately for $5,000 with a smaller immediate continuation retainer accepted if Judith pushes back.
 - [ ] [#s62t] [recommended] Prepare EFS invoice with truthful hours/value; Lucas cost is $4,150 (83h @ $50), so floor is 42h/$4,200 and recommended ask is 50-60h/$5,000-$6,000 with any concession as an explicit courtesy credit.
 - [ ] [#m6ch] Get Google Suite admin credentials from Robert (SMTP + Google Calendar integration)
@@ -210,6 +223,7 @@ Proof:
 - [/] [#qakx] Investor portal document pages: replace static Documents, Statements, and Accreditation fixture data with D1/R2-backed APIs and authenticated upload/request/download flows.
 - [/] [#1v5m] [recommended] Update passage btak/equityfundingsource/cloudflare_api_token to include Cloudflare D1 read/write permissions so the project cf:d1:* scripts can run without the OAuth bypass.
 - [/] [#jnzs] [recommended] Await Judith or EFS reviewer approval on funded-deal images, copy, lien-position wording, and legal/disclosure language before invoicing or launch sign-off. Technical D1 migration, Worker deploy, and live funded-deals/admin-route smoke tests completed 2026-05-23.
+- [/] [#dropbox-sync-adapter] Dropbox sync adapter: after Dropbox access is available, push/pull R2_DOCUMENTS with idempotent retries, backfill, tombstone handling, and per-document sync logs.
 <!-- /agent:review -->
 
 ## Completed / Reaped
@@ -218,7 +232,25 @@ Proof:
 - [ ] [#e1kb] Point equityfundingsource.com and www.equityfundingsource.com at the Cloudflare Pages project equityfundingsource, then verify / and /funded-deals on the custom domain; if admin routes are expected on the custom domain too, decide whether to route those paths to the Worker or move the dynamic app fully behind the same hostname.
 <!-- /agent:icebox -->
 
-<!-- agent:done -->
+<!-- agent:done arc -->
+- 2026-05-24 [#a20z] Set EFS Cloudflare deployment credentials (CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID) in src/equityfundingsource-dev/.env, then rerun bun run deploy:worker for src/equityfundingsource-dev commit 7ce187e or latest main.
+- 2026-05-24 [#r2-upload-cache] R2 upload cache path: make token/admin uploads write original bytes to R2 first, persist metadata in D1, and serve portal downloads from R2 even when Dropbox access is unavailable.
+- 2026-05-24 [#dropbox-cache-contract] Dropbox/R2 document cache contract: define R2 key namespace, D1 document metadata, Dropbox path mapping, content hashes, sync_status, last_dropbox_synced_at, tombstones, and conflict policy for uploaded documents.
+- 2026-05-24 [#portal-cache-api] Portal cache APIs: cut investor/admin portal pages over to cache-only reads with last-synced/stale indicators and an outbox for portal writes that must replay to TMO later.
+- 2026-05-24 [#tmo-cache-worker] TMO sync Worker: build idempotent manual/scheduled pulls with page cursors, retries, tombstones, sync batches, and D1/R2 writes that do not require TMO during portal requests.
+- 2026-05-24 [#tmo-cache-model] TMO cache contract: define D1 read-model tables plus R2 raw payload/document object paths, TMO IDs, cursors, checksums, last_synced/stale/deleted state, and conflict policy for portal-visible data.
+- 2026-05-24 [#cf-d1-cache-deploy] Resolve Cloudflare D1 API authorization for account 1e7e194ff8da4ad9e40ce041aea84f76, apply migration 0023_tmo_cache_and_r2_documents.sql, then deploy worker commit 3ada2de.
+- 2026-05-24 [#ck54] Investor portal private document storage: add a separate private R2_DOCUMENTS bucket plus provider-neutral document metadata and authenticated download APIs; treat R2 as the canonical uploaded-document cache and keep Dropbox as a later sync adapter.
+- 2026-05-24 [#njsx] Tier 0: Cloudflare WAF + upload limits
+- 2026-05-24 [#ft47] Token-based document upload flow
+- 2026-05-24 [#yh4b] Admin dashboard (Cloudflare Access auth)
+- 2026-05-24 [#zjbe] Admin investor document workflow: upload and publish deal due-diligence, investor statements, tax docs, and accreditation files from R2 with visibility and review status controls.
+- 2026-05-24 [#9vv3] Investor portal end-to-end QA: seed and test investor signup, accreditation, published deal documents, funding commitment, admin acceptance, positions, distributions, and statements with TMO simulator plus R2 documents.
+- 2026-05-24 [#2rpv] Set Cloudflare Access env vars (ACCESS_TEAM_DOMAIN, ACCESS_AUD) on the equityfundingsource Worker and configure the CF Access application that protects /login/access-callback, then verify an admin sign-in via Google SSO.
+- 2026-05-24 [#0r24] Apply migration 0025_upload_tokens.sql to remote D1 once review #1v5m unblocks D1 API token permissions, then smoke test POST /api/admin/upload-tokens and POST /api/uploads/by-token/<token> against the live Worker.
+- 2026-05-24 [#7chq] Apply migration 0026_broker_portal.sql to remote D1 alongside 0025 once review #1v5m unblocks D1 API token permissions, then smoke test POST /api/broker/deals against the live Worker.
+<!-- /agent:done -->
+<!-- agent:done archive=tasks/professional/equityfundingsource.done.md -->
 - 2026-05-24 [#a20z] Set EFS Cloudflare deployment credentials (CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID) in src/equityfundingsource-dev/.env, then rerun bun run deploy:worker for src/equityfundingsource-dev commit 7ce187e or latest main.
 - 2026-05-24 [#r2-upload-cache] R2 upload cache path: make token/admin uploads write original bytes to R2 first, persist metadata in D1, and serve portal downloads from R2 even when Dropbox access is unavailable.
 - 2026-05-24 [#dropbox-cache-contract] Dropbox/R2 document cache contract: define R2 key namespace, D1 document metadata, Dropbox path mapping, content hashes, sync_status, last_dropbox_synced_at, tombstones, and conflict policy for uploaded documents.

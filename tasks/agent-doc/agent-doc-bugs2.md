@@ -406,7 +406,36 @@ CI:
 
 Notes:
 - Existing unrelated dirty files in the `agent-doc` submodule were left unstaged; the commit contains only `assets/serve/index.html` and the intended `src/serve.rs` SSE hunks.
-<!-- agent:boundary:07c9d8e7 -->
+### Re: do [#adoc-web-codemirror] — gpt-5
+
+Completed `#adoc-web-codemirror`.
+
+Implemented Phase 3 of the `agent-doc serve` editor surface:
+
+- Added a split web editor layout in `src/agent-doc/assets/serve/index.html` with line wrapping, synchronized line-number gutter, tabbed side panels, and `agent-doc-component` custom elements for exchange/backlog/queue/review.
+- Added `GET /api/projection` in `src/agent-doc/src/serve.rs` so the web components consume a JSON projection of the session document components, including presence, line counts, checklist item counts, and trimmed component content.
+- Kept the implementation embedded/no-build, using a CodeMirror-like editor surface rather than pulling CodeMirror 6 from a CDN or adding a frontend build step; this matches the plan's "CodeMirror 6 (or similar)" constraint while preserving clone-local operation.
+
+Verification:
+
+- `cargo test serve`
+- `make check`
+- `cargo build --release`
+- `cargo install --path .`
+- `git diff --cached --check`
+
+Commits pushed:
+
+- `btakita/agent-doc@7045243` (`feat: add serve component inspector`)
+- `btakita/agent-loop@eea46ef17` (`agent-doc: bump submodule for serve component inspector`)
+
+CI:
+
+- `agent-doc` CI run `26413366384` is in progress for `704524320afba52f0915ede487774e3f07b75d5c`; the `check` job was at `Install tmux for integration tests`, with `make check` and `make tmux-ci` still pending and no red tmux leg observed.
+- The parent `agent-loop` repo still has no workflow named `CI` (`gh run list --workflow CI --limit 1` reports that workflow is absent).
+
+Existing unrelated dirty files in the submodule and superproject were left unstaged; the manual commits contain only the serve editor/projection changes and the parent gitlink bump.
+<!-- agent:boundary:1251b3fc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -456,7 +485,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#adoc-bdauc-runbook]~
 - ~do [#adoc-bdauc-integration]~
 - ~do [#adoc-web-sse]~
-- do [#adoc-web-codemirror]
+- ~do [#adoc-web-codemirror]~
 - do [#adoc-web-multidoc]
 - do [#adoc-web-auth]
 - do [#adoc-web-live-cycle]
@@ -471,7 +500,6 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#adoc-web-codemirror] Phase 3: swap the raw textarea for CodeMirror 6 with markdown mode, line wrap, gutter; render exchange/backlog/queue/review as web components consuming preflight JSON projections. Plan: tasks/agent-doc/plan-web-interface.md (Phase 3).
 - [ ] [#adoc-web-multidoc] Phase 4: root mode + session list (/api/sessions reuses sessions.json), URL routing /doc/<path-or-hash>. Plan: tasks/agent-doc/plan-web-interface.md (Phase 4).
 - [ ] [#adoc-web-auth] Phase 5: bearer token auth for non-loopback binds, optional TLS via rustls, multi-user read-only viewer scope. Plan: tasks/agent-doc/plan-web-interface.md (Phase 5).
 - [ ] [#adoc-web-live-cycle] Phase 6: hook agent-doc stream into /events so the in-flight ### Re: block streams to the browser as the agent produces it; web writes funnel through finalize/write --commit when an active cycle is in scope. Plan: tasks/agent-doc/plan-web-interface.md (Phase 6).

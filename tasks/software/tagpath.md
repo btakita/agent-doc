@@ -123,70 +123,12 @@ v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-gramm
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260524-232950.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260525-004250.md`*
 
 Compacted content:
-- Archived 1 response topic(s): queue auto
+- Archived 2 response topic(s): next-steps; queue auto
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-❯ What are #next-steps for tagpath to support tsift and agent-doc?
-### Re: next-steps — opus-4-7
-
-
-**Top of backlog: p5tsi** (tsift integration via `.naming/index.json` as a first-class symbol-graph adapter).
-
-Six items added to the backlog in priority order — the first three matter most because they unblock real tsift and agent-doc workflows; the bottom three are enablers / nice-to-haves.
-
-| Rank | ID | Hook | Why now |
-|------|-----|-----|---------|
-| 1 | p5tsi | tsift integration: `.naming/index.json` becomes tsift's symbol-graph adapter | Tsift currently re-extracts symbols. Tagpath 0.7.0+ has a richer family/ontology index. Wiring tsift envelopes to cite tagpath family handles gives stable refs and removes duplicated extraction. |
-| 2 | p5inc | Incremental indexing (`tagpath index --update`) | Full rebuilds block any "freshness-gated" caller. Tsift refuses stale envelopes; agent-doc cycles need sub-second index repair. Today the index is rebuild-only. |
-| 3 | p5sln | Session-doc tag lint | This session hit the `agent:done archive PATH` bug because the directive parser is hand-rolled. Tagpath lint already knows tag families — a dialect that validates agent-doc components closes the loop and would have failed-closed earlier. |
-| 4 | p5wat | `tagpath watch` | Long-running watcher emitting NDJSON index events. Foundation for live tsift projection and agent-doc editor-side validation. |
-| 5 | p5mcs | MCP helpers `family_by_path`, `lint_session_doc`, `index_handle` | Lets tsift and agent-doc speak to tagpath over the stdio MCP server shipped in 0.8.0 without bespoke wrappers. |
-| 6 | p5wnp [recommended] | Publish wasm-pack tarball to npm | Wasm surface shipped in 0.9.0 but no npm artifact. Required before any JS-side agent-doc / tsift surface can pick it up. |
-
-**Phase 5 framing:** items 1–3 are a coherent "indexing-as-a-platform" arc. Combined deliverable: a tagpath-backed symbol/tag graph that tsift consumes for citations and agent-doc consumes for tag validation. Recommend grouping under the `#spec-test-build-install-commit-push` preset once you're ready to execute.
-### Re: queue auto — do [#p5xfast] — opus-4-7
-
-
-**Done.** Bincode sidecar shipped in tagpath 0.13.0. No-op `--update` now ~56x faster than full rebuild — comfortably past the 10x target. Side fix: re-armed `agent:queue auto` (you'd dropped the `auto` token when inserting p5xfast); queue is processing normally again.
-
-**Approach taken:** binary sidecar cache (`.naming/index.bincache`) rather than streaming JSON. The sidecar carries `magic + schema_version + per-section sha256 + bincode-encoded Index`. JSON output is unchanged and remains byte-identical to a full rebuild — consumers depending on SPEC §15 are unaffected.
-
-**Perf (1000-file synthetic tree, internal stderr digest):**
-
-| metric | before #p5xfast | after #p5xfast | ratio vs full |
-|---|---|---|---|
-| full rebuild | ~140 ms | **~113 ms** | 1x |
-| `--update` no-op | ~33 ms | **~2 ms** | **~56x** |
-| `--update` one-file edit | ~114 ms | **~84 ms** | ~1.35x |
-
-Wall-clock including process startup: full ~181 ms vs no-op ~3 ms (~60x).
-
-**Fallback behavior (sidecar is optional):** missing / corrupt / flipped-byte / schema-mismatch sidecar → fall back to JSON read and regenerate the sidecar on the next write. JSON missing → full rebuild regardless of sidecar state. Both files written via `.tmp + rename`; mid-write crash leaves the repo recoverable.
-
-**Changes (tagpath submodule, d47f908):**
-- `src/index/sidecar.rs` (new) — split head/tail module with magic / version / per-section sha256.
-- `src/index/mod.rs` — sidecar integration, `IndexShape` enum (`Full` / `LazyTail`), `update_incremental_with`, lazy-tail fast path, `write_json_only` test hook for crash recovery.
-- `src/main.rs` — CLI passes `IndexShape::LazyTail` on bare `--update`, `Full` on `--emit jsonl`.
-- `tests/test_index_sidecar.rs` (new, 10 tests) — write, no-op-reads-sidecar (instrumented via `TAGPATH_SIDECAR_DEBUG=1`), missing/corrupt/flipped/schema fallback + regen, JSON-missing forces full rebuild, deterministic encode, crash recovery, edit-after-load.
-- `Cargo.toml` — `0.12.0 -> 0.13.0`, added `bincode = { version = "2", features = ["serde"] }`; `Cargo.lock` refreshed.
-- `.gitignore` — `.naming/index.bincache{,.tmp}`.
-- `SPEC.md` — §9.13 sidecar note + recommended `.gitignore`; new §15.6 sidecar contract (consumers MUST NOT depend on it).
-
-**Verification:**
-- `cargo fmt` + clippy clean on default and `dyn-grammar`.
-- `cargo test` — **166/166 pass** (was 150 + 10 new sidecar + 6 misc updated).
-- `cargo test --features dyn-grammar` — **175/175 pass**.
-- `cargo build --target wasm32-unknown-unknown --no-default-features --features wasm` — clean (`index` module is already `cfg(not(target_arch = "wasm32"))`, so bincode never reaches wasm).
-- JSON byte-equality verified: `diff <(jq 'del(.generated_at)' before.json) <(jq 'del(.generated_at)' after.json)` → empty.
-
-**Commits:**
-- tagpath `d47f908`: `perf: bincode sidecar cache for incremental index (p5xfast)` → pushed.
-- agent-loop `480f413`: `tagpath: bump submodule to 0.13.0 (p5xfast)` → pushed.
-
-Auto-queue advances next to session-doc tag lint.
-<!-- agent:boundary:2a46c3ca -->
+<!-- agent:boundary:37eb605e -->
 <!-- /agent:exchange -->
 ###
 

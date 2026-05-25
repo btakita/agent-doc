@@ -33,7 +33,28 @@ Fixed agent:queue stuck-after-1-turn — auto-strike done items at preflight.
 Compacted content:
 - Archived 3 response topic(s): do [#adoc-compact-during-turn-response-loss]; response patchback loss after JB Compact Exchange mid-turn; do [#jbccc3]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:9df622a6 -->
+### Re: do [#jbccc4] — opus-4-7
+
+Phase 4 of `#adoc-jb-cache-cancel-stuck-cycle` landed as a focused runbook plus the catalog wiring.
+
+#### What changed
+
+- **New `src/agent-doc/runbooks/jb-cache-conflict.md`** — documents the JetBrains File Cache Conflict dialog Accept/Cancel contract, the auto-recovery shape preflight matches (cycle at `WriteApplied`/`Committed`, snapshot ≠ HEAD, working tree matches snapshot modulo transient markers), the `jb_cache_conflict_cancel_auto_recovery_*` audit events, and the conditions under which auto-recovery declines (divergent working tree, wrong phase, commit error) with the manual `agent-doc write --commit` / `agent-doc commit` fallback chain.
+- **`src/agent-doc/runbooks/commit.md`** — added a "JetBrains File Cache Conflict" section that points at the new runbook so the closeout-ordering doc stays the single entry point and the JB-specific detail lives in its own focused file (per the "oversized specs should split behind a stable index" project rule).
+- **`src/agent-doc/SKILL.md`** and **`.claude/skills/agent-doc/SKILL.md`** — `jb-cache-conflict` added to the runbook full-catalog list so the harness skill surfaces stay aligned.
+
+#### Verification
+
+- File-by-file inspection of the new runbook + cross-links.
+- No Rust source changed this turn, so no `cargo test` / `make check` was rerun; Phase 3's test coverage still holds.
+
+#### Closeout
+
+- Submodule commit: `9eb99ff` — `docs: add jb-cache-conflict runbook for #jbccc4`.
+- Superproject commit: `f2ec1d760` — `agent-doc: bump submodule for #jbccc4 docs`.
+
+Marking `#jbccc4` done. Next queue head: `do [#jbccc5]` (Phase 5 — SimWorld inversion + real-file integration coverage).
+<!-- agent:boundary:b746731e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -62,7 +83,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#jbccc2]~
 - ~do [#adoc-compact-during-turn-response-loss]~
 - ~do [#jbccc3]~
-- do [#jbccc4]
+- ~do [#jbccc4]~
 - do [#jbccc5]
 - do [#adoc-baseline-drift-after-user-commit]
 - do [#adoc-prefix-strip-uncommitted]
@@ -77,7 +98,6 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#jbccc4] Phase 4 of #adoc-jb-cache-cancel-stuck-cycle: documentation + runbook. runbooks/commit.md, runbooks/harness-invocation.md (or new runbooks/jb-cache-conflict.md) — document dialog Accept/Cancel contract and recovery command for cases Phase 3 cannot auto-recover. Plan: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md
 - [ ] [#jbccc5] Phase 5 of #adoc-jb-cache-cancel-stuck-cycle: regression coverage. tests/run_integration.rs (or sibling) — integration test that simulates cancel-branch file shape and asserts agent-doc preflight auto-recovers without manual write --commit; SimWorld scenario from Phase 1 must pass after Phase 3 lands. Plan: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md
 - [ ] [#adoc-baseline-drift-after-user-commit] agent-doc-bug: when a user commits a manual edit on top of an agent-doc commit, the captured baseline (.agent-doc/baselines/<hash>.md) is not refreshed; preflight, write --commit, and repair all fail with 'captured response baseline no longer matches current document' and there is no clear recovery path the next time the user invokes /agent-doc on the doc. Workaround: agent-doc reset --from-current rebuilds the baseline from the live markdown but drops session ID + snapshot history. Plan path: tasks/agent-doc/plan-baseline-drift-after-user-commit.md
 - [ ] [#adoc-prefix-strip-uncommitted] agent-doc-bug: after the JB-cache-conflict bug forces a manual sed strip of incorrectly-applied prompt-prefix markers (❯ ) from the response body, the subsequent agent-doc write --commit / repair / session-check chain fails to recognize the cleaned response as the cycle's committed response. Symptoms: session-check INTERRUPTED with prompt_target pointing at the agent's own response paragraph. Recovery: bare git commit succeeds and ships the response, but the agent-doc cycle state never closes cleanly. Likely cause: snapshot/baseline tracking does not recover after the IPC patch was applied with malformed markers and then manually edited. Plan path: tasks/agent-doc/plan-prefix-strip-uncommitted.md (to be authored). Related: #adoc-jb-cache-cancel-stuck-cycle (precondition for this bug).

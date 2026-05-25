@@ -181,7 +181,30 @@ cd pkg && npm login && npm publish --access public   # scoped package needs --ac
 **Follow-up captured:** p5lic — add a root `LICENSE-MIT` file. Both the wasm-pack tarball and any future crates.io publish currently ship without an actual license file even though `license = "MIT"` is set in `Cargo.toml`.
 
 **Auto-queue drained.** Phase 5 prep complete: 7 cycles (p5tsi, p5inc, p5xfast, p5sln, p5wat, p5mcs, p5wnp), 7 minor releases (0.11.0 → 0.17.0), test baseline grew from 132 → 213 default / 222 with `dyn-grammar`, zero regressions.
-<!-- agent:boundary:90df39c3 -->
+❯ do [#p5lic]. #spec-test-build-install-commit-push
+### Re: do [#p5lic]. #spec-test-build-install-commit-push — opus-4-7
+
+
+**Done.** `LICENSE-MIT` added; tagpath bumped 0.17.0 → 0.17.1; submodule pointer bumped + pushed. The npm tarball and any future crates.io publish will now ship with an actual license file.
+
+**Changes (tagpath submodule, 6a5a106):**
+- `LICENSE-MIT` (new) — standard MIT text, `Copyright (c) 2026 Brian Takita`.
+- `Cargo.toml` — added `license-file = "LICENSE-MIT"` next to the existing `license = "MIT"` so packaging tools pick it up explicitly; version `0.17.0 → 0.17.1`.
+- `Cargo.lock` — refreshed.
+
+**Verification:**
+- `cargo build --release` — clean.
+- `cargo test` — **213/213 pass** (no behavior change, sanity gate).
+- `cargo install --path . --force` — `~/.cargo/bin/tagpath` at 0.17.1.
+
+**Commits:**
+- tagpath `6a5a106`: `chore: add LICENSE-MIT (p5lic)` → pushed.
+- agent-loop `7373245`: `tagpath: bump submodule to 0.17.1 (p5lic)` → pushed.
+
+Skipped wasm-pack rebuild this cycle — the `pkg/` will pick up the new LICENSE-MIT on the next `./scripts/build-wasm.sh` run before publish.
+
+**Session accretion warning:** exchange is at 62 lines (warn level). Recommend `agent-doc compact tasks/software/tagpath.md --commit` before the next non-trivial turn so the context stays manageable. I have not auto-compacted (frontmatter doesn't opt-in).
+<!-- agent:boundary:9a7150e2 -->
 <!-- /agent:exchange -->
 ###
 
@@ -191,7 +214,6 @@ cd pkg && npm login && npm publish --access public   # scoped package needs --ac
 ## Backlog
 
 (<!-- agent:backlog -->
-- [ ] [#p5lic] Add a root LICENSE-MIT file to the tagpath repo. Cargo.toml declares license = MIT but no LICENSE file exists, so the @btakita/tagpath-wasm npm tarball and crates.io published artifacts both ship without an actual license file. Trivial fix — paste the MIT text with btakita as the copyright holder.
 <!-- /agent:backlog -->
 
 ## Completed / Reaped

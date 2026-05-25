@@ -2,7 +2,7 @@
 description: "Interactive markdown session. TRIGGER: user invokes /agent-doc <file>. Requires a markdown session document, installed CLI, and write+commit every cycle."
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.33.16"
+agent-doc-version: "0.34.0"
 ---
 
 # agent-doc
@@ -25,7 +25,6 @@ This shared hot path serves Claude Code, Codex, OpenCode, Cursor, and direct har
 Arguments: `FILE` — path to the session document (e.g., `plan.md`).
 
 **Note:** Slash commands (`/agent-doc`) are Claude Code-specific. Other harnesses receive the document path directly.
-
 ## Hot Path Digest
 
 - **Document is the UI** — user edits ARE the prompt; respond in the document and console.
@@ -50,11 +49,12 @@ Detect subcommands before the normal workflow:
 - `compact <FILE>` → run `agent-doc compact <FILE> --commit` and stop.
 - `compact exchange <FILE>` → follow [runbooks/compact-exchange.md](runbooks/compact-exchange.md) and stop.
 
-**Auto-update skill:** Compare `agent-doc --version` to `agent-doc-version`. If newer, run the active-harness install: Claude Code `agent-doc skill install --harness claude --reload compact`; Codex `agent-doc skill install --harness codex --reload restart`; OpenCode `agent-doc skill install --harness opencode`; other harnesses `agent-doc skill install`. If install says already up to date, treat this file as stale duplicate instructions, use installed harness instructions, and continue with the task. Stop only on a real `SKILL_RELOAD=...`; see [runbooks/harness-invocation.md](runbooks/harness-invocation.md).
+**Auto-update skill:** Compare `agent-doc --version` to `agent-doc-version`. If newer, run `agent-doc skill install --harness claude --reload restart` unless `agent_doc_auto_compact` is explicitly set in frontmatter or `.agent-doc/config.toml`. On `SKILL_RELOAD=restart`, ask the user to restart Claude Code and re-invoke `/agent-doc <FILE>`, then stop. Use `--reload compact` and ask for `/compact` only when that explicit opt-in exists. If already up to date, treat as stale instruction drift, continue this turn, and use the installed Claude skill. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md).
 
-Run `agent-doc preflight <FILE>`. Preflight owns recovery before diffing and prints the cycle contract: `baseline_file`, `no_changes`, `claims`, `slash_commands`, `builtin_commands`, `orchestration_request`, `prompt_presets_requested`, tier/model fields, `agent_model`, `diff_type`, and the diff contract.
+Run `agent-doc preflight <FILE>`. Preflight owns recovery before diffing and prints the cycle contract: `baseline_file`, `no_changes`, `warnings`, `claims`, `slash_commands`, `builtin_commands`, `orchestration_request`, `prompt_presets_requested`, tier/model fields, `agent_model`, `diff_type`, and the diff contract.
 
 - If `no_changes: true` → tell the user nothing changed and stop.
+- Surface any `warnings`; for `harness_mismatch`, note that the document-declared agent differs from the active harness and continue with the active harness attribution/closeout path.
 - Print any `claims` to the console as a record.
 - Use `baseline_file` as `--baseline-file` for every subsequent response-persistence command. Do NOT save your own baseline — preflight's copy is taken at a stable post-commit point.
 - First cycle only: if the document is not yet in context, run `agent-doc read <FILE>` to fetch HEAD content. Do NOT read the snapshot file directly.
@@ -88,7 +88,7 @@ After preflight, run `agent-doc plan <FILE>` and treat `prompt_targets`, `execut
 
 ### 1b. Update pending (template mode)
 
-If `<!-- agent:backlog -->` (or legacy `agent:pending`) exists, mutate it only through granular `agent-doc write` flags: `--pending-add`, `--done <id>`, `--pending-edit "id=text"`, `--pending-reorder`, `--pending-gate`, `--pending-ungate`. Full-replace via `<!-- patch:backlog -->` is rejected; see [runbooks/pending-ops.md](runbooks/pending-ops.md). For `<!-- agent:icebox -->`, use `<!-- replace:icebox -->`.
+If `<!-- agent:backlog -->` (or legacy `agent:pending`) exists, mutate it only through granular `agent-doc write` flags: `--pending-add`, `--done <id>`, `--pending-edit "id=text"`, `--pending-reorder`, `--pending-gate`, `--pending-ungate`, `--review-add`, `--review-edit`. Full-replace via `<!-- patch:backlog -->` / `<!-- patch:review -->` is rejected; see [runbooks/pending-ops.md](runbooks/pending-ops.md). For `<!-- agent:icebox -->`, use `<!-- replace:icebox -->`.
 
 Completed/reaped items live under canonical `<!-- agent:done -->`; legacy `agent:backlog-done` and `agent:pending-done` tags require `agent-doc migrate`.
 
@@ -98,7 +98,7 @@ Completed/reaped items live under canonical `<!-- agent:done -->`; legacy `agent
 
 **Plan-backed pending items:** create the plan file first and include that exact plan file path in the pending text.
 
-**`do #id` closeout rule:** when the user directs `do #id ...`, record the pending outcome before persistence: `--done <id>` if completed, `--pending-gate <id>` if code-complete but externally blocked, or explain concretely why it stays open. `session-check` enforces the `pending_done_guard`.
+**`do #id` closeout rule:** when the user directs `do #id ...`, record the pending outcome before persistence: `--done <id>` if completed, `--pending-gate <id>` if code-complete but awaiting review/external validation, or explain concretely why it stays open. `session-check` enforces the `pending_done_guard`; projects may opt into `review_done_guard` when review must precede done.
 
 ### 2. Persist the response (MANDATORY — never skip)
 
@@ -133,3 +133,17 @@ Document format, frontmatter, component naming, and commit-boundary exceptions: 
 ## Runbooks
 
 Use runbooks for detail that is not needed every turn. Key runbooks: [runbooks/harness-invocation.md](runbooks/harness-invocation.md), [runbooks/planning-dispatch.md](runbooks/planning-dispatch.md), [runbooks/pending-ops.md](runbooks/pending-ops.md), [runbooks/commit.md](runbooks/commit.md), [runbooks/split-spec-files.md](runbooks/split-spec-files.md). `split-spec-files` applies across agent-doc-managed surfaces; custom root files stay opt-in unless they still match the generated baseline. Full catalog: `compact-exchange`, `transfer-extract`, `model-tier-gate`, `command-synonyms`, `compound-task-steering`, `streaming-checkpoints`, `document-format`, `code-enforced-directives`.
+## Auto-loop while queue is active (Claude Code)
+
+After a successful `agent-doc finalize` / `agent-doc write --commit` cycle whose `agent-doc session-check` returns OK, check preflight's queue fields:
+
+- `preflight.queue_active == true`
+- `preflight.queue_trigger == "auto"`
+- `preflight.queue_prompts.len() >= 1`
+- The closing cycle's `prompt_bearing_changes` was either empty or exactly the queue-synthetic head prompt (a non-queue user prompt mid-loop takes precedence; do NOT auto-loop over it)
+
+When all four hold, invoke the `Skill` tool with `skill: "loop"` and `args: "agent-doc <FILE>"` to drive the next cycle from the same Claude Code session. `/loop` self-paces the next invocation and terminates naturally when the queue drains, when the user interrupts, when `agent_doc_queue_max_iterations` (frontmatter or `.agent-doc/config.toml`) is hit, or when the environment hard-cap `AGENT_DOC_QUEUE_MAX_ITERATIONS_HARD_CAP` (default `50`) is exceeded.
+
+Skip the auto-loop on any failed closeout, `session-check` interruption, or `lint-gate` block — those need explicit operator attention. Skip when `preflight.queue_active == false` (queue drained or halted).
+
+This section is Claude-Code-specific. Codex auto-loops via its `Stop` hook in `.codex/hooks.json`; OpenCode currently has no auto-loop. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md) and `tasks/agent-doc/plan-claude-code-queue-auto-loop.md`.

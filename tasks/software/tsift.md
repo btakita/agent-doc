@@ -40,7 +40,7 @@ Compacted content:
 Dispatched as a focused packet. Investigates why `preparation_cache_lookup` (~250 ms) never hits across consecutive `tsift graph-db backend-eval` runs on agent-loop — runs a pair, captures the watermark hash inputs, identifies the drifting input (likely a path slipping past `traversal_relative_path_is_generated_artifact` or a directory mtime entering the hash per the `#gdbgatecold` history), applies the minimal stable fix or stops with a "no fix — by design" verdict, then verifies cache-hit on a post-fix consecutive pair. Bumps to v0.1.51 if a fix lands. Hard regression-safety: `search_timeout_reports_reindex_when_index_turns_stale_during_worker_run` must stay green.
 
 Awaiting the packet's proof block before `make check` + `cargo install --path .` + commit + push + finalize with `--done cachelookupshift`.
-<!-- agent:boundary:f1876bae -->
+<!-- agent:boundary:3b81668c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -49,7 +49,7 @@ What are #next-steps to make the graph faster?
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#cachelookupshift]
+- ~do [#cachelookupshift]~
 - do [#gdbvacconvex]
 - complete [#gdbvacproof]
 <!-- /agent:queue -->
@@ -57,7 +57,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#cachelookupshift] On agent-loop the conflict-matrix preparation_cache_lookup (~250 ms) never hits across repeated tsift graph-db backend-eval runs because traversal source watermark hashes shift slightly each invocation. Identify the per-invocation hash input that's drifting (likely a generated artifact path slipping past traversal_relative_path_is_generated_artifact, or a directory mtime entering the hash) and either stabilize the hash or narrow the cache key so the prep cache actually hits on identical source state.
 - [ ] [#gdbvacconvex] Deploy examples/convex-graph via npx convex dev against Brian's Convex account so tsift convex-sync --remote-snapshot --apply and tsift graph-db compact --prune-tombstones --confirmed-convex-reconciled can be exercised end-to-end (blocks the Convex half of #gdbvacproof).
 - [/] [#orchdog] [recommended] Dogfood the completed graph-backed agent orchestration stack on a real agent-doc queue run: run refresh -> evidence -> conflict-matrix -> dispatch-trace -> jobs create/collect, compare worker_prompt_packet and worker_result closure fields, and capture any tsift-side fixture gaps. **Dogfood performed 2026-05-21 on `session-share/tasks/root.md` items #x63e + #v4v0; findings recorded in #gdbevid, #cmgr, #gdbidx — see `session-share/tasks/root.md` exchange "graph-backed orchestration dogfood" entry for the full pipeline trace.** **Second dogfood 2026-05-21 against `tasks/software/tsift.md` (preset `#dogfood-tsift`) surfaced 2 new gaps: #cmgrwres and #gdblock.**
 <!-- /agent:backlog -->

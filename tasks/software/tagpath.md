@@ -123,52 +123,12 @@ v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-gramm
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260525-070330.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260525-071806.md`*
 
 Compacted content:
-- Archived 1 response topic(s): do [#p6tsifullpath]
+- Archived 1 response topic(s): do [#p6tsifullexplain]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-### Re: do [#p6tsifullexplain] — opus-4-7
-
-Wired the tagpath consumer adapter into `tsift explain` and shipped as **tsift v0.1.52** (commit `0a71c45`, superproject pointer `015797d`).
-
-#### What changed
-
-- **CLI surface (src/tsift/src/main.rs):** `--no-tagpath` and `--tagpath-strict` flags added to `Commands::Explain`, plumbed into `cmd_explain_with_budget` as `tagpath_opts: TagpathSearchOpts`. Same flag spelling as `tsift search` / `tsift path`.
-- **Index layer (src/tsift/src/index.rs):** `StoredSymbol` and `StoredEdge` gain a `tagpath_handle: Option<String>` field (serde-skipped when `None`). The shared index layer **never writes** the field — every `IndexDb` row constructor sets it to `None`. Only consumers (currently `cmd_explain`) populate it via the new annotation helpers.
-- **Four annotation helpers (src/tsift/src/main.rs):**
-  - `annotate_stored_symbols_with_tagpath` — definitions resolve directly from `(file, name)`.
-  - `annotate_stored_edges_with_tagpath` with `EdgeSide::{Caller, Callee}` — caller rows annotate `(caller_file, caller_name)` directly; callee rows look up each `callee_name`'s definition via `db.symbol_info` first.
-  - `resolve_community_member_handles` — looks up each member's definition file, returns parallel `Vec<Option<String>>` so `graph::Community` itself stays untouched.
-  - `resolve_tagpath_handles_for_names` — shared name→file→handle batch lookup with dedup; used by the callee + community paths.
-- **Annotation order:** `cmd_explain_with_budget` annotates against **absolute** paths before the optional `relativize_*` pass, so the adapter's `(path, name) → handle` resolution always sees real source paths.
-
-#### Additive JSON change (recorded in VERSIONS.md 0.1.52)
-
-`tsift explain --json` previously emitted `community` as `graph::Community` literally — `{id, members: ["alpha","beta"], modularity_contribution}`. Members are now objects: `{id, members: [{name, tagpath_handle?}, …], modularity_contribution}`. Existing consumers that read `member` as a string need a one-line update to read `member["name"]`. The standalone `tsift communities` command keeps the flat string-array shape until `#p6tsifullcommunities` lands.
-
-Definitions/callers/callees gain the field inline on `StoredSymbol` / `StoredEdge` — serde-skipped when no handle, so default output is byte-identical for repos without `.naming.toml`.
-
-#### Test coverage (src/tsift/tests/exit_code.rs)
-
-- `explain_json_combines_definition_edges_and_community` — updated to read `member["name"]`, asserts every surface (definitions, callers, callees, community members) has no `tagpath_handle` field when no tagpath index is present.
-- `explain_json_omits_handles_when_no_tagpath_flag_set` — builds a fresh tagpath index in the fixture, asserts `--no-tagpath` suppresses handles on all four surfaces.
-- `explain_json_annotates_definitions_edges_and_community_when_index_is_fresh` — builds a fresh tagpath index, asserts every definition, caller, callee, and community member carries a `mem:` handle.
-
-Reuses the `write_fresh_tagpath_index` helper introduced under `[#p6tsifullpath]`.
-
-#### Verification
-
-- `cargo test` ⇒ **855 passed** across 5 suites (exit_code 113, bin 687, conformance 31, perf_gate 21, scan_plan 4) — net +2 over the v0.1.51 baseline of 853 (3 new explain tests + 1 updated existing test).
-- `cargo clippy --all-targets --no-deps -- -D warnings` ⇒ clean (2 pre-existing patch-not-used warnings only). Fixed one new `.into_iter()` redundancy clippy flagged in the community zip.
-- `cargo build --release && cargo install --path .` ⇒ `tsift 0.1.52` live in `~/.cargo/bin/tsift`; `tsift explain --help` exposes the new flags.
-
-#### Pending follow-up (queue advances next)
-
-- `[#p6tsifullgraph]` — same template, but the backlog hint already notes `StoredEdge.tagpath_handle field if not already added by p6tsifullpath` ⇒ **already added by this commit**; `[#p6tsifullgraph]` only needs to wire `cmd_graph` to the existing annotation helpers and add CLI flags. Smaller blast radius than this turn.
-- `[#p6tsifullcommunities]` — schema change: `graph::Community.members` likely promotes to `Vec<CommunityMember>` or gets a parallel handles field; same trade-off as `PathResult.path` faced under `[#p6tsifullpath]`.
-- `[#p6tsifullfederated]` — most complex; adapter load must respect per-scope `project_root` across federated index DBs.
-<!-- agent:boundary:5bcf718b -->
+<!-- agent:boundary:a379f6d7 -->
 <!-- /agent:exchange -->
 ###
 

@@ -507,7 +507,31 @@ CI:
 - The parent repo still reports no workflow named `CI`.
 
 Unrelated dirty files in the submodule (`src/diff.rs`, `src/git_sibling.rs`, `src/route/tests.rs`, `src/session_accretion.rs`) were left unstaged.
-<!-- agent:boundary:23541403 -->
+### Re: do [#jbrsrbusysw] — gpt-5
+
+Implemented the binary restart behavior and pinned it in SimWorld. `agent-doc session restart-supervisor <FILE>` now accepts `--force`; the non-force alive-busy refusal includes the `--force` hint, and the force path sends the harness interrupt sequence, waits briefly for idle, then records separate ops-log audit events for force-used, interrupt-settled-idle, and force-killed outcomes before the supervisor restart IPC kills/restarts the child.
+
+SimWorld now has restart commands and deterministic scenarios for route + Restart Supervisor while the pane is alive-busy, covering both the refusal branch and the force branches. I also added a unit test that keeps the refusal text pointing at `--force`. The older parent tracker is resolved by this binary-side work and its already-split follow-ups remain independent.
+
+Verification:
+- `cargo test restart_supervisor_sim`
+- `cargo test restart_busy_refusal_points_to_force`
+- `cargo test sim_world`
+- `cargo test session_actor_cmd`
+- `make check`
+- `cargo build --release`
+- `cargo install --path .`
+
+Committed and pushed:
+- `agent-doc` submodule `bb37091` (`feat: force busy session restart`)
+- parent repo `a67f6aef3` (`agent-doc: bump submodule for busy restart force`)
+
+CI:
+- `agent-doc` CI run `26415605068` for `bb37091` is in progress; setup/checkout steps had passed and no red tmux/test leg existed at inspection time.
+- The parent repo still reports no workflow named `CI`.
+
+Unrelated dirty submodule files (`src/diff.rs`, `src/git_sibling.rs`, `src/preflight.rs`, `src/route/tests.rs`, `src/session_accretion.rs`, `src/skill.rs`, `src/write.rs`) were left unstaged.
+<!-- agent:boundary:83e5e74c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -561,7 +585,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#adoc-web-multidoc]~
 - ~do [#adoc-web-auth]~
 - ~do [#adoc-web-live-cycle]~
-- do [#jbrsrbusysw]
+- ~do [#jbrsrbusysw]~
 - do [#jbrsrbusyide]
 - do [#jbccfix]
 - do [#jbccreg]
@@ -572,7 +596,6 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#jbrsrbusysw] SimWorld scenario coverage for session_restart --force: route + Restart Supervisor while pane is alive-busy with and without --force, asserting the new refusal message and force success (including session_restart_busy_pre_interrupt_idle and session_restart_busy_force_killed event variants). Substantial — requires new Op variant + tmux/session_actor mock in src/sim_world.rs. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md phase 4 (SimWorld piece).
 - [ ] [#jbrsrbusyide] JB plugin IDE-side telemetry for session_restart --force: surface session_restart_force_used, session_restart_busy_pre_interrupt_idle, and session_restart_busy_force_killed events in the IntelliJ notification area or Logcat so users can see the recovery path the binary took. Kotlin work in editors/jetbrains/. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md phase 4 (IDE piece).
 - [ ] [#planperphase] Convention: split multi-phase plans into per-phase backlog IDs (e.g. #crdtrespfx1, #crdtrespfx2) instead of one parent ID that gets pending-gated. Lets queue auto-strike honor per-phase progress. Lower priority — the convention is opt-in for authors. [recommended]
 - [ ] [#jbccfix] Fix the Compact Exchange write/cache boundary so JetBrains never receives a stale or conflicting file-cache snapshot after compact exchange.
@@ -586,7 +609,6 @@ preset #spec-test-build-install-commit-push
 - [/] [#jbccc2] Phase 2 of #adoc-jb-cache-cancel-stuck-cycle: JB plugin undo-on-cancel. editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt — defer the write until user resolves the File Cache Conflict dialog (never queue change beforehand); on Cancel return 0/2 from socket IPC callback; on file-IPC cancel leave patch file in place. Plan: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md
 - [/] [#agent-doc-commit-sibling] agent-doc CLI: add --commit-sibling <repo> mode to finalize/write. When the session doc lives in repo A but the user's directive originates a commit in sibling repo B (e.g. session-share session-doc drives a build-party scripts change), agent-doc should be able to stage and commit the sibling repo with a Session-Doc git trailer auto-injected. Trailer format: 'Session-Doc: https://github.com/<session-share-org>/<repo>/blob/<session-share-cycle-sha>/<session-doc-path>'. Today agent-doc only commits inside the session-doc's own submodule, so the agent (Claude) creates sibling commits manually via 'git commit' and the trailer is easy to forget. Companion item #cross-repo-sessiondoc-trailer in tasks/docs.md covers the convention + backfill-updates.sh changes across the four script copies. Plan path: tasks/agent-doc/plan-commit-sibling.md
 - [/] [#adoc-jb-cache-cancel-stuck-cycle] agent-doc-bug: after canceling a JetBrains File Cache Conflict dialog during IPC patch delivery, the response patch lands in the working tree but the cycle does not reach committed state. Recovery requires running agent-doc write --commit FILE manually. Repro: have JB IDE open with the file in an editor; run finalize; cancel the JB cache-conflict dialog when it appears. Expected: cycle reaches committed cleanly or surfaces a clear error. Actual: response is in working tree but next preflight reports post-commit local drift requiring manual recovery. Plan path: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md (to be authored). Related: #jbccfix, #jbccreg, #jbccdocs in this same file.
-- [/] [#jbrsrbusy] [partial] Phase 1 (binary) landed: agent-doc session restart <FILE> --force flag accepts alive-busy panes, refusal message now ends with the --force hint citing the exact command, and the force path logs session_restart_force_used. Plan phases 2 (JB plugin confirm dialog → invokes --force), 3 (optional harness-aware pre-interrupt with 2s idle wait), and 4 (SimWorld coverage + IDE-side telemetry) split into #jbrsrbusyjb, #jbrsrbusyint, and #jbrsrbusysim. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md.
 - [/] [#stuckcycledup] [recommended] [partial] Wedged-cycle pattern: cycle_already_committed gate now refuses the short-circuit when the active capture body is absent from HEAD (flow/closeout.rs::cycle_already_committed + new stuck_captured_cycle helper), and preflight emits a stuck_captured_cycle warning. Remaining plan parts split into #stuckcycleorphan, #stuckcyclerepair, and #stuckcyclesuperseded. Plan: tasks/agent-doc/plan-stuck-cycle-causes-duplicated-uncommitted-response.md.
 - [/] [#jbresstart] Refuse cross-file pane rescue and extend Starting-actor wait after stash recovery; see tasks/agent-doc/plan-jb-route-rescued-stash-pane-starting-actor.md
 <!-- /agent:review -->

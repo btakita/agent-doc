@@ -36,7 +36,44 @@ queue_active: false
 Compacted content:
 - Archived 4 response topic(s): do [#7chq]; Invoice draft for $5,000 + email vs. attachment; Can we implement?; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:bb899d4b -->
+❯ do [#next-steps]. #spec-test-commit-push-deploy
+### Re: next-steps — gpt-5
+
+Implemented and shipped the code-owned part of `#next-steps`.
+
+Changed EFS broker portal frontend away from the old demo arrays and onto live broker APIs:
+- Dashboard now loads `/api/broker/dashboard` + `/api/broker/pipeline` with loading, empty, error, and retry states.
+- My Pipeline now loads live pipeline + deal-linked document checklist data.
+- Commissions now loads live commission rows + dashboard fee metrics.
+- Documents now loads `/api/broker/documents`.
+- Submit a Deal now posts the form to `POST /api/broker/deals`.
+- Added `GET /api/broker/documents?deal_id=<id>` and joined commission rows with their broker deal property/borrower context.
+- Fixed production Worker wiring so broker APIs and token-upload APIs are mounted in the deployed Worker, not only the local server.
+
+Spec/tests updated in `prds/equity-funding-source-lending-portal-prd.md`, `tests/broker-portal.test.ts`, and `tests/upload-tokens.test.ts`.
+
+Commit/push/deploy proof:
+- Commit pushed to `origin/main`: `0f85fad feat: wire broker portal to APIs`.
+- Deployed Worker version: `1d9b55f1-ac3b-4ce6-bae1-ecf0a27db503`.
+
+Verification:
+- `bun test tests/broker-portal.test.ts tests/upload-tokens.test.ts` passed: 38 tests.
+- `make check` passed after rebase and Worker-wiring fix: 172 tests, app build, worker build.
+- GitHub Actions check: this repo has no `.github` workflow directory and `gh run list --workflow CI --limit 1` reports no workflow named `CI`, so there is no remote CI run to inspect.
+
+Post-deploy smoke on `https://equityfundingsource.brian-takita.workers.dev`:
+- `/` -> 200.
+- `/funded-deals` -> 200.
+- `/portal-admin` -> 303 to `/login?role=admin`.
+- `/api/broker/dashboard` -> 401 unauthenticated, proving the broker API route is live and auth-gated.
+- `/api/admin/upload-tokens` -> 401 unauthenticated, proving the token API route is live and auth-gated.
+- `/u/not-a-real-token` -> 404, expected for an invalid upload token.
+
+`#next-steps` is not fully done, so I gated and narrowed it to the remaining external production-cutover blockers:
+- `bun run cf:d1:migrations:list:remote` still fails with Cloudflare API error 7403, so the current token still lacks D1 access and I could not verify/apply migrations 0025/0026 in this cycle.
+- The deploy output still shows `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` as blank, so Cloudflare Access / Google SSO is not configured yet.
+- `equityfundingsource.com` and `www.equityfundingsource.com` still resolve to DreamHost (`69.163.177.53`, DreamHost NS records). `/portal-admin` on the custom domain returns a WordPress/Apache 404, so custom-domain cutover is not complete.
+<!-- agent:boundary:595a3c9e -->
 <!-- /agent:exchange -->
 ###
 
@@ -46,7 +83,6 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#next-steps] Implement the concrete EFS next steps: replace broker portal frontend demo arrays with live API-backed state/loading/error flows; after review #1v5m updates the Cloudflare token, apply D1 migrations 0025/0026 and smoke test upload/broker APIs; after the Cloudflare Access app is provisioned, set ACCESS_TEAM_DOMAIN/ACCESS_AUD and verify Google SSO; then cut over equityfundingsource.com and smoke test /, /funded-deals, and admin routing.
 - [ ] [#k2xg] Send Robert the six-question TMO outbound webhook prompt in src/equityfundingsource-dev/docs/tmo-webhooks-question.md for him to forward to Mortgage Office, then record the response and decide push vs. tightened polling.
 - [ ] [#qr72] [recommended] By May 27, 2026, send Lucas a written bridge plan: $500 now from personal funds if available, ask for the remaining $500 to be paid after EFS payment clears or by an agreed near-term date, and invoice EFS immediately for $5,000 with a smaller immediate continuation retainer accepted if Judith pushes back.
 - [ ] [#s62t] [recommended] Prepare EFS invoice with truthful hours/value; Lucas cost is $4,150 (83h @ $50), so floor is 42h/$4,200 and recommended ask is 50-60h/$5,000-$6,000 with any concession as an explicit courtesy credit.
@@ -78,6 +114,7 @@ Compacted content:
 ## Review
 
 <!-- agent:review -->
+- [/] [#next-steps] Remaining EFS production cutover blockers: Cloudflare D1 API token still returns 7403, so apply/verify migrations 0025/0026 after #1v5m; Cloudflare Access vars are blank, so set ACCESS_TEAM_DOMAIN/ACCESS_AUD after the Access app exists; custom domain still uses DreamHost/Apache, so move equityfundingsource.com/www to the Worker and smoke test /, /funded-deals, and /portal-admin on the custom domain.
 - [/] [#37ah] [recommended] Broker portal backend: replace static broker demo data with TMO-backed submit-deal, pipeline, commissions, documents, and notifications
 - [/] [#dzmm] TMO webhooks: confirm outbound webhook support (Robert to check with Mortgage Office)
 - [/] [#qakx] Investor portal document pages: replace static Documents, Statements, and Accreditation fixture data with D1/R2-backed APIs and authenticated upload/request/download flows.

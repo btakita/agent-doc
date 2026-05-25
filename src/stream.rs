@@ -78,6 +78,14 @@ use crate::agent::streaming::{StreamChunk, StreamingAgent};
 use crate::{agent, config::Config, crdt, diff, frontmatter, git, repair, snapshot, template};
 
 /// Run the stream command: stream agent output to document in real-time.
+///
+/// `lint_override` mirrors the `--lint=off|warn|strict` flag on
+/// `agent-doc write` / `agent-doc finalize`. The lint gate runs after
+/// the final flush has merged the streamed response into the document
+/// and before the final git commit so malformed directives fail the
+/// stream cycle closed instead of being committed. Mode resolution
+/// precedence: CLI > frontmatter `agent_doc_lint_dialect` > workspace
+/// `.agent-doc/config.toml` `[lint] dialect` > default (`warn`).
 pub fn run(
     file: &Path,
     interval_ms: u64,
@@ -85,6 +93,7 @@ pub fn run(
     model: Option<&str>,
     no_git: bool,
     config: &Config,
+    lint_override: Option<crate::lint_gate::LintCliMode>,
 ) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
@@ -227,6 +236,15 @@ pub fn run(
         crate::write::atomic_write_pub(file, &updated)?;
         snapshot::save(file, &updated)?;
     }
+
+    // Lint gate: runs on the merged document AFTER the final flush /
+    // resume-id write / snapshot save and BEFORE the final git commit so
+    // malformed directives fail the stream cycle closed instead of being
+    // committed. Mirrors the gate position in
+    // `write::run_command` (Phase 3b.1). Mode resolution precedence:
+    // CLI override > frontmatter `agent_doc_lint_dialect` > workspace
+    // `.agent-doc/config.toml` `[lint] dialect` > default (`warn`).
+    crate::lint_gate::run(file, lint_override)?;
 
     // Final git commit
     if !no_git && let Err(e) = git::commit(file) {
@@ -1078,7 +1096,7 @@ mod tests {
         .unwrap();
 
         let config = Config::default();
-        let err = run(&doc, 2000, None, None, true, &config).unwrap_err();
+        let err = run(&doc, 2000, None, None, true, &config, None).unwrap_err();
         assert!(err.to_string().contains("expected crdt"), "error: {}", err);
     }
 
@@ -1182,5 +1200,117 @@ user prompt here
             content_no_override
         );
         assert!(content_no_override.contains("Agent response."));
+    }
+
+    // ---- Lint gate integration tests (p6adfstream) --------------------
+    //
+    // The stream subcommand calls `crate::lint_gate::run` after the final
+    // flush merges the response into the document and before the final
+    // git commit. These tests exercise the same gate against the
+    // post-flush document state to prove malformed streamed responses
+    // fail the cycle closed.
+
+    /// Write a session doc in the post-flush state (what the file looks
+    /// like after `stream_loop()` completes) and assert that the lint
+    /// gate — the same call `stream::run` now performs before the final
+    /// git commit — fails closed on a malformed `<!-- agent:done archive
+    /// PATH -->` directive missing the `=` between `archive` and the
+    /// path. Error message format must match the shared gate output the
+    /// `lint_gate` unit tests already pin for `write --commit`.
+    #[test]
+    fn stream_response_with_malformed_directive_blocks_lint_gate() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+        // Simulate the post-stream-flush document state directly to avoid
+        // triggering unrelated boundary-marker churn from the template
+        // patch path during test setup.
+        let post_flush = "---\nagent_doc_session: sid\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
+            <!-- agent:exchange -->\n\
+            user prompt\n\n\
+            ### Re: prompt — gpt-5\n\n\
+            Done.\n\
+            <!-- /agent:exchange -->\n\
+            <!-- agent:done archive tasks/x.done.md -->\n\
+            <!-- /agent:done -->\n";
+        std::fs::write(&doc, post_flush).unwrap();
+
+        let err = crate::lint_gate::run(&doc, None)
+            .expect_err("stream's lint gate must reject malformed directive");
+        let msg = format!("{}", err);
+        assert!(
+            msg.contains("agent-doc/malformed-attr"),
+            "expected agent-doc/malformed-attr rule, got: {msg}"
+        );
+        assert!(
+            msg.contains("INTERRUPTED"),
+            "expected INTERRUPTED prefix matching shared gate format, got: {msg}"
+        );
+    }
+
+    /// Clean post-stream document state → the lint gate must pass so the
+    /// stream cycle proceeds to the final commit.
+    #[test]
+    fn stream_response_clean_passes_lint_gate() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+        let post_flush = "---\nagent_doc_session: sid\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
+            <!-- agent:exchange -->\n\
+            user prompt\n\n\
+            ### Re: prompt — gpt-5\n\n\
+            Done.\n\
+            <!-- /agent:exchange -->\n";
+        std::fs::write(&doc, post_flush).unwrap();
+
+        crate::lint_gate::run(&doc, None).expect("clean stream output must pass lint gate");
+    }
+
+    /// `--lint=off` (via the CLI override) must bypass the gate even
+    /// when the streamed response contains a malformed directive — same
+    /// override semantics as `agent-doc write --commit --lint=off`.
+    #[test]
+    fn stream_lint_off_bypasses_malformed_directive() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+        let post_flush = "---\nagent_doc_session: sid\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
+            <!-- agent:exchange -->\n\
+            user prompt\n\n\
+            ### Re: prompt — gpt-5\n\n\
+            Done.\n\
+            <!-- /agent:exchange -->\n\
+            <!-- agent:done archive tasks/x.done.md -->\n\
+            <!-- /agent:done -->\n";
+        std::fs::write(&doc, post_flush).unwrap();
+
+        crate::lint_gate::run(&doc, Some(crate::lint_gate::LintCliMode::Off))
+            .expect("--lint=off must bypass the stream lint gate even with malformed directive");
+    }
+
+    /// Verify the stream subcommand's `run` signature accepts the
+    /// `--lint` CLI override slot. Uses a non-CRDT doc so the run exits
+    /// early on mode validation before lint gate would fire — the
+    /// purpose of the test is to prove the signature is wired and
+    /// matches `main.rs`'s Commands::Stream forwarding.
+    #[test]
+    fn stream_cli_accepts_lint_flag_via_signature() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_format: template\nagent_doc_write: merge\n---\n\nBody\n",
+        )
+        .unwrap();
+
+        let config = Config::default();
+        let err = run(
+            &doc,
+            2000,
+            None,
+            None,
+            true,
+            &config,
+            Some(crate::lint_gate::LintCliMode::Strict),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("expected crdt"), "error: {}", err);
     }
 }

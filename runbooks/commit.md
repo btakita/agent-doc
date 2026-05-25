@@ -32,7 +32,7 @@ A harness-native `agent-doc` entrypoint (`/agent-doc <FILE>` in Claude Code, `ag
 
 ## Lint Gate (tagpath agent-doc dialect)
 
-`finalize` and `write --commit` invoke `tagpath lint --dialect agent-doc` as an in-process library call on the session document **after** the response/pending edits have merged but **before** the snapshot/commit boundary. The gate catches malformed session-document directives — for example `<!-- agent:done archive PATH -->` missing the `=` between `archive` and the path — so they fail the cycle closed at the gate instead of crashing deeper inside finalize.
+`finalize`, `write --commit`, and `stream` invoke `tagpath lint --dialect agent-doc` as an in-process library call on the session document **after** the response/pending edits have merged but **before** the snapshot/commit boundary. The gate catches malformed session-document directives — for example `<!-- agent:done archive PATH -->` missing the `=` between `archive` and the path — so they fail the cycle closed at the gate instead of crashing deeper inside finalize. `stream` runs the gate after the final flush completes and before the post-stream git commit, so a malformed streamed response is rejected before it enters git history.
 
 - Default mode (`warn`): error-class findings block the cycle; warning-class findings surface on stderr and continue.
 - `strict`: warning-class findings escalate to errors.
@@ -40,12 +40,12 @@ A harness-native `agent-doc` entrypoint (`/agent-doc <FILE>` in Claude Code, `ag
 
 Mode resolution precedence (highest first):
 
-1. CLI: `--lint=off|warn|strict` on `agent-doc write` / `agent-doc finalize`.
+1. CLI: `--lint=off|warn|strict` on `agent-doc write` / `agent-doc finalize` / `agent-doc stream`.
 2. Frontmatter: `agent_doc_lint_dialect: off|warn|strict`.
 3. Workspace `.agent-doc/config.toml`: `[lint] dialect = "off|warn|strict"`.
 4. Default: `warn`.
 
-The error message preserves tagpath's CLI format — `<path>:<line>:<col> <severity>: <message> [<rule>]` with an optional `hint:` line — so the fix can be made and re-finalized in a single round-trip. See tagpath SPEC §16 (agent-doc dialect) for the full rule catalog. The integration lives in `src/lint_gate.rs` and is wired through `src/write.rs::run_command`.
+The error message preserves tagpath's CLI format — `<path>:<line>:<col> <severity>: <message> [<rule>]` with an optional `hint:` line — so the fix can be made and re-finalized in a single round-trip. See tagpath SPEC §16 (agent-doc dialect) for the full rule catalog. The integration lives in `src/lint_gate.rs` and is wired through `src/write.rs::run_command` for `finalize` / `write --commit`, and `src/stream.rs::run` for `stream`.
 
 ## Anti-Patterns
 

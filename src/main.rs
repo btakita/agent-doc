@@ -667,6 +667,12 @@ enum Commands {
         /// Skip git commit after stream completes
         #[arg(long)]
         no_git: bool,
+        /// Override the tagpath agent-doc lint dialect mode for this stream run.
+        /// Values: `off | warn | strict`. Precedence: CLI > frontmatter
+        /// `agent_doc_lint_dialect` > workspace `.agent-doc/config.toml`
+        /// `[lint] dialect` > default (`warn`).
+        #[arg(long = "lint", value_name = "MODE")]
+        lint: Option<String>,
     },
     /// Show template structure of a document (components, modes, content)
     TemplateInfo {
@@ -1608,8 +1614,8 @@ fn main() -> anyhow::Result<()> {
             } else {
                 route::RouteMode::Managed
             };
-            let wait_for_ready = wait_for_ready
-                .map(|secs| std::time::Duration::from_secs(secs.min(600)));
+            let wait_for_ready =
+                wait_for_ready.map(|secs| std::time::Duration::from_secs(secs.min(600)));
             route::run(
                 &file,
                 pane.as_deref(),
@@ -1851,14 +1857,22 @@ fn main() -> anyhow::Result<()> {
             agent,
             model,
             no_git,
-        } => stream::run(
-            &file,
-            interval,
-            agent.as_deref(),
-            model.as_deref(),
-            no_git,
-            &config,
-        ),
+            lint,
+        } => {
+            let lint_override = match lint.as_deref() {
+                Some(s) => Some(lint_gate::LintCliMode::parse(s).map_err(|e| anyhow::anyhow!(e))?),
+                None => None,
+            };
+            stream::run(
+                &file,
+                interval,
+                agent.as_deref(),
+                model.as_deref(),
+                no_git,
+                &config,
+                lint_override,
+            )
+        }
         Commands::TemplateInfo { file } => {
             let info = template::template_info(&file)?;
             println!("{}", serde_json::to_string_pretty(&info)?);

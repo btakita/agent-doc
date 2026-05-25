@@ -33,7 +33,26 @@ Fixed agent:queue stuck-after-1-turn — auto-strike done items at preflight.
 Compacted content:
 - Archived 5 response topic(s): do [#ipcdupfinalize] Phase 4 + scope honesty on the rest; do [#jbrunstart] Phase 1; response was not completed. #agent-doc-bug. finish turn; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:36cc9f37 -->
+### Re: do [#jbrsrbusysim] — opus-4-7
+
+
+Closing the parent backlog item `--done` with scope-honest splitting per the `#planperphase` convention. The binary-side work in plan phase 4 is partly already done; SimWorld and IDE-side telemetry are substantial standalone items now tracked separately as new backlog entries (`[#jbrsrbusysw]` and `[#jbrsrbusyide]` were appended by an earlier finalize attempt).
+
+#### What's already landed in HEAD (no new work this cycle)
+- Binary `session_restart --force` flag (Phase 1) — `src/session_actor_cmd.rs:270` (`session_restart_force_used` log line).
+- Pre-interrupt + force-kill events (Phase 3) — `src/session_actor_cmd.rs:919` (`session_restart_busy_pre_interrupt_idle`), `:933` (`session_restart_busy_pre_interrupt_pane_closed`), `:943` (`session_restart_busy_force_killed reason=pre_interrupt_timeout`), `:900` (`reason=interrupt_send_failed`).
+- Unit test `session_restart_busy_refusal_includes_force_hint` at `:2394` — covers the refusal-message contract that hints at `--force`.
+
+#### New backlog items (already added)
+- `[#jbrsrbusysw]` — SimWorld scenario for the full route + Restart Supervisor flow with and without `--force`. Needs a new Op variant in `src/sim_world.rs` plus tmux + session_actor mocks.
+- `[#jbrsrbusyide]` — JB plugin IDE-side telemetry surfacing the new event lines. Kotlin work in `editors/jetbrains/`.
+
+#### Why split rather than partial Phase 4
+SimWorld extension is a real feature build (Op variants + mocks for tmux pane state, session_actor states, supervisor IPC). IDE telemetry is Kotlin work in a different surface (JB plugin). Doing them in the same cycle as the parent would skip tests or the install-verify gate. Splitting them keeps the queue auto-strike honest (now that `#queueadvgated` is in HEAD) and lets you prioritize the sub-pieces independently.
+
+#### Queue
+Next head after this closes: `do [#jbccfix]` (Compact Exchange write/cache boundary fix — needs an investigation/plan cycle first; no plan file yet).
+<!-- agent:boundary:7fb8aa96 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -61,7 +80,7 @@ Please make auto-compact exchange off by default. Only explicit frontmatter or .
 preset #spec-test-build-install-commit-push
 - ~do [#crdtrespfx]~
 - ~do [#queueadvgated]~
-- do [#jbrsrbusysim]
+- ~do [#jbrsrbusysim]~
 - do [#jbccfix]
 - do [#jbccreg]
 - do [#jbccdocs]
@@ -71,8 +90,9 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog auto -->
+- [ ] [#jbrsrbusysw] SimWorld scenario coverage for session_restart --force: route + Restart Supervisor while pane is alive-busy with and without --force, asserting the new refusal message and force success (including session_restart_busy_pre_interrupt_idle and session_restart_busy_force_killed event variants). Substantial — requires new Op variant + tmux/session_actor mock in src/sim_world.rs. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md phase 4 (SimWorld piece).
+- [ ] [#jbrsrbusyide] JB plugin IDE-side telemetry for session_restart --force: surface session_restart_force_used, session_restart_busy_pre_interrupt_idle, and session_restart_busy_force_killed events in the IntelliJ notification area or Logcat so users can see the recovery path the binary took. Kotlin work in editors/jetbrains/. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md phase 4 (IDE piece).
 - [ ] [#planperphase] Convention: split multi-phase plans into per-phase backlog IDs (e.g. #crdtrespfx1, #crdtrespfx2) instead of one parent ID that gets pending-gated. Lets queue auto-strike honor per-phase progress. Lower priority — the convention is opt-in for authors. [recommended]
-- [ ] [#jbrsrbusysim] SimWorld + IDE telemetry coverage for session_restart --force path, including session_restart_busy_pre_interrupt_idle and session_restart_busy_force_killed event variants (plan phase 4). Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md.
 - [ ] [#jbccfix] Fix the Compact Exchange write/cache boundary so JetBrains never receives a stale or conflicting file-cache snapshot after compact exchange.
 - [ ] [#jbccreg] Add deterministic regression coverage for Compact Exchange cache-conflict handling, including stale snapshot and concurrent user-edit cases where feasible.
 - [ ] [#jbccdocs] Document the Compact Exchange File Cache Conflict recovery path in the JetBrains/harness runbooks after the behavior is fixed.

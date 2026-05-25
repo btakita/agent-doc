@@ -128,7 +128,7 @@ v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-gramm
 Compacted content:
 - Archived 1 response topic(s): do [#p6tsifullgraph]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-<!-- agent:boundary:b3eadb9d -->
+<!-- agent:boundary:6ca63039 -->
 <!-- /agent:exchange -->
 ###
 
@@ -150,7 +150,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#p6tsifullpath]~
 - ~do [#p6tsifullexplain]~
 - ~do [#p6tsifullgraph]~
-- do [#p6tsifullcommunities]
+- ~do [#p6tsifullcommunities]~
 - do [#p6tsifullfederated]
 - do [#p6tspub]
 - do [#p6skl]
@@ -161,7 +161,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 (<!-- agent:backlog -->
-- [ ] [#p6tsifullcommunities] Subitem of p6tsifull. Wire tagpath adapter into tsift communities command (src/tsift/src/main.rs ~line 1515). Louvain community report struct needs a tagpath_handle field per member symbol. Smallest schema change after path.
 - [ ] [#p6tsifullfederated] Subitem of p6tsifull. Wire tagpath adapter into tsift search --federated (workspace-scoped search across multiple scoped index.db files). Most complex of the five — federated search loops over scopes; adapter load must respect per-scope project_root. Defer until p6tsifullpath/explain/graph/communities establish the per-command template.
 - [ ] [#p6tspub] Restore tsift crates.io publishability after p6tsi: tsift now depends on tagpath via path = ../tagpath. Replace with version = "0.17.1" (or whatever ships first) before any tsift release. Already gated by the sift-publish blocker so no immediate regression, but track here.
 - [ ] [#p6ren] tagpath rename <old> <new>: cross-file, cross-convention identifier rename using the index. Walks every member of the matching family, rewrites in-place in each source convention (snake/camel/Pascal/kebab/UPPER/Ada). Foundation for the agent-loop intent-preserving refactor vision.

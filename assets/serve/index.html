@@ -45,6 +45,7 @@
 
     let savedContent = "";
     let saving = false;
+    let events = null;
 
     function setStatus(text, cls) {
       status.textContent = text;
@@ -58,15 +59,19 @@
       bytesEl.textContent = editor.value.length + " bytes";
     }
 
-    async function loadDoc() {
-      setStatus("loading…");
+    function hasUnsavedEdits() {
+      return editor.value !== savedContent;
+    }
+
+    async function loadDoc(reason) {
+      setStatus(reason || "loading…");
       try {
         const r = await fetch("/doc", { cache: "no-store" });
         if (!r.ok) throw new Error("HTTP " + r.status);
         const text = await r.text();
         savedContent = text;
         editor.value = text;
-        setStatus("loaded", "ok");
+        setStatus(reason ? "reloaded from disk" : "loaded", "ok");
         updateDirty();
       } catch (e) {
         setStatus("load failed: " + e.message, "err");
@@ -100,6 +105,35 @@
       }
     }
 
+    function connectEvents() {
+      if (!window.EventSource) {
+        setStatus("live updates unavailable; manual reload still works", "warn");
+        return;
+      }
+      events = new EventSource("/events");
+      events.addEventListener("ready", () => {
+        setStatus("live updates connected", "ok");
+      });
+      events.addEventListener("doc-changed", () => {
+        if (hasUnsavedEdits()) {
+          setStatus("file changed on disk; reload to discard local edits", "warn");
+          return;
+        }
+        loadDoc("file changed on disk; reloading…");
+      });
+      events.addEventListener("doc-error", (e) => {
+        try {
+          const payload = JSON.parse(e.data || "{}");
+          setStatus("live update error: " + (payload.message || "unknown"), "err");
+        } catch (_) {
+          setStatus("live update error", "err");
+        }
+      });
+      events.onerror = () => {
+        setStatus("live updates disconnected; manual reload still works", "warn");
+      };
+    }
+
     editor.addEventListener("input", updateDirty);
     saveBtn.addEventListener("click", saveDoc);
     reloadBtn.addEventListener("click", () => {
@@ -115,6 +149,7 @@
     });
 
     loadDoc();
+    connectEvents();
   </script>
 </body>
 </html>

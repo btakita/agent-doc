@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -88,18 +88,46 @@ Awaiting its proof block before committing, pushing, and finalizing with `--done
 ### Re: still waiting on #gdbgatecold packet — opus-4-7
 
 No change since the last status note — packet still running. Closing this cycle without consuming the queue head; will commit + push + finalize with `--done gdbgatecold` once the packet returns its proof block.
-<!-- agent:boundary:0cbd94be -->
+### Re: #gdbgatecold closed — opus-4-7
+
+Scope-bounded inspect cache landed (tsift `64b2fab`, superproject `54d7b3329`, v0.1.48). The 200 ms target was met with margin and the search-timeout regression test stayed green.
+
+#### Design — option 2 (scoped guard), not option 1 (signature threading)
+Subagent evaluated both paths. Threading the inspection result through `build_context_pack_report_with_profile` → `context_pack_status_reminders` → `status::check_status` would have required reshaping `status::check_status` (which already handles workspace-scope, summary cache, instruction checks) and propagating a multi-key inspection map through several signatures. A thread-local `InspectScopeGuard` in `src/index.rs` is non-invasive: only the trusted pipeline opens it, only `IndexDb::inspect_read_only` reads from it, and the cache drops when the outermost guard drops. Search and every other top-level call site runs outside any guard → identical fresh-per-call behavior, which is what protects the regression test. After a refresh inside the scope, `inspect_scope_invalidate_all()` drops the pre-write snapshot so subsequent inspects see the updated DB.
+
+#### Cold-leg medians (3 samples, agent-loop superproject)
+
+| Phase | Before (µs) | After (µs) | Δ |
+| --- | ---: | ---: | ---: |
+| `status_index_gate` | 323,657 | 52,674 | **-270,983 µs (~-271 ms)** |
+| `prepare_agent_doc_index_gate` | 322,617 | 51,711 | -270,906 µs |
+| status reminders (warm median) | 706 | 302 | -404 µs (~-57%) |
+
+Cold delta beats the ~200 ms target; warm delta proves the duplicate inspect was the real cost without resorting to process state. Single-sample true-cold proof requires `sudo drop_caches` (unavailable on this host); first-run-of-batch numbers stand in.
+
+#### Regression-safety
+- `tests/exit_code.rs::search_timeout_reports_reindex_when_index_turns_stale_during_worker_run` → `ok`
+- All 4 `search_timeout_*` tests → `ok`
+- All 3 existing `inspect_read_only*` tests → `ok`
+- `context_pack_refreshes_stale_index_before_handoff` → `ok` (refresh path invalidates scope cache)
+- `context_pack_status_reminders_include_stale_index_state` → `ok` (pre-refresh stale path still emits reminder)
+- New tests `build_context_pack_reuses_inspect_within_scope`, `inspect_read_only_outside_scope_does_not_cache` → `ok`
+- `make check` → exit 0
+- `cargo install --path .` → upgraded `~/.cargo/bin/tsift` to 0.1.48
+
+Sibling user commit `cd9c678` (tagpath consumer contract, v0.1.47) landed during the packet run; this work piles on top at v0.1.48 with a dedicated VERSIONS.md entry. The next two queue items remain gated for their own cycles per planner's `parallelizable: False`.
+<!-- agent:boundary:5c44a362 -->
 <!-- /agent:exchange -->
 ###
 <!--
 What are #next-steps to make the graph faster?
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
-- do [#gdbgatecold]
-- do [#gdbprephot]
-- do [#gdbvacproof]
+- ~do [#gdbgatecold]~
+- ~do [#gdbprephot]~
+- ~do [#gdbvacproof]~
 <!-- /agent:queue -->
 
 ## Backlog
@@ -111,7 +139,6 @@ preset #spec-test-build-install-commit-push
 ## Review
 
 <!-- agent:review -->
-- [/] [#gdbgatecold] [recommended] Reduce the cold-path cost of conflict_matrix_preparation.status_index_gate (678ms median: 422ms prepare_agent_doc_index_gate + 266ms context_pack_status_reminders). Investigation in 2026-05-24 cycle confirmed both call paths run IndexDb::inspect_read_only on the same (root, .tsift/index.db) — that is the duplicated work. A process-wide in-process cache for inspect_read_only_cached_digest was implemented and reverted: it correctly cut status_index_gate -29% (478ms median) and prepare_agent_doc_index_gate -44% (235ms median) on backend-eval, but broke tsift search's in-process freshness check on concurrent file modifications (tests/exit_code.rs search_timeout_reports_reindex_when_index_turns_stale_during_worker_run). The watermark-by-directory-mtime variant did not help because writing file content does not bump the parent directory mtime on Linux ext4. Correct fix: scope-bounded inspection sharing. Either thread the inspection result through build_context_pack_report_with_profile and into status::check_status (no process state), or introduce an explicit with_inspection_cache_scope guard that holds the cache only for the duration of one trusted pipeline. Project ~200ms savings on backend-eval cold path; do not regress search timeout reporting.
 - [/] [#gdbprephot] [recommended] Profile and reduce the remaining conflict-matrix preparation hotspots after the cache fixes: measure session_review_compute, context_pack_diff, impact, and dispatch-trace reuse on repeated real/full-projection runs, then add shared packet reuse or narrower digest paths with metric-digest gates so the cached queue path drops below the current multi-second prep cost without trusting stale ownership.
 - [/] [#gdbvacproof] [recommended] Run the real Convex reconciliation plus graph-db compact workflow and capture before/after file size, freelist, tombstone counts, status/doctor timings, and scan-cost deltas so compaction policy is backed by operational evidence.
 <!-- /agent:review -->

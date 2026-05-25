@@ -123,93 +123,12 @@ v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-gramm
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260525-060001.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260525-061738.md`*
 
 Compacted content:
-❯ - Archived 2 response topic(s): do [#p6adfcitagpath]; Why are we not auto-looping?
-❯ - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-### Re: do [#p6adftestfix] — opus-4-7
-
-Shipped. Picked option (b) — add legacy alias acceptance to tagpath's agent-doc lint dialect. Sweeping ~50+ references to legacy component names across agent-doc src+tests was the wrong direction.
-
-#### Change
-
-- `src/lint/agent_doc.rs`: new `LEGACY_COMPONENTS` const (`agent:pending`, `agent:pending-done`, `agent:backlog-done`) — the exact migration-input names from agent-doc's `src/migrate.rs`. Lint now accepts them silently; the canonical names remain in the fix-hint so the message still nudges toward `agent:backlog` / `agent:done`.
-- Removed a duplicate `is_known_component` function I introduced mid-edit.
-- 4 new tests: each legacy form accepted, plus a regression test confirming a truly unknown component still fails.
-
-#### Release
-
-- `tagpath v0.11.1` published to crates.io
-- GitHub Release: <https://github.com/btakita/tagpath/releases/tag/v0.11.1> with x86_64-linux binary
-- VERSIONS.md updated with a focused v0.11.1 entry
-- `~/.cargo/bin/tagpath` reinstalled
-
-#### Downstream
-
-- `src/agent-doc/Cargo.toml`: `version = "0.11"` → `"0.11.1"`. Cargo.lock regenerated in the same commit.
-- agent-loop superproject pointer bumped to pick up the new agent-doc submodule HEAD.
-
-#### CI
-
-New run `26386002572` on `20260422/codex-agent-backend` kicked off on the push and is in progress. Backgrounded a watcher to alert on completion. Once it lands green, `#p6adfmerge` is fully unblocked.
-
-#### Verification
-
-- `cargo test` in tagpath: **238 passed** (up from 234, +4 new legacy-component tests)
-- `cargo clippy --all-targets -- -D warnings`: clean
-- `cargo build --lib` in agent-doc with the new tagpath dep: clean
-
-#### Commits
-
-- `src/tagpath`: `8511dfb release: v0.11.1 — accept legacy agent-doc components in lint (p6adftestfix)` + tag `v0.11.1`
-- `src/agent-doc` (`20260422/codex-agent-backend`): `9ed0bc17 deps: bump tagpath 0.11 → 0.11.1 (p6adftestfix)`
-- `agent-loop` (`main`): `1f24e097b agent-doc: bump submodule for tagpath 0.11.1 (p6adftestfix)`
-### Re: do [#p6sklsymadocrunbooks] — opus-4-7
-
-
-Decision: **option (b) — leave install owning the parent copy; do not symlink runbooks.**
-
-#### Why
-
-The runbooks under `.claude/skills/agent-doc/runbooks/` are install-generated artifacts, not hand-maintained content. The source of truth is `src/agent-doc/runbooks/` (committed); the binary embeds those files at compile time and writes them out on `agent-doc skill install --harness claude`. They are a projection, not a duplication — same status as `target/` or a generated lockfile.
-
-Symlinking would actually make the topology *worse*:
-
-1. We'd add a third copy in `src/agent-doc/.claude/skills/agent-doc/runbooks/` that has to stay in sync with both the source dir and the binary's embedded content.
-2. Future `agent-doc skill install` runs in agent-loop would write through the symlink into the submodule, dirtying it on every install — same problem we noted in `p6sklsymagentdoc` but now applied to 14+ files instead of one.
-3. The install boundary already owns this directory; introducing a symlink would add a second owner.
-
-#### What surfaced instead
-
-The investigation found a real but unrelated install bug: `agent-doc skill install` does not reconcile the target directory. agent-loop currently has **21 installed runbooks vs 14 source files** — 8 stale extras from older versions still in place, AND `manual-job-packets.md` (new in source) never written because the install saw SKILL.md as already-up-to-date and skipped the runbooks pass.
-
-Captured as `#p6skillinstallreconcile`. That is the right place to fix the drift — not by symlinking, but by making install delete-then-write the runbooks subtree (or compute the canonical set and reap stragglers).
-
-#### Aligning the three "symlink the duplicated skill" follow-ups
-
-| Item | Resolution | Notes |
-|---|---|---|
-| `p6sklsym` (tagpath, email, linkedin) | Symlinked | Identical content, hand-maintained surface, single source of truth in submodule |
-| `p6sklsymagentdoc` (agent-doc SKILL.md) | Symlinked | Install regenerates the file each cycle; symlink routes the regen into the submodule |
-| `p6sklsymcorky` (corky SKILL.md) | Symlinked | Hand-maintained surface, submodule was newer |
-| `p6sklsymadocrunbooks` (agent-doc runbooks) | **Not symlinked** | Install-generated subtree; symlink would multiply the sync surface |
-
-Pattern: symlink hand-maintained surfaces and single files; leave install-generated subtrees to the install workflow and fix install bugs at the source.
-❯ should [#p6skillinstallreconcile] be added to the backlog of agent-doc-bugs2.md?
-### Re: should [#p6skillinstallreconcile] be added to the backlog of agent-doc-bugs2.md? — opus-4-7 (HEAD)
-
-
-Yes — you're right, that's its proper home. Moved.
-
-#### What I did
-
-1. Created the plan file: `tasks/agent-doc/plan-skill-install-runbooks-reconcile.md` (concrete diagnosis with the 21-vs-14 evidence, fix scope, verification cases).
-2. Added `[#p6skillinstallreconcile]` to `tasks/agent-doc/agent-doc-bugs2.md` backlog via `--pending-add-to`, with the plan path referenced inline (matches the convention used by `#ccloopguard`, `#jbrsrbusysw`, etc.).
-3. Marked the entry done on `tagpath.md` here — "done" in the sense of "tracked elsewhere now, not pending in this doc". The work itself is open; the bookkeeping moved.
-
-The frontmatter preset `#agent-doc-bug` already documents this routing convention ("Please create a plan for agent-doc to fix this issue. Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md") — I should have caught it last cycle when I first captured the item here. Noted for next time.
-<!-- agent:boundary:c1fdbacb -->
+- Archived 3 response topic(s): do [#p6adftestfix]; do [#p6sklsymadocrunbooks]; should [#p6skillinstallreconcile] be added to the backlog of agent-doc-bugs2.md?
+- Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
+<!-- agent:boundary:09953c81 -->
 <!-- /agent:exchange -->
 ###
 

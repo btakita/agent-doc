@@ -179,7 +179,42 @@ When `tagpath_state == "stale"`, the binary still loads the on-disk snapshot so 
 - Superproject `src/tsift` submodule pointer bumped
 
 Out of scope for this turn (would be follow-ups if needed): policy-hint surfacing (excluded paths, language coverage gaps), `--scope` test coverage (the implementation routes through `resolve_submodule` but the test exercises only the workspace-root path). Both can land later if operators ask for them.
-<!-- agent:boundary:f886e228 -->
+❯ Add #next-steps for follow-ups
+### Re: Add #next-steps for follow-ups — opus-4-7
+
+Added four follow-up items derived from the four tracked items closed this session (`#commhx`, `#p6tsifullfederated`, `#tpstdiag`, `#tpaudit`), reordered the backlog to put the silent-bug follow-up first and demote the existing `[recommended]` items.
+
+**Top of backlog: `#p6tsifullscoped`**
+
+#### New items (in priority order)
+
+1. **`#p6tsifullscoped`** (HIGH — silent bug, same pattern as just-shipped `#p6tsifullfederated`)
+   `tsift search --scope <name>` and inferred-scope paths still annotate against the workspace root. Scoped searches in workspaces where the submodule (not the workspace root) owns the `.naming.toml` return zero handles. Fix is mechanical: route `&sift_path` into `annotate_hits_with_tagpath` in `cmd_search_with_budget`.
+
+2. **`#tpauditscope`** (MEDIUM — locks in scope path for the just-shipped audit feature)
+   `tsift audit-tagpath --scope <name>` exists and routes correctly, but the test suite only exercises the workspace-root path. Add a multi-submodule fixture so the scoped path can't silently regress.
+
+3. **`#tpauditpolicy`** (MEDIUM — completes the audit feature)
+   The audit reports WHAT diverges but not WHY. Add `tsift_only_files_with_policy_hints` JSON field that surfaces tagpath `SKIP_DIRS` matches and language-coverage gaps so operators can act on the diff with intent.
+
+4. **`#commhxstrong`** (MEDIUM-LOW — stronger variant of `#commhx`)
+   Cheap fix in 0.1.56 returns the first row with a valid handle. Stronger fix uses Louvain community + `caller_file` evidence to pick the row that matches the actual call edge. Only worth doing if name collisions across files with valid handles produce visible wrong-handle bugs in practice.
+
+#### Reordered queue
+
+After this turn the backlog ordering is:
+
+1. `#p6tsifullscoped`
+2. `#tpauditscope`
+3. `#tpauditpolicy`
+4. `#commhxstrong`
+5. `#p6tspub`
+6. `#p6ren`
+7. `#mixconv` (existing `[recommended]` — demoted below the new follow-ups)
+8. `#p6meta` (existing `[recommended]`)
+
+The queue auto-prompts will pick up `#p6tsifullscoped` next.
+<!-- agent:boundary:f2f8b93f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -200,9 +235,13 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#mixconv] [recommended] tagpath lint policy that tolerates mixed conventions within a single identifier (e.g. `createUserProfile_v2`). Today `parser::detect_convention` classifies any identifier containing `_` as snake-family, so the camelCase-plus-suffix shape lint-fails in a camelCase-only context with `create_user_profile_v2` as the suggested fix. Add a per-context `tolerate_mixed = true` or top-level `lint.allow_mixed_within_identifier` policy that compares tag-equivalence rather than convention-equivalence. Single-file change in `src/lint/mod.rs:79`. Tests: extend `tests/lint.rs` with mixed-within-identifier cases.
+- [ ] [#p6tsifullscoped] `tsift search --scope <name>` and inferred-scope search paths still annotate against the workspace root instead of the scope's `source_root`. Same silent-handle-loss pattern as the federated bug `#p6tsifullfederated` (closed in 0.1.57). When a submodule has its own `.naming.toml` / `.naming/index.json` but the workspace root has none, scoped searches return zero `tagpath_handle` even though the data is right there. Fix: in `cmd_search_with_budget`, pass `&sift_path` (already populated with `scope.source_root` for scoped paths) into `annotate_hits_with_tagpath` instead of `&root`. Tests: extend `tests/exit_code.rs` with a single-submodule fixture where the workspace root has no `.naming.toml` but the submodule does; assert `tsift search ... --scope <name> --json` returns hits with `tagpath_handle` set.
+- [ ] [#tpauditscope] `tsift audit-tagpath --scope <name>` test coverage. The implementation routes through `config::Config::resolve_submodule` and opens the scoped `index.db` + tagpath at `scope.source_root`, but the `audit_tagpath_reports_walker_diff` test only exercises the workspace-root path. Add a fixture with `alpha` + `beta` submodules where one submodule's tagpath skips a path tsift indexes; assert the JSON `scope: "<name>"` field is set and only that submodule's files appear in `tsift_only_files`.
+- [ ] [#tpauditpolicy] Policy-hint surfacing for `tsift audit-tagpath`. Today the audit reports WHAT diverges (tsift-only / tagpath-only files) but not WHY. Parse the resolved `NamingConfig` (including `extends` chain) and surface: (a) hard-coded `SKIP_DIRS` hits per tsift-only file (the obvious explanation when files live under `__pycache__/`, `vendor/`, `target/`, `node_modules/`, `.venv/`, `.git/`), (b) language coverage gaps (extension not in tagpath's `SOURCE_EXTENSIONS` but tsift's walker accepted it). New JSON fields: `tsift_only_files_with_policy_hints: [{file, hints: ["skip_dir:__pycache__", "extension_unsupported"]}]`. Operators can then decide whether to broaden tagpath, narrow tsift, or accept the gap with intent.
+- [ ] [#commhxstrong] Stronger fix for `#commhx` name-collision wrong-handle (closed cheaply in 0.1.56 by iterating `symbol_info` rows). Today when two files define the same symbol AND both have valid tagpath handles, the resolver returns the FIRST file's handle, which may not match the actual call edge's resolved file. Stronger fix: when resolving a callee handle for a caller row, prefer the `symbol_info` row whose file lives in the same Louvain community as the caller (use `caller_file` evidence). Falls back to current first-handle-wins behavior when no community context is available (e.g. `tsift communities` itself). Touches `annotate_stored_edges_with_tagpath::EdgeSide::Callee` and the per-row `resolve_tagpath_handles_for_names` helper. Tests: extend the name-collision fixture from 0.1.56 with two valid tagpath handles (both files indexed by tagpath); assert the caller's callee handle matches the file in the caller's community.
 - [ ] [#p6tspub] Restore tsift crates.io publishability after p6tsi: tsift now depends on tagpath via path = ../tagpath. Replace with version = "0.17.1" (or whatever ships first) before any tsift release. Already gated by the sift-publish blocker so no immediate regression, but track here.
 - [ ] [#p6ren] tagpath rename <old> <new>: cross-file, cross-convention identifier rename using the index. Walks every member of the matching family, rewrites in-place in each source convention (snake/camel/Pascal/kebab/UPPER/Ada). Foundation for the agent-loop intent-preserving refactor vision.
+- [ ] [#mixconv] [recommended] tagpath lint policy that tolerates mixed conventions within a single identifier (e.g. `createUserProfile_v2`). Today `parser::detect_convention` classifies any identifier containing `_` as snake-family, so the camelCase-plus-suffix shape lint-fails in a camelCase-only context with `create_user_profile_v2` as the suggested fix. Add a per-context `tolerate_mixed = true` or top-level `lint.allow_mixed_within_identifier` policy that compares tag-equivalence rather than convention-equivalence. Single-file change in `src/lint/mod.rs:79`. Tests: extend `tests/lint.rs` with mixed-within-identifier cases.
 - [ ] [#p6meta] [recommended] agent-loop meta-index: aggregate per-submodule .naming/index.json files into a top-level handle registry so cross-repo searches resolve. New CLI: tagpath meta-index <workspace-root>. Useful once 2+ siblings adopt tagpath.
 <!-- /agent:backlog -->
 

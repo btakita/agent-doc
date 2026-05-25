@@ -377,7 +377,36 @@ Commits pushed:
 CI:
 - `agent-doc` CI run `26412405175` is in progress for `a6c11baed1f7d136a9a8a9599e1b633f42383e7e`; the `check` job was running at the `Install tmux for integration tests` step, with `make check` and `make tmux-ci` still pending and no red tmux leg observed.
 - The root `agent-loop` repo has no workflow named `CI` (`gh run list --workflow CI --limit 1` reports none).
-<!-- agent:boundary:25bf636a -->
+### Re: do [#adoc-web-sse] — gpt-5
+
+Implemented `#adoc-web-sse`.
+
+Changes:
+- Added `GET /events` to `agent-doc serve` as a Server-Sent Events stream with `ready`, `doc-changed`, and `doc-error` events.
+- Used a 300 ms polling fallback over the served document fingerprint so external file mutations from CLI/editor/other writers trigger browser updates without introducing async runtime dependencies.
+- Moved request handling onto per-request threads so long-lived SSE clients do not block `/doc` or `/save`.
+- Updated the embedded frontend to subscribe with `EventSource`, auto-reload clean editors on `doc-changed`, and warn instead of clobbering unsaved local edits.
+- Added focused unit coverage for SSE event formatting, change emission after mutation, and the frontend subscription hook.
+
+Verification:
+- `cargo test serve_sse`
+- `cargo test serve_index_html_subscribes_to_sse_doc_changed_events`
+- `cargo test serve`
+- `make check`
+- `cargo build --release`
+- `cargo install --path .`
+
+Commits pushed:
+- `btakita/agent-doc@c33977e7` (`feat: add serve SSE updates`)
+- `btakita/agent-loop@18984fcff` (`agent-doc: bump submodule for serve SSE`; included in the pushed `main` history)
+
+CI:
+- `agent-doc` CI run `26412955913` is in progress for `c33977e7c4f8791741ee96f58da2ff302649a513`; `make check` was running, `make tmux-ci` was pending, and no red tmux leg was observed.
+- The root `agent-loop` repo has no workflow named `CI` (`gh run list --workflow CI --limit 1` reports none).
+
+Notes:
+- Existing unrelated dirty files in the `agent-doc` submodule were left unstaged; the commit contains only `assets/serve/index.html` and the intended `src/serve.rs` SSE hunks.
+<!-- agent:boundary:07c9d8e7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -426,7 +455,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#adoc-prefix-strip-session-check-whitelist]~
 - ~do [#adoc-bdauc-runbook]~
 - ~do [#adoc-bdauc-integration]~
-- do [#adoc-web-sse]
+- ~do [#adoc-web-sse]~
 - do [#adoc-web-codemirror]
 - do [#adoc-web-multidoc]
 - do [#adoc-web-auth]
@@ -442,7 +471,6 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#adoc-web-sse] Phase 2 of agent-doc serve: SSE /events stream + frontend reload on file change. Reuse the existing notify integration if available, else 250-500ms poll. Plan: tasks/agent-doc/plan-web-interface.md (Phase 2).
 - [ ] [#adoc-web-codemirror] Phase 3: swap the raw textarea for CodeMirror 6 with markdown mode, line wrap, gutter; render exchange/backlog/queue/review as web components consuming preflight JSON projections. Plan: tasks/agent-doc/plan-web-interface.md (Phase 3).
 - [ ] [#adoc-web-multidoc] Phase 4: root mode + session list (/api/sessions reuses sessions.json), URL routing /doc/<path-or-hash>. Plan: tasks/agent-doc/plan-web-interface.md (Phase 4).
 - [ ] [#adoc-web-auth] Phase 5: bearer token auth for non-loopback binds, optional TLS via rustls, multi-user read-only viewer scope. Plan: tasks/agent-doc/plan-web-interface.md (Phase 5).

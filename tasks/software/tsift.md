@@ -62,7 +62,32 @@ Next: `complete [#gdbvacproof]`. Both prerequisites are now in:
 - `#convexscopedeval` (v0.1.57) — full-graph default + safer chunk-size
 
 So the Convex half of `#gdbvacproof` can run end-to-end: full-graph reconcile via paginated `--remote-snapshot`, `--apply` with the new safer default, then `tsift graph-db --path . compact --apply --prune-tombstones --confirmed-convex-reconciled --json` with metric capture.
-<!-- agent:boundary:560204a3 -->
+❯ Can we complete [#gdbvacproof] or [#orchdog]?
+### Re: complete [#gdbvacproof] + #orchdog — opus-4-7
+
+#### #orchdog — closed (cite prior dogfood evidence)
+Closed via `--done orchdog`. Two dogfood passes already happened on 2026-05-21:
+1. Against `session-share/tasks/root.md` items #x63e + #v4v0 → findings recorded in `#gdbevid`, `#cmgr`, `#gdbidx`.
+2. Against `tasks/software/tsift.md` (preset `#dogfood-tsift`) → surfaced two new gaps `#cmgrwres` + `#gdblock`.
+
+Deliverable was "capture any tsift-side fixture gaps" — 5 gaps captured across the two passes. The dogfood loop has been run; the findings are queued in their own tickets.
+
+#### #gdbvacproof — dispatched as focused subagent (long-running)
+End-to-end Convex reconciliation + tombstone-prune workflow against the agent-loop superproject `.tsift/graph.db` (357k nodes / 605k edges / 781k retained tombstones). Both prerequisites just landed (`#convexsnapshotscale` v0.1.56 + `#convexscopedeval` v0.1.57), so the full workflow is now exercisable end-to-end:
+
+1. Self-hosted Convex backend via Docker (no convex.dev auth).
+2. `bunx convex dev --once` deploys the paginated schema.
+3. `tsift convex-sync . --apply` at chunk-size 50 default (~10-15 min for 605k edges; falls back to chunk-size 25 if 50 still hits isolate carry-over).
+4. `tsift convex-sync . --remote-snapshot` verifies `freshness.status: current` via paginated transport (~1200 pages).
+5. Capture BEFORE: file size, freelist, page count, status/doctor/scan timings.
+6. `tsift graph-db --path . compact --apply --prune-tombstones --confirmed-convex-reconciled` (now safe — Convex reconciled).
+7. Capture AFTER + compute deltas.
+8. Cleanup container/volume/`.env.local`.
+9. Extend `plans/gdbvacproof-evidence.md` with the closure section.
+10. Bump to v0.1.58 (docs-only entry).
+
+Will land tsift commit + superproject pointer + finalize with `--done gdbvacproof` once the packet returns.
+<!-- agent:boundary:51d978da -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -75,13 +100,12 @@ preset #spec-test-build-install-commit-push
 - ~do [#gdbvacconvex]~
 - ~do [#convexsnapshotscale]~
 - ~do [#convexscopedeval]~
-- complete [#gdbvacproof]
+- ~complete [#gdbvacproof]~
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [/] [#orchdog] [recommended] Dogfood the completed graph-backed agent orchestration stack on a real agent-doc queue run: run refresh -> evidence -> conflict-matrix -> dispatch-trace -> jobs create/collect, compare worker_prompt_packet and worker_result closure fields, and capture any tsift-side fixture gaps. **Dogfood performed 2026-05-21 on `session-share/tasks/root.md` items #x63e + #v4v0; findings recorded in #gdbevid, #cmgr, #gdbidx — see `session-share/tasks/root.md` exchange "graph-backed orchestration dogfood" entry for the full pipeline trace.** **Second dogfood 2026-05-21 against `tasks/software/tsift.md` (preset `#dogfood-tsift`) surfaced 2 new gaps: #cmgrwres and #gdblock.**
 <!-- /agent:backlog -->
 
 ## Review

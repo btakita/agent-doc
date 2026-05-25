@@ -33,7 +33,40 @@ Fixed agent:queue stuck-after-1-turn — auto-strike done items at preflight.
 Compacted content:
 - Archived 5 response topic(s): batch closeout for ipclegacyfix, ipcpluginalready, ipcfilehashskip; Phases 1 + 5 already landed (queue advance); queue not auto-looping + typing duplicate observation; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:11bae495 -->
+### Re: do [#p6skillinstallreconcile] — opus-4-7
+
+Fixed `install_runbooks_for` in `src/agent-doc/src/skill.rs` to reconcile the on-disk runbooks set against the canonical embedded set on every install, using the reap-on-mismatch approach from `tasks/agent-doc/plan-skill-install-runbooks-reconcile.md`.
+
+#### Changes
+
+- `src/agent-doc/src/skill.rs`:
+  - Added `manual-job-packets.md` to `BUNDLED_RUNBOOKS` (the runbook existed in `src/agent-doc/runbooks/` but was never embedded, so it could never install).
+  - `install_runbooks_for` now builds a `HashSet` of canonical filenames, writes missing/changed files (unchanged behavior), then enumerates the target directory and reaps any `.md` file not in the canonical set. Non-`.md` files are left alone. Each reap logs `[{env}] reaped stale runbook → {path}`.
+- New tests in `skill::tests`:
+  - `install_runbooks_reaps_stale_files` — pre-populates `sentinel-stale.md`, `plugin-install.md`, and a non-`.md` file under `.claude/skills/agent-doc/runbooks/`, runs install, asserts stale `.md` files are gone, the non-`.md` file is preserved, and the post-install set equals `BUNDLED_RUNBOOKS`.
+  - `install_runbooks_is_no_op_on_clean_tree` — runs install twice with a 20ms gap, asserts no runbook mtime changes on the second pass (idempotency / no VCS noise).
+  - `install_runbooks_reaps_for_codex_and_opencode` — same reap semantics under `.codex/runbooks/` and `.opencode/skills/agent-doc/runbooks/`.
+
+#### Verification
+
+- `cargo test --bin agent-doc -- skill::` — 67 passed, 0 failed. All three new tests pass.
+- `cargo install --path .` + `cargo build --release` — both binaries rebuilt at `0.34.0`.
+- Live reconcile in `agent-loop`:
+  - First run reaped the 8 stale extras called out in the plan: `cleanup.md`, `diff-type-routing.md`, `investigate-behavior.md`, `large-content.md`, `multi-topic-response.md`, `plugin-install.md`, `session-share-commit.md`, `skill-submit-cycle.md`.
+  - Installed `manual-job-packets.md`.
+  - `diff <(ls .claude/skills/agent-doc/runbooks/ | sort) <(ls src/agent-doc/runbooks/ | sort)` is now empty — installed set matches source-of-truth.
+  - Second run prints only `[Claude Code] already up to date (v0.34.0).` (idempotent, no reap output, no mtime churn).
+
+#### Out of scope (per plan)
+
+- Did not touch runbook content, only the install workflow.
+- Did not change how runbooks are embedded — still `include_str!` in `BUNDLED_RUNBOOKS`.
+
+#### Notes
+
+- The `make check` run surfaced one pre-existing failure (`codex_bare_run_inside_owning_pane_fails_before_nested_dispatch`) that reproduces on stashed HEAD without these changes, plus pre-existing clippy errors in `src/route/tests.rs`, `src/session_accretion.rs`, and `src/sync.rs` that are unrelated to skill install. Not addressed here.
+- The plan's "short-circuits the runbooks pass entirely when SKILL.md is already up to date" diagnosis didn't match the current code — `install_at` / `install_for` already call `install_runbooks` unconditionally. The real root cause was missing reap logic plus the missing `manual-job-packets.md` embed entry. Both are now fixed.
+<!-- agent:boundary:ec4ae133 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -54,7 +87,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#cclooploop]~
 - ~do [#ipcdupfin23]~
 - ~do [#ccloopguard]~
-- do [#p6skillinstallreconcile]
+- ~do [#p6skillinstallreconcile]~
 - do [#adoc-jb-cache-cancel-stuck-cycle]
 - do [#adoc-prefix-strip-uncommitted]
 - do [#jbrsrbusysw]
@@ -68,9 +101,9 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#adoc-baseline-drift-after-user-commit] agent-doc-bug: when a user commits a manual edit on top of an agent-doc commit, the captured baseline (.agent-doc/baselines/<hash>.md) is not refreshed; preflight, write --commit, and repair all fail with 'captured response baseline no longer matches current document' and there is no clear recovery path the next time the user invokes /agent-doc on the doc. Workaround: agent-doc reset --from-current rebuilds the baseline from the live markdown but drops session ID + snapshot history. Plan path: tasks/agent-doc/plan-baseline-drift-after-user-commit.md
 - [ ] [#adoc-jb-cache-cancel-stuck-cycle] agent-doc-bug: after canceling a JetBrains File Cache Conflict dialog during IPC patch delivery, the response patch lands in the working tree but the cycle does not reach committed state. Recovery requires running agent-doc write --commit FILE manually. Repro: have JB IDE open with the file in an editor; run finalize; cancel the JB cache-conflict dialog when it appears. Expected: cycle reaches committed cleanly or surfaces a clear error. Actual: response is in working tree but next preflight reports post-commit local drift requiring manual recovery. Plan path: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md (to be authored). Related: #jbccfix, #jbccreg, #jbccdocs in this same file.
 - [ ] [#adoc-prefix-strip-uncommitted] agent-doc-bug: after the JB-cache-conflict bug forces a manual sed strip of incorrectly-applied prompt-prefix markers (❯ ) from the response body, the subsequent agent-doc write --commit / repair / session-check chain fails to recognize the cleaned response as the cycle's committed response. Symptoms: session-check INTERRUPTED with prompt_target pointing at the agent's own response paragraph. Recovery: bare git commit succeeds and ships the response, but the agent-doc cycle state never closes cleanly. Likely cause: snapshot/baseline tracking does not recover after the IPC patch was applied with malformed markers and then manually edited. Plan path: tasks/agent-doc/plan-prefix-strip-uncommitted.md (to be authored). Related: #adoc-jb-cache-cancel-stuck-cycle (precondition for this bug).
-- [ ] [#p6skillinstallreconcile] agent-doc skill install does not reconcile the target runbooks directory: writes new files but leaves stale ones in place, and short-circuits the runbooks pass entirely when SKILL.md is already up to date. Surfaced in agent-loop with 21 installed runbooks vs 14 source files (8 stale extras + 1 new source file never installed). Plan: tasks/agent-doc/plan-skill-install-runbooks-reconcile.md. Fix: src/skill.rs install path — separate SKILL.md short-circuit from runbooks pass, then reap-on-mismatch (or delete-then-write) so on-disk set converges to embedded canonical set. Also touches Codex/OpenCode harness install paths.
 - [ ] [#jbrsrbusysw] SimWorld scenario coverage for session_restart --force: route + Restart Supervisor while pane is alive-busy with and without --force, asserting the new refusal message and force success (including session_restart_busy_pre_interrupt_idle and session_restart_busy_force_killed event variants). Substantial — requires new Op variant + tmux/session_actor mock in src/sim_world.rs. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md phase 4 (SimWorld piece).
 - [ ] [#jbrsrbusyide] JB plugin IDE-side telemetry for session_restart --force: surface session_restart_force_used, session_restart_busy_pre_interrupt_idle, and session_restart_busy_force_killed events in the IntelliJ notification area or Logcat so users can see the recovery path the binary took. Kotlin work in editors/jetbrains/. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md phase 4 (IDE piece).
 - [ ] [#planperphase] Convention: split multi-phase plans into per-phase backlog IDs (e.g. #crdtrespfx1, #crdtrespfx2) instead of one parent ID that gets pending-gated. Lets queue auto-strike honor per-phase progress. Lower priority — the convention is opt-in for authors. [recommended]

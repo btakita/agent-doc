@@ -128,7 +128,25 @@ v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-gramm
 Compacted content:
 - Archived 2 response topic(s): queue auto; do [#p5lic]. #spec-test-build-install-commit-push
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-<!-- agent:boundary:69bfbfed -->
+❯ What are #next-steps for tagpath to assist with tsift and agent-doc?
+### Re: next-steps — opus-4-7
+
+
+**Top of backlog: p6tsi** (tsift adoption of the tagpath consumer contract). That's the single item that converts the Phase 5 platform work into actual user value — without it, all the indexing / watch / handle plumbing sits unused.
+
+Six items added to the backlog, priority order:
+
+| Rank | ID | Hook | Why |
+|------|-----|-----|-----|
+| 1 | p6tsi | Tsift adopts tagpath as symbol-graph source | Phase 5 shipped the contract; this is the sibling-repo work that consumes it. Highest leverage by far — every tagpath feature we built lights up the moment tsift wires in. |
+| 2 | p6adf | Agent-doc finalize calls `tagpath lint --dialect agent-doc` | The lint shipped in 0.14.0 only fires if invoked manually. Wiring it into finalize closes the `archive=PATH` bug class permanently — the malformed directive never reaches a snapshot. |
+| 3 | p6mcr | `tagpath mcp install` helper | The 9 MCP tools exist but every consumer has to hand-craft a config block. A scaffolder for Claude Desktop / Codex / OpenCode / Cursor drops setup friction to one command. |
+| 4 | p6skl | Update `.claude/skills/tagpath/SKILL.md` | Skill is stale (v0.5.0, pre-Phase-4 surface). Claude Code can't recommend features it doesn't know about. Refresh covers index / watch / lint / MCP / sidecar. |
+| 5 | p6ren | `tagpath rename` cross-convention refactor | The agent-loop integration vision ("intent-preserving refactoring") needs this. Index + handles already do the heavy lifting; rename is a thin writer on top. |
+| 6 | p6meta [recommended] | agent-loop meta-index across submodules | Once 2+ siblings adopt tagpath, a top-level handle registry makes cross-repo navigation work. Wait until p6tsi proves the contract before building this. |
+
+**Framing — what's shipped vs what's needed:** Phases 4 and 5 built the entire tagpath platform (index, MCP, WASM, dyn-grammar, handles, JSONL, sidecar, incremental update, watch, agent-doc lint dialect, wasm-pack publish, LICENSE). Phase 6 should be **adoption-driven**: each item is a sibling-repo or consumer-facing integration that proves the platform pays off. p6tsi first; everything else can run in parallel after.
+<!-- agent:boundary:2619f33b -->
 <!-- /agent:exchange -->
 ###
 
@@ -138,6 +156,12 @@ Compacted content:
 ## Backlog
 
 (<!-- agent:backlog -->
+- [ ] [#p6tsi] Tsift adoption of tagpath: in src/tsift, replace bespoke symbol extraction with the tagpath consumer contract — read .naming/index.json (or subscribe to tagpath watch), cite fam:/mem: handles in envelope refs, fall back to live scan when index is stale/missing. Sibling-repo work; tagpath only maintains the SPEC §15 contract.
+- [ ] [#p6adf] Agent-doc finalize gate: in src/agent-doc, call tagpath lint --dialect agent-doc on the session document during preflight or pre-write, refuse to commit on lint errors. Closes the loop on the archive=PATH bug class — it never reaches a snapshot. Sibling-repo work referencing tagpath.
+- [ ] [#p6mcr] tagpath mcp install helper: generate Claude Desktop / Codex / OpenCode / Cursor MCP config JSON blocks pointing at the local tagpath mcp binary. Drops integration friction so users get the 9 tools without hand-editing config files.
+- [ ] [#p6skl] Update .claude/skills/tagpath/SKILL.md — currently references v0.5.0 and pre-Phase-4 commands. Cover index / watch / lint --dialect agent-doc / MCP server / sidecar perf semantics so Claude Code can recommend the new surfaces without rediscovery.
+- [ ] [#p6ren] tagpath rename <old> <new>: cross-file, cross-convention identifier rename using the index. Walks every member of the matching family, rewrites in-place in each source convention (snake/camel/Pascal/kebab/UPPER/Ada). Foundation for the agent-loop intent-preserving refactor vision.
+- [ ] [#p6meta] [recommended] agent-loop meta-index: aggregate per-submodule .naming/index.json files into a top-level handle registry so cross-repo searches resolve. New CLI: tagpath meta-index <workspace-root>. Useful once 2+ siblings adopt tagpath.
 <!-- /agent:backlog -->
 
 ## Completed / Reaped

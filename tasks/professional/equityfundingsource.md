@@ -251,7 +251,32 @@ The draft includes the $5,000 invoice, high-level Done / Remaining TODOs summary
 Verification:
 - `corky draft validate mail/drafts/2026-05-25-equity-funding-source-invoice-efs-2026-05-01.md` passed.
 - `corky draft push mail/drafts/2026-05-25-equity-funding-source-invoice-efs-2026-05-01.md --json` returned `action: draft_created`, `account_user: brian.takita@gmail.com`, and `transport: imap`.
-<!-- agent:boundary:7f57d53e -->
+❯ Are the 4 portals (Admin, Investor, Broker, Borrower) feature complete?
+### Re: Portal feature completeness — gpt-5
+
+Short answer: no, I would not say all four portals are feature complete. I would say all four portal foundations are built and demoable, with several core workflows already wired to backend APIs, but the full product is not finished yet.
+
+Portal-by-portal:
+
+- Admin: closest to an operational internal MVP. It has dashboard, users, loans, deals, funded deals, blog posts, lender requests, TMO loan views, settings, document workflows, and Cloudflare Access protection. Not fully complete because final business review, Google Workspace SSO preference, custom-domain cutover, and some downstream TMO/operator workflows remain.
+- Investor: closest to end-to-end feature complete for the investor MVP. The repo has tested coverage for signup/login, accreditation, deal listing/detail, deal documents, fund commitment, admin acceptance, positions, distributions, documents, and dashboard. Still needs EFS review/signoff and real production operating data before I would call it complete.
+- Broker: core broker portal is now API-backed for dashboard, pipeline, documents, commissions, and submit-a-deal. It is demoable and no longer just the old demo arrays for those core pages. It is not fully complete because rate sheets/pre-qual are still static/local guidance, and notifications depend on EFS/admin events plus TMO webhook support.
+- Borrower: core borrower application/status/document workflows are in place and demoable. It is not feature complete because post-funding surfaces like messages, loan summary, make payment, and payment history still include local/static/mock behavior rather than a complete live TMO/payment/messaging backend.
+
+So the invoice/email should avoid saying “the four portals are feature complete.” Safer wording:
+
+```text
+Built and deployed the core portal foundation for admins, investors, brokers, and borrowers, including the main workflows needed to review, demo, and continue production rollout.
+```
+
+Or slightly stronger:
+
+```text
+Built demoable MVP versions of the admin, investor, broker, and borrower portals, with the most important workflows connected to backend services and the remaining work narrowed to production setup, review/signoff, and selected follow-on integrations.
+```
+
+That is accurate and defensible.
+<!-- agent:boundary:1f6b1b55 -->
 <!-- /agent:exchange -->
 ###
 <!--

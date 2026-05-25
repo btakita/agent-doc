@@ -132,8 +132,31 @@ Closing the turn. Queue head remains `do [#jbrsrbusysim]` for the next cycle.
 - If user wants every phase tracked individually, split into per-phase backlog IDs (e.g. `#crdtrespfx2`, `#crdtrespfx3`) at plan-write time — keeps queue auto-advance honest.
 - If user wants the queue to auto-skip `--pending-gate`d items too, that's a small behavior change in `preflight::run_queue_maintenance` worth a separate plan (`#queueadvgated`). Recommended; flag and file if you want.
 
+❯ Add #next-steps for the recommended flag and file.
+
 **Queue next head after this cycle:** `do [#jbrsrbusysim]` (SimWorld + IDE telemetry for `session_restart --force` — plan phase 4 of `plan-jb-restart-supervisor-busy-refusal.md`; phases 1 and 3 already in `session_actor_cmd.rs`). Substantial standalone cycle — I'll start it in the next turn rather than half-finish it here.
-<!-- agent:boundary:ef3c1e01 -->
+### Re: Add #next-steps for the recommended flag and file. — opus-4-7
+
+
+Added two backlog items:
+
+1. **`[#queueadvgated]`** (high priority — fixes the stall the user just hit). Plan at `tasks/agent-doc/plan-queue-auto-advance-past-pending-gate.md`. Touches `preflight::run_queue_maintenance` to also auto-strike queue-head prompts whose `[#id]` is in `agent:review` with the `[/]` pending-gate marker, alongside the existing `agent:done` strike. Phases: identify gated IDs, extend strike function, tests + spec, docs.
+
+2. **`[#planperphase]` `[recommended]`** (lower priority — process convention). When writing multi-phase plans, split into per-phase backlog IDs (`#crdtrespfx1`, `#crdtrespfx2`, …) instead of one parent that gets pending-gated. Opt-in for authors; complements `#queueadvgated` rather than replacing it.
+
+#### Priority-ordered backlog after this cycle
+
+1. `[#queueadvgated]` — directly fixes the queue-stall workflow the user flagged. Small surface (preflight.rs + tests + SPEC).
+2. `[#jbrsrbusysim]` — SimWorld + IDE telemetry for `session_restart --force` (plan phase 4).
+3. `[#jbccfix]` — Compact Exchange write/cache boundary fix.
+4. `[#jbccreg]` — regression coverage gated behind `#jbccfix`.
+5. `[#jbccdocs]` — runbook doc gated behind `#jbccfix`.
+6. `[#planperphase]` `[recommended]` — process convention; no code change required.
+
+**Top of backlog: `[#queueadvgated]`**
+
+Note: the active queue head is `do [#jbrsrbusysim]` (the user-specified order). If you want the queue to prioritize `#queueadvgated` first instead, re-edit the queue head — otherwise I'll start on `#jbrsrbusysim` next cycle per the queue order.
+<!-- agent:boundary:8204abb8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -169,6 +192,8 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog auto -->
+- [ ] [#queueadvgated] preflight::run_queue_maintenance should auto-strike queue-head prompts whose [#id] is in agent:review with the pending-gate marker [/], in addition to the existing agent:done strike. Unblocks queue stalls when a do-item lands a contained phase but the larger plan still has open phases. Files: src/agent-doc/src/preflight.rs (collect_agent_review_gated_ids + extend strike_done_queue_head_prompts), SPEC.md. Plan: tasks/agent-doc/plan-queue-auto-advance-past-pending-gate.md
+- [ ] [#planperphase] Convention: split multi-phase plans into per-phase backlog IDs (e.g. #crdtrespfx1, #crdtrespfx2) instead of one parent ID that gets pending-gated. Lets queue auto-strike honor per-phase progress. Lower priority — the convention is opt-in for authors. [recommended]
 - [ ] [#jbrsrbusysim] SimWorld + IDE telemetry coverage for session_restart --force path, including session_restart_busy_pre_interrupt_idle and session_restart_busy_force_killed event variants (plan phase 4). Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md.
 - [ ] [#jbccfix] Fix the Compact Exchange write/cache boundary so JetBrains never receives a stale or conflicting file-cache snapshot after compact exchange.
 - [ ] [#jbccreg] Add deterministic regression coverage for Compact Exchange cache-conflict handling, including stale snapshot and concurrent user-edit cases where feasible.

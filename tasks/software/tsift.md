@@ -136,7 +136,55 @@ Two halves:
 3. Run the `#gdbvacproof` compact half, capture before/after metrics into `plans/gdbvacproof-evidence.md`.
 4. Commit + push tsift (one combined commit covering both items) + superproject submodule pointer.
 5. Finalize with `--done gdbprephot`. Hold off on `--done gdbvacproof` since only the compact half is covered; leave it gated, with `#gdbvacconvex` capturing the Convex deployment prerequisite.
-<!-- agent:boundary:b24cfac1 -->
+❯ do [#gdbvacconvex]. #spec-test-build-install-commit-push
+### Re: do [#gdbvacconvex] (scaffold + stop at auth) — opus-4-7
+
+Scaffolded `src/tsift/examples/convex-graph-app/` (currently **untracked** per the "do NOT install/commit/push until after deploy works" direction). Stopping at the Convex browser-auth boundary; the next step is yours.
+
+#### What I built
+
+```
+src/tsift/examples/convex-graph-app/
+  package.json          # convex ^1.16, typescript ^5.5
+  tsconfig.json         # strict + ESNext, excludes convex/_generated
+  .gitignore            # node_modules/, .env*, convex/_generated/
+  bun.lock              # locked deploy of convex 1.39.1, typescript 5.9.3
+  convex/
+    schema.ts           # copied from examples/convex-graph/
+    graph.ts            # copied from examples/convex-graph/
+    http.ts             # copied from examples/convex-graph/
+  README.md             # full runbook + idempotency contract + #gdbvacproof closure path
+```
+
+Spec/test/build done:
+- **Spec**: README describes the app, the three-file snippet pack relationship, the deployment flow, the secrets discipline, and the #gdbvacproof closure path.
+- **Test (pre-auth)**: `bun install` → 6 packages installed. `bun run typecheck` fails on `Cannot find module './_generated/server'` — **expected**; that directory is emitted by `npx convex dev` and is gitignored. Re-run typecheck after auth to confirm types resolve.
+- **Build**: `bun install` populated `node_modules/` + `bun.lock`. Tried `bunx convex codegen` to skip auth — fails closed with `No CONVEX_DEPLOYMENT set, run npx convex dev to configure a Convex project`, confirming the auth boundary is real.
+
+#### Your turn — interactive Convex auth
+
+```bash
+cd src/tsift/examples/convex-graph-app
+npx convex dev
+```
+
+First run opens a browser to convex.dev. Pick a dev project (or create one named e.g. `tsift-graph-dev`). It writes `.env.local` (gitignored) with `CONVEX_DEPLOYMENT` + `CONVEX_URL`, emits `convex/_generated/`, and stays running in the terminal to redeploy on file changes.
+
+When the initial sync prints "Convex functions ready!", `cat .env.local` to confirm the URL, then either tell me the URL and I'll drive the rest, or run:
+
+```bash
+TSIFT_CONVEX_GRAPH_URL="https://<slug>.convex.site/tsift/graph" \
+  tsift convex-sync . --remote-snapshot --apply --json
+```
+
+Once that returns a clean sync report, `#gdbvacconvex` is closable and the Convex half of `#gdbvacproof` becomes executable.
+
+#### Why nothing is committed yet
+
+Per your "scaffold + stop at auth" choice, I held off on `git add` / `git commit` / `git push` so the working tree stays inspectable before you authenticate. The `#gdbprephot` packet is still running in parallel; once both it returns and your `npx convex dev` lands, I'll do one aggregated commit + push that covers `#gdbprephot`'s code/version-bump + the scaffold + any post-deploy `convex-sync` proof.
+
+If you'd rather I commit the scaffold now as a separate atom (lower risk of mixing scopes), say so and I'll do that immediately.
+<!-- agent:boundary:32df0317 -->
 <!-- /agent:exchange -->
 ###
 <!--

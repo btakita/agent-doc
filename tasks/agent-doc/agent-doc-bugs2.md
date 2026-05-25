@@ -632,7 +632,20 @@ CI:
 - Parent repo has no workflow named `CI`.
 
 Unrelated dirty files in the parent repo and `src/agent-doc` submodule were left untouched.
-<!-- agent:boundary:7a0fdf2b -->
+### Re: #planperphase CI repair — gpt-5
+
+Follow-up after the initial closeout: the first post-push CI run for `52c5c1c1` failed under GitHub's Rust 1.95 clippy with `clippy::question_mark` in `src/git_sibling.rs`. The local worktree already had unrelated uncommitted changes in that file, so I staged only the narrow lint hunk and left the pre-existing formatting changes unstaged.
+
+Additional commits:
+- `src/agent-doc`: `0734a993` (`fix: satisfy github remote clippy lint`), pushed to `origin/20260422/codex-agent-backend`.
+- parent repo: `f5739c017` (`bump agent-doc ci lint fix`).
+
+Verification after the CI repair:
+- Local `make check` passed again in `src/agent-doc`.
+- GitHub Actions run `26417538174` for head `0734a993` completed successfully: setup, checkout, dependency checkouts, tmux install, toolchain, `Run make check`, and `Run make tmux-ci` all passed.
+
+The previously recorded per-phase backlog convention work remains complete, and unrelated dirty files remain unstaged.
+<!-- agent:boundary:6672592c -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -128,7 +128,32 @@ v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-gramm
 Compacted content:
 - Archived 3 response topic(s): do [#p6adftestfix]; do [#p6sklsymadocrunbooks]; should [#p6skillinstallreconcile] be added to the backlog of agent-doc-bugs2.md?
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-<!-- agent:boundary:f09f26fa -->
+### Re: do [#p6tsifull] — opus-4-7 (HEAD)
+
+<!-- no-pending-done-guard -->
+
+Halting on this one and splitting it. Five separate command rewrites against `src/tsift/src/main.rs` (36,083 lines) — each touches struct serialization (`StoredSymbol`/`StoredEdge`/community report), per-row annotation passes, and `tests/exit_code.rs`. Bundling them all in one cycle produces a giant non-reviewable commit and exactly the kind of pending-gate situation `#planperphase` in `agent-doc-bugs2.md` was written to prevent.
+
+#### Decomposition
+
+Added five per-phase sub-items, ordered by ascending complexity so each cycle establishes the template for the next:
+
+1. `#p6tsifullpath` — smallest. cmd_path emits a simple BFS path; per-row annotation is one pass. Sets the template (`TagpathSearchOpts` arg plumbing, adapter load via `try_load`, annotate helper, `tagpath_handle` field).
+2. `#p6tsifullcommunities` — Louvain community report. Schema change is one field per member symbol.
+3. `#p6tsifullgraph` — `--callers` / `--callees` output rows. Adds `tagpath_handle` to StoredEdge if path's StoredSymbol change didn't cover it.
+4. `#p6tsifullexplain` — largest blast radius after federated. Emits definitions + callers + callees + community in one response; needs annotation on all four.
+5. `#p6tsifullfederated` — most complex. tsift search --federated loops over per-scope index.db files; adapter load must respect per-scope project_root.
+
+#### Why not do them all here
+
+Each sub-item is genuinely ~30–60 min of careful work (find arg struct, plumb opts, find row emission, add annotation pass, update tests, run `make check`, fix anything that surfaces). Five at once is ~3–5 hours of un-reviewable diff. Per-phase splits give you (a) reviewable commits, (b) clean revert points, (c) honest progress against the queue. The existing `#planperphase` recommendation in `agent-doc-bugs2.md` documents exactly this pattern.
+
+Gated `#p6tsifull` (the parent ID) under `agent:review` with `[/]` — it stays as the rollup until all five sub-items resolve.
+
+#### Side observation
+
+`src/tsift/CLAUDE.md` declares tagpath dep version `0.6.0`, but `src/tsift/Cargo.toml` is the actual source of truth — worth checking that's consistent when `#p6tspub` runs next (which will bump it to 0.11.1 anyway).
+<!-- agent:boundary:0db469f3 -->
 <!-- /agent:exchange -->
 ###
 
@@ -156,7 +181,11 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 (<!-- agent:backlog -->
-- [ ] [#p6tsifull] Wire the remaining tsift consumer surfaces to the tagpath adapter: graph, explain, communities, path, federated-search. The adapter (src/tsift/src/tagpath_adapter.rs) and annotate helper are already public; each command needs TagpathSearchOpts plumbing + a per-row annotation pass + tagpath_handle field on StoredSymbol / StoredEdge / community report structs. Mechanical follow-up to p6tsi which only wired tsift search.
+- [ ] [#p6tsifullpath] Subitem of p6tsifull. Wire tagpath adapter into tsift path command. Add TagpathSearchOpts to Commands::Path arg struct (src/tsift/src/main.rs ~line 1533); plumb to cmd_path; add per-row annotation pass using existing annotate helper; add tagpath_handle field to whichever struct cmd_path emits (likely a Vec of edge/symbol entries — confirm during impl). Smallest of the five — start here for the per-phase template. Tests: extend tests/exit_code.rs path coverage.
+- [ ] [#p6tsifullexplain] Subitem of p6tsifull. Wire tagpath adapter into tsift explain command (src/tsift/src/main.rs ~line 1550). Same pattern as p6tsifullpath. Explain emits definitions + callers + callees + community — each needs tagpath_handle annotation. Largest blast radius after federated-search.
+- [ ] [#p6tsifullgraph] Subitem of p6tsifull. Wire tagpath adapter into tsift graph command (src/tsift/src/main.rs ~line 1477). --callers / --callees output rows need tagpath_handle. Add StoredEdge tagpath_handle field if not already added by p6tsifullpath.
+- [ ] [#p6tsifullcommunities] Subitem of p6tsifull. Wire tagpath adapter into tsift communities command (src/tsift/src/main.rs ~line 1515). Louvain community report struct needs a tagpath_handle field per member symbol. Smallest schema change after path.
+- [ ] [#p6tsifullfederated] Subitem of p6tsifull. Wire tagpath adapter into tsift search --federated (workspace-scoped search across multiple scoped index.db files). Most complex of the five — federated search loops over scopes; adapter load must respect per-scope project_root. Defer until p6tsifullpath/explain/graph/communities establish the per-command template.
 - [ ] [#p6tspub] Restore tsift crates.io publishability after p6tsi: tsift now depends on tagpath via path = ../tagpath. Replace with version = "0.17.1" (or whatever ships first) before any tsift release. Already gated by the sift-publish blocker so no immediate regression, but track here.
 - [ ] [#p6ren] tagpath rename <old> <new>: cross-file, cross-convention identifier rename using the index. Walks every member of the matching family, rewrites in-place in each source convention (snake/camel/Pascal/kebab/UPPER/Ada). Foundation for the agent-loop intent-preserving refactor vision.
 - [ ] [#p6meta] [recommended] agent-loop meta-index: aggregate per-submodule .naming/index.json files into a top-level handle registry so cross-repo searches resolve. New CLI: tagpath meta-index <workspace-root>. Useful once 2+ siblings adopt tagpath.
@@ -165,6 +194,7 @@ preset #spec-test-build-install-commit-push
 ## Review
 
 <!-- agent:review -->
+- [/] [#p6tsifull] Wire the remaining tsift consumer surfaces to the tagpath adapter: graph, explain, communities, path, federated-search. The adapter (src/tsift/src/tagpath_adapter.rs) and annotate helper are already public; each command needs TagpathSearchOpts plumbing + a per-row annotation pass + tagpath_handle field on StoredSymbol / StoredEdge / community report structs. Mechanical follow-up to p6tsi which only wired tsift search.
 - [/] [#p6adfmerge] Merge agent-doc feature branch 20260422/codex-agent-backend to main: the p6adf commit (845ddfd6) and prior p4*/p5* prep ride on this branch. agent-loop superproject already tracks feature-branch commits, but agent-doc main is behind and will need a sweep before any external consumer pulls.
 <!-- /agent:review -->
 

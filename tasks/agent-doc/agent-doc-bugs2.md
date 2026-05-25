@@ -33,7 +33,7 @@ Fixed agent:queue stuck-after-1-turn — auto-strike done items at preflight.
 Compacted content:
 - Archived 4 response topic(s): backlog edit + queue add for #agent-doc-commit-sibling → #adcs-binary / #adcs-scripts; do [#adcs-binary]; transfer [#adcs-scripts] into docs.md backlog; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:ef32f8c0 -->
+<!-- agent:boundary:fc6193e0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +46,7 @@ agent-doc command failed (exit 1): Error: session_restart refused for /home/bria
 ```
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#crdtrespfx]~
 - ~do [#queueadvgated]~

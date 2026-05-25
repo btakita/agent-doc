@@ -184,7 +184,7 @@ Once that returns a clean sync report, `#gdbvacconvex` is closable and the Conve
 Per your "scaffold + stop at auth" choice, I held off on `git add` / `git commit` / `git push` so the working tree stays inspectable before you authenticate. The `#gdbprephot` packet is still running in parallel; once both it returns and your `npx convex dev` lands, I'll do one aggregated commit + push that covers `#gdbprephot`'s code/version-bump + the scaffold + any post-deploy `convex-sync` proof.
 
 If you'd rather I commit the scaffold now as a separate atom (lower risk of mixing scopes), say so and I'll do that immediately.
-<!-- agent:boundary:32df0317 -->
+<!-- agent:boundary:7e19bf0f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -204,7 +204,6 @@ What are #next-steps to make the graph faster?
 ## Review
 
 <!-- agent:review -->
-- [/] [#gdbprephot] [recommended] Profile and reduce the remaining conflict-matrix preparation hotspots after the cache fixes: measure session_review_compute, context_pack_diff, impact, and dispatch-trace reuse on repeated real/full-projection runs, then add shared packet reuse or narrower digest paths with metric-digest gates so the cached queue path drops below the current multi-second prep cost without trusting stale ownership.
 - [/] [#gdbvacproof] [recommended] Run the real Convex reconciliation plus graph-db compact workflow and capture before/after file size, freelist, tombstone counts, status/doctor timings, and scan-cost deltas so compaction policy is backed by operational evidence.
 <!-- /agent:review -->
 ###

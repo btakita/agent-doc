@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 
@@ -196,11 +196,11 @@ Captured as `#p6skillinstallreconcile`. That is the right place to fix the drift
 | `p6sklsymadocrunbooks` (agent-doc runbooks) | **Not symlinked** | Install-generated subtree; symlink would multiply the sync surface |
 
 Pattern: symlink hand-maintained surfaces and single files; leave install-generated subtrees to the install workflow and fix install bugs at the source.
-<!-- agent:boundary:bfdf9aad -->
+<!-- agent:boundary:26ad0d8b -->
 <!-- /agent:exchange -->
 ###
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#p6tsi]~
 - ~do [#p6adf]~

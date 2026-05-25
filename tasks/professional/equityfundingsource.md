@@ -235,7 +235,23 @@ Brian
 ```
 
 That keeps the ask direct while leaving the other payment paths open.
-<!-- agent:boundary:a8621b48 -->
+❯ Move the draft into brian.takita@gmail.com drafts.
+### Re: Gmail draft created — gpt-5
+
+Done. I created the invoice email draft in Gmail Drafts for the `personal` account, which is `brian.takita@gmail.com`. It was not sent.
+
+Draft details:
+- To: `judithkrug@gmail.com`
+- Cc: `rwaldman100@gmail.com`
+- Subject: `Invoice EFS-2026-05-01 - EFS portal build`
+- Local source draft: `mail/drafts/2026-05-25-equity-funding-source-invoice-efs-2026-05-01.md`
+
+The draft includes the $5,000 invoice, high-level Done / Remaining TODOs summary, the live-demo note, and payment wording that prefers Zelle to `brian.takita@gmail.com` while leaving ACH/wire and check open.
+
+Verification:
+- `corky draft validate mail/drafts/2026-05-25-equity-funding-source-invoice-efs-2026-05-01.md` passed.
+- `corky draft push mail/drafts/2026-05-25-equity-funding-source-invoice-efs-2026-05-01.md --json` returned `action: draft_created`, `account_user: brian.takita@gmail.com`, and `transport: imap`.
+<!-- agent:boundary:7f57d53e -->
 <!-- /agent:exchange -->
 ###
 <!--

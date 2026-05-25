@@ -76,7 +76,35 @@ Doing them all in one cycle would either skip tests, skip the local install-and-
 1. `#ipcdupfinalize` Phase 2 (socket-ack `already_applied` short-circuit — directly fixes the IPC corruption observed twice in this conversation).
 2. `#jbrunstart` Phase 1 (smallest concrete chunk: just the `--wait-for-ready` flag on `route`).
 3. `#jbrsrbusysim` (SimWorld + telemetry — substantial but well-scoped against the existing plan).
-<!-- agent:boundary:babd0f69 -->
+### Re: do [#jbrunstart] Phase 1 — opus-4-7
+
+
+❯ Landed Phase 1 only this cycle. Item stays open (`--pending-gate`d) — Phases 2 (JB plugin retry/spinner UX) and 3 (regression coverage on slow startup transitions) remain. Queue head was `do [#jbrunstart]`; the queue should auto-advance to `do [#jbrsrbusysim]` after this cycle.
+
+#### Phase 1 landed — submodule `fb2a312b`, superproject `ef0fe5a2a`
+
+`agent-doc <FILE>` / `agent-doc route <FILE>` now accept `--wait-for-ready <SECONDS>` (capped at 600s). When the authoritative actor is still `starting`, the bounded wait normally uses a harness-specific timeout (10s for claude); the override widens that bound for user-initiated dispatches that need to ride out a slow supervisor boot. Fail-closed semantics unchanged: the override only widens the bound, never promotes a non-ready actor.
+
+Implementation:
+- `src/main.rs` — `Commands::Route { wait_for_ready: Option<u64> }` clap arg; capped at 600s before passing to `route::run` as `Option<Duration>`.
+- `src/route.rs` — `WAIT_FOR_READY_OVERRIDE` thread-local + `WaitForReadyOverrideGuard` (RAII, nests cleanly). `wait_for_authoritative_actor_ready` reads the override and substitutes a `RetryBudget` with the longer timeout when set. Ops_log gains three new event lines for observability: `route_wait_for_ready_override` on entry, `route_wait_for_ready_elapsed` on success, `route_wait_for_ready_timeout` on bound exhaustion.
+- `src/route/tests.rs` — new `wait_for_ready_override_guard_sets_and_restores_thread_local` test covers guard mechanics (set, nest, unset, restore). 3 existing `run_with_tmux` call sites updated for the new signature.
+
+Verification:
+- `cargo test --bin agent-doc wait_for_ready_override_guard` → 1 passed.
+- `make check` (clippy -D warnings + full suite) → exit 0.
+- `cargo build --release` + `cargo install --path .` → `~/.cargo/bin/agent-doc` v0.33.16 replaced.
+- Selective stage in the submodule commit: only `src/main.rs` (my 22-line hunk extracted from a larger in-flight diff), `src/route.rs`, `src/route/tests.rs`. Other working-tree drift left untouched.
+
+Plan file updated at `tasks/agent-doc/plan-jb-run-agent-doc-starting-actor-refusal.md` — Phase 1 marked `[done]` with implementation + test summary.
+
+#### What's left on `#jbrunstart` (gated open)
+- Phase 2 — JB plugin Run Agent Doc passes `--wait-for-ready 60` (or project-configurable) on user-initiated actions, with a Retry button on the IDE notification when the override still times out. Optional busy spinner for the wait.
+- Phase 3 — SimWorld scenario: route while authoritative actor is `starting`, prompt becomes ready mid-wait, assert success without rerun; plus JB plugin test where feasible.
+
+#### Queue
+Next head: `do [#jbrsrbusysim]` (SimWorld + IDE telemetry for `session_restart --force`; plan phase 4 of `plan-jb-restart-supervisor-busy-refusal.md`; phases 1 and 3 already in `session_actor_cmd.rs`).
+<!-- agent:boundary:36579ab6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -102,7 +130,6 @@ Please make auto-compact exchange off by default. Only explicit frontmatter or .
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#jbrunstart]
 - do [#jbrsrbusysim]
 - do [#jbccfix]
 - do [#jbccreg]
@@ -111,8 +138,7 @@ preset #spec-test-build-install-commit-push
 
 ## Pending / Not Built
 
-<!-- agent:backlog -->
-- [ ] [#jbrunstart] JB Run Agent Doc fails with starting-actor refusal after 10s wait when Claude Code startup takes longer (common after Restart Supervisor). Add --wait-for-ready <SECONDS> to route + JB plugin retry/spinner UX. Plan: tasks/agent-doc/plan-jb-run-agent-doc-starting-actor-refusal.md
+<!-- agent:backlog auto -->
 - [ ] [#jbrsrbusysim] SimWorld + IDE telemetry coverage for session_restart --force path, including session_restart_busy_pre_interrupt_idle and session_restart_busy_force_killed event variants (plan phase 4). Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md.
 - [ ] [#jbccfix] Fix the Compact Exchange write/cache boundary so JetBrains never receives a stale or conflicting file-cache snapshot after compact exchange.
 - [ ] [#jbccreg] Add deterministic regression coverage for Compact Exchange cache-conflict handling, including stale snapshot and concurrent user-edit cases where feasible.
@@ -122,6 +148,7 @@ preset #spec-test-build-install-commit-push
 ## Review
 
 <!-- agent:review -->
+- [/] [#jbrunstart] JB Run Agent Doc fails with starting-actor refusal after 10s wait when Claude Code startup takes longer (common after Restart Supervisor). Add --wait-for-ready <SECONDS> to route + JB plugin retry/spinner UX. Plan: tasks/agent-doc/plan-jb-run-agent-doc-starting-actor-refusal.md
 - [/] [#ipcdupfinalize] IPC corruption + duplicate response when user types into a post-exchange comment during finalize. Socket-IPC ack=error falls through to file-IPC fallback that re-writes a response already in the live file, producing a duplicate response heading. Plan: tasks/agent-doc/plan-ipc-corruption-and-duplicate-during-typing.md
 - [/] [#jbrsrbusy] [partial] Phase 1 (binary) landed: agent-doc session restart <FILE> --force flag accepts alive-busy panes, refusal message now ends with the --force hint citing the exact command, and the force path logs session_restart_force_used. Plan phases 2 (JB plugin confirm dialog → invokes --force), 3 (optional harness-aware pre-interrupt with 2s idle wait), and 4 (SimWorld coverage + IDE-side telemetry) split into #jbrsrbusyjb, #jbrsrbusyint, and #jbrsrbusysim. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md.
 - [/] [#stuckcycledup] [recommended] [partial] Wedged-cycle pattern: cycle_already_committed gate now refuses the short-circuit when the active capture body is absent from HEAD (flow/closeout.rs::cycle_already_committed + new stuck_captured_cycle helper), and preflight emits a stuck_captured_cycle warning. Remaining plan parts split into #stuckcycleorphan, #stuckcyclerepair, and #stuckcyclesuperseded. Plan: tasks/agent-doc/plan-stuck-cycle-causes-duplicated-uncommitted-response.md.

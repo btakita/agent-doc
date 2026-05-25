@@ -123,38 +123,12 @@ v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-gramm
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260525-075810.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260525-082259.md`*
 
 Compacted content:
-- Archived 4 response topic(s): do [#p6tsifullcommunities]; Can tagpath handle mixed name conventions?; Is there a chance for lossy community lookups with tsift or agent-doc using tagpath?; 1 more
+- Archived 1 response topic(s): do [#commhx]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-### Re: do [#commhx] — opus-4-7
-
-Fixed in tsift 0.1.56 (committed b27cde570 in the superproject).
-
-#### Fix
-`resolve_tagpath_handles_for_names` in `src/tsift/src/main.rs` now iterates every `db.symbol_info` row for a given name and keeps the first one that resolves through the tagpath index, instead of stopping at the first row by `(file, line)`. When two symbols share a name across files (e.g. `main` in `bin/foo/main.rs` + `bin/bar/main.rs`) and the first-by-`(file, line)` definition lives outside the tagpath walk (vendored, generated, or skipped dir), the handle for the in-index copy is no longer silently dropped.
-
-The fix is the "cheap" variant from the backlog item — call-graph caller_file disambiguation is still open as a stronger follow-up (federated subitem can layer on top).
-
-#### Test
-`tests/exit_code.rs::communities_json_resolves_handle_through_name_collision` — uses a `__pycache__/main.rs` + `src/main.rs` fixture. Tagpath skips `__pycache__/` via SKIP_DIRS; tsift's `ignore`-based walker indexes both files. ASCII `_` (0x5F) < `s` (0x73), so `__pycache__/main.rs` is the first row from `symbol_info("helper")`. Verified the test fails before the fix (exit 101) and passes after.
-
-#### Verification
-- `cargo test --test exit_code` — green
-- `make check` — green (full clippy + suite)
-- `cargo build --release` + `cargo install --path .` — installed `tsift 0.1.56` to `~/.cargo/bin/`
-
-#### Files
-- `src/tsift/src/main.rs` — fix at `resolve_tagpath_handles_for_names`
-- `src/tsift/tests/exit_code.rs` — name-collision regression test
-- `src/tsift/SPEC.md` — collision-handling clause in §`tagpath_handle semantics`
-- `src/tsift/VERSIONS.md` — 0.1.56 entry (bundled with prior 0.1.55 convex pagination work that was prepared but uncommitted)
-- `src/tsift/Cargo.toml`, `src/tsift/Cargo.lock` — version → 0.1.56
-- Superproject `src/tsift` submodule pointer bumped
-
-This unblocks the federated subitem (`#p6tsifullfederated`), which can now assume per-name file-correct resolution.
-<!-- agent:boundary:5afc6086 -->
+<!-- agent:boundary:ae6a848a -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -128,7 +128,36 @@ v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-gramm
 Compacted content:
 - Archived 2 response topic(s): do [#p6tsifullscoped]; do [#p6tsifullscoped]
 - Prior summary/context: ### Session Summary ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c...
-<!-- agent:boundary:de183bbf -->
+### Re: do [#tpauditscope] — opus-4-7
+
+Shipped in tsift 0.1.61 (`6a3e795`, superproject pointer bumped). Test-only change locking in the per-submodule audit path that the 0.1.59 implementation already supported.
+
+#### Test
+`tests/exit_code.rs::audit_tagpath_scope_reports_per_submodule_walker_diff` builds an `alpha` + `beta` workspace:
+
+- **alpha**: contains `alpha/__pycache__/lib.rs` (tsift indexes, tagpath SKIP_DIRS) and `alpha/lib.rs`. Has its own `.naming.toml` and `.naming/index.json` rooted at `src/alpha/`.
+- **beta**: contains `beta/lib.rs` only. Has its own `.naming.toml` and `.naming/index.json` rooted at `src/beta/`.
+
+Then exercises both scope paths:
+
+- `tsift audit-tagpath --scope alpha --json` — asserts `scope: "alpha"`, asserts `__pycache__/lib.rs` lands in `tsift_only_files`, and asserts NO beta files leak into the alpha report.
+- `tsift audit-tagpath --scope beta --json` — asserts `scope: "beta"` and empty `tsift_only_files` + `tagpath_only_files` (clean coverage).
+
+The leak-prevention assertion is the load-bearing one: it locks in that `cmd_audit_tagpath` resolves the tagpath root from `scope.source_root` instead of falling back to the workspace root, and that `IndexDb` opens the scoped `.tsift/indexes/<scope>/index.db` rather than the workspace root.
+
+#### Verification
+- `cargo test --test exit_code audit_tagpath_scope_reports_per_submodule_walker_diff` — green
+- `make check` — green
+- `cargo install --path .` — `tsift 0.1.61` installed
+
+#### Files
+- `src/tsift/tests/exit_code.rs` — `audit_tagpath_scope_reports_per_submodule_walker_diff`
+- `src/tsift/VERSIONS.md` — 0.1.61 entry
+- `src/tsift/Cargo.toml`, `Cargo.lock` — version → 0.1.61
+- Superproject `src/tsift` submodule pointer bumped
+
+No source changes — `cmd_audit_tagpath` already handled the scoped path correctly when shipped in 0.1.59, so this turn locks that behavior in with deterministic test coverage.
+<!-- agent:boundary:da2f362f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -136,7 +165,7 @@ Compacted content:
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#tpauditscope]
+- ~do [#tpauditscope]~
 - do [#tpauditpolicy]
 - do [#commhxstrong]
 - do [#p6tspub]
@@ -148,7 +177,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#tpauditscope] `tsift audit-tagpath --scope <name>` test coverage. The implementation routes through `config::Config::resolve_submodule` and opens the scoped `index.db` + tagpath at `scope.source_root`, but the `audit_tagpath_reports_walker_diff` test only exercises the workspace-root path. Add a fixture with `alpha` + `beta` submodules where one submodule's tagpath skips a path tsift indexes; assert the JSON `scope: "<name>"` field is set and only that submodule's files appear in `tsift_only_files`.
 - [ ] [#tpauditpolicy] Policy-hint surfacing for `tsift audit-tagpath`. Today the audit reports WHAT diverges (tsift-only / tagpath-only files) but not WHY. Parse the resolved `NamingConfig` (including `extends` chain) and surface: (a) hard-coded `SKIP_DIRS` hits per tsift-only file (the obvious explanation when files live under `__pycache__/`, `vendor/`, `target/`, `node_modules/`, `.venv/`, `.git/`), (b) language coverage gaps (extension not in tagpath's `SOURCE_EXTENSIONS` but tsift's walker accepted it). New JSON fields: `tsift_only_files_with_policy_hints: [{file, hints: ["skip_dir:__pycache__", "extension_unsupported"]}]`. Operators can then decide whether to broaden tagpath, narrow tsift, or accept the gap with intent.
 - [ ] [#commhxstrong] Stronger fix for `#commhx` name-collision wrong-handle (closed cheaply in 0.1.56 by iterating `symbol_info` rows). Today when two files define the same symbol AND both have valid tagpath handles, the resolver returns the FIRST file's handle, which may not match the actual call edge's resolved file. Stronger fix: when resolving a callee handle for a caller row, prefer the `symbol_info` row whose file lives in the same Louvain community as the caller (use `caller_file` evidence). Falls back to current first-handle-wins behavior when no community context is available (e.g. `tsift communities` itself). Touches `annotate_stored_edges_with_tagpath::EdgeSide::Callee` and the per-row `resolve_tagpath_handles_for_names` helper. Tests: extend the name-collision fixture from 0.1.56 with two valid tagpath handles (both files indexed by tagpath); assert the caller's callee handle matches the file in the caller's community.
 - [ ] [#p6tspub] Restore tsift crates.io publishability after p6tsi: tsift now depends on tagpath via path = ../tagpath. Replace with version = "0.17.1" (or whatever ships first) before any tsift release. Already gated by the sift-publish blocker so no immediate regression, but track here.

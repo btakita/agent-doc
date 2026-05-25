@@ -34,9 +34,7 @@ Compacted content:
 - Archived 2 response topic(s): queue additions; do [#jbccc1]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
 ❯ The response patchback was not applied. Was this due to a JB `Compact Exchange` occurring during the turn? #agent-doc-bug. Apply + commit the response to the document.
-### Re: response patchback loss after JB Compact Exchange mid-turn — opus-4-7 (HEAD)
-<!-- no-pending-done-guard -->
-<!-- no-pending-capture -->
+### Re: response patchback loss after JB Compact Exchange mid-turn — opus-4-7
 
 Diagnosis confirmed: yes, a JetBrains-initiated `agent-doc compact exchange` ran in the middle of the `#jbccc2` cycle and that's why the response patchback was discarded. Authored the plan; backlog item `#adoc-compact-during-turn-response-loss` landed on the prior partial-apply.
 
@@ -75,7 +73,7 @@ Per your instruction to "apply + commit the response": the `#jbccc2` gate-with-I
 #### Next item
 
 Queue head advances to `#jbccc3` after this cycle (binary auto-recovery in `preflight` / `repair` / `write` / `session_check` — the failing baseline from `#jbccc1` flips green when this lands). I can fully execute that from this terminal.
-<!-- agent:boundary:900c0d80 -->
+<!-- agent:boundary:7f051dbb -->
 <!-- /agent:exchange -->
 ###
 <!--

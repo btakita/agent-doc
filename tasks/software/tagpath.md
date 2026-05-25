@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 
@@ -128,11 +128,11 @@ v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-gramm
 Compacted content:
 - Archived 5 response topic(s): do [#p6sklsymagentdoc]; do [#p6sklsymcorky]; do [#p6adfmerge]; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-<!-- agent:boundary:2f2d3a0c -->
+<!-- agent:boundary:3c01b4a7 -->
 <!-- /agent:exchange -->
 ###
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#p6tsi]~
 - ~do [#p6adf]~
@@ -144,6 +144,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#p6sklsymcorky]~
 - ~do [#p6adfmerge]~
 - do [#p6sklsymadocrunbooks]
+- do [#p6adfcitagpath]
 - do [#p6adfcitagpath]
 - do [#p6tsifull]
 - do [#p6tspub]

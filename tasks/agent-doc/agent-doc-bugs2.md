@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -33,7 +33,29 @@ Fixed agent:queue stuck-after-1-turn — auto-strike done items at preflight.
 Compacted content:
 - Archived 2 response topic(s): do [#p6skillinstallreconcile]; do [#adoc-jb-cache-cancel-stuck-cycle]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:c70f2d04 -->
+### Re: backlog edit + queue add for #agent-doc-commit-sibling → #adcs-binary / #adcs-scripts — opus-4-7
+
+The prior #agent-doc-commit-sibling cycle's response never landed (compaction ran between attempts and the late repair-write hit `cycle already committed`), but the plan and per-phase split DID land in the document. Reconciling state and acknowledging your queue additions. No new follow-up items needed — the three phase items `#adcs-binary`, `#adcs-scripts`, `#adcs-convention` are already in backlog from the earlier partial-apply.
+
+#### What's actually in the repo
+
+- `tasks/agent-doc/plan-commit-sibling.md` — authored and committed in `042ef88c7`. Contains the `Session-Doc:` trailer contract, the three-phase split, and verification steps.
+- Backlog now has `#adcs-binary`, `#adcs-scripts`, `#adcs-convention` (Phases 2/3/4 of the parent).
+- Review has `#agent-doc-commit-sibling` gated.
+- Queue head now includes your additions: `#adcs-binary`, `#adcs-scripts`.
+
+#### Queue state
+
+`preflight.queue_active = false`, halted with `queue_halted: "item_modified"` because your edits modified the active queue. Auto-loop is off until the queue is re-armed.
+
+#### Stopping the loop, not invoking /loop
+
+Same reasoning as the previous two cycles. `#adcs-binary` is the binary-side phase that's actually doable inside `agent-loop` (the `--commit-sibling` CLI flag in `src/agent-doc/src/main.rs` + `src/agent-doc/src/write.rs`, with tests). `#adcs-scripts` lives in four sibling repos (build-party, claudescore.com, claudescore-plugin, session-share) — it cannot be implemented from this codebase. `#adcs-convention` lives in `tasks/docs.md` in session-share.
+
+#### Suggested next action
+
+Re-invoke `/agent-doc tasks/agent-doc/agent-doc-bugs2.md` and the new queue head will be `#adcs-binary` — that's a standalone cycle I can fully execute here. If you also want `#adcs-scripts` driven, that needs to happen from each sibling repo's own session.
+<!-- agent:boundary:278101b7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +68,7 @@ agent-doc command failed (exit 1): Error: session_restart refused for /home/bria
 ```
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#crdtrespfx]~
 - ~do [#queueadvgated]~
@@ -55,7 +77,9 @@ preset #spec-test-build-install-commit-push
 - ~do [#ipcdupfin23]~
 - ~do [#ccloopguard]~
 - ~do [#p6skillinstallreconcile]~
-- do [#agent-doc-commit-sibling]
+- ~do [#agent-doc-commit-sibling]~
+- do [#adcs-binary]
+- do [#adcs-scripts]
 - do [#adoc-jb-cache-cancel-stuck-cycle]
 - do [#adoc-prefix-strip-uncommitted]
 - do [#jbrsrbusysw]
@@ -69,7 +93,9 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#agent-doc-commit-sibling] agent-doc CLI: add --commit-sibling <repo> mode to finalize/write. When the session doc lives in repo A but the user's directive originates a commit in sibling repo B (e.g. session-share session-doc drives a build-party scripts change), agent-doc should be able to stage and commit the sibling repo with a Session-Doc git trailer auto-injected. Trailer format: 'Session-Doc: https://github.com/<session-share-org>/<repo>/blob/<session-share-cycle-sha>/<session-doc-path>'. Today agent-doc only commits inside the session-doc's own submodule, so the agent (Claude) creates sibling commits manually via 'git commit' and the trailer is easy to forget. Companion item #cross-repo-sessiondoc-trailer in tasks/docs.md covers the convention + backfill-updates.sh changes across the four script copies. Plan path: tasks/agent-doc/plan-commit-sibling.md
+- [ ] [#adcs-binary] Phase 2 of #agent-doc-commit-sibling: --commit-sibling <repo> CLI flag in agent-doc. src/agent-doc/src/main.rs + src/agent-doc/src/write.rs — accept repeated --commit-sibling on finalize and write --commit; resolve session-share metadata (org, repo, sha, path) from the session document's remote and the freshly-created session-doc commit; run git -C <sibling> commit --trailer Session-Doc:<url>; commit session doc first, sibling second; fail closed on non-git, no staged changes, or same-repo. Tests: commit_sibling_injects_session_doc_trailer, commit_sibling_uses_session_doc_commit_sha, commit_sibling_fails_closed_on_same_repo, commit_sibling_fails_closed_on_no_staged_changes. Plan: tasks/agent-doc/plan-commit-sibling.md
+- [ ] [#adcs-scripts] Phase 3 of #agent-doc-commit-sibling: extend backfill-updates.sh in 4 sibling repos (build-party, claudescore.com, claudescore-plugin, fourth canonical home in session-share) to parse Session-Doc git trailer via git log --format=%(trailers:key=Session-Doc,valueonly) and prefer trailer URL over agent-doc(name): subject heuristic. Output dual link: last touched <date> by [tasks/docs.md](session-share-url) [<short>](sibling-url). Grandfather build-party@9a0be9a, claudescore.com@bf73644, claudescore-plugin@f1daedb. Executes in sibling repos, not agent-loop. Plan: tasks/agent-doc/plan-commit-sibling.md
+- [ ] [#adcs-convention] Phase 4 of #agent-doc-commit-sibling: author tasks/docs.md (in session-share) with the cross-repo Session-Doc trailer convention — format, when to use, migration story, link to plan and #cross-repo-sessiondoc-trailer. Plan: tasks/agent-doc/plan-commit-sibling.md
 - [ ] [#jbccc1] Phase 1 of #adoc-jb-cache-cancel-stuck-cycle: deterministic SimWorld repro for File Cache Conflict cancel. Add a SimCommand variant or scenario test FinalizeWithJbCacheConflictCancel modeling the three branches (no dialog, accept, cancel) explicitly; cancel branch produces response-on-disk, snapshot != HEAD, cycle phase write_applied; asserted to fail today (failing baseline) and pass once Phase 3 lands. Plan: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md
 - [ ] [#jbccc2] Phase 2 of #adoc-jb-cache-cancel-stuck-cycle: JB plugin undo-on-cancel. editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt — defer the write until user resolves the File Cache Conflict dialog (never queue change beforehand); on Cancel return 0/2 from socket IPC callback; on file-IPC cancel leave patch file in place. Plan: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md
 - [ ] [#jbccc3] Phase 3 of #adoc-jb-cache-cancel-stuck-cycle: binary detect + tailored recovery. src/preflight.rs, src/repair.rs, src/write.rs, src/session_check.rs — distinguish post-commit local drift from jb_cache_conflict_cancel (cycle phase write_applied + working-tree response matches captured body + snapshot != HEAD + no live exchange edits beyond response); preflight recovered=true auto-runs the equivalent of agent-doc write --commit; session_check stops surfacing likely_direct_response_patchback for this pattern. Plan: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md
@@ -88,6 +114,7 @@ preset #spec-test-build-install-commit-push
 ## Review
 
 <!-- agent:review -->
+- [/] [#agent-doc-commit-sibling] agent-doc CLI: add --commit-sibling <repo> mode to finalize/write. When the session doc lives in repo A but the user's directive originates a commit in sibling repo B (e.g. session-share session-doc drives a build-party scripts change), agent-doc should be able to stage and commit the sibling repo with a Session-Doc git trailer auto-injected. Trailer format: 'Session-Doc: https://github.com/<session-share-org>/<repo>/blob/<session-share-cycle-sha>/<session-doc-path>'. Today agent-doc only commits inside the session-doc's own submodule, so the agent (Claude) creates sibling commits manually via 'git commit' and the trailer is easy to forget. Companion item #cross-repo-sessiondoc-trailer in tasks/docs.md covers the convention + backfill-updates.sh changes across the four script copies. Plan path: tasks/agent-doc/plan-commit-sibling.md
 - [/] [#adoc-jb-cache-cancel-stuck-cycle] agent-doc-bug: after canceling a JetBrains File Cache Conflict dialog during IPC patch delivery, the response patch lands in the working tree but the cycle does not reach committed state. Recovery requires running agent-doc write --commit FILE manually. Repro: have JB IDE open with the file in an editor; run finalize; cancel the JB cache-conflict dialog when it appears. Expected: cycle reaches committed cleanly or surfaces a clear error. Actual: response is in working tree but next preflight reports post-commit local drift requiring manual recovery. Plan path: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md (to be authored). Related: #jbccfix, #jbccreg, #jbccdocs in this same file.
 - [/] [#jbrsrbusy] [partial] Phase 1 (binary) landed: agent-doc session restart <FILE> --force flag accepts alive-busy panes, refusal message now ends with the --force hint citing the exact command, and the force path logs session_restart_force_used. Plan phases 2 (JB plugin confirm dialog → invokes --force), 3 (optional harness-aware pre-interrupt with 2s idle wait), and 4 (SimWorld coverage + IDE-side telemetry) split into #jbrsrbusyjb, #jbrsrbusyint, and #jbrsrbusysim. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md.
 - [/] [#stuckcycledup] [recommended] [partial] Wedged-cycle pattern: cycle_already_committed gate now refuses the short-circuit when the active capture body is absent from HEAD (flow/closeout.rs::cycle_already_committed + new stuck_captured_cycle helper), and preflight emits a stuck_captured_cycle warning. Remaining plan parts split into #stuckcycleorphan, #stuckcyclerepair, and #stuckcyclesuperseded. Plan: tasks/agent-doc/plan-stuck-cycle-causes-duplicated-uncommitted-response.md.

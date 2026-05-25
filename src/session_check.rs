@@ -1643,7 +1643,9 @@ pub(crate) fn detect_bypassed_response_write_between(
         }
         let trimmed = change.value().trim();
         if trimmed.starts_with("### Re:") || trimmed == "## Assistant" {
-            if let Some(bare_target) = crate::diff::first_bare_prompt_prefix_target(&diff_text) {
+            if let Some(bare_target) =
+                first_bare_prompt_prefix_target_before_marker(&diff_text, trimmed)
+            {
                 return Some(format!(
                     "{} (bare prompt target missing `❯ `: {})",
                     trimmed, bare_target
@@ -1653,6 +1655,21 @@ pub(crate) fn detect_bypassed_response_write_between(
         }
     }
     None
+}
+
+fn first_bare_prompt_prefix_target_before_marker(diff_text: &str, marker: &str) -> Option<String> {
+    let mut prefix_diff = String::new();
+    for line in diff_text.lines() {
+        if line
+            .strip_prefix('+')
+            .is_some_and(|added| added.trim() == marker)
+        {
+            break;
+        }
+        prefix_diff.push_str(line);
+        prefix_diff.push('\n');
+    }
+    crate::diff::first_bare_prompt_prefix_target(&prefix_diff)
 }
 
 fn has_new_response_heading_marker(snapshot_doc: &str, current_doc: &str) -> bool {
@@ -2671,6 +2688,24 @@ Body\n\
         let marker = detect_bypassed_response_write(&doc).unwrap().unwrap();
         assert!(marker.contains("### Re: test — gpt-5"));
         assert!(marker.contains("Why was this missed?"));
+    }
+
+    #[test]
+    fn detect_bypassed_response_write_does_not_report_response_body_as_bare_prompt_target() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = make_project(tmp.path());
+        let snapshot =
+            "<!-- agent:exchange patch=append -->\n❯ Prior question?\n<!-- /agent:exchange -->\n";
+        fs::write(&doc, snapshot).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        fs::write(
+            &doc,
+            "<!-- agent:exchange patch=append -->\n❯ Prior question?\n### Re: test — gpt-5\n\nCompleted `#adoc-prefix-strip-session-check-whitelist`.\n<!-- /agent:exchange -->\n",
+        )
+        .unwrap();
+
+        let marker = detect_bypassed_response_write(&doc).unwrap().unwrap();
+        assert_eq!(marker, "### Re: test — gpt-5");
     }
 
     #[test]

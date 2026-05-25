@@ -165,6 +165,10 @@ or prove capabilities, but it may not change the closeout semantics.
 - The active Codex post-commit drift guard is scoped the same way: exchange-only content edits with no unresolved prompt target are allowed to wait for the next preflight diff, as are answered-prompt marker / `(HEAD)` / boundary churn paired with backlog metadata wording drift. Typed-component drift outside that promptless closeout metadata envelope, fresh prompt targets, or response patchback markers still fail closed.
 - May self-heal only narrow exchange-only already-committed historical drift proven by `HEAD`.
 - Must fail closed when the repaired tail would still include a bare prompt target or typed-component drift.
+- Direct-patchback diagnostics may report a bare prompt target only when that
+  target appears before the newly inserted response heading. Prompt-like prose
+  inside the response body after `### Re:` / `## Assistant` remains assistant
+  content and must not be surfaced as a missing `❯ ` user prompt.
 - Optional closeout sidecars such as cycle-state, capture, startup-miss, and ops-log files are advisory; if one disappears between discovery and read, session-check treats it as absent state instead of surfacing a transient `ENOENT`.
 - Runs the pending-capture, pending-done, backlog-shadow, backlog-replay, completed-item reap, snapshot-vs-HEAD, and parent-submodule-pointer closeout guards after a committed cycle.
 - Fails closed when a live backlog/icebox line looks like a tracked checklist item with an id but is not parseable as a canonical pending item. This prevents malformed prefixes from hiding an open item from the pending-done guard.

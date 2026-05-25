@@ -39,13 +39,17 @@ The "full-document IPC corruption" the user observed appears to be the file-IPC 
 2. Assert: no duplicate response heading in the resulting file; snapshot matches HEAD; `session-check` passes.
 3. Until the fix lands, this scenario must reproduce the duplicate today (acts as the failing baseline).
 
-### Phase 2: Socket-IPC ack=error must not trigger file-IPC fallback that re-writes the response
+### Phase 2: Socket-IPC ack=error must not trigger file-IPC fallback that re-writes the response [done — binary side]
 
-**File:** `src/ipc_socket.rs`, `src/write.rs`
+**File:** `src/ipc_socket.rs`, `src/write.rs` (landed); JB plugin Kotlin work tracked separately
 
-1. When socket IPC returns `{"type":"ack","status":"error"}` with reason `already_applied` (or equivalent — needs a new field on the ack), the write path must treat the response as plugin-applied and stop. Do not fall through to file-IPC re-write.
-2. When the ack reason is genuinely "plugin failed" (not "already applied"), file-IPC fallback may proceed but must hash-compare the current file's response-suffix against the response body and skip the write when they already match.
-3. Log a `flow_event` distinguishing `socket_ack_already_applied`, `socket_ack_failed`, and `file_ipc_skipped_response_already_present`.
+1. **(done)** When socket IPC returns `{"type":"ack","status":"error","reason":"already_applied"}`, the write path treats the response as plugin-applied and stops. Implementation: new `AckClassification` enum + `classify_ack(ack)` + `is_already_applied_error(err)` helpers in `src/ipc_socket.rs`; the main socket-IPC caller in `src/write.rs` (line 8552 area) honors `is_already_applied_error` by logging `ipc_socket_already_applied_skip_file_fallback`, cleaning fallback patch files, and returning `success=true` without falling through.
+2. **(remaining)** When the ack reason is genuinely "plugin failed" (not "already applied"), file-IPC fallback should hash-compare the current file's response-suffix against the response body and skip the write when they already match. Add as `#ipcfilehashskip` follow-up.
+3. **(remaining)** Plugin protocol contract — the JetBrains plugin and VS Code extension need to actually emit `reason: "already_applied"` when they detect the patch is already in the live buffer. Until then, this binary-side gate is dormant. Add as `#ipcpluginalready` follow-up.
+
+**Tests (`ipc_socket::tests`):** 7 unit tests cover ok / no-status / already_applied (lower + mixed case) / error-no-reason / other-error-reason / malformed-JSON. 2 unit tests cover `is_already_applied_error` matching and rejecting unrelated errors.
+
+**Spec contract:** the plugin ack JSON shape is now part of the IPC protocol: `{"type":"ack","status":"error","reason":"already_applied"}` means "patch text is already in my buffer — do NOT fall through to file IPC re-write".
 
 ### Phase 3: Typing-guard around IPC retries
 

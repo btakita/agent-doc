@@ -128,7 +128,43 @@ v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-gramm
 Compacted content:
 - Archived 1 response topic(s): do [#p6tsifullexplain]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-<!-- agent:boundary:a379f6d7 -->
+### Re: do [#p6tsifullgraph] — opus-4-7
+
+Wired the tagpath consumer adapter into `tsift graph` and shipped as **tsift v0.1.53** (commit `8deab36`, superproject pointer `474f09f`). Completes the call-graph triplet (`search` / `path` / `explain` already landed; `graph` was the last symbol-graph surface).
+
+#### What changed
+
+- **CLI surface (src/tsift/src/main.rs):** `--no-tagpath` and `--tagpath-strict` flags added to `Commands::Graph`, plumbed into `cmd_graph` as `tagpath_opts: TagpathSearchOpts`. Identical flag spelling to the prior three commands.
+- **`cmd_graph` annotation:** reuses the `annotate_stored_edges_with_tagpath` helper added under v0.1.52 with `EdgeSide::Caller` / `EdgeSide::Callee`. No new types or helpers were required — the `StoredEdge.tagpath_handle` field was already in place. As the backlog hint predicted: "Add StoredEdge tagpath_handle field if not already added by p6tsifullpath" → already added during the `#p6tsifullexplain` cycle.
+- **Three JSON output paths, all annotated consistently:**
+  - `--callers` only → `{callers, total, truncated}` — handles on every caller row.
+  - `--callees` only → `{callees, total, truncated}` — handles on every callee row (each `callee_name` resolves through `db.symbol_info` to the callee's definition file before the adapter lookup).
+  - Default (both directions, with `--json`) → `{callers, callees, callers_total, callees_total, callers_truncated, callees_truncated}` — both sides annotated.
+- **Diagnostic discipline:** the `tagpath_index_stale: true` stderr line emits at most once per `cmd_graph` invocation across the caller and callee branches via a small `tagpath_stale_emitted` flag. Caller-side annotation runs before relativization so the adapter sees absolute source paths.
+
+#### JSON contract
+
+Purely additive. `tagpath_handle: Option<String>` is serde-skipped when `None`, so default output for projects without `.naming.toml` is byte-identical to v0.1.52. No `--json` shape changes.
+
+#### Test coverage (src/tsift/tests/exit_code.rs)
+
+- `graph_json_reports_callers_and_callees` — updated to assert no `tagpath_handle` field appears on caller or callee rows when no tagpath index is present in the fixture.
+- `graph_json_omits_handles_when_no_tagpath_flag_set` — builds a fresh tagpath index, asserts `--no-tagpath` suppresses handles on both sides.
+- `graph_json_annotates_caller_and_callee_edges_when_index_is_fresh` — fresh tagpath index, asserts every caller and callee row in the combined response carries a `mem:` handle.
+- `graph_callers_only_json_annotates_handle` — confirms the single-direction `--callers`-only JSON branch annotates too (the branch produces a different envelope than the combined response).
+
+#### Verification
+
+- `cargo test` ⇒ **858 passed** across 5 suites (+3 over v0.1.52: three new graph tests, one existing test updated for the no-index baseline). Counts per suite: exit_code 116, bin 687, conformance 31, perf_gate 21, scan_plan 4.
+- `cargo clippy --all-targets --no-deps -- -D warnings` ⇒ clean (2 pre-existing patch-not-used warnings only).
+- `cargo build --release && cargo install --path .` ⇒ `tsift 0.1.53` live in `~/.cargo/bin/tsift`; `tsift graph --help` exposes the new flags.
+
+#### Pending follow-up (queue advances next)
+
+- `[#p6tsifullcommunities]` — `graph::Community.members: Vec<String>` needs to grow per-member handles. The cleanest path is the same trade-off `PathResult.path` faced under `[#p6tsifullpath]`: promote to a typed `CommunityMember { name, tagpath_handle? }` (breaking JSON change for `tsift communities`) or carry a parallel `tagpath_handles: Vec<Option<String>>` field (additive). Worth one explicit decision before implementation.
+- `[#p6tsifullfederated]` — adapter `try_load` must respect per-scope `project_root` across federated index DBs. Each scope owns its own `.naming/index.json`, so the federated search code path needs to load N adapters and select the right one per hit.
+- After both: `[#p6tspub]` (publish prep) and the broader p6 backlog (`p6skl`, `p6ren`, `p6meta`).
+<!-- agent:boundary:3b22e603 -->
 <!-- /agent:exchange -->
 ###
 
@@ -149,7 +185,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#p6tsifull]~
 - ~do [#p6tsifullpath]~
 - ~do [#p6tsifullexplain]~
-- do [#p6tsifullgraph]
+- ~do [#p6tsifullgraph]~
 - do [#p6tsifullcommunities]
 - do [#p6tsifullfederated]
 - do [#p6tspub]
@@ -161,7 +197,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 (<!-- agent:backlog -->
-- [ ] [#p6tsifullgraph] Subitem of p6tsifull. Wire tagpath adapter into tsift graph command (src/tsift/src/main.rs ~line 1477). --callers / --callees output rows need tagpath_handle. Add StoredEdge tagpath_handle field if not already added by p6tsifullpath.
 - [ ] [#p6tsifullcommunities] Subitem of p6tsifull. Wire tagpath adapter into tsift communities command (src/tsift/src/main.rs ~line 1515). Louvain community report struct needs a tagpath_handle field per member symbol. Smallest schema change after path.
 - [ ] [#p6tsifullfederated] Subitem of p6tsifull. Wire tagpath adapter into tsift search --federated (workspace-scoped search across multiple scoped index.db files). Most complex of the five — federated search loops over scopes; adapter load must respect per-scope project_root. Defer until p6tsifullpath/explain/graph/communities establish the per-command template.
 - [ ] [#p6tspub] Restore tsift crates.io publishability after p6tsi: tsift now depends on tagpath via path = ../tagpath. Replace with version = "0.17.1" (or whatever ships first) before any tsift release. Already gated by the sift-publish blocker so no immediate regression, but track here.

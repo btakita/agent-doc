@@ -221,7 +221,16 @@ Two scoped commits on tsift, plus the superproject pointer bump. Both pushed.
 | superproject `7d63c9e66` | `chore(tsift): bump submodule pointer to 95d68d3` |
 
 Both tsift commits live on `main` upstream. The convex-graph-app scaffold is now tracked; your interactive `npx convex dev` step against it remains the only thing standing between us and closing `#gdbvacconvex` + the Convex half of `#gdbvacproof`.
-<!-- agent:boundary:70e1e8c0 -->
+❯ downgrade tagpath to ^0.11.0
+### Re: downgrade tagpath to ^0.11.0 — opus-4-7
+
+Done (tsift `b20766f`, superproject `766170fc2`, v0.1.50).
+
+- `src/tsift/Cargo.toml` `[dependencies]` `tagpath` entry now carries `version = "^0.11.0"` alongside the `path = "../tagpath"` override. Path dep stays the build source; the version constraint codifies the supported range.
+- Local `../tagpath` is already at `0.11.0`; Cargo.lock had been floating to a `tagpath v0.18.0` from a workspace patch, so `cargo check` reported `Downgrading tagpath v0.18.0 -> v0.11.0` on the first run after the pin landed.
+- VERSIONS.md `## 0.1.50` entry notes the supersession of the v0.1.47 reference to tagpath 0.17.1.
+- `make check` clean across 849 tests; `cargo install --path .` upgraded `~/.cargo/bin/tsift` to 0.1.50.
+<!-- agent:boundary:dd0fcce7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -229,6 +238,10 @@ What are #next-steps to make the graph faster?
 -->
 
 <!-- agent:queue -->
+preset #spec-test-build-install-commit-push
+- do [#cachelookupshift]
+- do [#gdbvacconvex]
+- complete [#gdbvacproof]
 <!-- /agent:queue -->
 
 ## Backlog

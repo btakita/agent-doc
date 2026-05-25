@@ -36,8 +36,16 @@ queue_active: false
 Compacted content:
 - Archived 1 response topic(s): do [#37ah]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-do [#7chq]. #spec-test-commit-push-deploy
-<!-- agent:boundary:89e80358 -->
+❯ do [#7chq]. #spec-test-commit-push-deploy
+### Re: do [#7chq] — apply migration 0026 remote — still blocked — opus-4-7
+
+
+Retried `bun run cf:d1:migrate:remote` against the live D1. Same Cloudflare error 7403 — the API token at `passage btak/equityfundingsource/cloudflare_api_token` still lacks D1:Edit. Nothing has changed since the prior attempts on `#0r24` and `#2rpv`.
+
+`#7chq`, `#0r24`, and `#2rpv` are all gated on the same external unblock (review `#1v5m`: update the API token to include D1:Edit + Access:Read/Edit). The actionable path is unchanged — `docs/operator-runbook-pending-config.md` section 1 walks the token edit, and once it's updated, `bun run cf:d1:migrate:remote` applies 0025 and 0026 in the same pass.
+
+Advancing the queue past `#7chq` so it stops re-firing; the review entry remains the authoritative tracker.
+<!-- agent:boundary:51251ba2 -->
 <!-- /agent:exchange -->
 ###
 

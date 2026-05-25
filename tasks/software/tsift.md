@@ -68,7 +68,19 @@ Two of three agent-loop superproject cache legs reverted to full rebuild because
 - `[#gdbreplacereuse]` Cross-invocation reuse design for `replace_projection_with_version` on cache-hit — needs scope-bounded sharing to honor `[#gdbgatecold]` against process-wide `inspect_read_only` caching.
 - `[#gdblockmetric]` Emit `lock_wait_micros` / `lock_contention_micros` from SQLite backend-eval so the perf-gate's lock-contention parity check becomes enforceable instead of future-proof.
 - `[#gdbgateworkloads]` Add dedicated `default`, `high-degree`, and `deep-chain` workload entries to `fixtures/graph-db-performance-history.json` so the gate's per-workload three-sample requirement is satisfied with dedicated samples, not metric-prefix inference.
-<!-- agent:boundary:374e9a7d -->
+❯ Can we complete the items in review?
+### Re: review item #gdbcacheprove closed — opus-4-7
+
+Closing the one review item that was nearest the line; the other three (#gdbgatecold, #gdbprephot, #gdbvacproof) stay gated because each needs its own dedicated cycle (scope-bounded inspection-sharing design, multi-sample conflict-matrix profiling, Convex + compact operational run respectively).
+
+#### #gdbcacheprove — closed (tsift `7a85fa4`, superproject `21b10a5c3`)
+- **Cold/cache pair on agent-loop**: covered by #gdbfullreuse (3 cold + 3 cache samples, pair 1 hit cleanly with the new phase split; pairs 2 + 3 reverted to full rebuild because sibling agents edited tracked source during the 25-min window — that is the cache working as designed, not a regression).
+- **`.agent-doc/` watermark exclusion proof**: single chokepoint at `traversal_relative_path_is_generated_artifact` (`src/main.rs:12868`) excludes `.agent-doc`, `.agent-doc/...`, `/.agent-doc`, and `/.agent-doc/...` at any depth. New unit test `traversal_excludes_agent_doc_runtime_paths_from_source_watermark` regression-locks the rule across snapshots, baselines, archives, runtime JSONL, and nested session-doc paths, and asserts real source paths (`src/main.rs`, sibling `agent-doc/src/lib.rs`, `src/.agent-doc-helper.rs`) stay included.
+- **Cache artifact prune**: both `.tsift/backend-eval-cache/full_projection/` directories (superproject + tsift submodule) hold exactly one fresh entry written by the #gdbfullreuse run. LRU has already collapsed prior misses. Nothing stale to prune.
+- **Fixture refresh**: 9 workload-tagged entries appended by #gdbfullreuse.
+
+Evidence: `plans/gdbcacheprove-evidence.md`. `make check` clean; `cargo install --path .` upgraded `~/.cargo/bin/tsift`.
+<!-- agent:boundary:0a8ce69e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -89,7 +101,6 @@ What are #next-steps to make the graph faster?
 <!-- agent:review -->
 - [/] [#gdbgatecold] [recommended] Reduce the cold-path cost of conflict_matrix_preparation.status_index_gate (678ms median: 422ms prepare_agent_doc_index_gate + 266ms context_pack_status_reminders). Investigation in 2026-05-24 cycle confirmed both call paths run IndexDb::inspect_read_only on the same (root, .tsift/index.db) — that is the duplicated work. A process-wide in-process cache for inspect_read_only_cached_digest was implemented and reverted: it correctly cut status_index_gate -29% (478ms median) and prepare_agent_doc_index_gate -44% (235ms median) on backend-eval, but broke tsift search's in-process freshness check on concurrent file modifications (tests/exit_code.rs search_timeout_reports_reindex_when_index_turns_stale_during_worker_run). The watermark-by-directory-mtime variant did not help because writing file content does not bump the parent directory mtime on Linux ext4. Correct fix: scope-bounded inspection sharing. Either thread the inspection result through build_context_pack_report_with_profile and into status::check_status (no process state), or introduce an explicit with_inspection_cache_scope guard that holds the cache only for the duration of one trusted pipeline. Project ~200ms savings on backend-eval cold path; do not regress search timeout reporting.
 - [/] [#gdbprephot] [recommended] Profile and reduce the remaining conflict-matrix preparation hotspots after the cache fixes: measure session_review_compute, context_pack_diff, impact, and dispatch-trace reuse on repeated real/full-projection runs, then add shared packet reuse or narrower digest paths with metric-digest gates so the cached queue path drops below the current multi-second prep cost without trusting stale ownership.
-- [/] [#gdbcacheprove] [recommended] Run a post-fix real graph-db backend-eval --full-projection cold/cache pair on agent-loop, prove .agent-doc runtime markdown no longer changes the source watermark, prune stale pre-fix .tsift/backend-eval-cache miss artifacts, and refresh fixtures/graph-db-performance-history.json with a cache-hit sample.
 - [/] [#gdbvacproof] [recommended] Run the real Convex reconciliation plus graph-db compact workflow and capture before/after file size, freelist, tombstone counts, status/doctor timings, and scan-cost deltas so compaction policy is backed by operational evidence.
 <!-- /agent:review -->
 ###

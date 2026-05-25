@@ -66,7 +66,32 @@ Fixed `install_runbooks_for` in `src/agent-doc/src/skill.rs` to reconcile the on
 
 - The `make check` run surfaced one pre-existing failure (`codex_bare_run_inside_owning_pane_fails_before_nested_dispatch`) that reproduces on stashed HEAD without these changes, plus pre-existing clippy errors in `src/route/tests.rs`, `src/session_accretion.rs`, and `src/sync.rs` that are unrelated to skill install. Not addressed here.
 - The plan's "short-circuits the runbooks pass entirely when SKILL.md is already up to date" diagnosis didn't match the current code — `install_at` / `install_for` already call `install_runbooks` unconditionally. The real root cause was missing reap logic plus the missing `manual-job-packets.md` embed entry. Both are now fixed.
-<!-- agent:boundary:ec4ae133 -->
+### Re: do [#adoc-jb-cache-cancel-stuck-cycle] — opus-4-7
+
+Pausing the auto-loop on this item. The plan at `tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md` is a five-phase change spanning SimWorld (`src/sim_world.rs`, 2300 lines), the JetBrains Kotlin plugin (`PatchWatcher.kt`), four Rust modules (`preflight.rs`, `repair.rs`, `write.rs`, `session_check.rs`), runbooks, and integration tests — far outside a single auto-loop cycle's scope, and the kind of multi-phase work `#planperphase` recommends splitting before queue-driving.
+
+#### Changes this cycle
+
+- Gated parent `#adoc-jb-cache-cancel-stuck-cycle` so it stays visible but the queue can advance past it.
+- Added five per-phase backlog items mapped 1:1 to the plan phases:
+  - `#jbccc1` — Phase 1 SimWorld deterministic repro (failing baseline).
+  - `#jbccc2` — Phase 2 JB plugin undo-on-cancel.
+  - `#jbccc3` — Phase 3 binary detect + tailored recovery (preflight/repair/write/session_check).
+  - `#jbccc4` — Phase 4 docs/runbook.
+  - `#jbccc5` — Phase 5 regression coverage + Phase 1 scenario pass.
+
+Each item cites the same plan file so the work boundary is preserved.
+
+#### Why I'm stopping the auto-loop instead of proceeding
+
+- The remaining queue (`#adoc-prefix-strip-uncommitted`, `#jbrsrbusysw`, `#jbrsrbusyide`, `#jbccfix`, `#jbccreg`, `#jbccdocs`, `#planperphase`) is mostly multi-phase or review-bound work in the same shape — each deserves its own cycle, not an auto-loop pass.
+- Continuing would either produce shallow per-item responses ("starting/continuing" prose without the work) or wedge on the first item that requires Kotlin/IDE iteration plus Rust SimWorld plumbing.
+- Skipping the `Skill` tool `loop` invocation halts the queue cleanly. `queue_active` stays true in frontmatter; the user can resume by manually re-invoking `/agent-doc tasks/agent-doc/agent-doc-bugs2.md` or by editing the queue directly.
+
+#### Suggested next action
+
+Pick one of the new `#jbccc*` phase items (Phase 1 is the natural starting point — failing SimWorld baseline locks the bug in deterministically before any fix), invoke `/agent-doc` against it directly, and iterate phase-by-phase.
+<!-- agent:boundary:a543d082 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -101,8 +126,12 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#jbccc1] Phase 1 of #adoc-jb-cache-cancel-stuck-cycle: deterministic SimWorld repro for File Cache Conflict cancel. Add a SimCommand variant or scenario test FinalizeWithJbCacheConflictCancel modeling the three branches (no dialog, accept, cancel) explicitly; cancel branch produces response-on-disk, snapshot != HEAD, cycle phase write_applied; asserted to fail today (failing baseline) and pass once Phase 3 lands. Plan: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md
+- [ ] [#jbccc2] Phase 2 of #adoc-jb-cache-cancel-stuck-cycle: JB plugin undo-on-cancel. editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt — defer the write until user resolves the File Cache Conflict dialog (never queue change beforehand); on Cancel return 0/2 from socket IPC callback; on file-IPC cancel leave patch file in place. Plan: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md
+- [ ] [#jbccc3] Phase 3 of #adoc-jb-cache-cancel-stuck-cycle: binary detect + tailored recovery. src/preflight.rs, src/repair.rs, src/write.rs, src/session_check.rs — distinguish post-commit local drift from jb_cache_conflict_cancel (cycle phase write_applied + working-tree response matches captured body + snapshot != HEAD + no live exchange edits beyond response); preflight recovered=true auto-runs the equivalent of agent-doc write --commit; session_check stops surfacing likely_direct_response_patchback for this pattern. Plan: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md
+- [ ] [#jbccc4] Phase 4 of #adoc-jb-cache-cancel-stuck-cycle: documentation + runbook. runbooks/commit.md, runbooks/harness-invocation.md (or new runbooks/jb-cache-conflict.md) — document dialog Accept/Cancel contract and recovery command for cases Phase 3 cannot auto-recover. Plan: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md
+- [ ] [#jbccc5] Phase 5 of #adoc-jb-cache-cancel-stuck-cycle: regression coverage. tests/run_integration.rs (or sibling) — integration test that simulates cancel-branch file shape and asserts agent-doc preflight auto-recovers without manual write --commit; SimWorld scenario from Phase 1 must pass after Phase 3 lands. Plan: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md
 - [ ] [#adoc-baseline-drift-after-user-commit] agent-doc-bug: when a user commits a manual edit on top of an agent-doc commit, the captured baseline (.agent-doc/baselines/<hash>.md) is not refreshed; preflight, write --commit, and repair all fail with 'captured response baseline no longer matches current document' and there is no clear recovery path the next time the user invokes /agent-doc on the doc. Workaround: agent-doc reset --from-current rebuilds the baseline from the live markdown but drops session ID + snapshot history. Plan path: tasks/agent-doc/plan-baseline-drift-after-user-commit.md
-- [ ] [#adoc-jb-cache-cancel-stuck-cycle] agent-doc-bug: after canceling a JetBrains File Cache Conflict dialog during IPC patch delivery, the response patch lands in the working tree but the cycle does not reach committed state. Recovery requires running agent-doc write --commit FILE manually. Repro: have JB IDE open with the file in an editor; run finalize; cancel the JB cache-conflict dialog when it appears. Expected: cycle reaches committed cleanly or surfaces a clear error. Actual: response is in working tree but next preflight reports post-commit local drift requiring manual recovery. Plan path: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md (to be authored). Related: #jbccfix, #jbccreg, #jbccdocs in this same file.
 - [ ] [#adoc-prefix-strip-uncommitted] agent-doc-bug: after the JB-cache-conflict bug forces a manual sed strip of incorrectly-applied prompt-prefix markers (❯ ) from the response body, the subsequent agent-doc write --commit / repair / session-check chain fails to recognize the cleaned response as the cycle's committed response. Symptoms: session-check INTERRUPTED with prompt_target pointing at the agent's own response paragraph. Recovery: bare git commit succeeds and ships the response, but the agent-doc cycle state never closes cleanly. Likely cause: snapshot/baseline tracking does not recover after the IPC patch was applied with malformed markers and then manually edited. Plan path: tasks/agent-doc/plan-prefix-strip-uncommitted.md (to be authored). Related: #adoc-jb-cache-cancel-stuck-cycle (precondition for this bug).
 - [ ] [#jbrsrbusysw] SimWorld scenario coverage for session_restart --force: route + Restart Supervisor while pane is alive-busy with and without --force, asserting the new refusal message and force success (including session_restart_busy_pre_interrupt_idle and session_restart_busy_force_killed event variants). Substantial — requires new Op variant + tmux/session_actor mock in src/sim_world.rs. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md phase 4 (SimWorld piece).
 - [ ] [#jbrsrbusyide] JB plugin IDE-side telemetry for session_restart --force: surface session_restart_force_used, session_restart_busy_pre_interrupt_idle, and session_restart_busy_force_killed events in the IntelliJ notification area or Logcat so users can see the recovery path the binary took. Kotlin work in editors/jetbrains/. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md phase 4 (IDE piece).
@@ -115,6 +144,7 @@ preset #spec-test-build-install-commit-push
 ## Review
 
 <!-- agent:review -->
+- [/] [#adoc-jb-cache-cancel-stuck-cycle] agent-doc-bug: after canceling a JetBrains File Cache Conflict dialog during IPC patch delivery, the response patch lands in the working tree but the cycle does not reach committed state. Recovery requires running agent-doc write --commit FILE manually. Repro: have JB IDE open with the file in an editor; run finalize; cancel the JB cache-conflict dialog when it appears. Expected: cycle reaches committed cleanly or surfaces a clear error. Actual: response is in working tree but next preflight reports post-commit local drift requiring manual recovery. Plan path: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md (to be authored). Related: #jbccfix, #jbccreg, #jbccdocs in this same file.
 - [/] [#jbrsrbusy] [partial] Phase 1 (binary) landed: agent-doc session restart <FILE> --force flag accepts alive-busy panes, refusal message now ends with the --force hint citing the exact command, and the force path logs session_restart_force_used. Plan phases 2 (JB plugin confirm dialog → invokes --force), 3 (optional harness-aware pre-interrupt with 2s idle wait), and 4 (SimWorld coverage + IDE-side telemetry) split into #jbrsrbusyjb, #jbrsrbusyint, and #jbrsrbusysim. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md.
 - [/] [#stuckcycledup] [recommended] [partial] Wedged-cycle pattern: cycle_already_committed gate now refuses the short-circuit when the active capture body is absent from HEAD (flow/closeout.rs::cycle_already_committed + new stuck_captured_cycle helper), and preflight emits a stuck_captured_cycle warning. Remaining plan parts split into #stuckcycleorphan, #stuckcyclerepair, and #stuckcyclesuperseded. Plan: tasks/agent-doc/plan-stuck-cycle-causes-duplicated-uncommitted-response.md.
 - [/] [#jbresstart] Refuse cross-file pane rescue and extend Starting-actor wait after stash recovery; see tasks/agent-doc/plan-jb-route-rescued-stash-pane-starting-actor.md

@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -33,7 +33,7 @@ Fixed agent:queue stuck-after-1-turn — auto-strike done items at preflight.
 Compacted content:
 - Archived 6 response topic(s): do [#jbrsrbusysim]; Why is the queue still stalling?; Is agent-doc capable of activating the Claude `/loop`?; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:8cb8c7a2 -->
+<!-- agent:boundary:2c2bd1e6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +46,7 @@ agent-doc command failed (exit 1): Error: session_restart refused for /home/bria
 ```
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#crdtrespfx]~
 - ~do [#queueadvgated]~
@@ -63,9 +63,6 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#ipclegacyfix] Update tests/finalize_integration.rs fixtures to use canonical agent:backlog instead of legacy agent:pending component name. Pre-existing breakage: 27 integration tests now fail at the tagpath lint gate (landed in 845ddfd6) because the fixtures use the deprecated alias. Mechanical change across ~31 sites; opt-in lint disable via agent_doc_lint_dialect: off in fixture frontmatter is the lighter alternative if migration coverage tests legitimately need the legacy name.
-- [ ] [#ipcpluginalready] JetBrains plugin + VS Code extension emit {"type":"ack","status":"error","reason":"already_applied"} when their PatchWatcher detects the incoming patch text is already present in the live buffer. Until plugins send this, the binary-side gate landed in submodule 3d445a03 is dormant. Kotlin work in editors/jetbrains/, TypeScript work in editors/vscode/.
-- [ ] [#ipcfilehashskip] File-IPC fallback should hash-compare the live file's response-suffix against the response body and skip the write when they already match. Defense-in-depth complement to #ipcpluginalready in case plugins don't (yet) send the already_applied ack.
 - [ ] [#jbrsrbusysw] SimWorld scenario coverage for session_restart --force: route + Restart Supervisor while pane is alive-busy with and without --force, asserting the new refusal message and force success (including session_restart_busy_pre_interrupt_idle and session_restart_busy_force_killed event variants). Substantial — requires new Op variant + tmux/session_actor mock in src/sim_world.rs. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md phase 4 (SimWorld piece).
 - [ ] [#jbrsrbusyide] JB plugin IDE-side telemetry for session_restart --force: surface session_restart_force_used, session_restart_busy_pre_interrupt_idle, and session_restart_busy_force_killed events in the IntelliJ notification area or Logcat so users can see the recovery path the binary took. Kotlin work in editors/jetbrains/. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md phase 4 (IDE piece).
 - [ ] [#planperphase] Convention: split multi-phase plans into per-phase backlog IDs (e.g. #crdtrespfx1, #crdtrespfx2) instead of one parent ID that gets pending-gated. Lets queue auto-strike honor per-phase progress. Lower priority — the convention is opt-in for authors. [recommended]

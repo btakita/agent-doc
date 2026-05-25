@@ -28,70 +28,12 @@ Fixed agent:queue stuck-after-1-turn — auto-strike done items at preflight.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260525-062451.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260525-070119.md`*
 
 Compacted content:
-- Archived 5 response topic(s): batch closeout for ipclegacyfix, ipcpluginalready, ipcfilehashskip; Phases 1 + 5 already landed (queue advance); queue not auto-looping + typing duplicate observation; 2 more
+- Archived 2 response topic(s): do [#p6skillinstallreconcile]; do [#adoc-jb-cache-cancel-stuck-cycle]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-### Re: do [#p6skillinstallreconcile] — opus-4-7
-
-Fixed `install_runbooks_for` in `src/agent-doc/src/skill.rs` to reconcile the on-disk runbooks set against the canonical embedded set on every install, using the reap-on-mismatch approach from `tasks/agent-doc/plan-skill-install-runbooks-reconcile.md`.
-
-#### Changes
-
-- `src/agent-doc/src/skill.rs`:
-  - Added `manual-job-packets.md` to `BUNDLED_RUNBOOKS` (the runbook existed in `src/agent-doc/runbooks/` but was never embedded, so it could never install).
-  - `install_runbooks_for` now builds a `HashSet` of canonical filenames, writes missing/changed files (unchanged behavior), then enumerates the target directory and reaps any `.md` file not in the canonical set. Non-`.md` files are left alone. Each reap logs `[{env}] reaped stale runbook → {path}`.
-- New tests in `skill::tests`:
-  - `install_runbooks_reaps_stale_files` — pre-populates `sentinel-stale.md`, `plugin-install.md`, and a non-`.md` file under `.claude/skills/agent-doc/runbooks/`, runs install, asserts stale `.md` files are gone, the non-`.md` file is preserved, and the post-install set equals `BUNDLED_RUNBOOKS`.
-  - `install_runbooks_is_no_op_on_clean_tree` — runs install twice with a 20ms gap, asserts no runbook mtime changes on the second pass (idempotency / no VCS noise).
-  - `install_runbooks_reaps_for_codex_and_opencode` — same reap semantics under `.codex/runbooks/` and `.opencode/skills/agent-doc/runbooks/`.
-
-#### Verification
-
-- `cargo test --bin agent-doc -- skill::` — 67 passed, 0 failed. All three new tests pass.
-- `cargo install --path .` + `cargo build --release` — both binaries rebuilt at `0.34.0`.
-- Live reconcile in `agent-loop`:
-  - First run reaped the 8 stale extras called out in the plan: `cleanup.md`, `diff-type-routing.md`, `investigate-behavior.md`, `large-content.md`, `multi-topic-response.md`, `plugin-install.md`, `session-share-commit.md`, `skill-submit-cycle.md`.
-  - Installed `manual-job-packets.md`.
-  - `diff <(ls .claude/skills/agent-doc/runbooks/ | sort) <(ls src/agent-doc/runbooks/ | sort)` is now empty — installed set matches source-of-truth.
-  - Second run prints only `[Claude Code] already up to date (v0.34.0).` (idempotent, no reap output, no mtime churn).
-
-#### Out of scope (per plan)
-
-- Did not touch runbook content, only the install workflow.
-- Did not change how runbooks are embedded — still `include_str!` in `BUNDLED_RUNBOOKS`.
-
-#### Notes
-
-- The `make check` run surfaced one pre-existing failure (`codex_bare_run_inside_owning_pane_fails_before_nested_dispatch`) that reproduces on stashed HEAD without these changes, plus pre-existing clippy errors in `src/route/tests.rs`, `src/session_accretion.rs`, and `src/sync.rs` that are unrelated to skill install. Not addressed here.
-- The plan's "short-circuits the runbooks pass entirely when SKILL.md is already up to date" diagnosis didn't match the current code — `install_at` / `install_for` already call `install_runbooks` unconditionally. The real root cause was missing reap logic plus the missing `manual-job-packets.md` embed entry. Both are now fixed.
-### Re: do [#adoc-jb-cache-cancel-stuck-cycle] — opus-4-7
-
-Pausing the auto-loop on this item. The plan at `tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md` is a five-phase change spanning SimWorld (`src/sim_world.rs`, 2300 lines), the JetBrains Kotlin plugin (`PatchWatcher.kt`), four Rust modules (`preflight.rs`, `repair.rs`, `write.rs`, `session_check.rs`), runbooks, and integration tests — far outside a single auto-loop cycle's scope, and the kind of multi-phase work `#planperphase` recommends splitting before queue-driving.
-
-#### Changes this cycle
-
-- Gated parent `#adoc-jb-cache-cancel-stuck-cycle` so it stays visible but the queue can advance past it.
-- Added five per-phase backlog items mapped 1:1 to the plan phases:
-  - `#jbccc1` — Phase 1 SimWorld deterministic repro (failing baseline).
-  - `#jbccc2` — Phase 2 JB plugin undo-on-cancel.
-  - `#jbccc3` — Phase 3 binary detect + tailored recovery (preflight/repair/write/session_check).
-  - `#jbccc4` — Phase 4 docs/runbook.
-  - `#jbccc5` — Phase 5 regression coverage + Phase 1 scenario pass.
-
-Each item cites the same plan file so the work boundary is preserved.
-
-#### Why I'm stopping the auto-loop instead of proceeding
-
-- The remaining queue (`#adoc-prefix-strip-uncommitted`, `#jbrsrbusysw`, `#jbrsrbusyide`, `#jbccfix`, `#jbccreg`, `#jbccdocs`, `#planperphase`) is mostly multi-phase or review-bound work in the same shape — each deserves its own cycle, not an auto-loop pass.
-- Continuing would either produce shallow per-item responses ("starting/continuing" prose without the work) or wedge on the first item that requires Kotlin/IDE iteration plus Rust SimWorld plumbing.
-- Skipping the `Skill` tool `loop` invocation halts the queue cleanly. `queue_active` stays true in frontmatter; the user can resume by manually re-invoking `/agent-doc tasks/agent-doc/agent-doc-bugs2.md` or by editing the queue directly.
-
-#### Suggested next action
-
-Pick one of the new `#jbccc*` phase items (Phase 1 is the natural starting point — failing SimWorld baseline locks the bug in deterministically before any fix), invoke `/agent-doc` against it directly, and iterate phase-by-phase.
-<!-- agent:boundary:a543d082 -->
+<!-- agent:boundary:c70f2d04 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -113,6 +55,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#ipcdupfin23]~
 - ~do [#ccloopguard]~
 - ~do [#p6skillinstallreconcile]~
+- do [#agent-doc-commit-sibling]
 - do [#adoc-jb-cache-cancel-stuck-cycle]
 - do [#adoc-prefix-strip-uncommitted]
 - do [#jbrsrbusysw]
@@ -126,6 +69,7 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#agent-doc-commit-sibling] agent-doc CLI: add --commit-sibling <repo> mode to finalize/write. When the session doc lives in repo A but the user's directive originates a commit in sibling repo B (e.g. session-share session-doc drives a build-party scripts change), agent-doc should be able to stage and commit the sibling repo with a Session-Doc git trailer auto-injected. Trailer format: 'Session-Doc: https://github.com/<session-share-org>/<repo>/blob/<session-share-cycle-sha>/<session-doc-path>'. Today agent-doc only commits inside the session-doc's own submodule, so the agent (Claude) creates sibling commits manually via 'git commit' and the trailer is easy to forget. Companion item #cross-repo-sessiondoc-trailer in tasks/docs.md covers the convention + backfill-updates.sh changes across the four script copies. Plan path: tasks/agent-doc/plan-commit-sibling.md
 - [ ] [#jbccc1] Phase 1 of #adoc-jb-cache-cancel-stuck-cycle: deterministic SimWorld repro for File Cache Conflict cancel. Add a SimCommand variant or scenario test FinalizeWithJbCacheConflictCancel modeling the three branches (no dialog, accept, cancel) explicitly; cancel branch produces response-on-disk, snapshot != HEAD, cycle phase write_applied; asserted to fail today (failing baseline) and pass once Phase 3 lands. Plan: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md
 - [ ] [#jbccc2] Phase 2 of #adoc-jb-cache-cancel-stuck-cycle: JB plugin undo-on-cancel. editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt — defer the write until user resolves the File Cache Conflict dialog (never queue change beforehand); on Cancel return 0/2 from socket IPC callback; on file-IPC cancel leave patch file in place. Plan: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md
 - [ ] [#jbccc3] Phase 3 of #adoc-jb-cache-cancel-stuck-cycle: binary detect + tailored recovery. src/preflight.rs, src/repair.rs, src/write.rs, src/session_check.rs — distinguish post-commit local drift from jb_cache_conflict_cancel (cycle phase write_applied + working-tree response matches captured body + snapshot != HEAD + no live exchange edits beyond response); preflight recovered=true auto-runs the equivalent of agent-doc write --commit; session_check stops surfacing likely_direct_response_patchback for this pattern. Plan: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md

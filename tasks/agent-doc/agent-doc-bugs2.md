@@ -115,18 +115,6 @@ Repair this turn:
 - The `agent-doc finalize` / `agent-doc write --commit` paths kept failing the visible-write guard because the IDE buffer is divergent (`#crdtrespfx` Phase 3 will recover from this without operator intervention). Per your "finish turn" directive, falling through to a direct `git commit` to land the closeout for this turn. This is exactly the manual-git escape hatch that `#ipcdupfinalize` Phase 4 was supposed to eliminate; the gap surfaced by this turn is captured in `#crdtrespfx`.
 
 Closing the turn. Queue head remains `do [#jbrsrbusysim]` for the next cycle.
-### Re: response was not completed. #agent-doc-bug. finish turn — opus-4-7
-
-
-You're right — the prior `### Re: do [#jbrunstart] Phase 1` response body was mangled by a CRDT-merge prompt-prefix leak (the first response paragraph got a leading `❯ `), which made `session-check` classify it as a prompt-only closeout tail. The underlying Phase 1 work is fully committed and pushed (submodule `fb2a312b`, superproject `ef0fe5a2a`); only the session-doc patchback was wedged.
-
-Filed as new backlog item `[#crdtrespfx]` with plan `tasks/agent-doc/plan-crdt-merge-prompt-prefix-leaks-into-response-body.md`. Root cause hypotheses, deterministic repro plan, post-merge guard design, and repair-path coverage are in the plan file. Related to `[#ipcdupfinalize]` and `[#crdtlivpfxdup]` — same area (CRDT merge + live prompt prefix handling).
-
-Repair this turn:
-- Manually stripped the leaking `❯ ` from line 82 of the session document.
-- Finalizing with `--force-disk` to bypass the visible-write guard the IDE buffer was tripping (the new `[#crdtrespfx]` plan also needs the buffer-divergence guard to recover cleanly without operator intervention — that goes in Phase 3 of the plan).
-
-Closing the turn. Queue head remains `do [#jbrsrbusysim]` for the next cycle.
 <!-- agent:boundary:45df609f -->
 <!-- /agent:exchange -->
 ###

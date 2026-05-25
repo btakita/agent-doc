@@ -9850,6 +9850,76 @@ fn adopt_current_response_without_duplication(
     Ok(Some(repaired))
 }
 
+/// Strip a leaked harness user-prompt marker (`❯ `) from the first non-empty
+/// line of every `### Re: ...` response block inside `agent:exchange`.
+///
+/// Background: when finalize falls through to the CRDT merge path while the
+/// live document had a `❯ ` user input at the same column position as the
+/// incoming response body, the merge can splice the new agent line *into* the
+/// existing prompt run, leaving the first response paragraph prefixed with
+/// `❯ `. `session-check` then classifies the corrupted block as a prompt-only
+/// closeout tail and refuses to close.
+///
+/// Real response bodies never start with `❯ ` — that's the harness prompt
+/// marker, not Markdown. Stripping it is safe at this position. Returns
+/// `Some(repaired)` when any prefix was stripped, `None` when the document is
+/// clean. See `tasks/agent-doc/plan-crdt-merge-prompt-prefix-leaks-into-response-body.md`.
+fn strip_prompt_prefix_from_response_body_first_lines(content: &str) -> Option<String> {
+    let components = component::parse(content).ok()?;
+    let exchange = components.iter().find(|c| c.name == "exchange")?;
+    let exchange_body = exchange.content(content);
+
+    let mut repaired_lines: Vec<String> = Vec::with_capacity(exchange_body.lines().count());
+    let mut in_response_block = false;
+    let mut saw_response_body_line = false;
+    let mut stripped_any = false;
+    for line in exchange_body.lines() {
+        let trimmed_start = line.trim_start();
+        let is_response_heading = trimmed_start.starts_with("### Re:");
+        let is_other_heading = trimmed_start.starts_with("###") && !is_response_heading
+            || trimmed_start.starts_with("## ")
+            || trimmed_start.starts_with("# ");
+        let is_exchange_marker = trimmed_start.starts_with("<!-- agent:")
+            || trimmed_start.starts_with("<!-- /agent:")
+            || trimmed_start.starts_with("<!-- agent:boundary:");
+
+        if is_response_heading {
+            in_response_block = true;
+            saw_response_body_line = false;
+            repaired_lines.push(line.to_string());
+            continue;
+        }
+        if is_other_heading || is_exchange_marker {
+            in_response_block = false;
+            saw_response_body_line = false;
+            repaired_lines.push(line.to_string());
+            continue;
+        }
+        if in_response_block && !saw_response_body_line && !line.trim().is_empty() {
+            saw_response_body_line = true;
+            if let Some(rest) = line.strip_prefix("❯ ") {
+                stripped_any = true;
+                repaired_lines.push(rest.to_string());
+                continue;
+            }
+            if line.trim_start() == "❯" {
+                stripped_any = true;
+                repaired_lines.push(String::new());
+                continue;
+            }
+        }
+        repaired_lines.push(line.to_string());
+    }
+    if !stripped_any {
+        return None;
+    }
+    let mut repaired_body = repaired_lines.join("\n");
+    if exchange_body.ends_with('\n') && !repaired_body.ends_with('\n') {
+        repaired_body.push('\n');
+    }
+    Some(exchange.replace_content(content, &repaired_body))
+}
+
 fn normalize_final_template_content(
     file: &Path,
     base: &str,
@@ -9861,6 +9931,16 @@ fn normalize_final_template_content(
     let mut normalized = content.to_string();
     if let Some(snapshot_doc) = snapshot {
         normalized = normalize_user_prompts_in_exchange_safe(&normalized, base, snapshot_doc, file);
+    }
+    if let Some(stripped) = strip_prompt_prefix_from_response_body_first_lines(&normalized) {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "flow=document_mutation stage=crdt_post_merge_guard reason=response_body_prompt_prefix_leak file={}",
+                file.display()
+            ),
+        );
+        normalized = stripped;
     }
     let preserve_current_or_base = before_current.or(Some(base));
     normalized = normalize_template_structure_or_fail_preserving(
@@ -16161,6 +16241,109 @@ Implemented.
         assert!(repaired.contains("❯ do #dupfx. spec-test-build-install-commit-push"));
         assert!(!repaired.contains("\ndo #dupfx. spec-test-build-install-commit-push\n"));
         assert_eq!(repaired.matches("### Re: #dupfx — gpt-5").count(), 1);
+    }
+
+    #[test]
+    fn strip_prompt_prefix_from_response_body_first_lines_strips_leaked_marker() {
+        // CRDT merge corruption: first non-empty line of the response body
+        // got a leading `❯ `. The repair must strip it without touching real
+        // user prompts elsewhere in the exchange.
+        let content = "\
+<!-- agent:exchange patch=append -->
+❯ do #respfx. spec-test-build-install-commit-push
+### Re: #respfx — opus-4-7
+
+❯ Landed Phase 1 only this cycle. Item stays open.
+
+#### Details
+
+`agent-doc <FILE>` now accepts `--wait-for-ready <SECONDS>`.
+<!-- /agent:exchange -->
+";
+        let repaired = strip_prompt_prefix_from_response_body_first_lines(content)
+            .expect("leaked ❯ on response body first line must be stripped");
+        assert!(
+            repaired.contains("\nLanded Phase 1 only this cycle. Item stays open.\n"),
+            "stripped response body should start with the original prose, got:\n{repaired}"
+        );
+        assert!(
+            !repaired.contains("❯ Landed"),
+            "leaked ❯ must be removed, got:\n{repaired}"
+        );
+        // User prompt before the response heading is preserved.
+        assert!(repaired.contains("❯ do #respfx. spec-test-build-install-commit-push"));
+        // Heading and subsequent body lines are untouched.
+        assert!(repaired.contains("### Re: #respfx — opus-4-7"));
+        assert!(repaired.contains("#### Details"));
+        assert!(repaired.contains("`agent-doc <FILE>` now accepts `--wait-for-ready <SECONDS>`."));
+    }
+
+    #[test]
+    fn strip_prompt_prefix_from_response_body_first_lines_skips_when_clean() {
+        let content = "\
+<!-- agent:exchange patch=append -->
+❯ do #clean. spec-test-build-install-commit-push
+### Re: #clean — opus-4-7
+
+Landed cleanly.
+<!-- /agent:exchange -->
+";
+        let result = strip_prompt_prefix_from_response_body_first_lines(content);
+        assert!(
+            result.is_none(),
+            "clean document must not trigger the strip path"
+        );
+    }
+
+    #[test]
+    fn strip_prompt_prefix_from_response_body_first_lines_preserves_inner_prompt_like_lines() {
+        // A `❯ ` appearing AFTER the first body line — e.g. quoted user input
+        // inside the response prose — must be preserved. Only the leaked
+        // first-line marker is stripped.
+        let content = "\
+<!-- agent:exchange patch=append -->
+❯ do #inner. spec-test-build-install-commit-push
+### Re: #inner — opus-4-7
+
+❯ first line gets stripped
+
+The user said:
+❯ this quoted line stays
+because it is not the first body line.
+<!-- /agent:exchange -->
+";
+        let repaired = strip_prompt_prefix_from_response_body_first_lines(content)
+            .expect("leaked first-line ❯ must be stripped");
+        assert!(repaired.contains("\nfirst line gets stripped\n"));
+        assert!(!repaired.contains("❯ first line gets stripped"));
+        // Inner `❯ ` is preserved — it is part of the response body text.
+        assert!(repaired.contains("❯ this quoted line stays"));
+    }
+
+    #[test]
+    fn strip_prompt_prefix_from_response_body_first_lines_handles_multiple_re_blocks() {
+        let content = "\
+<!-- agent:exchange patch=append -->
+❯ do #a
+### Re: #a — opus-4-7
+
+❯ first response
+
+❯ do #b
+### Re: #b — opus-4-7
+
+❯ second response
+<!-- /agent:exchange -->
+";
+        let repaired = strip_prompt_prefix_from_response_body_first_lines(content)
+            .expect("multiple leaks must be stripped");
+        assert!(repaired.contains("\nfirst response\n"));
+        assert!(repaired.contains("\nsecond response\n"));
+        assert!(!repaired.contains("❯ first response"));
+        assert!(!repaired.contains("❯ second response"));
+        // User prompts between blocks preserved.
+        assert!(repaired.contains("❯ do #a"));
+        assert!(repaired.contains("❯ do #b"));
     }
 
     #[test]

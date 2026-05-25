@@ -330,7 +330,29 @@ Commits pushed:
 - `btakita/agent-loop` `21b24ea79` on `main`: `agent-doc: bump submodule for prefix-strip session-check`
 
 CI evidence: agent-doc CI run `26411360880` for `1f3e84c7` was in progress when inspected, with `check` running and no red tmux leg present. The parent repo reported no workflow named `CI`.
-<!-- agent:boundary:740d1151 -->
+### Re: do [#adoc-bdauc-runbook] — gpt-5
+
+Completed Phase 4 documentation for baseline-drift recovery.
+
+What changed:
+- Added `runbooks/baseline-drift.md` documenting benign manual-commit drift auto-refresh, normalized-response adoption, fail-closed response-body overlap, and `agent-doc reset --from-current --preserve-session <FILE>` recovery.
+- Cross-linked the new runbook from `runbooks/commit.md` and `runbooks/jb-cache-conflict.md`.
+- Added `baseline-drift` to the `SKILL.md` runbook catalog.
+- Registered `baseline-drift.md` in `BUNDLED_RUNBOOKS` and added a bundle/catalog regression test.
+
+Verification:
+- `cargo test baseline_drift_runbook`
+- `cargo test test_skill_md_contains_required_steps`
+- `make check`
+- `cargo build --release`
+- `cargo install --path .`
+
+Commits pushed:
+- `btakita/agent-doc` `65ea0840` on `20260422/codex-agent-backend`: `docs: add baseline drift recovery runbook`
+- `btakita/agent-loop` `a08f16da6` on `main`: `agent-doc: bump submodule for baseline drift runbook`
+
+CI evidence: agent-doc CI run `26411901790` for `65ea0840` was in progress when inspected. The `check` job was running, with the tmux step still pending and no red tmux leg present. The parent repo reported no workflow named `CI`.
+<!-- agent:boundary:d5ca0e2e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -377,7 +399,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#adoc-bdauc-simworld]~
 - ~do [#adoc-bdauc-preserve-session]~
 - ~do [#adoc-prefix-strip-session-check-whitelist]~
-- do [#adoc-bdauc-runbook]
+- ~do [#adoc-bdauc-runbook]~
 - do [#adoc-bdauc-integration]
 - do [#adoc-web-sse]
 - do [#adoc-web-codemirror]
@@ -400,7 +422,6 @@ preset #spec-test-build-install-commit-push
 - [ ] [#adoc-web-multidoc] Phase 4: root mode + session list (/api/sessions reuses sessions.json), URL routing /doc/<path-or-hash>. Plan: tasks/agent-doc/plan-web-interface.md (Phase 4).
 - [ ] [#adoc-web-auth] Phase 5: bearer token auth for non-loopback binds, optional TLS via rustls, multi-user read-only viewer scope. Plan: tasks/agent-doc/plan-web-interface.md (Phase 5).
 - [ ] [#adoc-web-live-cycle] Phase 6: hook agent-doc stream into /events so the in-flight ### Re: block streams to the browser as the agent produces it; web writes funnel through finalize/write --commit when an active cycle is in scope. Plan: tasks/agent-doc/plan-web-interface.md (Phase 6).
-- [ ] [#adoc-bdauc-runbook] Document baseline-drift recovery: new runbooks/baseline-drift.md (or extend jb-cache-conflict.md cross-link), SKILL.md catalog mirrors, runbooks/commit.md reference. Plan: tasks/agent-doc/plan-baseline-drift-after-user-commit.md (Phase 4).
 - [ ] [#adoc-bdauc-integration] In-source preflight integration test mirroring preflight_auto_recovers_jb_cache_conflict_cancel_committed_with_snapshot_drift: real git repo + cycle state, simulate user-committed benign drift, assert validate_replay auto-refreshes and preflight proceeds. Plan: tasks/agent-doc/plan-baseline-drift-after-user-commit.md (Phase 5).
 - [ ] [#jbrsrbusysw] SimWorld scenario coverage for session_restart --force: route + Restart Supervisor while pane is alive-busy with and without --force, asserting the new refusal message and force success (including session_restart_busy_pre_interrupt_idle and session_restart_busy_force_killed event variants). Substantial — requires new Op variant + tmux/session_actor mock in src/sim_world.rs. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md phase 4 (SimWorld piece).
 - [ ] [#jbrsrbusyide] JB plugin IDE-side telemetry for session_restart --force: surface session_restart_force_used, session_restart_busy_pre_interrupt_idle, and session_restart_busy_force_killed events in the IntelliJ notification area or Logcat so users can see the recovery path the binary took. Kotlin work in editors/jetbrains/. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md phase 4 (IDE piece).

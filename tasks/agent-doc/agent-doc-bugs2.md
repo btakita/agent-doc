@@ -557,7 +557,17 @@ CI:
 
 - agent-doc CI run `26416165331` for `a66383aa` was in progress when checked; setup/checkout passed, `Install tmux for integration tests` was running, and `make check` / `make tmux-ci` were still pending.
 - parent repo has no workflow named `CI`.
-<!-- agent:boundary:8da8cc94 -->
+### Re: #jbccfix — gpt-5
+
+I verified the Compact Exchange write/cache boundary is already on the safe path in the current implementation: `compact::apply_compacted_document` writes through `write::atomic_write_if_current_pub`, snapshots only after the visible/current guard passes, and the operator full-document IPC path returns before emitting any `fullContent` payload.
+
+Focused verification passed:
+- `cargo test component_compact_uses_guarded_direct_write_when_patches_dir_exists`
+- `cargo test visible_write_guard_blocks_when_idle_editor_buffer_differs_from_disk`
+- `cargo test full_content_operator_ipc_is_disabled_before_source_buffer_delivery`
+
+No repo code changes were needed for this item; the dedicated regression and runbook follow-ups remain queued as `#jbccreg` and `#jbccdocs`.
+<!-- agent:boundary:d14b2e92 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -613,7 +623,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#adoc-web-live-cycle]~
 - ~do [#jbrsrbusysw]~
 - ~do [#jbrsrbusyide]~
-- do [#jbccfix]
+- ~do [#jbccfix]~
 - do [#jbccreg]
 - do [#jbccdocs]
 - do [#planperphase]
@@ -623,7 +633,6 @@ preset #spec-test-build-install-commit-push
 
 <!-- agent:backlog -->
 - [ ] [#planperphase] Convention: split multi-phase plans into per-phase backlog IDs (e.g. #crdtrespfx1, #crdtrespfx2) instead of one parent ID that gets pending-gated. Lets queue auto-strike honor per-phase progress. Lower priority — the convention is opt-in for authors. [recommended]
-- [ ] [#jbccfix] Fix the Compact Exchange write/cache boundary so JetBrains never receives a stale or conflicting file-cache snapshot after compact exchange.
 - [ ] [#jbccreg] Add deterministic regression coverage for Compact Exchange cache-conflict handling, including stale snapshot and concurrent user-edit cases where feasible.
 - [ ] [#jbccdocs] Document the Compact Exchange File Cache Conflict recovery path in the JetBrains/harness runbooks after the behavior is fixed.
 <!-- /agent:backlog -->

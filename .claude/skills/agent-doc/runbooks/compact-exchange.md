@@ -6,6 +6,7 @@ Steps to compact an agent-doc exchange component when it grows too large.
 
 - User explicitly requests "compact exchange"
 - Never auto-compact without user approval
+- Auto-compact is off by default. The only way it becomes "active" is an explicit `agent_doc_auto_compact` opt-in in document frontmatter or project `.agent-doc/config.toml`. Without that opt-in, `session_accretion.guidance` emits a gated reminder ("Exchange is large; ask the user before compacting...") instead of an imperative `Run agent-doc compact <FILE>` directive — agents must follow that gate and ask the user before invoking compact.
 
 ## Steps
 

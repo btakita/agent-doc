@@ -28,61 +28,12 @@ Fixed agent:queue stuck-after-1-turn — auto-strike done items at preflight.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260525-073217.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260525-074255.md`*
 
 Compacted content:
-- Archived 4 response topic(s): backlog edit + queue add for #agent-doc-commit-sibling → #adcs-binary / #adcs-scripts; do [#adcs-binary]; transfer [#adcs-scripts] into docs.md backlog; 1 more
+- Archived 2 response topic(s): queue additions; do [#jbccc1]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-### Re: queue additions — #jbccc1–5 + #adoc-baseline-drift-after-user-commit — opus-4-7
-
-Acknowledging six new queue items. Queue marker is plain `&lt;!-- agent:queue --&gt;` (no `auto` suffix), so the auto-loop will not fire — invocations stay one-cycle-each.
-
-#### What you added
-
-- `#jbccc1` through `#jbccc5` — the five phases I split from `#adoc-jb-cache-cancel-stuck-cycle` two cycles ago. Plan: `tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md`. Phase 1 (deterministic SimWorld repro of the cancel-branch wedge) is the natural starting point — it locks the bug in as a failing baseline before Phase 3's preflight/repair/write/session-check fix lands.
-- `#adoc-baseline-drift-after-user-commit` — agent-doc bug, no plan file yet. Per `#agent-doc-bug` preset, the first cycle on this one should author `tasks/agent-doc/plan-baseline-drift-after-user-commit.md` and split if multi-phase.
-
-#### Heads-up on `#jbccc1`
-
-The SimWorld scenario lives in `src/agent-doc/src/sim_world.rs` (2300 LOC). Adding `FinalizeWithJbCacheConflictCancel` likely needs a new `SimCommand` variant + tmux/session_actor mock + assertions. Doable in one cycle, but it's a big single-file diff — flagging so you can decide whether to scope it down further before executing.
-
-#### Suggested next step
-
-Re-invoke `/agent-doc tasks/agent-doc/agent-doc-bugs2.md` if you want me to pick up `#jbccc1`. If you'd prefer a different head, strike `#jbccc1` and the binary will advance.
-### Re: do [#jbccc1] — opus-4-7
-
-Phase 1 of `#adoc-jb-cache-cancel-stuck-cycle` landed: deterministic SimWorld scenario modeling the three branches of the JetBrains File Cache Conflict dialog (no-dialog, accept, cancel) during IPC patch delivery. The cancel branch is now pinned as a failing baseline that Phase 3 (`#jbccc3`) will recover from inside `preflight`.
-
-#### Changes
-
-- `src/agent-doc/src/sim_world.rs` (+129 LOC, committed in `src/agent-doc@08cd54f`):
-  - Two helpers — `apply_jb_cache_conflict_accept` (binary-side indistinguishable from `ApplyCapturedResponse`) and `apply_jb_cache_conflict_cancel` (applies the response to the doc but stops at `WriteApplied`, modeling the wedge where VFS landed the write but the binary's IPC callback returned failure).
-  - Four new tests:
-    - `jb_cache_conflict_no_dialog_commits_cleanly` — happy path.
-    - `jb_cache_conflict_accept_branch_commits_cleanly` — accept path (same closeout as no-dialog from the binary's perspective).
-    - `jb_cache_conflict_cancel_branch_wedges_at_write_applied_today` — **failing baseline**: asserts the cancel wedge surfaces as `response write applied but not committed` at `WriteApplied` with `snapshot != doc`. `#jbccc3` will flip this assertion.
-    - `jb_cache_conflict_cancel_branch_recovers_via_explicit_write_commit_today` — pins today's manual recovery (`agent-doc write --commit <FILE>`) as a `Commit` from `WriteApplied`, so `#jbccc3`'s auto-recovery doesn't regress the manual escape hatch.
-
-#### Verification
-
-- `cargo test --bin agent-doc -- sim_world::jb_cache_conflict` — 4 new tests pass.
-- `cargo test --bin agent-doc -- sim_world::` — all 31 sim_world tests pass.
-- `cargo build --release` — clean rebuild.
-
-#### Commits
-
-- `src/agent-doc@08cd54f` — `test(sim_world): deterministic JB cache-conflict cancel-branch scenario (#jbccc1)`.
-- `agent-loop@HEAD` (`08b55bedd`) — superproject submodule pointer bump.
-
-#### What's next
-
-- `#jbccc2` — JetBrains plugin Kotlin change (defer the write until the dialog resolves; return 0/2 from socket IPC on Cancel).
-- `#jbccc3` — binary auto-recovery in `preflight` / `repair` / `write` / `session_check`. Will flip the failing-baseline test assertion above.
-- `#jbccc4` — runbook docs.
-- `#jbccc5` — integration test that simulates the cancel-branch file shape end-to-end and asserts `agent-doc preflight` auto-recovers without manual `write --commit`. Depends on `#jbccc3`.
-
-Queue is still `auto` per the re-arm; if the next invocation continues the loop, head will be `#jbccc2` (Kotlin plugin work — that lives in `editors/jetbrains/` and may need IntelliJ-side build/test verification).
-<!-- agent:boundary:1eac6e7e -->
+<!-- agent:boundary:47347303 -->
 <!-- /agent:exchange -->
 ###
 <!--

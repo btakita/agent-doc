@@ -95,7 +95,10 @@ Dispatched as a focused packet. Replaces `examples/convex-graph/graph.ts:snapsho
 Updates both `examples/convex-graph/` and `examples/convex-graph-app/convex/` (kept identical by contract), the HTTP action route, the tsift consumer in `src/main.rs`, and bumps to v0.1.52. Live-tested end-to-end against the self-hosted `ghcr.io/get-convex/convex-backend` Docker image with the existing 4767-node / 28427-edge tsift scope dataset; container + volume + `.env.local` cleaned up after.
 
 `#convexscopedeval` and `complete [#gdbvacproof]` remain in the queue for subsequent cycles (planner says sequential — they touch the same Convex surface).
-<!-- agent:boundary:aa75c0c8 -->
+### Re: still waiting on #convexsnapshotscale packet — opus-4-7
+
+Packet still running (schema refactor + tsift consumer update + live test against self-hosted Convex). Closing this cycle without consuming the queue head; will commit + push + finalize with `--done convexsnapshotscale` once its proof returns.
+<!-- agent:boundary:b2e03a75 -->
 <!-- /agent:exchange -->
 ###
 <!--

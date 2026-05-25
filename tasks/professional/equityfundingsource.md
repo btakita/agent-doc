@@ -31,44 +31,13 @@ queue_active: false
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260525-000702.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260525-004402.md`*
 
 Compacted content:
-- Archived 4 response topic(s): do [#zjbe]; do [#9vv3]; do [#dzmm]; 1 more
+- Archived 3 response topic(s): do [#2rpv]; queue advance past gated 2rpv; do [#0r24]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-### Re: do [#2rpv] — still externally blocked — opus-4-7
-
-
-Confirmed I cannot complete this from the Worker session:
-
-- D1 API still returns 7403 (`#1v5m` open — token lacks D1:Edit).
-- Cloudflare Access API also returns 403 / code 10000 ("Authentication error") — the same `passage btak/equityfundingsource/cloudflare_api_token` lacks Access:Read, let alone Access:Edit. I cannot list, create, or modify the Access application via API from here.
-- The Worker `ACCESS_TEAM_DOMAIN` / `ACCESS_AUD` vars are still empty strings in `wrangler.toml`; setting them to fabricated values would silently break admin sign-in by pointing at a non-existent team domain.
-
-The only path forward is the dashboard runbook from last cycle:
-[docs/operator-runbook-pending-config.md](../docs/operator-runbook-pending-config.md).
-Section 2 lists the exact Zero Trust setup, the AUD copy step, the
-`wrangler.toml` `[vars]` edits, and the one-shot `ADMIN_SIGNUP_ENABLED`
-bootstrap dance. Whoever holds the Cloudflare Zero Trust admin role
-(EFS account owner) needs ~10 minutes in the dashboard. Once done,
-share the AUD + team domain and I can land the `wrangler.toml` change
-+ deploy in a single follow-up cycle.
-
-No code change this cycle. Re-gating `#2rpv` so the queue stops firing
-on it; the existing review entry already captures the operator follow-up.
-### Re: queue advance past gated 2rpv — opus-4-7
-
-
-Advancing queue past `#2rpv` (still gated on Cloudflare dashboard work — see prior cycle and `docs/operator-runbook-pending-config.md`). The prior `--pending-gate` did not consume the queue line, so this cycle uses `--done` purely to advance the queue head; the gate state in review is the authoritative status.
-### Re: do [#0r24] — still externally blocked — opus-4-7
-
-
-Retried `bun run cf:d1:migrate:remote` and it still fails with Cloudflare error 7403 — the API token at `passage btak/equityfundingsource/cloudflare_api_token` still lacks D1:Edit. This is the same gate as `#1v5m` and `#2rpv`; nothing has changed since last cycle.
-
-The actionable path is unchanged: section 1 of `docs/operator-runbook-pending-config.md` walks the dashboard owner through adding the D1:Edit permission. Once the token is updated, the migration applies in one command.
-
-Advancing the queue past `#0r24` so it stops re-firing; the gated review item is the authoritative tracker.
-<!-- agent:boundary:0942a7f6 -->
+do [#37ah]. #spec-test-commit-push-deploy
+<!-- agent:boundary:231b8496 -->
 <!-- /agent:exchange -->
 ###
 
@@ -78,11 +47,11 @@ Advancing the queue past `#0r24` so it stops re-firing; the gated review item is
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#7chq] Apply migration 0026_broker_portal.sql to remote D1 alongside 0025 once review #1v5m unblocks D1 API token permissions, then smoke test POST /api/broker/deals against the live Worker.
 - [ ] [#k2xg] Send Robert the six-question TMO outbound webhook prompt in src/equityfundingsource-dev/docs/tmo-webhooks-question.md for him to forward to Mortgage Office, then record the response and decide push vs. tightened polling.
 - [/] [#dropbox-sync-adapter] Dropbox sync adapter: after Dropbox access is available, push/pull R2_DOCUMENTS with idempotent retries, backfill, tombstone handling, and per-document sync logs.
 - [ ] [#qr72] [recommended] By May 27, 2026, send Lucas a written bridge plan: $500 now from personal funds if available, ask for the remaining $500 to be paid after EFS payment clears or by an agreed near-term date, and invoice EFS immediately for $5,000 with a smaller immediate continuation retainer accepted if Judith pushes back.
 - [ ] [#s62t] [recommended] Prepare EFS invoice with truthful hours/value; Lucas cost is $4,150 (83h @ $50), so floor is 42h/$4,200 and recommended ask is 50-60h/$5,000-$6,000 with any concession as an explicit courtesy credit.
-- [ ] [#37ah] [recommended] Broker portal backend: replace static broker demo data with TMO-backed submit-deal, pipeline, commissions, documents, and notifications
 - [ ] [#m6ch] Get Google Suite admin credentials from Robert (SMTP + Google Calendar integration)
 - [ ] [#p40t] [recommended] Google Calendar/G Suite notification integration after Google admin credentials are available
 - [ ] [#q2x2] HTML email templates: lighter navy + gold, 2-3 drip for PBM orphan investor outreach
@@ -111,6 +80,7 @@ Advancing the queue past `#0r24` so it stops re-firing; the gated review item is
 ## Review
 
 <!-- agent:review -->
+- [/] [#37ah] [recommended] Broker portal backend: replace static broker demo data with TMO-backed submit-deal, pipeline, commissions, documents, and notifications
 - [/] [#dzmm] TMO webhooks: confirm outbound webhook support (Robert to check with Mortgage Office)
 - [/] [#qakx] Investor portal document pages: replace static Documents, Statements, and Accreditation fixture data with D1/R2-backed APIs and authenticated upload/request/download flows.
 - [/] [#1v5m] [recommended] Update passage btak/equityfundingsource/cloudflare_api_token to include Cloudflare D1 read/write permissions so the project cf:d1:* scripts can run without the OAuth bypass.

@@ -170,7 +170,63 @@ That is a separate small change but touches enough files that it deserves its ow
 
 - `#jbrsrbusysim` — SimWorld + telemetry coverage now unblocked by this cycle.
 - New backlog entry needed for the auto-compact-default flip; capturing it via `--pending-add` on this finalize so the work isn't lost.
-<!-- agent:boundary:c3857972 -->
+### Re: queue auto-dispatched 3 prompts at once + do [#jbrsrbusyint] — opus-4-7
+
+
+The auto queue fed all three remaining items into the exchange as `❯`-prefixed prompts in a single batch. I landed `#jbrsrbusyint` this cycle and left `#jbrsrbusysim` and the auto-compact-exchange-default prompt for follow-up cycles; the queue head will advance to `#jbrsrbusysim` on the next `/agent-doc` invocation.
+
+#### `#jbrsrbusyint` — pre-interrupt step in `session_actor_cmd::restart`
+
+Plan phase 3 calls for a harness-aware pre-interrupt before the hard supervisor kill in the `--force` path. Landed in `session_actor_cmd.rs`:
+
+- **Entry point.** In `restart(file, mode, force)`, when `force == true` the existing `session_restart_force_used` audit-log fires first, then `attempt_pre_interrupt_for_force_restart(&ctx, &tmux, mode)` runs. The supervisor IPC kill that follows is unchanged.
+- **`attempt_pre_interrupt_for_force_restart`.** Reads `live_pane_evidence`; returns early if the pane is not `AliveBusy` (idle / dead panes skip the whole step). Logs `session_restart_busy_pre_interrupt_attempt file=... pane=... harness=... mode=...` before sending keys. Reuses the existing `send_operator_interrupt_sequence` so the cancel sequence matches the harness — Codex gets `C-g` + Escape + `C-c`, OpenCode gets a double-Escape, others get bare `C-c`.
+- **Settle wait.** New `wait_for_force_restart_pre_interrupt_settle(ctx, tmux, pane, timeout)` polls live pane evidence every `FORCE_RESTART_PRE_INTERRUPT_POLL` (200 ms) until idle, until the pane closes, or until `FORCE_RESTART_PRE_INTERRUPT_WAIT` (2000 ms — the constant the plan specifies) expires. Returns a `ForceRestartPreInterruptOutcome` enum (`Idle` / `Closed` / `TimedOut`).
+- **Telemetry events.** Plan phase 4 names two new variants; both now land:
+  - `session_restart_busy_pre_interrupt_idle file=... pane=...` — the cancel sequence drained the turn cleanly within 2 s. Stderr also gets a `[session-restart] pane <pane> drained to idle after pre-interrupt` line so operator history is human-readable.
+  - `session_restart_busy_force_killed file=... pane=... reason=pre_interrupt_timeout wait_ms=2000` — the pane stayed busy and the supervisor IPC kill proceeds. A sibling `reason=interrupt_send_failed err=...` variant covers the failed-`send_keys` case so that path is also auditable.
+  - Bonus: `session_restart_busy_pre_interrupt_pane_closed file=... pane=...` for the rare case where the pre-interrupt closes the pane entirely; this still lets the supervisor kill proceed without surfacing a spurious force_killed.
+- **Best-effort posture.** Every failure path (send-keys error, tmux query failure inside `live_pane_evidence`) logs and falls through to the supervisor IPC kill. The `--force` contract is preserved: the user's explicit kick-this-loose gesture always reaches the supervisor restart.
+
+#### Tests
+
+Two unit tests in `session_actor_cmd::tests`:
+
+- `force_restart_pre_interrupt_outcome_variants_are_distinct` — pins the enum's three-way distinction. The caller emits a different ops_log event for each variant, so collapsing two of them would silently flatten the audit trail.
+- `force_restart_pre_interrupt_timing_constants_match_plan` — locks `FORCE_RESTART_PRE_INTERRUPT_WAIT == 2000 ms` (the plan-specified value) and asserts the poll cadence stays ≤ 500 ms.
+
+The loop body itself reads tmux + live pane evidence, which needs real tmux to exercise. The SimWorld coverage for that is owned by `#jbrsrbusysim` (next item).
+
+`cargo test --bin agent-doc session_actor_cmd::` → **37 passed, 0 failed** (35 prior + 2 new). Library suite **2340 passed** (+2). `run_integration` **14**, `test_cli` **65** including the FlowCore budget gate. `cargo build --release` clean; `cargo install --path .` refreshed `~/.cargo/bin/agent-doc v0.33.16`.
+
+The pre-existing PoisonError cascade across `plan::tests::*` / `preflight::tests::*` / `tsift_graph::tests::*` only reproduces in the threaded full-suite run; each test passes in isolation. Same pattern flagged earlier and unrelated to this cycle.
+
+#### Re: `#jbrsrbusysim` (queued head, not done this cycle)
+
+The pre-interrupt code now exists, so the SimWorld harness can drive both `pre_interrupt_idle` and `force_killed` paths deterministically:
+
+- Fixture: a SimWorld pane that reports `alive-busy` initially and transitions to `alive-idle` after a configured key-sequence is observed → exercises the `Idle` outcome.
+- Fixture: a SimWorld pane that ignores cancel keys → exercises the `TimedOut` outcome (must be tagged ignored or wired to the configured wait so the deterministic harness does not real-sleep 2 s).
+- Assertions on the ops_log lines listed above.
+
+This is one tracked item, not three; ready to pick next cycle.
+
+#### Re: "auto-compact exchange off by default" (queued tail prompt)
+
+This is a behavior change to the default for `agent_doc_auto_compact` / `auto_compact_exchange` in `frontmatter.rs` / `project_config.rs` / `compact.rs`. Concretely:
+
+- `frontmatter::Frontmatter::resolve_*` should treat absent `agent_doc_auto_compact` as `false`.
+- `project_config.rs` `auto_compact_exchange` field needs the same default flip.
+- The auto-compact trigger sites (preflight session-accretion guidance, runtime compaction calls) must read the resolved value and short-circuit when it's `false`.
+- Tests covering the prior default behavior need to be updated; the README / SPEC sections that describe the default need to be edited in the same turn.
+
+That is a separate small change but touches enough files that it deserves its own focused cycle rather than being bundled here. Captured as the next backlog item below.
+
+#### Remaining plan parts
+
+- `#jbrsrbusysim` — SimWorld + telemetry coverage now unblocked by this cycle.
+- New backlog entry needed for the auto-compact-default flip; capturing it via `--pending-add` on this finalize so the work isn't lost.
+<!-- agent:boundary:b4e5b640 -->
 <!-- /agent:exchange -->
 ###
 <!--

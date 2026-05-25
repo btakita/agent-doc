@@ -196,7 +196,7 @@ Captured as `#p6skillinstallreconcile`. That is the right place to fix the drift
 | `p6sklsymadocrunbooks` (agent-doc runbooks) | **Not symlinked** | Install-generated subtree; symlink would multiply the sync surface |
 
 Pattern: symlink hand-maintained surfaces and single files; leave install-generated subtrees to the install workflow and fix install bugs at the source.
-<!-- agent:boundary:26ad0d8b -->
+<!-- agent:boundary:c1fdbacb -->
 <!-- /agent:exchange -->
 ###
 
@@ -224,7 +224,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 (<!-- agent:backlog -->
-- [ ] [#p6skillinstallreconcile] agent-doc skill install does not reconcile the target runbooks directory — it writes new content but leaves stale files in place. Surfaced in p6sklsymadocrunbooks investigation: agent-loop/.claude/skills/agent-doc/runbooks/ has 21 files; src/agent-doc/runbooks/ (source) has 14 files. The installed copy has 8 stale extras (cleanup, diff-type-routing, investigate-behavior, large-content, multi-topic-response, plugin-install, session-share-commit, skill-submit-cycle) AND is missing one new source file (manual-job-packets.md). Fix: install should delete-then-write the runbooks subtree, or compute the canonical set from the binary's embedded contents and reap files not in that set. Without this, install drift accumulates indefinitely.
 - [ ] [#p6tsifull] Wire the remaining tsift consumer surfaces to the tagpath adapter: graph, explain, communities, path, federated-search. The adapter (src/tsift/src/tagpath_adapter.rs) and annotate helper are already public; each command needs TagpathSearchOpts plumbing + a per-row annotation pass + tagpath_handle field on StoredSymbol / StoredEdge / community report structs. Mechanical follow-up to p6tsi which only wired tsift search.
 - [ ] [#p6tspub] Restore tsift crates.io publishability after p6tsi: tsift now depends on tagpath via path = ../tagpath. Replace with version = "0.17.1" (or whatever ships first) before any tsift release. Already gated by the sift-publish blocker so no immediate regression, but track here.
 - [ ] [#p6ren] tagpath rename <old> <new>: cross-file, cross-convention identifier rename using the index. Walks every member of the matching family, rewrites in-place in each source convention (snake/camel/Pascal/kebab/UPPER/Ada). Foundation for the agent-loop intent-preserving refactor vision.

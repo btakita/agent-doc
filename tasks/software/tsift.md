@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -153,16 +153,77 @@ The parent plan called for sharing per-target context/diff packets across `sessi
 #### Queue state
 
 Queue head is now `do [#gdbprephotgate]`. The 3-sample baseline data is already in this cycle for its sibling phase `status_index_gate` (not measured per-sub-phase here, just the parent); the next cycle should start by capturing the `conflict_matrix_preparation.status_index_gate` median against the new 0.1.44 numbers before changing the gate path.
-<!-- agent:boundary:71e92572 -->
+### Re: `do [#gdbgatecold]` — investigated, in-process inspect_read_only cache reverted; gating with refined plumbing plan — opus-4-7
+
+Spent the cycle investigating the cold-path cost of `conflict_matrix_preparation.status_index_gate` and confirmed the shared-inspection opportunity, but the simple process-wide cache approach broke `tsift search` freshness correctness. Reverted; no shippable change this cycle. **No tsift release; `#gdbgatecold` is gated `[/]`** with a refined description capturing the architectural finding so the next attempt starts from data and the broken test name.
+
+#### What was confirmed (data-grounded)
+
+- Both `prepare_agent_doc_index_gate` (via `inspect_search_index` at `src/main.rs:24530`) and `context_pack_status_reminders` (via `status::check_single_index` at `src/status.rs:180`) call `IndexDb::inspect_read_only(.tsift/index.db, root, false)`. That is the duplicated work on the same `(root, .tsift/index.db)` pair within a single backend-eval pipeline.
+- The first call costs ~200ms (full index scan + stale-file count). The second call repeats that scan because there is no shared state between them.
+
+#### What was attempted and reverted
+
+1. Added `IndexDb::inspect_read_only_cached_digest` (process-wide in-process cache keyed by `(db_path, root, prune)`) returning a small `CachedInspectionDigest { total_files, new, modified, deleted, recovery }` cloneable struct.
+2. Wired `inspect_search_index` and `check_single_index` to the cached variant; added `IndexDb::invalidate_inspection_cache` and hooked it into `run_index_update` so any successful index write drops cached digests for the affected `(db_path, root)`.
+3. Measured win on agent-loop 3-sample medians:
+
+| phase (median ms) | pre-cycle (0.1.45) | with cache | delta |
+|---|---:|---:|---:|
+| `…status_index_gate` | 678 | 479 | **-29%** |
+| `…status_index_gate.prepare_agent_doc_index_gate` | 422 | 235 | **-44%** |
+| `…status_index_gate.context_pack_status_reminders` | 266 | 254 | -4% |
+
+4. The cache broke `tests/exit_code.rs::search_timeout_reports_reindex_when_index_turns_stale_during_worker_run` and `tests/tests::context_pack_refreshes_stale_index_before_handoff`. The first test:
+   - Writes `main.rs` and indexes it (cache miss → digest cached "fresh").
+   - Spawns a thread that modifies `main.rs` after 100 ms.
+   - Runs `tsift search` with a forced 5 s sleep, then checks error reporting includes "index is stale".
+   - With the cache: the post-timeout freshness re-check inside the same process returns the cached "fresh" digest, so the error message lacks the expected "index is stale" line.
+5. Tried a watermark-keyed cache that included `(db_mtime, root_dir_mtime)` so concurrent changes would invalidate via mtime drift. Did not help: writing file *content* does not bump the parent directory's mtime on Linux ext4 (only create/delete/rename do), so the watermark stays identical across the concurrent write and the cache still returns stale "fresh".
+6. Reverted all three files (`src/index.rs`, `src/main.rs`, `src/status.rs`) to HEAD. No tsift release this cycle.
+
+#### Why a plain process-wide cache is the wrong shape
+
+`inspect_search_index` is called from at least four distinct paths (gate at 13279, search precheck loops at 24645 and 24713, plus the gate-cached variant from the prior cycle). They have different freshness contracts:
+
+- **Backend-eval pipeline path** (`build_context_pack_report_with_profile`): both consumers fire within ~1 s of each other; trusting one inspection is safe because no concurrent writers are expected within that window.
+- **Search command path**: the precheck and the error-reporting re-check can be separated by an arbitrary timeout (5 s in this test), during which concurrent writers may legitimately modify source; the second check must observe the new state.
+
+A process-wide cache cannot serve both without violating one. The correct fix is **scope-bounded sharing**, two viable shapes:
+
+1. **Explicit threading** — extend `prepare_agent_doc_index_gate_cached` (already in 0.1.45) to also return the `IndexSummary` or a derived digest, and pass it into `context_pack_status_reminders` so `check_status` can accept a pre-computed inspection result instead of recomputing. Zero process state, but requires API changes in `status::check_status` / `status::check_single_index`.
+2. **Scope guard** — introduce `with_inspection_cache_scope(|| { … })` that enables the cache only for the duration of one trusted pipeline (the backend-eval flow). The search precheck stays uncached.
+
+Either is correct; (1) is more invasive but has no process state to invalidate; (2) is smaller but introduces a TLS-like scope concept.
+
+#### Updated backlog state
+
+`#gdbgatecold` was edited via `--pending-edit` to record: (a) the confirmed duplicate-inspection finding, (b) the measured 29% / 44% wins from the broken cache approach, (c) the specific broken test name, (d) the two correct fix shapes and the projected ~200ms savings, (e) the constraint not to regress search timeout reporting. Marking it `[/]` gated for review so the next implementation cycle starts from this evidence instead of re-running the speculative path.
+
+#### Verification
+
+| Check | Result |
+|---|---|
+| `cargo build --release` (tsift) | clean at HEAD (no code changes shipping) |
+| `cargo install --path .` | `tsift --version` → `tsift 0.1.45` (unchanged) |
+| `cargo test --release` | not re-run after revert; HEAD passes from prior cycle (801 tests) |
+| git working tree | clean for src/tsift; no commits / no push this cycle |
+
+#### Queue state
+
+Queue head is now `do [#impactprof]`. `#gdbgatecold` is gated for the next attempt under the refined plumbing plan; the broader queue (`#impactprof`, `#gdbfullreuse`, `#gdbscanproof`, `#gdbperfgate`) remains.
+<!-- agent:boundary:164d3edb -->
 <!-- /agent:exchange -->
 ###
 <!--
 What are #next-steps to make the graph faster?
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#gdbprephotgate]~
+- do [#gdbgatecold]
+- do [#impactprof]
 - do [#gdbfullreuse]
 - do [#gdbscanproof]
 - do [#gdbperfgate]
@@ -171,7 +232,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gdbgatecold] [recommended] Reduce the cold-path cost of conflict_matrix_preparation.status_index_gate. The in-process cache landed in 0.1.45 covers daemon/multi-call use but does not help single-shot CLI invocations because each helper fires only once per backend-eval pipeline. Three-sample medians attribute the 678ms median to prepare_agent_doc_index_gate (~422ms inspect_search_index + apply_search_index_update) and context_pack_status_reminders (~266ms). Investigate whether inspect_search_index can fast-path a freshness verdict from a cheap watermark check (e.g., index db mtime + source root mtime hash) before any DB open, and whether context_pack_status_reminders can read fewer files. Verify with 3-sample medians under conflict_matrix_preparation.status_index_gate.{prepare_agent_doc_index_gate, context_pack_status_reminders} before claiming reduction.
 - [ ] [#impactprof] [recommended] After conflict_matrix_preparation.session_review_compute dropped from 3719ms to 272ms (#gdbprephotreuse, tsift 0.1.44) and status_index_gate observability landed (#gdbprephotgate, tsift 0.1.45), conflict_matrix_preparation.impact is now the dominant single sibling at 774-810ms median. Profile impact::compute by adding sub-phase timers (mirror the session_review_compute and status_index_gate decomposition pattern), capture a 3-sample baseline under conflict_matrix_preparation.impact.<sub>, then implement the proven inner-call reduction with a metric-digest regression gate.
 - [ ] [#gdbfullreuse] [recommended] Make full-projection cache-hit performance the next hard gate: run at least three tsift graph-db --json backend-eval --full-projection cold/cache samples, split source-graph-build, projection-row construction, cache load, compression, and SQLite write phases, then remove clone/serde/cache artifact churn only where those samples show a stable bottleneck.
 - [ ] [#gdbscanproof] [recommended] Re-check SQLite scan plans on the current graph schema before adding another backend: capture EXPLAIN/cardinality evidence for edge_property_scan, incident_edges, kind/neighborhood property filters, and path frontier probes on real plus synthetic high-degree/deep-chain data; add indexes/materialized rows only for proven scan-dominant cases.
@@ -182,6 +242,7 @@ preset #spec-test-build-install-commit-push
 ## Review
 
 <!-- agent:review -->
+- [/] [#gdbgatecold] [recommended] Reduce the cold-path cost of conflict_matrix_preparation.status_index_gate (678ms median: 422ms prepare_agent_doc_index_gate + 266ms context_pack_status_reminders). Investigation in 2026-05-24 cycle confirmed both call paths run IndexDb::inspect_read_only on the same (root, .tsift/index.db) — that is the duplicated work. A process-wide in-process cache for inspect_read_only_cached_digest was implemented and reverted: it correctly cut status_index_gate -29% (478ms median) and prepare_agent_doc_index_gate -44% (235ms median) on backend-eval, but broke tsift search's in-process freshness check on concurrent file modifications (tests/exit_code.rs search_timeout_reports_reindex_when_index_turns_stale_during_worker_run). The watermark-by-directory-mtime variant did not help because writing file content does not bump the parent directory mtime on Linux ext4. Correct fix: scope-bounded inspection sharing. Either thread the inspection result through build_context_pack_report_with_profile and into status::check_status (no process state), or introduce an explicit with_inspection_cache_scope guard that holds the cache only for the duration of one trusted pipeline. Project ~200ms savings on backend-eval cold path; do not regress search timeout reporting.
 - [/] [#gdbprephot] [recommended] Profile and reduce the remaining conflict-matrix preparation hotspots after the cache fixes: measure session_review_compute, context_pack_diff, impact, and dispatch-trace reuse on repeated real/full-projection runs, then add shared packet reuse or narrower digest paths with metric-digest gates so the cached queue path drops below the current multi-second prep cost without trusting stale ownership.
 - [/] [#gdbcacheprove] [recommended] Run a post-fix real graph-db backend-eval --full-projection cold/cache pair on agent-loop, prove .agent-doc runtime markdown no longer changes the source watermark, prune stale pre-fix .tsift/backend-eval-cache miss artifacts, and refresh fixtures/graph-db-performance-history.json with a cache-hit sample.
 - [/] [#gdbvacproof] [recommended] Run the real Convex reconciliation plus graph-db compact workflow and capture before/after file size, freelist, tombstone counts, status/doctor timings, and scan-cost deltas so compaction policy is backed by operational evidence.

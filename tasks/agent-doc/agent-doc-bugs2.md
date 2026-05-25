@@ -582,7 +582,31 @@ Commits pushed:
 - parent gitlink: `e789aec9d` (`bump agent-doc compact cache regression`)
 
 CI: agent-doc run `26416687771` for `fc97024` is in progress; setup/checkout/dependency checkout/tmux install/toolchain steps passed, `make check` is running, and `make tmux-ci` is pending. Parent repo has no `CI` workflow.
-<!-- agent:boundary:fb535d90 -->
+### Re: #jbccdocs — gpt-5
+
+Documented the Compact Exchange File Cache Conflict recovery path in the JetBrains/harness runbooks.
+
+Changed paths:
+- `src/agent-doc/runbooks/jb-cache-conflict.md`
+- `src/agent-doc/runbooks/compact-exchange.md`
+- `src/agent-doc/runbooks/commit.md`
+
+What changed:
+- Added a Compact Exchange section that distinguishes normal response IPC conflict recovery from the guarded direct-write compact path.
+- Documented that Compact Exchange does not emit editor IPC `fullContent`, uses `source=compact_exchange_direct_write`, and fails closed on stale JetBrains live-buffer/file-cache proof before replacing the document or advancing the snapshot.
+- Added the expected ops-log signature, recovery instruction to save/discard/reload the IDE buffer and rerun compact, and the VCS refresh expectation after a successful compact commit.
+
+Verification:
+- `make check` in `src/agent-doc` passed, including the medium SimWorld seed corpus.
+- GitHub Actions CI for `btakita/agent-doc` run `26416964221` is in progress on head `1b61441af32685d29805652a45725ad9595c86b7`; setup, checkout, dependency checkout, tmux install, and Rust toolchain steps passed, `Run make check` is in progress, and `Run make tmux-ci` is pending.
+- The parent repo has no workflow named `CI`.
+
+Commits:
+- `src/agent-doc`: `1b61441af32685d29805652a45725ad9595c86b7` (`docs: document compact cache conflict recovery`), pushed to `origin/20260422/codex-agent-backend`.
+- parent repo: `90835bc7f` (`bump agent-doc compact cache docs`), pushed to `origin/main`.
+
+Escalation: none. Existing unrelated dirty files in the parent repo and submodule were left untouched.
+<!-- agent:boundary:cb941d51 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -640,7 +664,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#jbrsrbusyide]~
 - ~do [#jbccfix]~
 - ~do [#jbccreg]~
-- do [#jbccdocs]
+- ~do [#jbccdocs]~
 - do [#planperphase]
 <!-- /agent:queue -->
 
@@ -648,7 +672,6 @@ preset #spec-test-build-install-commit-push
 
 <!-- agent:backlog -->
 - [ ] [#planperphase] Convention: split multi-phase plans into per-phase backlog IDs (e.g. #crdtrespfx1, #crdtrespfx2) instead of one parent ID that gets pending-gated. Lets queue auto-strike honor per-phase progress. Lower priority — the convention is opt-in for authors. [recommended]
-- [ ] [#jbccdocs] Document the Compact Exchange File Cache Conflict recovery path in the JetBrains/harness runbooks after the behavior is fixed.
 <!-- /agent:backlog -->
 
 ## Review

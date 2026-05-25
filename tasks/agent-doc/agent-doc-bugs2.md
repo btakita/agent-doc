@@ -531,7 +531,33 @@ CI:
 - The parent repo still reports no workflow named `CI`.
 
 Unrelated dirty submodule files (`src/diff.rs`, `src/git_sibling.rs`, `src/preflight.rs`, `src/route/tests.rs`, `src/session_accretion.rs`, `src/skill.rs`, `src/write.rs`) were left unstaged.
-<!-- agent:boundary:83e5e74c -->
+### Re: #jbrsrbusyide — gpt-5
+
+Done.
+
+Implemented JetBrains IDE-side restart telemetry for `agent-doc session restart-supervisor --force`:
+
+- normal restart stays non-destructive; a busy restart refusal now shows an IDE warning with `Interrupt and restart`, `Show status`, and `Copy details` actions.
+- `Interrupt and restart` confirms with the user before running `restart-supervisor --force`.
+- successful forced restart reads only the ops-log entries appended by that command and surfaces `session_restart_force_used`, `session_restart_busy_pre_interrupt_idle`, and `session_restart_busy_force_killed` in the IDE notification and IntelliJ log.
+
+Verification:
+
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test --tests com.github.btakita.agentdoc.TerminalUtilTest`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin`
+- `make check` on the final working tree, including the medium deterministic SimWorld corpus
+- `git diff --check` for the edited JetBrains files
+
+Commits:
+
+- `src/agent-doc` submodule: `a66383aa` (`feat: surface restart force telemetry in JetBrains`)
+- parent gitlink: `b79e70b5a` points `src/agent-doc` at `a66383aa`
+
+CI:
+
+- agent-doc CI run `26416165331` for `a66383aa` was in progress when checked; setup/checkout passed, `Install tmux for integration tests` was running, and `make check` / `make tmux-ci` were still pending.
+- parent repo has no workflow named `CI`.
+<!-- agent:boundary:8da8cc94 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -586,7 +612,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#adoc-web-auth]~
 - ~do [#adoc-web-live-cycle]~
 - ~do [#jbrsrbusysw]~
-- do [#jbrsrbusyide]
+- ~do [#jbrsrbusyide]~
 - do [#jbccfix]
 - do [#jbccreg]
 - do [#jbccdocs]
@@ -596,7 +622,6 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#jbrsrbusyide] JB plugin IDE-side telemetry for session_restart --force: surface session_restart_force_used, session_restart_busy_pre_interrupt_idle, and session_restart_busy_force_killed events in the IntelliJ notification area or Logcat so users can see the recovery path the binary took. Kotlin work in editors/jetbrains/. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md phase 4 (IDE piece).
 - [ ] [#planperphase] Convention: split multi-phase plans into per-phase backlog IDs (e.g. #crdtrespfx1, #crdtrespfx2) instead of one parent ID that gets pending-gated. Lets queue auto-strike honor per-phase progress. Lower priority — the convention is opt-in for authors. [recommended]
 - [ ] [#jbccfix] Fix the Compact Exchange write/cache boundary so JetBrains never receives a stale or conflicting file-cache snapshot after compact exchange.
 - [ ] [#jbccreg] Add deterministic regression coverage for Compact Exchange cache-conflict handling, including stale snapshot and concurrent user-edit cases where feasible.

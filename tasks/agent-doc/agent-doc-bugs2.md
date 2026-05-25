@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -55,10 +55,62 @@ Same reasoning as the previous two cycles. `#adcs-binary` is the binary-side pha
 #### Suggested next action
 
 Re-invoke `/agent-doc tasks/agent-doc/agent-doc-bugs2.md` and the new queue head will be `#adcs-binary` — that's a standalone cycle I can fully execute here. If you also want `#adcs-scripts` driven, that needs to happen from each sibling repo's own session.
-<!-- agent:boundary:278101b7 -->
+### Re: do [#adcs-binary] — opus-4-7
+
+❯ Implemented Phase 2 of `#agent-doc-commit-sibling`: the `--commit-sibling <REPO>` / `--commit-sibling-message <MSG>` CLI flags on `agent-doc finalize` and `agent-doc write --commit`. Marking `#adcs-binary` done; parent gated until the sibling-script and convention phases land in their respective repos.
+
+#### Changes
+
+- New module `src/agent-doc/src/git_sibling.rs` (~370 LOC) — owns the cross-repo sibling-commit flow end-to-end:
+  - `parse_github_remote(url)` accepts SSH (`git@github.com:org/repo[.git]`), SSH-proto (`ssh://git@github.com/...`), and HTTPS (`https://github.com/org/repo[.git]`) forms; rejects non-GitHub URLs.
+  - `build_session_doc_url(remote, sha, path)` → `https://github.com/<org>/<repo>/blob/<sha>/<path>`.
+  - `origin_url`, `toplevel`, `absolute_git_dir`, `head_sha`, `has_staged_changes` — small git-Command shells with explicit error context.
+  - `commit_sibling_with_trailer(sibling, msg, url)` → `git -C <sibling> commit -m <msg> --trailer 'Session-Doc: <url>'` so the trailer round-trips through `%(trailers:key=Session-Doc,valueonly)`.
+  - `commit_siblings_for_session_doc(session_doc, &[(repo, msg)])` orchestrates: resolve session-doc remote + sha + path-in-repo, build trailer URL, validate each sibling, commit each in order, log a per-sibling line.
+- `src/agent-doc/src/main.rs`:
+  - Added `mod git_sibling;`.
+  - `WriteArgs` got `commit_sibling: Vec<PathBuf>` + `commit_sibling_message: Vec<String>` (both `clap` `--commit-sibling` / `--commit-sibling-message`, repeatable, positional pairing).
+  - Both `Commands::Write` and `Commands::Finalize` plumb the new fields through to `write::CommandOptions`.
+- `src/agent-doc/src/write.rs`:
+  - `CommandOptions` got matching `commit_sibling` / `commit_sibling_message` fields.
+  - `run_command` validates counts up front, rejects the flags without `--commit` / `finalize` (the trailer URL needs the session-doc sha), and after a successful primary `finalize_commit` invokes `git_sibling::commit_siblings_for_session_doc` once.
+
+#### Tests
+
+15 new tests in `git_sibling::tests`, all passing:
+
+- URL parsing: SSH, SSH-proto, HTTPS forms with and without `.git`; rejects GitLab and empty inputs.
+- `build_session_doc_url` basic + leading-slash-strip.
+- `commit_siblings_empty_is_noop`.
+- `commit_siblings_injects_session_doc_trailer` — end-to-end: two temp repos, session doc + sibling with staged changes, assert `git log -1 --format='%(trailers:key=Session-Doc,valueonly)'` returns the expected URL with the session-doc sha.
+- `commit_siblings_uses_session_doc_commit_sha` — second session-doc commit bumps sha; trailer URL must use the current head, not the earlier one.
+- `commit_siblings_fails_closed_on_same_repo`, `..._on_no_staged_changes`, `..._on_non_github_remote` — explicit fail-closed assertions.
+
+Pre-existing `write::` tests (271) still pass. `make check` not run because of pre-existing red suites in this branch (`codex_bare_run_inside_owning_pane_fails_before_nested_dispatch` + clippy errors in `route/tests.rs`, `session_accretion.rs`, `sync.rs`) that reproduce on stashed HEAD and are unrelated to this work.
+
+#### Repo commits
+
+- `src/agent-doc@891cc85d` — `fix(skill): reconcile installed runbooks set against canonical embedded set` (the previously-uncommitted `#p6skillinstallreconcile` reap fix that never made it through `finalize`).
+- `src/agent-doc@718e53b` — `feat(commit-sibling): --commit-sibling <repo>/--commit-sibling-message flags for cross-repo session-doc provenance (#adcs-binary)`.
+- `agent-loop@HEAD` — superproject submodule pointer bump + `.claude/skills/agent-doc/runbooks/` reconciliation (8 stale reaped, `manual-job-packets.md` installed).
+
+#### Live verification
+
+`agent-doc finalize --help` now lists `--commit-sibling <REPO>` and `--commit-sibling-message <MSG>` with the documented pairing semantics. The integration tests cover the full round-trip against the real `git` binary in temp repos.
+
+#### What still pends
+
+- `#adcs-scripts` — sibling `backfill-updates.sh` parsers in four sibling repos. Outside this repo.
+- `#adcs-convention` — `tasks/docs.md` in session-share authoring the convention.
+- Parent `#agent-doc-commit-sibling` stays gated until both land.
+
+Not invoking `/loop` — remaining queue is still the multi-phase / sibling-repo work from prior cycles.
+<!-- agent:boundary:955d3443 -->
 <!-- /agent:exchange -->
 ###
 <!--
+transfer [#adcs-scripts] into docs.md backlog
+---
 As I was typing into the comment below `/agent:exchange`, the full-document IPC corruption happened, then the duplicate line happened, then the full-document IPC corruption happened again.
 #spec-test-build-install-commit-push
 ---
@@ -68,7 +120,7 @@ agent-doc command failed (exit 1): Error: session_restart refused for /home/bria
 ```
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#crdtrespfx]~
 - ~do [#queueadvgated]~
@@ -79,7 +131,6 @@ preset #spec-test-build-install-commit-push
 - ~do [#p6skillinstallreconcile]~
 - ~do [#agent-doc-commit-sibling]~
 - do [#adcs-binary]
-- do [#adcs-scripts]
 - do [#adoc-jb-cache-cancel-stuck-cycle]
 - do [#adoc-prefix-strip-uncommitted]
 - do [#jbrsrbusysw]
@@ -93,7 +144,6 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#adcs-binary] Phase 2 of #agent-doc-commit-sibling: --commit-sibling <repo> CLI flag in agent-doc. src/agent-doc/src/main.rs + src/agent-doc/src/write.rs — accept repeated --commit-sibling on finalize and write --commit; resolve session-share metadata (org, repo, sha, path) from the session document's remote and the freshly-created session-doc commit; run git -C <sibling> commit --trailer Session-Doc:<url>; commit session doc first, sibling second; fail closed on non-git, no staged changes, or same-repo. Tests: commit_sibling_injects_session_doc_trailer, commit_sibling_uses_session_doc_commit_sha, commit_sibling_fails_closed_on_same_repo, commit_sibling_fails_closed_on_no_staged_changes. Plan: tasks/agent-doc/plan-commit-sibling.md
 - [ ] [#adcs-scripts] Phase 3 of #agent-doc-commit-sibling: extend backfill-updates.sh in 4 sibling repos (build-party, claudescore.com, claudescore-plugin, fourth canonical home in session-share) to parse Session-Doc git trailer via git log --format=%(trailers:key=Session-Doc,valueonly) and prefer trailer URL over agent-doc(name): subject heuristic. Output dual link: last touched <date> by [tasks/docs.md](session-share-url) [<short>](sibling-url). Grandfather build-party@9a0be9a, claudescore.com@bf73644, claudescore-plugin@f1daedb. Executes in sibling repos, not agent-loop. Plan: tasks/agent-doc/plan-commit-sibling.md
 - [ ] [#adcs-convention] Phase 4 of #agent-doc-commit-sibling: author tasks/docs.md (in session-share) with the cross-repo Session-Doc trailer convention — format, when to use, migration story, link to plan and #cross-repo-sessiondoc-trailer. Plan: tasks/agent-doc/plan-commit-sibling.md
 - [ ] [#jbccc1] Phase 1 of #adoc-jb-cache-cancel-stuck-cycle: deterministic SimWorld repro for File Cache Conflict cancel. Add a SimCommand variant or scenario test FinalizeWithJbCacheConflictCancel modeling the three branches (no dialog, accept, cancel) explicitly; cancel branch produces response-on-disk, snapshot != HEAD, cycle phase write_applied; asserted to fail today (failing baseline) and pass once Phase 3 lands. Plan: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md

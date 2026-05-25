@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -121,9 +121,9 @@ Thank you — Brian
 >
 > What is left (not blocking this invoice):
 >
-> - Apply two D1 migrations (token uploads + broker portal) on production — gated on a one-line Cloudflare API token permission update on your account. Step-by-step runbook is in the repo.
-> - Cloudflare Access application setup so admins can sign in with Google. Same operator step.
-> - Broker portal frontend swap from demo arrays to the live APIs.
+❯ > - Apply two D1 migrations (token uploads + broker portal) on production — gated on a one-line Cloudflare API token permission update on your account. Step-by-step runbook is in the repo.
+❯ > - Cloudflare Access application setup so admins can sign in with Google. Same operator step.
+❯ > - Broker portal frontend swap from demo arrays to the live APIs.
 > - Custom domain cutover for equityfundingsource.com (currently live at the *.workers.dev URL).
 > - Document AI tiers 1 through 3 (Workers AI pre-screen, Claude review, Ragie index) — separate scope.
 > - HTML email drip templates, testimonial carousel, logo PNG/SVG conversion, online presence cleanup.
@@ -143,7 +143,27 @@ Thank you — Brian
 #### On the question "should this match #s62t's recommendation"
 
 Yes — backlog item `#s62t` says floor $4,200 / recommended $5,000–$6,000. $5,000 sits at the bottom of the recommended band, which is the right call given the work is real but the platform isn't fully launched to investors yet (admin still has to flip CF Access + apply migrations + take the custom domain live). Sets expectation for follow-on invoicing once those operator steps land.
-<!-- agent:boundary:ebcb5e43 -->
+❯ Can we implement?
+### Re: Can we implement? — gpt-5
+
+Yes, partially.
+
+The two Cloudflare items are implementable, but not from code alone:
+
+- The D1 migrations are already present and the runbook is clear. Applying them is `bun run cf:d1:migrate:remote`, but prior attempts hit Cloudflare error `7403` because the token stored at `passage btak/equityfundingsource/cloudflare_api_token` lacks `Account -> D1 -> Edit`. Until the Cloudflare token gains that scope, this remains externally gated.
+- Cloudflare Access setup is also an operator/account step. The code path is in place, but someone with Zero Trust access has to create the Access app, enable Google, restrict the admin emails, then copy `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` into Worker vars and redeploy.
+
+The broker portal frontend swap is the part we can implement locally now. The backend routes already exist for `/api/broker/dashboard`, `/api/broker/pipeline`, `/api/broker/deals`, `/api/broker/commissions`, and `/api/broker/notifications`; the current broker Preact screens still import `BROKER_*` arrays from `lib/ui--browser--efs/portal/broker/data.ts`. So the concrete next code task is to replace those imports with API-backed state/loading/error flows in the dashboard, pipeline, submit-deal, commissions, and notifications screens. Documents/rate sheets either need matching backend endpoints or should remain clearly marked as static library content until those APIs exist.
+
+I did not run production migrations or change code in this cycle because the prompt was phrased as feasibility. Recommendation: do the broker frontend swap next, and keep the D1/Access items gated until the Cloudflare token/account permissions are updated.
+
+Proof:
+- Changed paths: none.
+- Commands: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `tsift status --fix`, `tsift index .`, targeted `tsift` searches, and file inspections of the broker frontend/backend plus the pending Cloudflare runbook.
+- Verification: no code changed, so no build/test suite was run.
+- Confidence: high on the split between local broker work and Cloudflare-gated operator work.
+- Escalation: none.
+<!-- agent:boundary:851ede71 -->
 <!-- /agent:exchange -->
 ###
 

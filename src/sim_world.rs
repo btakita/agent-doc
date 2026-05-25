@@ -2298,3 +2298,132 @@ fn finalize_with_typing_in_post_exchange_comment_and_already_applied_ack_does_no
     );
     assert_owned_scratch_comment_preserved(&deduped, prompt);
 }
+
+// -------- #jbccc1: deterministic SimWorld scenario for the JB File Cache Conflict
+// cancel wedge. See tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md.
+//
+// The scenario models three branches of the JetBrains "File Cache Conflict"
+// dialog that surfaces during IPC patch delivery while the document is open
+// in IntelliJ:
+//
+// 1. **No dialog** — happy path; IPC apply commits cleanly.
+// 2. **Accept** — user accepts the conflict resolution; IPC apply still commits
+//    cleanly. From the binary's perspective indistinguishable from (1).
+// 3. **Cancel** — user cancels; the response is already written to the working
+//    tree by the time the dialog appears, but the binary's IPC callback returns
+//    failure. The cycle wedges at `WriteApplied`: response in doc, snapshot ≠
+//    HEAD-equivalent, no commit landed.
+//
+// The cancel branch is the failing baseline that Phase 3 (#jbccc3) will recover
+// from inside `preflight` / `repair` by auto-detecting the
+// `cycle_phase=WriteApplied + working-tree-response-matches-captured-body +
+// snapshot != HEAD` signature and running the equivalent of `write --commit`.
+
+/// Apply the captured response to the document the way a successful JB cache
+/// conflict acceptance would: VFS writes the patch into the working tree and
+/// the binary receives the ack. From the binary's perspective this is
+/// indistinguishable from `SimCommand::ApplyCapturedResponse`.
+fn apply_jb_cache_conflict_accept(world: &mut SimWorld) {
+    world.apply(SimCommand::ApplyCapturedResponse).unwrap();
+}
+
+/// Apply the captured response to the document the way a JB cache conflict
+/// **cancel** does: the VFS write has already happened (the plugin queued it
+/// before showing the dialog), but the binary's IPC callback returns failure
+/// and the cycle never reaches `Committed`. The world stops at `WriteApplied`
+/// with the response visible in `self.doc` and the snapshot still pointing at
+/// the pre-response state.
+///
+/// This is the root-cause hypothesis 1/2 from
+/// `tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md`.
+fn apply_jb_cache_conflict_cancel(world: &mut SimWorld) {
+    world.apply(SimCommand::ApplyCapturedResponse).unwrap();
+    // No SimCommand::Commit — the cancel branch is exactly the absence of the
+    // commit half. Phase 3 (#jbccc3) will close this in the binary.
+}
+
+#[test]
+fn jb_cache_conflict_no_dialog_commits_cleanly() {
+    let mut world = SimWorld::new(2026_05_25);
+    world.apply(SimCommand::EditPrompt).unwrap();
+    world.apply(SimCommand::CaptureResponse).unwrap();
+    world.apply(SimCommand::ApplyCapturedResponse).unwrap();
+    world.apply(SimCommand::Commit).unwrap();
+    assert_eq!(world.phase, CyclePhase::Committed);
+    assert_eq!(world.snapshot, world.doc);
+    world.strict_closeout_invariants().unwrap();
+}
+
+#[test]
+fn jb_cache_conflict_accept_branch_commits_cleanly() {
+    let mut world = SimWorld::new(2026_05_25 + 1);
+    world.apply(SimCommand::EditPrompt).unwrap();
+    world.apply(SimCommand::CaptureResponse).unwrap();
+    apply_jb_cache_conflict_accept(&mut world);
+    world.apply(SimCommand::Commit).unwrap();
+    assert_eq!(world.phase, CyclePhase::Committed);
+    assert_eq!(world.snapshot, world.doc);
+    world.strict_closeout_invariants().unwrap();
+}
+
+#[test]
+fn jb_cache_conflict_cancel_branch_wedges_at_write_applied_today() {
+    // FAILING BASELINE for #jbccc1.
+    //
+    // Today the cancel branch leaves the cycle at WriteApplied with the
+    // response visible in the document but snapshot ≠ doc. This test pins
+    // that behavior so that #jbccc3 (binary auto-recovery) has a clear
+    // before/after assertion to flip.
+    //
+    // When #jbccc3 lands, this test should be replaced (or its assertion
+    // inverted) by `jb_cache_conflict_cancel_branch_auto_recovers_via_preflight`
+    // that drives a recovery and asserts phase == Committed without a manual
+    // `write --commit`.
+    let mut world = SimWorld::new(2026_05_25 + 2);
+    world.apply(SimCommand::EditPrompt).unwrap();
+    world.apply(SimCommand::CaptureResponse).unwrap();
+    apply_jb_cache_conflict_cancel(&mut world);
+
+    assert_eq!(
+        world.phase,
+        CyclePhase::WriteApplied,
+        "cancel branch must wedge at WriteApplied today"
+    );
+    assert_ne!(
+        world.snapshot, world.doc,
+        "cancel branch must leave snapshot behind the visible response today"
+    );
+    assert!(
+        world.doc.contains("### Re: sim closeout"),
+        "cancel branch must leave the response visible in the working-tree doc today"
+    );
+
+    let err = world
+        .strict_closeout_invariants()
+        .expect_err("cancel-branch wedge must trip strict closeout today");
+    assert!(
+        err.to_string()
+            .contains("response write applied but not committed"),
+        "expected wedge to surface as 'response write applied but not committed'; got: {err}"
+    );
+}
+
+#[test]
+fn jb_cache_conflict_cancel_branch_recovers_via_explicit_write_commit_today() {
+    // Today's documented recovery path (per the #adoc-jb-cache-cancel-stuck-cycle
+    // backlog item) is: run `agent-doc write --commit <FILE>` manually after the
+    // cancel-induced wedge. In the simulator, that's a follow-up `Commit` from
+    // the WriteApplied phase. This test pins the recovery exit so #jbccc3 can
+    // automate it inside preflight without regressing the manual escape hatch.
+    let mut world = SimWorld::new(2026_05_25 + 3);
+    world.apply(SimCommand::EditPrompt).unwrap();
+    world.apply(SimCommand::CaptureResponse).unwrap();
+    apply_jb_cache_conflict_cancel(&mut world);
+    assert_eq!(world.phase, CyclePhase::WriteApplied);
+
+    // Manual recovery — equivalent to `agent-doc write --commit <FILE>`.
+    world.apply(SimCommand::Commit).unwrap();
+    assert_eq!(world.phase, CyclePhase::Committed);
+    assert_eq!(world.snapshot, world.doc);
+    world.strict_closeout_invariants().unwrap();
+}

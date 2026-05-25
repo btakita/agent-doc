@@ -148,7 +148,7 @@ Landed Phase 3 of `#cclooploop` (the SKILL.md auto-loop instruction itself). Sub
 - Phase 5 — installed SKILL.md regression test, `runbooks/harness-invocation.md` documentation.
 
 **Note for this turn:** the new auto-loop only takes effect after the user runs `agent-doc skill install --harness claude --reload restart` to refresh the installed SKILL.md, then restarts Claude Code so the agent re-reads it. Until then, this session continues with the prior manual-invocation behavior. Next queue head after this closes is `do [#ipcdupfin23]`.
-<!-- agent:boundary:87429110 -->
+<!-- agent:boundary:7baf014a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -164,7 +164,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#queueadvgated]~
 - ~do [#jbrsrbusysim]~
 - ~do [#cclooploop]~
-- do [#ipcdupfin23]
+- ~do [#ipcdupfin23]~
 - do Phases 1 + 5 in tasks/agent-doc/plan-ipc-corruption-and-duplicate-during-typing.md
 - do [#jbccfix]
 - do [#jbccreg]
@@ -175,7 +175,8 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#ipcdupfin23] Re-elevate #ipcdupfinalize Phases 2 + 3 — recurring IPC corruption + duplicate response when user types into a post-exchange comment during finalize. Phase 2: socket-IPC ack=error reason field so already_applied short-circuits file-IPC re-write. Phase 3: typing-guard around IPC retries during finalize. Parent plan: tasks/agent-doc/plan-ipc-corruption-and-duplicate-during-typing.md (Phase 4 landed; Phases 1, 2, 3, 5 still open; the user just hit this corruption again — Phases 2+3 are the direct fix).
+- [ ] [#ipcpluginalready] JetBrains plugin + VS Code extension emit {"type":"ack","status":"error","reason":"already_applied"} when their PatchWatcher detects the incoming patch text is already present in the live buffer. Until plugins send this, the binary-side gate landed in submodule 3d445a03 is dormant. Kotlin work in editors/jetbrains/, TypeScript work in editors/vscode/.
+- [ ] [#ipcfilehashskip] File-IPC fallback should hash-compare the live file's response-suffix against the response body and skip the write when they already match. Defense-in-depth complement to #ipcpluginalready in case plugins don't (yet) send the already_applied ack.
 - [ ] [#jbrsrbusysw] SimWorld scenario coverage for session_restart --force: route + Restart Supervisor while pane is alive-busy with and without --force, asserting the new refusal message and force success (including session_restart_busy_pre_interrupt_idle and session_restart_busy_force_killed event variants). Substantial — requires new Op variant + tmux/session_actor mock in src/sim_world.rs. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md phase 4 (SimWorld piece).
 - [ ] [#jbrsrbusyide] JB plugin IDE-side telemetry for session_restart --force: surface session_restart_force_used, session_restart_busy_pre_interrupt_idle, and session_restart_busy_force_killed events in the IntelliJ notification area or Logcat so users can see the recovery path the binary took. Kotlin work in editors/jetbrains/. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md phase 4 (IDE piece).
 - [ ] [#planperphase] Convention: split multi-phase plans into per-phase backlog IDs (e.g. #crdtrespfx1, #crdtrespfx2) instead of one parent ID that gets pending-gated. Lets queue auto-strike honor per-phase progress. Lower priority — the convention is opt-in for authors. [recommended]

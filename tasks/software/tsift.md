@@ -209,7 +209,7 @@ Full evidence at `src/tsift/plans/gdbvacproof-evidence.md`.
 
 #### Pre-existing scaffold note
 `src/tsift/examples/convex-graph-app/` (created earlier this turn) is **still untracked** per your "do NOT install/commit/push until after deploy works" direction. It will be committed in the cycle that closes `#gdbvacconvex` (after your interactive `npx convex dev` confirms the live deployment works).
-<!-- agent:boundary:04f32dbb -->
+<!-- agent:boundary:993a670e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -222,6 +222,7 @@ What are #next-steps to make the graph faster?
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#cachelookupshift] On agent-loop the conflict-matrix preparation_cache_lookup (~250 ms) never hits across repeated tsift graph-db backend-eval runs because traversal source watermark hashes shift slightly each invocation. Identify the per-invocation hash input that's drifting (likely a generated artifact path slipping past traversal_relative_path_is_generated_artifact, or a directory mtime entering the hash) and either stabilize the hash or narrow the cache key so the prep cache actually hits on identical source state.
 - [ ] [#gdbvacconvex] Deploy examples/convex-graph via npx convex dev against Brian's Convex account so tsift convex-sync --remote-snapshot --apply and tsift graph-db compact --prune-tombstones --confirmed-convex-reconciled can be exercised end-to-end (blocks the Convex half of #gdbvacproof).
 - [/] [#orchdog] [recommended] Dogfood the completed graph-backed agent orchestration stack on a real agent-doc queue run: run refresh -> evidence -> conflict-matrix -> dispatch-trace -> jobs create/collect, compare worker_prompt_packet and worker_result closure fields, and capture any tsift-side fixture gaps. **Dogfood performed 2026-05-21 on `session-share/tasks/root.md` items #x63e + #v4v0; findings recorded in #gdbevid, #cmgr, #gdbidx — see `session-share/tasks/root.md` exchange "graph-backed orchestration dogfood" entry for the full pipeline trace.** **Second dogfood 2026-05-21 against `tasks/software/tsift.md` (preset `#dogfood-tsift`) surfaced 2 new gaps: #cmgrwres and #gdblock.**
 <!-- /agent:backlog -->

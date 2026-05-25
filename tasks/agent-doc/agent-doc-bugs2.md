@@ -14,13 +14,13 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
-Queue manual-mode acknowledged; awaiting next explicit pick.
+Landed #jbrsrbusyjb; JB Restart Supervisor busy-aware path with confirmation dialog → --force.
 <!-- /agent:status -->
 
 ## Exchange
@@ -57,18 +57,71 @@ If `#jbrsrbusyint` lands first, `#jbrsrbusysim` can cover both new event variant
 Also still in the queue tail: the remaining `#jbcc*` items (`#jbccfix`, `#jbccreg`, `#jbccdocs`) and the trailing prompt about defaulting auto-compact exchange off (which would touch `compact.rs` / `frontmatter.rs` / `project_config.rs`).
 
 Ready for your explicit next pick.
-<!-- agent:boundary:41d813bc -->
+### Re: do [#jbrsrbusyjb] — opus-4-7
+
+
+Landed phase 2 of `plan-jb-restart-supervisor-busy-refusal.md`. The JetBrains Restart Supervisor action now detects the binary's alive-busy refusal, surfaces a warning notification with a "Force restart" action, prompts for explicit user confirmation, and re-invokes the binary with `--force` on accept. Phase-1 wiring (the `--force` flag and refusal-message hint in the Rust binary) already landed under `#jbrsrbusy`; the IDE side was the only missing piece for the user-visible UX.
+
+#### Kotlin changes (`TerminalUtil.kt`)
+
+- **`BUSY_RESTART_REFUSAL_HEADER_REGEX`** — anchors on `session_restart refused for (.+?) because pane (\S+) is alive-busy`. Matches both the bare binary error and the `agent-doc command failed (exit 1): Error: ...` wrapper that `runDocumentCommand` produces.
+- **`BusySessionRestartRefusal`** data class — mirror of `BusySessionClearRefusal` (file, pane, source, currentCommand, tail). No `protectedReason` field; restart only has the busy-pane shape, not the protected-prompt-input shape.
+- **`parseBusySessionRestartRefusal(output)`** — uses the new regex + the existing `BUSY_CLEAR_SOURCE_REGEX` / `BUSY_CLEAR_COMMAND_REGEX` extractors and the shared `extractBusyClearTail` helper. Returns `null` when no match (the caller falls through to a generic error notification).
+- **`restartSessionInternal(project, file, force, onComplete)`** — replaces the prior single-shot `restartSession` body. Builds `["restart-supervisor"]` or `["restart-supervisor", "--force"]` per `force`. Routes failure through a new `onFailure` callback that parses the output via `parseBusySessionRestartRefusal`; on match (and not already in force mode) it calls `notifyBusySessionRestartBlocked`, otherwise it surfaces the raw `agent-doc command failed (exit N)` text. `force = true` failures intentionally bypass the busy parse and report verbatim so the user sees real errors from the force path.
+- **`forceRestartSession(project, file, onComplete)`** — public entry point that the action chain reuses after confirmation. Internally calls `restartSessionInternal(force = true)`.
+- **`notifyBusySessionRestartBlocked(...)`** — non-blocking warning notification with three actions: `Force restart` (opens the confirmation dialog), `Show status` (runs `agent-doc session status`), `Copy details` (clipboard-copies the raw output for support).
+- **`confirmAndForceRestartSession(...)`** — modal `Messages.showYesNoDialog` on the EDT: "Supervisor is busy on a running turn for `<relativePath>`. Pane `<pane>` (`<current_command>`) will be interrupted and the supervisor restarted. Proceed?" with `Interrupt and restart` / `Cancel` buttons and the warning icon. Only the explicit Yes path calls `forceRestartSession`; Cancel is a no-op.
+- **`buildBusySessionRestartBlockedMessage(...)`** — message-builder helper, extracted so the wording is unit-testable independent of the IntelliJ notification plumbing.
+
+Surface contract:
+
+- Stderr is **not** swallowed: the bare-failure branch and force-failure branch both call `notifyError` with the exit code + raw output, satisfying the plan's "do not silently swallow stderr" requirement.
+- `Restarting...` / `Force-restarting supervisor for <file>` shows as an inline hint via `showHint` when the command is dispatched, satisfying "surface restart progress in the IDE notification area."
+- The notification group reuses the existing `Agent Doc` group (no `plugin.xml` change needed).
+
+#### Tests (`TerminalUtilTest.kt`)
+
+Four new tests:
+
+1. `busy restart refusal parses alive busy details and force hint` — full binary refusal output (with the `--force` hint suffix), asserts file/pane/source/currentCommand/tail extraction.
+2. `busy restart refusal parses generic command wrapper output` — wrapped `agent-doc command failed (exit 1): Error: ...` form, asserts the parser still recovers all fields.
+3. `busy restart refusal returns null when output is unrelated` — fail-safe guard so the busy branch is not taken for unrelated errors.
+4. `busy restart blocked message advertises force restart action` — message-text assertions: contains `Restart Supervisor Process is blocked`, `Pane %13 is busy (agent-doc)`, `Force restart`, `Show status`, `Latest pane output: ...`, and does **not** contain the generic `agent-doc command failed` text.
+
+`./gradlew test --tests "com.github.btakita.agentdoc.TerminalUtilTest"` → BUILD SUCCESSFUL. Full `./gradlew test`: BUILD SUCCESSFUL, 13 test reports clean.
+
+#### Versioning + build
+
+- Bumped `gradle.properties` `pluginVersion` 0.2.130 → 0.2.131 per the per-edit JB-plugin version-bump rule. Without the bump, IDEA dedupes install-from-disk by version string and would leave the prior bytecode cached.
+- `./gradlew buildPlugin signPlugin` produced both:
+  - `build/distributions/agent-doc-jetbrains-0.2.131.zip` (unsigned)
+  - `build/distributions/agent-doc-jetbrains-0.2.131-signed.zip` (signed)
+
+#### How to use
+
+User clicks **Restart Supervisor Process** in JetBrains:
+
+- **Idle pane** → existing behavior: invokes `agent-doc session restart-supervisor <FILE>`, shows hint, done.
+- **Busy pane** → binary returns the new refusal with `--force` hint suffix → plugin parses it → warning notification appears with `Force restart` / `Show status` / `Copy details` actions. Click **Force restart** → modal confirm dialog → click **Interrupt and restart** → plugin invokes `agent-doc session restart-supervisor --force <FILE>` → idle hint on success or raw `notifyError` on failure.
+
+#### Remaining plan parts
+
+- `#jbrsrbusyint` — optional harness-aware pre-interrupt step in the binary (Ctrl-C / harness escape with 2s idle wait, fall through to `--force` if still busy).
+- `#jbrsrbusysim` — SimWorld scenario + the two remaining telemetry events (`session_restart_busy_pre_interrupt_idle`, `session_restart_busy_force_killed`).
+
+Both still in `agent:backlog`, ordered as `#jbrsrbusyint` → `#jbrsrbusysim` (the pre-interrupt code is the natural dependency for the `pre_interrupt_idle` event to be observable in the SimWorld harness).
+<!-- agent:boundary:72b1a539 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Please make auto-compact exchange off by default. Only explicit frontmatter or .agent-doc/config.toml setting should make auto-compact exchange active.
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#stuckcyclesuperseded]~
 - ~do [#runintegcodexbare]~
-- do [#jbrsrbusyjb]
+- ~do [#jbrsrbusyjb]~
 - do [#jbrsrbusyint]
 - do [#jbrsrbusysim]
 - Please make auto-compact exchange off by default. Only explicit frontmatter or .agent-doc/config.toml setting should make auto-compact exchange active.
@@ -77,7 +130,6 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#jbrsrbusyjb] JetBrains Restart Supervisor action: prompt 'Supervisor is busy on a running turn. Interrupt and restart?' when the pane is alive-busy, invoke agent-doc session restart <FILE> --force on confirm, surface restart progress in the IDE notification area without swallowing stderr (plan phase 2). Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md.
 - [ ] [#jbrsrbusyint] Optional harness-aware pre-interrupt step before restart: send Ctrl-C / harness escape, wait up to 2s for idle, fall through to --force when still busy (plan phase 3). Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md.
 - [ ] [#jbrsrbusysim] SimWorld + IDE telemetry coverage for session_restart --force path, including session_restart_busy_pre_interrupt_idle and session_restart_busy_force_killed event variants (plan phase 4). Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md.
 - [ ] [#jbccfix] Fix the Compact Exchange write/cache boundary so JetBrains never receives a stale or conflicting file-cache snapshot after compact exchange.

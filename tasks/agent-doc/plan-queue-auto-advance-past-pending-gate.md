@@ -18,7 +18,20 @@ Direct evidence: this session stalled the queue head at `do [#crdtrespfx]` after
 
 ## Plan
 
-### Phase 1: Identify gated IDs from `agent:review`
+### Phase 1: Identify gated IDs from `agent:review` [done]
+### Phase 2: Extend `strike_done_queue_head_prompts` [done]
+### Phase 3: Tests + spec [done]
+
+**Implementation (landed):** new `collect_agent_review_gated_ids(content)` in `src/preflight.rs` scans the `agent:review` component for items starting with `- [/]` and extracts the `[#id]` value (alphanumeric / `-` / `_` only, lower-cased). The `run_queue_maintenance` call site unions the gated IDs with the existing `agent:done` IDs into a single `eligible_ids` set before calling `strike_done_queue_head_prompts` — same strike contract, broader strike eligibility. Per-prompt telemetry now logs `source=done` vs `source=review_gated` so audit can see which path advanced the queue. SPEC.md updated at `specs/02-document-format.md` with the union semantics under the queue auto-advance section.
+
+**Tests:**
+- `collect_agent_review_gated_ids_extracts_only_gated_marker` — `[/]` collected, `[x]`/`[ ]` not.
+- `collect_agent_review_gated_ids_returns_empty_when_no_review_component` — no review → empty.
+- `collect_agent_review_gated_ids_ignores_backlog_open_items` — backlog `[ ]` never matches.
+- `strike_done_queue_head_prompts_strikes_review_gated_items` — gated id in eligible set strikes the head, live head stays intact.
+- Existing tests `strike_done_queue_head_prompts_marks_done_items_completed` and `..._returns_none_when_head_is_live` continue to pass.
+
+### Phase 1: Identify gated IDs from `agent:review` (notes — superseded by landed phase above)
 
 **File:** `src/agent-doc/src/preflight.rs`
 

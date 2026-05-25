@@ -72,25 +72,30 @@ So the visible "stall" is the gap between the end of one Claude Code turn and yo
 3. **File a follow-up** to add a Claude Code Stop-hook equivalent for `agent-doc` (would need API surface from the Claude Code harness; not currently available). Out of scope for the binary itself.
 
 Per the `#spec-test-build-install-commit-push` preset, no spec/test/build/install/commit/push action is appropriate this cycle — the question is about workflow mechanics, not a code change. Next queue head remains `do [#jbccfix]` and will dispatch on the next `agent-doc <FILE>` invocation.
-<!-- agent:boundary:433aa6a2 -->
+❯ Is agent-doc capable of activating the Claude `/loop`?
+### Re: Is agent-doc capable of activating the Claude `/loop`? — opus-4-7
+
+Short answer: not directly from the binary, but yes via the installed SKILL.md.
+
+**Binary** — `agent-doc` writes stdout/stderr and mutates files. It has no API to drive Claude Code slash commands; the harness only invokes the binary, not the other way around. So the binary itself cannot call `/loop`.
+
+**Skill** — the installed `~/.claude/skills/agent-doc/SKILL.md` (or equivalent harness-specific instruction surface) IS read by Claude Code on `/agent-doc <FILE>`. We can add a Claude-Code-specific closeout instruction along the lines of:
+
+> After a successful `finalize` / `write --commit` cycle, if `preflight.queue_active == true` AND `preflight.queue_trigger == "auto"` AND `preflight.queue_prompts.len() >= 1`, invoke `/loop agent-doc <FILE>` via the Skill tool to drive the next cycle from the same Claude Code session.
+
+The data is already there: preflight emits `queue_active`, `queue_trigger`, and `queue_prompts`. Closeout records would only need to read those fields and act on them.
+
+**Tradeoffs to consider before implementing:**
+- `/loop` self-paces dynamically. The next cycle will fire on its own cadence, not the same turn. That's still progress vs the current "you re-type each cycle" pattern, but it's not the same-turn continuation Codex's Stop hook gives.
+- Auto-loop on `queue_active` could surprise the user when the queue is long. Should there be a maximum-iterations gate or an explicit `queue_auto_claude_loop` opt-in in frontmatter?
+- Termination: when the queue drains, the loop instruction should stop scheduling. That's a one-line "if `queue_prompts.len() == 0`, do not invoke `/loop`" rule.
+
+Want me to file this as a backlog item (`#cclooploop` or similar) with a plan covering: SKILL.md addition, frontmatter opt-in flag, max-iterations gate, and termination rule? I'll need your call on the opt-in default (off by default = explicit opt-in; on by default = surprise risk).
+<!-- agent:boundary:5d1e1ef3 -->
 <!-- /agent:exchange -->
 ###
 <!--
 As I was typing into the comment below `/agent:exchange`, the full-document IPC corruption happened, then the duplicate line happened, then the full-document IPC corruption happened again.
-#spec-test-build-install-commit-push
----
-JB `Run Agent Doc` on docs.md had an error
-```
-resync: stash pane %23 is registered in its own project root — skipping kill
-resync: stash pane %11 is registered in its own project root — skipping kill
-resync: stash pane %28 is registered in its own project root — skipping kill
-resync: stash pane %33 is registered in its own project root — skipping kill
-resync: stash pane %13 is registered in its own project root — skipping kill
-resync: stash pane %26 is registered in its own project root — skipping kill
-[route] debounce OK — file idle for 22.1s and typing indicator idle
-[route] target tmux session: 0
-Error: authoritative actor generation 56 for tasks/docs.md owns pane %39 but route will not inject a new trigger because the authoritative actor is still starting (waited 10s for claude startup). Wait for the pane to show a dispatch-ready prompt (`prompt_ready=true`), then rerun `agent-doc tasks/docs.md`. If the pane stays stuck, restart the owner with `agent-doc start tasks/docs.md`.
-```
 #spec-test-build-install-commit-push
 ---
 Please make auto-compact exchange off by default. Only explicit frontmatter or .agent-doc/config.toml setting should make auto-compact exchange active.
@@ -109,7 +114,7 @@ preset #spec-test-build-install-commit-push
 
 ## Pending / Not Built
 
-<!-- agent:backlog auto -->
+<!-- agent:backlog -->
 - [ ] [#jbrsrbusysw] SimWorld scenario coverage for session_restart --force: route + Restart Supervisor while pane is alive-busy with and without --force, asserting the new refusal message and force success (including session_restart_busy_pre_interrupt_idle and session_restart_busy_force_killed event variants). Substantial — requires new Op variant + tmux/session_actor mock in src/sim_world.rs. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md phase 4 (SimWorld piece).
 - [ ] [#jbrsrbusyide] JB plugin IDE-side telemetry for session_restart --force: surface session_restart_force_used, session_restart_busy_pre_interrupt_idle, and session_restart_busy_force_killed events in the IntelliJ notification area or Logcat so users can see the recovery path the binary took. Kotlin work in editors/jetbrains/. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md phase 4 (IDE piece).
 - [ ] [#planperphase] Convention: split multi-phase plans into per-phase backlog IDs (e.g. #crdtrespfx1, #crdtrespfx2) instead of one parent ID that gets pending-gated. Lets queue auto-strike honor per-phase progress. Lower priority — the convention is opt-in for authors. [recommended]

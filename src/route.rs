@@ -1369,6 +1369,7 @@ pub fn run(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn run_with_tmux(
     file: &Path,
     tmux: &Tmux,
@@ -2875,9 +2876,7 @@ fn wait_for_authoritative_actor_ready(
             );
             crate::flow::routed_reopen::RetryBudget::new(timeout, Duration::from_millis(100))
         }
-        None => {
-            authoritative_actor_ready_retry_budget(Some(harness.binary.as_str()), cfg!(test))
-        }
+        None => authoritative_actor_ready_retry_budget(Some(harness.binary.as_str()), cfg!(test)),
     };
     let deadline = Instant::now() + budget.timeout;
     let mut last_facts = authoritative_actor_ready_facts_from_target(

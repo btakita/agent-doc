@@ -115,6 +115,40 @@ const CODEX_AUTO_UPDATE_LINE: &str = "**Auto-update skill:** Compare `agent-doc 
 
 const OPENCODE_AUTO_UPDATE_LINE: &str = "**Auto-update skill:** Compare `agent-doc --version` to `agent-doc-version`. If newer, run `agent-doc skill install --harness opencode`; if it says already up to date, treat as stale instruction drift, continue this turn, and use the installed OpenCode skill. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md).";
 
+/// Claude-Code-only auto-loop instruction appended to the rendered SKILL.md.
+///
+/// Codex has a `Stop` hook in `.codex/hooks.json` that re-invokes
+/// `agent-doc <FILE>` in the same turn when the queue is still active and the
+/// next head is ready (see `specs/07-orchestration-commands.md`). Claude Code
+/// has no equivalent Stop hook, so without this instruction the operator has
+/// to retype `agent-doc <FILE>` after every cycle to drain the queue.
+///
+/// The instruction tells the Claude Code agent to invoke `/loop agent-doc
+/// <FILE>` via the `Skill` tool after a successful closeout when the queue is
+/// still active. `/loop` drives the next cycle on its self-paced cadence,
+/// terminating naturally when the queue drains, when the user types a non-
+/// queue prompt, when `agent_doc_queue_max_iterations` is hit, or when the
+/// environment hard-cap (`AGENT_DOC_QUEUE_MAX_ITERATIONS_HARD_CAP`, default
+/// 50) is exceeded.
+///
+/// Plan: tasks/agent-doc/plan-claude-code-queue-auto-loop.md
+const CLAUDE_QUEUE_AUTO_LOOP_SECTION: &str = r#"
+## Auto-loop while queue is active (Claude Code)
+
+After a successful `agent-doc finalize` / `agent-doc write --commit` cycle whose `agent-doc session-check` returns OK, check preflight's queue fields:
+
+- `preflight.queue_active == true`
+- `preflight.queue_trigger == "auto"`
+- `preflight.queue_prompts.len() >= 1`
+- The closing cycle's `prompt_bearing_changes` was either empty or exactly the queue-synthetic head prompt (a non-queue user prompt mid-loop takes precedence; do NOT auto-loop over it)
+
+When all four hold, invoke the `Skill` tool with `skill: "loop"` and `args: "agent-doc <FILE>"` to drive the next cycle from the same Claude Code session. `/loop` self-paces the next invocation and terminates naturally when the queue drains, when the user interrupts, when `agent_doc_queue_max_iterations` (frontmatter or `.agent-doc/config.toml`) is hit, or when the environment hard-cap `AGENT_DOC_QUEUE_MAX_ITERATIONS_HARD_CAP` (default `50`) is exceeded.
+
+Skip the auto-loop on any failed closeout, `session-check` interruption, or `lint-gate` block — those need explicit operator attention. Skip when `preflight.queue_active == false` (queue drained or halted).
+
+This section is Claude-Code-specific. Codex auto-loops via its `Stop` hook in `.codex/hooks.json`; OpenCode currently has no auto-loop. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md) and `tasks/agent-doc/plan-claude-code-queue-auto-loop.md`.
+"#;
+
 /// Bundled runbooks installed alongside the skill.
 const BUNDLED_RUNBOOKS: &[(&str, &str)] = &[
     (
@@ -201,8 +235,26 @@ fn render_skill(
         .expect("SKILL.md must contain an agent-doc-version field in frontmatter");
     let rendered = replace_markdown_section(&rendered, "## Invocation", invocation_section)
         .expect("SKILL.md must contain an ## Invocation section");
-    replace_auto_update_line(&rendered, auto_update_line_for_env(env))
-        .expect("SKILL.md must contain the auto-update instructions")
+    let mut rendered = replace_auto_update_line(&rendered, auto_update_line_for_env(env))
+        .expect("SKILL.md must contain the auto-update instructions");
+    if is_claude_environment(env) {
+        if !rendered.ends_with('\n') {
+            rendered.push('\n');
+        }
+        rendered.push_str(CLAUDE_QUEUE_AUTO_LOOP_SECTION.trim_start_matches('\n'));
+        if !rendered.ends_with('\n') {
+            rendered.push('\n');
+        }
+    }
+    rendered
+}
+
+fn is_claude_environment(env: agent_kit::detect::Environment) -> bool {
+    use agent_kit::detect::Environment;
+    !matches!(
+        env,
+        Environment::Codex | Environment::OpenCode | Environment::Generic
+    )
 }
 
 fn replace_frontmatter_field(content: &str, field: &str, value: &str) -> Option<String> {
@@ -780,6 +832,54 @@ mod tests {
             line_count(SKILL_TEMPLATE) <= 140,
             "SKILL.md hot path grew to {} lines",
             line_count(SKILL_TEMPLATE)
+        );
+    }
+
+    #[test]
+    fn rendered_claude_skill_includes_queue_auto_loop_section() {
+        let rendered = super::content_for_env(Environment::ClaudeCode);
+        assert!(
+            rendered.contains("## Auto-loop while queue is active (Claude Code)"),
+            "Claude-rendered SKILL.md must include the auto-loop section header"
+        );
+        assert!(
+            rendered.contains("Skill") && rendered.contains("skill: \"loop\""),
+            "auto-loop section must instruct invoking the Skill tool with skill: \"loop\""
+        );
+        assert!(
+            rendered.contains("AGENT_DOC_QUEUE_MAX_ITERATIONS_HARD_CAP"),
+            "auto-loop section must name the env hard-cap"
+        );
+        assert!(
+            rendered.contains("queue_active") && rendered.contains("queue_prompts"),
+            "auto-loop section must reference preflight queue fields"
+        );
+    }
+
+    #[test]
+    fn rendered_codex_skill_omits_queue_auto_loop_section() {
+        let rendered = super::content_for_env(Environment::Codex);
+        assert!(
+            !rendered.contains("## Auto-loop while queue is active (Claude Code)"),
+            "Codex-rendered SKILL.md must NOT include the Claude-only auto-loop section (Codex uses its own Stop hook)"
+        );
+    }
+
+    #[test]
+    fn rendered_opencode_skill_omits_queue_auto_loop_section() {
+        let rendered = super::content_for_env(Environment::OpenCode);
+        assert!(
+            !rendered.contains("## Auto-loop while queue is active (Claude Code)"),
+            "OpenCode-rendered SKILL.md must NOT include the Claude-only auto-loop section"
+        );
+    }
+
+    #[test]
+    fn rendered_generic_skill_omits_queue_auto_loop_section() {
+        let rendered = super::content_for_env(Environment::Generic);
+        assert!(
+            !rendered.contains("## Auto-loop while queue is active (Claude Code)"),
+            "Generic-rendered SKILL.md must NOT include the Claude-only auto-loop section"
         );
     }
 

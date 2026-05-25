@@ -128,7 +128,7 @@ v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-gramm
 Compacted content:
 - Archived 1 response topic(s): do [#p6tsifullfederated]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-<!-- agent:boundary:5d407db4 -->
+<!-- agent:boundary:df380769 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -138,7 +138,7 @@ Compacted content:
 preset #spec-test-build-install-commit-push
 - ~do [#commhx]~
 - ~do [#p6tsifullfederated]~
-- do [#tpstdiag]
+- ~do [#tpstdiag]~
 - do [#tpaudit]
 - do [#mixconv]
 - do [#p6tspub]
@@ -149,7 +149,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 (<!-- agent:backlog -->
-- [ ] [#tpstdiag] Surface the tagpath stale-index signal into the structured `tsift --envelope` / `--json` output. Today `annotate_*_with_tagpath` only emits `tagpath_index_stale: true (reason=…)` on stderr; tsift / agent-doc consumers reading the JSON response cannot see the diagnostic and therefore cannot decide to re-run with `--tagpath-strict` or trigger a rebuild. Add a top-level `tagpath_index_stale: true` + `tagpath_stale_reason` field to the envelope when any of the helpers reported `stale=true`. Touches `cmd_search`, `cmd_path`, `cmd_explain`, `cmd_graph`, `cmd_communities`, and the budget-mode reports. Tests: extend `tests/exit_code.rs` with a stale-index fixture (mutate a source file after `write_fresh_tagpath_index`, assert the JSON carries the new field).
 - [ ] [#tpaudit] Reconcile tsift tree-sitter source walk against tagpath `.naming.toml` walk and surface the diff. Today silent recall loss happens when tagpath `[exclude]` or `extends` skip files / languages that tsift indexes; the tsift symbols in those files get no handle even with a fresh tagpath index. New CLI: `tsift audit tagpath [--path .] [--scope <name>] [--json]` that reports (a) tsift symbols whose definition file is outside the tagpath source set, (b) tagpath families whose source files no longer exist in tsift index.db, and (c) the policy hints (excluded paths, language coverage gaps). Tests: extend `tests/exit_code.rs` with a fixture where `.naming.toml` excludes a path tsift still indexes.
 - [ ] [#mixconv] [recommended] tagpath lint policy that tolerates mixed conventions within a single identifier (e.g. `createUserProfile_v2`). Today `parser::detect_convention` classifies any identifier containing `_` as snake-family, so the camelCase-plus-suffix shape lint-fails in a camelCase-only context with `create_user_profile_v2` as the suggested fix. Add a per-context `tolerate_mixed = true` or top-level `lint.allow_mixed_within_identifier` policy that compares tag-equivalence rather than convention-equivalence. Single-file change in `src/lint/mod.rs:79`. Tests: extend `tests/lint.rs` with mixed-within-identifier cases.
 - [ ] [#p6tspub] Restore tsift crates.io publishability after p6tsi: tsift now depends on tagpath via path = ../tagpath. Replace with version = "0.17.1" (or whatever ships first) before any tsift release. Already gated by the sift-publish blocker so no immediate regression, but track here.

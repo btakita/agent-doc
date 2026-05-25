@@ -31,38 +31,13 @@ queue_active: false
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260525-004402.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260525-011643.md`*
 
 Compacted content:
-- Archived 3 response topic(s): do [#2rpv]; queue advance past gated 2rpv; do [#0r24]
+- Archived 1 response topic(s): do [#37ah]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-❯ do [#37ah]. #spec-test-commit-push-deploy
-### Re: do [#37ah] — Broker portal backend — opus-4-7
-
-
-Shipped to Worker; gated on the same remote D1 migration blocker as ft47. Broker endpoints will 500 until 0026 applies remotely; everything else is in HEAD and tested.
-
-What landed in `src/equityfundingsource-dev`:
-
-- `migrations/0026_broker_portal.sql` (new) — `broker_deals` + `broker_commissions` with the submit→funded lifecycle, indexes, and ON DELETE CASCADE foreign keys.
-- `lib/broker/repo.ts` (new) — typed CRUD + `broker_dashboard_metrics_` (active_deals / pipeline_value / earned_ytd_cents / pending_fee_cents / docs_needed). YTD starts at Jan 1 UTC; counts are fault-tolerant.
-- `lib/broker/routes.ts` (new) — 9 endpoints behind `require_broker_` / `require_admin_`: dashboard, pipeline, submit-a-deal (lenient `$350,000` / `20%` parsing), broker status PATCH (admin-reserved statuses rejected), commissions, notifications, admin status POST, admin commission create, admin mark-paid.
-- `app/index.server.ts` — mounts `broker_api_routes__mount(app)`.
-- PRD `### Broker Portal` opens with a new `#### Broker portal backend` subsection documenting each endpoint, role split, and schema.
-- `tests/broker-portal.test.ts` (new) — 12 tests covering enums, migration shape, metrics shape + UTC-year window, every route mount, role guards, submit-deal validation, broker-cannot-promote gate, admin-only counterparts, currency parsing, worker wiring, and PRD coverage.
-
-Verification:
-
-- `bun test` — 161 pass / 0 fail (19 files).
-- `bun run check` — clean.
-- `bun run cf:d1:migrate:local` — applied 0026 locally.
-- `bun run deploy:worker` — Worker version `140ee584-7e09-48ec-bbc9-d72c64bcd719`.
-- Submodule commit `1a05655` + superproject pointer bump pushed to `origin/main`.
-
-Gating: same `#1v5m` D1 token blocker. Follow-up backlog item already records the apply-0026 + smoke-test action paired with 0025.
-
-Out of scope (intentional): frontend swap from `BROKER_METRICS` / `BROKER_DEALS` / `BROKER_COMMISSIONS` static arrays to `fetch('/api/broker/...')`; TMO `NewLoanApplication` from `POST /api/broker/deals` (admin promotion remains the existing `/api/admin/loans/:id/deal` flow).
-<!-- agent:boundary:309fbf31 -->
+do [#7chq]. #spec-test-commit-push-deploy
+<!-- agent:boundary:89e80358 -->
 <!-- /agent:exchange -->
 ###
 
@@ -72,7 +47,6 @@ Out of scope (intentional): frontend swap from `BROKER_METRICS` / `BROKER_DEALS`
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#7chq] Apply migration 0026_broker_portal.sql to remote D1 alongside 0025 once review #1v5m unblocks D1 API token permissions, then smoke test POST /api/broker/deals against the live Worker.
 - [ ] [#k2xg] Send Robert the six-question TMO outbound webhook prompt in src/equityfundingsource-dev/docs/tmo-webhooks-question.md for him to forward to Mortgage Office, then record the response and decide push vs. tightened polling.
 - [/] [#dropbox-sync-adapter] Dropbox sync adapter: after Dropbox access is available, push/pull R2_DOCUMENTS with idempotent retries, backfill, tombstone handling, and per-document sync logs.
 - [ ] [#qr72] [recommended] By May 27, 2026, send Lucas a written bridge plan: $500 now from personal funds if available, ask for the remaining $500 to be paid after EFS payment clears or by an agreed near-term date, and invoice EFS immediately for $5,000 with a smaller immediate continuation retainer accepted if Judith pushes back.
@@ -134,4 +108,5 @@ Out of scope (intentional): frontend swap from `BROKER_METRICS` / `BROKER_DEALS`
 - 2026-05-24 [#9vv3] Investor portal end-to-end QA: seed and test investor signup, accreditation, published deal documents, funding commitment, admin acceptance, positions, distributions, and statements with TMO simulator plus R2 documents.
 - 2026-05-24 [#2rpv] Set Cloudflare Access env vars (ACCESS_TEAM_DOMAIN, ACCESS_AUD) on the equityfundingsource Worker and configure the CF Access application that protects /login/access-callback, then verify an admin sign-in via Google SSO.
 - 2026-05-24 [#0r24] Apply migration 0025_upload_tokens.sql to remote D1 once review #1v5m unblocks D1 API token permissions, then smoke test POST /api/admin/upload-tokens and POST /api/uploads/by-token/<token> against the live Worker.
+- 2026-05-24 [#7chq] Apply migration 0026_broker_portal.sql to remote D1 alongside 0025 once review #1v5m unblocks D1 API token permissions, then smoke test POST /api/broker/deals against the live Worker.
 <!-- /agent:done -->

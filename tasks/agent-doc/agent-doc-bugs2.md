@@ -95,7 +95,39 @@ This implements the spirit of plan Phase 3 ("tighten the captured response contr
 - `cargo install --path .` + `cargo build --release` both ran.
 
 Plan: `tasks/agent-doc/plan-prefix-strip-uncommitted.md`.
-<!-- agent:boundary:446ee7d4 -->
+❯ Can all the current features be ported to html using web components and the controller as a webserver? Is this architecture advisable or should there be a separate webserver?
+### Re: web components + controller-as-webserver port — opus-4-7
+
+Short answer: don't port wholesale; add a web frontend for specific use cases (remote, mobile, multi-viewer) and keep the editor-native path as the primary UI. If you do go web, prefer a separate webserver over folding HTTP into the controller — the controller is a deterministic state machine with one job per cycle and conflating it with a long-lived HTTP server invites lifecycle / lock-contention churn it currently avoids.
+
+#### Why the current arch resists a wholesale port
+
+- **"The document IS the UI"** is load-bearing. Users edit a markdown file in their existing editor (IntelliJ, VS Code, Vim, plain disk + git) and the binary reacts to those edits via IPC + file watching. A web-components UI replaces that with a new editing surface that has to *re-implement* editor semantics (cursor preservation, undo stacks, language modes, file-cache conflict resolution — the very pain points the JB cache-conflict bugs reflect).
+- **The controller is per-cycle and per-document.** It does preflight → respond → finalize → commit, then exits. A controller-as-webserver would have to stay resident across cycles, share state across docs and clients, and serialize concurrent edits — that's a different system. Today's CLI also wins on debuggability: every step is reproducible from a shell prompt and lands a git commit.
+- **Harness orchestration is tmux-shaped, not HTTP-shaped.** The supervisor/route/start/session-actor logic mediates Claude/Codex/OpenCode CLIs running in panes, owns pane lifecycle proof, and reconciles startup-miss / busy / blocked-stop states. Porting this to HTTP means either (a) reimplementing harnesses as long-lived HTTP services or (b) keeping a local agent under the webserver — which is what the current architecture already is, minus the browser layer.
+- **Git as persistence + history** is already the source of truth. A web UI would still want to drive `git commit` on every closeout; nothing about HTML changes that boundary.
+
+#### Where a web frontend would clearly help
+
+- **Remote viewing of a live session** (read-only dashboard streaming the exchange + commits to a browser) — no editor port required, the controller can publish events over WebSockets or SSE.
+- **Multi-viewer review** — pointing teammates at a URL to watch or comment without installing the JB plugin.
+- **Mobile / casual visibility** — phone view of "what is my agent-doc loop doing right now."
+- **Web components for the rendered exchange + backlog + queue + review state** — these are already structured components in the markdown; rendering them as HTML on the side is a straight projection, not a rewrite.
+
+#### Architecture recommendation if you do this
+
+- **Separate webserver, not controller-as-webserver.** Add a `agent-doc serve` (or sibling crate) that reads `.agent-doc/` artifacts (capture chain, cycle state, ops.log, snapshot/baseline) and exposes them over HTTP+WebSocket. Treat it as a *projection layer* over the existing on-disk state — read-only first, optional write-back via the same `agent-doc write --commit` / `finalize` boundary the editor IPC already uses. Lifecycle / locking / single-writer guarantees stay where they live today.
+- **Web components consume the JSON projections preflight already emits.** preflight, plan, session-check all already produce structured JSON; web components rendering those is mostly a presentation layer, not new business logic.
+- **Don't replace the editor IPC path.** Editor-native users keep file-IPC + socket IPC; web users get a parallel write surface that funnels through the same `write --commit` / `finalize` boundary so the cycle invariants (atomic write, snapshot, commit, session-check) hold uniformly.
+
+#### Tradeoffs vs alternatives
+
+- **Vs. controller-as-webserver:** lower coupling, no cross-cycle state sharing risk, but two processes to coordinate and a separate deploy story.
+- **Vs. current editor-only path:** more code to maintain, web auth/CSP surface to think about, but unlocks remote/mobile/multi-viewer cases that JB/VS Code plugins cannot.
+- **Vs. doing nothing:** if the dominant pain is "I want to see this from my phone," a tiny SSE-only read-only viewer captures most of the value for ~1% of the engineering surface a full web rewrite would need.
+
+Want me to draft a focused plan for the projection-layer `agent-doc serve` if that direction sounds right?
+<!-- agent:boundary:42315ea6 -->
 <!-- /agent:exchange -->
 ###
 <!--

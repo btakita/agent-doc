@@ -123,12 +123,76 @@ v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-gramm
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260525-090022.md`*
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260525-091617.md`*
 
 Compacted content:
+❯ - Archived 2 response topic(s): do [#tpstdiag]; Add #next-steps to fix remaining lossy data
 - Archived 2 response topic(s): do [#tpaudit]; Add #next-steps for follow-ups
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-<!-- agent:boundary:eafbca96 -->
+### Re: do [#p6tsifullscoped] — opus-4-7
+
+Fixed in tsift 0.1.60 (`e844a36`, superproject pointer bumped).
+
+#### Fix
+One line in `cmd_search_with_budget` (`src/main.rs`): pass `&sift_path` into `annotate_hits_with_tagpath` instead of `&root`. `sift_path` is already populated upstream with `scope.source_root` for both the `--scope <name>` and `infer_submodule_from_path` branches, and falls back to the workspace root otherwise — so the change is correct for every non-federated branch without touching the callsite logic. The federated path carries its own per-scope diagnostic and short-circuits this branch entirely, so the existing per-scope annotation from the federated fix is preserved.
+
+#### Test
+`tests/exit_code.rs::search_scoped_json_annotates_handles_from_submodule_tagpath` builds a single-submodule workspace where:
+
+- `.gitmodules` declares `src/alpha`
+- `src/alpha/lib.rs` defines `scoped_helper` and `caller`
+- `src/alpha/.naming.toml` + `src/alpha/.naming/index.json` are present
+- the workspace root has **no** tagpath project
+
+Then runs `tsift search --scope alpha --json scoped_helper` and asserts the result carries a `mem:` `tagpath_handle`. Verified the test fails before the fix (`scoped_helper missing tagpath_handle`) and passes after.
+
+#### Verification
+- `cargo test --test exit_code search_scoped_json_annotates_handles_from_submodule_tagpath` — green
+- `make check` — green (full clippy + suite)
+- `cargo install --path .` — `tsift 0.1.60` installed to `~/.cargo/bin/`
+
+#### Files
+- `src/tsift/src/main.rs` — `&root` → `&sift_path` in the non-federated annotation branch
+- `src/tsift/tests/exit_code.rs` — new scoped-search test
+- `src/tsift/SPEC.md` — scoped paragraph in §`tagpath_handle semantics`
+- `src/tsift/VERSIONS.md` — 0.1.60 entry
+- `src/tsift/Cargo.toml`, `Cargo.lock` — version → 0.1.60
+- Superproject `src/tsift` submodule pointer bumped
+
+### Re: do [#p6tsifullscoped] — opus-4-7
+
+Fixed in tsift 0.1.60 (`e844a36`, superproject pointer bumped).
+
+#### Fix
+One line in `cmd_search_with_budget` (`src/main.rs`): pass `&sift_path` into `annotate_hits_with_tagpath` instead of `&root`. `sift_path` is already populated upstream with `scope.source_root` for both the `--scope <name>` and `infer_submodule_from_path` branches, and falls back to the workspace root otherwise — so the change is correct for every non-federated branch without touching the callsite logic. The federated path carries its own per-scope diagnostic and short-circuits this branch entirely, so the existing per-scope annotation from the federated fix is preserved.
+
+#### Test
+`tests/exit_code.rs::search_scoped_json_annotates_handles_from_submodule_tagpath` builds a single-submodule workspace where:
+
+- `.gitmodules` declares `src/alpha`
+- `src/alpha/lib.rs` defines `scoped_helper` and `caller`
+- `src/alpha/.naming.toml` + `src/alpha/.naming/index.json` are present
+- the workspace root has **no** tagpath project
+
+Then runs `tsift search --scope alpha --json scoped_helper` and asserts the result carries a `mem:` `tagpath_handle`. Verified the test fails before the fix (`scoped_helper missing tagpath_handle`) and passes after.
+
+#### Verification
+- `cargo test --test exit_code search_scoped_json_annotates_handles_from_submodule_tagpath` — green
+- `make check` — green (full clippy + suite)
+- `cargo install --path .` — `tsift 0.1.60` installed to `~/.cargo/bin/`
+
+#### Files
+- `src/tsift/src/main.rs` — `&root` → `&sift_path` in the non-federated annotation branch
+- `src/tsift/tests/exit_code.rs` — new scoped-search test
+- `src/tsift/SPEC.md` — scoped paragraph in §`tagpath_handle semantics`
+- `src/tsift/VERSIONS.md` — 0.1.60 entry
+- `src/tsift/Cargo.toml`, `Cargo.lock` — version → 0.1.60
+- Superproject `src/tsift` submodule pointer bumped
+
+Every search-routing branch (default / scoped / federated / inferred-scope) now resolves handles against the correct tagpath project root.
+Every search-routing branch (default / scoped / federated / inferred-scope) now resolves handles against the correct tagpath project root.
+<!-- agent:boundary:7b524eb2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -149,7 +213,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#p6tsifullscoped] `tsift search --scope <name>` and inferred-scope search paths still annotate against the workspace root instead of the scope's `source_root`. Same silent-handle-loss pattern as the federated bug `#p6tsifullfederated` (closed in 0.1.57). When a submodule has its own `.naming.toml` / `.naming/index.json` but the workspace root has none, scoped searches return zero `tagpath_handle` even though the data is right there. Fix: in `cmd_search_with_budget`, pass `&sift_path` (already populated with `scope.source_root` for scoped paths) into `annotate_hits_with_tagpath` instead of `&root`. Tests: extend `tests/exit_code.rs` with a single-submodule fixture where the workspace root has no `.naming.toml` but the submodule does; assert `tsift search ... --scope <name> --json` returns hits with `tagpath_handle` set.
 - [ ] [#tpauditscope] `tsift audit-tagpath --scope <name>` test coverage. The implementation routes through `config::Config::resolve_submodule` and opens the scoped `index.db` + tagpath at `scope.source_root`, but the `audit_tagpath_reports_walker_diff` test only exercises the workspace-root path. Add a fixture with `alpha` + `beta` submodules where one submodule's tagpath skips a path tsift indexes; assert the JSON `scope: "<name>"` field is set and only that submodule's files appear in `tsift_only_files`.
 - [ ] [#tpauditpolicy] Policy-hint surfacing for `tsift audit-tagpath`. Today the audit reports WHAT diverges (tsift-only / tagpath-only files) but not WHY. Parse the resolved `NamingConfig` (including `extends` chain) and surface: (a) hard-coded `SKIP_DIRS` hits per tsift-only file (the obvious explanation when files live under `__pycache__/`, `vendor/`, `target/`, `node_modules/`, `.venv/`, `.git/`), (b) language coverage gaps (extension not in tagpath's `SOURCE_EXTENSIONS` but tsift's walker accepted it). New JSON fields: `tsift_only_files_with_policy_hints: [{file, hints: ["skip_dir:__pycache__", "extension_unsupported"]}]`. Operators can then decide whether to broaden tagpath, narrow tsift, or accept the gap with intent.
 - [ ] [#commhxstrong] Stronger fix for `#commhx` name-collision wrong-handle (closed cheaply in 0.1.56 by iterating `symbol_info` rows). Today when two files define the same symbol AND both have valid tagpath handles, the resolver returns the FIRST file's handle, which may not match the actual call edge's resolved file. Stronger fix: when resolving a callee handle for a caller row, prefer the `symbol_info` row whose file lives in the same Louvain community as the caller (use `caller_file` evidence). Falls back to current first-handle-wins behavior when no community context is available (e.g. `tsift communities` itself). Touches `annotate_stored_edges_with_tagpath::EdgeSide::Callee` and the per-row `resolve_tagpath_handles_for_names` helper. Tests: extend the name-collision fixture from 0.1.56 with two valid tagpath handles (both files indexed by tagpath); assert the caller's callee handle matches the file in the caller's community.

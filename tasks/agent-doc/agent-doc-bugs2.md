@@ -33,7 +33,11 @@ Fixed agent:queue stuck-after-1-turn — auto-strike done items at preflight.
 Compacted content:
 - Archived 6 response topic(s): do [#jbrsrbusysim]; Why is the queue still stalling?; Is agent-doc capable of activating the Claude `/loop`?; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:2c2bd1e6 -->
+
+### Re: batch closeout for ipclegacyfix, ipcpluginalready, ipcfilehashskip — opus-4-7
+
+All three queue items landed. Submodule d899c92, superproject 2a7116db8, both pushed. JB plugin 0.2.131 zips signed + unsigned built. ipclegacyfix migrated test fixtures from the legacy backlog component name to the canonical one (31+4 sites; 30 tests recovered). ipcfilehashskip adds response-only hash-skip in src/write.rs try_ipc fallback. ipcpluginalready adds FFI v2 listener with already_applied ack; JB plugin uses v2 with lastApplyWasNoOp detection. Verification clean (2358 unit pass plus pre-existing parallel-execution flakes that pass when run alone; integration suites all green except 1 pre-existing pane-recursion test unrelated to this work). Next queue head: jbrsrbusysw.
+<!-- agent:boundary:b1d8c717 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -54,6 +58,8 @@ preset #spec-test-build-install-commit-push
 - ~do [#cclooploop]~
 - ~do [#ipcdupfin23]~
 - do Phases 1 + 5 in tasks/agent-doc/plan-ipc-corruption-and-duplicate-during-typing.md
+- do [#jbrsrbusysw]
+- do [#jbrsrbusyide]
 - do [#jbccfix]
 - do [#jbccreg]
 - do [#jbccdocs]

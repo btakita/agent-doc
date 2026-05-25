@@ -712,10 +712,10 @@ enum Commands {
         /// Path to the session document
         file: PathBuf,
     },
-    /// Serve a localhost HTTP markdown editor for the session document (Phase 1 MVP — see tasks/agent-doc/plan-web-interface.md)
+    /// Serve a localhost HTTP markdown editor for one document or a project session list
     Serve {
-        /// Path to the session document
-        file: PathBuf,
+        /// Path to a session document or project directory. Defaults to the nearest project root from CWD.
+        file: Option<PathBuf>,
         /// Bind host (default: 127.0.0.1)
         #[arg(long)]
         host: Option<String>,

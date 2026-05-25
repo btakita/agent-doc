@@ -1,9 +1,9 @@
 //! # Module: serve
 //!
 //! ## Spec
-//! - `agent-doc serve <FILE> [--port 7333] [--host 127.0.0.1]` starts a
-//!   localhost HTTP server that exposes a minimal markdown editor for the
-//!   session document.
+//! - `agent-doc serve [FILE_OR_DIR] [--port 7333] [--host 127.0.0.1]` starts a
+//!   localhost HTTP server that exposes a minimal markdown editor for one
+//!   session document or the project session list.
 //! - Phase 1 MVP per `tasks/agent-doc/plan-web-interface.md`: localhost-only
 //!   bind, raw `<textarea>` editor, no auth. Phase 2 adds an SSE `/events`
 //!   stream that reports file changes so browser tabs can reload. All writes
@@ -12,6 +12,8 @@
 //! - Routes:
 //!   - `GET /` → embedded HTML editor page (`INDEX_HTML`).
 //!   - `GET /doc` → current document text (read from disk).
+//!   - `GET /doc/<path-or-hash>` → current text for a project session document.
+//!   - `GET /api/sessions` → project session list.
 //!   - `POST /save` → body = full document text; calls `write --commit`,
 //!     returns JSON with the new HEAD short SHA.
 //!   - `GET /events` → Server-Sent Events stream with `ready`, `doc-changed`,
@@ -35,10 +37,11 @@
 
 use anyhow::{Context, Result};
 use serde::Serialize;
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tiny_http::{Header, Method, Response, Server, StatusCode};
@@ -50,15 +53,15 @@ const MAX_BODY_BYTES: usize = 4 * 1024 * 1024; // 4 MiB cap for the MVP
 const SSE_POLL_INTERVAL_MS: u64 = 300;
 
 pub struct ServeOptions {
-    pub file: PathBuf,
+    pub target: Option<PathBuf>,
     pub host: String,
     pub port: u16,
 }
 
 impl ServeOptions {
-    pub fn new(file: PathBuf, host: Option<String>, port: Option<u16>) -> Self {
+    pub fn new(target: Option<PathBuf>, host: Option<String>, port: Option<u16>) -> Self {
         Self {
-            file,
+            target,
             host: host.unwrap_or_else(|| DEFAULT_HOST.to_string()),
             port: port.unwrap_or(DEFAULT_PORT),
         }
@@ -66,13 +69,7 @@ impl ServeOptions {
 }
 
 pub fn run(options: ServeOptions) -> Result<()> {
-    if !options.file.exists() {
-        anyhow::bail!("file not found: {}", options.file.display());
-    }
-    let canonical = options
-        .file
-        .canonicalize()
-        .with_context(|| format!("failed to canonicalize {}", options.file.display()))?;
+    let state = Arc::new(ServeState::new(options.target)?);
 
     if options.host != "127.0.0.1" && options.host != "localhost" {
         eprintln!(
@@ -82,19 +79,21 @@ pub fn run(options: ServeOptions) -> Result<()> {
     }
 
     let bind = format!("{}:{}", options.host, options.port);
-    let server = Server::http(&bind)
-        .map_err(|e| anyhow::anyhow!("failed to bind {bind}: {e}"))?;
+    let server = Server::http(&bind).map_err(|e| anyhow::anyhow!("failed to bind {bind}: {e}"))?;
 
-    eprintln!(
-        "[serve] listening on http://{} — editing {}",
-        bind,
-        canonical.display()
-    );
+    match &state.default_doc {
+        Some(doc) => eprintln!("[serve] listening on http://{} — editing {}", bind, doc.display()),
+        None => eprintln!(
+            "[serve] listening on http://{} — browsing {}",
+            bind,
+            state.root.display()
+        ),
+    }
 
     for request in server.incoming_requests() {
-        let doc = canonical.clone();
+        let state = Arc::clone(&state);
         thread::spawn(move || {
-            if let Err(e) = handle_request(request, &doc) {
+            if let Err(e) = handle_request(request, &state) {
                 eprintln!("[serve] request error: {e}");
             }
         });
@@ -102,32 +101,134 @@ pub fn run(options: ServeOptions) -> Result<()> {
     Ok(())
 }
 
-fn handle_request(request: tiny_http::Request, doc: &Path) -> Result<()> {
-    let url = request.url().to_string();
-    let method = request.method().clone();
-    match (method, url.as_str()) {
-        (Method::Get, "/") | (Method::Get, "/index.html") => {
-            respond(request, INDEX_HTML, "text/html; charset=utf-8", StatusCode(200))
+#[derive(Clone, Debug)]
+struct ServeState {
+    root: PathBuf,
+    default_doc: Option<PathBuf>,
+    browse_root: bool,
+}
+
+impl ServeState {
+    fn new(target: Option<PathBuf>) -> Result<Self> {
+        let raw_target = match target {
+            Some(target) => target,
+            None => {
+                let cwd = std::env::current_dir().context("failed to get current directory")?;
+                crate::snapshot::find_project_root(&cwd).unwrap_or(cwd)
+            }
+        };
+        if !raw_target.exists() {
+            anyhow::bail!("file or directory not found: {}", raw_target.display());
         }
+        let canonical = raw_target
+            .canonicalize()
+            .with_context(|| format!("failed to canonicalize {}", raw_target.display()))?;
+        if canonical.is_file() {
+            let root = crate::snapshot::find_project_root(&canonical)
+                .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+            Ok(Self {
+                root,
+                default_doc: Some(canonical),
+                browse_root: false,
+            })
+        } else {
+            let root = crate::snapshot::find_project_root(&canonical).unwrap_or(canonical);
+            Ok(Self {
+                root,
+                default_doc: None,
+                browse_root: true,
+            })
+        }
+    }
+
+    fn resolve_doc(&self, token: Option<&str>) -> Result<PathBuf> {
+        let sessions = list_sessions(self)?;
+        if let Some(token) = token.filter(|token| !token.is_empty()) {
+            let decoded = percent_decode(token.trim_start_matches('/'))?;
+            if let Some(session) = sessions.iter().find(|session| {
+                session.id == decoded || session.path == decoded || session.absolute == decoded
+            }) {
+                if !session.exists {
+                    anyhow::bail!("session document is registered but missing: {}", session.path);
+                }
+                return Ok(PathBuf::from(&session.absolute));
+            }
+            return self.resolve_relative_doc(&decoded);
+        }
+        if let Some(doc) = &self.default_doc {
+            return Ok(doc.clone());
+        }
+        sessions
+            .iter()
+            .find(|session| session.exists)
+            .map(|session| PathBuf::from(&session.absolute))
+            .ok_or_else(|| {
+                anyhow::anyhow!("no session documents found under {}", self.root.display())
+            })
+    }
+
+    fn resolve_relative_doc(&self, decoded: &str) -> Result<PathBuf> {
+        let relative = Path::new(decoded);
+        if decoded.is_empty()
+            || relative.components().any(|component| {
+                matches!(
+                    component,
+                    Component::ParentDir | Component::RootDir | Component::Prefix(_)
+                )
+            })
+        {
+            anyhow::bail!("invalid document path: {decoded}");
+        }
+        let candidate = self.root.join(relative);
+        let canonical = candidate
+            .canonicalize()
+            .with_context(|| format!("session document not found: {decoded}"))?;
+        if !canonical.starts_with(&self.root) {
+            anyhow::bail!("document path escapes served root: {decoded}");
+        }
+        if !is_agent_doc_file(&canonical)? {
+            anyhow::bail!("not an agent-doc session document: {decoded}");
+        }
+        Ok(canonical)
+    }
+}
+
+fn handle_request(request: tiny_http::Request, state: &ServeState) -> Result<()> {
+    let url = request.url().to_string();
+    let route = route_path(&url);
+    let method = request.method().clone();
+    match (method, route) {
+        (Method::Get, "/") | (Method::Get, "/index.html") => respond(
+            request,
+            INDEX_HTML,
+            "text/html; charset=utf-8",
+            StatusCode(200),
+        ),
         (Method::Get, "/healthz") => respond(
             request,
             "ok\n",
             "text/plain; charset=utf-8",
             StatusCode(200),
         ),
-        (Method::Get, "/doc") => {
-            let body = std::fs::read_to_string(doc)
-                .with_context(|| format!("failed to read {}", doc.display()))?;
-            respond(
-                request,
-                &body,
-                "text/markdown; charset=utf-8",
-                StatusCode(200),
-            )
+        (Method::Get, "/api/sessions") => handle_sessions(request, state),
+        (Method::Get, "/doc") => handle_doc(request, state, None),
+        (Method::Get, route) if route.starts_with("/doc/") => {
+            handle_doc(request, state, Some(&route["/doc/".len()..]))
         }
-        (Method::Get, "/api/projection") => handle_projection(request, doc),
-        (Method::Get, "/events") => handle_events(request, doc),
-        (Method::Post, "/save") => handle_save(request, doc),
+        (Method::Get, "/api/projection") => handle_projection(request, state, None),
+        (Method::Get, route) if route.starts_with("/api/projection/") => handle_projection(
+            request,
+            state,
+            Some(&route["/api/projection/".len()..]),
+        ),
+        (Method::Get, "/events") => handle_events(request, state, None),
+        (Method::Get, route) if route.starts_with("/events/") => {
+            handle_events(request, state, Some(&route["/events/".len()..]))
+        }
+        (Method::Post, "/save") => handle_save(request, state, None),
+        (Method::Post, route) if route.starts_with("/save/") => {
+            handle_save(request, state, Some(&route["/save/".len()..]))
+        }
         _ => respond(
             request,
             "not found\n",
@@ -137,8 +238,59 @@ fn handle_request(request: tiny_http::Request, doc: &Path) -> Result<()> {
     }
 }
 
-fn handle_projection(request: tiny_http::Request, doc: &Path) -> Result<()> {
-    let body = std::fs::read_to_string(doc)
+fn handle_sessions(request: tiny_http::Request, state: &ServeState) -> Result<()> {
+    let payload = build_sessions_payload(state)?;
+    respond(
+        request,
+        &serde_json::to_string(&payload)?,
+        "application/json; charset=utf-8",
+        StatusCode(200),
+    )
+}
+
+fn handle_doc(
+    request: tiny_http::Request,
+    state: &ServeState,
+    token: Option<&str>,
+) -> Result<()> {
+    let doc = match state.resolve_doc(token) {
+        Ok(doc) => doc,
+        Err(e) => {
+            return respond(
+                request,
+                &format!("{e}\n"),
+                "text/plain; charset=utf-8",
+                StatusCode(404),
+            );
+        }
+    };
+    let body = std::fs::read_to_string(&doc)
+        .with_context(|| format!("failed to read {}", doc.display()))?;
+    respond(
+        request,
+        &body,
+        "text/markdown; charset=utf-8",
+        StatusCode(200),
+    )
+}
+
+fn handle_projection(
+    request: tiny_http::Request,
+    state: &ServeState,
+    token: Option<&str>,
+) -> Result<()> {
+    let doc = match state.resolve_doc(token) {
+        Ok(doc) => doc,
+        Err(e) => {
+            return respond(
+                request,
+                &format!("{e}\n"),
+                "text/plain; charset=utf-8",
+                StatusCode(404),
+            );
+        }
+    };
+    let body = std::fs::read_to_string(&doc)
         .with_context(|| format!("failed to read {}", doc.display()))?;
     let projection = build_projection(&body)?;
     respond(
@@ -161,6 +313,215 @@ struct ServeProjectionComponent {
     lines: usize,
     items: usize,
     content: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ServeSessions {
+    root: String,
+    selected: Option<String>,
+    sessions: Vec<ServeSession>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct ServeSession {
+    id: String,
+    path: String,
+    absolute: String,
+    title: String,
+    session_id: Option<String>,
+    registered: bool,
+    exists: bool,
+}
+
+fn build_sessions_payload(state: &ServeState) -> Result<ServeSessions> {
+    let sessions = list_sessions(state)?;
+    let selected = state
+        .default_doc
+        .as_ref()
+        .and_then(|doc| relative_path(&state.root, doc).ok())
+        .or_else(|| {
+            sessions
+                .iter()
+                .find(|session| session.exists)
+                .map(|session| session.path.clone())
+        });
+    Ok(ServeSessions {
+        root: state.root.display().to_string(),
+        selected,
+        sessions,
+    })
+}
+
+fn list_sessions(state: &ServeState) -> Result<Vec<ServeSession>> {
+    let mut by_path: BTreeMap<PathBuf, ServeSession> = BTreeMap::new();
+
+    if let Some(doc) = &state.default_doc {
+        upsert_session(&mut by_path, &state.root, doc.clone(), None, false)?;
+    }
+    if !state.browse_root {
+        return Ok(by_path.into_values().collect());
+    }
+
+    if let Ok(registry) = crate::sessions::load_in(&state.root) {
+        for (key, entry) in registry {
+            let path = registry_entry_path(&state.root, &key, &entry);
+            let session_id = (!entry.session_id.is_empty()).then_some(entry.session_id);
+            upsert_session(&mut by_path, &state.root, path, session_id, true)?;
+        }
+    }
+
+    let mut scanned = Vec::new();
+    scan_agent_docs(&state.root, &mut scanned)?;
+    for path in scanned {
+        let session_id = read_agent_doc_session_id(&path).ok().flatten();
+        upsert_session(&mut by_path, &state.root, path, session_id, false)?;
+    }
+
+    Ok(by_path.into_values().collect())
+}
+
+fn registry_entry_path(
+    root: &Path,
+    key: &str,
+    entry: &crate::sessions::SessionEntry,
+) -> PathBuf {
+    if !entry.file.is_empty() {
+        let file = Path::new(&entry.file);
+        if file.is_absolute() {
+            return file.to_path_buf();
+        }
+        return root.join(file);
+    }
+    PathBuf::from(key)
+}
+
+fn upsert_session(
+    by_path: &mut BTreeMap<PathBuf, ServeSession>,
+    root: &Path,
+    path: PathBuf,
+    session_id: Option<String>,
+    registered: bool,
+) -> Result<()> {
+    let display_path = canonicalize_or_normalize(&path);
+    let key = display_path.clone();
+    let session = make_session(root, &display_path, session_id, registered)?;
+    by_path
+        .entry(key)
+        .and_modify(|existing| {
+            existing.registered |= session.registered;
+            if existing.session_id.is_none() {
+                existing.session_id = session.session_id.clone();
+            }
+            existing.exists |= session.exists;
+        })
+        .or_insert(session);
+    Ok(())
+}
+
+fn make_session(
+    root: &Path,
+    path: &Path,
+    session_id: Option<String>,
+    registered: bool,
+) -> Result<ServeSession> {
+    let absolute = canonicalize_or_normalize(path);
+    let absolute_str = absolute.display().to_string();
+    let hash = crate::snapshot::doc_hash_from_str(&absolute_str);
+    let id = hash.chars().take(12).collect();
+    let path = relative_path(root, &absolute).unwrap_or_else(|_| absolute_str.clone());
+    let title = absolute
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(&path)
+        .to_string();
+    Ok(ServeSession {
+        id,
+        path,
+        absolute: absolute_str,
+        title,
+        session_id,
+        registered,
+        exists: absolute.exists(),
+    })
+}
+
+fn scan_agent_docs(root: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
+    if !root.is_dir() {
+        return Ok(());
+    }
+    for entry in
+        std::fs::read_dir(root).with_context(|| format!("failed to read {}", root.display()))?
+    {
+        let entry = entry?;
+        let path = entry.path();
+        let name = entry.file_name();
+        if path.is_dir() {
+            if is_ignored_session_scan_dir(&name) {
+                continue;
+            }
+            scan_agent_docs(&path, out)?;
+        } else if is_agent_doc_file(&path)? {
+            out.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn is_ignored_session_scan_dir(name: &std::ffi::OsStr) -> bool {
+    matches!(
+        name.to_str(),
+        Some(".agent-doc" | ".git" | "node_modules" | "target")
+    )
+}
+
+fn is_agent_doc_file(path: &Path) -> Result<bool> {
+    if path.extension().and_then(|ext| ext.to_str()) != Some("md") {
+        return Ok(false);
+    }
+    let content = std::fs::read_to_string(path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    let (frontmatter, _) = match crate::frontmatter::parse(&content) {
+        Ok(parsed) => parsed,
+        Err(_) => return Ok(false),
+    };
+    Ok(frontmatter.session.is_some()
+        || frontmatter.format.is_some()
+        || content.contains("<!-- agent:exchange")
+        || content.contains("<!-- agent:backlog")
+        || content.contains("<!-- agent:queue"))
+}
+
+fn read_agent_doc_session_id(path: &Path) -> Result<Option<String>> {
+    let content = std::fs::read_to_string(path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    let (frontmatter, _) = crate::frontmatter::parse(&content)?;
+    Ok(frontmatter.session)
+}
+
+fn relative_path(root: &Path, path: &Path) -> Result<String> {
+    let relative = path
+        .strip_prefix(root)
+        .with_context(|| format!("{} is not under {}", path.display(), root.display()))?;
+    Ok(relative.to_string_lossy().replace('\\', "/"))
+}
+
+fn canonicalize_or_normalize(path: &Path) -> PathBuf {
+    path.canonicalize()
+        .unwrap_or_else(|_| normalize_path(path))
+}
+
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            other => normalized.push(other.as_os_str()),
+        }
+    }
+    normalized
 }
 
 fn build_projection(doc: &str) -> Result<ServeProjection> {
@@ -199,7 +560,22 @@ fn projection_component(
     }
 }
 
-fn handle_events(request: tiny_http::Request, doc: &Path) -> Result<()> {
+fn handle_events(
+    request: tiny_http::Request,
+    state: &ServeState,
+    token: Option<&str>,
+) -> Result<()> {
+    let doc = match state.resolve_doc(token) {
+        Ok(doc) => doc,
+        Err(e) => {
+            return respond(
+                request,
+                &format!("{e}\n"),
+                "text/plain; charset=utf-8",
+                StatusCode(404),
+            );
+        }
+    };
     let headers = vec![
         header("Content-Type", "text/event-stream; charset=utf-8")?,
         header("Cache-Control", "no-cache")?,
@@ -207,7 +583,7 @@ fn handle_events(request: tiny_http::Request, doc: &Path) -> Result<()> {
     let response = Response::new(
         StatusCode(200),
         headers,
-        SsePollStream::new(doc.to_path_buf()),
+        SsePollStream::new(doc),
         None,
         None,
     )
@@ -353,11 +729,31 @@ impl Read for SsePollStream {
     }
 }
 
-fn handle_save(mut request: tiny_http::Request, doc: &Path) -> Result<()> {
+fn handle_save(
+    mut request: tiny_http::Request,
+    state: &ServeState,
+    token: Option<&str>,
+) -> Result<()> {
+    let doc = match state.resolve_doc(token) {
+        Ok(doc) => doc,
+        Err(e) => {
+            return respond(
+                request,
+                &format!("{e}\n"),
+                "text/plain; charset=utf-8",
+                StatusCode(404),
+            );
+        }
+    };
     let content_length = request
         .headers()
         .iter()
-        .find(|h| h.field.as_str().as_str().eq_ignore_ascii_case("content-length"))
+        .find(|h| {
+            h.field
+                .as_str()
+                .as_str()
+                .eq_ignore_ascii_case("content-length")
+        })
         .and_then(|h| h.value.as_str().parse::<usize>().ok())
         .unwrap_or(0);
     if content_length > MAX_BODY_BYTES {
@@ -384,7 +780,7 @@ fn handle_save(mut request: tiny_http::Request, doc: &Path) -> Result<()> {
         );
     }
 
-    if let Err(e) = std::fs::write(doc, &body) {
+    if let Err(e) = std::fs::write(&doc, &body) {
         return respond(
             request,
             &format!("failed to write {}: {e}\n", doc.display()),
@@ -399,7 +795,7 @@ fn handle_save(mut request: tiny_http::Request, doc: &Path) -> Result<()> {
     // `write --commit` / `finalize`. Future phases hooking the editor up to
     // live cycles (Phase 6 in plan-web-interface.md) will route through
     // those boundaries instead.
-    if let Err(e) = git_commit_user_edit(doc) {
+    if let Err(e) = git_commit_user_edit(&doc) {
         return respond(
             request,
             &format!("git commit failed: {e}\n"),
@@ -408,7 +804,7 @@ fn handle_save(mut request: tiny_http::Request, doc: &Path) -> Result<()> {
         );
     }
 
-    let head = git_head_short(doc).unwrap_or_else(|_| "<unknown>".to_string());
+    let head = git_head_short(&doc).unwrap_or_else(|_| "<unknown>".to_string());
     let payload = serde_json::json!({
         "ok": true,
         "head": head,
@@ -488,6 +884,40 @@ fn git_head_short(doc: &Path) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
+fn route_path(url: &str) -> &str {
+    url.split_once('?').map(|(path, _)| path).unwrap_or(url)
+}
+
+fn percent_decode(input: &str) -> Result<String> {
+    let bytes = input.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            if i + 2 >= bytes.len() {
+                anyhow::bail!("invalid percent encoding in path");
+            }
+            let high = hex_value(bytes[i + 1])?;
+            let low = hex_value(bytes[i + 2])?;
+            decoded.push((high << 4) | low);
+            i += 3;
+        } else {
+            decoded.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(decoded).context("path is not valid UTF-8")
+}
+
+fn hex_value(byte: u8) -> Result<u8> {
+    match byte {
+        b'0'..=b'9' => Ok(byte - b'0'),
+        b'a'..=b'f' => Ok(byte - b'a' + 10),
+        b'A'..=b'F' => Ok(byte - b'A' + 10),
+        _ => anyhow::bail!("invalid percent encoding in path"),
+    }
+}
+
 fn respond(
     request: tiny_http::Request,
     body: &str,
@@ -544,7 +974,7 @@ mod tests {
 
     #[test]
     fn serve_index_html_subscribes_to_sse_doc_changed_events() {
-        assert!(INDEX_HTML.contains("new EventSource(\"/events\")"));
+        assert!(INDEX_HTML.contains("new EventSource(docUrl(\"/events\"))"));
         assert!(INDEX_HTML.contains("doc-changed"));
     }
 
@@ -579,5 +1009,97 @@ mod tests {
             .find(|component| component.name == "review")
             .unwrap();
         assert!(!review.present);
+    }
+
+    #[test]
+    fn serve_sessions_include_registry_and_scanned_docs() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::write(
+            root.join("tasks/one.md"),
+            "---\nagent_doc_session: one\nagent_doc_format: template\n---\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("registered.md"), "# registered\n").unwrap();
+
+        let mut registry = crate::sessions::SessionRegistry::new();
+        registry.insert(
+            root.join("registered.md").display().to_string(),
+            crate::sessions::SessionEntry {
+                pane: "%1".to_string(),
+                pid: 1,
+                cwd: root.display().to_string(),
+                started: "2026-05-25T00:00:00Z".to_string(),
+                session_id: "registered".to_string(),
+                file: "registered.md".to_string(),
+                window: "@1".to_string(),
+                supervisor_instance_id: String::new(),
+            },
+        );
+        crate::sessions::save_in(root, &registry).unwrap();
+
+        let state = ServeState {
+            root: root.to_path_buf(),
+            default_doc: None,
+            browse_root: true,
+        };
+        let sessions = list_sessions(&state).unwrap();
+
+        assert!(sessions.iter().any(|session| session.path == "tasks/one.md"
+            && session.session_id.as_deref() == Some("one")));
+        assert!(sessions.iter().any(|session| session.path == "registered.md"
+            && session.registered
+            && session.session_id.as_deref() == Some("registered")));
+    }
+
+    #[test]
+    fn serve_resolves_doc_path_and_short_hash_inside_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::write(
+            root.join("tasks/one.md"),
+            "---\nagent_doc_session: one\nagent_doc_format: template\n---\n",
+        )
+        .unwrap();
+
+        let state = ServeState {
+            root: root.to_path_buf(),
+            default_doc: None,
+            browse_root: true,
+        };
+        let sessions = list_sessions(&state).unwrap();
+        let session = sessions
+            .iter()
+            .find(|session| session.path == "tasks/one.md")
+            .unwrap();
+
+        assert_eq!(
+            state
+                .resolve_doc(Some("tasks%2Fone.md"))
+                .unwrap()
+                .strip_prefix(root)
+                .unwrap(),
+            Path::new("tasks/one.md")
+        );
+        assert_eq!(
+            state
+                .resolve_doc(Some(&session.id))
+                .unwrap()
+                .strip_prefix(root)
+                .unwrap(),
+            Path::new("tasks/one.md")
+        );
+        assert!(state.resolve_doc(Some("..%2Fsecret.md")).is_err());
+    }
+
+    #[test]
+    fn serve_index_html_loads_sessions_and_hash_routes() {
+        assert!(INDEX_HTML.contains("/api/sessions"));
+        assert!(INDEX_HTML.contains("docNav"));
+        assert!(INDEX_HTML.contains("hashchange"));
     }
 }

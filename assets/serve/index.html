@@ -16,7 +16,14 @@
     button { background: var(--accent); color: #fff; border: 0; border-radius: 4px; padding: 6px 14px; font-size: 13px; cursor: pointer; font-weight: 600; }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
     button.secondary { background: #2a2f3a; color: var(--fg); }
-    .workspace { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 340px; }
+    .workspace { flex: 1; min-height: 0; display: grid; grid-template-columns: 260px minmax(0, 1fr) 340px; }
+    .workspace.single-doc { grid-template-columns: minmax(0, 1fr) 340px; }
+    .doc-nav { min-width: 0; min-height: 0; overflow: auto; background: #12151c; border-right: 1px solid #232735; }
+    .doc-nav[hidden] { display: none; }
+    .doc-list { display: flex; flex-direction: column; gap: 2px; padding: 8px; }
+    .doc-list button { width: 100%; min-height: 32px; padding: 6px 8px; text-align: left; border-radius: 4px; background: transparent; color: var(--fg); font-weight: 500; overflow-wrap: anywhere; }
+    .doc-list button.active { background: #1b202a; color: #fff; }
+    .doc-list button.missing { color: var(--warn); }
     .editor-shell { min-width: 0; min-height: 0; display: grid; grid-template-columns: 56px minmax(0, 1fr); background: #0b0d11; }
     .gutter { padding: 16px 10px; color: #5c6370; background: #11141a; border-right: 1px solid #232735; font: 13px/1.5 ui-monospace, "SF Mono", Menlo, monospace; text-align: right; overflow: hidden; user-select: none; white-space: pre; }
     textarea { width: 100%; height: 100%; background: #0b0d11; color: var(--fg); border: 0; padding: 16px; font: 13px/1.5 ui-monospace, "SF Mono", Menlo, monospace; resize: none; outline: none; tab-size: 2; line-height: 1.5; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -32,7 +39,9 @@
     .component-content { flex: 1; min-height: 0; margin: 0; overflow: auto; padding: 12px; white-space: pre-wrap; overflow-wrap: anywhere; color: #d8dee9; font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace; }
     .footer { padding: 6px 12px; background: #181b22; border-top: 1px solid #232735; color: var(--muted); font-size: 11px; font-family: ui-monospace, monospace; display: flex; gap: 16px; flex-shrink: 0; }
     @media (max-width: 900px) {
-      .workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 220px; }
+      .workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: 160px minmax(0, 1fr) 220px; }
+      .workspace.single-doc { grid-template-rows: minmax(0, 1fr) 220px; }
+      .doc-nav { border-right: 0; border-bottom: 1px solid #232735; }
       .inspector { border-left: 0; border-top: 1px solid #232735; }
     }
   </style>
@@ -45,6 +54,9 @@
     <button id="save" disabled>save (Ctrl+S)</button>
   </header>
   <main class="workspace">
+    <aside class="doc-nav" id="docNav" aria-label="Session documents" hidden>
+      <div class="doc-list" id="docList"></div>
+    </aside>
     <section class="editor-shell" aria-label="Markdown editor">
       <pre class="gutter" id="gutter" aria-hidden="true">1</pre>
       <textarea id="editor" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" wrap="soft"></textarea>
@@ -71,6 +83,9 @@
   </div>
 
   <script>
+    const workspace = document.querySelector(".workspace");
+    const docNav = document.getElementById("docNav");
+    const docList = document.getElementById("docList");
     const editor = document.getElementById("editor");
     const gutter = document.getElementById("gutter");
     const status = document.getElementById("status");
@@ -84,6 +99,8 @@
     let savedContent = "";
     let saving = false;
     let events = null;
+    let sessions = [];
+    let selectedDoc = "";
 
     class AgentDocComponent extends HTMLElement {
       set data(component) {
@@ -126,15 +143,77 @@
       return editor.value !== savedContent;
     }
 
+    function docUrl(base) {
+      return selectedDoc ? `${base}/${encodeURIComponent(selectedDoc)}` : base;
+    }
+
+    function hashSelection() {
+      if (!window.location.hash.startsWith("#/")) return "";
+      try {
+        return decodeURIComponent(window.location.hash.slice(2));
+      } catch (_) {
+        return "";
+      }
+    }
+
+    async function loadSessions() {
+      try {
+        const r = await fetch("/api/sessions", { cache: "no-store" });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const projection = await r.json();
+        sessions = projection.sessions || [];
+        const hashDoc = hashSelection();
+        selectedDoc = sessions.some((session) => session.path === hashDoc)
+          ? hashDoc
+          : (projection.selected || sessions.find((session) => session.exists)?.path || "");
+        renderSessions();
+      } catch (e) {
+        sessions = [];
+        selectedDoc = "";
+        setStatus("session list failed: " + e.message, "err");
+      }
+    }
+
+    function renderSessions() {
+      docList.textContent = "";
+      const showNav = sessions.length > 1;
+      docNav.hidden = !showNav;
+      workspace.classList.toggle("single-doc", !showNav);
+      for (const session of sessions) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = session.path;
+        button.title = session.absolute;
+        button.classList.toggle("active", session.path === selectedDoc);
+        button.classList.toggle("missing", !session.exists);
+        button.addEventListener("click", () => selectDoc(session.path));
+        docList.append(button);
+      }
+    }
+
+    function selectDoc(path) {
+      if (path === selectedDoc) return;
+      if (hasUnsavedEdits() && !confirm("Discard unsaved edits and switch documents?")) return;
+      selectedDoc = path;
+      window.location.hash = "#/" + encodeURIComponent(path);
+      renderSessions();
+      loadDoc("loading " + path + "…");
+      connectEvents();
+    }
+
     async function loadDoc(reason) {
       setStatus(reason || "loading…");
+      if (!selectedDoc && sessions.length === 0) {
+        setStatus("no session documents found", "warn");
+        return;
+      }
       try {
-        const r = await fetch("/doc", { cache: "no-store" });
+        const r = await fetch(docUrl("/doc"), { cache: "no-store" });
         if (!r.ok) throw new Error("HTTP " + r.status);
         const text = await r.text();
         savedContent = text;
         editor.value = text;
-        setStatus(reason ? "reloaded from disk" : "loaded", "ok");
+        setStatus("loaded", "ok");
         updateDirty();
         updateGutter();
         loadProjection();
@@ -145,7 +224,7 @@
 
     async function loadProjection() {
       try {
-        const r = await fetch("/api/projection", { cache: "no-store" });
+        const r = await fetch(docUrl("/api/projection"), { cache: "no-store" });
         if (!r.ok) throw new Error("HTTP " + r.status);
         const projection = await r.json();
         renderProjection(projection);
@@ -172,9 +251,9 @@
       if (saving) return;
       saving = true;
       saveBtn.disabled = true;
-      setStatus("saving via agent-doc write --commit…");
+      setStatus("saving document…");
       try {
-        const r = await fetch("/save", {
+        const r = await fetch(docUrl("/save"), {
           method: "POST",
           headers: { "Content-Type": "text/markdown; charset=utf-8" },
           body: editor.value,
@@ -201,11 +280,13 @@
         setStatus("live updates unavailable; manual reload still works", "warn");
         return;
       }
-      events = new EventSource("/events");
+      if (events) events.close();
+      events = new EventSource(docUrl("/events"));
       events.addEventListener("ready", () => {
         setStatus("live updates connected", "ok");
       });
       events.addEventListener("doc-changed", () => {
+        loadSessions();
         if (hasUnsavedEdits()) {
           setStatus("file changed on disk; reload to discard local edits", "warn");
           return;
@@ -255,8 +336,17 @@
       }
     });
 
-    loadDoc();
-    connectEvents();
+    window.addEventListener("hashchange", () => {
+      const hashDoc = hashSelection();
+      if (hashDoc && sessions.some((session) => session.path === hashDoc)) {
+        selectDoc(hashDoc);
+      }
+    });
+
+    loadSessions().then(() => {
+      loadDoc();
+      connectEvents();
+    });
   </script>
 </body>
 </html>

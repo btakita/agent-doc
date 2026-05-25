@@ -184,6 +184,7 @@ Once that returns a clean sync report, `#gdbvacconvex` is closable and the Conve
 Per your "scaffold + stop at auth" choice, I held off on `git add` / `git commit` / `git push` so the working tree stays inspectable before you authenticate. The `#gdbprephot` packet is still running in parallel; once both it returns and your `npx convex dev` lands, I'll do one aggregated commit + push that covers `#gdbprephot`'s code/version-bump + the scaffold + any post-deploy `convex-sync` proof.
 
 If you'd rather I commit the scaffold now as a separate atom (lower risk of mixing scopes), say so and I'll do that immediately.
+❯ commit + push
 ### Re: #gdbvacproof partial (local compact half) landed — opus-4-7
 
 Evidence committed: tsift `af7c3ae`, superproject `c8d9ca732`. `#gdbvacproof` stays in review — only the local-compact half has proof; the Convex half remains gated behind `#gdbvacconvex`.
@@ -209,7 +210,18 @@ Full evidence at `src/tsift/plans/gdbvacproof-evidence.md`.
 
 #### Pre-existing scaffold note
 `src/tsift/examples/convex-graph-app/` (created earlier this turn) is **still untracked** per your "do NOT install/commit/push until after deploy works" direction. It will be committed in the cycle that closes `#gdbvacconvex` (after your interactive `npx convex dev` confirms the live deployment works).
-<!-- agent:boundary:993a670e -->
+### Re: commit + push — opus-4-7
+
+Two scoped commits on tsift, plus the superproject pointer bump. Both pushed.
+
+| Commit | Scope |
+| --- | --- |
+| tsift `d979902` | `perf(graph-db): #gdbprephot — complete full-projection samples in v0.1.49 evidence` (VERSIONS.md + evidence doc fill-in: `context_pack_diff` -39.7 % on full-projection vs -35.2 % default; parent -4.7 % vs -1.8 %) |
+| tsift `95d68d3` | `feat(convex-graph-app): scaffold standalone Convex app for #gdbvacconvex deployment` (8 files: package.json, tsconfig.json, .gitignore, bun.lock, convex/{schema,graph,http}.ts, README.md) |
+| superproject `7d63c9e66` | `chore(tsift): bump submodule pointer to 95d68d3` |
+
+Both tsift commits live on `main` upstream. The convex-graph-app scaffold is now tracked; your interactive `npx convex dev` step against it remains the only thing standing between us and closing `#gdbvacconvex` + the Convex half of `#gdbvacproof`.
+<!-- agent:boundary:70e1e8c0 -->
 <!-- /agent:exchange -->
 ###
 <!--

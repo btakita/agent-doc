@@ -105,12 +105,32 @@ Pre-existing `write::` tests (271) still pass. `make check` not run because of p
 - Parent `#agent-doc-commit-sibling` stays gated until both land.
 
 Not invoking `/loop` — remaining queue is still the multi-phase / sibling-repo work from prior cycles.
+❯ transfer [#adcs-scripts] into docs.md backlog
+### Re: transfer [#adcs-scripts] into docs.md backlog — opus-4-7 (HEAD)
+
+Transferred `#adcs-scripts` out of `tasks/agent-doc/agent-doc-bugs2.md` into `src/session-share/tasks/docs.md` backlog. Marked the local entry done (acts as a move marker — the work itself was never started here, it just lived in the wrong backlog).
+
+#### What moved
+
+The Phase 3 item that covers extending `backfill-updates.sh` in the four sibling repos (build-party, claudescore.com, claudescore-plugin, plus the canonical home in session-share) to parse the `Session-Doc:` trailer and render the dual link. Same body, retagged to reference `agent-loop:tasks/agent-doc/plan-commit-sibling.md` since the plan file lives in this repo, and cross-linked to `#cross-repo-sessiondoc-trailer` (the umbrella in session-share that this closes the parser sub-part of).
+
+#### Why
+
+- The work runs entirely inside session-share's sibling repos, not `agent-loop`. Keeping the tracking item where the work lives matches how `#cross-repo-sessiondoc-trailer` (also in `src/session-share/tasks/docs.md`) tracks its other sub-parts.
+- Avoids the bookkeeping cost of cross-repo backlog drift — when session-share runs its next `agent-doc` cycle, the head of its backlog will already carry this item.
+
+#### Remaining state of `#agent-doc-commit-sibling`
+
+- `#adcs-binary` — done (committed in `src/agent-doc@718e53b` last cycle).
+- `#adcs-scripts` — moved to `src/session-share/tasks/docs.md`.
+- `#adcs-convention` — still in this file's backlog; that one's also session-share work (`tasks/docs.md` convention authoring) so it could follow the same transfer pattern if you want — leaving it here pending your call.
+- Parent `#agent-doc-commit-sibling` — stays gated until `#adcs-convention` lands and `#adcs-scripts` ships in session-share. Both of those will need their own sessions in those repos.
+
+Not invoking `/loop`. Queue is `queue_halted: item_modified` from your prompt.
 <!-- agent:boundary:27ed13ba -->
 <!-- /agent:exchange -->
 ###
 <!--
-transfer [#adcs-scripts] into docs.md backlog
----
 As I was typing into the comment below `/agent:exchange`, the full-document IPC corruption happened, then the duplicate line happened, then the full-document IPC corruption happened again.
 #spec-test-build-install-commit-push
 ---
@@ -130,8 +150,8 @@ preset #spec-test-build-install-commit-push
 - ~do [#ccloopguard]~
 - ~do [#p6skillinstallreconcile]~
 - ~do [#agent-doc-commit-sibling]~
-- do [#adcs-binary]
-- do [#adoc-jb-cache-cancel-stuck-cycle]
+- ~do [#adcs-binary]~
+- ~do [#adoc-jb-cache-cancel-stuck-cycle]~
 - do [#adoc-prefix-strip-uncommitted]
 - do [#jbrsrbusysw]
 - do [#jbrsrbusyide]

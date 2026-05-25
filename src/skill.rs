@@ -1622,6 +1622,10 @@ mod tests {
         let claude_shared = super::remove_markdown_section(&claude, "## Invocation");
         let codex_shared = super::remove_markdown_section(&codex, "## Invocation");
         let opencode_shared = super::remove_markdown_section(&opencode, "## Invocation");
+        let claude_shared = super::remove_markdown_section(
+            &claude_shared,
+            "## Auto-loop while queue is active (Claude Code)",
+        );
         let claude_shared = claude_shared.replace(CLAUDE_AUTO_UPDATE_LINE, "<AUTO_UPDATE>");
         let codex_shared = codex_shared.replace(CODEX_AUTO_UPDATE_LINE, "<AUTO_UPDATE>");
         let opencode_shared = opencode_shared.replace(OPENCODE_AUTO_UPDATE_LINE, "<AUTO_UPDATE>");

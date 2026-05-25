@@ -6,6 +6,22 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **SimWorld regression coverage for the IPC corruption + duplicate response
+  race when the user types into the post-`/agent:exchange` scratch comment
+  during finalize.** New deterministic scenario in `src/sim_world.rs` exercises
+  the `is_already_applied_error` gate: when socket IPC returns
+  `{"type":"ack","status":"error","reason":"already_applied"}` after the plugin
+  has applied the patch via a prior socket retry, the file-IPC fallback must be
+  skipped so the response is not duplicated on top of the live buffer. Includes
+  the counterfactual dedupe-recovery path to prove `dedupe_ipc_snapshot_content`
+  still collapses the duplicate if the gate ever regresses. Also adds two
+  integration-style tests for the `recover_empty_response_for_strict_closeout`
+  wrapper in `src/write.rs` covering the full `agent-doc dedupe` →
+  `agent-doc write --commit` (empty stdin) recovery path: the dedupe-only drift
+  is committed through the binary path under strict closeout, and the
+  non-strict path stays read-only. Closes Phases 1 and 5 of
+  `tasks/agent-doc/plan-ipc-corruption-and-duplicate-during-typing.md`.
+
 - **`finalize` / `write --commit` now invoke `tagpath lint --dialect agent-doc`
   before the snapshot/commit boundary.** Malformed session-document
   directives — for example `<!-- agent:done archive PATH -->` missing `=` —

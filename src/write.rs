@@ -18176,8 +18176,9 @@ mod pending_patch_normalization_tests {
 #[cfg(test)]
 mod late_fallback_patch_guard_tests {
     use super::{
-        IpcDiskRepairReason, IpcRepairDecision, IpcSnapshotSource, cleanup_fallback_patch_files,
-        cycle_already_committed, recover_dedupe_only_drift, redeliver_ipc_dedupe_to_editor,
+        IpcDiskRepairReason, IpcRepairDecision, IpcSnapshotSource, WriteFlags,
+        cleanup_fallback_patch_files, cycle_already_committed, recover_dedupe_only_drift,
+        recover_empty_response_for_strict_closeout, redeliver_ipc_dedupe_to_editor,
         repair_ipc_decision_visible_state, try_ipc, try_ipc_full_content,
         try_ipc_full_content_operator_mutation_from_source,
     };
@@ -19289,6 +19290,108 @@ Implemented.
         assert!(
             !recovered,
             "arbitrary working-tree drift must not be auto-committed as a dedupe recovery"
+        );
+    }
+
+    // Plan: tasks/agent-doc/plan-ipc-corruption-and-duplicate-during-typing.md
+    // Phase 4 + Phase 5 regression coverage. Exercises the full
+    // `agent-doc dedupe` → `agent-doc write --commit` (empty stdin) recovery
+    // path through the strict-closeout entry point that the four `run` /
+    // `stream` / `write` call sites use.
+    #[test]
+    fn recover_empty_response_for_strict_closeout_lands_dedupe_only_drift_through_binary_commit() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        init_git_repo(root);
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+
+        let duplicated = "\
+---
+agent_doc_session: test
+agent_doc_format: template
+---
+
+<!-- agent:exchange patch=append -->
+### Re: topic — opus-4-7
+
+Implemented.
+### Re: topic — opus-4-7
+
+Implemented.
+<!-- /agent:exchange -->
+";
+        git_commit_file(root, "session.md", duplicated, "add duplicate");
+        let doc = root.join("session.md");
+
+        let deduped = crate::dedupe::dedupe_responses(duplicated);
+        fs::write(&doc, &deduped).unwrap();
+        crate::snapshot::save(&doc, &deduped).unwrap();
+
+        let strict = WriteFlags {
+            strict_closeout: true,
+            ..Default::default()
+        };
+        let head_before = head_count(root);
+        let recovered = recover_empty_response_for_strict_closeout(&doc, &strict)
+            .expect("strict-closeout empty-stdin path should recognize dedupe-only drift");
+        assert!(
+            recovered,
+            "empty stdin + strict closeout + dedupe-only drift must commit through the binary path"
+        );
+        assert_eq!(
+            head_count(root),
+            head_before + 1,
+            "exactly one new commit should land via the dedupe recovery wrapper"
+        );
+
+        let head_after = crate::git::show_head(&doc).unwrap().unwrap();
+        assert_eq!(
+            head_after.matches("### Re: topic — opus-4-7").count(),
+            1,
+            "committed HEAD must hold the deduped response"
+        );
+    }
+
+    #[test]
+    fn recover_empty_response_for_strict_closeout_refuses_when_not_strict_closeout() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        init_git_repo(root);
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        let duplicated = "\
+---
+agent_doc_session: test
+agent_doc_format: template
+---
+
+<!-- agent:exchange patch=append -->
+### Re: topic — opus-4-7
+
+Implemented.
+### Re: topic — opus-4-7
+
+Implemented.
+<!-- /agent:exchange -->
+";
+        git_commit_file(root, "session.md", duplicated, "add duplicate");
+        let doc = root.join("session.md");
+        let deduped = crate::dedupe::dedupe_responses(duplicated);
+        fs::write(&doc, &deduped).unwrap();
+        crate::snapshot::save(&doc, &deduped).unwrap();
+
+        let lenient = WriteFlags::default();
+        let head_before = head_count(root);
+        let recovered = recover_empty_response_for_strict_closeout(&doc, &lenient).unwrap();
+        assert!(
+            !recovered,
+            "non-strict empty-stdin path must not silently auto-commit dedupe drift"
+        );
+        assert_eq!(
+            head_count(root),
+            head_before,
+            "non-strict path should not produce a commit"
         );
     }
 }

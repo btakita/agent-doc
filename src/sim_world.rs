@@ -2218,3 +2218,83 @@ fn sync_sim_tmuxbudget_seed_3004_attaches_hidden_requested_pane_and_focuses_visi
     assert_eq!(world.coverage.sync_protected_expansions, 1);
     assert_eq!(world.coverage.sync_focus_handoffs, 1);
 }
+
+#[test]
+fn finalize_with_typing_in_post_exchange_comment_and_already_applied_ack_does_not_duplicate_response()
+ {
+    // Plan: tasks/agent-doc/plan-ipc-corruption-and-duplicate-during-typing.md
+    // Phase 1 (deterministic SimWorld repro) + Phase 5 (regression coverage).
+    //
+    // Models the finalize-time IPC corruption + duplicate-response race:
+    //   1. Document baseline = exchange with a prompt + an HTML scratch comment
+    //      below `</agent:exchange>` that the user is actively typing into.
+    //   2. Agent runs finalize and the plugin had already applied the response
+    //      patch to its live buffer (e.g. via a prior socket retry whose ack
+    //      write was slow).
+    //   3. The plugin's retry ack is the protocol's dedupe signal:
+    //      `{"type":"ack","status":"error","reason":"already_applied"}`.
+    //   4. The binary recognizes that signal through
+    //      `ipc_socket::is_already_applied_error` and skips the file-IPC
+    //      fallback so it does not re-apply the same response on top of the
+    //      live buffer (which would land a duplicate `### Re:` heading and
+    //      collide with the user's in-flight typing inside the scratch
+    //      comment).
+    let prompt = "do #ipcdup. spec-test-build-install-commit-push";
+    let file = Path::new("sim-ipc-already-applied.md");
+    let mut world = SimWorld::new(2_020);
+    world.append_to_exchange(&format!("❯ {prompt}\n")).unwrap();
+    world
+        .insert_after_exchange(&post_exchange_scratch_comment(prompt))
+        .unwrap();
+    world.snapshot = world.doc.clone();
+
+    let response_block = "\n### Re: closeout — gpt-5\n\nImplemented.\n";
+    world
+        .append_to_exchange(response_block)
+        .expect("plugin already inserted the response patch into the live buffer");
+    let live_after_plugin_apply = world.doc.clone();
+
+    let already_applied_ack = r#"{"type":"ack","status":"error","reason":"already_applied"}"#;
+    assert_eq!(
+        crate::ipc_socket::classify_ack(already_applied_ack),
+        crate::ipc_socket::AckClassification::AlreadyApplied,
+        "protocol contract: status=error + reason=already_applied is the dedupe signal"
+    );
+    let send_err = anyhow!("IPC ack already_applied: {}", already_applied_ack);
+    assert!(
+        crate::ipc_socket::is_already_applied_error(&send_err),
+        "send_message wraps already_applied acks in an error the write path can recognize"
+    );
+
+    assert_eq!(
+        world.doc.matches("### Re: closeout — gpt-5").count(),
+        1,
+        "with the already_applied gate, the file-IPC fallback must not re-apply the patch and double the response heading"
+    );
+    assert_owned_scratch_comment_preserved(&world.doc, prompt);
+
+    let mut counterfactual = world.doc.clone();
+    counterfactual.push_str(response_block);
+    assert_eq!(
+        counterfactual.matches("### Re: closeout — gpt-5").count(),
+        2,
+        "without the already_applied gate the file-IPC fallback would land a duplicate response heading"
+    );
+    let (deduped, changed) = crate::write::dedupe_ipc_snapshot_content(
+        file,
+        Some(&live_after_plugin_apply),
+        &counterfactual,
+        "sim_ipc_already_applied_counterfactual",
+    )
+    .unwrap();
+    assert!(
+        changed,
+        "dedupe recovery must collapse the counterfactual duplicate response"
+    );
+    assert_eq!(
+        deduped.matches("### Re: closeout — gpt-5").count(),
+        1,
+        "dedupe recovery must collapse the duplicated response heading down to one"
+    );
+    assert_owned_scratch_comment_preserved(&deduped, prompt);
+}

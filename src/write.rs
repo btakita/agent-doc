@@ -8549,6 +8549,32 @@ pub fn try_ipc(
             Ok(None) => {
                 eprintln!("[write] socket IPC sent but no ack — falling back to file IPC");
             }
+            Err(e) if crate::ipc_socket::is_already_applied_error(&e) => {
+                // The plugin detected the response body is already present
+                // in the live buffer and chose not to re-apply it. Re-writing
+                // through the file-IPC fallback would create a duplicate
+                // response. Treat as success and skip the fallback.
+                // Plan: tasks/agent-doc/plan-ipc-corruption-and-duplicate-during-typing.md
+                // Phase 2.
+                eprintln!(
+                    "[write] socket IPC reported already_applied: {} — skipping file IPC fallback (response already in live buffer)",
+                    e
+                );
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "ipc_socket_already_applied_skip_file_fallback file={} patch_id={}",
+                        file.display(),
+                        patch_id
+                    ),
+                );
+                cleanup_fallback_patch_files(file);
+                return Ok(IpcResult {
+                    success: true,
+                    patch_id,
+                    skipped_committed_cycle: false,
+                });
+            }
             Err(e) => {
                 eprintln!(
                     "[write] socket IPC failed: {} — falling back to file IPC",

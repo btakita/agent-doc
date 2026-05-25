@@ -164,6 +164,38 @@ pub(crate) fn cycle_already_committed(file: &Path) -> Option<String> {
     }
 }
 
+/// Diagnostic information about a "stuck captured cycle" — a cycle whose
+/// `cycle_state` advanced to `Committed` but whose captured response body is
+/// not present in HEAD for the document.
+///
+/// Preflight surfaces this as a non-blocking warning so harnesses can drive
+/// recovery via `agent-doc write --commit <FILE>` instead of silently retrying
+/// the same finalize.
+///
+/// Plan: tasks/agent-doc/plan-stuck-cycle-causes-duplicated-uncommitted-response.md
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub(crate) struct StuckCapturedCycleInfo {
+    pub(crate) cycle_id: String,
+    pub(crate) response_body_len: usize,
+    pub(crate) capture_id: String,
+    pub(crate) capture_state: String,
+}
+
+/// Detect a "stuck captured cycle" wedge for `file`. Returns `None` when the
+/// document is healthy or when detection is not yet implemented for the
+/// observed cycle/capture combination.
+///
+/// Stub for now — the full detection logic (cross-referencing
+/// `cycle_state::load(file)`, `capture::latest(file)`, and `git::show_head`
+/// to prove the captured response body is absent from HEAD) is tracked under
+/// the parent stuck-cycle plan and lands separately. Returning `None`
+/// preserves the existing preflight behavior (no false-positive warnings)
+/// while keeping the call site stable for future implementation.
+pub(crate) fn stuck_captured_cycle(_file: &Path) -> Option<StuckCapturedCycleInfo> {
+    None
+}
+
 pub(crate) fn cleanup_fallback_patch_files(file: &Path) {
     let Ok(canonical) = file.canonicalize() else {
         return;

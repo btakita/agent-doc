@@ -98,10 +98,12 @@ pub fn send_message(project_root: &Path, message: &serde_json::Value) -> Result<
         )),
         Ok((Ok(_), line)) => {
             let ack = line.trim().to_string();
-            if ack_reports_error(&ack) {
-                Err(anyhow::anyhow!("IPC ack status error: {}", ack))
-            } else {
-                Ok(Some(ack))
+            match classify_ack(&ack) {
+                AckClassification::Ok => Ok(Some(ack)),
+                AckClassification::AlreadyApplied => {
+                    Err(anyhow::anyhow!("IPC ack already_applied: {}", ack))
+                }
+                AckClassification::Failed => Err(anyhow::anyhow!("IPC ack status error: {}", ack)),
             }
         }
         Ok((Err(e), _)) => Err(anyhow::anyhow!("IPC ack read error: {}", e)),
@@ -114,16 +116,54 @@ pub fn send_message(project_root: &Path, message: &serde_json::Value) -> Result<
     }
 }
 
-fn ack_reports_error(ack: &str) -> bool {
-    serde_json::from_str::<serde_json::Value>(ack)
-        .ok()
-        .and_then(|value| {
-            value
-                .get("status")
-                .and_then(|status| status.as_str())
-                .map(|status| status.eq_ignore_ascii_case("error"))
-        })
-        .unwrap_or(false)
+/// Classification of a plugin-sent IPC ack line.
+///
+/// The plugin (JetBrains / VS Code) sends a JSON ack after applying a patch.
+/// `Ok` means the patch was applied normally. `AlreadyApplied` means the
+/// plugin detected the response body is already present in the live buffer
+/// and chose NOT to re-apply it — this is the signal the binary needs to
+/// skip the file-IPC fallback (which would otherwise re-write the same
+/// content and produce a duplicate response). `Failed` covers any other
+/// `status: error` ack.
+///
+/// Plan: tasks/agent-doc/plan-ipc-corruption-and-duplicate-during-typing.md
+/// Phase 2.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AckClassification {
+    Ok,
+    AlreadyApplied,
+    Failed,
+}
+
+/// Classify a plugin-sent IPC ack line. See [`AckClassification`].
+pub fn classify_ack(ack: &str) -> AckClassification {
+    let Some(value) = serde_json::from_str::<serde_json::Value>(ack).ok() else {
+        return AckClassification::Ok;
+    };
+    let status_is_error = value
+        .get("status")
+        .and_then(|s| s.as_str())
+        .map(|s| s.eq_ignore_ascii_case("error"))
+        .unwrap_or(false);
+    if !status_is_error {
+        return AckClassification::Ok;
+    }
+    let reason = value
+        .get("reason")
+        .and_then(|r| r.as_str())
+        .map(|r| r.to_ascii_lowercase());
+    match reason.as_deref() {
+        Some("already_applied") => AckClassification::AlreadyApplied,
+        _ => AckClassification::Failed,
+    }
+}
+
+/// True when a `send_message` error string indicates the plugin reported
+/// `already_applied` rather than a genuine apply failure. Callers should use
+/// this to short-circuit the file-IPC fallback so they do not re-write a
+/// response the plugin already has in the live buffer.
+pub fn is_already_applied_error(err: &anyhow::Error) -> bool {
+    err.to_string().starts_with("IPC ack already_applied")
 }
 
 /// Send a patch message to the plugin.
@@ -305,5 +345,70 @@ mod tests {
 
         let _ = std::fs::remove_file(socket_path(&root));
         drop(server);
+    }
+
+    #[test]
+    fn classify_ack_treats_ok_status_as_ok() {
+        let ack = r#"{"type":"ack","status":"ok","id":"patch-123"}"#;
+        assert_eq!(classify_ack(ack), AckClassification::Ok);
+    }
+
+    #[test]
+    fn classify_ack_treats_ack_without_status_as_ok() {
+        // Legacy ack shape: just `{"type":"ack","id":"..."}` with no status.
+        let ack = r#"{"type":"ack","id":"patch-123"}"#;
+        assert_eq!(classify_ack(ack), AckClassification::Ok);
+    }
+
+    #[test]
+    fn classify_ack_treats_already_applied_reason_as_already_applied() {
+        let ack = r#"{"type":"ack","status":"error","reason":"already_applied"}"#;
+        assert_eq!(classify_ack(ack), AckClassification::AlreadyApplied);
+    }
+
+    #[test]
+    fn classify_ack_treats_already_applied_reason_uppercase_as_already_applied() {
+        // Plugin implementations should send the canonical lowercase form,
+        // but the classifier matches case-insensitively as a forgiving
+        // protocol contract.
+        let ack = r#"{"type":"ack","status":"ERROR","reason":"Already_Applied"}"#;
+        assert_eq!(classify_ack(ack), AckClassification::AlreadyApplied);
+    }
+
+    #[test]
+    fn classify_ack_treats_other_error_reasons_as_failed() {
+        let ack = r#"{"type":"ack","status":"error","reason":"apply_failed"}"#;
+        assert_eq!(classify_ack(ack), AckClassification::Failed);
+    }
+
+    #[test]
+    fn classify_ack_treats_error_status_without_reason_as_failed() {
+        let ack = r#"{"type":"ack","status":"error"}"#;
+        assert_eq!(classify_ack(ack), AckClassification::Failed);
+    }
+
+    #[test]
+    fn classify_ack_treats_malformed_json_as_ok() {
+        // Backwards compat: unparseable acks (e.g. plain text) are not
+        // treated as error so existing plugins keep working.
+        let ack = "not json at all";
+        assert_eq!(classify_ack(ack), AckClassification::Ok);
+    }
+
+    #[test]
+    fn is_already_applied_error_matches_classifier_output() {
+        let err = anyhow::anyhow!(
+            "IPC ack already_applied: {}",
+            r#"{"type":"ack","status":"error","reason":"already_applied"}"#
+        );
+        assert!(super::is_already_applied_error(&err));
+    }
+
+    #[test]
+    fn is_already_applied_error_rejects_other_errors() {
+        let err = anyhow::anyhow!("IPC ack status error: something else");
+        assert!(!super::is_already_applied_error(&err));
+        let err = anyhow::anyhow!("IPC ack timeout (2s)");
+        assert!(!super::is_already_applied_error(&err));
     }
 }

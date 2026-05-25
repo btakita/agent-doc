@@ -486,7 +486,28 @@ Committed and pushed:
 CI check: submodule CI run `26414656183` for `7917eb3` is in progress with no red tmux leg when checked; the parent repo has no workflow named `CI`.
 
 Left unrelated existing dirty submodule files unstaged: `src/diff.rs`, `src/git_sibling.rs`, `src/route/tests.rs`, and `src/session_accretion.rs`.
-<!-- agent:boundary:5023b86a -->
+### Re: do [#adoc-web-live-cycle] — gpt-5
+
+Implemented the Phase 6 live-cycle stream for `agent-doc serve`: `/events` now emits `agent-response` SSE payloads from the active cycle's partial-response checkpoint, and the browser renders the in-flight response block in the inspector while save status reports the commit path used.
+
+Web saves now detect an open active cycle and route through `agent-doc write --commit --origin serve`; out-of-cycle edits keep the existing direct write plus git commit path.
+
+Verification:
+- `cargo test serve`
+- `make check`
+- `cargo build --release`
+- `cargo install --path .`
+
+Committed and pushed:
+- `agent-doc` submodule `9b6252c` (`feat: stream live serve responses`)
+- parent repo `8597ab5f3` (`agent-doc: bump submodule for serve live cycle`)
+
+CI:
+- `agent-doc` CI run `26415087912` for `9b6252c` is in progress; the job has started and had no red tmux/test leg at inspection time.
+- The parent repo still reports no workflow named `CI`.
+
+Unrelated dirty files in the submodule (`src/diff.rs`, `src/git_sibling.rs`, `src/route/tests.rs`, `src/session_accretion.rs`) were left unstaged.
+<!-- agent:boundary:23541403 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -539,7 +560,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#adoc-web-codemirror]~
 - ~do [#adoc-web-multidoc]~
 - ~do [#adoc-web-auth]~
-- do [#adoc-web-live-cycle]
+- ~do [#adoc-web-live-cycle]~
 - do [#jbrsrbusysw]
 - do [#jbrsrbusyide]
 - do [#jbccfix]
@@ -551,7 +572,6 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#adoc-web-live-cycle] Phase 6: hook agent-doc stream into /events so the in-flight ### Re: block streams to the browser as the agent produces it; web writes funnel through finalize/write --commit when an active cycle is in scope. Plan: tasks/agent-doc/plan-web-interface.md (Phase 6).
 - [ ] [#jbrsrbusysw] SimWorld scenario coverage for session_restart --force: route + Restart Supervisor while pane is alive-busy with and without --force, asserting the new refusal message and force success (including session_restart_busy_pre_interrupt_idle and session_restart_busy_force_killed event variants). Substantial — requires new Op variant + tmux/session_actor mock in src/sim_world.rs. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md phase 4 (SimWorld piece).
 - [ ] [#jbrsrbusyide] JB plugin IDE-side telemetry for session_restart --force: surface session_restart_force_used, session_restart_busy_pre_interrupt_idle, and session_restart_busy_force_killed events in the IntelliJ notification area or Logcat so users can see the recovery path the binary took. Kotlin work in editors/jetbrains/. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md phase 4 (IDE piece).
 - [ ] [#planperphase] Convention: split multi-phase plans into per-phase backlog IDs (e.g. #crdtrespfx1, #crdtrespfx2) instead of one parent ID that gets pending-gated. Lets queue auto-strike honor per-phase progress. Lower priority — the convention is opt-in for authors. [recommended]

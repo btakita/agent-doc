@@ -23,7 +23,7 @@ queue_active: false
 
 <!-- agent:status patch=replace -->
 
-25 pages deployed with form backend (D1 + R2 + email). D1/R2 TMO + document cache migrated and deployed to Worker version 59aaf003.
+EFS workers.dev production: D1 API unblocked; remote D1 migrations are current; Cloudflare Access protects /login/access-callback with ACCESS_TEAM_DOMAIN/AUD deployed in Worker version 252b1753-968b-4c90-8c49-0e63f46dd033. Custom-domain cutover is deferred; continue using https://equityfundingsource.brian-takita.workers.dev until further notice.
 <!-- /agent:status -->
 
 ## Exchange
@@ -73,9 +73,36 @@ Post-deploy smoke on `https://equityfundingsource.brian-takita.workers.dev`:
 - `bun run cf:d1:migrations:list:remote` still fails with Cloudflare API error 7403, so the current token still lacks D1 access and I could not verify/apply migrations 0025/0026 in this cycle.
 - The deploy output still shows `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` as blank, so Cloudflare Access / Google SSO is not configured yet.
 - `equityfundingsource.com` and `www.equityfundingsource.com` still resolve to DreamHost (`69.163.177.53`, DreamHost NS records). `/portal-admin` on the custom domain returns a WordPress/Apache 404, so custom-domain cutover is not complete.
-<!-- agent:boundary:595a3c9e -->
+❯ Use the CF api or chromium-bridge to create a token unblock the D1 API.
+❯ Update the env variables. We will remain on the current cf url until further notice.
+### Re: Cloudflare D1 + Access — gpt-5
+
+Done on the current `workers.dev` URL. I did not move `equityfundingsource.com` or `www.equityfundingsource.com`.
+
+Changed/configured:
+- Created a new EFS-specific Cloudflare API token and updated `passage btak/equityfundingsource/cloudflare_api_token`; the project `.env` still references that passage secret, so no secret value was written to the repo.
+- Enabled Cloudflare Zero Trust for `equityfundingsource.cloudflareaccess.com`.
+- Created the Access IdP `One-time PIN login` and the self-hosted Access app `EFS portal admin` for `equityfundingsource.brian-takita.workers.dev/login/access-callback`.
+- Updated `src/equityfundingsource-dev/wrangler.toml` with `ACCESS_TEAM_DOMAIN = "equityfundingsource"` and the app AUD.
+- Deployed Worker version `252b1753-968b-4c90-8c49-0e63f46dd033` to `https://equityfundingsource.brian-takita.workers.dev`.
+
+Important scope note: Cloudflare Access is live with one-time PIN, not a Google Workspace IdP. The Worker only needs a valid CF Access JWT, so the callback is now protected and verifiable; true Google Workspace SSO still depends on Google admin credentials.
+
+Verification:
+- `bun run cf:whoami` passed with the new EFS token and only the EFS Cloudflare account visible.
+- `bun run cf:d1:migrations:list:remote` passed: no migrations to apply.
+- `bun run cf:d1:migrate:remote` passed: no migrations to apply.
+- `bun run cf:d1:query:remote -- "SELECT email, role, status FROM users WHERE role IN ('admin','staff') ORDER BY email"` passed and found the existing active admin `btak.dev@gmail.com`.
+- `make check` passed after the final file edit: 172 tests, app build, worker build.
+- Smoke tests on workers.dev passed: `/` 200, `/funded-deals` 200, `/portal-admin` 303 to admin login, `/login/google?role=admin` 302 to `/login/access-callback`, and `/login/access-callback?role=admin` 302 to the Cloudflare Access login URL.
+- GitHub Actions check: this repo has no `.github` workflows and `gh run list --workflow CI --limit 1` reports no workflow named `CI`.
+
+References used for the Cloudflare API shape: [Zero Trust organization create](https://developers.cloudflare.com/api/resources/zero_trust/subresources/organizations/methods/create/), [Access application create](https://developers.cloudflare.com/api/resources/zero_trust/subresources/access/subresources/applications/methods/create/), and [One-time PIN IdP setup](https://developers.cloudflare.com/cloudflare-one/integrations/identity-providers/one-time-pin/).
+<!-- agent:boundary:0d25faed -->
 <!-- /agent:exchange -->
 ###
+<!--
+-->
 
 <!-- agent:queue -->
 <!-- /agent:queue -->
@@ -114,11 +141,11 @@ Post-deploy smoke on `https://equityfundingsource.brian-takita.workers.dev`:
 ## Review
 
 <!-- agent:review -->
-- [/] [#next-steps] Remaining EFS production cutover blockers: Cloudflare D1 API token still returns 7403, so apply/verify migrations 0025/0026 after #1v5m; Cloudflare Access vars are blank, so set ACCESS_TEAM_DOMAIN/ACCESS_AUD after the Access app exists; custom domain still uses DreamHost/Apache, so move equityfundingsource.com/www to the Worker and smoke test /, /funded-deals, and /portal-admin on the custom domain.
+- [/] [#next-steps] Remaining EFS workers.dev production state: D1 API token unblocked; migrations 0025/0026 are already applied; Cloudflare Access env vars are deployed for /login/access-callback on workers.dev using the one-time PIN IdP. Custom domain cutover remains intentionally deferred; true Google Workspace SSO remains gated on Google admin credentials.
 - [/] [#37ah] [recommended] Broker portal backend: replace static broker demo data with TMO-backed submit-deal, pipeline, commissions, documents, and notifications
 - [/] [#dzmm] TMO webhooks: confirm outbound webhook support (Robert to check with Mortgage Office)
 - [/] [#qakx] Investor portal document pages: replace static Documents, Statements, and Accreditation fixture data with D1/R2-backed APIs and authenticated upload/request/download flows.
-- [/] [#1v5m] [recommended] Update passage btak/equityfundingsource/cloudflare_api_token to include Cloudflare D1 read/write permissions so the project cf:d1:* scripts can run without the OAuth bypass.
+- [/] [#1v5m] Resolved 2026-05-25: created an EFS-specific Cloudflare API token scoped to account 1e7e194ff8da4ad9e40ce041aea84f76 with D1, Workers Scripts, R2, observability, and read-only user/account metadata permissions; updated passage btak/equityfundingsource/cloudflare_api_token. D1 migration list/apply now succeeds and reports no pending migrations.
 - [/] [#jnzs] [recommended] Await Judith or EFS reviewer approval on funded-deal images, copy, lien-position wording, and legal/disclosure language before invoicing or launch sign-off. Technical D1 migration, Worker deploy, and live funded-deals/admin-route smoke tests completed 2026-05-23.
 - [/] [#dropbox-sync-adapter] Dropbox sync adapter: after Dropbox access is available, push/pull R2_DOCUMENTS with idempotent retries, backfill, tombstone handling, and per-document sync logs.
 <!-- /agent:review -->

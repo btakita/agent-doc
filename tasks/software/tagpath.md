@@ -146,14 +146,55 @@ Six items added to the backlog in priority order — the first three matter most
 | 6 | p5wnp [recommended] | Publish wasm-pack tarball to npm | Wasm surface shipped in 0.9.0 but no npm artifact. Required before any JS-side agent-doc / tsift surface can pick it up. |
 
 **Phase 5 framing:** items 1–3 are a coherent "indexing-as-a-platform" arc. Combined deliverable: a tagpath-backed symbol/tag graph that tsift consumes for citations and agent-doc consumes for tag validation. Recommend grouping under the `#spec-test-build-install-commit-push` preset once you're ready to execute.
-<!-- agent:boundary:c0559fc4 -->
+### Re: queue auto — do [#p5xfast] — opus-4-7
+
+
+**Done.** Bincode sidecar shipped in tagpath 0.13.0. No-op `--update` now ~56x faster than full rebuild — comfortably past the 10x target. Side fix: re-armed `agent:queue auto` (you'd dropped the `auto` token when inserting p5xfast); queue is processing normally again.
+
+**Approach taken:** binary sidecar cache (`.naming/index.bincache`) rather than streaming JSON. The sidecar carries `magic + schema_version + per-section sha256 + bincode-encoded Index`. JSON output is unchanged and remains byte-identical to a full rebuild — consumers depending on SPEC §15 are unaffected.
+
+**Perf (1000-file synthetic tree, internal stderr digest):**
+
+| metric | before #p5xfast | after #p5xfast | ratio vs full |
+|---|---|---|---|
+| full rebuild | ~140 ms | **~113 ms** | 1x |
+| `--update` no-op | ~33 ms | **~2 ms** | **~56x** |
+| `--update` one-file edit | ~114 ms | **~84 ms** | ~1.35x |
+
+Wall-clock including process startup: full ~181 ms vs no-op ~3 ms (~60x).
+
+**Fallback behavior (sidecar is optional):** missing / corrupt / flipped-byte / schema-mismatch sidecar → fall back to JSON read and regenerate the sidecar on the next write. JSON missing → full rebuild regardless of sidecar state. Both files written via `.tmp + rename`; mid-write crash leaves the repo recoverable.
+
+**Changes (tagpath submodule, d47f908):**
+- `src/index/sidecar.rs` (new) — split head/tail module with magic / version / per-section sha256.
+- `src/index/mod.rs` — sidecar integration, `IndexShape` enum (`Full` / `LazyTail`), `update_incremental_with`, lazy-tail fast path, `write_json_only` test hook for crash recovery.
+- `src/main.rs` — CLI passes `IndexShape::LazyTail` on bare `--update`, `Full` on `--emit jsonl`.
+- `tests/test_index_sidecar.rs` (new, 10 tests) — write, no-op-reads-sidecar (instrumented via `TAGPATH_SIDECAR_DEBUG=1`), missing/corrupt/flipped/schema fallback + regen, JSON-missing forces full rebuild, deterministic encode, crash recovery, edit-after-load.
+- `Cargo.toml` — `0.12.0 -> 0.13.0`, added `bincode = { version = "2", features = ["serde"] }`; `Cargo.lock` refreshed.
+- `.gitignore` — `.naming/index.bincache{,.tmp}`.
+- `SPEC.md` — §9.13 sidecar note + recommended `.gitignore`; new §15.6 sidecar contract (consumers MUST NOT depend on it).
+
+**Verification:**
+- `cargo fmt` + clippy clean on default and `dyn-grammar`.
+- `cargo test` — **166/166 pass** (was 150 + 10 new sidecar + 6 misc updated).
+- `cargo test --features dyn-grammar` — **175/175 pass**.
+- `cargo build --target wasm32-unknown-unknown --no-default-features --features wasm` — clean (`index` module is already `cfg(not(target_arch = "wasm32"))`, so bincode never reaches wasm).
+- JSON byte-equality verified: `diff <(jq 'del(.generated_at)' before.json) <(jq 'del(.generated_at)' after.json)` → empty.
+
+**Commits:**
+- tagpath `d47f908`: `perf: bincode sidecar cache for incremental index (p5xfast)` → pushed.
+- agent-loop `480f413`: `tagpath: bump submodule to 0.13.0 (p5xfast)` → pushed.
+
+Auto-queue advances next to session-doc tag lint.
+<!-- agent:boundary:2a46c3ca -->
 <!-- /agent:exchange -->
 ###
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#p5tsi]~
 - ~do [#p5inc]~
+- do [#p5xfast]
 - do [#p5sln]
 - do [#p5wat]
 - do [#p5mcs]
@@ -163,7 +204,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#p5xfast] Hit the 10x no-op perf bar for tagpath index --update on large repos: today on a 1000-file synthetic tree no-op runs at ~4.7x vs full rebuild and one-file-edit at ~1.4x; ceiling is full JSON (de)serialize of the on-disk index. Options: stream-parse only the sources array of the existing index, or add a binary sidecar cache. Either is scope beyond p5inc — track here so tsift's polling cadence isn't blocked.
 - [ ] [#p5sln] Session-document tag lint: extend tagpath lint with an agent-doc dialect that validates agent:exchange / agent:backlog / agent:done / patch:* tags, catches malformed directives like the agent:done archive=PATH bug hit this session, and refuses to write a finalize until they parse cleanly.
 - [ ] [#p5wat] tagpath watch: long-running watcher that emits index update events on file changes (newline-delimited JSON), suitable for tsift's incremental graph projection and agent-doc tag validators that need to react inside a cycle.
 - [ ] [#p5mcs] MCP convention helpers for tsift and agent-doc: add tagpath mcp tools family_by_path, lint_session_doc, and index_handle so both upstreams can call tagpath without bespoke shell wrappers.

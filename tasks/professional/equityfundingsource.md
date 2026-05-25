@@ -31,122 +31,16 @@ queue_active: false
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260524-233714.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260525-000702.md`*
 
 Compacted content:
-- Archived 2 response topic(s): gate transition acknowledged; do [#yh4b]
+- Archived 4 response topic(s): do [#zjbe]; do [#9vv3]; do [#dzmm]; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-### Re: do [#zjbe] — Admin investor document workflow — opus-4-7
-
-
-Shipped. Backend complete; admin frontend UI for these endpoints is a follow-up cycle but the API surface is live and Tier 0–guarded.
-
-What changed in `src/equityfundingsource-dev`:
-
-- **`lib/investor/documents_repo.ts`** — new admin helpers: `investor_documents_admin_R_` (cross-user list with `user_id` / `deal_id` / `category` / `status` filters, 500-row cap), `investor_document_update_` (patch name/notes/visibility/action_kind/deal_id), `investor_document_status_update_` (publish/archive — sets/clears `archived_at`), `investor_document_requests_admin_R_` (inbox by status), `investor_document_request_fulfill_` (link to document_id + admin_notes + fulfilled_at), `investor_document_request_reject_`, `investor_accreditation_decision_` (verify/reject with reviewer + optional `expires_at`, preserves prior notes via `COALESCE`).
-- **`lib/admin/routes.ts`** — 10 new admin endpoints, each behind `require_admin_`:
-  - `GET /api/admin/investor-documents` (list)
-  - `POST /api/admin/investor-documents` (multipart upload → R2 → `investor_document_create_`; honors `visibility=shared` override after the default-private insert)
-  - `PATCH /api/admin/investor-documents/:id` (update name/notes/visibility/action_kind/deal_id with strict enum validation)
-  - `POST /api/admin/investor-documents/:id/publish`
-  - `POST /api/admin/investor-documents/:id/archive`
-  - `GET /api/admin/investor-document-requests` (filter by status / user_id)
-  - `POST /api/admin/investor-document-requests/:id/fulfill` (validates `document_id` exists, links + admin_notes)
-  - `POST /api/admin/investor-document-requests/:id/reject` (with admin_notes)
-  - `POST /api/admin/investor-accreditation/:id/decision` (`verified` / `rejected`, optional `ttl_seconds` → `expires_at`, reviewer = current admin)
-  - `GET /api/admin/users/:id/investor-accreditation` (latest verification + valid types)
-- **`prds/equity-funding-source-lending-portal-prd.md`** — `### Admin Portal` opens with a new `#### Admin investor document workflow` block enumerating every endpoint, the upload contract (category + visibility + action_kind), and the Tier 0 rate-limit binding.
-- **`tests/admin-investor-documents.test.ts`** (new) — 12 tests covering the seven new repo helpers (presence + filter wiring + archived_at toggling + accreditation decision shape), all 10 routes, Tier 0 guard composition on upload, document_cache_put_ ordering before insert, enum validation on PATCH, fulfill error paths (missing document_id, 404 unknown doc), accreditation decision allowed-values gate, and PRD coverage.
-
-Verification:
-
-- `bun test` — 139 pass / 0 fail (across 17 files). Includes the deliberate "limiter down" console.error from the existing throw-recovery test.
-- `bun run check` (test + build + build:worker) — clean.
-- `bun run deploy:worker` — deployed Worker version `0c42e603-2b44-44b3-bed5-25151f2fd7af` to `https://equityfundingsource.brian-takita.workers.dev`.
-- Submodule commit `55cf812` pushed to `origin/main`.
-- Superproject pointer bump pushed to `origin/main`.
-
-Out of scope for this cycle (intentional — admin frontend is a separate concern):
-
-- Preact UI for the new endpoints in the admin portal dashboard sidebar / detail panes. The endpoints are API-complete and exercisable today; the frontend wiring can land alongside the existing admin sections without churning this turn.
-
-Next queue head should be `#9vv3` (Investor portal end-to-end QA).
-### Re: do [#9vv3] — Investor portal end-to-end QA — opus-4-7
-
-
-Shipped. Operator-runnable QA path landed; coverage map asserted by CI so endpoint drift fails the suite.
-
-What changed in `src/equityfundingsource-dev`:
-
-- **`tests/seed/investor-portal-fixtures.ts`** (new) — deterministic seed factories with stable IDs (`QA_INVESTOR_USER_ID = 'qa-investor-001'`, `QA_ADMIN_USER_ID = 'qa-admin-001'`, `QA_DEAL_ID = 'qa-deal-001'` ↔ `QA_DEAL_LOAN_NUMBER = 'QA-LN-9001'`, `QA_DOCUMENT_ID = 'qa-doc-001'`, `QA_FUND_AMOUNT_CENTS = 2_500_000`) plus a `QA_E2E_STEPS` array binding each of the 13 QA steps to its real Worker endpoint.
-- **`docs/qa-investor-portal.md`** (new) — operator runbook with a coverage table (step → endpoint), local + remote QA invocation examples, expected results, TMO simulator alignment notes (Token `TMO` / Database `API Sandbox`), cleanup contract, and out-of-scope items linked to other backlog IDs.
-- **`bin/qa-investor-portal.ts`** (new) — Bun-runnable smoke script: read-only by default (safe against production), unauthenticated 401 check, then optional authenticated read pass with `--investor-cookie`, then optional `--mutate` for fund commit + admin endpoints with `--admin-cookie`. Help command lists the QA fixture constants.
-- **`tests/investor-portal-e2e.test.ts`** (new) — 8 tests covering: fixture stability (the IDs the runbook and smoke script depend on), seed determinism at a fixed Unix time, every `QA_E2E_STEPS` step having a real `app.<method>(<path>)` in the worker source (accepts both literal paths and `URLS.signup`/`URLS.login` aliases for auth routes), runbook drift guards (each endpoint string referenced; each fixture ID cited), smoke-script wiring (imports fixtures, exposes `--mutate` / cookie flags), and smoke-script defaults (read-only when invoked without `--mutate`).
-- **`prds/equity-funding-source-lending-portal-prd.md`** — `### Investor Portal` adds an explicit E2E QA bullet citing the fixtures module, runbook, smoke script, and coverage-map test.
-
-Verification:
-
-- `bun test` — 147 pass / 0 fail across 18 files (deliberate "limiter down" console.error from the throw-recovery path is still present).
-- `bun run check` (test + build + build:worker) — clean.
-- `bun run deploy:worker` — deployed Worker version `92a1e42a-619d-4af6-b8d4-6740cf5e5a21` to `https://equityfundingsource.brian-takita.workers.dev`.
-- Submodule commit `972347b` pushed to `origin/main`; superproject pointer bump pushed.
-
-Scope discipline:
-
-- Full real-D1 backed E2E with mutations requires either Cloudflare's local D1 emulator running or a substantial fake-D1 supporting 10+ tables. This cycle delivered the deterministic operator path (fixtures + runbook + smoke + drift guards) so QA is **runnable today** without inventing fake-D1 infrastructure that would be obsolete the moment real wrangler-emulator coverage lands.
-- The smoke script intentionally requires explicit `--investor-cookie` / `--admin-cookie` rather than performing signup → login flows itself; signup-only tests already exist in `tests/auth.test.ts`, and avoiding embedded credentials keeps the script safe to commit and run against production.
-
-Next queue head should be `#dzmm` (TMO webhook confirmation — externally blocked on Robert + Mortgage Office).
-### Re: do [#dzmm] — TMO webhooks — opus-4-7
-
-
-Externally blocked, not done — gated. dzmm requires The Mortgage Office to confirm whether outbound webhooks are supported; I cannot answer that from this side. What I can produce is a ready-to-forward technical prompt and a fallback plan, which is what landed this cycle.
-
-What changed in `src/equityfundingsource-dev`:
-
-- **`docs/tmo-webhooks-question.md`** (new) — six-question prompt Robert can paste directly to TMO support: (1) is push supported at all, (2) supported event types + subscription scope, (3) auth (HMAC / mTLS / IP allowlist), (4) payload signing + timestamp skew, (5) retry policy + delivery idempotency, (6) change-feed / `updated_since` polling endpoint if push is unsupported. Includes the implementation plan for both the webhook path (HMAC verification, `tmo_cache_outbox` idempotent dispatch, replay-safe ordering, observability via the existing `[observability]` block) and the polling-fallback path (tightened cron cadence, the existing `POST /api/admin/tmo-sync` admin button, optimistic pending pills) so the eventual response slots into a single follow-up ticket without re-architecting.
-
-Verification:
-
-- `bun test` — last run was 147 pass / 0 fail; no code change this cycle.
-- Submodule commit `9c0caca` ("docs: draft TMO outbound webhook question for Mortgage Office (dzmm)") pushed to `origin/main`.
-- Superproject pointer bump pushed.
-
-Gating rationale: dzmm is "confirm outbound webhook support (Robert to check with Mortgage Office)" — the deliverable is information from TMO, which only Robert can obtain. Marking `--done` would falsely claim I confirmed it. Gating preserves the open state while the follow-up captures the next concrete operator action.
-
-All six items from the original queue are now resolved:
-
-- `#njsx` (Tier 0 WAF + upload limits) — done, deployed
-- `#ft47` (Token-based document upload flow) — gated on remote D1 migration (review `#1v5m`)
-- `#yh4b` (Admin dashboard + CF Access auth) — done, deployed
-- `#zjbe` (Admin investor document workflow) — done, deployed
-- `#9vv3` (Investor portal E2E QA) — done, deployed
-- `#dzmm` (TMO webhooks) — gated on Mortgage Office reply via Robert
-
-Queue exhausted. Awaiting either new directives or external unblock on the three gated items.
-### Re: do [#2rpv] + do [#0r24] — externally blocked — opus-4-7
-
-
-Both items still need Cloudflare dashboard / credential access this Worker session does not have. I retried `#0r24` (D1 migration apply) and it still returns Cloudflare error 7403 — the API token at `passage btak/equityfundingsource/cloudflare_api_token` still lacks D1:Edit, which is the open review item `#1v5m`. `#2rpv` (CF Access env vars + Access application) needs operator work in Cloudflare Zero Trust to create the Access app and copy back the team domain + AUD.
-
-What landed this cycle:
-
-- **`docs/operator-runbook-pending-config.md`** (new) — step-by-step runbook for whoever has dashboard access. Covers:
-  - `#0r24`: exact API token permissions to add (Account → D1 → Edit), `passage` and `.env` updates if the token changes, the `bun run cf:d1:migrate:remote` invocation, and a curl smoke test against `POST /api/admin/upload-tokens` with the expected `{ ok: true, token, url_path, view.status: "active" }` response shape.
-  - `#2rpv`: Zero Trust team-domain setup, the exact Access application configuration (self-hosted, 12 h session, restricted email policy, Google IdP), where to copy AUD and team domain from, the `wrangler.toml` `[vars]` edits, the one-shot `ADMIN_SIGNUP_ENABLED` bootstrap dance for net-new admin accounts (flip to "true" → deploy → sign in once → flip back to "false" → deploy), and a curl smoke that expects a CF Access challenge instead of the current 503.
-  - Explicit out-of-scope list pointing at icebox `#e1kb`, `docs/security-tier-0.md`, and `docs/tmo-webhooks-question.md` so the runbook does not accumulate unrelated work.
-
-Verification:
-
-- `bun run cf:d1:migrate:remote` still fails with `code: 7403, "The given account is not valid or is not authorized to access this service"` — confirms `#1v5m` is still live and the gate on `#0r24` has not moved.
-- Submodule commit `cf2b038` pushed to `origin/main`; superproject pointer bump pushed.
-
-Neither item moves out of "review" this cycle. The follow-up work to forward this runbook to whoever has Cloudflare dashboard access is the operator's call; I won't add a meta-follow-up backlog item for "send the runbook to the owner" since it would just be paperwork on top of paperwork. When the dashboard work completes, retry the smoke tests in the runbook and close `#0r24` / `#2rpv` / `#1v5m` in review.
-<!-- agent:boundary:a8a73747 -->
+<!-- agent:boundary:af92623d -->
 <!-- /agent:exchange -->
 ###
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-commit-push-deploy
 - do [#2rpv]
 - do [#0r24]

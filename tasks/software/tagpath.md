@@ -128,7 +128,35 @@ v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-gramm
 Compacted content:
 - Archived 5 response topic(s): do [#p6sklsymagentdoc]; do [#p6sklsymcorky]; do [#p6adfmerge]; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-<!-- agent:boundary:3c01b4a7 -->
+### Re: do [#p6adfcitagpath] — opus-4-7
+
+
+Done. Dropped the tagpath path override from `src/agent-doc/Cargo.toml`; downstream CI now resolves tagpath 0.11.0 from crates.io.
+
+#### Change set
+
+- `src/agent-doc/Cargo.toml`: `tagpath = { path = "../tagpath", version = "0.11", ... }` → `tagpath = { version = "0.11", ... }` (path override removed).
+- `agent-loop/.cargo/config.toml`: added `tagpath = { path = "src/tagpath" }` under `[patch.crates-io]`, matching the existing pattern for tmux-router and agent-kit. Local dev in the agent-loop workspace still picks up the sibling; agent-doc CI (which builds from src/agent-doc/ as its own root) sees no patch and resolves cleanly from crates.io.
+
+#### Local verification
+
+- CI-style fresh resolve in `/tmp` from a one-line dep on `tagpath = "0.11"` → compiles tagpath v0.11.0 from crates.io cleanly.
+- `cargo clippy` in src/agent-doc → no issues.
+- `cargo test --lib` → 446/446 pass.
+
+#### CI verification (in flight)
+
+- New run `26385513733` on `20260422/codex-agent-backend` kicked off automatically after the push. Initial steps (checkout, dependency setup, toolchain) green; `make check` now in progress — already past the dependency-resolution failure point that was tripping the previous three runs. Backgrounded a notifier that will alert on completion.
+
+#### Commits
+
+- `src/agent-doc` (`20260422/codex-agent-backend`): `e11ee81d deps: drop tagpath path override, depend on crates.io 0.11 (p6adfcitagpath)`
+- `agent-loop` (`main`): `3b529d077 deps: workspace-patch tagpath; bump agent-doc submodule (p6adfcitagpath)`
+
+#### Unblocks
+
+`#p6adfmerge` is now actionable once CI run `26385513733` lands green. `#p6tspub` (the tsift equivalent — same dependency edit) remains queued and can run immediately; same pattern, two-line diff.
+<!-- agent:boundary:d2af6ce4 -->
 <!-- /agent:exchange -->
 ###
 
@@ -145,7 +173,6 @@ preset #spec-test-build-install-commit-push
 - ~do [#p6adfmerge]~
 - do [#p6sklsymadocrunbooks]
 - do [#p6adfcitagpath]
-- do [#p6adfcitagpath]
 - do [#p6tsifull]
 - do [#p6tspub]
 - do [#p6skl]
@@ -156,7 +183,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 (<!-- agent:backlog -->
-- [ ] [#p6adfcitagpath] CI fix prerequisite for p6adfmerge: agent-doc Cargo.toml declares tagpath = { path = '../tagpath', ... } but the agent-doc CI workflow doesn't clone tagpath as a sibling, so cargo clippy errors with 'No such file or directory' on ../tagpath/Cargo.toml. Fix options: (a) checkout-and-place tagpath sibling in CI before make check, (b) switch to git source pointing at btakita/tagpath, or (c) publish tagpath 0.18 to crates.io and drop the path override. Until this clears, the feature branch CI stays red and p6adfmerge stays gated.
 - [ ] [#p6sklsymadocrunbooks] After agent-doc SKILL.md symlinking (p6sklsymagentdoc), check whether the runbooks under agent-loop/.claude/skills/agent-doc/runbooks/ should also be symlinked. Source of truth lives in src/agent-doc/runbooks/ but installed copies are in src/agent-doc/.claude/skills/agent-doc/runbooks/ (created by agent-doc skill install, so currently absent from the submodule). Either install once into the submodule and symlink, or leave install owning the parent copy and accept the duplication.
 - [ ] [#p6tsifull] Wire the remaining tsift consumer surfaces to the tagpath adapter: graph, explain, communities, path, federated-search. The adapter (src/tsift/src/tagpath_adapter.rs) and annotate helper are already public; each command needs TagpathSearchOpts plumbing + a per-row annotation pass + tagpath_handle field on StoredSymbol / StoredEdge / community report structs. Mechanical follow-up to p6tsi which only wired tsift search.
 - [ ] [#p6tspub] Restore tsift crates.io publishability after p6tsi: tsift now depends on tagpath via path = ../tagpath. Replace with version = "0.17.1" (or whatever ships first) before any tsift release. Already gated by the sift-publish blocker so no immediate regression, but track here.

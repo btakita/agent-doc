@@ -71,6 +71,18 @@ The auto-loop is a different, skill-level mechanism. It runs entirely in Claude 
 So 0.2.131 helps the typing/duplicate path. #ccloopguard (filed last cycle) is what would unblock the auto-loop. They are two separate bugs in two separate surfaces.
 
 This message itself is the simplest demonstration: your prompt was classified as `prompt_target`, which trips condition #4. Auto-loop will not fire after this cycle. The queue head remains jbrsrbusysw.
+
+### Re: ccloopguard landed — opus-4-7 (HEAD)
+
+Implemented and pushed. Submodule commits 14d28fe0 + 4724df3e (installed SKILL.md regen), superproject c65011b77.
+
+Preflight now emits user_intent_prompt_changes, which filters prompt_bearing_changes through a new diff::change_is_managed_state_only classifier. The classifier recognises queue/backlog/review/done component markers, queue_active frontmatter flips, `- do ...` queue items (including struck `- ~do ...~`), task-list items (`- [ ]`, `- [/]`, `- [x]`, `- [-]`, `- [?]`), done archive date-prefixed items, and preset lines. SKILL.md's CLAUDE_QUEUE_AUTO_LOOP_SECTION now reads user_intent_prompt_changes instead of prompt_bearing_changes for the fourth condition. prompt_bearing_changes is unchanged for backwards compat.
+
+7 new unit tests in diff::tests::change_is_managed_state_only_* (queue toggle, frontmatter flip, queue items, backlog/done items, multi-line managed blocks, rejecting real user prompts, rejecting mixed managed+user text). Full unit suite 2377 pass (was 2370). Integration suites green except the pre-existing codex_bare_run_inside_owning_pane_fails_before_nested_dispatch failure unrelated to this work. cargo build release + install + agent-doc skill install --harness claude --reload restart all clean.
+
+To activate for THIS Claude Code session: restart Claude Code so the agent re-reads the regenerated `~/.claude/skills/agent-doc/SKILL.md`. Until restart, the auto-loop will continue to behave per the old rule.
+
+Next queue head: jbrsrbusysw.
 <!-- agent:boundary:7b21a64f -->
 <!-- /agent:exchange -->
 ###
@@ -91,6 +103,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#jbrsrbusysim]~
 - ~do [#cclooploop]~
 - ~do [#ipcdupfin23]~
+- do [#ccloopguard]
 - do Phases 1 + 5 in tasks/agent-doc/plan-ipc-corruption-and-duplicate-during-typing.md
 - do [#jbrsrbusysw]
 - do [#jbrsrbusyide]
@@ -103,6 +116,8 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#adoc-jb-cache-cancel-stuck-cycle] agent-doc-bug: after canceling a JetBrains File Cache Conflict dialog during IPC patch delivery, the response patch lands in the working tree but the cycle does not reach committed state. Recovery requires running agent-doc write --commit FILE manually. Repro: have JB IDE open with the file in an editor; run finalize; cancel the JB cache-conflict dialog when it appears. Expected: cycle reaches committed cleanly or surfaces a clear error. Actual: response is in working tree but next preflight reports post-commit local drift requiring manual recovery. Plan path: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md (to be authored). Related: #jbccfix, #jbccreg, #jbccdocs in this same file.
+- [ ] [#adoc-prefix-strip-uncommitted] agent-doc-bug: after the JB-cache-conflict bug forces a manual sed strip of incorrectly-applied prompt-prefix markers (❯ ) from the response body, the subsequent agent-doc write --commit / repair / session-check chain fails to recognize the cleaned response as the cycle's committed response. Symptoms: session-check INTERRUPTED with prompt_target pointing at the agent's own response paragraph. Recovery: bare git commit succeeds and ships the response, but the agent-doc cycle state never closes cleanly. Likely cause: snapshot/baseline tracking does not recover after the IPC patch was applied with malformed markers and then manually edited. Plan path: tasks/agent-doc/plan-prefix-strip-uncommitted.md (to be authored). Related: #adoc-jb-cache-cancel-stuck-cycle (precondition for this bug).
 - [ ] [#p6skillinstallreconcile] agent-doc skill install does not reconcile the target runbooks directory: writes new files but leaves stale ones in place, and short-circuits the runbooks pass entirely when SKILL.md is already up to date. Surfaced in agent-loop with 21 installed runbooks vs 14 source files (8 stale extras + 1 new source file never installed). Plan: tasks/agent-doc/plan-skill-install-runbooks-reconcile.md. Fix: src/skill.rs install path — separate SKILL.md short-circuit from runbooks pass, then reap-on-mismatch (or delete-then-write) so on-disk set converges to embedded canonical set. Also touches Codex/OpenCode harness install paths.
 - [ ] [#jbrsrbusysw] SimWorld scenario coverage for session_restart --force: route + Restart Supervisor while pane is alive-busy with and without --force, asserting the new refusal message and force success (including session_restart_busy_pre_interrupt_idle and session_restart_busy_force_killed event variants). Substantial — requires new Op variant + tmux/session_actor mock in src/sim_world.rs. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md phase 4 (SimWorld piece).
 - [ ] [#jbrsrbusyide] JB plugin IDE-side telemetry for session_restart --force: surface session_restart_force_used, session_restart_busy_pre_interrupt_idle, and session_restart_busy_force_killed events in the IntelliJ notification area or Logcat so users can see the recovery path the binary took. Kotlin work in editors/jetbrains/. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md phase 4 (IDE piece).

@@ -128,7 +128,58 @@ v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-gramm
 Compacted content:
 - Archived 2 response topic(s): do [#tpstdiag]; Add #next-steps to fix remaining lossy data
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-<!-- agent:boundary:43967f01 -->
+### Re: do [#tpaudit] — opus-4-7
+
+Shipped in tsift 0.1.59 (`1551a72` in tsift, superproject pointer bumped).
+
+#### Surface
+New top-level command: `tsift audit-tagpath [--path .] [--scope <name>] [--json]`.
+
+Reconciles the tsift symbol index against the tagpath `.naming/index.json` source set and reports the diff so operators can see exactly where `tagpath_handle` recall is at risk. JSON shape:
+
+```
+{
+  "project_root": "...",
+  "scope": null | "<scope>",
+  "tagpath_state": "fresh" | "stale" | "stale_unreadable" | "missing",
+  "tsift_file_count": <usize>,
+  "tagpath_file_count": <usize>,
+  "tsift_only_files": [<rel_path>, ...],
+  "tagpath_only_files": [<rel_path>, ...],
+  "tsift_only_symbol_count": <usize>,
+  "tsift_only_files_with_symbols": [{"file": ..., "symbols": ...}, ...]
+}
+```
+
+When `tagpath_state == "stale"`, the binary still loads the on-disk snapshot so the audit produces useful output, marks the response, and injects the standard `tagpath_index_stale: true` + `tagpath_stale_reason: stale_snapshot_loaded` pair (the same field contract `#tpstdiag` shipped for the other commands). When the tagpath index is missing entirely, the audit reports `tagpath_state: "missing"` and `tagpath_only_files: []`.
+
+#### Implementation
+`cmd_audit_tagpath` in `src/main.rs`:
+
+1. Resolves the project root, optionally narrowing to a workspace scope via `config::Config::resolve_submodule`.
+2. Opens `IndexDb` read-only at the resolved scope's `.tsift/indexes/<scope>/index.db` (or workspace root `.tsift/index.db`).
+3. Normalizes tsift's stored absolute paths to relative-to-tagpath-root for set comparison while remembering the absolute form so `db.symbols_for_file` can still query it.
+4. Builds the set of tagpath sources from `adapter.index.sources` (already relative).
+5. Diffs both sets and counts per-file tsift symbols for each tsift-only file.
+
+#### Test
+`tests/exit_code.rs::audit_tagpath_reports_walker_diff` — uses a `__pycache__/lib.rs` + `main.rs` fixture. Tagpath's hard-coded `SKIP_DIRS` skips `__pycache__/`, but tsift's `ignore`-based walker indexes it. The test runs `tsift index` then `tsift audit-tagpath --json`, asserts `tagpath_state == "fresh"`, that `__pycache__/lib.rs` lands in `tsift_only_files`, and that the per-file symbol count surface shows `cached_helper`'s file with `symbols >= 1`.
+
+#### Verification
+- `cargo test --test exit_code audit_tagpath_reports_walker_diff` — green
+- `make check` — green (full clippy + suite)
+- `cargo install --path .` — installed `tsift 0.1.59` to `~/.cargo/bin/`
+
+#### Files
+- `src/tsift/src/main.rs` — `AuditTagpath` clap variant + dispatch + `cmd_audit_tagpath`
+- `src/tsift/tests/exit_code.rs` — `audit_tagpath_reports_walker_diff`
+- `src/tsift/VERSIONS.md` — 0.1.59 entry
+- `src/tsift/CLAUDE.md` — command table row for `tsift audit-tagpath`
+- `src/tsift/Cargo.toml`, `Cargo.lock` — version → 0.1.59
+- Superproject `src/tsift` submodule pointer bumped
+
+Out of scope for this turn (would be follow-ups if needed): policy-hint surfacing (excluded paths, language coverage gaps), `--scope` test coverage (the implementation routes through `resolve_submodule` but the test exercises only the workspace-root path). Both can land later if operators ask for them.
+<!-- agent:boundary:f886e228 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -139,7 +190,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#commhx]~
 - ~do [#p6tsifullfederated]~
 - ~do [#tpstdiag]~
-- do [#tpaudit]
+- ~do [#tpaudit]~
 - do [#mixconv]
 - do [#p6tspub]
 - do [#p6ren]
@@ -149,7 +200,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#tpaudit] Reconcile tsift tree-sitter source walk against tagpath `.naming.toml` walk and surface the diff. Today silent recall loss happens when tagpath `[exclude]` or `extends` skip files / languages that tsift indexes; the tsift symbols in those files get no handle even with a fresh tagpath index. New CLI: `tsift audit tagpath [--path .] [--scope <name>] [--json]` that reports (a) tsift symbols whose definition file is outside the tagpath source set, (b) tagpath families whose source files no longer exist in tsift index.db, and (c) the policy hints (excluded paths, language coverage gaps). Tests: extend `tests/exit_code.rs` with a fixture where `.naming.toml` excludes a path tsift still indexes.
 - [ ] [#mixconv] [recommended] tagpath lint policy that tolerates mixed conventions within a single identifier (e.g. `createUserProfile_v2`). Today `parser::detect_convention` classifies any identifier containing `_` as snake-family, so the camelCase-plus-suffix shape lint-fails in a camelCase-only context with `create_user_profile_v2` as the suggested fix. Add a per-context `tolerate_mixed = true` or top-level `lint.allow_mixed_within_identifier` policy that compares tag-equivalence rather than convention-equivalence. Single-file change in `src/lint/mod.rs:79`. Tests: extend `tests/lint.rs` with mixed-within-identifier cases.
 - [ ] [#p6tspub] Restore tsift crates.io publishability after p6tsi: tsift now depends on tagpath via path = ../tagpath. Replace with version = "0.17.1" (or whatever ships first) before any tsift release. Already gated by the sift-publish blocker so no immediate regression, but track here.
 - [ ] [#p6ren] tagpath rename <old> <new>: cross-file, cross-convention identifier rename using the index. Walks every member of the matching family, rewrites in-place in each source convention (snake/camel/Pascal/kebab/UPPER/Ada). Foundation for the agent-loop intent-preserving refactor vision.

@@ -285,7 +285,32 @@ Pushed commits:
 - `btakita/agent-loop` branch `main`: `11d1e971d` (`agent-doc: bump submodule for baseline drift SimWorld`)
 
 Unrelated pre-existing dirty files remain unstaged.
-<!-- agent:boundary:bfb75a90 -->
+### Re: do [#adoc-bdauc-preserve-session] — gpt-5
+
+Completed `#adoc-bdauc-preserve-session`.
+
+Implemented `agent-doc reset --from-current --preserve-session <FILE>` in `src/agent-doc/src/reset.rs` and wired the flag through the CLI. The new mode refreshes snapshot, CRDT, and preflight baseline sidecars from the current visible markdown without rewriting the document or clearing `resume`, and it leaves cycle state plus capture history untouched. `--preserve-session` now fails closed unless paired with `--from-current`.
+
+Updated the capture replay fail-closed message so unrecoverable baseline drift points operators at the non-destructive recovery command: `agent-doc reset --from-current --preserve-session <FILE>`. Updated `src/agent-doc/specs/07-core-commands.md` with the new reset contract.
+
+Verification passed:
+
+- `cargo test reset::tests`
+- `cargo test validate_replay`
+- `cargo test --test test_cli test_cli_help`
+- `make check`
+- `cargo build --release`
+- `cargo install --path .`
+
+CI/tmux evidence: the latest pushed agent-doc CI run `26410963462` for `1e47dd52` is in progress; at inspection time the job had started and `Run make tmux-ci` was still pending, so there was no red tmux leg to reproduce locally. The superproject has no workflow named `CI`.
+
+Pushed commits:
+
+- `btakita/agent-doc` branch `20260422/codex-agent-backend`: `1e47dd52` (`feat: preserve session state when resetting sidecars`)
+- `btakita/agent-loop` branch `main`: `e452e9de4` (`agent-doc: bump submodule for preserve-session reset`)
+
+Unrelated pre-existing dirty files remain unstaged.
+<!-- agent:boundary:c580a51b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -330,7 +355,8 @@ preset #spec-test-build-install-commit-push
 - ~do [#adoc-baseline-drift-after-user-commit]~
 - ~do [#adoc-prefix-strip-uncommitted]~
 - ~do [#adoc-bdauc-simworld]~
-- do [#adoc-bdauc-preserve-session]
+- ~do [#adoc-bdauc-preserve-session]~
+- do [#adoc-prefix-strip-session-check-whitelist]
 - do [#adoc-bdauc-runbook]
 - do [#adoc-bdauc-integration]
 - do [#adoc-web-sse]
@@ -355,7 +381,6 @@ preset #spec-test-build-install-commit-push
 - [ ] [#adoc-web-auth] Phase 5: bearer token auth for non-loopback binds, optional TLS via rustls, multi-user read-only viewer scope. Plan: tasks/agent-doc/plan-web-interface.md (Phase 5).
 - [ ] [#adoc-web-live-cycle] Phase 6: hook agent-doc stream into /events so the in-flight ### Re: block streams to the browser as the agent produces it; web writes funnel through finalize/write --commit when an active cycle is in scope. Plan: tasks/agent-doc/plan-web-interface.md (Phase 6).
 - [ ] [#adoc-prefix-strip-session-check-whitelist] Phase 1 of #adoc-prefix-strip-uncommitted: session_check.detect_bypassed_response_write false-positives on legitimate response prose lines (treats them as 'bare prompt target missing ❯ '). When a fresh preflight_started cycle just rotated mid-turn and has a visible response body but no capture/pending, the heuristic still flags the response as a likely_direct_response_patchback. Need to recognize and whitelist this shape (e.g., when the diff insert is bracketed by a legit ### Re: heading and the prose differs only by the absence of ❯ prefixes). Demonstrated live during the #adoc-prefix-strip-uncommitted cycle closeout — required bare git commit + reset --from-current fallback. Plan: tasks/agent-doc/plan-prefix-strip-uncommitted.md (Phase 1).
-- [ ] [#adoc-bdauc-preserve-session] agent-doc reset --from-current --preserve-session: non-destructive recovery that rebuilds the baseline but keeps session id, snapshot history, and capture chain. Today's --from-current is destructive. Plan: tasks/agent-doc/plan-baseline-drift-after-user-commit.md (Phase 3).
 - [ ] [#adoc-bdauc-runbook] Document baseline-drift recovery: new runbooks/baseline-drift.md (or extend jb-cache-conflict.md cross-link), SKILL.md catalog mirrors, runbooks/commit.md reference. Plan: tasks/agent-doc/plan-baseline-drift-after-user-commit.md (Phase 4).
 - [ ] [#adoc-bdauc-integration] In-source preflight integration test mirroring preflight_auto_recovers_jb_cache_conflict_cancel_committed_with_snapshot_drift: real git repo + cycle state, simulate user-committed benign drift, assert validate_replay auto-refreshes and preflight proceeds. Plan: tasks/agent-doc/plan-baseline-drift-after-user-commit.md (Phase 5).
 - [ ] [#jbrsrbusysw] SimWorld scenario coverage for session_restart --force: route + Restart Supervisor while pane is alive-busy with and without --force, asserting the new refusal message and force success (including session_restart_busy_pre_interrupt_idle and session_restart_busy_force_killed event variants). Substantial — requires new Op variant + tmux/session_actor mock in src/sim_world.rs. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md phase 4 (SimWorld piece).

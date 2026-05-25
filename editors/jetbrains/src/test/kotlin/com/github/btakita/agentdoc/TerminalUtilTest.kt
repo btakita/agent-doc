@@ -4,6 +4,7 @@ import java.nio.file.Files
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -399,6 +400,113 @@ class TerminalUtilTest {
                 "tasks/agent-doc/agent-doc-bugs2.md",
             ),
         )
+    }
+
+    @Test
+    fun `forced restart supervisor keeps force flag inside session command`() {
+        assertEquals(
+            listOf(
+                "agent-doc",
+                "session",
+                "restart-supervisor",
+                "--force",
+                "tasks/agent-doc/agent-doc-bugs2.md",
+            ),
+            TerminalUtil.buildSessionCommand(
+                "agent-doc",
+                listOf("restart-supervisor", "--force"),
+                "tasks/agent-doc/agent-doc-bugs2.md",
+            ),
+        )
+    }
+
+    @Test
+    fun `busy restart refusal parses force guidance details`() {
+        val output = """
+            agent-doc command failed (exit 1): Error: session_restart refused for /repo/tasks/root.md because pane %2 is alive-busy (source=authoritative_actor, current_command=agent-doc, tail="gpt-5 high - ~/repo - Context 20% used"). Run `agent-doc session status /repo/tasks/root.md` and wait for an idle prompt, or pass `--force` to interrupt the running turn and restart anyway.
+        """.trimIndent()
+
+        val refusal = TerminalUtil.parseBusySessionRestartRefusal(output)
+
+        assertNotNull(refusal)
+        assertEquals("/repo/tasks/root.md", refusal!!.file)
+        assertEquals("%2", refusal.pane)
+        assertEquals("authoritative_actor", refusal.source)
+        assertEquals("agent-doc", refusal.currentCommand)
+        assertEquals("gpt-5 high - ~/repo - Context 20% used", refusal.tail)
+    }
+
+    @Test
+    fun `busy restart refusal message exposes interrupt restart action`() {
+        val message = TerminalUtil.buildBusySessionRestartBlockedMessage(
+            relativePath = "tasks/root.md",
+            refusal = TerminalUtil.BusySessionRestartRefusal(
+                file = "/repo/tasks/root.md",
+                pane = "%2",
+                source = "authoritative_actor",
+                currentCommand = "agent-doc",
+                tail = "gpt-5 high - ~/repo - Context 20% used",
+            ),
+        )
+
+        assertTrue(message.contains("Restart Supervisor is blocked"))
+        assertTrue(message.contains("Pane %2 is busy (agent-doc)"))
+        assertTrue(message.contains("Interrupt and restart"))
+        assertFalse(message.contains("agent-doc command failed"))
+    }
+
+    @Test
+    fun `restart telemetry parses force recovery ops log events for document`() {
+        val lines = listOf(
+            "[1] session_restart_force_used file=/repo/tasks/other.md pane=%9 source=authoritative_actor state=alive-busy current_command=agent-doc prompt_ready=false tail=\"other\"",
+            "[2] session_restart_force_used file=/repo/tasks/root.md pane=%2 source=authoritative_actor state=alive-busy current_command=agent-doc prompt_ready=false tail=\"running\"",
+            "[3] session_restart_busy_force_killed file=/repo/tasks/root.md pane=%2 source=authoritative_actor state=closed current_command=agent-doc prompt_ready=false tail=\"exited\"",
+        )
+
+        val telemetry = TerminalUtil.parseRestartSupervisorTelemetry(lines, "/repo", "tasks/root.md")
+
+        assertNotNull(telemetry)
+        assertTrue(telemetry!!.forceUsed)
+        assertTrue(telemetry.busyForceKilled)
+        assertFalse(telemetry.busyPreInterruptIdle)
+        assertEquals("%2", telemetry.pane)
+        assertEquals("closed", telemetry.state)
+        assertEquals("agent-doc", telemetry.currentCommand)
+        assertEquals(
+            listOf("session_restart_force_used", "session_restart_busy_force_killed"),
+            telemetry.eventNames,
+        )
+    }
+
+    @Test
+    fun `restart telemetry ignores unrelated documents`() {
+        val lines = listOf(
+            "[1] session_restart_force_used file=/repo/tasks/other.md pane=%9 source=authoritative_actor state=alive-busy current_command=agent-doc prompt_ready=false tail=\"other\"",
+        )
+
+        assertNull(TerminalUtil.parseRestartSupervisorTelemetry(lines, "/repo", "tasks/root.md"))
+    }
+
+    @Test
+    fun `restart success message surfaces force telemetry events`() {
+        val message = TerminalUtil.restartSessionSuccessMessage(
+            relativePath = "tasks/root.md",
+            output = "Requested continue restart for /repo/tasks/root.md (controller stage ready).",
+            telemetry = TerminalUtil.RestartSupervisorTelemetry(
+                forceUsed = true,
+                busyPreInterruptIdle = false,
+                busyForceKilled = true,
+                pane = "%2",
+                state = "closed",
+                currentCommand = "agent-doc",
+                eventNames = listOf("session_restart_force_used", "session_restart_busy_force_killed"),
+            ),
+        )
+
+        assertTrue(message.contains("Requested continue restart"))
+        assertTrue(message.contains("forced restart interrupted a busy pane"))
+        assertTrue(message.contains("pane %2"))
+        assertTrue(message.contains("Events: session_restart_force_used, session_restart_busy_force_killed"))
     }
 
     @Test

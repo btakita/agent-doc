@@ -5,6 +5,7 @@ import com.intellij.notification.NotificationAction
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.ide.CopyPasteManager
@@ -17,7 +18,9 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 
 object TerminalUtil {
+    private val LOG = Logger.getInstance(TerminalUtil::class.java)
     private const val ROUTE_ERROR_DIAGNOSTICS_DIR = ".agent-doc/state/editor-route-errors"
+    private const val RESTART_TELEMETRY_OPS_LOG_MAX_LINES = 400
     internal const val STARTING_ACTOR_ROUTE_MAX_ATTEMPTS = 4
     private val STARTING_ACTOR_ROUTE_RETRY_DELAYS_MILLIS = longArrayOf(2_000L, 4_000L, 8_000L)
     private val BUSY_CLEAR_REFUSAL_HEADER_REGEX = Regex(
@@ -28,9 +31,22 @@ object TerminalUtil {
         """session_clear refused for (.+?) because pane (\S+) contains protected prompt input""",
         RegexOption.DOT_MATCHES_ALL,
     )
+    private val BUSY_RESTART_REFUSAL_HEADER_REGEX = Regex(
+        """session_restart refused for (.+?) because pane (\S+) is alive-busy""",
+        RegexOption.DOT_MATCHES_ALL,
+    )
     private val PROTECTED_CLEAR_REASON_REGEX = Regex("""reason=([^,)]+)""")
     private val BUSY_CLEAR_SOURCE_REGEX = Regex("""source=([^,)]+)""")
     private val BUSY_CLEAR_COMMAND_REGEX = Regex("""current_command=([^,)]+)""")
+    private val OPS_LOG_FILE_REGEX = Regex("""\bfile=(\S+)""")
+    private val OPS_LOG_PANE_REGEX = Regex("""\bpane=(\S+)""")
+    private val OPS_LOG_STATE_REGEX = Regex("""\bstate=(\S+)""")
+    private val OPS_LOG_CURRENT_COMMAND_REGEX = Regex("""\bcurrent_command=(\S+)""")
+    private val RESTART_TELEMETRY_EVENT_NAMES = listOf(
+        "session_restart_force_used",
+        "session_restart_busy_pre_interrupt_idle",
+        "session_restart_busy_force_killed",
+    )
 
     internal interface InFlightRouteHandle {
         fun isAlive(): Boolean
@@ -122,6 +138,24 @@ object TerminalUtil {
         val protectedReason: String = "",
     )
 
+    internal data class BusySessionRestartRefusal(
+        val file: String,
+        val pane: String,
+        val source: String,
+        val currentCommand: String,
+        val tail: String,
+    )
+
+    internal data class RestartSupervisorTelemetry(
+        val forceUsed: Boolean,
+        val busyPreInterruptIdle: Boolean,
+        val busyForceKilled: Boolean,
+        val pane: String,
+        val state: String,
+        val currentCommand: String,
+        val eventNames: List<String>,
+    )
+
     internal val inFlightRouteRegistry = InFlightRouteRegistry()
 
     fun relativePath(project: Project, file: VirtualFile): String {
@@ -178,7 +212,6 @@ object TerminalUtil {
      * 4. Auto-starts a new agent session if needed
      */
     fun sendToTerminal(project: Project, file: VirtualFile, onComplete: (() -> Unit)? = null) {
-        val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(TerminalUtil::class.java)
         val (cwd, relativePath) = resolveProject(project, file)
         val agentDoc = resolveAgentDoc(cwd)
         val routeKey = "$cwd::$relativePath"
@@ -403,16 +436,64 @@ object TerminalUtil {
     }
 
     fun restartSession(project: Project, file: VirtualFile, onComplete: (() -> Unit)? = null) {
+        runRestartSupervisorCommand(project, file, force = false, onComplete = onComplete)
+    }
+
+    private fun runRestartSupervisorCommand(
+        project: Project,
+        file: VirtualFile,
+        force: Boolean,
+        onComplete: (() -> Unit)? = null,
+    ) {
+        val (telemetryCwd, _) = resolveProject(project, file)
+        val telemetryStartLine = restartTelemetryOpsLogLineCount(telemetryCwd)
         runSessionCommand(
             project = project,
             file = file,
-            args = listOf("restart-supervisor"),
+            args = if (force) listOf("restart-supervisor", "--force") else listOf("restart-supervisor"),
             startedMessage = "Restarting supervisor for ${file.name}",
             onSuccess = { relativePath, output ->
-                showHint(project, output.ifBlank { "Restart requested for supervisor handling $relativePath" })
+                val telemetry = readRestartSupervisorTelemetry(telemetryCwd, relativePath, telemetryStartLine)
+                val message = restartSessionSuccessMessage(relativePath, output, telemetry)
+                if (telemetry != null) {
+                    LOG.info("[session_restart] $relativePath ${telemetry.eventNames.joinToString(",")} pane=${telemetry.pane}")
+                    notifyInfo(project, message)
+                } else {
+                    showHint(project, message)
+                }
+            },
+            onFailure = if (force) {
+                null
+            } else {
+                { relativePath, exitCode, output ->
+                    val busyRefusal = parseBusySessionRestartRefusal(output)
+                    if (busyRefusal != null) {
+                        notifyBusySessionRestartBlocked(project, file, relativePath, busyRefusal, output)
+                    } else {
+                        notifyError(project, "agent-doc command failed (exit $exitCode):\n$output")
+                    }
+                }
             },
             onComplete = onComplete,
         )
+    }
+
+    fun interruptAndRestartSession(project: Project, file: VirtualFile, onComplete: (() -> Unit)? = null) {
+        ApplicationManager.getApplication().invokeLater {
+            val decision = Messages.showYesNoDialog(
+                project,
+                "Interrupt the running agent-doc turn and restart its supervisor? Unsaved work in the terminal session may be discarded.",
+                "Interrupt and Restart Supervisor",
+                "Interrupt and restart",
+                "Cancel",
+                Messages.getWarningIcon(),
+            )
+            if (decision != Messages.YES) {
+                onComplete?.invoke()
+                return@invokeLater
+            }
+            runRestartSupervisorCommand(project, file, force = true, onComplete = onComplete)
+        }
     }
 
     fun compactExchange(project: Project, file: VirtualFile, onComplete: (() -> Unit)? = null) {
@@ -631,6 +712,43 @@ object TerminalUtil {
                 line.contains("prompt_ready=true")
         }
 
+    internal fun restartSessionSuccessMessage(
+        relativePath: String,
+        output: String,
+        telemetry: RestartSupervisorTelemetry?,
+    ): String {
+        val base = output.ifBlank { "Restart requested for supervisor handling $relativePath" }
+        return if (telemetry == null) {
+            base
+        } else {
+            "$base\n${buildRestartSupervisorTelemetryMessage(telemetry)}"
+        }
+    }
+
+    internal fun buildRestartSupervisorTelemetryMessage(telemetry: RestartSupervisorTelemetry): String = buildString {
+        append("Recovery path: ")
+        when {
+            telemetry.busyForceKilled -> append("forced restart interrupted a busy pane and restarted the supervisor")
+            telemetry.busyPreInterruptIdle -> append("forced restart interrupted a busy pane that reached idle before restart")
+            telemetry.forceUsed -> append("forced restart was used")
+            else -> append("restart completed")
+        }
+        if (telemetry.pane.isNotBlank() && telemetry.pane != "unknown") {
+            append(" (pane ")
+            append(telemetry.pane)
+            append(")")
+        }
+        append(".")
+        if (telemetry.currentCommand.isNotBlank() && telemetry.currentCommand != "unknown") {
+            append("\nInterrupted command: ")
+            append(telemetry.currentCommand)
+        }
+        if (telemetry.eventNames.isNotEmpty()) {
+            append("\nEvents: ")
+            append(telemetry.eventNames.joinToString(", "))
+        }
+    }
+
     internal fun parseBusySessionClearRefusal(output: String): BusySessionClearRefusal? {
         val protectedMatch = PROTECTED_CLEAR_REFUSAL_HEADER_REGEX.find(output)
         if (protectedMatch != null) {
@@ -660,6 +778,20 @@ object TerminalUtil {
         )
     }
 
+    internal fun parseBusySessionRestartRefusal(output: String): BusySessionRestartRefusal? {
+        val match = BUSY_RESTART_REFUSAL_HEADER_REGEX.find(output) ?: return null
+        val detail = output.substring(match.range.last + 1)
+        val source = BUSY_CLEAR_SOURCE_REGEX.find(detail)?.groupValues?.getOrNull(1).orEmpty()
+        val currentCommand = BUSY_CLEAR_COMMAND_REGEX.find(detail)?.groupValues?.getOrNull(1).orEmpty()
+        return BusySessionRestartRefusal(
+            file = match.groupValues[1],
+            pane = match.groupValues[2],
+            source = source.ifBlank { "unknown" },
+            currentCommand = currentCommand.ifBlank { "unknown" },
+            tail = extractBusyClearTail(detail),
+        )
+    }
+
     private fun extractBusyClearTail(detail: String): String {
         val marker = "tail="
         val start = detail.indexOf(marker)
@@ -680,6 +812,110 @@ object TerminalUtil {
             .replace("\\\"", "\"")
             .replace("\\\\", "\\")
     }
+
+    internal fun parseRestartSupervisorTelemetry(
+        lines: Iterable<String>,
+        cwd: String,
+        relativePath: String,
+    ): RestartSupervisorTelemetry? {
+        val matched = lines.filter { line ->
+            restartTelemetryEventName(line) != null && opsLogLineMatchesPath(line, cwd, relativePath)
+        }
+        if (matched.isEmpty()) {
+            return null
+        }
+
+        val eventNames = mutableListOf<String>()
+        for (line in matched) {
+            val name = restartTelemetryEventName(line) ?: continue
+            if (!eventNames.contains(name)) {
+                eventNames.add(name)
+            }
+        }
+        return RestartSupervisorTelemetry(
+            forceUsed = eventNames.contains("session_restart_force_used"),
+            busyPreInterruptIdle = eventNames.contains("session_restart_busy_pre_interrupt_idle"),
+            busyForceKilled = eventNames.contains("session_restart_busy_force_killed"),
+            pane = latestRegexValue(matched, OPS_LOG_PANE_REGEX).ifBlank { "unknown" },
+            state = latestRegexValue(matched, OPS_LOG_STATE_REGEX).ifBlank { "unknown" },
+            currentCommand = latestRegexValue(matched, OPS_LOG_CURRENT_COMMAND_REGEX).ifBlank { "unknown" },
+            eventNames = eventNames,
+        )
+    }
+
+    private fun readRestartSupervisorTelemetry(
+        cwd: String,
+        relativePath: String,
+        startLine: Int?,
+    ): RestartSupervisorTelemetry? {
+        val logFile = File(cwd, ".agent-doc/logs/ops.log")
+        if (!logFile.isFile) {
+            return null
+        }
+        return try {
+            val lines = logFile.readLines()
+            val candidateLines = if (startLine != null && startLine <= lines.size) {
+                lines.drop(startLine)
+            } else {
+                lines.takeLast(RESTART_TELEMETRY_OPS_LOG_MAX_LINES)
+            }
+            parseRestartSupervisorTelemetry(
+                candidateLines.takeLast(RESTART_TELEMETRY_OPS_LOG_MAX_LINES),
+                cwd,
+                relativePath,
+            )
+        } catch (e: Exception) {
+            LOG.warn("[session_restart] failed to read restart telemetry: ${e.message}")
+            null
+        }
+    }
+
+    private fun restartTelemetryOpsLogLineCount(cwd: String): Int? {
+        val logFile = File(cwd, ".agent-doc/logs/ops.log")
+        if (!logFile.isFile) {
+            return 0
+        }
+        return try {
+            logFile.useLines { it.count() }
+        } catch (e: Exception) {
+            LOG.warn("[session_restart] failed to count restart telemetry: ${e.message}")
+            null
+        }
+    }
+
+    private fun restartTelemetryEventName(line: String): String? =
+        RESTART_TELEMETRY_EVENT_NAMES.firstOrNull { line.contains(it) }
+
+    private fun opsLogLineMatchesPath(line: String, cwd: String, relativePath: String): Boolean {
+        val loggedFile = OPS_LOG_FILE_REGEX.find(line)?.groupValues?.getOrNull(1) ?: return false
+        val normalizedLoggedFile = normalizePath(loggedFile)
+        val normalizedRelative = normalizePath(relativePath)
+        if (normalizedLoggedFile == normalizedRelative) {
+            return true
+        }
+        val absolute = normalizePath(File(cwd, relativePath).absolutePath)
+        if (normalizedLoggedFile == absolute) {
+            return true
+        }
+        val canonical = try {
+            normalizePath(File(cwd, relativePath).canonicalPath)
+        } catch (_: Exception) {
+            absolute
+        }
+        return normalizedLoggedFile == canonical || normalizedLoggedFile.endsWith("/$normalizedRelative")
+    }
+
+    private fun latestRegexValue(lines: List<String>, regex: Regex): String {
+        for (line in lines.asReversed()) {
+            val value = regex.find(line)?.groupValues?.getOrNull(1)
+            if (!value.isNullOrBlank()) {
+                return value
+            }
+        }
+        return ""
+    }
+
+    private fun normalizePath(path: String): String = path.replace('\\', '/')
 
     internal fun isStartingActorRouteFailure(output: String): Boolean {
         return output.contains("authoritative actor generation") &&
@@ -754,6 +990,35 @@ object TerminalUtil {
         }
     }
 
+    private fun notifyBusySessionRestartBlocked(
+        project: Project,
+        file: VirtualFile,
+        relativePath: String,
+        refusal: BusySessionRestartRefusal,
+        rawOutput: String,
+    ) {
+        val summary = buildBusySessionRestartBlockedMessage(relativePath, refusal)
+        try {
+            val notification = NotificationGroupManager.getInstance()
+                .getNotificationGroup("Agent Doc")
+                .createNotification(summary, NotificationType.WARNING)
+            notification.isImportant = true
+            notification.addAction(NotificationAction.createSimple("Interrupt and restart") {
+                interruptAndRestartSession(project, file)
+            })
+            notification.addAction(NotificationAction.createSimple("Show status") {
+                showSessionStatus(project, file)
+            })
+            notification.addAction(NotificationAction.createSimple("Copy details") {
+                CopyPasteManager.getInstance().setContents(StringSelection(rawOutput))
+                showHint(project, "Copied busy restart details for $relativePath")
+            })
+            notification.notify(project)
+        } catch (_: Exception) {
+            System.err.println("[agent-doc] $summary")
+        }
+    }
+
     internal fun buildBusySessionClearBlockedMessage(
         relativePath: String,
         refusal: BusySessionClearRefusal,
@@ -785,6 +1050,27 @@ object TerminalUtil {
         }
         append(". Wait for the turn to finish, then retry Clear Session Context.")
         append(" Use Refresh and retry if the pane has returned to an idle prompt, or Interrupt and clear to discard the running turn.")
+        if (refusal.tail.isNotBlank() && refusal.tail != "unknown") {
+            append("\nLatest pane output: ")
+            append(refusal.tail)
+        }
+    }
+
+    internal fun buildBusySessionRestartBlockedMessage(
+        relativePath: String,
+        refusal: BusySessionRestartRefusal,
+    ): String = buildString {
+        append("Restart Supervisor is blocked for ")
+        append(relativePath)
+        append(".\nPane ")
+        append(refusal.pane)
+        append(" is busy")
+        if (refusal.currentCommand.isNotBlank() && refusal.currentCommand != "unknown") {
+            append(" (")
+            append(refusal.currentCommand)
+            append(")")
+        }
+        append(". Use Interrupt and restart to stop the running turn and restart the supervisor, or Show status to inspect the session.")
         if (refusal.tail.isNotBlank() && refusal.tail != "unknown") {
             append("\nLatest pane output: ")
             append(refusal.tail)

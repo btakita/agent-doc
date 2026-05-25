@@ -35,7 +35,84 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 5 response topic(s): graph performance next steps; `#gdbprephot` confirmed as top; `do [#gdbprephot]`; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:259d47bb -->
+❯ preset #spec-test-build-install-commit-push
+❯ - do [#impactprof]
+❯ - do [#gdbfullreuse]
+❯ - do [#gdbscanproof]
+❯ - do [#gdbperfgate]
+### Re: `do [#impactprof]` — impact sub-phase timers + empty-input short-circuits drop impact 789ms → 1.6ms — opus-4-7
+
+`#impactprof` done in **tsift 0.1.46 (`998860e`)** with agent-loop submodule pointer bumped to **`bb894cf74`**. Sub-phase timers landed and the dominant cost (488ms `call_edge_impacts` + 285ms `import_impacts`) collapses to ~0ms on the typical backend-eval cold path because the work was loading every call edge and walking every source file just to filter against an empty `changed_symbols` / `changed_tokens` set.
+
+#### Sub-phase evidence (3 cold runs on agent-loop, post-timer pre-fix)
+
+| sub-phase (median ms) | s1 | s2 | s3 | median |
+|---|---:|---:|---:|---:|
+| `…impact` (parent) | 808 | 778 | 789 | **789** |
+| `…impact.call_edge_impacts` | 509 | 498 | 497 | **498 (63%)** |
+| `…impact.import_impacts` | 294 | 276 | 285 | **285 (36%)** |
+| `…impact.route_handler_impacts` | 3 | 2 | 4 | 3 |
+| `…impact.diff_digest` | 1 | 1 | 1 | 1 |
+| `…impact.index_open` | 0 | 0 | 0 | 0 |
+| `…impact.test_path_scan` | 0 | 0 | 0 | 0 |
+| `…impact.context_resolution` | 0 | 0 | 0 | 0 |
+| `…impact.report_assembly` | 0 | 0 | 0 | 0 |
+
+#### Why the fix is a 100% drop, not a partial nibble
+
+Both `add_call_edge_impacts` and `add_import_impacts` were paying their full cost regardless of whether there was anything to match:
+
+- `add_call_edge_impacts` ran `db.all_stored_edges()?` (loads every call edge in the tsift index — tens of thousands of rows for agent-loop) and then dropped each one in the `if !changed_symbols.contains(...)` filter.
+- `add_import_impacts` ran `walk::walk_files(source_root)?` and per-file `fs::read_to_string` on every test-bearing file, then matched against an empty `changed_tokens` set that could never produce a hit.
+
+In the typical `tsift graph-db --json backend-eval` flow, `impact::compute` is called with `cached: true` against a clean working tree → `diff_digest` returns no staged changes → both `changed_symbols` and `changed_tokens` are empty → all 783 ms of the iteration phases were wasted. The fix is three early-return guards at the top of `add_call_edge_impacts`, `add_route_handler_impacts`, and `add_import_impacts`. When staged changes exist (a real `tsift impact` invocation against a dirty tree, or a test scenario) the iteration runs as before.
+
+#### Post-fix 3-sample medians
+
+| phase | pre (with timers) | post (with guards) | delta |
+|---|---:|---:|---:|
+| `conflict_matrix_preparation` | 2572 | **1935** | **-25%** |
+| `conflict_matrix_preparation.impact` | 789 | **1.6** | **-100%** |
+| `…impact.call_edge_impacts` | 498 | 0 | -100% |
+| `…impact.import_impacts` | 285 | 0 | -100% |
+
+#### What landed (tsift 0.1.46)
+
+| Surface | Change |
+|---|---|
+| `src/tsift/src/impact.rs` | New public `ImpactPhaseTiming { name, duration_micros, detail }` + `compute_with_phases(path, options)` returning `(ImpactReport, Vec<ImpactPhaseTiming>)`. Original `compute` becomes a thin wrapper. `add_call_edge_impacts`, `add_route_handler_impacts`, and `add_import_impacts` gain `if X.is_empty() { return Ok(()); }` guards at the top. |
+| `src/tsift/src/main.rs` (`prepare_conflict_matrix_inputs`) | Switched the `impact::compute(...)` call to `impact::compute_with_phases(...)` so the eight inner timings flow into the existing `phases` Vec as `impact.<sub>` entries. |
+| `src/tsift/src/main.rs` (`conflict_matrix_prepared_inputs_cache_hit`) | Cache-hit path emits all eight new sub-phases as `0us` with the existing source/document/staged-diff watermark detail. |
+| `src/tsift/tests/graph_db_conformance.rs` | Cold-run existence loop and cached-run 0us/watermark loop both extended to the eight new sub-phases. |
+| `src/tsift/SPEC.md` | `impact` phase listing now names the eight `impact.<sub>` entries and the short-circuit behavior. |
+| `src/tsift/VERSIONS.md` + `Cargo.toml` | New `## 0.1.46` entry; package version bumped. |
+
+#### Verification
+
+| Check | Result |
+|---|---|
+| `cargo test --release` (tsift, full suite) | 662 + 108 + 31 = 801 tests pass |
+| `cargo build --release` + `cargo install --path .` | `tsift --version` → `tsift 0.1.46` |
+| `git push` (tsift `main` → `origin/main`) | `998860e` pushed |
+| `git push` (agent-loop `main` → `origin/main`) | `bb894cf74` pushed |
+
+#### Updated cost landscape (0.1.46 cold-path medians, 3 samples)
+
+| phase | median (ms) | share |
+|---|---:|---:|
+| `conflict_matrix_preparation` | ~1935 | 100% |
+| `…status_index_gate` (parent) | 678 | 35% |
+| `…context_pack_diff` | ~436 | 23% |
+| `…session_review_compute` | ~272 | 14% |
+| `…preparation_cache_lookup` | ~242 | 13% |
+| `…impact` | **~2** | <1% |
+
+`status_index_gate` (gated as `#gdbgatecold`) is now the largest single sibling. `context_pack_diff` is next.
+
+#### Queue state
+
+Queue head is now `do [#gdbfullreuse]` (full-projection cache-hit performance). The 3 remaining items (`#gdbfullreuse`, `#gdbscanproof`, `#gdbperfgate`) plus the gated `#gdbgatecold` cover the next wave.
+<!-- agent:boundary:9ef0f7a9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -55,7 +132,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#impactprof] [recommended] After conflict_matrix_preparation.session_review_compute dropped from 3719ms to 272ms (#gdbprephotreuse, tsift 0.1.44) and status_index_gate observability landed (#gdbprephotgate, tsift 0.1.45), conflict_matrix_preparation.impact is now the dominant single sibling at 774-810ms median. Profile impact::compute by adding sub-phase timers (mirror the session_review_compute and status_index_gate decomposition pattern), capture a 3-sample baseline under conflict_matrix_preparation.impact.<sub>, then implement the proven inner-call reduction with a metric-digest regression gate.
 - [ ] [#gdbfullreuse] [recommended] Make full-projection cache-hit performance the next hard gate: run at least three tsift graph-db --json backend-eval --full-projection cold/cache samples, split source-graph-build, projection-row construction, cache load, compression, and SQLite write phases, then remove clone/serde/cache artifact churn only where those samples show a stable bottleneck.
 - [ ] [#gdbscanproof] [recommended] Re-check SQLite scan plans on the current graph schema before adding another backend: capture EXPLAIN/cardinality evidence for edge_property_scan, incident_edges, kind/neighborhood property filters, and path frontier probes on real plus synthetic high-degree/deep-chain data; add indexes/materialized rows only for proven scan-dominant cases.
 - [ ] [#gdbperfgate] [recommended] Turn graph performance tuning into a repeatable release gate: store metric-digest summaries for default, full-projection, high-degree, and deep-chain runs, require three-sample regression evidence, and keep FalkorDB/Kuzu promotion blocked until they beat the stabilized SQLite gate including projection writes and lock behavior.

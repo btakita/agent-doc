@@ -9590,6 +9590,33 @@ fn authoritative_actor_state_preserves_terminal_record_over_runtime_starting() {
 }
 
 #[test]
+fn starting_timeout_blocked_actor_recovery_requires_prompt_ready_proof() {
+    let mut blocked_record = test_actor_record("%42");
+    blocked_record.state = crate::session_actor::ActorState::Blocked;
+    blocked_record.last_transition.reason = "starting_actor_timeout".to_string();
+    let blocked_actor = AuthoritativeActorDispatchTarget {
+        record: blocked_record,
+        runtime: SupervisorRuntime {
+            health: SupervisorHealth::Healthy,
+            actor_state: Some(crate::session_actor::ActorState::Starting),
+        },
+    };
+
+    assert!(
+        starting_timeout_blocked_actor_can_recover(&blocked_actor, true),
+        "a route-owned starting timeout may recover only after direct dispatch-ready prompt proof"
+    );
+    assert!(
+        !starting_timeout_blocked_actor_can_recover(&blocked_actor, false),
+        "route must not clear a durable starting timeout without prompt proof"
+    );
+    assert!(
+        !starting_timeout_blocked_actor_can_recover(&test_degraded_actor("%43"), true),
+        "ordinary degraded actors must not use the starting-timeout recovery path"
+    );
+}
+
+#[test]
 fn dispatch_only_can_use_degraded_authoritative_actor_returns_true_when_registered_matches() {
     let actor = test_degraded_actor("%42");
     assert!(dispatch_only_can_use_degraded_authoritative_actor(

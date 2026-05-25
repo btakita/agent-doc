@@ -18,6 +18,8 @@ class TerminalUtilTest {
                 "route",
                 "--dispatch-only",
                 "--plain-trigger",
+                "--wait-for-ready",
+                "60",
                 "tasks/root.md",
             ),
             TerminalUtil.buildRunRouteCommand("/usr/local/bin/agent-doc", "tasks/root.md"),

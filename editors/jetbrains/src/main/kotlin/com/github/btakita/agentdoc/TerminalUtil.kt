@@ -315,7 +315,15 @@ object TerminalUtil {
     }
 
     internal fun buildRunRouteCommand(agentDoc: String, relativePath: String): MutableList<String> =
-        mutableListOf(agentDoc, "route", "--dispatch-only", "--plain-trigger", relativePath)
+        mutableListOf(
+            agentDoc,
+            "route",
+            "--dispatch-only",
+            "--plain-trigger",
+            "--wait-for-ready",
+            "60",
+            relativePath,
+        )
 
     internal fun buildRouteLayoutArgs(
         visibleMdFiles: List<String>,

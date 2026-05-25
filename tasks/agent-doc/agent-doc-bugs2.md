@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -41,7 +41,12 @@ Compacted content:
 ❯ I’m treating the IPC corruption / duplicate-line note as reproduced context for the existing JetBrains cache-conflict review items, not as a new distinct backlog entry. The same failure surface is already represented by `#adoc-jb-cache-cancel-stuck-cycle`, with `#jbccc2` as the active plugin-side phase.
 
 ❯ Verification: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`; no repo code changed.
-<!-- agent:boundary:daac734b -->
+### Re: Closeout repair — gpt-5
+
+The stale queue has been cleared and the review-gated items remain gated. This repair response closes the prior IPC recovery body that was mistakenly written with prompt prefixes, so the document has an assistant response after that prompt-only tail.
+
+Verification: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`; no repo code changed.
+<!-- agent:boundary:b7c5aeaf -->
 <!-- /agent:exchange -->
 ###
 <!--

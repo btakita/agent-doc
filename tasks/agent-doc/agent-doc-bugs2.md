@@ -122,7 +122,40 @@ Per your instruction to "apply + commit the response": the `#jbccc2` gate-with-I
 #### Next item
 
 Queue head advances to `#jbccc3` after this cycle (binary auto-recovery in `preflight` / `repair` / `write` / `session_check` — the failing baseline from `#jbccc1` flips green when this lands). I can fully execute that from this terminal.
-<!-- agent:boundary:dc66c813 -->
+### Re: do [#jbccc3] — opus-4-7
+
+Phase 3 of `#adoc-jb-cache-cancel-stuck-cycle` landed. Preflight now auto-recovers the wedge instead of bailing.
+
+#### What changed (binary)
+
+- New `session_check::detect_jb_cache_conflict_cancel_recoverable(file)` — true when cycle phase is `WriteApplied` or `Committed`, snapshot ≠ HEAD, and the working tree matches the snapshot modulo transient `(HEAD)` / boundary markers. That signature is the cancel-induced wedge (response written through the binary write path, commit boundary never landed) and it is safely closeable via `git::commit`.
+- `preflight::enforce_no_uncommitted_closeout_drift` runs `git::commit(file)` when the pattern matches before falling through to the legacy drift bail. Logs `jb_cache_conflict_cancel_auto_recovery_attempt` / `_succeeded` / `_failed` to `ops.log` so the recovery is auditable.
+- `session_check::detect_uncommitted_closeout_drift` and `check_snapshot_committed_guard` return `None`/`Ok` for the same pattern. Standalone `agent-doc session-check` therefore stops surfacing the misleading "snapshot does not match HEAD" / "likely direct response patchback" interruption when the next preflight will auto-recover.
+
+#### Tests
+
+- Added `preflight_auto_recovers_jb_cache_conflict_cancel_committed_with_snapshot_drift` — pins the State B variant (cycle marked `Committed` but commit boundary never landed). Runs preflight, asserts cycle reaches `Committed` and HEAD contains the response.
+- Added `session_check_snapshot_committed_guard_skips_jb_cache_conflict_cancel_pattern` — pins the standalone session-check behavior.
+- Updated `session_check_snapshot_committed_guard_fails_when_snapshot_differs` and `..._reports_side_effect_recovery_hint` to use divergent working trees (or no cycle state) where the cancel pattern legitimately does not apply, so the side-effect / drift hint still fires for the real out-of-band shapes.
+- `cargo test session_check` and `cargo test preflight` both green. `make check` fails only on the pre-existing `codex_bare_run_inside_owning_pane_fails_before_nested_dispatch` nextest flake (confirmed identical failure with my changes stashed out).
+
+#### Verification this turn
+
+This very session was wedged on the exact pattern at start (preflight bailed with "snapshot differs from HEAD without an open or recoverable agent-doc cycle"). I recovered via `agent-doc commit`, which is the same `git::commit` call the new auto-recovery path now invokes. Future hits should be transparent.
+
+#### Scope and follow-ups
+
+- Phase 4 (docs/runbook) and Phase 5 (full SimWorld inversion + real-file integration coverage) still pending; the existing SimWorld baseline test still pins the pre-binary-recovery shape because SimWorld models the abstract state machine, not the real binary's preflight call. Replacing it with a real `agent-doc preflight` integration test belongs with Phase 5.
+- Independent work on the JB plugin undo-on-cancel path stays in its own item; this binary recovery reduces user-visible impact regardless of plugin status.
+
+#### Closeout
+
+- Submodule commit: `b009fbc` (`src/agent-doc`) — `fix: auto-recover jb_cache_conflict_cancel wedge in preflight`.
+- Superproject commit: `82977a917` — `agent-doc: bump submodule`.
+- `cargo install --path .` + `cargo build --release` both ran; `~/.cargo/bin/agent-doc` and `.bin/agent-doc → target/release/agent-doc` both refreshed.
+
+Marking `#jbccc3` done. Queue head advances next cycle.
+<!-- agent:boundary:e2587c0d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -150,7 +183,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#jbccc1]~
 - ~do [#jbccc2]~
 - ~do [#adoc-compact-during-turn-response-loss]~
-- do [#jbccc3]
+- ~do [#jbccc3]~
 - do [#jbccc4]
 - do [#jbccc5]
 - do [#adoc-baseline-drift-after-user-commit]

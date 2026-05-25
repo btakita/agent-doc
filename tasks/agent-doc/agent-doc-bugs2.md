@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -76,7 +76,7 @@ Doing them all in one cycle would either skip tests, skip the local install-and-
 1. `#ipcdupfinalize` Phase 2 (socket-ack `already_applied` short-circuit — directly fixes the IPC corruption observed twice in this conversation).
 2. `#jbrunstart` Phase 1 (smallest concrete chunk: just the `--wait-for-ready` flag on `route`).
 3. `#jbrsrbusysim` (SimWorld + telemetry — substantial but well-scoped against the existing plan).
-<!-- agent:boundary:f1991778 -->
+<!-- agent:boundary:babd0f69 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -100,14 +100,13 @@ Error: authoritative actor generation 56 for tasks/docs.md owns pane %39 but rou
 Please make auto-compact exchange off by default. Only explicit frontmatter or .agent-doc/config.toml setting should make auto-compact exchange active.
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- ~do [#stuckcyclesuperseded]~
-- ~do [#runintegcodexbare]~
-- ~do [#jbrsrbusyjb]~
-- ~do [#jbrsrbusyint]~
+- do [#jbrunstart]
 - do [#jbrsrbusysim]
-- Please make auto-compact exchange off by default. Only explicit frontmatter or .agent-doc/config.toml setting should make auto-compact exchange active.
+- do [#jbccfix]
+- do [#jbccreg]
+- do [#jbccdocs]
 <!-- /agent:queue -->
 
 ## Pending / Not Built

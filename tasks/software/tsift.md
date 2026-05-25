@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -88,14 +88,21 @@ The Convex tombstone-prune leg of the other review item cannot run until `#conve
 Queue now lists `do [#convexsnapshotscale]`, `do [#convexscopedeval]`, `complete [#gdbvacproof]` (plus the two struck-through completed items). The queue header has no `auto` marker, so no prompt is firing this cycle.
 
 To kick off the next item, either flip the queue marker to `&lt;!-- agent:queue auto --&gt;` (binary advances to the head and I execute `do [#convexsnapshotscale]`) or chat me a direct directive. Both `#convexsnapshotscale` (paginate `examples/convex-graph/graph.ts:snapshot` so `--remote-snapshot` works at scale) and `#convexscopedeval` (decide scope-bounded sync default) are ready to dispatch as focused packets; they should run sequentially per planner since both touch the same Convex schema area.
-<!-- agent:boundary:735db0d9 -->
+### Re: do [#convexsnapshotscale] — opus-4-7
+
+Dispatched as a focused packet. Replaces `examples/convex-graph/graph.ts:snapshot`'s `.collect()` with a scalable variant — most likely a content-hash digest (`snapshotDigest` returning `{nodeCount, edgeCount, nodeHash, edgeHash, indexes}`) since `tsift convex-sync --remote-snapshot` only needs a hash for the freshness verdict, not materialized rows. Subagent verifies that assumption against `src/main.rs` first; if the consumer actually needs rows, falls back to cursor-based pagination.
+
+Updates both `examples/convex-graph/` and `examples/convex-graph-app/convex/` (kept identical by contract), the HTTP action route, the tsift consumer in `src/main.rs`, and bumps to v0.1.52. Live-tested end-to-end against the self-hosted `ghcr.io/get-convex/convex-backend` Docker image with the existing 4767-node / 28427-edge tsift scope dataset; container + volume + `.env.local` cleaned up after.
+
+`#convexscopedeval` and `complete [#gdbvacproof]` remain in the queue for subsequent cycles (planner says sequential — they touch the same Convex surface).
+<!-- agent:boundary:aa75c0c8 -->
 <!-- /agent:exchange -->
 ###
 <!--
 What are #next-steps to make the graph faster?
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#cachelookupshift]~
 - ~do [#gdbvacconvex]~

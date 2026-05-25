@@ -224,7 +224,74 @@ If the codebase has lots of mixed-within-one-identifier names (`createUserProfil
 #### Backlog impact
 
 Worth tracking as a small follow-up alongside the existing tagpath surface: a `lint.allow_mixed_within_identifier` policy (or per-context `[contexts.variable] tolerate_mixed = true`) would close the only real gap above. Low risk, single-file change in `lint/mod.rs:79`, mostly the policy plumbing. Adding to the recommended slot in the backlog as `[#mixconv]`. Not blocking the existing `p6tsifull*` rollout; `[#p6tsifullfederated]` is still the natural next item for `/agent-doc` continuation.
-<!-- agent:boundary:51d025ad -->
+❯ Is there a chance for lossy community lookups with tsift or agent-doc using tagpath?
+### Re: Is there a chance for lossy community lookups with tsift or agent-doc using tagpath? — opus-4-7
+
+**Short answer:** Yes — five real loss modes today, ranked from worst to most benign. Four are recall losses (missing handle, output still correct) and one is a correctness loss (wrong handle on a name collision). The correctness one has a cheap fix; the rest are mostly scope / freshness limits that are documented and partially addressed by upcoming work.
+
+#### 1. Name-collision wrong-handle (correctness loss — fixable)
+
+The current resolver in `src/tsift/src/main.rs:3438` (`resolve_tagpath_handles_for_names`) walks each community member name once and picks the **first** `db.symbol_info(name)` row to get a file:
+
+```rust
+let Some(sym) = syms.into_iter().next() else { continue };
+…
+if let Some(handle) = adapter.handle_for_member(&abs, name) {
+    out.insert(name.clone(), handle);
+}
+```
+
+`db.symbol_info` orders by `file, line`, so if two symbols share a name across files (`fn main()` in `bin/foo/main.rs` and `bin/bar/main.rs`, or any free function name that recurs across crates / modules), the picked file is whichever sorts first lexicographically — not necessarily the one the call-graph community is actually about. The adapter then either:
+
+- Returns a handle for the wrong file's family (silent **wrong-handle** for that member), or
+- Returns `None` because the wrong file isn't tagged in tagpath's index at all (silent **no-handle**, less bad).
+
+**Mitigation today:** none — the resolver bails on the first symbol row.
+**Cheap fix:** iterate every `symbol_info` row, return the first one that yields a handle. Still ambiguous when multiple rows resolve, but at least drops obviously-wrong-file picks. A stronger fix is community-member→file disambiguation through the call-graph (use a `caller_file` from the same community's edges as a tiebreaker), which is more work but fully eliminates the ambiguity. I'll add this to the backlog as `[#commhx]`.
+
+#### 2. Cross-scope blind spot (federated/workspace recall loss)
+
+`annotate_communities_with_tagpath` loads exactly one adapter: `tagpath_adapter::try_load(root)`. For a tsift **workspace** with scoped indexes at `.tsift/indexes/<scope>/index.db`, the call-graph already aggregates symbols from multiple submodules, but the tagpath adapter only sees one project root. Members defined in a different scope's tree get `handle = None` even when their owning scope *does* have a fresh `.naming/index.json`.
+
+This is exactly what `[#p6tsifullfederated]` is queued to fix — the federated path needs N adapters, one per scope, with per-symbol routing on `relative_to_root` semantics. Until then, single-scope use is fine; workspace/federated use is lossy by design.
+
+#### 3. Index-drift recall loss (handled but worth understanding)
+
+The freshness check is two-sided:
+- **tsift `index.db`** lags real source → `db.symbol_info` returns no row for newly-added symbols → no handle (silent miss).
+- **tagpath `.naming/index.json`** lags real source → `tagpath_adapter::try_load` returns `Stale`. The path/explain/graph/communities helpers either suppress (default — emit `tagpath_index_stale: true` diagnostic and skip annotation) or hard-fail under `--tagpath-strict`.
+
+The default behavior is bounded: stale-tagpath means **every** member gets `handle = None`, never a wrong handle. That's the right safety choice but it is recall loss.
+
+#### 4. Tagpath source-walk vs. tsift source-walk divergence
+
+`tsift index` and `tagpath build` each have their own file walker. The walkers can disagree on:
+- **Excluded directories** — `.naming.toml` `[exclude]` paths that tsift's tree-sitter walker still indexes (or vice versa).
+- **Language coverage** — tsift may index a `.rs` file in a directory where tagpath's `extends = ["python"]` config doesn't apply, so the file has no tagpath family.
+- **Tag-family eligibility** — tagpath only creates a `Family` when the parsed canonical tag string is non-empty (see `tagpath/src/index/mod.rs:190`). Pure single-segment identifiers (`x`, `i`, `_`) get no family, so they get no handle even when tagpath *did* walk the file.
+
+Mitigation: this is mostly user-config drift, not a tsift bug. Adding a "tagpath sources vs tsift symbols" reconciliation report (`tsift audit` extension?) would surface the gap. Lower priority than the federated and collision fixes.
+
+#### 5. Synthetic / external-reference call sites (no-data, by design)
+
+`graph::detect_communities` builds its node set from `db.all_edges()` — i.e. from the `call_edges` table. Edges include both intra-project calls and references to external library names that have no local definition. Those names show up as community members but `db.symbol_info` returns empty for them → no handle. Correct behavior: there is nothing local to cite. Not a bug, just worth knowing that a community of `["my_handler", "tokio_spawn", "tracing_info"]` will only annotate the first member.
+
+#### Agent-doc usage
+
+agent-doc itself does **not** call the tagpath adapter directly. It consumes tsift surfaces (search / path / explain / graph / communities) and trusts the handle each row reports. That means all five loss modes above propagate transparently through agent-doc — if tsift loses a handle, agent-doc sees `tagpath_handle: null` and acts accordingly (citation falls back to file/line). Agent-doc has no separate retry / disambiguation logic, so improving the tsift resolver pays off in both surfaces simultaneously.
+
+#### Summary table
+
+| # | Mode | Loss type | Status |
+|---|------|-----------|--------|
+| 1 | Name-collision wrong-handle | Correctness | Fix queued as `[#commhx]` |
+| 2 | Cross-scope blind spot | Recall | Will be closed by `[#p6tsifullfederated]` |
+| 3 | Index drift | Recall (bounded) | Already diagnosed; `--tagpath-strict` opts into hard-fail |
+| 4 | Walker divergence | Recall | User-config drift; reconciliation tool would help |
+| 5 | External references | No-data (by design) | Working as intended |
+
+Item 1 is the only one that can emit a **wrong** handle today; the rest are conservative no-handle outcomes. Adding it to the backlog now so it lands before `[#p6tsifullfederated]` — fixing collision-disambiguation first lets the federated work assume a per-name handle resolution that is at least file-correct.
+<!-- agent:boundary:41c94efb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -259,6 +326,7 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 (<!-- agent:backlog -->
+- [ ] [#commhx] Name-collision wrong-handle in `resolve_tagpath_handles_for_names` (src/tsift/src/main.rs:3438). When two symbols share a name across files (e.g. `main` in `bin/foo/main.rs` and `bin/bar/main.rs`), the resolver picks the first `db.symbol_info` row by `(file, line)` and calls `adapter.handle_for_member(abs, name)` against that file. Result: silent wrong-handle for the community member, or silent no-handle when the wrong file is not in the tagpath index. Cheap fix: iterate every symbol_info row and pick the first that returns a handle. Stronger fix: disambiguate via call-graph caller_file evidence inside the same community. Should land before the federated subitem (p6tsifullfederated) so federated work can assume a per-name file-correct resolution. Tests: extend tests/exit_code.rs path/explain/graph/communities with a name-collision fixture (two files defining `main`).
 - [ ] [#mixconv] [recommended] tagpath lint policy that tolerates mixed conventions within a single identifier (e.g. `createUserProfile_v2`). Today `parser::detect_convention` classifies any identifier containing `_` as snake-family, so the camelCase-plus-suffix shape lint-fails in a camelCase-only context with `create_user_profile_v2` as the suggested fix. Add a per-context `tolerate_mixed = true` or top-level `lint.allow_mixed_within_identifier` policy that compares tag-equivalence rather than convention-equivalence. Single-file change in `src/lint/mod.rs:79`. Tests: extend `tests/lint.rs` with mixed-within-identifier cases.
 - [ ] [#p6tsifullfederated] Subitem of p6tsifull. Wire tagpath adapter into tsift search --federated (workspace-scoped search across multiple scoped index.db files). Most complex of the five — federated search loops over scopes; adapter load must respect per-scope project_root. Defer until p6tsifullpath/explain/graph/communities establish the per-command template.
 - [ ] [#p6tspub] Restore tsift crates.io publishability after p6tsi: tsift now depends on tagpath via path = ../tagpath. Replace with version = "0.17.1" (or whatever ships first) before any tsift release. Already gated by the sift-publish blocker so no immediate regression, but track here.

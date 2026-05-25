@@ -58,7 +58,20 @@ Manual workaround for now: keep invoking the skill between cycles, or temporaril
 For the typing duplicate observation: verified no actual duplicate landed in HEAD. The previous cycle commit log shows the file-IPC hash-skip gate fired and prevented the duplicate (`patches already present in live buffer — skipping file IPC write`). What you saw visually was likely a transient editor state during the IPC roundtrip; the committed history is clean. For the cleaner path with no transient flicker, install JB plugin 0.2.131 (build/distributions/agent-doc-jetbrains-0.2.131-signed.zip) — it returns already_applied directly from the socket callback so the binary skips the file-IPC fallback entirely.
 
 No spec/code change this cycle (the preset's spec/test/build/install/commit/push surface is satisfied by the backlog-add plus this response, since the actual code work is gated on the new backlog item's fix). Next queue head remains jbrsrbusysw.
-<!-- agent:boundary:6f5999d3 -->
+❯ With 0.2.131 now installed, the auto-loop should work?
+
+### Re: With 0.2.131 now installed, the auto-loop should work? — opus-4-7
+
+No — the two are independent.
+
+JB plugin 0.2.131 fixes the IPC duplicate path: the plugin now returns 2 (already_applied) from the v2 socket callback when an incoming patch is a structural no-op against the live buffer, so the binary skips the file-IPC fallback that would otherwise re-write a duplicate response heading. That's about preventing duplicate response landing during a finalize cycle.
+
+The auto-loop is a different, skill-level mechanism. It runs entirely in Claude Code's SKILL.md after a finalize cycle completes, deciding whether to invoke `/loop agent-doc <FILE>` to drive the next cycle. The guard sits inside `~/.claude/skills/agent-doc/SKILL.md`, not in the binary or the plugin. It checks four conditions on preflight output; condition #4 — "prompt_bearing_changes was either empty or exactly the queue-synthetic head prompt" — is what's blocking. Plugin behavior doesn't affect it.
+
+So 0.2.131 helps the typing/duplicate path. #ccloopguard (filed last cycle) is what would unblock the auto-loop. They are two separate bugs in two separate surfaces.
+
+This message itself is the simplest demonstration: your prompt was classified as `prompt_target`, which trips condition #4. Auto-loop will not fire after this cycle. The queue head remains jbrsrbusysw.
+<!-- agent:boundary:06d53c36 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -128,7 +128,7 @@ v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-gramm
 Compacted content:
 - Archived 1 response topic(s): do [#p6tsifull]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-<!-- agent:boundary:df6d5d16 -->
+<!-- agent:boundary:d8b42916 -->
 <!-- /agent:exchange -->
 ###
 
@@ -147,7 +147,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#p6sklsymadocrunbooks]~
 - ~do [#p6adfcitagpath]~
 - ~do [#p6tsifull]~
-- do [#p6tsifullpath]
+- ~do [#p6tsifullpath]~
 - do [#p6tsifullexplain]
 - do [#p6tsifullgraph]
 - do [#p6tsifullcommunities]
@@ -161,7 +161,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 (<!-- agent:backlog -->
-- [ ] [#p6tsifullpath] Subitem of p6tsifull. Wire tagpath adapter into tsift path command. Add TagpathSearchOpts to Commands::Path arg struct (src/tsift/src/main.rs ~line 1533); plumb to cmd_path; add per-row annotation pass using existing annotate helper; add tagpath_handle field to whichever struct cmd_path emits (likely a Vec of edge/symbol entries — confirm during impl). Smallest of the five — start here for the per-phase template. Tests: extend tests/exit_code.rs path coverage.
 - [ ] [#p6tsifullexplain] Subitem of p6tsifull. Wire tagpath adapter into tsift explain command (src/tsift/src/main.rs ~line 1550). Same pattern as p6tsifullpath. Explain emits definitions + callers + callees + community — each needs tagpath_handle annotation. Largest blast radius after federated-search.
 - [ ] [#p6tsifullgraph] Subitem of p6tsifull. Wire tagpath adapter into tsift graph command (src/tsift/src/main.rs ~line 1477). --callers / --callees output rows need tagpath_handle. Add StoredEdge tagpath_handle field if not already added by p6tsifullpath.
 - [ ] [#p6tsifullcommunities] Subitem of p6tsifull. Wire tagpath adapter into tsift communities command (src/tsift/src/main.rs ~line 1515). Louvain community report struct needs a tagpath_handle field per member symbol. Smallest schema change after path.

@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 
@@ -123,112 +123,26 @@ v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-gramm
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260525-090022.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260525-091617.md`*
 
 Compacted content:
-- Archived 2 response topic(s): do [#tpstdiag]; Add #next-steps to fix remaining lossy data
+- Archived 2 response topic(s): do [#tpaudit]; Add #next-steps for follow-ups
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-### Re: do [#tpaudit] — opus-4-7
-
-Shipped in tsift 0.1.59 (`1551a72` in tsift, superproject pointer bumped).
-
-#### Surface
-New top-level command: `tsift audit-tagpath [--path .] [--scope <name>] [--json]`.
-
-Reconciles the tsift symbol index against the tagpath `.naming/index.json` source set and reports the diff so operators can see exactly where `tagpath_handle` recall is at risk. JSON shape:
-
-```
-{
-  "project_root": "...",
-  "scope": null | "<scope>",
-  "tagpath_state": "fresh" | "stale" | "stale_unreadable" | "missing",
-  "tsift_file_count": <usize>,
-  "tagpath_file_count": <usize>,
-  "tsift_only_files": [<rel_path>, ...],
-  "tagpath_only_files": [<rel_path>, ...],
-  "tsift_only_symbol_count": <usize>,
-  "tsift_only_files_with_symbols": [{"file": ..., "symbols": ...}, ...]
-}
-```
-
-When `tagpath_state == "stale"`, the binary still loads the on-disk snapshot so the audit produces useful output, marks the response, and injects the standard `tagpath_index_stale: true` + `tagpath_stale_reason: stale_snapshot_loaded` pair (the same field contract `#tpstdiag` shipped for the other commands). When the tagpath index is missing entirely, the audit reports `tagpath_state: "missing"` and `tagpath_only_files: []`.
-
-#### Implementation
-`cmd_audit_tagpath` in `src/main.rs`:
-
-1. Resolves the project root, optionally narrowing to a workspace scope via `config::Config::resolve_submodule`.
-2. Opens `IndexDb` read-only at the resolved scope's `.tsift/indexes/<scope>/index.db` (or workspace root `.tsift/index.db`).
-3. Normalizes tsift's stored absolute paths to relative-to-tagpath-root for set comparison while remembering the absolute form so `db.symbols_for_file` can still query it.
-4. Builds the set of tagpath sources from `adapter.index.sources` (already relative).
-5. Diffs both sets and counts per-file tsift symbols for each tsift-only file.
-
-#### Test
-`tests/exit_code.rs::audit_tagpath_reports_walker_diff` — uses a `__pycache__/lib.rs` + `main.rs` fixture. Tagpath's hard-coded `SKIP_DIRS` skips `__pycache__/`, but tsift's `ignore`-based walker indexes it. The test runs `tsift index` then `tsift audit-tagpath --json`, asserts `tagpath_state == "fresh"`, that `__pycache__/lib.rs` lands in `tsift_only_files`, and that the per-file symbol count surface shows `cached_helper`'s file with `symbols >= 1`.
-
-#### Verification
-- `cargo test --test exit_code audit_tagpath_reports_walker_diff` — green
-- `make check` — green (full clippy + suite)
-- `cargo install --path .` — installed `tsift 0.1.59` to `~/.cargo/bin/`
-
-#### Files
-- `src/tsift/src/main.rs` — `AuditTagpath` clap variant + dispatch + `cmd_audit_tagpath`
-- `src/tsift/tests/exit_code.rs` — `audit_tagpath_reports_walker_diff`
-- `src/tsift/VERSIONS.md` — 0.1.59 entry
-- `src/tsift/CLAUDE.md` — command table row for `tsift audit-tagpath`
-- `src/tsift/Cargo.toml`, `Cargo.lock` — version → 0.1.59
-- Superproject `src/tsift` submodule pointer bumped
-
-Out of scope for this turn (would be follow-ups if needed): policy-hint surfacing (excluded paths, language coverage gaps), `--scope` test coverage (the implementation routes through `resolve_submodule` but the test exercises only the workspace-root path). Both can land later if operators ask for them.
-❯ Add #next-steps for follow-ups
-### Re: Add #next-steps for follow-ups — opus-4-7
-
-Added four follow-up items derived from the four tracked items closed this session (`#commhx`, `#p6tsifullfederated`, `#tpstdiag`, `#tpaudit`), reordered the backlog to put the silent-bug follow-up first and demote the existing `[recommended]` items.
-
-**Top of backlog: `#p6tsifullscoped`**
-
-#### New items (in priority order)
-
-1. **`#p6tsifullscoped`** (HIGH — silent bug, same pattern as just-shipped `#p6tsifullfederated`)
-   `tsift search --scope <name>` and inferred-scope paths still annotate against the workspace root. Scoped searches in workspaces where the submodule (not the workspace root) owns the `.naming.toml` return zero handles. Fix is mechanical: route `&sift_path` into `annotate_hits_with_tagpath` in `cmd_search_with_budget`.
-
-2. **`#tpauditscope`** (MEDIUM — locks in scope path for the just-shipped audit feature)
-   `tsift audit-tagpath --scope <name>` exists and routes correctly, but the test suite only exercises the workspace-root path. Add a multi-submodule fixture so the scoped path can't silently regress.
-
-3. **`#tpauditpolicy`** (MEDIUM — completes the audit feature)
-   The audit reports WHAT diverges but not WHY. Add `tsift_only_files_with_policy_hints` JSON field that surfaces tagpath `SKIP_DIRS` matches and language-coverage gaps so operators can act on the diff with intent.
-
-4. **`#commhxstrong`** (MEDIUM-LOW — stronger variant of `#commhx`)
-   Cheap fix in 0.1.56 returns the first row with a valid handle. Stronger fix uses Louvain community + `caller_file` evidence to pick the row that matches the actual call edge. Only worth doing if name collisions across files with valid handles produce visible wrong-handle bugs in practice.
-
-#### Reordered queue
-
-After this turn the backlog ordering is:
-
-1. `#p6tsifullscoped`
-2. `#tpauditscope`
-3. `#tpauditpolicy`
-4. `#commhxstrong`
-5. `#p6tspub`
-6. `#p6ren`
-7. `#mixconv` (existing `[recommended]` — demoted below the new follow-ups)
-8. `#p6meta` (existing `[recommended]`)
-
-The queue auto-prompts will pick up `#p6tsifullscoped` next.
-<!-- agent:boundary:f2f8b93f -->
+<!-- agent:boundary:eafbca96 -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
-- ~do [#commhx]~
-- ~do [#p6tsifullfederated]~
-- ~do [#tpstdiag]~
-- ~do [#tpaudit]~
-- do [#mixconv]
+- do [#p6tsifullscoped]
+- do [#tpauditscope]
+- do [#tpauditpolicy]
+- do [#commhxstrong]
 - do [#p6tspub]
 - do [#p6ren]
+- do [#mixconv]
 - do [#p6meta]
 <!-- /agent:queue -->
 

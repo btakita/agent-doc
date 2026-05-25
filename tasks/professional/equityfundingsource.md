@@ -111,7 +111,91 @@ They are for later Google-owned integrations:
 - Google Calendar integration: create/connect the Google Cloud project/OAuth client or service-account delegation needed for booking links, calendar events, invitations, and availability sync.
 
 I would not ask Robert to send a raw Google super-admin password in chat. The cleaner path is a screen share, temporary admin access, or having Robert perform the admin-console steps while we provide the exact values to paste. If we do receive any credential material, it should go into the password manager/secrets path, be least-privilege where possible, and be rotated after setup.
-<!-- agent:boundary:acce62c8 -->
+❯ Please redraft the invoice. The Done and TODOs should be at a high level. Don't get bogged down in technical details please.
+### Re: High-level invoice redraft — gpt-5
+
+Here is the cleaner version I would send. It keeps the invoice itself formal and moves the Done / TODO context into a short summary that is readable by Judith, Robert, and a bookkeeper without turning into an engineering report.
+
+#### Invoice PDF body
+
+```text
+INVOICE
+
+Brian Takita
+[your business address]
+brian.takita@gmail.com
+
+Bill to:
+Equity Funding Source
+c/o Judith Krug
+[EFS billing address]
+
+Invoice #:    EFS-2026-05-01
+Issue date:   2026-05-25
+Due date:     2026-06-08 (Net 14)
+Project:      Equity Funding Source lending portal and website build
+
+Description                                                        Amount
+----------------------------------------------------------------  --------
+Product strategy, design, implementation, deployment, and
+production setup for the Equity Funding Source website and
+lending portal through 2026-05-24.                                $5,000
+
+Total due:                                                        $5,000
+
+Payment:
+- ACH / wire to [bank, routing, account] preferred
+- Check to [your business mailing address] acceptable
+- Net 14 from issue date
+
+Thank you,
+Brian Takita
+```
+
+#### Short project summary to attach or include under the invoice
+
+```text
+Project Summary
+
+Done
+
+- Rebuilt the Equity Funding Source public website with updated positioning, funded-deal presentation, lead capture, and a cleaner path for borrowers, brokers, and investors.
+- Built the foundation for the investor, borrower, broker, and admin portals so EFS can manage deals, documents, users, and portal activity in one system.
+- Set up the production application environment on Cloudflare and connected the core database, file storage, authentication, and deployment flow.
+- Added the first version of the document workflow, including secure uploads and admin-controlled access.
+- Established the base integration path for The Mortgage Office so the portal can grow toward a more automated operating workflow.
+- Reviewed and tightened the platform for production readiness, including access control, upload limits, and live smoke testing.
+
+Remaining TODOs
+
+- Finalize the preferred admin login method and Google Workspace setup.
+- Review and approve final public-site copy, deal presentation, disclosures, and any legal language before broader launch.
+- Decide when to move the public domain from the current staging/production URL to equityfundingsource.com.
+- Finish the next layer of communications work: email templates, calendar/notification setup, and follow-up messaging.
+- Confirm Mortgage Office webhook support so the integration can move from scheduled sync toward more real-time updates if supported.
+- Prioritize the next phase of document intelligence and investor-search features after the core portal workflow is approved.
+```
+
+#### Email body
+
+```text
+Subject: Invoice EFS-2026-05-01 - EFS portal build
+
+Hi Judith and Robert,
+
+Attached is invoice EFS-2026-05-01 for $5,000 covering the Equity Funding Source website and lending portal build through 2026-05-24.
+
+I included a short Done / Remaining TODOs summary with the invoice so the scope is clear without getting into implementation details. At a high level, the work completed covers the public website rebuild, the portal foundation for investors/borrowers/brokers/admins, production setup, secure document workflows, and the base path for the Mortgage Office integration.
+
+The remaining items are mostly business/setup decisions: final admin login preference, Google Workspace setup, final content/legal review, domain cutover timing, communications templates, and the next phase of document/search automation.
+
+Net 14 is fine on this invoice. Happy to walk through the status or next priorities on a call if useful.
+
+Brian
+```
+
+I would not include the long technical checklist from the earlier draft. It makes the invoice feel harder to approve. This version says enough to justify the $5,000 while keeping the ask clean.
+<!-- agent:boundary:84953a55 -->
 <!-- /agent:exchange -->
 ###
 <!--

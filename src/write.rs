@@ -1231,6 +1231,9 @@ fn recover_empty_response_for_strict_closeout(file: &Path, flags: &WriteFlags) -
             );
             return Ok(true);
         }
+        if recover_dedupe_only_drift(file)? {
+            return Ok(true);
+        }
     }
     if flags.has_pending_mutation {
         eprintln!(
@@ -1239,6 +1242,45 @@ fn recover_empty_response_for_strict_closeout(file: &Path, flags: &WriteFlags) -
         return Ok(true);
     }
     Ok(false)
+}
+
+/// When `agent-doc write --commit <FILE>` runs with empty stdin and the
+/// working tree differs from HEAD only by the deletions a fresh
+/// `agent-doc dedupe <FILE>` would produce against HEAD, accept that as a
+/// recoverable closeout: align the snapshot to the current file and commit
+/// through the normal binary path.
+///
+/// Why: when a finalize cycle produces a duplicate response (for example the
+/// IPC retry / file-IPC fallback path adopting a response already in the live
+/// file), the user runs `agent-doc dedupe` to remove the duplicate. The
+/// follow-up `agent-doc write --commit` (no stdin) used to bail with
+/// "empty response — nothing to write", forcing a manual `git commit` and
+/// defeating the binary-owned closeout contract. This branch keeps the
+/// closeout binary-owned by recognizing the dedupe-only drift signature.
+fn recover_dedupe_only_drift(file: &Path) -> Result<bool> {
+    let Some(head_content) = crate::git::show_head(file)? else {
+        return Ok(false);
+    };
+    let current = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {}", file.display()))?;
+    if current == head_content {
+        return Ok(false);
+    }
+    let dedupe_of_head = crate::dedupe::dedupe_responses(&head_content);
+    if dedupe_of_head == head_content {
+        // HEAD has no duplicates — drift is something else, not a dedupe outcome.
+        return Ok(false);
+    }
+    if dedupe_of_head != current {
+        return Ok(false);
+    }
+    eprintln!(
+        "[write] empty response stdin; current file matches dedupe(HEAD) for {} — committing dedupe-only working-tree drift through the binary closeout path",
+        file.display()
+    );
+    crate::snapshot::save(file, &current)?;
+    crate::git::commit(file)?;
+    Ok(true)
 }
 
 pub(crate) fn unresolved_backlog_capture_targets(
@@ -17909,11 +17951,13 @@ mod pending_patch_normalization_tests {
 mod late_fallback_patch_guard_tests {
     use super::{
         IpcDiskRepairReason, IpcRepairDecision, IpcSnapshotSource, cleanup_fallback_patch_files,
-        cycle_already_committed, redeliver_ipc_dedupe_to_editor, repair_ipc_decision_visible_state,
-        try_ipc, try_ipc_full_content, try_ipc_full_content_operator_mutation_from_source,
+        cycle_already_committed, recover_dedupe_only_drift, redeliver_ipc_dedupe_to_editor,
+        repair_ipc_decision_visible_state, try_ipc, try_ipc_full_content,
+        try_ipc_full_content_operator_mutation_from_source,
     };
     use crate::snapshot;
     use std::fs;
+    use std::path::Path;
     use tempfile::TempDir;
 
     fn doc_in_agent_doc_project(tmp: &TempDir, content: &str) -> std::path::PathBuf {
@@ -18837,5 +18881,191 @@ mod late_fallback_patch_guard_tests {
 
         let _ = fs::remove_file(crate::ipc_socket::socket_path(&root));
         drop(server);
+    }
+
+    fn init_git_repo(root: &Path) {
+        use std::process::Command;
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "commit.gpgsign", "false"])
+            .output()
+            .unwrap();
+    }
+
+    fn git_commit_file(root: &Path, rel: &str, content: &str, msg: &str) {
+        use std::process::Command;
+        let path = root.join(rel);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(&path, content).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "--", rel])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", msg, "--no-verify"])
+            .output()
+            .unwrap();
+    }
+
+    fn head_count(root: &Path) -> usize {
+        use std::process::Command;
+        let out = Command::new("git")
+            .current_dir(root)
+            .args(["rev-list", "--count", "HEAD"])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout)
+            .trim()
+            .parse()
+            .unwrap()
+    }
+
+    #[test]
+    fn recover_dedupe_only_drift_commits_when_file_matches_dedupe_of_head() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        init_git_repo(root);
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+
+        let duplicated = "\
+---
+agent_doc_session: test
+agent_doc_format: template
+---
+
+<!-- agent:exchange patch=append -->
+### Re: topic — opus-4-7
+
+Implemented.
+### Re: topic — opus-4-7
+
+Implemented.
+<!-- /agent:exchange -->
+";
+        git_commit_file(root, "session.md", duplicated, "add duplicate");
+        let doc = root.join("session.md");
+
+        // Simulate what `agent-doc dedupe` produced: file + snapshot both equal
+        // the deduped form, HEAD still holds the duplicate.
+        let deduped = crate::dedupe::dedupe_responses(duplicated);
+        assert_ne!(
+            deduped, duplicated,
+            "test setup: duplicated content must actually dedupe"
+        );
+        fs::write(&doc, &deduped).unwrap();
+        crate::snapshot::save(&doc, &deduped).unwrap();
+
+        let head_before = head_count(root);
+        let recovered =
+            recover_dedupe_only_drift(&doc).expect("dedupe-only drift recovery should succeed");
+        assert!(
+            recovered,
+            "file matching dedupe(HEAD) must be recognized as a dedupe-only drift"
+        );
+
+        // Commit landed through the binary path.
+        let head_after = head_count(root);
+        assert_eq!(
+            head_after,
+            head_before + 1,
+            "dedupe-only recovery must produce exactly one new commit"
+        );
+        let head_content = crate::git::show_head(&doc).unwrap().unwrap();
+        assert_eq!(
+            head_content.matches("### Re: topic — opus-4-7").count(),
+            1,
+            "committed HEAD must hold the deduped response"
+        );
+        let snapshot_after = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            snapshot_after.matches("### Re: topic — opus-4-7").count(),
+            1,
+            "snapshot must hold the deduped response (boundary markers may differ from disk)"
+        );
+    }
+
+    #[test]
+    fn recover_dedupe_only_drift_skips_when_file_matches_head() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        init_git_repo(root);
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        let clean = "\
+---
+agent_doc_session: test
+agent_doc_format: template
+---
+
+<!-- agent:exchange patch=append -->
+### Re: topic — opus-4-7
+
+Implemented.
+<!-- /agent:exchange -->
+";
+        git_commit_file(root, "session.md", clean, "add clean");
+        let doc = root.join("session.md");
+        crate::snapshot::save(&doc, clean).unwrap();
+
+        let recovered = recover_dedupe_only_drift(&doc).unwrap();
+        assert!(
+            !recovered,
+            "no drift between file and HEAD should not trigger dedupe-only recovery"
+        );
+    }
+
+    #[test]
+    fn recover_dedupe_only_drift_skips_when_drift_is_not_a_dedupe_outcome() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        init_git_repo(root);
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        let original = "\
+---
+agent_doc_session: test
+agent_doc_format: template
+---
+
+<!-- agent:exchange patch=append -->
+### Re: topic — opus-4-7
+
+Implemented.
+<!-- /agent:exchange -->
+";
+        git_commit_file(root, "session.md", original, "add original");
+        let doc = root.join("session.md");
+
+        // Working tree differs from HEAD by an arbitrary user edit, not by
+        // dedupe. Recovery must refuse so we don't auto-commit unrelated drift.
+        let user_edit = original.replace("Implemented.", "Implemented and tested.");
+        fs::write(&doc, &user_edit).unwrap();
+        crate::snapshot::save(&doc, &user_edit).unwrap();
+
+        let recovered = recover_dedupe_only_drift(&doc).unwrap();
+        assert!(
+            !recovered,
+            "arbitrary working-tree drift must not be auto-committed as a dedupe recovery"
+        );
     }
 }

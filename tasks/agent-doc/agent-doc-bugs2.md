@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -37,7 +37,11 @@ Compacted content:
 ### Re: batch closeout for ipclegacyfix, ipcpluginalready, ipcfilehashskip — opus-4-7
 
 All three queue items landed. Submodule d899c92, superproject 2a7116db8, both pushed. JB plugin 0.2.131 zips signed + unsigned built. ipclegacyfix migrated test fixtures from the legacy backlog component name to the canonical one (31+4 sites; 30 tests recovered). ipcfilehashskip adds response-only hash-skip in src/write.rs try_ipc fallback. ipcpluginalready adds FFI v2 listener with already_applied ack; JB plugin uses v2 with lastApplyWasNoOp detection. Verification clean (2358 unit pass plus pre-existing parallel-execution flakes that pass when run alone; integration suites all green except 1 pre-existing pane-recursion test unrelated to this work). Next queue head: jbrsrbusysw.
-<!-- agent:boundary:b1d8c717 -->
+
+### Re: Phases 1 + 5 already landed (queue advance) — opus-4-7
+
+Phases 1 + 5 of plan-ipc-corruption-and-duplicate-during-typing.md were landed two cycles ago in submodule 2e8a155 (response 852e34b9b on main). Queue head re-fired because the queue body was reset to a pre-consumption state when the file was restored via git checkout. This response is just the consumption signal so the queue advances. No new code this cycle. Next head: jbrsrbusysw.
+<!-- agent:boundary:4e0ee4d3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -50,7 +54,7 @@ agent-doc command failed (exit 1): Error: session_restart refused for /home/bria
 ```
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#crdtrespfx]~
 - ~do [#queueadvgated]~

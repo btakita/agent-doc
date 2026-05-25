@@ -196,7 +196,28 @@ Commits pushed:
 - `btakita/agent-loop@6d5c56010` — `chore: update tsift published tagpath dependency`
 
 I left the pre-existing unrelated dirty tsift changes unstaged: the `0.1.62` version bump in `Cargo.toml`/`Cargo.lock`, `VERSIONS.md`, and `plans/gdbvacproof-evidence.md`.
-<!-- agent:boundary:35eed741 -->
+### Re: do #p6ren — gpt-5
+
+Implemented `tagpath rename <old> <new> [path]` as an index-backed family rename.
+
+Code changes:
+- Added `tagpath::rename` for loading or refreshing the index, finding the old family, rendering the new tags in each member's source convention, rewriting token-boundary-safe occurrences in-place, and rebuilding the index after a non-dry-run rename.
+- Wired the CLI as `tagpath rename <OLD> <NEW> [<PATH>] [--dry-run] [--format text|json]`.
+- Documented the command in `README.md` and `SPEC.md`.
+- Added integration coverage for snake, camel, Pascal, kebab, upper-snake, Ada, refreshed-index behavior, and dry-run no-write behavior.
+
+Verification:
+- `cargo test --test test_rename`
+- `cargo test`
+- `cargo clippy`
+- `cargo install --path .`
+- `make check`
+- GitHub Actions CI for `btakita/tagpath@3b34185` passed: run `26412025982`, job `check` in 56s. The only annotation was the existing Node 20 deprecation notice for `actions/checkout@v4`.
+
+Commits:
+- `btakita/tagpath@3b34185` pushed to `main`.
+- Parent submodule pointer committed locally as `agent-loop@92a1afda8`; I will push the parent commit after this document finalize, per the agent-doc closeout rule.
+<!-- agent:boundary:312883fe -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -208,7 +229,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#tpauditpolicy]~
 - ~do [#commhxstrong]~
 - ~do [#p6tspub]~
-- do [#p6ren]
+- ~do [#p6ren]~
 - do [#mixconv]
 - do [#p6meta]
 <!-- /agent:queue -->
@@ -216,7 +237,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#p6ren] tagpath rename <old> <new>: cross-file, cross-convention identifier rename using the index. Walks every member of the matching family, rewrites in-place in each source convention (snake/camel/Pascal/kebab/UPPER/Ada). Foundation for the agent-loop intent-preserving refactor vision.
 - [ ] [#mixconv] [recommended] tagpath lint policy that tolerates mixed conventions within a single identifier (e.g. `createUserProfile_v2`). Today `parser::detect_convention` classifies any identifier containing `_` as snake-family, so the camelCase-plus-suffix shape lint-fails in a camelCase-only context with `create_user_profile_v2` as the suggested fix. Add a per-context `tolerate_mixed = true` or top-level `lint.allow_mixed_within_identifier` policy that compares tag-equivalence rather than convention-equivalence. Single-file change in `src/lint/mod.rs:79`. Tests: extend `tests/lint.rs` with mixed-within-identifier cases.
 - [ ] [#p6meta] [recommended] agent-loop meta-index: aggregate per-submodule .naming/index.json files into a top-level handle registry so cross-repo searches resolve. New CLI: tagpath meta-index <workspace-root>. Useful once 2+ siblings adopt tagpath.
 <!-- /agent:backlog -->

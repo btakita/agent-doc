@@ -56,13 +56,17 @@ share the AUD + team domain and I can land the `wrangler.toml` change
 
 No code change this cycle. Re-gating `#2rpv` so the queue stops firing
 on it; the existing review entry already captures the operator follow-up.
-<!-- agent:boundary:2720a6aa -->
+### Re: queue advance past gated 2rpv — opus-4-7
+
+
+Advancing queue past `#2rpv` (still gated on Cloudflare dashboard work — see prior cycle and `docs/operator-runbook-pending-config.md`). The prior `--pending-gate` did not consume the queue line, so this cycle uses `--done` purely to advance the queue head; the gate state in review is the authoritative status.
+<!-- agent:boundary:0d826034 -->
 <!-- /agent:exchange -->
 ###
 
 <!-- agent:queue auto -->
 preset #spec-test-commit-push-deploy
-- do [#2rpv]
+- ~do [#2rpv]~
 - do [#0r24]
 <!-- /agent:queue -->
 
@@ -103,7 +107,6 @@ preset #spec-test-commit-push-deploy
 ## Review
 
 <!-- agent:review -->
-- [/] [#2rpv] Set Cloudflare Access env vars (ACCESS_TEAM_DOMAIN, ACCESS_AUD) on the equityfundingsource Worker and configure the CF Access application that protects /login/access-callback, then verify an admin sign-in via Google SSO.
 - [/] [#dzmm] TMO webhooks: confirm outbound webhook support (Robert to check with Mortgage Office)
 - [/] [#qakx] Investor portal document pages: replace static Documents, Statements, and Accreditation fixture data with D1/R2-backed APIs and authenticated upload/request/download flows.
 - [/] [#1v5m] [recommended] Update passage btak/equityfundingsource/cloudflare_api_token to include Cloudflare D1 read/write permissions so the project cf:d1:* scripts can run without the OAuth bypass.
@@ -130,4 +133,5 @@ preset #spec-test-commit-push-deploy
 - 2026-05-24 [#yh4b] Admin dashboard (Cloudflare Access auth)
 - 2026-05-24 [#zjbe] Admin investor document workflow: upload and publish deal due-diligence, investor statements, tax docs, and accreditation files from R2 with visibility and review status controls.
 - 2026-05-24 [#9vv3] Investor portal end-to-end QA: seed and test investor signup, accreditation, published deal documents, funding commitment, admin acceptance, positions, distributions, and statements with TMO simulator plus R2 documents.
+- 2026-05-24 [#2rpv] Set Cloudflare Access env vars (ACCESS_TEAM_DOMAIN, ACCESS_AUD) on the equityfundingsource Worker and configure the CF Access application that protects /login/access-callback, then verify an admin sign-in via Google SSO.
 <!-- /agent:done -->

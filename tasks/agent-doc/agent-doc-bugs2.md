@@ -33,6 +33,22 @@ Fixed agent:queue stuck-after-1-turn — auto-strike done items at preflight.
 Compacted content:
 - Archived 4 response topic(s): backlog edit + queue add for #agent-doc-commit-sibling → #adcs-binary / #adcs-scripts; do [#adcs-binary]; transfer [#adcs-scripts] into docs.md backlog; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
+### Re: queue additions — #jbccc1–5 + #adoc-baseline-drift-after-user-commit — opus-4-7 (HEAD)
+
+Acknowledging six new queue items. Queue marker is plain `&lt;!-- agent:queue --&gt;` (no `auto` suffix), so the auto-loop will not fire — invocations stay one-cycle-each.
+
+#### What you added
+
+- `#jbccc1` through `#jbccc5` — the five phases I split from `#adoc-jb-cache-cancel-stuck-cycle` two cycles ago. Plan: `tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md`. Phase 1 (deterministic SimWorld repro of the cancel-branch wedge) is the natural starting point — it locks the bug in as a failing baseline before Phase 3's preflight/repair/write/session-check fix lands.
+- `#adoc-baseline-drift-after-user-commit` — agent-doc bug, no plan file yet. Per `#agent-doc-bug` preset, the first cycle on this one should author `tasks/agent-doc/plan-baseline-drift-after-user-commit.md` and split if multi-phase.
+
+#### Heads-up on `#jbccc1`
+
+The SimWorld scenario lives in `src/agent-doc/src/sim_world.rs` (2300 LOC). Adding `FinalizeWithJbCacheConflictCancel` likely needs a new `SimCommand` variant + tmux/session_actor mock + assertions. Doable in one cycle, but it's a big single-file diff — flagging so you can decide whether to scope it down further before executing.
+
+#### Suggested next step
+
+Re-invoke `/agent-doc tasks/agent-doc/agent-doc-bugs2.md` if you want me to pick up `#jbccc1`. If you'd prefer a different head, strike `#jbccc1` and the binary will advance.
 <!-- agent:boundary:fc6193e0 -->
 <!-- /agent:exchange -->
 ###
@@ -58,6 +74,12 @@ preset #spec-test-build-install-commit-push
 - ~do [#agent-doc-commit-sibling]~
 - ~do [#adcs-binary]~
 - ~do [#adoc-jb-cache-cancel-stuck-cycle]~
+- do [#jbccc1]
+- do [#jbccc2]
+- do [#jbccc3]
+- do [#jbccc4]
+- do [#jbccc5]
+- do [#adoc-baseline-drift-after-user-commit]
 - do [#adoc-prefix-strip-uncommitted]
 - do [#jbrsrbusysw]
 - do [#jbrsrbusyide]

@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -62,14 +62,14 @@ Next: `complete [#gdbvacproof]`. Both prerequisites are now in:
 - `#convexscopedeval` (v0.1.57) — full-graph default + safer chunk-size
 
 So the Convex half of `#gdbvacproof` can run end-to-end: full-graph reconcile via paginated `--remote-snapshot`, `--apply` with the new safer default, then `tsift graph-db --path . compact --apply --prune-tombstones --confirmed-convex-reconciled --json` with metric capture.
-<!-- agent:boundary:395bf5b4 -->
+<!-- agent:boundary:560204a3 -->
 <!-- /agent:exchange -->
 ###
 <!--
 What are #next-steps to make the graph faster?
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#cachelookupshift]~
 - ~do [#gdbvacconvex]~

@@ -152,7 +152,23 @@ The runbooks under `.claude/skills/agent-doc/runbooks/` (commit.md, harness-invo
 #### Release-flow implication
 
 Per the original backlog text: now that the symlink is in place, future `agent-doc skill install --harness claude` runs in agent-loop will write through the symlink into the submodule, dirtying it. The install loop needs to either commit the submodule + bump the pointer, or skip writing when the target is a symlink whose contents already match. Captured in the original `p6sklsymagentdoc` backlog text; no new item.
-<!-- agent:boundary:8840b065 -->
+### Re: do [#p6sklsymcorky] — opus-4-7
+
+Shipped.
+
+Submodule won the canonical-version decision on dates alone — its copy is from 2026-05-20 (a polished consolidated-prose format), the agent-loop copy was from 2026-04-08 with no information that wasn't already in the newer submodule version. No reconciliation patch needed — straight symlink.
+
+#### Verification
+
+- Symlink resolves: `head -3 .claude/skills/corky/SKILL.md` shows "# Corky — Correspondence Kit" from the submodule
+- File mode changed `100644 → 120000`
+
+#### Commit
+
+- `agent-loop`: `f1f3138de skills: symlink corky SKILL.md to submodule canonical (p6sklsymcorky)` — pushed to main
+
+The pattern for the three "diverge then symlink" follow-ups (tagpath, agent-doc, corky) is now fully applied. Per-skill symlinks documented; release flow implication tracked under `#p6sklsymadocrunbooks` for the agent-doc runbooks question.
+<!-- agent:boundary:fd9da50a -->
 <!-- /agent:exchange -->
 ###
 
@@ -165,7 +181,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#p6sklsym]~
 - ~do [#p6lintbnd]~
 - ~do [#p6sklsymagentdoc]~
-- do [#p6sklsymcorky]
+- ~do [#p6sklsymcorky]~
 - do [#p6adfmerge]
 - do [#p6tsifull]
 - do [#p6tspub]
@@ -178,7 +194,6 @@ preset #spec-test-build-install-commit-push
 
 (<!-- agent:backlog -->
 - [ ] [#p6sklsymadocrunbooks] After agent-doc SKILL.md symlinking (p6sklsymagentdoc), check whether the runbooks under agent-loop/.claude/skills/agent-doc/runbooks/ should also be symlinked. Source of truth lives in src/agent-doc/runbooks/ but installed copies are in src/agent-doc/.claude/skills/agent-doc/runbooks/ (created by agent-doc skill install, so currently absent from the submodule). Either install once into the submodule and symlink, or leave install owning the parent copy and accept the duplication.
-- [ ] [#p6sklsymcorky] Reconcile and symlink corky SKILL.md: agent-loop/.claude/skills/corky/SKILL.md and src/corky/.claude/skills/corky/SKILL.md diverge substantively (different command listing format — terse one-liners vs prose paragraphs). Pick a canonical version (submodule is the natural home), reconcile, then symlink the agent-loop copy. Same pattern applies to corky's sub-skills if they drift in the future.
 - [ ] [#p6adfmerge] Merge agent-doc feature branch 20260422/codex-agent-backend to main: the p6adf commit (845ddfd6) and prior p4*/p5* prep ride on this branch. agent-loop superproject already tracks feature-branch commits, but agent-doc main is behind and will need a sweep before any external consumer pulls.
 - [ ] [#p6tsifull] Wire the remaining tsift consumer surfaces to the tagpath adapter: graph, explain, communities, path, federated-search. The adapter (src/tsift/src/tagpath_adapter.rs) and annotate helper are already public; each command needs TagpathSearchOpts plumbing + a per-row annotation pass + tagpath_handle field on StoredSymbol / StoredEdge / community report structs. Mechanical follow-up to p6tsi which only wired tsift search.
 - [ ] [#p6tspub] Restore tsift crates.io publishability after p6tsi: tsift now depends on tagpath via path = ../tagpath. Replace with version = "0.17.1" (or whatever ships first) before any tsift release. Already gated by the sift-publish blocker so no immediate regression, but track here.

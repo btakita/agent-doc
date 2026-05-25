@@ -352,7 +352,32 @@ Commits pushed:
 - `btakita/agent-loop` `a08f16da6` on `main`: `agent-doc: bump submodule for baseline drift runbook`
 
 CI evidence: agent-doc CI run `26411901790` for `65ea0840` was in progress when inspected. The `check` job was running, with the tmux step still pending and no red tmux leg present. The parent repo reported no workflow named `CI`.
-<!-- agent:boundary:d5ca0e2e -->
+### Re: do [#adoc-bdauc-integration] — gpt-5
+
+Implemented `#adoc-bdauc-integration`.
+
+Changes:
+- Added the in-source preflight integration test `preflight_refreshes_capture_after_user_committed_baseline_drift` in `src/preflight.rs`, using a real git repo and cycle state to reproduce user-committed benign baseline drift after a prefix-stripped response lands.
+- Hardened the already-present repair path in `src/repair.rs` so it validates replay against the capture before cleanup and recognizes prefix-stripped response materialization in both the live doc and snapshot.
+- Updated `src/write.rs` materialization detection so commit/recovery guards also accept prefix-stripped responses.
+
+Verification:
+- `cargo test preflight_refreshes_capture_after_user_committed_baseline_drift`
+- `cargo test baseline_drift`
+- `cargo test validate_replay`
+- `cargo test response_materialized` (no matching tests; command exited successfully)
+- `make check`
+- `cargo build --release`
+- `cargo install --path .`
+
+Commits pushed:
+- `btakita/agent-doc@a6c11bae` (`test: cover baseline drift preflight recovery`)
+- `btakita/agent-loop@a7ce9235e` (`agent-doc: bump submodule for baseline drift integration`)
+
+CI:
+- `agent-doc` CI run `26412405175` is in progress for `a6c11baed1f7d136a9a8a9599e1b633f42383e7e`; the `check` job was running at the `Install tmux for integration tests` step, with `make check` and `make tmux-ci` still pending and no red tmux leg observed.
+- The root `agent-loop` repo has no workflow named `CI` (`gh run list --workflow CI --limit 1` reports none).
+<!-- agent:boundary:25bf636a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -400,7 +425,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#adoc-bdauc-preserve-session]~
 - ~do [#adoc-prefix-strip-session-check-whitelist]~
 - ~do [#adoc-bdauc-runbook]~
-- do [#adoc-bdauc-integration]
+- ~do [#adoc-bdauc-integration]~
 - do [#adoc-web-sse]
 - do [#adoc-web-codemirror]
 - do [#adoc-web-multidoc]
@@ -422,7 +447,6 @@ preset #spec-test-build-install-commit-push
 - [ ] [#adoc-web-multidoc] Phase 4: root mode + session list (/api/sessions reuses sessions.json), URL routing /doc/<path-or-hash>. Plan: tasks/agent-doc/plan-web-interface.md (Phase 4).
 - [ ] [#adoc-web-auth] Phase 5: bearer token auth for non-loopback binds, optional TLS via rustls, multi-user read-only viewer scope. Plan: tasks/agent-doc/plan-web-interface.md (Phase 5).
 - [ ] [#adoc-web-live-cycle] Phase 6: hook agent-doc stream into /events so the in-flight ### Re: block streams to the browser as the agent produces it; web writes funnel through finalize/write --commit when an active cycle is in scope. Plan: tasks/agent-doc/plan-web-interface.md (Phase 6).
-- [ ] [#adoc-bdauc-integration] In-source preflight integration test mirroring preflight_auto_recovers_jb_cache_conflict_cancel_committed_with_snapshot_drift: real git repo + cycle state, simulate user-committed benign drift, assert validate_replay auto-refreshes and preflight proceeds. Plan: tasks/agent-doc/plan-baseline-drift-after-user-commit.md (Phase 5).
 - [ ] [#jbrsrbusysw] SimWorld scenario coverage for session_restart --force: route + Restart Supervisor while pane is alive-busy with and without --force, asserting the new refusal message and force success (including session_restart_busy_pre_interrupt_idle and session_restart_busy_force_killed event variants). Substantial — requires new Op variant + tmux/session_actor mock in src/sim_world.rs. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md phase 4 (SimWorld piece).
 - [ ] [#jbrsrbusyide] JB plugin IDE-side telemetry for session_restart --force: surface session_restart_force_used, session_restart_busy_pre_interrupt_idle, and session_restart_busy_force_killed events in the IntelliJ notification area or Logcat so users can see the recovery path the binary took. Kotlin work in editors/jetbrains/. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md phase 4 (IDE piece).
 - [ ] [#planperphase] Convention: split multi-phase plans into per-phase backlog IDs (e.g. #crdtrespfx1, #crdtrespfx2) instead of one parent ID that gets pending-gated. Lets queue auto-strike honor per-phase progress. Lower priority — the convention is opt-in for authors. [recommended]

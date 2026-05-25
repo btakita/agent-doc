@@ -128,7 +128,7 @@ v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-gramm
 Compacted content:
 - Archived 1 response topic(s): do [#p6tsifullpath]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-<!-- agent:boundary:9bf88d81 -->
+<!-- agent:boundary:d1626ae1 -->
 <!-- /agent:exchange -->
 ###
 
@@ -148,7 +148,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#p6adfcitagpath]~
 - ~do [#p6tsifull]~
 - ~do [#p6tsifullpath]~
-- do [#p6tsifullexplain]
+- ~do [#p6tsifullexplain]~
 - do [#p6tsifullgraph]
 - do [#p6tsifullcommunities]
 - do [#p6tsifullfederated]
@@ -161,7 +161,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 (<!-- agent:backlog -->
-- [ ] [#p6tsifullexplain] Subitem of p6tsifull. Wire tagpath adapter into tsift explain command (src/tsift/src/main.rs ~line 1550). Same pattern as p6tsifullpath. Explain emits definitions + callers + callees + community — each needs tagpath_handle annotation. Largest blast radius after federated-search.
 - [ ] [#p6tsifullgraph] Subitem of p6tsifull. Wire tagpath adapter into tsift graph command (src/tsift/src/main.rs ~line 1477). --callers / --callees output rows need tagpath_handle. Add StoredEdge tagpath_handle field if not already added by p6tsifullpath.
 - [ ] [#p6tsifullcommunities] Subitem of p6tsifull. Wire tagpath adapter into tsift communities command (src/tsift/src/main.rs ~line 1515). Louvain community report struct needs a tagpath_handle field per member symbol. Smallest schema change after path.
 - [ ] [#p6tsifullfederated] Subitem of p6tsifull. Wire tagpath adapter into tsift search --federated (workspace-scoped search across multiple scoped index.db files). Most complex of the five — federated search loops over scopes; adapter load must respect per-scope project_root. Defer until p6tsifullpath/explain/graph/communities establish the per-command template.

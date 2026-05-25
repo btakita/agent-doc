@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -84,13 +84,14 @@ agent-doc command failed (exit 1): Error: session_restart refused for /home/bria
 ```
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#crdtrespfx]~
 - ~do [#queueadvgated]~
 - ~do [#jbrsrbusysim]~
 - ~do [#cclooploop]~
 - ~do [#ipcdupfin23]~
+- do [#ccloopguard]
 - do Phases 1 + 5 in tasks/agent-doc/plan-ipc-corruption-and-duplicate-during-typing.md
 - do [#jbrsrbusysw]
 - do [#jbrsrbusyide]
@@ -103,6 +104,7 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#p6skillinstallreconcile] agent-doc skill install does not reconcile the target runbooks directory: writes new files but leaves stale ones in place, and short-circuits the runbooks pass entirely when SKILL.md is already up to date. Surfaced in agent-loop with 21 installed runbooks vs 14 source files (8 stale extras + 1 new source file never installed). Plan: tasks/agent-doc/plan-skill-install-runbooks-reconcile.md. Fix: src/skill.rs install path — separate SKILL.md short-circuit from runbooks pass, then reap-on-mismatch (or delete-then-write) so on-disk set converges to embedded canonical set. Also touches Codex/OpenCode harness install paths.
 - [ ] [#ccloopguard] Claude Code auto-loop guard is too strict: SKILL.md rule blocks auto-loop unless prompt_bearing_changes is empty or exactly the queue-synthetic head prompt. In practice, every meaningful cycle touches queue_active flag or pending state via --done/--pending-add, which preflight classifies as content_edit and trips the guard. Net effect: auto-loop almost never fires for real work. Fix: classify edits that ONLY toggle queue_active or queue/backlog/done-component mutations as non-user-prompt and allow auto-loop. Files: src/preflight.rs (prompt_bearing_changes classifier), src/skill.rs (CLAUDE_QUEUE_AUTO_LOOP_SECTION). Plan: tasks/agent-doc/plan-claude-code-queue-auto-loop.md should be extended with a Phase 6 guard-relaxation section.
 - [ ] [#jbrsrbusysw] SimWorld scenario coverage for session_restart --force: route + Restart Supervisor while pane is alive-busy with and without --force, asserting the new refusal message and force success (including session_restart_busy_pre_interrupt_idle and session_restart_busy_force_killed event variants). Substantial — requires new Op variant + tmux/session_actor mock in src/sim_world.rs. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md phase 4 (SimWorld piece).
 - [ ] [#jbrsrbusyide] JB plugin IDE-side telemetry for session_restart --force: surface session_restart_force_used, session_restart_busy_pre_interrupt_idle, and session_restart_busy_force_killed events in the IntelliJ notification area or Logcat so users can see the recovery path the binary took. Kotlin work in editors/jetbrains/. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md phase 4 (IDE piece).

@@ -196,6 +196,19 @@ Captured as `#p6skillinstallreconcile`. That is the right place to fix the drift
 | `p6sklsymadocrunbooks` (agent-doc runbooks) | **Not symlinked** | Install-generated subtree; symlink would multiply the sync surface |
 
 Pattern: symlink hand-maintained surfaces and single files; leave install-generated subtrees to the install workflow and fix install bugs at the source.
+❯ should [#p6skillinstallreconcile] be added to the backlog of agent-doc-bugs2.md?
+### Re: should [#p6skillinstallreconcile] be added to the backlog of agent-doc-bugs2.md? — opus-4-7 (HEAD)
+
+
+Yes — you're right, that's its proper home. Moved.
+
+#### What I did
+
+1. Created the plan file: `tasks/agent-doc/plan-skill-install-runbooks-reconcile.md` (concrete diagnosis with the 21-vs-14 evidence, fix scope, verification cases).
+2. Added `[#p6skillinstallreconcile]` to `tasks/agent-doc/agent-doc-bugs2.md` backlog via `--pending-add-to`, with the plan path referenced inline (matches the convention used by `#ccloopguard`, `#jbrsrbusysw`, etc.).
+3. Marked the entry done on `tagpath.md` here — "done" in the sense of "tracked elsewhere now, not pending in this doc". The work itself is open; the bookkeeping moved.
+
+The frontmatter preset `#agent-doc-bug` already documents this routing convention ("Please create a plan for agent-doc to fix this issue. Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md") — I should have caught it last cycle when I first captured the item here. Noted for next time.
 <!-- agent:boundary:c1fdbacb -->
 <!-- /agent:exchange -->
 ###
@@ -213,7 +226,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#p6adfmerge]~
 - ~do [#p6adftestfix]~
 - ~do [#p6sklsymadocrunbooks]~
-- do [#p6adfcitagpath]
+- ~do [#p6adfcitagpath]~
 - do [#p6tsifull]
 - do [#p6tspub]
 - do [#p6skl]

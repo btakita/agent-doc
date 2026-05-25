@@ -171,50 +171,7 @@ Last cycle's response flagged this as the open shape decision: promote `Communit
 
 - `[#p6tsifullfederated]` — last symbol-graph surface. Federated search loops over scopes; adapter `try_load` must run per-scope against each `project_root` (each scope owns its own `.naming/index.json`). Most complex of the five because there's no single project root.
 - After that: `[#p6tspub]` (publish prep — restore tsift crates.io publishability by replacing `path = "../tagpath"` with `version = "..."`).
-### Re: do [#p6tsifullcommunities] — opus-4-7
-
-Wired the tagpath consumer adapter into `tsift communities` and shipped as **tsift v0.1.54** (commit `1d29d0a`, superproject pointer `9faf6de`). Fourth of the five symbol-graph consumer surfaces — only `[#p6tsifullfederated]` remains.
-
-#### Decision: typed `CommunityMember`, not parallel handles array
-
-Last cycle's response flagged this as the open shape decision: promote `Community.members` to a typed `Vec<CommunityMember>` (breaking JSON change for `tsift communities`) or carry a parallel `tagpath_handles: Vec<Option<String>>` field (additive). Picked typed for two reasons:
-
-1. **Precedent under `[#p6tsifullpath]`** — `PathResult.path` made the same trade-off (flat `Vec<String>` → typed `Vec<PathNode>`) with a one-line consumer migration. Applying the same pattern here keeps the consumer-side mental model consistent across `tsift path` and `tsift communities`.
-2. **Removes JSON wrapping in `cmd_explain`** — v0.1.52's `cmd_explain` carried hand-written JSON wrapping for `community.members` so the explain response could emit `{name, tagpath_handle}` objects. Promoting the struct lets the wrapping go away entirely; `community` now serializes natively from `cmd_explain` with byte-identical output.
-
-#### What changed
-
-- **`graph::CommunityMember`** (src/tsift/src/graph.rs) — new public struct `{ name: String, tagpath_handle: Option<String> }`. `Community.members: Vec<String>` → `Vec<CommunityMember>`. `detect_communities` now builds members via `CommunityMember::new`.
-- **`Commands::Communities`** (src/tsift/src/main.rs) — gains `--no-tagpath` / `--tagpath-strict`, plumbed into `cmd_communities` as `tagpath_opts: TagpathSearchOpts`.
-- **`cmd_communities`** resolves the canonical project root, calls `annotate_communities_with_tagpath` on `result.communities` **before** the `min_size` / `--limit` filter+truncate pass so even filtered-out communities carry handles for any future per-community surface that re-reads `result.communities` (forward-compat win for `[#p6tsifullfederated]`).
-- **`annotate_communities_with_tagpath`** (new) batches all member names across all communities into one `resolve_tagpath_handles_for_names` call (dedup'd), then back-fills handles. Replaces the older `resolve_community_member_handles` helper that synthesized parallel `Vec<Option<String>>` output for the now-removed `cmd_explain` JSON wrapping.
-- **`cmd_explain_with_budget`** annotates `comm_result.communities` once before locating the focus community; downstream JSON / human / compact / tabular paths just serialize the struct directly.
-- **`compact_members`** helper updated to take `&[graph::CommunityMember]` and project to names internally.
-- **Human output:** unchanged member layout; nodes with a resolved handle now print as `name  [mem:…]` (matches the `path` / `explain` conventions).
-
-#### JSON contract — BREAKING (recorded in VERSIONS.md 0.1.54)
-
-`tsift communities --json` previously emitted each member as a bare string: `community.members: ["alpha", "beta"]`. It now emits objects: `community.members: [{name, tagpath_handle?}, …]`. `tagpath_handle` is serde-skipped when `None`, so default output for projects without `.naming.toml` differs from v0.1.53 only by the wrapping `{}` around each member.
-
-`tsift explain --json` already had this object shape for `community.members` since v0.1.52 (via manual JSON wrapping); that wrapping is now gone — the struct serializes natively. The wire shape is unchanged.
-
-#### Test coverage (src/tsift/tests/exit_code.rs)
-
-- `communities_json_reports_disconnected_clusters` — updated to read `member["name"]`, asserts no handles when no tagpath index is present.
-- `communities_json_omits_handles_when_no_tagpath_flag_set` — fresh tagpath index, asserts `--no-tagpath` suppresses every member handle.
-- `communities_json_annotates_members_when_index_is_fresh` — fresh tagpath index, asserts every member in every community carries a `mem:` handle.
-
-#### Verification
-
-- `cargo test` ⇒ **860 passed** across 5 suites (+2 over v0.1.53). Counts per suite: exit_code 118, bin 686, conformance 31, perf_gate 21, scan_plan 4.
-- `cargo clippy --all-targets --no-deps -- -D warnings` ⇒ clean (2 pre-existing patch-not-used warnings only). Fixed two clippy-flagged collapsible `if let … { if … }` blocks during this cycle.
-- `cargo build --release && cargo install --path .` ⇒ `tsift 0.1.54` live in `~/.cargo/bin/tsift`; `tsift communities --help` exposes the new flags.
-
-#### Pending follow-up (queue advances next)
-
-- `[#p6tsifullfederated]` — last symbol-graph surface. Federated search loops over scopes; adapter `try_load` must run per-scope against each `project_root` (each scope owns its own `.naming/index.json`). Most complex of the five because there's no single project root.
-- After that: `[#p6tspub]` (publish prep — restore tsift crates.io publishability by replacing `path = "../tagpath"` with `version = "..."`).
-<!-- agent:boundary:fac4442a -->
+<!-- agent:boundary:e0938760 -->
 <!-- /agent:exchange -->
 ###
 <!--

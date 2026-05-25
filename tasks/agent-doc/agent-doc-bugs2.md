@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -148,7 +148,7 @@ Landed Phase 3 of `#cclooploop` (the SKILL.md auto-loop instruction itself). Sub
 - Phase 5 — installed SKILL.md regression test, `runbooks/harness-invocation.md` documentation.
 
 **Note for this turn:** the new auto-loop only takes effect after the user runs `agent-doc skill install --harness claude --reload restart` to refresh the installed SKILL.md, then restarts Claude Code so the agent re-reads it. Until then, this session continues with the prior manual-invocation behavior. Next queue head after this closes is `do [#ipcdupfin23]`.
-<!-- agent:boundary:6eaa5f73 -->
+<!-- agent:boundary:87429110 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -158,12 +158,12 @@ As I was typing into the comment below `/agent:exchange`, the full-document IPC 
 Please make auto-compact exchange off by default. Only explicit frontmatter or .agent-doc/config.toml setting should make auto-compact exchange active.
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#crdtrespfx]~
 - ~do [#queueadvgated]~
 - ~do [#jbrsrbusysim]~
-- do [#cclooploop]
+- ~do [#cclooploop]~
 - do [#ipcdupfin23]
 - do Phases 1 + 5 in tasks/agent-doc/plan-ipc-corruption-and-duplicate-during-typing.md
 - do [#jbccfix]

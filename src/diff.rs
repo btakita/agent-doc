@@ -963,6 +963,78 @@ pub fn classify_prompt_bearing_changes(diff: &str) -> Vec<PromptBearingChange> {
     suppress_answered_prompt_runs(classify_prompt_bearing_changes_raw(diff))
 }
 
+/// True when the change is entirely a managed-component state mutation:
+/// queue activity toggle, queue body item (add/strike), backlog item line,
+/// or done item line. These edits are routine session bookkeeping, not
+/// real user prompts, so the Claude Code auto-loop guard treats them as
+/// non-blocking. Plan: `#ccloopguard`.
+pub fn change_is_managed_state_only(change: &PromptBearingChange) -> bool {
+    text_is_managed_state_only(&change.text)
+}
+
+fn text_is_managed_state_only(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let lines: Vec<&str> = trimmed.lines().collect();
+    if lines.is_empty() {
+        return false;
+    }
+    lines.iter().all(|line| line_is_managed_state_only(line))
+}
+
+fn line_is_managed_state_only(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+    // Queue activity comment marker (with or without `auto`)
+    if trimmed.starts_with("<!-- agent:queue")
+        || trimmed.starts_with("<!-- /agent:queue")
+        || trimmed.starts_with("<!-- agent:backlog")
+        || trimmed.starts_with("<!-- /agent:backlog")
+        || trimmed.starts_with("<!-- agent:done")
+        || trimmed.starts_with("<!-- /agent:done")
+        || trimmed.starts_with("<!-- agent:review")
+        || trimmed.starts_with("<!-- /agent:review")
+    {
+        return true;
+    }
+    // Frontmatter queue activity toggle (`queue_active: true|false`)
+    if trimmed.starts_with("queue_active:") {
+        return true;
+    }
+    // Queue body lines: `- do ...`, `- ~do ...~` (strikethrough)
+    if trimmed.starts_with("- do ") || trimmed.starts_with("- ~do ") {
+        return true;
+    }
+    // Backlog/review/done item lines: `- [ ] [#id] ...`, `- [/]`, `- [x]`, `- [-]`
+    if trimmed.starts_with("- [ ]")
+        || trimmed.starts_with("- [/]")
+        || trimmed.starts_with("- [x]")
+        || trimmed.starts_with("- [-]")
+        || trimmed.starts_with("- [?]")
+    {
+        return true;
+    }
+    // Done archive items often start with a date prefix: `- YYYY-MM-DD [#id]`
+    if trimmed.len() >= 12
+        && trimmed.starts_with("- ")
+        && trimmed
+            .chars()
+            .nth(2)
+            .is_some_and(|c| c.is_ascii_digit())
+    {
+        return true;
+    }
+    // Queue preset lines (`preset #foo`).
+    if trimmed.starts_with("preset #") || trimmed.starts_with("preset:") {
+        return true;
+    }
+    false
+}
+
 /// Return a copy of `diff` with user-added lines inside the current
 /// `agent:queue` component removed.
 ///
@@ -4236,5 +4308,100 @@ Please fix the bug.\n\
 
         let bare = first_bare_prompt_prefix_target(diff);
         assert_eq!(bare.as_deref(), Some("Follow-up context."));
+    }
+
+    // Plan: tasks/agent-doc/plan-claude-code-queue-auto-loop.md `#ccloopguard`.
+    // Managed-component state edits (queue/backlog/done body, queue activity
+    // toggle, frontmatter queue flag) must not block the Claude Code auto-loop.
+    // Real user prompts must continue to block it.
+    fn pbc(kind: PromptBearingChangeKind, text: &str) -> PromptBearingChange {
+        PromptBearingChange {
+            kind,
+            text: text.to_string(),
+        }
+    }
+
+    #[test]
+    fn change_is_managed_state_only_accepts_queue_activity_toggle() {
+        assert!(change_is_managed_state_only(&pbc(
+            PromptBearingChangeKind::ContentEdit,
+            "<!-- agent:queue auto -->"
+        )));
+        assert!(change_is_managed_state_only(&pbc(
+            PromptBearingChangeKind::ContentEdit,
+            "<!-- agent:queue -->"
+        )));
+    }
+
+    #[test]
+    fn change_is_managed_state_only_accepts_frontmatter_queue_active_flip() {
+        assert!(change_is_managed_state_only(&pbc(
+            PromptBearingChangeKind::ContentEdit,
+            "queue_active: true"
+        )));
+        assert!(change_is_managed_state_only(&pbc(
+            PromptBearingChangeKind::ContentEdit,
+            "queue_active: false"
+        )));
+    }
+
+    #[test]
+    fn change_is_managed_state_only_accepts_queue_item_lines() {
+        assert!(change_is_managed_state_only(&pbc(
+            PromptBearingChangeKind::PromptTarget,
+            "- do [#newitem]"
+        )));
+        assert!(change_is_managed_state_only(&pbc(
+            PromptBearingChangeKind::PromptTarget,
+            "- ~do [#consumed]~"
+        )));
+    }
+
+    #[test]
+    fn change_is_managed_state_only_accepts_backlog_and_done_item_lines() {
+        assert!(change_is_managed_state_only(&pbc(
+            PromptBearingChangeKind::ContentEdit,
+            "- [ ] [#newitem] short description"
+        )));
+        assert!(change_is_managed_state_only(&pbc(
+            PromptBearingChangeKind::ContentEdit,
+            "- [/] [#gated] partial progress note"
+        )));
+        assert!(change_is_managed_state_only(&pbc(
+            PromptBearingChangeKind::ContentEdit,
+            "- 2026-05-25 [#done] closed last cycle"
+        )));
+    }
+
+    #[test]
+    fn change_is_managed_state_only_accepts_multi_line_managed_blocks() {
+        assert!(change_is_managed_state_only(&pbc(
+            PromptBearingChangeKind::PromptTarget,
+            "- do [#a]\n- do [#b]\n- do [#c]"
+        )));
+    }
+
+    #[test]
+    fn change_is_managed_state_only_rejects_real_user_prompts() {
+        assert!(!change_is_managed_state_only(&pbc(
+            PromptBearingChangeKind::PromptTarget,
+            "Why is the queue not auto-looping?"
+        )));
+        assert!(!change_is_managed_state_only(&pbc(
+            PromptBearingChangeKind::PromptTarget,
+            "❯ do this thing please"
+        )));
+        assert!(!change_is_managed_state_only(&pbc(
+            PromptBearingChangeKind::ContentEdit,
+            "Fix the regression on line 42."
+        )));
+    }
+
+    #[test]
+    fn change_is_managed_state_only_rejects_mixed_managed_and_user_text() {
+        assert!(!change_is_managed_state_only(&pbc(
+            PromptBearingChangeKind::PromptTarget,
+            "- do [#newitem]\nAnd please also fix the older bug."
+        )));
     }
 }

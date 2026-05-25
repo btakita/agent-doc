@@ -252,6 +252,13 @@ pub struct PreflightOutput {
     /// items indicate document-state cleanup rather than ordinary conversation.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub prompt_bearing_changes: Vec<crate::diff::PromptBearingChange>,
+    /// `prompt_bearing_changes` with managed-component state edits filtered
+    /// out (queue activity toggle, queue items, backlog/review/done items,
+    /// `queue_active:` frontmatter toggle). The Claude Code auto-loop guard
+    /// uses this field instead of `prompt_bearing_changes` so routine
+    /// session bookkeeping does not block the auto-loop. Plan: `#ccloopguard`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub user_intent_prompt_changes: Vec<crate::diff::PromptBearingChange>,
     /// Legacy compatibility field: inline user edits inside prior agent responses.
     /// Derived from `prompt_bearing_changes` by keeping only `prompt_target` and
     /// `content_edit` items.
@@ -1835,6 +1842,11 @@ pub fn run(file: &Path) -> Result<()> {
         diff_type: diff_type_str.clone(),
         diff_type_reason: classification.map(|c| c.diff_type_reason),
         annotated_diff,
+        user_intent_prompt_changes: prompt_bearing_changes
+            .iter()
+            .filter(|change| !crate::diff::change_is_managed_state_only(change))
+            .cloned()
+            .collect(),
         prompt_bearing_changes,
         inline_annotations,
         slash_commands,
@@ -2310,16 +2322,10 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
     // items.
     //
     // Fixes the user-reported "queue gets stuck after 1 turn" symptom.
-    let project_root = file
-        .canonicalize()
-        .ok()
-        .and_then(|canonical| {
-            snapshot::find_project_root(&canonical).or_else(|| {
-                canonical
-                    .parent()
-                    .map(std::path::Path::to_path_buf)
-            })
-        });
+    let project_root = file.canonicalize().ok().and_then(|canonical| {
+        snapshot::find_project_root(&canonical)
+            .or_else(|| canonical.parent().map(std::path::Path::to_path_buf))
+    });
     let done_ids = collect_agent_done_ids_with_root(&current_content, project_root.as_deref());
     let gated_ids = collect_agent_review_gated_ids(&current_content);
     let mut eligible_ids: std::collections::HashSet<String> = done_ids.clone();
@@ -2819,7 +2825,10 @@ fn collect_agent_review_gated_ids(content: &str) -> std::collections::HashSet<St
 fn strike_done_queue_head_prompts(
     entries: &[crate::queue::QueueEntry],
     done_ids: &std::collections::HashSet<String>,
-) -> Option<(Vec<crate::queue::QueueEntry>, Vec<crate::queue::QueuePrompt>)> {
+) -> Option<(
+    Vec<crate::queue::QueueEntry>,
+    Vec<crate::queue::QueuePrompt>,
+)> {
     let mut rewritten: Vec<crate::queue::QueueEntry> = Vec::with_capacity(entries.len());
     let mut struck: Vec<crate::queue::QueuePrompt> = Vec::new();
     let mut head_settled = false;
@@ -3529,7 +3538,12 @@ mod tests {
             !ids.contains("charlie"),
             "[ ] marker is not gated, must not be collected"
         );
-        assert_eq!(ids.len(), 2, "only [/] items should be collected: {:?}", ids);
+        assert_eq!(
+            ids.len(),
+            2,
+            "only [/] items should be collected: {:?}",
+            ids
+        );
     }
 
     #[test]
@@ -3611,8 +3625,7 @@ mod tests {
             "<!-- agent:done archive={} -->\n<!-- /agent:done -->\n",
             archive_rel
         );
-        let ids =
-            super::collect_agent_done_ids_with_root(&content, Some(dir.path()));
+        let ids = super::collect_agent_done_ids_with_root(&content, Some(dir.path()));
         assert!(
             ids.contains("archived1"),
             "expected ids to include archived1 from archive file: {:?}",

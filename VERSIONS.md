@@ -6,6 +6,26 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Claude Code auto-loop guard no longer blocks on routine
+  managed-component state edits.** The SKILL.md auto-loop rule previously
+  fired only when `prompt_bearing_changes` was empty or exactly the
+  queue-synthetic head prompt. In practice every meaningful queue cycle
+  produces queue-activity toggles, queue item add/strike lines, or
+  backlog/review/done item edits that preflight classified as
+  `content_edit` / `prompt_target` and tripped the guard. Net effect: the
+  auto-loop almost never fired for real queue work. Preflight now emits a
+  new `user_intent_prompt_changes` field that filters the same change list
+  through `diff::change_is_managed_state_only`, which recognises
+  queue/backlog/review/done component-marker lines, `queue_active:`
+  frontmatter flips, `- do ...` queue items (including struck `- ~do ...~`),
+  and standard task-list items as managed state rather than user prompts.
+  The SKILL.md auto-loop section now reads `user_intent_prompt_changes`
+  instead of `prompt_bearing_changes` so routine session bookkeeping does
+  not interrupt the queue drain. Real user prompts (free-text questions,
+  imperative directives outside the managed components) still appear in
+  `user_intent_prompt_changes` and continue to block. 7 new unit tests in
+  `diff::tests::change_is_managed_state_only_*`. Plan: `#ccloopguard`.
+
 - **JetBrains plugin (0.2.131) now emits `already_applied` socket-IPC acks
   via the new FFI v2 listener.** When the plugin's apply path detects that
   the incoming patch produces no structural change against the live editor

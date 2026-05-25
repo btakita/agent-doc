@@ -140,7 +140,7 @@ After a successful `agent-doc finalize` / `agent-doc write --commit` cycle whose
 - `preflight.queue_active == true`
 - `preflight.queue_trigger == "auto"`
 - `preflight.queue_prompts.len() >= 1`
-- The closing cycle's `prompt_bearing_changes` was either empty or exactly the queue-synthetic head prompt (a non-queue user prompt mid-loop takes precedence; do NOT auto-loop over it)
+- `preflight.user_intent_prompt_changes` is empty (a real user prompt mid-loop takes precedence; do NOT auto-loop over it). Managed-component state edits — queue activity toggle, queue item add/strike, backlog/review/done item edits, `queue_active:` frontmatter flip — appear in `prompt_bearing_changes` for compatibility but are filtered out of `user_intent_prompt_changes` so routine session bookkeeping does not block the auto-loop.
 
 When all four hold, invoke the `Skill` tool with `skill: "loop"` and `args: "agent-doc <FILE>"` to drive the next cycle from the same Claude Code session. `/loop` self-paces the next invocation and terminates naturally when the queue drains, when the user interrupts, when `agent_doc_queue_max_iterations` (frontmatter or `.agent-doc/config.toml`) is hit, or when the environment hard-cap `AGENT_DOC_QUEUE_MAX_ITERATIONS_HARD_CAP` (default `50`) is exceeded.
 

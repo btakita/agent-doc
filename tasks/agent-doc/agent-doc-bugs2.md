@@ -127,6 +127,19 @@ The Phase 3 item that covers extending `backfill-updates.sh` in the four sibling
 - Parent `#agent-doc-commit-sibling` — stays gated until `#adcs-convention` lands and `#adcs-scripts` ships in session-share. Both of those will need their own sessions in those repos.
 
 Not invoking `/loop`. Queue is `queue_halted: item_modified` from your prompt.
+❯ Transfer #adcs-convention into docs.md backlog.
+### Re: Transfer #adcs-convention into docs.md backlog — opus-4-7 (HEAD)
+
+Moved `#adcs-convention` out of this file's backlog into `src/session-share/tasks/docs.md` backlog. Local entry marked `[x]` as a transfer marker.
+
+All `#agent-doc-commit-sibling` phases now live where the work happens:
+
+- `#adcs-binary` — done here (agent-doc CLI flag landed in `src/agent-doc@718e53b`).
+- `#adcs-scripts` — moved to `src/session-share/tasks/docs.md` last cycle (sibling-repo backfill-updates.sh parsers).
+- `#adcs-convention` — moved this cycle (convention authoring in the same `docs.md`).
+- Parent `#agent-doc-commit-sibling` — stays gated in this file's review until the two session-share-side items ship. Could also be transferred to `docs.md` if you'd rather consolidate the umbrella there too; flagging that as an option, not doing it without confirmation.
+
+Not invoking `/loop`. Queue is still halted from your previous prompt.
 <!-- agent:boundary:21019b94 -->
 <!-- /agent:exchange -->
 ###

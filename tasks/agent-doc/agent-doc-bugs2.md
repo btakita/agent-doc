@@ -21,7 +21,7 @@ queue_active: false
 
 <!-- agent:status patch=replace -->
 
-Moved #agent-doc-commit-sibling and #jbresstart to done; #adoc-jb-cache-cancel-stuck-cycle remains gated on #jbccc2.
+Closed stale duplicate #agent-doc-commit-sibling prompt; review remains at 3 gated items.
 <!-- /agent:status -->
 
 ## Exchange
@@ -60,7 +60,13 @@ I left `#adoc-jb-cache-cancel-stuck-cycle` in review. It still depends on `#jbcc
 ❯ Verification: `make check` passed in `src/agent-doc` via tsift digest artifact `tart-9a435fb3ee`; `make install` completed and installed `agent-doc 0.34.0` plus `libagent_doc-0.34.0.so`; latest GitHub Actions CI run `26421124683` on `20260422/codex-agent-backend` is successful, including `Run make tmux-ci`.
 
 ❯ Changed paths: session document closeout only, with done-archive updates handled by `agent-doc finalize --done`; no non-session repo files were manually staged or committed. The existing `src/agent-doc` formatting-only working tree drift was left untouched. Confidence: high for the two done review items; high for leaving the cache-cancel parent gated. Escalation: none.
-<!-- agent:boundary:58e86e52 -->
+❯ complete #agent-doc-commit-sibling. #spec-test-build-install-commit-push
+### Re: Stale Queue Prompt — gpt-5
+
+`#agent-doc-commit-sibling` is already archived in done, so this duplicate queue prompt needed no additional repo mutation. The requested verification/build/install work has already run: `make check` passed via tsift artifact `tart-9a435fb3ee`, `make install` completed for `agent-doc 0.34.0`, and GitHub Actions run `26421124683` is green including `Run make tmux-ci`.
+
+Changed paths: session-document closeout only. No non-session repo files were manually staged or committed. Commit: handled by `agent-doc finalize`; push: pending the required post-finalize session check. Confidence: high. Escalation: none.
+<!-- agent:boundary:73ed4baf -->
 <!-- /agent:exchange -->
 ###
 <!--

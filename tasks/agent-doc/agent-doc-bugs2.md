@@ -33,7 +33,56 @@ Fixed agent:queue stuck-after-1-turn — auto-strike done items at preflight.
 Compacted content:
 - Archived 1 response topic(s): response patchback loss after JB Compact Exchange mid-turn
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:5307ab49 -->
+### Re: do [#adoc-compact-during-turn-response-loss] — opus-4-7
+
+Fixed: the `try_ipc` late-fallback gate now rotates the cycle on mid-turn drift instead of discarding the response.
+
+#### Change
+
+In `src/agent-doc/src/write.rs::try_ipc`, when `cycle_already_committed(file)` returns `Some(cycle_id)`:
+
+- **Old behavior**: unconditionally log `rejecting late fallback patch: cycle <ID> already committed`, mark `skipped_committed_cycle`, drop the patch.
+- **New behavior**: check whether every `### Re:` response heading carried by the incoming `patches` is already in `git show HEAD:<file>`. If yes, reject as before (true `already_committed`). If any heading is missing, the cycle's `Committed` phase belongs to a different operation (compact, sibling write) — log `mid_turn_cycle_rotation`, call `cycle_state::start_preflight` to rotate, and fall through to normal IPC flow.
+
+This is Option A from `tasks/agent-doc/plan-compact-during-turn-response-loss.md`, applied at the narrow gate-fail surface so the existing happy-path stays untouched.
+
+#### Helpers
+
+- `extract_response_headings_from_patches(&[PatchBlock])` — picks the first `### Re:` line from each patch (subheadings ignored, no false positives from body text).
+- `patch_response_headings_already_in_head(file, &[PatchBlock])` — returns `true` only when every heading is present in HEAD; fail-safe `false` when there's no HEAD content (no git / new file), which makes the gate rotate rather than reject in that edge case.
+
+#### Tests
+
+7 new tests in `write::tests`, all green:
+
+- `extract_response_headings_returns_re_lines_in_order` — multi-patch ordering, non-Re patches skipped.
+- `extract_response_headings_picks_first_re_per_patch` — first heading wins, body Re-mentions ignored.
+- `patch_response_headings_already_in_head_true_when_no_patches` — empty list preserves prior conservative behavior.
+- `patch_response_headings_already_in_head_true_when_heading_in_head` — true already-committed case (gate rejects).
+- `patch_response_headings_already_in_head_false_when_heading_missing_from_head` — mid-turn rotation signature (gate allows).
+- `patch_response_headings_already_in_head_false_when_any_heading_missing` — multi-patch must all be in HEAD to skip.
+- `patch_response_headings_already_in_head_false_when_file_not_in_git` — no-git fail-safe.
+
+`cargo test --bin agent-doc -- write::` — all 278 tests pass.
+
+#### Commits
+
+- `src/agent-doc@1ec758e` — `fix(write): late-fallback gate rotates the cycle on mid-turn drift (#adoc-compact-during-turn-response-loss)`.
+- `agent-loop@4405642b2` — superproject submodule pointer bump.
+
+#### What this does and doesn't cover
+
+This fix addresses the exact race observed yesterday: response heading not yet in HEAD plus cycle marked Committed. It generalizes to any mid-turn binary-owned commit that closes a cycle while leaving the document content unchanged for the active turn. The corollary that's NOT covered:
+
+- A mid-turn commit that DID land an unrelated `### Re:` block that happens to match the skill's heading text. Vanishingly unlikely (`### Re:` lines are turn-specific), but worth noting.
+- The `cycle_state` rotation doesn't re-do all the bookkeeping `agent-doc preflight` does (claims sweep, related-doc sweep). For mid-turn rotation that's correct — the original preflight already did those, and we're just resetting the cycle phase.
+
+Option B from the plan (compact writes a `.compact-landed.json` sidecar marker) isn't needed once Option A ships — it would be redundant. Removed from the plan's active recommendation.
+
+#### Next item
+
+Queue head advances to `#jbccc3` (binary auto-recovery for the JB File Cache Conflict cancel wedge) — that's the next item I can fully drive from this terminal, and it'll flip the failing baseline from `#jbccc1` green.
+<!-- agent:boundary:2e68cf56 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -60,7 +109,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#adoc-jb-cache-cancel-stuck-cycle]~
 - ~do [#jbccc1]~
 - ~do [#jbccc2]~
-- do [#adoc-compact-during-turn-response-loss]
+- ~do [#adoc-compact-during-turn-response-loss]~
 - do [#jbccc3]
 - do [#jbccc4]
 - do [#jbccc5]
@@ -77,7 +126,6 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#adoc-compact-during-turn-response-loss] agent-doc-bug: when a JetBrains-initiated agent-doc compact exchange (or any other binary-owned commit on the same doc) lands between agent-doc preflight and agent-doc finalize within the same skill turn, finalize's late-fallback gate fires 'rejecting late fallback patch: cycle <ID> already committed' and the response heredoc is discarded. The pending mutations from the same finalize invocation do land in the working tree, but the response body never crosses the patch boundary. Recovery today requires bare git commit + agent-doc reset --from-current. Plan: tasks/agent-doc/plan-compact-during-turn-response-loss.md. Concrete repro: tasks/agent-doc/agent-doc-bugs2.md cycle for #jbccc2 at 2026-05-25 03:42-03:45 EDT — preflight captured cycle cycle-1779694939132 at 03:42:30, compact exchange ran at 03:42:55 creating archive ...074255.md + commit 14bc483d3, finalize at 03:43 hit the late-fallback gate. Likely fix: finalize compares its CLI --baseline-file against current snapshot/HEAD; on drift, start a fresh cycle instead of short-circuiting on already_committed (Option A) or compact writes a sidecar marker so the next finalize knows to start fresh (Option B). Related: #adoc-jb-cache-cancel-stuck-cycle, #adoc-prefix-strip-uncommitted, #jbccfix.
 - [ ] [#jbccc3] Phase 3 of #adoc-jb-cache-cancel-stuck-cycle: binary detect + tailored recovery. src/preflight.rs, src/repair.rs, src/write.rs, src/session_check.rs — distinguish post-commit local drift from jb_cache_conflict_cancel (cycle phase write_applied + working-tree response matches captured body + snapshot != HEAD + no live exchange edits beyond response); preflight recovered=true auto-runs the equivalent of agent-doc write --commit; session_check stops surfacing likely_direct_response_patchback for this pattern. Plan: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md
 - [ ] [#jbccc4] Phase 4 of #adoc-jb-cache-cancel-stuck-cycle: documentation + runbook. runbooks/commit.md, runbooks/harness-invocation.md (or new runbooks/jb-cache-conflict.md) — document dialog Accept/Cancel contract and recovery command for cases Phase 3 cannot auto-recover. Plan: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md
 - [ ] [#jbccc5] Phase 5 of #adoc-jb-cache-cancel-stuck-cycle: regression coverage. tests/run_integration.rs (or sibling) — integration test that simulates cancel-branch file shape and asserts agent-doc preflight auto-recovers without manual write --commit; SimWorld scenario from Phase 1 must pass after Phase 3 lands. Plan: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md

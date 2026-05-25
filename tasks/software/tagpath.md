@@ -128,7 +128,31 @@ v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-gramm
 Compacted content:
 - Archived 1 response topic(s): do [#tpauditscope]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-<!-- agent:boundary:a2731db1 -->
+### Re: do [#tpauditpolicy] — gpt-5
+
+Implemented and pushed `#tpauditpolicy`.
+
+What changed:
+- `tsift audit-tagpath --json` now emits `tsift_only_files_with_policy_hints`, with entries like `{ "file": "__pycache__/lib.rs", "hints": ["skip_dir:__pycache__"] }`.
+- Policy hints now cover tagpath hard-coded skip directories (`.git`, `node_modules`, `target`, `__pycache__`, `.venv`, `vendor`) and tsift-indexed extensions that tagpath does not cover (`extension_unsupported`).
+- The hint helper resolves `.naming.toml` through tagpath's `NamingConfig` extends chain and includes configured dynamic grammar extensions before treating an extension as unsupported.
+- Human `audit-tagpath` output now prints the same hints beside tsift-only file symbol counts.
+- `tests/exit_code.rs::audit_tagpath_reports_walker_diff` now covers both a skipped `__pycache__` file and a `.pyi` file that tsift indexes while tagpath skips.
+- CI now checks out sibling `btakita/tagpath` at `../tagpath`, fixing the latest red CI failure where the standalone tsift checkout could not resolve the local tagpath path dependency.
+
+Verification:
+- `cargo test audit_tagpath_reports_walker_diff` passed.
+- `make check` passed locally after the final edits.
+- `cargo install --path .` passed.
+- `gh run watch 26410346141 --exit-status` passed: both `clippy + test` and `live Convex graph acceptance` succeeded.
+- tmux CI review: no `tmux`, `tmux-ci`, or `tmux-test` workflow/Makefile references exist in this repo.
+
+Commits pushed:
+- `btakita/tsift@a37937f` — `feat: surface audit-tagpath policy hints`
+- `btakita/agent-loop@d6adbb3af` — `chore: update tsift audit policy hints`
+
+I left the pre-existing unrelated dirty tsift files unstaged: `Cargo.toml`, `Cargo.lock`, `VERSIONS.md`, and `plans/gdbvacproof-evidence.md`.
+<!-- agent:boundary:922b8465 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -137,7 +161,7 @@ Compacted content:
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#tpauditscope]~
-- do [#tpauditpolicy]
+- ~do [#tpauditpolicy]~
 - do [#commhxstrong]
 - do [#p6tspub]
 - do [#p6ren]
@@ -148,7 +172,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#tpauditpolicy] Policy-hint surfacing for `tsift audit-tagpath`. Today the audit reports WHAT diverges (tsift-only / tagpath-only files) but not WHY. Parse the resolved `NamingConfig` (including `extends` chain) and surface: (a) hard-coded `SKIP_DIRS` hits per tsift-only file (the obvious explanation when files live under `__pycache__/`, `vendor/`, `target/`, `node_modules/`, `.venv/`, `.git/`), (b) language coverage gaps (extension not in tagpath's `SOURCE_EXTENSIONS` but tsift's walker accepted it). New JSON fields: `tsift_only_files_with_policy_hints: [{file, hints: ["skip_dir:__pycache__", "extension_unsupported"]}]`. Operators can then decide whether to broaden tagpath, narrow tsift, or accept the gap with intent.
 - [ ] [#commhxstrong] Stronger fix for `#commhx` name-collision wrong-handle (closed cheaply in 0.1.56 by iterating `symbol_info` rows). Today when two files define the same symbol AND both have valid tagpath handles, the resolver returns the FIRST file's handle, which may not match the actual call edge's resolved file. Stronger fix: when resolving a callee handle for a caller row, prefer the `symbol_info` row whose file lives in the same Louvain community as the caller (use `caller_file` evidence). Falls back to current first-handle-wins behavior when no community context is available (e.g. `tsift communities` itself). Touches `annotate_stored_edges_with_tagpath::EdgeSide::Callee` and the per-row `resolve_tagpath_handles_for_names` helper. Tests: extend the name-collision fixture from 0.1.56 with two valid tagpath handles (both files indexed by tagpath); assert the caller's callee handle matches the file in the caller's community.
 - [ ] [#p6tspub] Restore tsift crates.io publishability after p6tsi: tsift now depends on tagpath via path = ../tagpath. Replace with version = "0.17.1" (or whatever ships first) before any tsift release. Already gated by the sift-publish blocker so no immediate regression, but track here.
 - [ ] [#p6ren] tagpath rename <old> <new>: cross-file, cross-convention identifier rename using the index. Walks every member of the matching family, rewrites in-place in each source convention (snake/camel/Pascal/kebab/UPPER/Ada). Foundation for the agent-loop intent-preserving refactor vision.

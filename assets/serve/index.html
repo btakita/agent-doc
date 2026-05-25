@@ -101,6 +101,15 @@
     let events = null;
     let sessions = [];
     let selectedDoc = "";
+    let accessScope = "edit";
+    const authToken = (() => {
+      const token = new URLSearchParams(window.location.search).get("token");
+      if (token) {
+        window.localStorage.setItem("agentDocServeToken", token);
+        return token;
+      }
+      return window.localStorage.getItem("agentDocServeToken") || "";
+    })();
 
     class AgentDocComponent extends HTMLElement {
       set data(component) {
@@ -128,7 +137,8 @@
 
     function updateDirty() {
       const dirty = editor.value !== savedContent;
-      saveBtn.disabled = saving || !dirty;
+      saveBtn.disabled = saving || accessScope !== "edit" || !dirty;
+      editor.readOnly = accessScope !== "edit";
       dirtyEl.textContent = dirty ? "● unsaved" : "";
       bytesEl.textContent = editor.value.length + " bytes";
     }
@@ -144,7 +154,38 @@
     }
 
     function docUrl(base) {
-      return selectedDoc ? `${base}/${encodeURIComponent(selectedDoc)}` : base;
+      const url = selectedDoc ? `${base}/${encodeURIComponent(selectedDoc)}` : base;
+      return withAuth(url);
+    }
+
+    function withAuth(url) {
+      if (!authToken) return url;
+      return url + (url.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(authToken);
+    }
+
+    function authHeaders(extra) {
+      const headers = extra || {};
+      if (authToken) headers.Authorization = "Bearer " + authToken;
+      return headers;
+    }
+
+    async function loadAuth() {
+      try {
+        const r = await fetch(withAuth("/api/auth"), {
+          cache: "no-store",
+          headers: authHeaders(),
+        });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const auth = await r.json();
+        accessScope = auth.canWrite ? "edit" : "read-only";
+        saveBtn.textContent = auth.canWrite ? "save (Ctrl+S)" : "read only";
+        updateDirty();
+      } catch (e) {
+        accessScope = "read-only";
+        saveBtn.textContent = "auth required";
+        updateDirty();
+        throw e;
+      }
     }
 
     function hashSelection() {
@@ -158,7 +199,10 @@
 
     async function loadSessions() {
       try {
-        const r = await fetch("/api/sessions", { cache: "no-store" });
+        const r = await fetch(withAuth("/api/sessions"), {
+          cache: "no-store",
+          headers: authHeaders(),
+        });
         if (!r.ok) throw new Error("HTTP " + r.status);
         const projection = await r.json();
         sessions = projection.sessions || [];
@@ -208,7 +252,10 @@
         return;
       }
       try {
-        const r = await fetch(docUrl("/doc"), { cache: "no-store" });
+        const r = await fetch(docUrl("/doc"), {
+          cache: "no-store",
+          headers: authHeaders(),
+        });
         if (!r.ok) throw new Error("HTTP " + r.status);
         const text = await r.text();
         savedContent = text;
@@ -224,7 +271,10 @@
 
     async function loadProjection() {
       try {
-        const r = await fetch(docUrl("/api/projection"), { cache: "no-store" });
+        const r = await fetch(docUrl("/api/projection"), {
+          cache: "no-store",
+          headers: authHeaders(),
+        });
         if (!r.ok) throw new Error("HTTP " + r.status);
         const projection = await r.json();
         renderProjection(projection);
@@ -249,13 +299,17 @@
 
     async function saveDoc() {
       if (saving) return;
+      if (accessScope !== "edit") {
+        setStatus("read-only token cannot save", "warn");
+        return;
+      }
       saving = true;
       saveBtn.disabled = true;
       setStatus("saving document…");
       try {
         const r = await fetch(docUrl("/save"), {
           method: "POST",
-          headers: { "Content-Type": "text/markdown; charset=utf-8" },
+          headers: authHeaders({ "Content-Type": "text/markdown; charset=utf-8" }),
           body: editor.value,
         });
         if (!r.ok) {
@@ -343,10 +397,13 @@
       }
     });
 
-    loadSessions().then(() => {
-      loadDoc();
-      connectEvents();
-    });
+    loadAuth()
+      .then(loadSessions)
+      .then(() => {
+        loadDoc();
+        connectEvents();
+      })
+      .catch((e) => setStatus("auth failed: " + e.message, "err"));
   </script>
 </body>
 </html>

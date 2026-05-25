@@ -5,14 +5,13 @@
 //!   localhost HTTP server that exposes a minimal markdown editor for one
 //!   session document or the project session list.
 //! - Phase 1 MVP per `tasks/agent-doc/plan-web-interface.md`: localhost-only
-//!   bind, raw `<textarea>` editor, no auth. Phase 2 adds an SSE `/events`
-//!   stream that reports file changes so browser tabs can reload. All writes
-//!   funnel through `agent-doc write --commit <FILE>` via a child process so
-//!   the binary-owned snapshot/commit/session-check boundary applies.
+//!   bind and a raw `<textarea>` editor. Later phases add SSE reloads, project
+//!   document routing, bearer auth for non-loopback binds, and optional TLS.
 //! - Routes:
 //!   - `GET /` → embedded HTML editor page (`INDEX_HTML`).
 //!   - `GET /doc` → current document text (read from disk).
 //!   - `GET /doc/<path-or-hash>` → current text for a project session document.
+//!   - `GET /api/auth` → current auth mode and token scope.
 //!   - `GET /api/sessions` → project session list.
 //!   - `POST /save` → body = full document text; calls `write --commit`,
 //!     returns JSON with the new HEAD short SHA.
@@ -21,8 +20,10 @@
 //!   - `GET /healthz` → `ok`.
 //!
 //! ## Agentic Contracts
-//! - Localhost-only by default. Non-loopback binds print a clear warning;
-//!   auth lands in Phase 5 of the plan.
+//! - Localhost-only by default. Non-loopback binds require bearer auth; edit
+//!   and read-only viewer tokens are printed on start unless supplied.
+//! - Optional HTTPS uses tiny_http's rustls backend when `--tls-cert` and
+//!   `--tls-key` are provided.
 //! - No async — sequential per-connection via `tiny_http` (project rule:
 //!   no tokio).
 //! - Writes never bypass `write --commit`; the in-process write path is not
@@ -44,7 +45,7 @@ use std::process::Command;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tiny_http::{Header, Method, Response, Server, StatusCode};
+use tiny_http::{Header, Method, Response, Server, SslConfig, StatusCode};
 
 const INDEX_HTML: &str = include_str!("../assets/serve/index.html");
 const DEFAULT_PORT: u16 = 7333;
@@ -56,38 +57,62 @@ pub struct ServeOptions {
     pub target: Option<PathBuf>,
     pub host: String,
     pub port: u16,
+    pub auth_token: Option<String>,
+    pub read_only_token: Option<String>,
+    pub tls_cert: Option<PathBuf>,
+    pub tls_key: Option<PathBuf>,
 }
 
 impl ServeOptions {
-    pub fn new(target: Option<PathBuf>, host: Option<String>, port: Option<u16>) -> Self {
+    pub fn new(
+        target: Option<PathBuf>,
+        host: Option<String>,
+        port: Option<u16>,
+        auth_token: Option<String>,
+        read_only_token: Option<String>,
+        tls_cert: Option<PathBuf>,
+        tls_key: Option<PathBuf>,
+    ) -> Self {
         Self {
             target,
             host: host.unwrap_or_else(|| DEFAULT_HOST.to_string()),
             port: port.unwrap_or(DEFAULT_PORT),
+            auth_token,
+            read_only_token,
+            tls_cert,
+            tls_key,
         }
     }
 }
 
 pub fn run(options: ServeOptions) -> Result<()> {
-    let state = Arc::new(ServeState::new(options.target)?);
-
-    if options.host != "127.0.0.1" && options.host != "localhost" {
-        eprintln!(
-            "[serve] WARNING: binding to non-loopback host {} without auth — exposes the document on the network",
-            options.host
-        );
-    }
+    let auth = ServeAuth::from_options(&options.host, options.auth_token, options.read_only_token)?;
+    let tls = ServeTls::from_options(options.tls_cert, options.tls_key)?;
+    let scheme = if tls.is_some() { "https" } else { "http" };
+    let state = Arc::new(ServeState::new(options.target, auth)?);
 
     let bind = format!("{}:{}", options.host, options.port);
-    let server = Server::http(&bind).map_err(|e| anyhow::anyhow!("failed to bind {bind}: {e}"))?;
+    let server = bind_server(&bind, tls)?;
 
     match &state.default_doc {
-        Some(doc) => eprintln!("[serve] listening on http://{} — editing {}", bind, doc.display()),
+        Some(doc) => eprintln!(
+            "[serve] listening on {}://{} — editing {}",
+            scheme,
+            bind,
+            doc.display()
+        ),
         None => eprintln!(
-            "[serve] listening on http://{} — browsing {}",
+            "[serve] listening on {}://{} — browsing {}",
+            scheme,
             bind,
             state.root.display()
         ),
+    }
+    state.print_auth_urls(scheme, &bind);
+    if state.auth.is_enabled() && !is_loopback_host(&options.host) && scheme == "http" {
+        eprintln!(
+            "[serve] WARNING: remote bearer tokens are sent over plain HTTP; use --tls-cert and --tls-key for HTTPS"
+        );
     }
 
     for request in server.incoming_requests() {
@@ -106,10 +131,11 @@ struct ServeState {
     root: PathBuf,
     default_doc: Option<PathBuf>,
     browse_root: bool,
+    auth: ServeAuth,
 }
 
 impl ServeState {
-    fn new(target: Option<PathBuf>) -> Result<Self> {
+    fn new(target: Option<PathBuf>, auth: ServeAuth) -> Result<Self> {
         let raw_target = match target {
             Some(target) => target,
             None => {
@@ -130,6 +156,7 @@ impl ServeState {
                 root,
                 default_doc: Some(canonical),
                 browse_root: false,
+                auth,
             })
         } else {
             let root = crate::snapshot::find_project_root(&canonical).unwrap_or(canonical);
@@ -137,6 +164,7 @@ impl ServeState {
                 root,
                 default_doc: None,
                 browse_root: true,
+                auth,
             })
         }
     }
@@ -149,7 +177,10 @@ impl ServeState {
                 session.id == decoded || session.path == decoded || session.absolute == decoded
             }) {
                 if !session.exists {
-                    anyhow::bail!("session document is registered but missing: {}", session.path);
+                    anyhow::bail!(
+                        "session document is registered but missing: {}",
+                        session.path
+                    );
                 }
                 return Ok(PathBuf::from(&session.absolute));
             }
@@ -191,12 +222,187 @@ impl ServeState {
         }
         Ok(canonical)
     }
+
+    fn print_auth_urls(&self, scheme: &str, bind: &str) {
+        if let ServeAuth::Enabled {
+            edit_token,
+            read_only_token,
+        } = &self.auth
+        {
+            eprintln!("[serve] auth required");
+            eprintln!("[serve] edit token: {edit_token}");
+            eprintln!("[serve] edit URL: {scheme}://{bind}/?token={edit_token}");
+            if let Some(token) = read_only_token {
+                eprintln!("[serve] read-only token: {token}");
+                eprintln!("[serve] read-only URL: {scheme}://{bind}/?token={token}");
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+enum ServeAuth {
+    Disabled,
+    Enabled {
+        edit_token: String,
+        read_only_token: Option<String>,
+    },
+}
+
+impl ServeAuth {
+    fn from_options(
+        host: &str,
+        auth_token: Option<String>,
+        read_only_token: Option<String>,
+    ) -> Result<Self> {
+        let remote = !is_loopback_host(host);
+        if !remote && auth_token.is_none() && read_only_token.is_none() {
+            return Ok(Self::Disabled);
+        }
+
+        let edit_token = match auth_token {
+            Some(token) => validate_token(token, "--auth-token")?,
+            None => generate_bearer_token("edit"),
+        };
+        let read_only_token = match read_only_token {
+            Some(token) => Some(validate_token(token, "--read-only-token")?),
+            None if remote => Some(generate_bearer_token("read")),
+            None => None,
+        };
+        if read_only_token.as_deref() == Some(edit_token.as_str()) {
+            anyhow::bail!("--auth-token and --read-only-token must be distinct");
+        }
+        Ok(Self::Enabled {
+            edit_token,
+            read_only_token,
+        })
+    }
+
+    fn is_enabled(&self) -> bool {
+        matches!(self, Self::Enabled { .. })
+    }
+
+    fn scope_for_token(&self, token: Option<&str>) -> std::result::Result<AuthScope, AuthFailure> {
+        match self {
+            Self::Disabled => Ok(AuthScope::Edit),
+            Self::Enabled {
+                edit_token,
+                read_only_token,
+            } => {
+                let token = token.ok_or(AuthFailure::Missing)?;
+                if token == edit_token {
+                    Ok(AuthScope::Edit)
+                } else if read_only_token.as_deref() == Some(token) {
+                    Ok(AuthScope::ReadOnly)
+                } else {
+                    Err(AuthFailure::Invalid)
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AuthScope {
+    Edit,
+    ReadOnly,
+}
+
+impl AuthScope {
+    fn can_write(self) -> bool {
+        matches!(self, Self::Edit)
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Edit => "edit",
+            Self::ReadOnly => "read-only",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AuthFailure {
+    Missing,
+    Invalid,
+}
+
+#[derive(Debug)]
+struct ServeTls {
+    cert: PathBuf,
+    key: PathBuf,
+}
+
+impl ServeTls {
+    fn from_options(tls_cert: Option<PathBuf>, tls_key: Option<PathBuf>) -> Result<Option<Self>> {
+        match (tls_cert, tls_key) {
+            (Some(cert), Some(key)) => Ok(Some(Self { cert, key })),
+            (None, None) => Ok(None),
+            (Some(_), None) => anyhow::bail!("--tls-cert requires --tls-key"),
+            (None, Some(_)) => anyhow::bail!("--tls-key requires --tls-cert"),
+        }
+    }
+}
+
+fn bind_server(bind: &str, tls: Option<ServeTls>) -> Result<Server> {
+    if let Some(tls) = tls {
+        let certificate = std::fs::read(&tls.cert)
+            .with_context(|| format!("failed to read TLS certificate {}", tls.cert.display()))?;
+        let private_key = std::fs::read(&tls.key)
+            .with_context(|| format!("failed to read TLS private key {}", tls.key.display()))?;
+        return Server::https(
+            bind,
+            SslConfig {
+                certificate,
+                private_key,
+            },
+        )
+        .map_err(|e| anyhow::anyhow!("failed to bind HTTPS {bind}: {e}"));
+    }
+    Server::http(bind).map_err(|e| anyhow::anyhow!("failed to bind {bind}: {e}"))
+}
+
+fn is_loopback_host(host: &str) -> bool {
+    matches!(host, "127.0.0.1" | "localhost" | "::1" | "[::1]")
+}
+
+fn validate_token(token: String, name: &str) -> Result<String> {
+    if token.trim().is_empty() {
+        anyhow::bail!("{name} cannot be empty");
+    }
+    Ok(token)
+}
+
+fn generate_bearer_token(scope: &str) -> String {
+    format!("adoc_{scope}_{}", uuid::Uuid::new_v4().simple())
 }
 
 fn handle_request(request: tiny_http::Request, state: &ServeState) -> Result<()> {
     let url = request.url().to_string();
     let route = route_path(&url);
     let method = request.method().clone();
+    if method == Method::Get && route == "/healthz" {
+        return respond(
+            request,
+            "ok\n",
+            "text/plain; charset=utf-8",
+            StatusCode(200),
+        );
+    }
+    let scope = match authorize_request(&request, state, &url) {
+        Ok(scope) => scope,
+        Err(failure) => {
+            return respond_auth_failure(request, failure);
+        }
+    };
+    if route_requires_write(&method, route) && !scope.can_write() {
+        return respond(
+            request,
+            "read-only bearer token cannot save\n",
+            "text/plain; charset=utf-8",
+            StatusCode(403),
+        );
+    }
     match (method, route) {
         (Method::Get, "/") | (Method::Get, "/index.html") => respond(
             request,
@@ -204,23 +410,16 @@ fn handle_request(request: tiny_http::Request, state: &ServeState) -> Result<()>
             "text/html; charset=utf-8",
             StatusCode(200),
         ),
-        (Method::Get, "/healthz") => respond(
-            request,
-            "ok\n",
-            "text/plain; charset=utf-8",
-            StatusCode(200),
-        ),
+        (Method::Get, "/api/auth") => handle_auth(request, state, scope),
         (Method::Get, "/api/sessions") => handle_sessions(request, state),
         (Method::Get, "/doc") => handle_doc(request, state, None),
         (Method::Get, route) if route.starts_with("/doc/") => {
             handle_doc(request, state, Some(&route["/doc/".len()..]))
         }
         (Method::Get, "/api/projection") => handle_projection(request, state, None),
-        (Method::Get, route) if route.starts_with("/api/projection/") => handle_projection(
-            request,
-            state,
-            Some(&route["/api/projection/".len()..]),
-        ),
+        (Method::Get, route) if route.starts_with("/api/projection/") => {
+            handle_projection(request, state, Some(&route["/api/projection/".len()..]))
+        }
         (Method::Get, "/events") => handle_events(request, state, None),
         (Method::Get, route) if route.starts_with("/events/") => {
             handle_events(request, state, Some(&route["/events/".len()..]))
@@ -238,6 +437,41 @@ fn handle_request(request: tiny_http::Request, state: &ServeState) -> Result<()>
     }
 }
 
+fn authorize_request(
+    request: &tiny_http::Request,
+    state: &ServeState,
+    url: &str,
+) -> std::result::Result<AuthScope, AuthFailure> {
+    let token = bearer_token(request).or_else(|| query_param(url, "token"));
+    state.auth.scope_for_token(token.as_deref())
+}
+
+fn route_requires_write(method: &Method, route: &str) -> bool {
+    *method == Method::Post && (route == "/save" || route.starts_with("/save/"))
+}
+
+fn bearer_token(request: &tiny_http::Request) -> Option<String> {
+    request
+        .headers()
+        .iter()
+        .find(|header| {
+            header
+                .field
+                .as_str()
+                .as_str()
+                .eq_ignore_ascii_case("authorization")
+        })
+        .and_then(|header| {
+            let value = header.value.as_str().trim();
+            value
+                .strip_prefix("Bearer ")
+                .or_else(|| value.strip_prefix("bearer "))
+                .map(str::trim)
+                .filter(|token| !token.is_empty())
+                .map(ToOwned::to_owned)
+        })
+}
+
 fn handle_sessions(request: tiny_http::Request, state: &ServeState) -> Result<()> {
     let payload = build_sessions_payload(state)?;
     respond(
@@ -248,11 +482,21 @@ fn handle_sessions(request: tiny_http::Request, state: &ServeState) -> Result<()
     )
 }
 
-fn handle_doc(
-    request: tiny_http::Request,
-    state: &ServeState,
-    token: Option<&str>,
-) -> Result<()> {
+fn handle_auth(request: tiny_http::Request, state: &ServeState, scope: AuthScope) -> Result<()> {
+    let payload = serde_json::json!({
+        "authRequired": state.auth.is_enabled(),
+        "scope": scope.as_str(),
+        "canWrite": scope.can_write(),
+    });
+    respond(
+        request,
+        &payload.to_string(),
+        "application/json; charset=utf-8",
+        StatusCode(200),
+    )
+}
+
+fn handle_doc(request: tiny_http::Request, state: &ServeState, token: Option<&str>) -> Result<()> {
     let doc = match state.resolve_doc(token) {
         Ok(doc) => doc,
         Err(e) => {
@@ -380,11 +624,7 @@ fn list_sessions(state: &ServeState) -> Result<Vec<ServeSession>> {
     Ok(by_path.into_values().collect())
 }
 
-fn registry_entry_path(
-    root: &Path,
-    key: &str,
-    entry: &crate::sessions::SessionEntry,
-) -> PathBuf {
+fn registry_entry_path(root: &Path, key: &str, entry: &crate::sessions::SessionEntry) -> PathBuf {
     if !entry.file.is_empty() {
         let file = Path::new(&entry.file);
         if file.is_absolute() {
@@ -506,8 +746,7 @@ fn relative_path(root: &Path, path: &Path) -> Result<String> {
 }
 
 fn canonicalize_or_normalize(path: &Path) -> PathBuf {
-    path.canonicalize()
-        .unwrap_or_else(|_| normalize_path(path))
+    path.canonicalize().unwrap_or_else(|_| normalize_path(path))
 }
 
 fn normalize_path(path: &Path) -> PathBuf {
@@ -888,6 +1127,21 @@ fn route_path(url: &str) -> &str {
     url.split_once('?').map(|(path, _)| path).unwrap_or(url)
 }
 
+fn query_param(url: &str, key: &str) -> Option<String> {
+    let query = url.split_once('?')?.1;
+    let query = query
+        .split_once('#')
+        .map(|(query, _)| query)
+        .unwrap_or(query);
+    for pair in query.split('&') {
+        let (name, value) = pair.split_once('=').unwrap_or((pair, ""));
+        if percent_decode(name).ok().as_deref() == Some(key) {
+            return percent_decode(value).ok();
+        }
+    }
+    None
+}
+
 fn percent_decode(input: &str) -> Result<String> {
     let bytes = input.as_bytes();
     let mut decoded = Vec::with_capacity(bytes.len());
@@ -924,10 +1178,40 @@ fn respond(
     content_type: &str,
     status: StatusCode,
 ) -> Result<()> {
+    respond_with_headers(request, body, content_type, status, Vec::new())
+}
+
+fn respond_auth_failure(request: tiny_http::Request, failure: AuthFailure) -> Result<()> {
+    let body = match failure {
+        AuthFailure::Missing => "missing bearer token\n",
+        AuthFailure::Invalid => "invalid bearer token\n",
+    };
+    respond_with_headers(
+        request,
+        body,
+        "text/plain; charset=utf-8",
+        StatusCode(401),
+        vec![header(
+            "WWW-Authenticate",
+            r#"Bearer realm="agent-doc serve""#,
+        )?],
+    )
+}
+
+fn respond_with_headers(
+    request: tiny_http::Request,
+    body: &str,
+    content_type: &str,
+    status: StatusCode,
+    extra_headers: Vec<Header>,
+) -> Result<()> {
     let content_type_header = header("Content-Type", content_type)?;
-    let response = Response::from_string(body.to_string())
+    let mut response = Response::from_string(body.to_string())
         .with_status_code(status)
         .with_header(content_type_header);
+    for header in extra_headers {
+        response.add_header(header);
+    }
     request.respond(response)?;
     Ok(())
 }
@@ -1044,14 +1328,19 @@ mod tests {
             root: root.to_path_buf(),
             default_doc: None,
             browse_root: true,
+            auth: ServeAuth::Disabled,
         };
         let sessions = list_sessions(&state).unwrap();
 
         assert!(sessions.iter().any(|session| session.path == "tasks/one.md"
             && session.session_id.as_deref() == Some("one")));
-        assert!(sessions.iter().any(|session| session.path == "registered.md"
-            && session.registered
-            && session.session_id.as_deref() == Some("registered")));
+        assert!(
+            sessions
+                .iter()
+                .any(|session| session.path == "registered.md"
+                    && session.registered
+                    && session.session_id.as_deref() == Some("registered"))
+        );
     }
 
     #[test]
@@ -1070,6 +1359,7 @@ mod tests {
             root: root.to_path_buf(),
             default_doc: None,
             browse_root: true,
+            auth: ServeAuth::Disabled,
         };
         let sessions = list_sessions(&state).unwrap();
         let session = sessions
@@ -1101,5 +1391,73 @@ mod tests {
         assert!(INDEX_HTML.contains("/api/sessions"));
         assert!(INDEX_HTML.contains("docNav"));
         assert!(INDEX_HTML.contains("hashchange"));
+    }
+
+    #[test]
+    fn serve_non_loopback_generates_edit_and_read_only_tokens() {
+        let auth = ServeAuth::from_options("0.0.0.0", None, None).unwrap();
+        match auth {
+            ServeAuth::Enabled {
+                edit_token,
+                read_only_token,
+            } => {
+                assert!(edit_token.starts_with("adoc_edit_"));
+                let read_only_token = read_only_token.unwrap();
+                assert!(read_only_token.starts_with("adoc_read_"));
+                assert_ne!(edit_token, read_only_token);
+            }
+            ServeAuth::Disabled => panic!("non-loopback bind must require auth"),
+        }
+    }
+
+    #[test]
+    fn serve_auth_scopes_allow_viewer_reads_not_writes() {
+        let auth = ServeAuth::from_options(
+            "0.0.0.0",
+            Some("edit-token".to_string()),
+            Some("read-token".to_string()),
+        )
+        .unwrap();
+
+        assert_eq!(
+            auth.scope_for_token(Some("edit-token")).unwrap(),
+            AuthScope::Edit
+        );
+        assert_eq!(
+            auth.scope_for_token(Some("read-token")).unwrap(),
+            AuthScope::ReadOnly
+        );
+        assert!(
+            !auth
+                .scope_for_token(Some("read-token"))
+                .unwrap()
+                .can_write()
+        );
+        assert_eq!(
+            auth.scope_for_token(Some("wrong")).unwrap_err(),
+            AuthFailure::Invalid
+        );
+    }
+
+    #[test]
+    fn serve_tls_requires_certificate_and_key_pair() {
+        assert!(ServeTls::from_options(Some(PathBuf::from("cert.pem")), None).is_err());
+        assert!(ServeTls::from_options(None, Some(PathBuf::from("key.pem"))).is_err());
+        assert!(
+            ServeTls::from_options(
+                Some(PathBuf::from("cert.pem")),
+                Some(PathBuf::from("key.pem")),
+            )
+            .unwrap()
+            .is_some()
+        );
+    }
+
+    #[test]
+    fn serve_index_html_sends_auth_to_fetch_and_eventsource() {
+        assert!(INDEX_HTML.contains("/api/auth"));
+        assert!(INDEX_HTML.contains("Authorization"));
+        assert!(INDEX_HTML.contains("token=\" + encodeURIComponent(authToken)"));
+        assert!(INDEX_HTML.contains("read-only token cannot save"));
     }
 }

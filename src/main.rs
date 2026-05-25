@@ -722,6 +722,18 @@ enum Commands {
         /// Bind port (default: 7333)
         #[arg(long)]
         port: Option<u16>,
+        /// Edit bearer token. Defaults to a generated token when auth is required.
+        #[arg(long, value_name = "TOKEN")]
+        auth_token: Option<String>,
+        /// Read-only bearer token for viewer access.
+        #[arg(long, value_name = "TOKEN")]
+        read_only_token: Option<String>,
+        /// TLS certificate PEM path. Requires --tls-key.
+        #[arg(long, value_name = "PEM")]
+        tls_cert: Option<PathBuf>,
+        /// TLS private key PEM path. Requires --tls-cert.
+        #[arg(long, value_name = "PEM")]
+        tls_key: Option<PathBuf>,
     },
     /// Print document content to stdout (full file or a single named component).
     Read {
@@ -1944,9 +1956,23 @@ fn main() -> anyhow::Result<()> {
             }
         },
         Commands::SessionCheck { file } => session_check::run(&file),
-        Commands::Serve { file, host, port } => {
-            serve::run(serve::ServeOptions::new(file, host, port))
-        }
+        Commands::Serve {
+            file,
+            host,
+            port,
+            auth_token,
+            read_only_token,
+            tls_cert,
+            tls_key,
+        } => serve::run(serve::ServeOptions::new(
+            file,
+            host,
+            port,
+            auth_token,
+            read_only_token,
+            tls_cert,
+            tls_key,
+        )),
         Commands::Read { file, component } => read::run(&file, component.as_deref()),
         Commands::ResponseToc {
             file,

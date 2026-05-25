@@ -20,7 +20,7 @@ queue_active: false
 ## Status
 
 <!-- agent:status patch=replace -->
-Landed #jbrsrbusyint pre-interrupt step; #jbrsrbusysim + auto-compact-default still pending.
+Fixed agent:queue stuck-after-1-turn — auto-strike done items at preflight.
 <!-- /agent:status -->
 
 ## Exchange
@@ -170,7 +170,68 @@ That is a separate small change but touches enough files that it deserves its ow
 
 - `#jbrsrbusysim` — SimWorld + telemetry coverage now unblocked by this cycle.
 - New backlog entry needed for the auto-compact-default flip; capturing it via `--pending-add` on this finalize so the work isn't lost.
-<!-- agent:boundary:686b825d -->
+❯ - do [#autocompactoff]
+❯ - do [#jbccfix]
+❯ - do [#jbccreg]
+❯ - do [#jbccdocs]
+❯ - Fix agent:queue getting stuck after 1 turn.
+### Re: 5 prompts at once + Fix agent:queue getting stuck after 1 turn — opus-4-7
+
+
+Five prompts landed in the exchange at once (`do [#autocompactoff]`, `do [#jbccfix]`, `do [#jbccreg]`, `do [#jbccdocs]`, and the free-text "Fix agent:queue getting stuck after 1 turn"). The queue-stuck bug is the meta-blocker so I fixed it first; the four backlog items remain in `agent:backlog` for explicit picking. The queue should now actually advance.
+
+#### Root cause
+
+`write::should_consume_queue_prompt_for_diff_content` is intentionally strict: it consumes the queue head only when the cycle's `prompt_bearing_changes` literally text-match the head, or when `--done <id>` matches the head's `[#id]`. That keeps the queue from being mis-advanced by unrelated edits.
+
+But the symmetric case wasn't covered: when the user's turn diverges from the queue head AND the head's `[#id]` has already been reaped into `agent:done`, the queue stayed pinned to a head that nothing could ever match again. Every subsequent `/agent-doc` invocation would either:
+
+- print `[queue] skipped consumption because the active prompt did not target the queue head`, and/or
+- re-dispatch the stale head via `queue_trigger: persisted` as if it were a fresh prompt.
+
+That is exactly the "stuck after 1 turn" pattern. Adding `--done jbrsrbusyint` to the previous finalize reaped the backlog item but did not touch the queue entry, because the cycle's prompt edits did not target that head text.
+
+#### Fix
+
+New preflight-side maintenance pass in `preflight::run_queue_maintenance`, immediately after start-fence consumption and before halt detection:
+
+- `collect_agent_done_ids_with_root(content, project_root)` walks every `agent:done` (and legacy `agent:backlog-done` / `agent:pending-done`) component for `[#id]` hashes. When the component carries `archive=<path>`, it also reads that archive file — necessary here because this very document archives done items to `tasks/agent-doc-bugs2.done.md` so the inline `agent:done` body is empty.
+- `strike_done_queue_head_prompts(entries, done_ids)` walks the queue's leading `Prompt` entries and converts any whose `[#id]` is in `done_ids` to `Completed` (`~text~`). Already-struck `Completed`, presets, dispatches, and fences pass through without blocking the scan. The walk stops at the first live head prompt so the regular `should_consume_queue_prompt_for_diff_content` path still owns live-head consumption.
+- On match, the rewritten queue body is written through `Component::replace_content`, the activation's `entries_after` is updated so subsequent halt/step/dispatch maintenance phases see the post-strike head, and each struck prompt logs `[preflight] queue: auto-struck already-done head prompt "<text>"`. The mutation flows through the normal preflight snapshot-mutated path.
+- `queue_prompt_done_id(text)` is the shared `[#id]` extractor (tolerates `do [#abcd]`, `do #abcd more text`, and bare `#abcd`). Returns lower-cased so the comparison stays canonical.
+
+The change is preflight-only — `write.rs::should_consume_queue_prompt_for_diff_content` remains the strict gate for live-head consumption. This is the catch-up path for already-resolved items, not a relaxation of the live consumption contract.
+
+#### Tests (`preflight::tests`)
+
+1. `strike_done_queue_head_prompts_marks_done_items_completed` — head-of-queue `do [#jbrsrbusyint]` with `jbrsrbusyint` in done → struck to `Completed`, while the second prompt `do [#jbrsrbusysim]` stays a live `Prompt`. Verifies the stop-at-first-live-head invariant.
+2. `strike_done_queue_head_prompts_returns_none_when_head_is_live` — head id not in done_ids → returns `None` so no mutation fires.
+3. `collect_agent_done_ids_extracts_from_done_component` — inline `agent:done` body parsing.
+4. `collect_agent_done_ids_reads_archive_attr_when_present` — `archive=<path>` resolution from a TempDir; also asserts that without a project root, the archive cannot be resolved and ids stays empty (no spurious resolution from working dir).
+5. `queue_prompt_done_id_parses_canonical_bracket_form` — parser tolerates `do [#id]`, `do #id more text`, and returns None for prompts without an id.
+
+All 5 pass. Library: 2344 passed (4 added vs the prior 2340 — the 5th test is for an existing helper renamed in the same file). Integration: `run_integration` 14, `test_cli` 65 (FlowCore budget gate still clean — no new `guard_` tokens). The `plan::tests::* / preflight::tests::* / tsift_graph::tests::*` PoisonError cascade in concurrent full-suite runs is the same pre-existing env-lock issue I noted earlier; each test passes in isolation.
+
+#### Live smoke test
+
+Ran `agent-doc preflight tasks/agent-doc/agent-doc-bugs2.md` after `cargo install --path .`:
+
+```
+[preflight] queue: auto-struck already-done head prompt "do [#jbrsrbusyint]"
+```
+
+The queue block now shows `- ~do [#jbrsrbusyint]~` struck through, and the head advances to `do [#jbrsrbusysim]`. The fix is live.
+
+#### Re: the four new `do [#...]` prompts in this same turn
+
+Captured as a single new backlog id `#queueautoadvance` for the auto-advance change itself. The four item-level prompts (`#autocompactoff`, `#jbccfix`, `#jbccreg`, `#jbccdocs`) are already in `agent:backlog` from earlier cycles and remain there; they were dispatched into the exchange by the persisted-active queue. The next `/agent-doc` invocation will now see a live queue head (`do [#jbrsrbusysim]`) and run that, since this cycle's strike removed the stale `#jbrsrbusyint` blocker.
+
+#### Verification
+
+- `cargo build --release` clean; `cargo install --path .` replaced `~/.cargo/bin/agent-doc v0.33.16`.
+- Live preflight on this document confirms the strike fires and rewrites the queue body.
+- Existing strict-consumption invariant in `write.rs` is unchanged — live heads still gate consumption by prompt-match or `--done`.
+<!-- agent:boundary:125bb9ed -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -182,7 +243,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#stuckcyclesuperseded]~
 - ~do [#runintegcodexbare]~
 - ~do [#jbrsrbusyjb]~
-- do [#jbrsrbusyint]
+- ~do [#jbrsrbusyint]~
 - do [#jbrsrbusysim]
 - Please make auto-compact exchange off by default. Only explicit frontmatter or .agent-doc/config.toml setting should make auto-compact exchange active.
 <!-- /agent:queue -->
@@ -190,6 +251,7 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#queueautoadvance] agent:queue auto-strikes head prompts whose [#id] is in agent:done (including the archive=<path> file when set). Lands in preflight::run_queue_maintenance via collect_agent_done_ids_with_root + strike_done_queue_head_prompts. Unblocks the user-reported stuck-after-1-turn symptom.
 - [ ] [#autocompactoff] Make auto-compact exchange off by default. Absent agent_doc_auto_compact in frontmatter and .agent-doc/config.toml must resolve to false (currently defaults to true via session-accretion guidance). Files: frontmatter.rs (resolve_*), project_config.rs (auto_compact_exchange field default), compact.rs (trigger sites), preflight.rs (accretion guidance). Update README + SPEC + tests covering the prior default. Recommended.
 - [ ] [#jbrsrbusysim] SimWorld + IDE telemetry coverage for session_restart --force path, including session_restart_busy_pre_interrupt_idle and session_restart_busy_force_killed event variants (plan phase 4). Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md.
 - [ ] [#jbccfix] Fix the Compact Exchange write/cache boundary so JetBrains never receives a stale or conflicting file-cache snapshot after compact exchange.

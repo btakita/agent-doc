@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 4602f467-ef2a-4094-a750-5eb533368988
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -123,41 +123,12 @@ v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-gramm
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260525-092327.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260525-161445.md`*
 
 Compacted content:
-- Archived 2 response topic(s): do [#p6tsifullscoped]; do [#p6tsifullscoped]
-- Prior summary/context: ### Session Summary ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c...
-### Re: do [#tpauditscope] — opus-4-7
-
-Shipped in tsift 0.1.61 (`6a3e795`, superproject pointer bumped). Test-only change locking in the per-submodule audit path that the 0.1.59 implementation already supported.
-
-#### Test
-`tests/exit_code.rs::audit_tagpath_scope_reports_per_submodule_walker_diff` builds an `alpha` + `beta` workspace:
-
-- **alpha**: contains `alpha/__pycache__/lib.rs` (tsift indexes, tagpath SKIP_DIRS) and `alpha/lib.rs`. Has its own `.naming.toml` and `.naming/index.json` rooted at `src/alpha/`.
-- **beta**: contains `beta/lib.rs` only. Has its own `.naming.toml` and `.naming/index.json` rooted at `src/beta/`.
-
-Then exercises both scope paths:
-
-- `tsift audit-tagpath --scope alpha --json` — asserts `scope: "alpha"`, asserts `__pycache__/lib.rs` lands in `tsift_only_files`, and asserts NO beta files leak into the alpha report.
-- `tsift audit-tagpath --scope beta --json` — asserts `scope: "beta"` and empty `tsift_only_files` + `tagpath_only_files` (clean coverage).
-
-The leak-prevention assertion is the load-bearing one: it locks in that `cmd_audit_tagpath` resolves the tagpath root from `scope.source_root` instead of falling back to the workspace root, and that `IndexDb` opens the scoped `.tsift/indexes/<scope>/index.db` rather than the workspace root.
-
-#### Verification
-- `cargo test --test exit_code audit_tagpath_scope_reports_per_submodule_walker_diff` — green
-- `make check` — green
-- `cargo install --path .` — `tsift 0.1.61` installed
-
-#### Files
-- `src/tsift/tests/exit_code.rs` — `audit_tagpath_scope_reports_per_submodule_walker_diff`
-- `src/tsift/VERSIONS.md` — 0.1.61 entry
-- `src/tsift/Cargo.toml`, `Cargo.lock` — version → 0.1.61
-- Superproject `src/tsift` submodule pointer bumped
-
-No source changes — `cmd_audit_tagpath` already handled the scoped path correctly when shipped in 0.1.59, so this turn locks that behavior in with deterministic test coverage.
-<!-- agent:boundary:da2f362f -->
+- Archived 1 response topic(s): do [#tpauditscope]
+- Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
+<!-- agent:boundary:a2731db1 -->
 <!-- /agent:exchange -->
 ###
 <!--

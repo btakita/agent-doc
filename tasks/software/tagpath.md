@@ -171,11 +171,63 @@ Last cycle's response flagged this as the open shape decision: promote `Communit
 
 - `[#p6tsifullfederated]` — last symbol-graph surface. Federated search loops over scopes; adapter `try_load` must run per-scope against each `project_root` (each scope owns its own `.naming/index.json`). Most complex of the five because there's no single project root.
 - After that: `[#p6tspub]` (publish prep — restore tsift crates.io publishability by replacing `path = "../tagpath"` with `version = "..."`).
-<!-- agent:boundary:e0938760 -->
+❯ Can tagpath handle mixed name conventions? Such as javascript that is mostly in camelCase but has some snake_case variable or function names?
+### Re: Can tagpath handle mixed name conventions? — opus-4-7
+
+Short answer: **yes for parse/search/extract; mostly yes for lint with one rough edge.** Tagpath's design always picks one convention per identifier and uses that as a routing key, so a file that mixes camelCase and snake_case is handled identifier-by-identifier, not file-by-file.
+
+#### How it works in practice
+
+1. **Detection is per-identifier, not per-file.** `parser::detect_convention(name)` in `src/parser/mod.rs:64` runs against each identifier individually:
+   - Contains `_` (and is not all-uppercase, and not Ada_Case) → `SnakeCase`
+   - Contains `-` → `KebabCase`
+   - Starts uppercase → `PascalCase`
+   - Otherwise → `CamelCase`
+
+   So `getUserId` and `user_id` sitting side-by-side in the same `.js` file get classified independently — no global "file convention" lock-in.
+
+2. **Canonical tags are convention-agnostic.** `parse()` first splits on `_` (and `__`), then applies camelCase splitting per segment (`src/parser/mod.rs:107` `tokenize`). The tag list is lowercased before any matching. Net effect:
+   - `getUserId` → tags `[get, user, id]`
+   - `get_user_id` → tags `[get, user, id]`
+   - `GetUserId` → tags `[get, user, id]`
+   - `get-user-id` → tags `[get, user, id]`
+   - Mixed like `createContext_auth` → tags `[create, context, auth]`
+
+   That means `tagpath search` and the cross-convention alias machinery treat all four as equivalent — the JS file with both styles is fully searchable from any one canonical query.
+
+3. **AST-aware extraction sorts identifiers by context.** With `lang-javascript` enabled, `extract::extract_from_path_with_mode(path, true)` walks the tree-sitter AST and tags each identifier as `Function | Variable | Type | Constant | Import | Parameter | Field | Other`. So even within a mixed file, the extractor knows *which* identifier is a function and which is a variable — that's what makes per-context lint rules work.
+
+#### Lint side — the rough edge
+
+`tagpath lint` enforces per-context conventions from `.naming.toml`. The bundled `lang/javascript.toml` preset uses:
+
+```toml
+[contexts.function]   convention = "camelCase"
+[contexts.variable]   convention = "camelCase"
+[contexts.constant]   convention = "UPPER_SNAKE_CASE"
+[contexts.class]      convention = "PascalCase"
+```
+
+So a JS file with `function getUserName()` (function, camelCase ✓), `const MAX_RETRIES = 3` (constant, UPPER_SNAKE_CASE ✓), and `let user_count = 0` (variable, snake_case ✗ — expected camelCase) lints **cleanly on the first two and flags only the third**. That's the right answer for "JS file that is mostly camelCase with a few snake_case stragglers."
+
+**The rough edge:** identifiers that themselves mix conventions within one name (e.g. `createUserProfile_v2`) are classified by `detect_convention` as a single convention. Because the rule is "contains `_` → snake-ish family," `createUserProfile_v2` is detected as `SnakeCase` even though it reads as "camelCase + version suffix." Tag extraction still works correctly (`[create, user, profile, v2]`), but the lint check `actual == expected` compares whole-identifier conventions, so this would lint-fail in a `camelCase`-only context with the suggested fix being `create_user_profile_v2`. Pure single-convention identifiers in a mixed file lint correctly; only mixed-within-one-identifier names hit this edge.
+
+#### Practical guidance
+
+For a JS codebase that's "mostly camelCase but with some snake_case":
+- **Parse / alias / search** — works out of the box. Same canonical tags, cross-convention matching is the default behavior.
+- **Extract** — works out of the box with `lang-javascript` enabled.
+- **Lint** — works out of the box with the bundled `javascript` preset; flags exactly the snake_case-where-it-shouldn't-be cases. If you want stricter or laxer enforcement (e.g. allow snake_case for legacy variables but not for new functions), narrow it via `.naming.toml` overrides on `[contexts.variable]` / `[contexts.function]` per context; you can also `extends = ["javascript"]` and override only the contexts that need different rules.
+
+If the codebase has lots of mixed-within-one-identifier names (`createUserProfile_v2` style) and you don't want those flagged, the cleanest workaround today is to either rename them or scope-exclude their paths in `.naming.toml`. A "tolerate mixed within an identifier" lint mode does not exist yet — it would need a new lint policy variant that compares tag-equivalence rather than convention-equivalence.
+
+#### Backlog impact
+
+Worth tracking as a small follow-up alongside the existing tagpath surface: a `lint.allow_mixed_within_identifier` policy (or per-context `[contexts.variable] tolerate_mixed = true`) would close the only real gap above. Low risk, single-file change in `lint/mod.rs:79`, mostly the policy plumbing. Adding to the recommended slot in the backlog as `[#mixconv]`. Not blocking the existing `p6tsifull*` rollout; `[#p6tsifullfederated]` is still the natural next item for `/agent-doc` continuation.
+<!-- agent:boundary:51d025ad -->
 <!-- /agent:exchange -->
 ###
 <!--
-Can tagpath handle mixed name conventions? Such as javascript that is mostly in camelCase but has some snake_case variable or function names?
 -->
 
 <!-- agent:queue auto -->
@@ -207,6 +259,7 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 (<!-- agent:backlog -->
+- [ ] [#mixconv] [recommended] tagpath lint policy that tolerates mixed conventions within a single identifier (e.g. `createUserProfile_v2`). Today `parser::detect_convention` classifies any identifier containing `_` as snake-family, so the camelCase-plus-suffix shape lint-fails in a camelCase-only context with `create_user_profile_v2` as the suggested fix. Add a per-context `tolerate_mixed = true` or top-level `lint.allow_mixed_within_identifier` policy that compares tag-equivalence rather than convention-equivalence. Single-file change in `src/lint/mod.rs:79`. Tests: extend `tests/lint.rs` with mixed-within-identifier cases.
 - [ ] [#p6tsifullfederated] Subitem of p6tsifull. Wire tagpath adapter into tsift search --federated (workspace-scoped search across multiple scoped index.db files). Most complex of the five — federated search loops over scopes; adapter load must respect per-scope project_root. Defer until p6tsifullpath/explain/graph/communities establish the per-command template.
 - [ ] [#p6tspub] Restore tsift crates.io publishability after p6tsi: tsift now depends on tagpath via path = ../tagpath. Replace with version = "0.17.1" (or whatever ships first) before any tsift release. Already gated by the sift-publish blocker so no immediate regression, but track here.
 - [ ] [#p6ren] tagpath rename <old> <new>: cross-file, cross-convention identifier rename using the index. Walks every member of the matching family, rewrites in-place in each source convention (snake/camel/Pascal/kebab/UPPER/Ada). Foundation for the agent-loop intent-preserving refactor vision.

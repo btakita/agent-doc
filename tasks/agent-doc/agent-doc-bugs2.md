@@ -177,7 +177,67 @@ End-to-end manual test against a temp git repo:
 - Superproject commit: `01280713e` — `agent-doc: add web interface plan + Phase 1 MVP submodule bump`.
 - `cargo install --path .` + `cargo build --release` both ran; tmux `~/.cargo/bin/agent-doc` and `.bin/agent-doc → target/release/agent-doc` carry the new subcommand.
 - Plan: `tasks/agent-doc/plan-web-interface.md`.
-<!-- agent:boundary:7b944553 -->
+❯ Can the web server be run on a directory and auto-detect all agent documents, with realtime updates to added/deleted/updated files, with a navigation system?
+### Re: directory mode + nav + live file updates — opus-4-7
+
+Yes — all of that is a natural extension of the MVP and folds the existing Phase 2 (`#adoc-web-sse`) and Phase 4 (`#adoc-web-multidoc`) follow-ups together. Concrete design:
+
+#### Invocation
+
+```
+agent-doc serve <DIR>          # auto-detect mode (new)
+agent-doc serve <FILE>         # single-doc mode (today's MVP)
+```
+
+The argument's `is_dir()` switches the mode. Existing `--host` / `--port` still apply. Add `--recursive` (default on for dir mode) and `--include` / `--exclude` glob filters for projects with many `.md` files that aren't session docs.
+
+#### How "agent document" is detected
+
+Two-tier classification, fast-path first:
+
+1. **Registry fast path:** read `.agent-doc/sessions.json` (already used by `claim` / `route` / `sync`). Anything registered is a session doc, no scan needed.
+2. **Frontmatter fallback:** walk the directory once, parse frontmatter on each `.md`, treat as a session doc when any of these are present: `agent_doc_session:`, legacy `session:`, `agent_doc_format:`. Other `.md` files (READMEs, plans, runbooks) are skipped.
+
+Cache the classification keyed by `(path, mtime)` so the walk is cheap on every browse.
+
+#### Realtime updates
+
+`notify` (already a project dependency) watches the directory with `RecommendedWatcher`. On `Create` / `Modify` / `Remove`:
+
+- Reclassify the affected path (frontmatter could have just been added).
+- Update the in-memory doc list.
+- Push an SSE event on `/events` so every connected browser tab updates its nav + (if the currently-open doc was modified) reloads the editor surface.
+
+Debounce events at ~200ms so a single `agent-doc finalize` (which writes + commits + boundary-cleans in quick succession) collapses to one update on the wire.
+
+#### New routes
+
+- `GET /` — directory-mode landing page with a left nav (file tree or flat sorted list) and an editor area on the right.
+- `GET /api/docs` — JSON list of session docs (path, title from H1 or frontmatter, last-modified, cycle phase if open, optional unread badge).
+- `GET /events` — SSE; events: `doc-added` / `doc-removed` / `doc-changed` (with path), `cycle-changed` (with path + phase).
+- `GET /doc?path=<rel-path>` — current single-doc GET widened to accept a path query in dir mode (the MVP `GET /doc` stays for single-doc launches).
+- `POST /save?path=<rel-path>` — same widening.
+- URL routing in the browser: `#/<rel-path>` opens that doc; back/forward navigates.
+
+#### Tradeoffs
+
+- **Registry-only vs frontmatter scan:** registry is instant but only sees claimed docs; first-time use of a fresh repo would show nothing. Scan covers everything but costs a walk on startup. The two-tier path above gives both — registry for "open right now," scan for "what else is in the project."
+- **Polling vs `notify`:** `notify` is reliable on Linux (inotify) and macOS (FSEvents) but flaky over network filesystems; auto-fallback to 500 ms polling when the watcher reports a `notify::Error::Generic` for the root path.
+- **Nav scope:** flat list is simple but unfriendly past ~30 docs. A collapsible tree keyed on directory layout is the right default; render it client-side from the `/api/docs` flat list to keep the server stateless.
+- **Editor state across switches:** "you have unsaved edits — switch anyway?" prompt, with optional autosave-on-blur as a setting in Phase 5+.
+
+#### What I'd build now
+
+I'd land this as `#adoc-web-multidoc` (Phase 4) + `#adoc-web-sse` (Phase 2) combined, in one PR since the SSE plumbing is what makes the nav reactive and the two halves are not independently useful for this UX:
+
+1. Switch `serve.rs` to dispatch by `is_dir`.
+2. Add the classification + scan + registry merge.
+3. Add `notify`-backed watcher + `/events` SSE channel + the new routes.
+4. Replace `index.html` with a two-pane layout (nav + editor) that subscribes to SSE.
+5. Keep all writes flowing through plain `git add`/`commit` (Phase 1 contract) until Phase 6 hooks live cycles.
+
+About a day of focused work; want me to start?
+<!-- agent:boundary:8d7bf655 -->
 <!-- /agent:exchange -->
 ###
 <!--

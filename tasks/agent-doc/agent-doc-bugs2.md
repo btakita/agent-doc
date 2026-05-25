@@ -126,8 +126,58 @@ Short answer: don't port wholesale; add a web frontend for specific use cases (r
 - **Vs. current editor-only path:** more code to maintain, web auth/CSP surface to think about, but unlocks remote/mobile/multi-viewer cases that JB/VS Code plugins cannot.
 - **Vs. doing nothing:** if the dominant pain is "I want to see this from my phone," a tiny SSE-only read-only viewer captures most of the value for ~1% of the engineering surface a full web rewrite would need.
 
-Want me to draft a focused plan for the projection-layer `agent-doc serve` if that direction sounds right?
-<!-- agent:boundary:42315ea6 -->
+❯ Want me to draft a focused plan for the projection-layer `agent-doc serve` if that direction sounds right?
+❯ I would like to have a fully featured web interface. It can be a markdown editor for now.
+### Re: web interface MVP — opus-4-7
+
+`agent-doc serve <FILE>` now boots a localhost HTTP markdown editor on `http://127.0.0.1:7333/` (override with `--host` / `--port`). Phase 1 of the web-interface plan is in HEAD; phases 2–6 split into per-phase backlog items so each can be picked up independently.
+
+#### How to try it
+
+```
+agent-doc serve tasks/agent-doc/agent-doc-bugs2.md
+# then open http://127.0.0.1:7333/ in a browser
+```
+
+Edit the markdown, hit save (or Ctrl+S). The response payload returns the new HEAD short SHA so you can confirm the commit landed without leaving the browser.
+
+#### What's in the MVP
+
+- **`src/agent-doc/src/serve.rs`** — `tiny_http`-backed sync server (no async; project rule). Routes: `GET /` (embedded HTML editor), `GET /healthz`, `GET /doc` (current text), `POST /save` (full-document replace → `git add` + `git commit --no-verify` with generated message).
+- **`src/agent-doc/assets/serve/index.html`** — embedded via `include_str!`. Raw `<textarea>` editor, dark theme, Ctrl+S save, dirty-state indicator, HEAD readout in the footer, reload-from-disk button.
+- **`src/agent-doc/Cargo.toml`** — adds `tiny_http = "0.12"`. Chosen for the sync-only constraint (rules out tokio/axum); ~15 KB compiled, no transitive runtime.
+- **`src/agent-doc/src/main.rs`** — wires `agent-doc serve <FILE> [--host] [--port]` subcommand.
+
+#### Deliberate scope decisions
+
+- **User edits commit through plain `git`, not `write --commit`.** The cycle/capture machinery is reserved for agent responses through `write --commit` / `finalize`. Web-editor user edits are explicitly outside the cycle boundary for Phase 1 — Phase 6 will route writes through the cycle when an active cycle is in scope, matching the editor IPC contract.
+- **Localhost-only bind by default.** Non-loopback host prints a clear warning; auth lands in Phase 5.
+- **Raw `<textarea>` editor.** Phase 3 swaps in CodeMirror 6 with proper markdown mode + side panels for backlog/queue/review web components.
+- **No SSE.** Phase 2 adds `/events` with `notify`-backed file watching so external mutations (editor IPC, the CLI, another writer) push to the browser.
+
+#### Smoke test
+
+End-to-end manual test against a temp git repo:
+- `GET /doc` returned the seed `# hello`.
+- `POST /save` with body `# hello from web edit` returned `{"ok":true,"head":"5863939","bytes":21}`.
+- `git log --oneline` showed the new commit landed (`5863939 agent-doc serve: web edit <timestamp>`).
+- Subsequent `GET /doc` reflected the new content.
+
+#### Follow-ups added to backlog
+
+- `#adoc-web-sse` — Phase 2 SSE updates.
+- `#adoc-web-codemirror` — Phase 3 editor swap + JSON-projection components.
+- `#adoc-web-multidoc` — Phase 4 root mode + session list.
+- `#adoc-web-auth` — Phase 5 token auth + TLS.
+- `#adoc-web-live-cycle` — Phase 6 stream integration.
+
+#### Closeout
+
+- Submodule commit: `(see superproject pointer bump)` — `feat: agent-doc serve — localhost markdown editor (Phase 1 MVP)`.
+- Superproject commit: `01280713e` — `agent-doc: add web interface plan + Phase 1 MVP submodule bump`.
+- `cargo install --path .` + `cargo build --release` both ran; tmux `~/.cargo/bin/agent-doc` and `.bin/agent-doc → target/release/agent-doc` carry the new subcommand.
+- Plan: `tasks/agent-doc/plan-web-interface.md`.
+<!-- agent:boundary:7b944553 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -175,6 +225,11 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#adoc-web-sse] Phase 2 of agent-doc serve: SSE /events stream + frontend reload on file change. Reuse the existing notify integration if available, else 250-500ms poll. Plan: tasks/agent-doc/plan-web-interface.md (Phase 2).
+- [ ] [#adoc-web-codemirror] Phase 3: swap the raw textarea for CodeMirror 6 with markdown mode, line wrap, gutter; render exchange/backlog/queue/review as web components consuming preflight JSON projections. Plan: tasks/agent-doc/plan-web-interface.md (Phase 3).
+- [ ] [#adoc-web-multidoc] Phase 4: root mode + session list (/api/sessions reuses sessions.json), URL routing /doc/<path-or-hash>. Plan: tasks/agent-doc/plan-web-interface.md (Phase 4).
+- [ ] [#adoc-web-auth] Phase 5: bearer token auth for non-loopback binds, optional TLS via rustls, multi-user read-only viewer scope. Plan: tasks/agent-doc/plan-web-interface.md (Phase 5).
+- [ ] [#adoc-web-live-cycle] Phase 6: hook agent-doc stream into /events so the in-flight ### Re: block streams to the browser as the agent produces it; web writes funnel through finalize/write --commit when an active cycle is in scope. Plan: tasks/agent-doc/plan-web-interface.md (Phase 6).
 - [ ] [#adoc-prefix-strip-session-check-whitelist] Phase 1 of #adoc-prefix-strip-uncommitted: session_check.detect_bypassed_response_write false-positives on legitimate response prose lines (treats them as 'bare prompt target missing ❯ '). When a fresh preflight_started cycle just rotated mid-turn and has a visible response body but no capture/pending, the heuristic still flags the response as a likely_direct_response_patchback. Need to recognize and whitelist this shape (e.g., when the diff insert is bracketed by a legit ### Re: heading and the prose differs only by the absence of ❯ prefixes). Demonstrated live during the #adoc-prefix-strip-uncommitted cycle closeout — required bare git commit + reset --from-current fallback. Plan: tasks/agent-doc/plan-prefix-strip-uncommitted.md (Phase 1).
 - [ ] [#adoc-bdauc-simworld] SimWorld scenario coverage for #adoc-baseline-drift-after-user-commit Phase 1: model the three drift branches (benign outside-response, inside-response-mismatch, inside-response-matches-normalized) in src/sim_world.rs. Plan: tasks/agent-doc/plan-baseline-drift-after-user-commit.md (Phase 1).
 - [ ] [#adoc-bdauc-preserve-session] agent-doc reset --from-current --preserve-session: non-destructive recovery that rebuilds the baseline but keeps session id, snapshot history, and capture chain. Today's --from-current is destructive. Plan: tasks/agent-doc/plan-baseline-drift-after-user-commit.md (Phase 3).

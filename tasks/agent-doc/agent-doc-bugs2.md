@@ -33,7 +33,7 @@ Fixed agent:queue stuck-after-1-turn — auto-strike done items at preflight.
 Compacted content:
 - Archived 4 response topic(s): backlog edit + queue add for #agent-doc-commit-sibling → #adcs-binary / #adcs-scripts; do [#adcs-binary]; transfer [#adcs-scripts] into docs.md backlog; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-### Re: queue additions — #jbccc1–5 + #adoc-baseline-drift-after-user-commit — opus-4-7 (HEAD)
+### Re: queue additions — #jbccc1–5 + #adoc-baseline-drift-after-user-commit — opus-4-7
 
 Acknowledging six new queue items. Queue marker is plain `&lt;!-- agent:queue --&gt;` (no `auto` suffix), so the auto-loop will not fire — invocations stay one-cycle-each.
 
@@ -49,7 +49,7 @@ The SimWorld scenario lives in `src/agent-doc/src/sim_world.rs` (2300 LOC). Addi
 #### Suggested next step
 
 Re-invoke `/agent-doc tasks/agent-doc/agent-doc-bugs2.md` if you want me to pick up `#jbccc1`. If you'd prefer a different head, strike `#jbccc1` and the binary will advance.
-<!-- agent:boundary:fc6193e0 -->
+<!-- agent:boundary:ead50299 -->
 <!-- /agent:exchange -->
 ###
 <!--

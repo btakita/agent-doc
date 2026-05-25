@@ -67,17 +67,46 @@ Commits:
 - Root repo: `22a338184 agent-doc: bump submodule for route recovery` created; root push follows after this document closeout so the session-doc commit is included on `main`.
 
 No actionable follow-up backlog item from this turn.
-<!-- agent:boundary:029beceb -->
+❯ JB `Restart Supervisor Process` error:
+❯ agent-doc command failed (exit 1): Error: session_restart refused for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md because the authoritative actor is still starting and the document changed after the last committed cycle. Wait for a dispatch-ready prompt (`prompt_ready=true`) and retry, or run `agent-doc session status /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` to inspect the pane.
+### Re: JB Restart Supervisor Process starting guard — gpt-5
+
+Fixed the JetBrains `Restart Supervisor Process` dead-end when the authoritative actor is still `starting` and the document has changed since the last committed cycle.
+
+What changed:
+- `agent-doc session restart-supervisor --force <FILE>` now bypasses the starting-actor restart guard. Bare restart still fails closed, but the refusal now points to `--force` as the explicit discard/restart path.
+- JetBrains now parses the starting-actor restart refusal and shows the typed recovery notification with `Interrupt and restart`, `Show status`, and `Copy details` instead of raw command-failed output.
+- VS Code received the same typed restart refusal helpers so the shared editor specs stay true across plugins.
+- Specs now document that bare restart remains guarded while `--force` is the explicit operator recovery path.
+- Added deterministic SimWorld coverage for forced restart from a `starting` owner.
+
+Changed paths:
+- `src/agent-doc/src/session_actor_cmd.rs`, `src/agent-doc/src/sim_world.rs`
+- `src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt`, `src/agent-doc/editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/TerminalUtilTest.kt`
+- `src/agent-doc/editors/vscode/src/extension.ts`, `src/agent-doc/editors/vscode/src/sessionUi.ts`, `src/agent-doc/editors/vscode/src/sessionUi.test.ts`
+- `src/agent-doc/SPEC.md`, `src/agent-doc/specs/07-session-tmux-commands.md`, `src/agent-doc/editors/SPEC.md`, `src/agent-doc/editors/PLUGIN-SPEC.md`, `src/agent-doc/editors/jetbrains/SPEC.md`
+
+Verification:
+- `cargo test restart`
+- `./gradlew test --tests com.github.btakita.agentdoc.TerminalUtilTest`
+- `npm test -- --runInBand`
+- `make check`
+- `./gradlew test buildPlugin`
+- Latest GitHub Actions CI `26421124683`: success; `Run make tmux-ci` step also success.
+
+Commits:
+- `src/agent-doc`: `2f463515 fix: force restart starting supervisors`
+- Root repo: `c407b0208 agent-doc: bump submodule for restart recovery`
+
+Escalation: none. Push/install were not requested, so the commits are local and the installed CLI/plugin were not changed in this cycle.
+
+No actionable follow-up backlog item from this turn.
+<!-- agent:boundary:be560b54 -->
 <!-- /agent:exchange -->
 ###
 <!--
 As I was typing into the comment below `/agent:exchange`, the full-document IPC corruption happened, then the duplicate line happened, then the full-document IPC corruption happened again.
 #spec-test-build-install-commit-push
----
-JB `Restart Supervisor Process` error:
-```
-agent-doc command failed (exit 1): Error: session_restart refused for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md because the authoritative actor is still starting and the document changed after the last committed cycle. Wait for a dispatch-ready prompt (`prompt_ready=true`) and retry, or run `agent-doc session status /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` to inspect the pane.
-```
 -->
 
 <!-- agent:queue -->

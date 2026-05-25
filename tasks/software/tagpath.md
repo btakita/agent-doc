@@ -128,7 +128,7 @@ v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-gramm
 Compacted content:
 - Archived 1 response topic(s): queue auto
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-<!-- agent:boundary:512b98a1 -->
+<!-- agent:boundary:2eed9563 -->
 <!-- /agent:exchange -->
 ###
 
@@ -139,14 +139,13 @@ preset #spec-test-build-install-commit-push
 - ~do [#p5xfast]~
 - ~do [#p5sln]~
 - ~do [#p5wat]~
-- do [#p5mcs]
+- ~do [#p5mcs]~
 - do [#p5wnp]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#p5mcs] MCP convention helpers for tsift and agent-doc: add tagpath mcp tools family_by_path, lint_session_doc, and index_handle so both upstreams can call tagpath without bespoke shell wrappers.
 - [ ] [#p5wnp] [recommended] Publish the wasm-pack tarball to npm (@btakita/tagpath-wasm) so agent-doc front-end surfaces and tsift JS adapters can call parse / alias / normalize_query / search_over_rows in-browser without a native dep.
 <!-- /agent:backlog -->
 

@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -33,7 +33,7 @@ Fixed agent:queue stuck-after-1-turn — auto-strike done items at preflight.
 Compacted content:
 - Archived 5 response topic(s): batch closeout for ipclegacyfix, ipcpluginalready, ipcfilehashskip; Phases 1 + 5 already landed (queue advance); queue not auto-looping + typing duplicate observation; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:094087e1 -->
+<!-- agent:boundary:11bae495 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +46,7 @@ agent-doc command failed (exit 1): Error: session_restart refused for /home/bria
 ```
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#crdtrespfx]~
 - ~do [#queueadvgated]~
@@ -54,6 +54,9 @@ preset #spec-test-build-install-commit-push
 - ~do [#cclooploop]~
 - ~do [#ipcdupfin23]~
 - ~do [#ccloopguard]~
+- do [#p6skillinstallreconcile]
+- do [#adoc-jb-cache-cancel-stuck-cycle]
+- do [#adoc-prefix-strip-uncommitted]
 - do [#jbrsrbusysw]
 - do [#jbrsrbusyide]
 - do [#jbccfix]

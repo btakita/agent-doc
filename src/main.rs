@@ -80,6 +80,7 @@ mod jobs;
 mod layout;
 mod lib_gc;
 mod lib_install;
+mod lint_gate;
 mod migrate;
 mod mode;
 mod notify;
@@ -294,6 +295,12 @@ struct WriteArgs {
     /// Replace the status component content (repeatable for multi-line).
     #[arg(long = "status")]
     status: Option<String>,
+    /// Override the tagpath agent-doc lint dialect mode for this run.
+    /// Values: `off | warn | strict`. Precedence: CLI > frontmatter
+    /// `agent_doc_lint_dialect` > workspace `.agent-doc/config.toml`
+    /// `[lint] dialect` > default (`warn`).
+    #[arg(long = "lint", value_name = "MODE")]
+    lint: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -1764,66 +1771,80 @@ fn main() -> anyhow::Result<()> {
             PluginAction::Update { editor } => plugin::update(&editor),
             PluginAction::List => plugin::list(),
         },
-        Commands::Write { args, commit } => write::run_command(
-            write::CommandOptions {
-                file: args.file,
-                baseline_file: args.baseline_file,
-                is_template: args.template,
-                is_stream: args.stream,
-                is_ipc: args.ipc,
-                force_disk: args.force_disk,
-                origin: args.origin,
-                pending_add: args.pending_add,
-                pending_add_to: args.pending_add_to,
-                pending_add_gated: args.pending_add_gated,
-                pending_done: args.pending_done,
-                pending_edit: args.pending_edit,
-                pending_clear: args.pending_clear,
-                pending_reorder: args.pending_reorder,
-                pending_gate: args.pending_gate,
-                pending_ungate: args.pending_ungate,
-                pending_resolve_gate: args.pending_resolve_gate,
-                pending_set_gate_type: args.pending_set_gate_type,
-                review_add: args.review_add,
-                review_edit: args.review_edit,
-                allow_replace_pending: args.allow_replace_pending,
-                pending_only: args.pending_only,
-                status: args.status,
-            },
-            if commit {
-                write::CommitMode::BestEffort
-            } else {
-                write::CommitMode::None
-            },
-        ),
-        Commands::Finalize { args } => write::run_command(
-            write::CommandOptions {
-                file: args.file,
-                baseline_file: args.baseline_file,
-                is_template: args.template,
-                is_stream: args.stream,
-                is_ipc: args.ipc,
-                force_disk: args.force_disk,
-                origin: args.origin,
-                pending_add: args.pending_add,
-                pending_add_to: args.pending_add_to,
-                pending_add_gated: args.pending_add_gated,
-                pending_done: args.pending_done,
-                pending_edit: args.pending_edit,
-                pending_clear: args.pending_clear,
-                pending_reorder: args.pending_reorder,
-                pending_gate: args.pending_gate,
-                pending_ungate: args.pending_ungate,
-                pending_resolve_gate: args.pending_resolve_gate,
-                pending_set_gate_type: args.pending_set_gate_type,
-                review_add: args.review_add,
-                review_edit: args.review_edit,
-                allow_replace_pending: args.allow_replace_pending,
-                pending_only: args.pending_only,
-                status: args.status,
-            },
-            write::CommitMode::Required,
-        ),
+        Commands::Write { args, commit } => {
+            let lint_override = match args.lint.as_deref() {
+                None => None,
+                Some(s) => Some(lint_gate::LintCliMode::parse(s).map_err(|e| anyhow::anyhow!(e))?),
+            };
+            write::run_command(
+                write::CommandOptions {
+                    file: args.file,
+                    baseline_file: args.baseline_file,
+                    is_template: args.template,
+                    is_stream: args.stream,
+                    is_ipc: args.ipc,
+                    force_disk: args.force_disk,
+                    origin: args.origin,
+                    pending_add: args.pending_add,
+                    pending_add_to: args.pending_add_to,
+                    pending_add_gated: args.pending_add_gated,
+                    pending_done: args.pending_done,
+                    pending_edit: args.pending_edit,
+                    pending_clear: args.pending_clear,
+                    pending_reorder: args.pending_reorder,
+                    pending_gate: args.pending_gate,
+                    pending_ungate: args.pending_ungate,
+                    pending_resolve_gate: args.pending_resolve_gate,
+                    pending_set_gate_type: args.pending_set_gate_type,
+                    review_add: args.review_add,
+                    review_edit: args.review_edit,
+                    allow_replace_pending: args.allow_replace_pending,
+                    pending_only: args.pending_only,
+                    status: args.status,
+                    lint_override,
+                },
+                if commit {
+                    write::CommitMode::BestEffort
+                } else {
+                    write::CommitMode::None
+                },
+            )
+        }
+        Commands::Finalize { args } => {
+            let lint_override = match args.lint.as_deref() {
+                None => None,
+                Some(s) => Some(lint_gate::LintCliMode::parse(s).map_err(|e| anyhow::anyhow!(e))?),
+            };
+            write::run_command(
+                write::CommandOptions {
+                    file: args.file,
+                    baseline_file: args.baseline_file,
+                    is_template: args.template,
+                    is_stream: args.stream,
+                    is_ipc: args.ipc,
+                    force_disk: args.force_disk,
+                    origin: args.origin,
+                    pending_add: args.pending_add,
+                    pending_add_to: args.pending_add_to,
+                    pending_add_gated: args.pending_add_gated,
+                    pending_done: args.pending_done,
+                    pending_edit: args.pending_edit,
+                    pending_clear: args.pending_clear,
+                    pending_reorder: args.pending_reorder,
+                    pending_gate: args.pending_gate,
+                    pending_ungate: args.pending_ungate,
+                    pending_resolve_gate: args.pending_resolve_gate,
+                    pending_set_gate_type: args.pending_set_gate_type,
+                    review_add: args.review_add,
+                    review_edit: args.review_edit,
+                    allow_replace_pending: args.allow_replace_pending,
+                    pending_only: args.pending_only,
+                    status: args.status,
+                    lint_override,
+                },
+                write::CommitMode::Required,
+            )
+        }
         Commands::Stream {
             file,
             interval,

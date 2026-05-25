@@ -30,6 +30,23 @@ A harness-native `agent-doc` entrypoint (`/agent-doc <FILE>` in Claude Code, `ag
 - The same post-write `agent-doc session-check <FILE>` guard applies after manual repair with `agent-doc write --commit`.
 - Manual repair uses the same ordering rule: do the repair write-back last, then `session-check`, then stop.
 
+## Lint Gate (tagpath agent-doc dialect)
+
+`finalize` and `write --commit` invoke `tagpath lint --dialect agent-doc` as an in-process library call on the session document **after** the response/pending edits have merged but **before** the snapshot/commit boundary. The gate catches malformed session-document directives — for example `<!-- agent:done archive PATH -->` missing the `=` between `archive` and the path — so they fail the cycle closed at the gate instead of crashing deeper inside finalize.
+
+- Default mode (`warn`): error-class findings block the cycle; warning-class findings surface on stderr and continue.
+- `strict`: warning-class findings escalate to errors.
+- `off`: the gate is skipped (the skip is recorded via `ops_log` for audit).
+
+Mode resolution precedence (highest first):
+
+1. CLI: `--lint=off|warn|strict` on `agent-doc write` / `agent-doc finalize`.
+2. Frontmatter: `agent_doc_lint_dialect: off|warn|strict`.
+3. Workspace `.agent-doc/config.toml`: `[lint] dialect = "off|warn|strict"`.
+4. Default: `warn`.
+
+The error message preserves tagpath's CLI format — `<path>:<line>:<col> <severity>: <message> [<rule>]` with an optional `hint:` line — so the fix can be made and re-finalized in a single round-trip. See tagpath SPEC §16 (agent-doc dialect) for the full rule catalog. The integration lives in `src/lint_gate.rs` and is wired through `src/write.rs::run_command`.
+
 ## Anti-Patterns
 
 - Do **not** stop after bare `agent-doc write` for a final response.

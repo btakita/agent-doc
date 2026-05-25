@@ -242,6 +242,27 @@ pub enum PendingCaptureGuardMode {
     Off,
 }
 
+/// Lint dialect mode for the `tagpath lint --dialect agent-doc` finalize gate.
+///
+/// Resolution precedence: CLI `--lint=...` > frontmatter
+/// `agent_doc_lint_dialect` > workspace `.agent-doc/config.toml` `[lint]
+/// dialect` > default (`warn`).
+///
+/// - `Warn` (default): lint runs; errors block the cycle, warnings surface on
+///   stderr but do not block.
+/// - `Strict`: warnings are promoted to errors.
+/// - `Off`: lint gate is skipped entirely. Used to migrate documents with
+///   historical malformed directives while staging fixes.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LintDialectMode {
+    #[default]
+    Warn,
+    #[serde(alias = "error")]
+    Strict,
+    Off,
+}
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Frontmatter {
     /// Document/routing UUID — permanent identifier for tmux pane routing.
@@ -393,6 +414,11 @@ pub struct Frontmatter {
     /// Values: `off` (default when absent), `warn`, `strict`/`error`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review_done_guard: Option<PendingCaptureGuardMode>,
+    /// Lint dialect mode for the agent-doc finalize lint gate. Values:
+    /// `warn` (default), `strict`, `off`. See `lint_gate` module for the
+    /// full precedence chain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_doc_lint_dialect: Option<LintDialectMode>,
     /// Document-level lifecycle hooks: shell commands executed at key events.
     ///
     /// Supported events: `session_start`, `post_write`, `post_commit`.
@@ -1175,6 +1201,7 @@ mod tests {
             pending_capture_guard: None,
             pending_done_guard: None,
             review_done_guard: None,
+            agent_doc_lint_dialect: None,
             hooks: std::collections::HashMap::new(),
             env: indexmap::IndexMap::new(),
             prompt_presets: indexmap::IndexMap::new(),

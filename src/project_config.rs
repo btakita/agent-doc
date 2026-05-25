@@ -32,6 +32,18 @@ pub struct GuardConfig {
     pub review_done: Option<crate::frontmatter::PendingCaptureGuardMode>,
 }
 
+/// Workspace-level lint configuration (`[lint]` section in
+/// `.agent-doc/config.toml`).
+///
+/// Currently exposes a single key, `dialect`, controlling the
+/// `tagpath lint --dialect agent-doc` finalize gate. See
+/// `crate::frontmatter::LintDialectMode` for the resolved semantics.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct LintConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dialect: Option<crate::frontmatter::LintDialectMode>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SshProfileConfig {
     /// Resolved SSH targets for a named profile.
@@ -113,6 +125,9 @@ pub struct ProjectConfig {
     /// Guard behavior overrides (for example pending-capture enforcement).
     #[serde(default)]
     pub guards: GuardConfig,
+    /// Lint behavior overrides for the agent-doc finalize lint gate.
+    #[serde(default)]
+    pub lint: LintConfig,
     /// Project-local SSH requirement mappings for known ops documents.
     #[serde(default)]
     pub ssh: SshConfig,

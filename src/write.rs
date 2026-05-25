@@ -260,6 +260,9 @@ pub struct CommandOptions {
     pub allow_replace_pending: bool,
     pub pending_only: bool,
     pub status: Option<String>,
+    /// Optional CLI override for the agent-doc lint gate. `None` means
+    /// "no CLI override; use frontmatter/config/default precedence".
+    pub lint_override: Option<crate::lint_gate::LintCliMode>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -1054,6 +1057,9 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
 
     if options.pending_only {
         run_closeout_pending_maintenance(file, commit_mode)?;
+        if commit_mode != CommitMode::None {
+            crate::lint_gate::run(file, options.lint_override)?;
+        }
         return finalize_commit(file, commit_mode);
     }
 
@@ -1125,6 +1131,17 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     if write_result.is_ok() && commit_mode == CommitMode::Required {
         precommit_pending_capture_check(file)?;
         precommit_pending_done_check(file)?;
+    }
+
+    // Phase 3b.1: tagpath agent-doc lint gate. Runs on the final file
+    // state after the response/pending edits have merged, before the
+    // snapshot/commit boundary. Errors fail the cycle closed so malformed
+    // directives (for example `<!-- agent:done archive PATH -->` missing
+    // `=`) cannot reach a committed state. Mode resolution: CLI override
+    // > frontmatter `agent_doc_lint_dialect` > workspace `.agent-doc/
+    // config.toml` `[lint] dialect` > default (`warn`).
+    if write_result.is_ok() && commit_mode != CommitMode::None {
+        crate::lint_gate::run(file, options.lint_override)?;
     }
 
     // Phase 3c: consume queue prompt after all other strict closeout gates
@@ -19116,10 +19133,7 @@ mod late_fallback_patch_guard_tests {
             .args(["rev-list", "--count", "HEAD"])
             .output()
             .unwrap();
-        String::from_utf8_lossy(&out.stdout)
-            .trim()
-            .parse()
-            .unwrap()
+        String::from_utf8_lossy(&out.stdout).trim().parse().unwrap()
     }
 
     #[test]

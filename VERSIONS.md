@@ -6,6 +6,19 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **`finalize` / `write --commit` now invoke `tagpath lint --dialect agent-doc`
+  before the snapshot/commit boundary.** Malformed session-document
+  directives — for example `<!-- agent:done archive PATH -->` missing `=` —
+  now fail closed at the lint gate with a structured error pointing at the
+  rule, line, column, and fix hint, rather than crashing deep inside
+  `finalize`. The gate is a library call against `tagpath`'s agent-doc
+  dialect (no subprocess overhead). Mode resolution: CLI `--lint=off|warn|
+  strict` > frontmatter `agent_doc_lint_dialect: off|warn|strict` >
+  workspace `.agent-doc/config.toml` `[lint] dialect` > default (`warn`).
+  Default behavior: errors block, warnings surface on stderr. `strict`
+  promotes warnings to errors; `off` skips the gate (logged via `ops_log`
+  for audit). New module: `src/lint_gate.rs`.
+
 - **Newly activated auto queues no longer stall as modified in-flight work.**
   Preflight now treats a queue that was inactive in the snapshot and newly
   activated by the current document as operator-authored input, snapshots the

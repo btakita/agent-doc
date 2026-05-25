@@ -58,10 +58,8 @@ pub fn parse_github_remote(url: &str) -> Option<ParsedRemote> {
         rest
     } else if let Some(rest) = without_git.strip_prefix("ssh://git@github.com/") {
         rest
-    } else if let Some(rest) = without_git.strip_prefix("ssh://git@github.com:") {
-        rest
     } else {
-        return None;
+        without_git.strip_prefix("ssh://git@github.com:")?
     };
 
     let mut segments = path_part.split('/').filter(|s| !s.is_empty());

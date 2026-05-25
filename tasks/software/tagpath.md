@@ -123,66 +123,12 @@ v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-gramm
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260525-004250.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260525-012602.md`*
 
 Compacted content:
-- Archived 2 response topic(s): next-steps; queue auto
+- Archived 1 response topic(s): queue auto
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-❯ preset #spec-test-build-install-commit-push
-❯ - do [#p5sln]
-❯ - do [#p5wat]
-❯ - do [#p5mcs]
-❯ - do [#p5wnp]
-### Re: queue auto — do [#p5sln] — opus-4-7
-
-
-**Done.** Agent-doc dialect for `tagpath lint` shipped in tagpath 0.14.0; submodule pointer bumped + pushed. The malformed-directive bug we hit mid-session (`agent:done archive PATH` without the `=`) now fails at lint time before reaching `finalize` — that's the canary the whole feature was built around. Side fix: re-strikethrough'd p5xfast in the queue (the prior cycle's queue consumer missed it).
-
-**14 rules wired, each with passing positive + negative tests:**
-1. `unknown-component`
-2. `unclosed-component`
-3. `orphan-close`
-4. `duplicate-component`
-5. **`malformed-attr`** — fires on `archive PATH` with a fix hint suggesting `archive=PATH`. The motivating bug.
-6. `empty-attr-value`
-7. `unknown-attr` — per-component allow-list (`agent:status/exchange/backlog/review/icebox/queue` → `patch`; `agent:done` → `archive`, `patch`)
-8. `queue-mode-token` — bare `auto` / `manual` only; `mode=auto` rejected
-9. `done-archive-missing-target` — fs-checks; also enforces `.done.md` suffix
-10. `patch-marker-outside-cycle` (warning)
-11. `backlog-id-collision`
-12. `done-id-not-in-backlog` — fs-checks; honors `<!-- migrated -->` escape
-13. `malformed-boundary` (bonus)
-14. `unknown-patch-marker` (bonus)
-
-Filesystem-dependent rules (#9, #12) are gated behind `--fs-checks` so the default lint stays fast and offline.
-
-**Changes (tagpath submodule, cb874c8):**
-- `src/lint/agent_doc.rs` (new) — hand-rolled HTML-comment parser + rule engine + structured `LintFinding`.
-- `src/lint/mod.rs` — re-exports the new module.
-- `src/main.rs` — `Lint` subcommand gains `--dialect {agent-doc,identifier,auto}`, `--fs-checks`, `--rule <id>` (repeatable). Auto-detect: a `.md` file containing `<!-- agent:exchange` opts into the agent-doc dialect; directory walks combine.
-- `tests/test_lint_agent_doc.rs` (new, 13 integration tests) — including the explicit regression test for `agent:done archive PATH`.
-- `SPEC.md` — new section 16 "Agent-doc dialect" (rules table, CLI flags, examples).
-- `README.md` — `tagpath lint --dialect agent-doc tasks/` bullet.
-- `Cargo.toml` — `0.13.0 → 0.14.0`; `Cargo.lock` refreshed.
-
-**Verification:**
-- `cargo fmt` + clippy clean on default and `dyn-grammar`.
-- `cargo test` — **196/196 pass** across 13 suites (was 166 + 17 unit + 13 integration).
-- `cargo test --features dyn-grammar` — **200/200 pass**.
-- `cargo build --target wasm32-unknown-unknown --no-default-features --features wasm` — clean.
-- `cargo build --release` + `cargo install --path . --force` — `~/.cargo/bin/tagpath` at 0.14.0.
-
-**Smoke (release binary):**
-- `tagpath lint --dialect agent-doc tasks/software/tagpath.md` → **0 findings**, exit 0.
-- `tagpath lint --dialect agent-doc tasks/software/tsift.md` → **0 findings**, exit 0.
-- Negative: a fixture with `<!-- agent:done archive tasks/x.done.md -->` → 2 `agent-doc/malformed-attr` errors with fix hints, exit 1. The motivating bug class is now caught at lint time.
-
-**Commits:**
-- tagpath `cb874c8`: `feat: agent-doc dialect for tagpath lint (p5sln)` → pushed.
-- agent-loop `294c164`: `tagpath: bump submodule to 0.14.0 (p5sln)` → pushed.
-
-Auto-queue advances next to `tagpath watch`.
-<!-- agent:boundary:11e596e5 -->
+<!-- agent:boundary:512b98a1 -->
 <!-- /agent:exchange -->
 ###
 

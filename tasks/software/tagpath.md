@@ -165,7 +165,38 @@ New run `26386002572` on `20260422/codex-agent-backend` kicked off on the push a
 - `src/tagpath`: `8511dfb release: v0.11.1 — accept legacy agent-doc components in lint (p6adftestfix)` + tag `v0.11.1`
 - `src/agent-doc` (`20260422/codex-agent-backend`): `9ed0bc17 deps: bump tagpath 0.11 → 0.11.1 (p6adftestfix)`
 - `agent-loop` (`main`): `1f24e097b agent-doc: bump submodule for tagpath 0.11.1 (p6adftestfix)`
-<!-- agent:boundary:e10b0044 -->
+### Re: do [#p6sklsymadocrunbooks] — opus-4-7
+
+
+Decision: **option (b) — leave install owning the parent copy; do not symlink runbooks.**
+
+#### Why
+
+The runbooks under `.claude/skills/agent-doc/runbooks/` are install-generated artifacts, not hand-maintained content. The source of truth is `src/agent-doc/runbooks/` (committed); the binary embeds those files at compile time and writes them out on `agent-doc skill install --harness claude`. They are a projection, not a duplication — same status as `target/` or a generated lockfile.
+
+Symlinking would actually make the topology *worse*:
+
+1. We'd add a third copy in `src/agent-doc/.claude/skills/agent-doc/runbooks/` that has to stay in sync with both the source dir and the binary's embedded content.
+2. Future `agent-doc skill install` runs in agent-loop would write through the symlink into the submodule, dirtying it on every install — same problem we noted in `p6sklsymagentdoc` but now applied to 14+ files instead of one.
+3. The install boundary already owns this directory; introducing a symlink would add a second owner.
+
+#### What surfaced instead
+
+The investigation found a real but unrelated install bug: `agent-doc skill install` does not reconcile the target directory. agent-loop currently has **21 installed runbooks vs 14 source files** — 8 stale extras from older versions still in place, AND `manual-job-packets.md` (new in source) never written because the install saw SKILL.md as already-up-to-date and skipped the runbooks pass.
+
+Captured as `#p6skillinstallreconcile`. That is the right place to fix the drift — not by symlinking, but by making install delete-then-write the runbooks subtree (or compute the canonical set and reap stragglers).
+
+#### Aligning the three "symlink the duplicated skill" follow-ups
+
+| Item | Resolution | Notes |
+|---|---|---|
+| `p6sklsym` (tagpath, email, linkedin) | Symlinked | Identical content, hand-maintained surface, single source of truth in submodule |
+| `p6sklsymagentdoc` (agent-doc SKILL.md) | Symlinked | Install regenerates the file each cycle; symlink routes the regen into the submodule |
+| `p6sklsymcorky` (corky SKILL.md) | Symlinked | Hand-maintained surface, submodule was newer |
+| `p6sklsymadocrunbooks` (agent-doc runbooks) | **Not symlinked** | Install-generated subtree; symlink would multiply the sync surface |
+
+Pattern: symlink hand-maintained surfaces and single files; leave install-generated subtrees to the install workflow and fix install bugs at the source.
+<!-- agent:boundary:bfdf9aad -->
 <!-- /agent:exchange -->
 ###
 
@@ -181,7 +212,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#p6sklsymcorky]~
 - ~do [#p6adfmerge]~
 - ~do [#p6adftestfix]~
-- do [#p6sklsymadocrunbooks]
+- ~do [#p6sklsymadocrunbooks]~
 - do [#p6adfcitagpath]
 - do [#p6tsifull]
 - do [#p6tspub]
@@ -193,7 +224,7 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 (<!-- agent:backlog -->
-- [ ] [#p6sklsymadocrunbooks] After agent-doc SKILL.md symlinking (p6sklsymagentdoc), check whether the runbooks under agent-loop/.claude/skills/agent-doc/runbooks/ should also be symlinked. Source of truth lives in src/agent-doc/runbooks/ but installed copies are in src/agent-doc/.claude/skills/agent-doc/runbooks/ (created by agent-doc skill install, so currently absent from the submodule). Either install once into the submodule and symlink, or leave install owning the parent copy and accept the duplication.
+- [ ] [#p6skillinstallreconcile] agent-doc skill install does not reconcile the target runbooks directory — it writes new content but leaves stale files in place. Surfaced in p6sklsymadocrunbooks investigation: agent-loop/.claude/skills/agent-doc/runbooks/ has 21 files; src/agent-doc/runbooks/ (source) has 14 files. The installed copy has 8 stale extras (cleanup, diff-type-routing, investigate-behavior, large-content, multi-topic-response, plugin-install, session-share-commit, skill-submit-cycle) AND is missing one new source file (manual-job-packets.md). Fix: install should delete-then-write the runbooks subtree, or compute the canonical set from the binary's embedded contents and reap files not in that set. Without this, install drift accumulates indefinitely.
 - [ ] [#p6tsifull] Wire the remaining tsift consumer surfaces to the tagpath adapter: graph, explain, communities, path, federated-search. The adapter (src/tsift/src/tagpath_adapter.rs) and annotate helper are already public; each command needs TagpathSearchOpts plumbing + a per-row annotation pass + tagpath_handle field on StoredSymbol / StoredEdge / community report structs. Mechanical follow-up to p6tsi which only wired tsift search.
 - [ ] [#p6tspub] Restore tsift crates.io publishability after p6tsi: tsift now depends on tagpath via path = ../tagpath. Replace with version = "0.17.1" (or whatever ships first) before any tsift release. Already gated by the sift-publish blocker so no immediate regression, but track here.
 - [ ] [#p6ren] tagpath rename <old> <new>: cross-file, cross-convention identifier rename using the index. Walks every member of the matching family, rewrites in-place in each source convention (snake/camel/Pascal/kebab/UPPER/Ada). Foundation for the agent-loop intent-preserving refactor vision.

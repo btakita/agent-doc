@@ -16,7 +16,7 @@ prompt_presets:
   '#commit-push-deploy': commit all uncommitted files + push in claudescore-plugin, claudescore.com, and session-share. deploy
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -60,21 +60,25 @@ on it; the existing review entry already captures the operator follow-up.
 
 
 Advancing queue past `#2rpv` (still gated on Cloudflare dashboard work — see prior cycle and `docs/operator-runbook-pending-config.md`). The prior `--pending-gate` did not consume the queue line, so this cycle uses `--done` purely to advance the queue head; the gate state in review is the authoritative status.
-<!-- agent:boundary:0d826034 -->
+### Re: do [#0r24] — still externally blocked — opus-4-7
+
+
+Retried `bun run cf:d1:migrate:remote` and it still fails with Cloudflare error 7403 — the API token at `passage btak/equityfundingsource/cloudflare_api_token` still lacks D1:Edit. This is the same gate as `#1v5m` and `#2rpv`; nothing has changed since last cycle.
+
+The actionable path is unchanged: section 1 of `docs/operator-runbook-pending-config.md` walks the dashboard owner through adding the D1:Edit permission. Once the token is updated, the migration applies in one command.
+
+Advancing the queue past `#0r24` so it stops re-firing; the gated review item is the authoritative tracker.
+<!-- agent:boundary:0942a7f6 -->
 <!-- /agent:exchange -->
 ###
 
-<!-- agent:queue auto -->
-preset #spec-test-commit-push-deploy
-- ~do [#2rpv]~
-- do [#0r24]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
 - [ ] [#k2xg] Send Robert the six-question TMO outbound webhook prompt in src/equityfundingsource-dev/docs/tmo-webhooks-question.md for him to forward to Mortgage Office, then record the response and decide push vs. tightened polling.
-- [ ] [#0r24] Apply migration 0025_upload_tokens.sql to remote D1 once review #1v5m unblocks D1 API token permissions, then smoke test POST /api/admin/upload-tokens and POST /api/uploads/by-token/<token> against the live Worker.
 - [/] [#dropbox-sync-adapter] Dropbox sync adapter: after Dropbox access is available, push/pull R2_DOCUMENTS with idempotent retries, backfill, tombstone handling, and per-document sync logs.
 - [ ] [#qr72] [recommended] By May 27, 2026, send Lucas a written bridge plan: $500 now from personal funds if available, ask for the remaining $500 to be paid after EFS payment clears or by an agreed near-term date, and invoice EFS immediately for $5,000 with a smaller immediate continuation retainer accepted if Judith pushes back.
 - [ ] [#s62t] [recommended] Prepare EFS invoice with truthful hours/value; Lucas cost is $4,150 (83h @ $50), so floor is 42h/$4,200 and recommended ask is 50-60h/$5,000-$6,000 with any concession as an explicit courtesy credit.
@@ -134,4 +138,5 @@ preset #spec-test-commit-push-deploy
 - 2026-05-24 [#zjbe] Admin investor document workflow: upload and publish deal due-diligence, investor statements, tax docs, and accreditation files from R2 with visibility and review status controls.
 - 2026-05-24 [#9vv3] Investor portal end-to-end QA: seed and test investor signup, accreditation, published deal documents, funding commitment, admin acceptance, positions, distributions, and statements with TMO simulator plus R2 documents.
 - 2026-05-24 [#2rpv] Set Cloudflare Access env vars (ACCESS_TEAM_DOMAIN, ACCESS_AUD) on the equityfundingsource Worker and configure the CF Access application that protects /login/access-callback, then verify an admin sign-in via Google SSO.
+- 2026-05-24 [#0r24] Apply migration 0025_upload_tokens.sql to remote D1 once review #1v5m unblocks D1 API token permissions, then smoke test POST /api/admin/upload-tokens and POST /api/uploads/by-token/<token> against the live Worker.
 <!-- /agent:done -->

@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 
@@ -128,16 +128,60 @@ v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-gramm
 Compacted content:
 - Archived 3 response topic(s): next-steps; queue auto; queue auto
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-<!-- agent:boundary:f5552359 -->
+### Re: do [#p6sklsym] [#p6lintbnd] — opus-4-7
+
+
+Both queue items shipped.
+
+#### #p6sklsym — symlink co-installed skills
+
+Replaced three identical agent-loop skill copies with relative symlinks to the submodule canonicals:
+
+- `.claude/skills/tagpath/SKILL.md` → `../../../src/tagpath/.claude/skills/tagpath/SKILL.md`
+- `.claude/skills/email/SKILL.md` → `../../../src/corky/.claude/skills/email/SKILL.md`
+- `.claude/skills/linkedin/SKILL.md` → `../../../src/corky/.claude/skills/linkedin/SKILL.md`
+
+Skipped two skills whose parent/child copies diverge — recorded as new follow-up backlog items (NOT completed this cycle):
+
+- `agent-doc` parent (v0.34.0, freshly installed) vs submodule (v0.33.16) — new id `p6sklsymagentdoc`
+- `corky` parent vs submodule (different command listing format) — new id `p6sklsymcorky`
+
+#### #p6lintbnd — relax agent-doc/malformed-boundary
+
+Investigated the conflict. The lint rule rejected anything with non-hex characters in the boundary id, but `agent_doc::new_boundary_id_with_summary` emits the form `hex:slug` (e.g. `a0cfeb34:boundary-fix`). The colon and slug dashes failed the all-hex check.
+
+Chose to **relax the rule** rather than change the binary's format — the summary suffix is a real product feature that aids human scanning, and dropping it would lose information.
+
+Updated `src/lint/agent_doc.rs` to accept `hex(:slug)?` where the slug is non-empty lowercase alphanumeric + dashes (matching what the slugifier produces). Added six unit tests: plain hex, hex:slug, non-hex prefix (rejects), empty id (rejects), uppercase slug (rejects), trailing-colon empty slug (rejects). Updated SPEC.md §16.3 rule description accordingly.
+
+#### Verification
+
+- `cargo test` — 234 passed across 15 suites
+- `cargo clippy --all-targets -- -D warnings` — clean (fixed one `unnecessary_map_or` lint to `is_none_or`)
+- `cargo build --release && cargo install --path .` — installed at `~/.cargo/bin/tagpath`
+- Smoke test on the live doc: `tagpath lint tasks/software/tagpath.md --dialect agent-doc` → "No agent-doc tag violations found"
+- Smoke test on synthetic hex:slug form → passes
+- Smoke test on `zzz` non-hex form → fires as expected with updated message
+- tagpath CI run kicked off
+
+#### Commits
+
+- `src/tagpath`: `a89ba7e feat(lint): accept <hex>:<slug> boundary form (p6lintbnd)` — pushed to main
+- `agent-loop`: `38cfc05f0 skills: symlink tagpath/email/linkedin to submodule canonicals (p6sklsym)` — pushed to main (includes the src/tagpath pointer bump)
+
+Note on versioning: tagpath Cargo.toml is at 0.18.0 locally but crates.io tops out at 0.10.0 and there's no v0.18.0 tag — the publish gap is independent of this change and not part of this preset.
+<!-- agent:boundary:821612ff -->
 <!-- /agent:exchange -->
 ###
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#p6tsi]~
 - ~do [#p6adf]~
 - ~do [#p6mcr]~
 - ~do [#p6adfstream]~
+- do [#p6sklsym]
+- do [#p6lintbnd]
 - do [#p6adfmerge]
 - do [#p6tsifull]
 - do [#p6tspub]
@@ -149,8 +193,8 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 (<!-- agent:backlog -->
-- [ ] [#p6lintbnd] Tagpath agent-doc lint rule agent-doc/malformed-boundary fires on UUID-format boundary markers emitted by the agent-doc binary itself. Stream-commit smoke surfaced this when the gate started running on streamed responses — pre-existing finding now visible. Decide: relax the rule to accept UUID dashes, or change the binary's boundary format to hex-only. Either side; just align them so the gate stays trustworthy on real-world session docs.
-- [ ] [#p6sklsym] Symlink the agent-loop .claude/skills/tagpath/SKILL.md to src/tagpath/.claude/skills/tagpath/SKILL.md so future updates only need one edit. Currently both copies are maintained by hand and drift is inevitable. Mirror the same approach for the other co-installed skills (tsift, agent-doc, etc.) if they exhibit the same duplication.
+- [ ] [#p6sklsymagentdoc] Reconcile and symlink agent-doc SKILL.md: agent-loop/.claude/skills/agent-doc/SKILL.md (v0.34.0, freshly installed) diverges from src/agent-doc/.claude/skills/agent-doc/SKILL.md (v0.33.16). Copy the newer agent-loop content into the submodule, commit src/agent-doc, then symlink the agent-loop copy. After this, agent-doc skill install --harness claude will write through the symlink to the submodule — adjust the release flow to commit the submodule pointer as part of the install loop.
+- [ ] [#p6sklsymcorky] Reconcile and symlink corky SKILL.md: agent-loop/.claude/skills/corky/SKILL.md and src/corky/.claude/skills/corky/SKILL.md diverge substantively (different command listing format — terse one-liners vs prose paragraphs). Pick a canonical version (submodule is the natural home), reconcile, then symlink the agent-loop copy. Same pattern applies to corky's sub-skills if they drift in the future.
 - [ ] [#p6adfmerge] Merge agent-doc feature branch 20260422/codex-agent-backend to main: the p6adf commit (845ddfd6) and prior p4*/p5* prep ride on this branch. agent-loop superproject already tracks feature-branch commits, but agent-doc main is behind and will need a sweep before any external consumer pulls.
 - [ ] [#p6tsifull] Wire the remaining tsift consumer surfaces to the tagpath adapter: graph, explain, communities, path, federated-search. The adapter (src/tsift/src/tagpath_adapter.rs) and annotate helper are already public; each command needs TagpathSearchOpts plumbing + a per-row annotation pass + tagpath_handle field on StoredSymbol / StoredEdge / community report structs. Mechanical follow-up to p6tsi which only wired tsift search.
 - [ ] [#p6tspub] Restore tsift crates.io publishability after p6tsi: tsift now depends on tagpath via path = ../tagpath. Replace with version = "0.17.1" (or whatever ships first) before any tsift release. Already gated by the sift-publish blocker so no immediate regression, but track here.

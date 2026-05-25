@@ -123,76 +123,12 @@ v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-gramm
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260525-090022.md`*
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260525-091617.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260525-092327.md`*
 
 Compacted content:
-❯ - Archived 2 response topic(s): do [#tpstdiag]; Add #next-steps to fix remaining lossy data
-- Archived 2 response topic(s): do [#tpaudit]; Add #next-steps for follow-ups
-- Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-### Re: do [#p6tsifullscoped] — opus-4-7
-
-Fixed in tsift 0.1.60 (`e844a36`, superproject pointer bumped).
-
-#### Fix
-One line in `cmd_search_with_budget` (`src/main.rs`): pass `&sift_path` into `annotate_hits_with_tagpath` instead of `&root`. `sift_path` is already populated upstream with `scope.source_root` for both the `--scope <name>` and `infer_submodule_from_path` branches, and falls back to the workspace root otherwise — so the change is correct for every non-federated branch without touching the callsite logic. The federated path carries its own per-scope diagnostic and short-circuits this branch entirely, so the existing per-scope annotation from the federated fix is preserved.
-
-#### Test
-`tests/exit_code.rs::search_scoped_json_annotates_handles_from_submodule_tagpath` builds a single-submodule workspace where:
-
-- `.gitmodules` declares `src/alpha`
-- `src/alpha/lib.rs` defines `scoped_helper` and `caller`
-- `src/alpha/.naming.toml` + `src/alpha/.naming/index.json` are present
-- the workspace root has **no** tagpath project
-
-Then runs `tsift search --scope alpha --json scoped_helper` and asserts the result carries a `mem:` `tagpath_handle`. Verified the test fails before the fix (`scoped_helper missing tagpath_handle`) and passes after.
-
-#### Verification
-- `cargo test --test exit_code search_scoped_json_annotates_handles_from_submodule_tagpath` — green
-- `make check` — green (full clippy + suite)
-- `cargo install --path .` — `tsift 0.1.60` installed to `~/.cargo/bin/`
-
-#### Files
-- `src/tsift/src/main.rs` — `&root` → `&sift_path` in the non-federated annotation branch
-- `src/tsift/tests/exit_code.rs` — new scoped-search test
-- `src/tsift/SPEC.md` — scoped paragraph in §`tagpath_handle semantics`
-- `src/tsift/VERSIONS.md` — 0.1.60 entry
-- `src/tsift/Cargo.toml`, `Cargo.lock` — version → 0.1.60
-- Superproject `src/tsift` submodule pointer bumped
-
-### Re: do [#p6tsifullscoped] — opus-4-7
-
-Fixed in tsift 0.1.60 (`e844a36`, superproject pointer bumped).
-
-#### Fix
-One line in `cmd_search_with_budget` (`src/main.rs`): pass `&sift_path` into `annotate_hits_with_tagpath` instead of `&root`. `sift_path` is already populated upstream with `scope.source_root` for both the `--scope <name>` and `infer_submodule_from_path` branches, and falls back to the workspace root otherwise — so the change is correct for every non-federated branch without touching the callsite logic. The federated path carries its own per-scope diagnostic and short-circuits this branch entirely, so the existing per-scope annotation from the federated fix is preserved.
-
-#### Test
-`tests/exit_code.rs::search_scoped_json_annotates_handles_from_submodule_tagpath` builds a single-submodule workspace where:
-
-- `.gitmodules` declares `src/alpha`
-- `src/alpha/lib.rs` defines `scoped_helper` and `caller`
-- `src/alpha/.naming.toml` + `src/alpha/.naming/index.json` are present
-- the workspace root has **no** tagpath project
-
-Then runs `tsift search --scope alpha --json scoped_helper` and asserts the result carries a `mem:` `tagpath_handle`. Verified the test fails before the fix (`scoped_helper missing tagpath_handle`) and passes after.
-
-#### Verification
-- `cargo test --test exit_code search_scoped_json_annotates_handles_from_submodule_tagpath` — green
-- `make check` — green (full clippy + suite)
-- `cargo install --path .` — `tsift 0.1.60` installed to `~/.cargo/bin/`
-
-#### Files
-- `src/tsift/src/main.rs` — `&root` → `&sift_path` in the non-federated annotation branch
-- `src/tsift/tests/exit_code.rs` — new scoped-search test
-- `src/tsift/SPEC.md` — scoped paragraph in §`tagpath_handle semantics`
-- `src/tsift/VERSIONS.md` — 0.1.60 entry
-- `src/tsift/Cargo.toml`, `Cargo.lock` — version → 0.1.60
-- Superproject `src/tsift` submodule pointer bumped
-
-Every search-routing branch (default / scoped / federated / inferred-scope) now resolves handles against the correct tagpath project root.
-Every search-routing branch (default / scoped / federated / inferred-scope) now resolves handles against the correct tagpath project root.
-<!-- agent:boundary:eaaa248b -->
+- Archived 2 response topic(s): do [#p6tsifullscoped]; do [#p6tsifullscoped]
+- Prior summary/context: ### Session Summary ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c...
+<!-- agent:boundary:de183bbf -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -200,7 +136,6 @@ Every search-routing branch (default / scoped / federated / inferred-scope) now 
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- ~do [#p6tsifullscoped]~
 - do [#tpauditscope]
 - do [#tpauditpolicy]
 - do [#commhxstrong]

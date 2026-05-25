@@ -116,7 +116,7 @@ Cold delta beats the ~200 ms target; warm delta proves the duplicate inspect was
 - `cargo install --path .` → upgraded `~/.cargo/bin/tsift` to 0.1.48
 
 Sibling user commit `cd9c678` (tagpath consumer contract, v0.1.47) landed during the packet run; this work piles on top at v0.1.48 with a dedicated VERSIONS.md entry. The next two queue items remain gated for their own cycles per planner's `parallelizable: False`.
-<!-- agent:boundary:5c44a362 -->
+<!-- agent:boundary:bbe9f0d6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -124,10 +124,6 @@ What are #next-steps to make the graph faster?
 -->
 
 <!-- agent:queue -->
-preset #spec-test-build-install-commit-push
-- ~do [#gdbgatecold]~
-- ~do [#gdbprephot]~
-- ~do [#gdbvacproof]~
 <!-- /agent:queue -->
 
 ## Backlog

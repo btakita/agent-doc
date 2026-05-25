@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 
@@ -123,40 +123,12 @@ v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-gramm
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260525-084324.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260525-084637.md`*
 
 Compacted content:
 - Archived 1 response topic(s): do [#p6tsifullfederated]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-### Re: do [#p6tsifullfederated] — opus-4-7
-
-Wired in tsift 0.1.57 (committed as part of f328770 in the submodule; agent-loop pointer at 3c9fcfc08). This is the final subitem under `#p6tsifull`, so the parent is also resolved.
-
-#### Fix
-`federated_symbol_search` now takes `&TagpathSearchOpts` and runs the tagpath annotation pass **per scope** inside the submodule loop, against `scope.source_root` rather than the workspace root. It returns `(Vec<SymbolHit>, TagpathAnnotationDiagnostic)` with merged diagnostics: `loaded=true` when any scope loaded, `stale=true` with the first stale scope's reason when any scope was stale.
-
-`cmd_search_with_budget` carries the diagnostic forward (`federated_tagpath_diag: Option<TagpathAnnotationDiagnostic>`) and skips the workspace-root annotation when the federated path supplied its own. Per-name file-correct resolution from #commhx propagates per scope since each scope runs its own annotation pass.
-
-#### Test
-`tests/exit_code.rs::search_federated_json_annotates_handles_from_per_scope_tagpath_indexes` — builds an `alpha` + `beta` workspace fixture, writes per-scope `.naming.toml` + `.naming/index.json` for each submodule, runs `tsift index --workspace`, then `tsift search shared_helper --federated --json` and asserts both scopes contribute hits with `tagpath_handle` set. Verified the test fails (exit 101) before the fix when `federated_symbol_search` is forced to skip tagpath annotation, and passes after.
-
-Inline unit tests in `main.rs` (`federated_search_returns_hits_from_all_submodules`, `federated_search_respects_isolation`) updated for the new signature with `no_tagpath = true` so they keep exercising the federation logic without requiring scope tagpath setup.
-
-#### Verification
-- `cargo test --test exit_code` — green
-- `make check` — green (full clippy + test suite, 884+ lines of test output, all passing)
-- `cargo install --path .` — installed `tsift 0.1.57` to `~/.cargo/bin/`
-
-#### Files
-- `src/tsift/src/main.rs` — `federated_symbol_search` signature + per-scope annotation pass; `cmd_search_with_budget` plumbing; two inline test call sites updated
-- `src/tsift/tests/exit_code.rs` — `search_federated_json_annotates_handles_from_per_scope_tagpath_indexes`
-- `src/tsift/SPEC.md` — federated paragraph in §`tagpath_handle semantics`
-- `src/tsift/VERSIONS.md` — 0.1.57 entry (bundled with the in-flight `#convexscopedeval` work)
-- `src/tsift/Cargo.toml`, `Cargo.lock` — version → 0.1.57
-- Superproject `src/tsift` pointer bumped (3c9fcfc08)
-
-This closes the symbol-graph annotation rollout under `#p6tsifull` — `search` / `path` / `explain` / `graph` / `communities` / `search --federated` all annotate consistently. Remaining tagpath-related backlog items move to diagnostics surfacing (#tpstdiag), audit reconciliation (#tpaudit), and lint policy (#mixconv).
-<!-- agent:boundary:2f7a8fa7 -->
+<!-- agent:boundary:e35ce5d9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -165,7 +137,7 @@ This closes the symbol-graph annotation rollout under `#p6tsifull` — `search` 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#commhx]~
-- do [#p6tsifullfederated]
+- ~do [#p6tsifullfederated]~
 - do [#tpstdiag]
 - do [#tpaudit]
 - do [#mixconv]

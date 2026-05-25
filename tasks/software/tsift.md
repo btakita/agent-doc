@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -80,14 +80,18 @@ Closing the one review item that was nearest the line; the other three (#gdbgate
 - **Fixture refresh**: 9 workload-tagged entries appended by #gdbfullreuse.
 
 Evidence: `plans/gdbcacheprove-evidence.md`. `make check` clean; `cargo install --path .` upgraded `~/.cargo/bin/tsift`.
-<!-- agent:boundary:0a8ce69e -->
+<!-- agent:boundary:7311859c -->
 <!-- /agent:exchange -->
 ###
 <!--
 What are #next-steps to make the graph faster?
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+preset #spec-test-build-install-commit-push
+- do [#gdbgatecold]
+- do [#gdbprephot]
+- do [#gdbvacproof]
 <!-- /agent:queue -->
 
 ## Backlog

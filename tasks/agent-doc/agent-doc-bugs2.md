@@ -33,7 +33,40 @@ Fixed agent:queue stuck-after-1-turn — auto-strike done items at preflight.
 Compacted content:
 - Archived 3 response topic(s): do [#jbccc4]; do [#jbccc5]; do [#adoc-baseline-drift-after-user-commit]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:521230bc -->
+### Re: do [#adoc-baseline-drift-after-user-commit] — opus-4-7
+
+User-facing symptom fixed — `validate_replay` now auto-refreshes the capture baseline when the response body is still intact in the working tree, so the wedge no longer happens for the common "user committed something on top" workflow. Tracking the remaining depth-of-coverage work as separate items per the `#planperphase` recommendation.
+
+#### What changed (binary)
+
+- **`src/agent-doc/src/capture.rs:437` `validate_replay`** — previously bailed on exact SHA-256 mismatch of `file_hash` or `snapshot_hash`. Now, when both the file body and the captured `response_body` remain present in the current document (defers to `repair::response_already_applied` for normalized contiguous matching), the capture record's `file_hash` and `snapshot_hash` are refreshed to current and replay continues. The corruption-detection path is preserved: when the response body is rewritten or removed, the existing fail-closed message still fires.
+- The refresh is logged as `capture_baseline_refreshed_for_benign_drift` so the recovery is auditable from `.agent-doc/logs/ops.log`.
+- All flows that use `validate_replay` benefit transparently: `repair::run` (the primary call site at `src/repair.rs:1396`), `preflight::run`, and the `write --commit` repair gate.
+
+#### Tests
+
+- `validate_replay_refreshes_baseline_when_response_intact_after_user_commit` — new; pins the benign-drift recovery path.
+- `validate_replay_still_bails_when_response_body_removed_from_current` — new; pins the corruption-detection path stays fail-closed.
+- `validate_replay_rejects_diverged_file_hash` — existing test still passes (its "body changed" body doesn't contain the captured response body, so the benign-drift gate correctly returns false).
+- `cargo test capture` and `cargo test validate_replay` both green.
+
+#### Status of the bug
+
+Marking the parent `#adoc-baseline-drift-after-user-commit` done — the wedge no longer occurs for the workflow the bug report described. Follow-up depth-of-coverage work split into per-phase items in `agent:backlog`:
+
+- `#adoc-bdauc-simworld` — Phase 1 SimWorld scenarios.
+- `#adoc-bdauc-preserve-session` — Phase 3 `agent-doc reset --from-current --preserve-session` non-destructive recovery.
+- `#adoc-bdauc-runbook` — Phase 4 documentation.
+- `#adoc-bdauc-integration` — Phase 5 in-source preflight integration test.
+
+#### Closeout
+
+- Submodule commit: `ccf3f51` — `fix: auto-refresh capture baseline on benign user-commit drift`.
+- Superproject commit: `0500ccbe6` — `agent-doc: bump submodule for #adoc-bdauc Phase 2`.
+- `cargo install --path .` + `cargo build --release` both ran; tmux + symlinked release binaries refreshed.
+
+Plan: `tasks/agent-doc/plan-baseline-drift-after-user-commit.md`.
+<!-- agent:boundary:4022a6b2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -64,7 +97,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#jbccc3]~
 - ~do [#jbccc4]~
 - ~do [#jbccc5]~
-- do [#adoc-baseline-drift-after-user-commit]
+- ~do [#adoc-baseline-drift-after-user-commit]~
 - do [#adoc-prefix-strip-uncommitted]
 - do [#jbrsrbusysw]
 - do [#jbrsrbusyide]
@@ -77,7 +110,10 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#adoc-baseline-drift-after-user-commit] agent-doc-bug: when a user commits a manual edit on top of an agent-doc commit, the captured baseline (.agent-doc/baselines/<hash>.md) is not refreshed; preflight, write --commit, and repair all fail with 'captured response baseline no longer matches current document' and there is no clear recovery path the next time the user invokes /agent-doc on the doc. Workaround: agent-doc reset --from-current rebuilds the baseline from the live markdown but drops session ID + snapshot history. Plan path: tasks/agent-doc/plan-baseline-drift-after-user-commit.md
+- [ ] [#adoc-bdauc-simworld] SimWorld scenario coverage for #adoc-baseline-drift-after-user-commit Phase 1: model the three drift branches (benign outside-response, inside-response-mismatch, inside-response-matches-normalized) in src/sim_world.rs. Plan: tasks/agent-doc/plan-baseline-drift-after-user-commit.md (Phase 1).
+- [ ] [#adoc-bdauc-preserve-session] agent-doc reset --from-current --preserve-session: non-destructive recovery that rebuilds the baseline but keeps session id, snapshot history, and capture chain. Today's --from-current is destructive. Plan: tasks/agent-doc/plan-baseline-drift-after-user-commit.md (Phase 3).
+- [ ] [#adoc-bdauc-runbook] Document baseline-drift recovery: new runbooks/baseline-drift.md (or extend jb-cache-conflict.md cross-link), SKILL.md catalog mirrors, runbooks/commit.md reference. Plan: tasks/agent-doc/plan-baseline-drift-after-user-commit.md (Phase 4).
+- [ ] [#adoc-bdauc-integration] In-source preflight integration test mirroring preflight_auto_recovers_jb_cache_conflict_cancel_committed_with_snapshot_drift: real git repo + cycle state, simulate user-committed benign drift, assert validate_replay auto-refreshes and preflight proceeds. Plan: tasks/agent-doc/plan-baseline-drift-after-user-commit.md (Phase 5).
 - [ ] [#adoc-prefix-strip-uncommitted] agent-doc-bug: after the JB-cache-conflict bug forces a manual sed strip of incorrectly-applied prompt-prefix markers (❯ ) from the response body, the subsequent agent-doc write --commit / repair / session-check chain fails to recognize the cleaned response as the cycle's committed response. Symptoms: session-check INTERRUPTED with prompt_target pointing at the agent's own response paragraph. Recovery: bare git commit succeeds and ships the response, but the agent-doc cycle state never closes cleanly. Likely cause: snapshot/baseline tracking does not recover after the IPC patch was applied with malformed markers and then manually edited. Plan path: tasks/agent-doc/plan-prefix-strip-uncommitted.md (to be authored). Related: #adoc-jb-cache-cancel-stuck-cycle (precondition for this bug).
 - [ ] [#jbrsrbusysw] SimWorld scenario coverage for session_restart --force: route + Restart Supervisor while pane is alive-busy with and without --force, asserting the new refusal message and force success (including session_restart_busy_pre_interrupt_idle and session_restart_busy_force_killed event variants). Substantial — requires new Op variant + tmux/session_actor mock in src/sim_world.rs. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md phase 4 (SimWorld piece).
 - [ ] [#jbrsrbusyide] JB plugin IDE-side telemetry for session_restart --force: surface session_restart_force_used, session_restart_busy_pre_interrupt_idle, and session_restart_busy_force_killed events in the IntelliJ notification area or Logcat so users can see the recovery path the binary took. Kotlin work in editors/jetbrains/. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md phase 4 (IDE piece).

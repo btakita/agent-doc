@@ -123,37 +123,12 @@ v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-gramm
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260525-061738.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260525-062202.md`*
 
 Compacted content:
-- Archived 3 response topic(s): do [#p6adftestfix]; do [#p6sklsymadocrunbooks]; should [#p6skillinstallreconcile] be added to the backlog of agent-doc-bugs2.md?
+- Archived 1 response topic(s): do [#p6tsifull]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-### Re: do [#p6tsifull] — opus-4-7 (HEAD)
-
-<!-- no-pending-done-guard -->
-
-Halting on this one and splitting it. Five separate command rewrites against `src/tsift/src/main.rs` (36,083 lines) — each touches struct serialization (`StoredSymbol`/`StoredEdge`/community report), per-row annotation passes, and `tests/exit_code.rs`. Bundling them all in one cycle produces a giant non-reviewable commit and exactly the kind of pending-gate situation `#planperphase` in `agent-doc-bugs2.md` was written to prevent.
-
-#### Decomposition
-
-Added five per-phase sub-items, ordered by ascending complexity so each cycle establishes the template for the next:
-
-1. `#p6tsifullpath` — smallest. cmd_path emits a simple BFS path; per-row annotation is one pass. Sets the template (`TagpathSearchOpts` arg plumbing, adapter load via `try_load`, annotate helper, `tagpath_handle` field).
-2. `#p6tsifullcommunities` — Louvain community report. Schema change is one field per member symbol.
-3. `#p6tsifullgraph` — `--callers` / `--callees` output rows. Adds `tagpath_handle` to StoredEdge if path's StoredSymbol change didn't cover it.
-4. `#p6tsifullexplain` — largest blast radius after federated. Emits definitions + callers + callees + community in one response; needs annotation on all four.
-5. `#p6tsifullfederated` — most complex. tsift search --federated loops over per-scope index.db files; adapter load must respect per-scope project_root.
-
-#### Why not do them all here
-
-Each sub-item is genuinely ~30–60 min of careful work (find arg struct, plumb opts, find row emission, add annotation pass, update tests, run `make check`, fix anything that surfaces). Five at once is ~3–5 hours of un-reviewable diff. Per-phase splits give you (a) reviewable commits, (b) clean revert points, (c) honest progress against the queue. The existing `#planperphase` recommendation in `agent-doc-bugs2.md` documents exactly this pattern.
-
-Gated `#p6tsifull` (the parent ID) under `agent:review` with `[/]` — it stays as the rollup until all five sub-items resolve.
-
-#### Side observation
-
-`src/tsift/CLAUDE.md` declares tagpath dep version `0.6.0`, but `src/tsift/Cargo.toml` is the actual source of truth — worth checking that's consistent when `#p6tspub` runs next (which will bump it to 0.11.1 anyway).
-<!-- agent:boundary:0db469f3 -->
+<!-- agent:boundary:8969ed31 -->
 <!-- /agent:exchange -->
 ###
 
@@ -172,6 +147,11 @@ preset #spec-test-build-install-commit-push
 - ~do [#p6sklsymadocrunbooks]~
 - ~do [#p6adfcitagpath]~
 - do [#p6tsifull]
+- do [#p6tsifullpath]
+- do [#p6tsifullexplain]
+- do [#p6tsifullgraph]
+- do [#p6tsifullcommunities]
+- do [#p6tsifullfederated]
 - do [#p6tspub]
 - do [#p6skl]
 - do [#p6ren]

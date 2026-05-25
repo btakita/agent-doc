@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 
@@ -191,15 +191,56 @@ Six items added to the backlog, priority order:
 - `p6adfmerge` — feature branch `20260422/codex-agent-backend` carries this + prior Phase 4/5 prep. Needs a merge sweep to agent-doc main before any external consumer pulls.
 
 Auto-queue advances next to MCP install helper (`p6mcr`).
-<!-- agent:boundary:6c33476c -->
+### Re: queue auto — do [#p6skl] — opus-4-7
+
+
+**Done.** `tagpath` skill refreshed for the 0.18.0 surface in both the canonical `src/tagpath/.claude/skills/tagpath/SKILL.md` and the agent-loop mirror. The skill description that Claude Code matches against ("Parse, search, lint, **index, and serve** tag-based identifiers...") now reflects what shipped through Phase 4 and Phase 5.
+
+**Coverage added (was missing from the v0.5.0 skill):**
+- `normalize-query`, `family`, `compression-report`, `ontology` (commands that already existed but weren't documented).
+- `index` — full subcommand surface (`--update`, `--check`, `--force-full`, `--emit jsonl`, `--schema-version`) + the `fam:`/`mem:` handle semantics.
+- `watch` — NDJSON event stream (`hello` / `ready` / `index_update` / `lint_finding` / `shutdown`), debounce, single-instance lock.
+- `grammars list/check` (`dyn-grammar` opt-in feature).
+- `mcp serve` + the `install` helper covering all 5 harnesses (`--list`, `--print`, `--apply`, `--uninstall`).
+- `lint --dialect agent-doc|auto|identifier` + `--fs-checks` + `--rule`.
+- `search --index` flag (instant index-backed search).
+- Three new Use Cases: **cross-tool symbol graph** (tsift adapter), **session-doc tag enforcement** (agent-doc finalize gate), **MCP one-command install**.
+- Key Concepts updated with handle derivation and SPEC §15 cross-link.
+
+**Layout:** the file is 198 lines (was 130). Restructured Commands section so related surfaces sit together (index right next to watch, lint right next to extract).
+
+**Changes (tagpath submodule, 1e6cdb9):**
+- `.claude/skills/tagpath/SKILL.md` — full refresh (105 insertions / 37 deletions).
+
+**Changes (agent-loop):**
+- `.claude/skills/tagpath/SKILL.md` — mirrored from canonical copy.
+- `src/tagpath` — bumped to `1e6cdb9` (docs-only; no version bump).
+
+**Verification:**
+- `diff -q` between the two copies → identical.
+- Skill-tool listing in this session already picks up the new description ("Parse, search, lint, index, and serve...") — confirms Claude Code reload sees the change.
+- No code change → no test run needed (this is docs-only).
+
+**Commits:**
+- tagpath `1e6cdb9`: `docs: refresh tagpath skill for 0.18.0 surface (p6skl)` → pushed.
+- agent-loop `8f421a7`: `phase 6: refresh tagpath skill for 0.18.0 surface (p6skl)` → pushed.
+
+**Follow-up captured:** `p6sklsym` — symlink the agent-loop mirror to the canonical copy so future updates only need one edit. Same pattern likely applies to `tsift`, `agent-doc`, and the other co-installed skills if they show similar duplication.
+
+Auto-queue advances next to `tagpath rename` (`p6ren`).
+<!-- agent:boundary:c069c099 -->
 <!-- /agent:exchange -->
 ###
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#p6tsi]~
 - ~do [#p6adf]~
 - ~do [#p6mcr]~
+- do [#p6adfstream]
+- do [#p6adfmerge]
+- do [#p6tsifull]
+- do [#p6tspub]
 - do [#p6skl]
 - do [#p6ren]
 - do [#p6meta]
@@ -208,11 +249,11 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 (<!-- agent:backlog -->
+- [ ] [#p6sklsym] Symlink the agent-loop .claude/skills/tagpath/SKILL.md to src/tagpath/.claude/skills/tagpath/SKILL.md so future updates only need one edit. Currently both copies are maintained by hand and drift is inevitable. Mirror the same approach for the other co-installed skills (tsift, agent-doc, etc.) if they exhibit the same duplication.
 - [ ] [#p6adfstream] Instrument agent-doc Stream subcommand with the lint gate from p6adf: src/stream.rs has its own write loop that bypasses the finalize/write --commit gate path. Mirror the lint_gate call at stream commit time so streaming responses can't sneak malformed directives past the boundary.
 - [ ] [#p6adfmerge] Merge agent-doc feature branch 20260422/codex-agent-backend to main: the p6adf commit (845ddfd6) and prior p4*/p5* prep ride on this branch. agent-loop superproject already tracks feature-branch commits, but agent-doc main is behind and will need a sweep before any external consumer pulls.
 - [ ] [#p6tsifull] Wire the remaining tsift consumer surfaces to the tagpath adapter: graph, explain, communities, path, federated-search. The adapter (src/tsift/src/tagpath_adapter.rs) and annotate helper are already public; each command needs TagpathSearchOpts plumbing + a per-row annotation pass + tagpath_handle field on StoredSymbol / StoredEdge / community report structs. Mechanical follow-up to p6tsi which only wired tsift search.
 - [ ] [#p6tspub] Restore tsift crates.io publishability after p6tsi: tsift now depends on tagpath via path = ../tagpath. Replace with version = "0.17.1" (or whatever ships first) before any tsift release. Already gated by the sift-publish blocker so no immediate regression, but track here.
-- [ ] [#p6skl] Update .claude/skills/tagpath/SKILL.md — currently references v0.5.0 and pre-Phase-4 commands. Cover index / watch / lint --dialect agent-doc / MCP server / sidecar perf semantics so Claude Code can recommend the new surfaces without rediscovery.
 - [ ] [#p6ren] tagpath rename <old> <new>: cross-file, cross-convention identifier rename using the index. Walks every member of the matching family, rewrites in-place in each source convention (snake/camel/Pascal/kebab/UPPER/Ada). Foundation for the agent-loop intent-preserving refactor vision.
 - [ ] [#p6meta] [recommended] agent-loop meta-index: aggregate per-submodule .naming/index.json files into a top-level handle registry so cross-repo searches resolve. New CLI: tagpath meta-index <workspace-root>. Useful once 2+ siblings adopt tagpath.
 <!-- /agent:backlog -->

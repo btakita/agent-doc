@@ -30,99 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260525-055028.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260525-082913.md`*
 
 Compacted content:
-- Archived 10 response topic(s): #gdbfullreuse + #gdbscanproof + #gdbperfgate landed; review item #gdbcacheprove closed; #gdbgatecold packet in flight; 7 more
+- Archived 6 response topic(s): do [#cachelookupshift]; do [#gdbvacconvex]; queue updated; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-### Re: do [#cachelookupshift] — opus-4-7
-
-Dispatched as a focused packet. Investigates why `preparation_cache_lookup` (~250 ms) never hits across consecutive `tsift graph-db backend-eval` runs on agent-loop — runs a pair, captures the watermark hash inputs, identifies the drifting input (likely a path slipping past `traversal_relative_path_is_generated_artifact` or a directory mtime entering the hash per the `#gdbgatecold` history), applies the minimal stable fix or stops with a "no fix — by design" verdict, then verifies cache-hit on a post-fix consecutive pair. Bumps to v0.1.51 if a fix lands. Hard regression-safety: `search_timeout_reports_reindex_when_index_turns_stale_during_worker_run` must stay green.
-
-Awaiting the packet's proof block before `make check` + `cargo install --path .` + commit + push + finalize with `--done cachelookupshift`.
-### Re: do [#gdbvacconvex] — closed via self-hosted Convex Docker — opus-4-7
-
-Auth wall bypassed. Workflow end-to-end verified. Demo schema has a real snapshot scale gap (captured as new backlog items `#convexsnapshotscale` + `#convexscopedeval`) that keeps the Convex half of `#gdbvacproof` review-gated.
-
-#### Bypass: self-hosted Convex backend (no convex.dev account)
-
-```
-docker run -d --name convex-tsift --rm -p 3210:3210 -p 3211:3211 \
-  -v convex-tsift-data:/convex/data \
-  ghcr.io/get-convex/convex-backend:latest
-docker exec convex-tsift bash -c "cd /convex && ./generate_admin_key.sh"
-```
-
-Schema/functions deployed in ~220 ms via `bunx convex dev --once` with `CONVEX_SELF_HOSTED_URL` + admin key in `examples/convex-graph-app/.env.local` (gitignored). No browser auth, no convex.dev account, no `npx convex dev` device-name prompt.
-
-#### Sync proven (tsift scope)
-
-```
-TSIFT_CONVEX_GRAPH_URL="http://localhost:3211/tsift/graph" \
-  tsift convex-sync . --scope tsift --remote-snapshot --apply --chunk-size 50 --json
-```
-
-| Metric | Value |
-| --- | ---: |
-| node_upserts planned | 4,767 |
-| edge_upserts planned | 28,427 |
-| chunks dispatched | 665 |
-| chunk receipts (HTTP 200) | **665 / 665** |
-| transport diagnostic | "live Convex transport completed all planned chunks" |
-| mutation order asserted | nodes-before-edges (upsert) / edges-before-nodes (tombstone) |
-
-End-to-end proof of the chunk pipeline, the schema-side `upsertNodes`/`upsertEdges` mutations, the foreign-key check inside `upsertEdges`, and the chunk ordering contract against a real Convex backend.
-
-#### Scale gap (demo schema, not a self-host limitation)
-
-`examples/convex-graph/graph.ts:snapshot` calls `.collect()` on both populated tables in one isolate request. Even at 33k rows it hits Convex's `maximum total syscall duration (15s)` budget — same budget on the cloud product. Result: `--remote-snapshot` freshness verification returns `snapshot_hash: None`, which blocks `--confirmed-convex-reconciled` for the agent-loop scale graph (357k nodes / 605k edges). Full superproject sync also hits the isolate's 99 MiB carry-over limit at chunk-size 100 on `upsertEdges`; smaller chunks (25/50) clear that, but `snapshot` is the binding gate.
-
-The Convex tombstone-prune leg of the other review item cannot run until `#convexsnapshotscale` lands.
-
-#### Commits + cleanup
-- tsift `3e8a211` — `docs(graph-db): #gdbvacconvex evidence — self-hosted backend bypasses auth; demo schema has snapshot scale gap`
-- superproject `b4a23f705` — submodule pointer bump
-- Container `convex-tsift` stopped + `convex-tsift-data` volume removed. `examples/convex-graph-app/.env.local` deleted (admin key was instance-local). `convex/_generated/` left in place (gitignored).
-### Re: queue updated — opus-4-7
-
-Queue now lists `do [#convexsnapshotscale]`, `do [#convexscopedeval]`, `complete [#gdbvacproof]` (plus the two struck-through completed items). The queue header has no `auto` marker, so no prompt is firing this cycle.
-
-To kick off the next item, either flip the queue marker to `&lt;!-- agent:queue auto --&gt;` (binary advances to the head and I execute `do [#convexsnapshotscale]`) or chat me a direct directive. Both `#convexsnapshotscale` (paginate `examples/convex-graph/graph.ts:snapshot` so `--remote-snapshot` works at scale) and `#convexscopedeval` (decide scope-bounded sync default) are ready to dispatch as focused packets; they should run sequentially per planner since both touch the same Convex schema area.
-### Re: do [#convexsnapshotscale] — opus-4-7
-
-Dispatched as a focused packet. Replaces `examples/convex-graph/graph.ts:snapshot`'s `.collect()` with a scalable variant — most likely a content-hash digest (`snapshotDigest` returning `{nodeCount, edgeCount, nodeHash, edgeHash, indexes}`) since `tsift convex-sync --remote-snapshot` only needs a hash for the freshness verdict, not materialized rows. Subagent verifies that assumption against `src/main.rs` first; if the consumer actually needs rows, falls back to cursor-based pagination.
-
-Updates both `examples/convex-graph/` and `examples/convex-graph-app/convex/` (kept identical by contract), the HTTP action route, the tsift consumer in `src/main.rs`, and bumps to v0.1.52. Live-tested end-to-end against the self-hosted `ghcr.io/get-convex/convex-backend` Docker image with the existing 4767-node / 28427-edge tsift scope dataset; container + volume + `.env.local` cleaned up after.
-
-`#convexscopedeval` and `complete [#gdbvacproof]` remain in the queue for subsequent cycles (planner says sequential — they touch the same Convex surface).
-### Re: still waiting on #convexsnapshotscale packet — opus-4-7
-
-Packet still running (schema refactor + tsift consumer update + live test against self-hosted Convex). Closing this cycle without consuming the queue head; will commit + push + finalize with `--done convexsnapshotscale` once its proof returns.
-### Re: #convexsnapshotscale closed — cursor pagination unblocks --remote-snapshot — opus-4-7
-
-Landed (tsift `86d5fde` + sibling `102a1d2` for the schema/consumer code, superproject `fb55e9922`, v0.1.56). `make check` clean across 862 tests; install upgraded.
-
-#### Design verdict — cursor pagination (A), not digest (B)
-Subagent read `convex_projection_freshness` at `src/main.rs:6549-6620` first and found it materializes per-row diffs (`missing_nodes`, `stale_nodes`, `missing_edges`, `stale_edges`) — a hash-only digest would have gutted that diagnostic surface. Cursors over the existing `externalId` / `edgeKey` indexes need no schema changes.
-
-#### Before / after on self-hosted Convex
-
-| | State |
-| --- | --- |
-| **Before** | Legacy `snapshot` returns `HTTP 500: Array length is too long (22342 > maximum length 8192)` at ~22k-edge scale — stricter cousin of the previously documented 15s syscall-budget timeout at 33k rows. |
-| **After** | Paginated path fetches 3,895 nodes in 8 pages + 22,342 edges in 45 pages with no isolate-budget errors. `tsift convex-sync . --remote-snapshot --json` returns `snapshot_hash` matching `local_hash` and `freshness.status: current`. |
-
-#### Surface
-- `examples/convex-graph/{graph,http}.ts` + `examples/convex-graph-app/convex/{graph,http}.ts` (kept identical): added `snapshotMeta`, `snapshotNodesPage`, `snapshotEdgesPage` queries and the matching HTTP-action operations. Legacy `snapshot` retained for small-scale callers.
-- `src/main.rs`: extended `ConvexTransportRequest`/`ConvexTransportResponse` for cursor/page fields; added `ConvexSnapshotMeta`/`ConvexSnapshotPage`; rewrote `fetch_snapshot` as paginated-first with legacy fallback on unknown-op.
-- `tests/graph_db_conformance.rs`: rewrote `fetch_live_convex_snapshot` for paginated ops; new `convex_sync_remote_snapshot_uses_paginated_transport_against_mock_backend` integration test using stdlib `TcpListener` to exercise the cursor loop at page size 3 and pin call ordering.
-
-#### Regression-safety
-`cargo test search_timeout` → 7 passed. `cargo test convex` → 18 passed (all convex-sync tests including the new mock). `make check` exit 0.
-
-#### `#gdbvacproof` unblocked on snapshot prerequisite
-The Convex tombstone-prune leg can now run end-to-end against the self-hosted backend (or any Convex deployment) at sub-50k-row scale. The `--chunk-size 50` requirement for the apply leg's isolate-carryover limit (from `gdbvacconvex-evidence.md`) is a separate ticket — apply works, snapshot now verifies. Queue head advances to `do [#convexscopedeval]` next cycle, then `complete [#gdbvacproof]`.
-<!-- agent:boundary:b6cb8868 -->
+<!-- agent:boundary:688e6181 -->
 <!-- /agent:exchange -->
 ###
 <!--

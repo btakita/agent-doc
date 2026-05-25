@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 
@@ -168,11 +168,11 @@ Submodule won the canonical-version decision on dates alone — its copy is from
 - `agent-loop`: `f1f3138de skills: symlink corky SKILL.md to submodule canonical (p6sklsymcorky)` — pushed to main
 
 The pattern for the three "diverge then symlink" follow-ups (tagpath, agent-doc, corky) is now fully applied. Per-skill symlinks documented; release flow implication tracked under `#p6sklsymadocrunbooks` for the agent-doc runbooks question.
-<!-- agent:boundary:fd9da50a -->
+<!-- agent:boundary:aea4a149 -->
 <!-- /agent:exchange -->
 ###
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#p6tsi]~
 - ~do [#p6adf]~

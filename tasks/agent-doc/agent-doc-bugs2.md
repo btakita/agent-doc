@@ -106,7 +106,7 @@ Pre-existing `write::` tests (271) still pass. `make check` not run because of p
 
 Not invoking `/loop` — remaining queue is still the multi-phase / sibling-repo work from prior cycles.
 ❯ transfer [#adcs-scripts] into docs.md backlog
-### Re: transfer [#adcs-scripts] into docs.md backlog — opus-4-7 (HEAD)
+### Re: transfer [#adcs-scripts] into docs.md backlog — opus-4-7
 
 Transferred `#adcs-scripts` out of `tasks/agent-doc/agent-doc-bugs2.md` into `src/session-share/tasks/docs.md` backlog. Marked the local entry done (acts as a move marker — the work itself was never started here, it just lived in the wrong backlog).
 
@@ -127,7 +127,7 @@ The Phase 3 item that covers extending `backfill-updates.sh` in the four sibling
 - Parent `#agent-doc-commit-sibling` — stays gated until `#adcs-convention` lands and `#adcs-scripts` ships in session-share. Both of those will need their own sessions in those repos.
 
 Not invoking `/loop`. Queue is `queue_halted: item_modified` from your prompt.
-<!-- agent:boundary:27ed13ba -->
+<!-- agent:boundary:09f088a3 -->
 <!-- /agent:exchange -->
 ###
 <!--

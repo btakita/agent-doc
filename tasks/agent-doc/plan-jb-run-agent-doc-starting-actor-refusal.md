@@ -38,13 +38,17 @@ The fail-closed path is correct, but the IDE-side UX is broken: clicking `Run Ag
 
 ## Plan
 
-### Phase 1: Add `--wait-for-ready <SECONDS>` to `route` / top-level `agent-doc <FILE>`
+### Phase 1: Add `--wait-for-ready <SECONDS>` to `route` / top-level `agent-doc <FILE>` [done]
 
-**File:** `src/route.rs`, `src/main.rs`, harness instruction surfaces
+**File:** `src/route.rs`, `src/main.rs` (landed)
 
 1. Accept `--wait-for-ready <SECONDS>` (default: 10, max bounded to e.g. 120) on the route entrypoint. When the authoritative actor is `starting`, poll prompt-ready up to that bound before failing closed.
 2. Emit `route_wait_for_ready_elapsed` and `route_wait_for_ready_timeout` ops_log events so the wait outcome is observable.
 3. Keep the existing fail-closed behavior at the bound — do not silently send to a non-ready pane.
+
+**Implementation:** `Commands::Route` gained a `wait_for_ready: Option<u64>` clap arg (capped at 600s). `route::run` / `run_with_tmux` accept `wait_for_ready: Option<Duration>` and install a thread-local override via `WaitForReadyOverrideGuard` (RAII, restores prior value on drop, supports nesting). `wait_for_authoritative_actor_ready` reads the override and replaces the harness-specific `authoritative_actor_ready_retry_budget` timeout when set. On success the success path emits `route_wait_for_ready_elapsed`; on timeout the failure path emits `route_wait_for_ready_timeout`. The existing fail-closed semantics are unchanged — the override only widens the bound; it does not promote a non-ready actor.
+
+**Tests:** `route::tests::wait_for_ready_override_guard_sets_and_restores_thread_local` covers the guard mechanics (set, nest, unset, restore).
 
 ### Phase 2: JB plugin passes a longer wait on user-initiated actions
 

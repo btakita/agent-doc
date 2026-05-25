@@ -29,44 +29,12 @@ Closed stale duplicate #agent-doc-commit-sibling prompt; review remains at 3 gat
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260525-230926.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260525-234436.md`*
 
 Compacted content:
-- Archived 2 response topic(s): JB Run Agent Doc starting-timeout recovery; JB Restart Supervisor Process starting guard
+- Archived 3 response topic(s): Review Completion Priority; Review Completion Queue; Stale Queue Prompt
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ Which tasks in review can be completed? Please order by priority.
-### Re: Review Completion Priority — gpt-5
-
-Priority order:
-
-1. `#agent-doc-commit-sibling` can be completed now. The parent phases are all archived in done (`#adcs-binary`, `#adcs-scripts`, `#adcs-convention`), the source contains the CLI/trailer implementation in `src/git_sibling.rs`, `src/main.rs`, and `src/write.rs`, and `cargo test --bin agent-doc commit_sibling` passed 6/6.
-
-2. `#jbresstart` is the next-best close candidate, but I would only complete it if the existing route coverage is accepted as sufficient. The route code now refuses cross-file dispatch and rechecks Starting actors after stash rescue; `cargo test --bin agent-doc cross_file` passed 1/1 with one live tmux test ignored, and `cargo test --bin agent-doc starting_timeout` passed 2/2. The plan's exact stash-rescue SimWorld/live proof is still not explicit, so strict review should keep it gated.
-
-3. `#adoc-jb-cache-cancel-stuck-cycle` should stay gated until `#jbccc2` closes. Binary phases `#jbccc1`, `#jbccc3`, `#jbccc4`, and `#jbccc5` are archived and `cargo test --bin agent-doc jb_cache_conflict` passed 7/7, but the parent plan still includes the JetBrains plugin cancel behavior.
-
-4. `#jbccc2` cannot be completed yet. `PatchWatcher.kt` has IPC ack machinery, but I did not find the required defer-write-until-dialog-resolution behavior, nor the Cancel path that leaves the patch file in place without modifying the document.
-
-5. `#stuckcycledup` cannot be completed yet. The review text says the `stuck_captured_cycle` warning exists, but `src/flow/closeout.rs` still returns `None`; `cargo test --bin agent-doc stuck_captured_cycle` found 0 tests. Keep it gated or rewrite the review item to match the actual partial state.
-
-Changed paths: none by me. Verification: `cargo test --bin agent-doc commit_sibling`, `cargo test --bin agent-doc jb_cache_conflict`, `cargo test --bin agent-doc cross_file`, `cargo test --bin agent-doc starting_timeout`, `cargo test --bin agent-doc cycle_already_committed`, and `cargo test --bin agent-doc stuck_captured_cycle`. Confidence: high for `#agent-doc-commit-sibling`, medium for `#jbresstart`, high that the other three should remain gated. Escalation: none.
-### Re: Review Completion Queue — gpt-5
-
-I moved `#agent-doc-commit-sibling` and `#jbresstart` from review to done.
-
-I left `#adoc-jb-cache-cancel-stuck-cycle` in review. It still depends on `#jbccc2`: the JetBrains plugin cancel path still needs the explicit defer-write-until-dialog-resolution behavior, including Cancel leaving the patch file in place. Moving the parent to done would hide that unresolved phase.
-
-
-❯ Verification: `make check` passed in `src/agent-doc` via tsift digest artifact `tart-9a435fb3ee`; `make install` completed and installed `agent-doc 0.34.0` plus `libagent_doc-0.34.0.so`; latest GitHub Actions CI run `26421124683` on `20260422/codex-agent-backend` is successful, including `Run make tmux-ci`.
-
-❯ Changed paths: session document closeout only, with done-archive updates handled by `agent-doc finalize --done`; no non-session repo files were manually staged or committed. The existing `src/agent-doc` formatting-only working tree drift was left untouched. Confidence: high for the two done review items; high for leaving the cache-cancel parent gated. Escalation: none.
-❯ complete #agent-doc-commit-sibling. #spec-test-build-install-commit-push
-### Re: Stale Queue Prompt — gpt-5
-
-`#agent-doc-commit-sibling` is already archived in done, so this duplicate queue prompt needed no additional repo mutation. The requested verification/build/install work has already run: `make check` passed via tsift artifact `tart-9a435fb3ee`, `make install` completed for `agent-doc 0.34.0`, and GitHub Actions run `26421124683` is green including `Run make tmux-ci`.
-
-Changed paths: session-document closeout only. No non-session repo files were manually staged or committed. Commit: handled by `agent-doc finalize`; push: pending the required post-finalize session check. Confidence: high. Escalation: none.
-<!-- agent:boundary:73ed4baf -->
+<!-- agent:boundary:9d6cfd3c -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -213,7 +213,29 @@ Brian
 ```
 
 I would keep it to one sentence. It gives Judith and Robert confidence that the work is real and reviewable without turning the invoice into a technical walkthrough.
-<!-- agent:boundary:ef2aef6f -->
+❯ Please update the draft to prefer Zelle as payment, but leave the other options open.
+### Re: Zelle payment preference — gpt-5
+
+Update the invoice payment block to this:
+
+```text
+Payment:
+- Zelle to brian.takita@gmail.com preferred
+- ACH / wire available if preferred by accounting
+- Check to [your business mailing address] acceptable
+- Net 14 from issue date
+```
+
+In the email body, change the payment/closing paragraph to:
+
+```text
+Net 14 is fine on this invoice. Zelle to brian.takita@gmail.com is preferred, but ACH/wire or check are also available if easier for accounting. I can also demo the completed work live so you can see exactly what is already in place and where the next decisions fit.
+
+Brian
+```
+
+That keeps the ask direct while leaving the other payment paths open.
+<!-- agent:boundary:a8621b48 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -146,13 +146,13 @@ Six items added to the backlog, priority order:
 | 6 | p6meta [recommended] | agent-loop meta-index across submodules | Once 2+ siblings adopt tagpath, a top-level handle registry makes cross-repo navigation work. Wait until p6tsi proves the contract before building this. |
 
 **Framing — what's shipped vs what's needed:** Phases 4 and 5 built the entire tagpath platform (index, MCP, WASM, dyn-grammar, handles, JSONL, sidecar, incremental update, watch, agent-doc lint dialect, wasm-pack publish, LICENSE). Phase 6 should be **adoption-driven**: each item is a sibling-repo or consumer-facing integration that proves the platform pays off. p6tsi first; everything else can run in parallel after.
-<!-- agent:boundary:783fcf9e -->
+<!-- agent:boundary:2c552e12 -->
 <!-- /agent:exchange -->
 ###
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#p6tsi]
+- ~do [#p6tsi]~
 - do [#p6adf]
 - do [#p6mcr]
 - do [#p6skl]
@@ -163,7 +163,8 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 (<!-- agent:backlog -->
-- [ ] [#p6tsi] Tsift adoption of tagpath: in src/tsift, replace bespoke symbol extraction with the tagpath consumer contract — read .naming/index.json (or subscribe to tagpath watch), cite fam:/mem: handles in envelope refs, fall back to live scan when index is stale/missing. Sibling-repo work; tagpath only maintains the SPEC §15 contract.
+- [ ] [#p6tsifull] Wire the remaining tsift consumer surfaces to the tagpath adapter: graph, explain, communities, path, federated-search. The adapter (src/tsift/src/tagpath_adapter.rs) and annotate helper are already public; each command needs TagpathSearchOpts plumbing + a per-row annotation pass + tagpath_handle field on StoredSymbol / StoredEdge / community report structs. Mechanical follow-up to p6tsi which only wired tsift search.
+- [ ] [#p6tspub] Restore tsift crates.io publishability after p6tsi: tsift now depends on tagpath via path = ../tagpath. Replace with version = "0.17.1" (or whatever ships first) before any tsift release. Already gated by the sift-publish blocker so no immediate regression, but track here.
 - [ ] [#p6adf] Agent-doc finalize gate: in src/agent-doc, call tagpath lint --dialect agent-doc on the session document during preflight or pre-write, refuse to commit on lint errors. Closes the loop on the archive=PATH bug class — it never reaches a snapshot. Sibling-repo work referencing tagpath.
 - [ ] [#p6mcr] tagpath mcp install helper: generate Claude Desktop / Codex / OpenCode / Cursor MCP config JSON blocks pointing at the local tagpath mcp binary. Drops integration friction so users get the 9 tools without hand-editing config files.
 - [ ] [#p6skl] Update .claude/skills/tagpath/SKILL.md — currently references v0.5.0 and pre-Phase-4 commands. Cover index / watch / lint --dialect agent-doc / MCP server / sidecar perf semantics so Claude Code can recommend the new surfaces without rediscovery.

@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -34,7 +34,14 @@ Closed stale duplicate #agent-doc-commit-sibling prompt; review remains at 3 gat
 Compacted content:
 - Archived 3 response topic(s): Review Completion Priority; Review Completion Queue; Stale Queue Prompt
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:9d6cfd3c -->
+### Re: Stale queue / IPC corruption note — gpt-5
+
+❯ The queue request contained `#spec-test-build-install-commit-push` plus references to `#jbresstart`, `#jbccc2`, `#stuckcycledup`, and `#adoc-jb-cache-cancel-stuck-cycle`. Preflight recognized the queue as stale, auto-struck already resolved head prompts, and drained it before planning. The remaining review items stay gated; I did not mark them done in this cycle.
+
+❯ I’m treating the IPC corruption / duplicate-line note as reproduced context for the existing JetBrains cache-conflict review items, not as a new distinct backlog entry. The same failure surface is already represented by `#adoc-jb-cache-cancel-stuck-cycle`, with `#jbccc2` as the active plugin-side phase.
+
+❯ Verification: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`; no repo code changed.
+<!-- agent:boundary:daac734b -->
 <!-- /agent:exchange -->
 ###
 <!--

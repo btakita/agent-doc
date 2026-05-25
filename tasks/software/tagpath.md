@@ -175,7 +175,28 @@ Commits pushed:
 - `btakita/agent-loop@24664c721` — `chore: update tsift callee handle resolution`
 
 I left the pre-existing unrelated dirty tsift files unstaged: `Cargo.toml`, `Cargo.lock`, `VERSIONS.md`, and `plans/gdbvacproof-evidence.md`.
-<!-- agent:boundary:45b2be43 -->
+### Re: do [#p6tspub] — gpt-5
+
+Implemented and pushed `#p6tspub`.
+
+What changed:
+- `tsift` no longer depends on sibling `../tagpath` for publish builds. `Cargo.toml` now uses the published crate dependency: `tagpath = { version = "0.11.1", default-features = false, features = [...] }`.
+- `Cargo.lock` now records `tagpath v0.11.1` as a crates.io registry package with source/checksum, so packaging does not rely on the local sibling checkout.
+- I used `0.11.1` rather than the old backlog placeholder `0.17.1`: the published docs.rs version page shows `v0.11.1 — 2026-05-25`, and the `v0.11.0` notes say local `0.11–0.18` versions were not published and were consolidated into the `0.11.0` crates.io release: https://docs.rs/crate/tagpath/0.11.1/source/VERSIONS.md
+
+Verification:
+- `cargo publish --dry-run --allow-dirty --manifest-path /home/brian/work/btakita/agent-loop/src/tsift/Cargo.toml` passed from `/tmp`, outside the agent-loop parent `.cargo/config.toml` patch scope. Cargo initially hit one transient crates.io 500 while downloading `tagpath v0.11.1`, retried, downloaded it, compiled the packaged crate, and aborted upload because dry run.
+- `make check` passed locally.
+- `cargo install --path .` passed.
+- `gh run watch 26411462514 --exit-status` passed: both `clippy + test` and `live Convex graph acceptance` succeeded. CI had only non-blocking annotations for GitHub's Node.js 20 action deprecation and the live Convex URL note.
+- tmux CI review: no `tmux`, `tmux-ci`, or `tmux-test` workflow/Makefile references exist in this repo.
+
+Commits pushed:
+- `btakita/tsift@8c5bff7` — `fix: use published tagpath dependency`
+- `btakita/agent-loop@6d5c56010` — `chore: update tsift published tagpath dependency`
+
+I left the pre-existing unrelated dirty tsift changes unstaged: the `0.1.62` version bump in `Cargo.toml`/`Cargo.lock`, `VERSIONS.md`, and `plans/gdbvacproof-evidence.md`.
+<!-- agent:boundary:35eed741 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -186,7 +207,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#tpauditscope]~
 - ~do [#tpauditpolicy]~
 - ~do [#commhxstrong]~
-- do [#p6tspub]
+- ~do [#p6tspub]~
 - do [#p6ren]
 - do [#mixconv]
 - do [#p6meta]
@@ -195,7 +216,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#p6tspub] Restore tsift crates.io publishability after p6tsi: tsift now depends on tagpath via path = ../tagpath. Replace with version = "0.17.1" (or whatever ships first) before any tsift release. Already gated by the sift-publish blocker so no immediate regression, but track here.
 - [ ] [#p6ren] tagpath rename <old> <new>: cross-file, cross-convention identifier rename using the index. Walks every member of the matching family, rewrites in-place in each source convention (snake/camel/Pascal/kebab/UPPER/Ada). Foundation for the agent-loop intent-preserving refactor vision.
 - [ ] [#mixconv] [recommended] tagpath lint policy that tolerates mixed conventions within a single identifier (e.g. `createUserProfile_v2`). Today `parser::detect_convention` classifies any identifier containing `_` as snake-family, so the camelCase-plus-suffix shape lint-fails in a camelCase-only context with `create_user_profile_v2` as the suggested fix. Add a per-context `tolerate_mixed = true` or top-level `lint.allow_mixed_within_identifier` policy that compares tag-equivalence rather than convention-equivalence. Single-file change in `src/lint/mod.rs:79`. Tests: extend `tests/lint.rs` with mixed-within-identifier cases.
 - [ ] [#p6meta] [recommended] agent-loop meta-index: aggregate per-submodule .naming/index.json files into a top-level handle registry so cross-repo searches resolve. New CLI: tagpath meta-index <workspace-root>. Useful once 2+ siblings adopt tagpath.

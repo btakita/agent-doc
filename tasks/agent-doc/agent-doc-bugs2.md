@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -105,7 +105,7 @@ Pre-existing `write::` tests (271) still pass. `make check` not run because of p
 - Parent `#agent-doc-commit-sibling` stays gated until both land.
 
 Not invoking `/loop` — remaining queue is still the multi-phase / sibling-repo work from prior cycles.
-<!-- agent:boundary:955d3443 -->
+<!-- agent:boundary:27ed13ba -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -120,7 +120,7 @@ agent-doc command failed (exit 1): Error: session_restart refused for /home/bria
 ```
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#crdtrespfx]~
 - ~do [#queueadvgated]~
@@ -144,7 +144,6 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#adcs-scripts] Phase 3 of #agent-doc-commit-sibling: extend backfill-updates.sh in 4 sibling repos (build-party, claudescore.com, claudescore-plugin, fourth canonical home in session-share) to parse Session-Doc git trailer via git log --format=%(trailers:key=Session-Doc,valueonly) and prefer trailer URL over agent-doc(name): subject heuristic. Output dual link: last touched <date> by [tasks/docs.md](session-share-url) [<short>](sibling-url). Grandfather build-party@9a0be9a, claudescore.com@bf73644, claudescore-plugin@f1daedb. Executes in sibling repos, not agent-loop. Plan: tasks/agent-doc/plan-commit-sibling.md
 - [ ] [#adcs-convention] Phase 4 of #agent-doc-commit-sibling: author tasks/docs.md (in session-share) with the cross-repo Session-Doc trailer convention — format, when to use, migration story, link to plan and #cross-repo-sessiondoc-trailer. Plan: tasks/agent-doc/plan-commit-sibling.md
 - [ ] [#jbccc1] Phase 1 of #adoc-jb-cache-cancel-stuck-cycle: deterministic SimWorld repro for File Cache Conflict cancel. Add a SimCommand variant or scenario test FinalizeWithJbCacheConflictCancel modeling the three branches (no dialog, accept, cancel) explicitly; cancel branch produces response-on-disk, snapshot != HEAD, cycle phase write_applied; asserted to fail today (failing baseline) and pass once Phase 3 lands. Plan: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md
 - [ ] [#jbccc2] Phase 2 of #adoc-jb-cache-cancel-stuck-cycle: JB plugin undo-on-cancel. editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt — defer the write until user resolves the File Cache Conflict dialog (never queue change beforehand); on Cancel return 0/2 from socket IPC callback; on file-IPC cancel leave patch file in place. Plan: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md

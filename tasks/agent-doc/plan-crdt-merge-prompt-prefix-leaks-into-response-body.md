@@ -56,15 +56,19 @@ Construct a scenario:
 
 Until the fix lands, this scenario reproduces the corruption (failing baseline).
 
-### Phase 2: CRDT merge post-condition guard
+### Phase 2: CRDT merge post-condition guard [done — option (a) chosen]
 
-**File:** `src/merge.rs`, `src/crdt.rs`
+**File:** `src/write.rs` (landed)
 
-After CRDT merge in the response write path, scan the response region for "first non-empty line of any `### Re: ...` block starts with `❯ ` or any harness prompt marker". If found, either:
-- a) Strip the marker in-place (when the surrounding context proves the marker is a CRDT-merge artifact, not real prompt text), OR
-- b) Fail closed with a `flow_event` and route to repair, preserving the live file for inspection.
+`normalize_final_template_content` now calls a new `strip_prompt_prefix_from_response_body_first_lines(content)` helper. The helper scans every `### Re: ...` block inside `agent:exchange`; if the first non-empty body line starts with `❯ ` (or the bare marker character), it strips the prefix and the surrounding code logs `flow=document_mutation stage=crdt_post_merge_guard reason=response_body_prompt_prefix_leak`. Lines after the first body line are untouched (so a quoted `❯ ` inside the response body remains intact), and user prompts outside the response block are preserved.
 
-Option (a) is fragile; (b) is safer. Prefer (b) and add a `flow_event stage=crdt_post_merge_guard reason=response_body_prompt_prefix_leak`.
+Chose option (a) over (b) because the corruption signature is unambiguous (real responses never start with `❯ ` — that's the harness prompt marker, not Markdown), and a fail-closed path here would reproduce the wedge that motivated the bug.
+
+**Tests (`write::submodule_patch_routing_tests`):**
+- `strip_prompt_prefix_from_response_body_first_lines_strips_leaked_marker` — happy path: leaked prefix stripped, response body intact, neighbouring user prompts preserved.
+- `strip_prompt_prefix_from_response_body_first_lines_skips_when_clean` — clean document returns `None`, no allocation/rewrite.
+- `strip_prompt_prefix_from_response_body_first_lines_preserves_inner_prompt_like_lines` — quoted `❯ ` after the first body line is preserved.
+- `strip_prompt_prefix_from_response_body_first_lines_handles_multiple_re_blocks` — both response blocks in a multi-Re exchange get repaired independently.
 
 ### Phase 3: Repair path for the corruption signature
 

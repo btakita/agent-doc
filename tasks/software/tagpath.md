@@ -152,7 +152,30 @@ Commits pushed:
 - `btakita/agent-loop@d6adbb3af` — `chore: update tsift audit policy hints`
 
 I left the pre-existing unrelated dirty tsift files unstaged: `Cargo.toml`, `Cargo.lock`, `VERSIONS.md`, and `plans/gdbvacproof-evidence.md`.
-<!-- agent:boundary:922b8465 -->
+### Re: do [#commhxstrong] — gpt-5
+
+Implemented and pushed `#commhxstrong`.
+
+What changed:
+- `annotate_stored_edges_with_tagpath(..., EdgeSide::Callee)` now resolves callee handles per edge instead of sharing one `callee_name -> tagpath_handle` result across all rows.
+- Callee resolution now prefers a candidate definition in the caller's own file, then a candidate whose file has overlapping Louvain community evidence with the caller file, then falls back to the previous first-resolving-handle behavior for no-context surfaces such as `tsift communities`.
+- The no-context `resolve_tagpath_handles_for_names` helper remains the fallback path for community/path-style annotation.
+- `SPEC.md` documents the per-edge callee-handle collision behavior.
+- Added `graph_json_resolves_callee_handle_with_caller_file_name_collision`, covering two valid tagpath handles for the same `helper` name and asserting `graph src_caller --json` chooses the `src/main.rs` handle rather than the first sorted vendor handle.
+
+Verification:
+- `cargo test graph_json_resolves_callee_handle_with_caller_file_name_collision --test exit_code -- --nocapture` passed.
+- `make check` passed after the final tree edits.
+- `cargo install --path .` passed.
+- `gh run watch 26411018042 --exit-status` passed: both `clippy + test` and `live Convex graph acceptance` succeeded.
+- tmux CI review: no `tmux`, `tmux-ci`, or `tmux-test` workflow/Makefile references exist in this repo.
+
+Commits pushed:
+- `btakita/tsift@5b049cf` — `fix: resolve callee tagpath handle collisions`
+- `btakita/agent-loop@24664c721` — `chore: update tsift callee handle resolution`
+
+I left the pre-existing unrelated dirty tsift files unstaged: `Cargo.toml`, `Cargo.lock`, `VERSIONS.md`, and `plans/gdbvacproof-evidence.md`.
+<!-- agent:boundary:45b2be43 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -162,7 +185,7 @@ I left the pre-existing unrelated dirty tsift files unstaged: `Cargo.toml`, `Car
 preset #spec-test-build-install-commit-push
 - ~do [#tpauditscope]~
 - ~do [#tpauditpolicy]~
-- do [#commhxstrong]
+- ~do [#commhxstrong]~
 - do [#p6tspub]
 - do [#p6ren]
 - do [#mixconv]
@@ -172,7 +195,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#commhxstrong] Stronger fix for `#commhx` name-collision wrong-handle (closed cheaply in 0.1.56 by iterating `symbol_info` rows). Today when two files define the same symbol AND both have valid tagpath handles, the resolver returns the FIRST file's handle, which may not match the actual call edge's resolved file. Stronger fix: when resolving a callee handle for a caller row, prefer the `symbol_info` row whose file lives in the same Louvain community as the caller (use `caller_file` evidence). Falls back to current first-handle-wins behavior when no community context is available (e.g. `tsift communities` itself). Touches `annotate_stored_edges_with_tagpath::EdgeSide::Callee` and the per-row `resolve_tagpath_handles_for_names` helper. Tests: extend the name-collision fixture from 0.1.56 with two valid tagpath handles (both files indexed by tagpath); assert the caller's callee handle matches the file in the caller's community.
 - [ ] [#p6tspub] Restore tsift crates.io publishability after p6tsi: tsift now depends on tagpath via path = ../tagpath. Replace with version = "0.17.1" (or whatever ships first) before any tsift release. Already gated by the sift-publish blocker so no immediate regression, but track here.
 - [ ] [#p6ren] tagpath rename <old> <new>: cross-file, cross-convention identifier rename using the index. Walks every member of the matching family, rewrites in-place in each source convention (snake/camel/Pascal/kebab/UPPER/Ada). Foundation for the agent-loop intent-preserving refactor vision.
 - [ ] [#mixconv] [recommended] tagpath lint policy that tolerates mixed conventions within a single identifier (e.g. `createUserProfile_v2`). Today `parser::detect_convention` classifies any identifier containing `_` as snake-family, so the camelCase-plus-suffix shape lint-fails in a camelCase-only context with `create_user_profile_v2` as the suggested fix. Add a per-context `tolerate_mixed = true` or top-level `lint.allow_mixed_within_identifier` policy that compares tag-equivalence rather than convention-equivalence. Single-file change in `src/lint/mod.rs:79`. Tests: extend `tests/lint.rs` with mixed-within-identifier cases.

@@ -33,7 +33,41 @@ Fixed agent:queue stuck-after-1-turn — auto-strike done items at preflight.
 Compacted content:
 - Archived 23 response topic(s): do [#adoc-baseline-drift-after-user-commit]; do [#adoc-prefix-strip-uncommitted]; web components + controller-as-webserver port; 20 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:029dcb6e -->
+❯ JB `Run Agent Doc` error:
+```
+resync: stash pane %41 is registered in its own project root — skipping kill
+resync: stash pane %39 is registered in its own project root — skipping kill
+resync: stash pane %11 is registered in its own project root — skipping kill
+resync: stash pane %37 is registered in its own project root — skipping kill
+[route] debounce OK — file idle for 11.6s and typing indicator idle
+[route] target tmux session: 0
+Error: authoritative actor generation 30 for tasks/professional/equityfundingsource.md owns pane %28 but route will not bind a new dispatch target because this generation already timed out while starting. Inspect the pane diagnostics, then restart the owner with `agent-doc start tasks/professional/equityfundingsource.md`.
+```
+❯ #spec-test-build-install-commit-push
+### Re: JB Run Agent Doc starting-timeout recovery — gpt-5
+
+Fixed the JetBrains `Run Agent Doc` starting-timeout failure path.
+
+What changed:
+- `route --dispatch-only` can now recover a route-owned `starting_actor_timeout` block if the same pane/generation later shows a dispatch-ready prompt. It clears the saved timeout, promotes the actor to `ready`, then continues through the normal prompt-gated submit path.
+- JetBrains `Run Agent Doc` now invokes `agent-doc route --dispatch-only --plain-trigger --wait-for-ready 60`, giving slow supervisor startup a longer readiness window before surfacing an error.
+- Updated route specs/README and JetBrains spec; bumped the JetBrains plugin version to `0.2.132`.
+
+Verification:
+- `cargo test starting_timeout_blocked_actor_recovery_requires_prompt_ready_proof`
+- `./gradlew test --tests com.github.btakita.agentdoc.TerminalUtilTest`
+- `make check`
+- `./gradlew test buildPlugin`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.34.0`
+- Latest GitHub Actions CI `26417538174`: success, including `Run make tmux-ci`.
+
+Commits:
+- `src/agent-doc`: `c1fa3825 fix: recover timed-out starting actor reroutes`, pushed to `origin/20260422/codex-agent-backend`.
+- Root repo: `22a338184 agent-doc: bump submodule for route recovery` created; root push follows after this document closeout so the session-doc commit is included on `main`.
+
+No actionable follow-up backlog item from this turn.
+<!-- agent:boundary:029beceb -->
 <!-- /agent:exchange -->
 ###
 <!--

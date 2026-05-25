@@ -80,7 +80,12 @@ Closing the one review item that was nearest the line; the other three (#gdbgate
 - **Fixture refresh**: 9 workload-tagged entries appended by #gdbfullreuse.
 
 Evidence: `plans/gdbcacheprove-evidence.md`. `make check` clean; `cargo install --path .` upgraded `~/.cargo/bin/tsift`.
-<!-- agent:boundary:7311859c -->
+### Re: #gdbgatecold packet in flight — opus-4-7
+
+Queue head `do [#gdbgatecold]` is already dispatched as a single focused packet (planner said `parallelizable: False` so sibling items #gdbprephot and #gdbvacproof are intentionally held). The packet is researching scope-bounded inspection sharing along the `prepare_agent_doc_index_gate` → `context_pack_status_reminders` path, with the hard requirement that `tests/exit_code.rs::search_timeout_reports_reindex_when_index_turns_stale_during_worker_run` stays green (the prior process-wide cache attempt broke it).
+
+Awaiting its proof block before committing, pushing, and finalizing with `--done gdbgatecold`. Next queue item advances on the following cycle.
+<!-- agent:boundary:926e3bd7 -->
 <!-- /agent:exchange -->
 ###
 <!--

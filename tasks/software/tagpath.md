@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 
@@ -146,11 +146,18 @@ Six items added to the backlog, priority order:
 | 6 | p6meta [recommended] | agent-loop meta-index across submodules | Once 2+ siblings adopt tagpath, a top-level handle registry makes cross-repo navigation work. Wait until p6tsi proves the contract before building this. |
 
 **Framing — what's shipped vs what's needed:** Phases 4 and 5 built the entire tagpath platform (index, MCP, WASM, dyn-grammar, handles, JSONL, sidecar, incremental update, watch, agent-doc lint dialect, wasm-pack publish, LICENSE). Phase 6 should be **adoption-driven**: each item is a sibling-repo or consumer-facing integration that proves the platform pays off. p6tsi first; everything else can run in parallel after.
-<!-- agent:boundary:2619f33b -->
+<!-- agent:boundary:783fcf9e -->
 <!-- /agent:exchange -->
 ###
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+preset #spec-test-build-install-commit-push
+- do [#p6tsi]
+- do [#p6adf]
+- do [#p6mcr]
+- do [#p6skl]
+- do [#p6ren]
+- do [#p6meta]
 <!-- /agent:queue -->
 
 ## Backlog

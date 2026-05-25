@@ -98,7 +98,31 @@ Updates both `examples/convex-graph/` and `examples/convex-graph-app/convex/` (k
 ### Re: still waiting on #convexsnapshotscale packet — opus-4-7
 
 Packet still running (schema refactor + tsift consumer update + live test against self-hosted Convex). Closing this cycle without consuming the queue head; will commit + push + finalize with `--done convexsnapshotscale` once its proof returns.
-<!-- agent:boundary:b2e03a75 -->
+### Re: #convexsnapshotscale closed — cursor pagination unblocks --remote-snapshot — opus-4-7
+
+Landed (tsift `86d5fde` + sibling `102a1d2` for the schema/consumer code, superproject `fb55e9922`, v0.1.56). `make check` clean across 862 tests; install upgraded.
+
+#### Design verdict — cursor pagination (A), not digest (B)
+Subagent read `convex_projection_freshness` at `src/main.rs:6549-6620` first and found it materializes per-row diffs (`missing_nodes`, `stale_nodes`, `missing_edges`, `stale_edges`) — a hash-only digest would have gutted that diagnostic surface. Cursors over the existing `externalId` / `edgeKey` indexes need no schema changes.
+
+#### Before / after on self-hosted Convex
+
+| | State |
+| --- | --- |
+| **Before** | Legacy `snapshot` returns `HTTP 500: Array length is too long (22342 > maximum length 8192)` at ~22k-edge scale — stricter cousin of the previously documented 15s syscall-budget timeout at 33k rows. |
+| **After** | Paginated path fetches 3,895 nodes in 8 pages + 22,342 edges in 45 pages with no isolate-budget errors. `tsift convex-sync . --remote-snapshot --json` returns `snapshot_hash` matching `local_hash` and `freshness.status: current`. |
+
+#### Surface
+- `examples/convex-graph/{graph,http}.ts` + `examples/convex-graph-app/convex/{graph,http}.ts` (kept identical): added `snapshotMeta`, `snapshotNodesPage`, `snapshotEdgesPage` queries and the matching HTTP-action operations. Legacy `snapshot` retained for small-scale callers.
+- `src/main.rs`: extended `ConvexTransportRequest`/`ConvexTransportResponse` for cursor/page fields; added `ConvexSnapshotMeta`/`ConvexSnapshotPage`; rewrote `fetch_snapshot` as paginated-first with legacy fallback on unknown-op.
+- `tests/graph_db_conformance.rs`: rewrote `fetch_live_convex_snapshot` for paginated ops; new `convex_sync_remote_snapshot_uses_paginated_transport_against_mock_backend` integration test using stdlib `TcpListener` to exercise the cursor loop at page size 3 and pin call ordering.
+
+#### Regression-safety
+`cargo test search_timeout` → 7 passed. `cargo test convex` → 18 passed (all convex-sync tests including the new mock). `make check` exit 0.
+
+#### `#gdbvacproof` unblocked on snapshot prerequisite
+The Convex tombstone-prune leg can now run end-to-end against the self-hosted backend (or any Convex deployment) at sub-50k-row scale. The `--chunk-size 50` requirement for the apply leg's isolate-carryover limit (from `gdbvacconvex-evidence.md`) is a separate ticket — apply works, snapshot now verifies. Queue head advances to `do [#convexscopedeval]` next cycle, then `complete [#gdbvacproof]`.
+<!-- agent:boundary:b6cb8868 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -109,7 +133,7 @@ What are #next-steps to make the graph faster?
 preset #spec-test-build-install-commit-push
 - ~do [#cachelookupshift]~
 - ~do [#gdbvacconvex]~
-- do [#convexsnapshotscale]
+- ~do [#convexsnapshotscale]~
 - do [#convexscopedeval]
 - complete [#gdbvacproof]
 <!-- /agent:queue -->
@@ -117,7 +141,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#convexsnapshotscale] Replace examples/convex-graph/graph.ts:snapshot's ctx.db.query('nodes'/'edges').collect() with a cursor-based paginated query (or a content-hash digest variant) so tsift convex-sync --remote-snapshot can verify reconciliation on tables larger than ~5k rows. Today the demo schema hits Convex's 15s syscall budget on snapshot once the backend has ~33k rows, which blocks --confirmed-convex-reconciled for the full agent-loop graph and therefore blocks the Convex half of #gdbvacproof.
 - [ ] [#convexscopedeval] Decide whether tsift convex-sync should ship a scope-bounded default that promotes per-submodule reconciliation as the supported large-graph workflow, or whether the full-graph workflow waits on #convexsnapshotscale. Per-scope sync against the self-hosted backend (chunk-size 50) was end-to-end verified at the tsift scope (4767 nodes + 28427 edges, 665/665 receipts); full superproject sync hit the 99 MiB isolate carry-over limit at chunk-size 100.
 - [/] [#orchdog] [recommended] Dogfood the completed graph-backed agent orchestration stack on a real agent-doc queue run: run refresh -> evidence -> conflict-matrix -> dispatch-trace -> jobs create/collect, compare worker_prompt_packet and worker_result closure fields, and capture any tsift-side fixture gaps. **Dogfood performed 2026-05-21 on `session-share/tasks/root.md` items #x63e + #v4v0; findings recorded in #gdbevid, #cmgr, #gdbidx — see `session-share/tasks/root.md` exchange "graph-backed orchestration dogfood" entry for the full pipeline trace.** **Second dogfood 2026-05-21 against `tasks/software/tsift.md` (preset `#dogfood-tsift`) surfaced 2 new gaps: #cmgrwres and #gdblock.**
 <!-- /agent:backlog -->

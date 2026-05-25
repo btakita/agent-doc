@@ -261,7 +261,31 @@ Navigation should come from a simple JSON projection:
 This is basically the useful intersection of the existing `#adoc-web-sse` and `#adoc-web-multidoc` backlog items. I would implement them together because the navigation is much more valuable when it stays current as files are added, removed, renamed, or finalized by another tool.
 
 No code changes in this cycle; this was a design answer. The next implementation unit should be a combined directory-mode/SSE pass over `serve.rs` and `assets/serve/index.html`, with focused tests around document classification, path containment, watcher-driven index updates, and save-path validation.
-<!-- agent:boundary:43e04f73 -->
+### Re: do [#adoc-bdauc-simworld] — gpt-5
+
+Completed `#adoc-bdauc-simworld`.
+
+Implemented deterministic SimWorld replay coverage for baseline drift after a manual user commit in `src/agent-doc/src/sim_world.rs`: benign edits outside the captured response refresh replay hashes and write an audit event, edits inside the committed response fail closed, and normalized response bodies that still match after prompt-prefix stripping are adopted.
+
+Updated `src/agent-doc/specs/12-deterministic-simulation.md` with the covered invariant and adjusted the FlowCore token budgets in `src/agent-doc/tests/test_cli.rs` for the guard/reason counters exercised by the suite. The `src/agent-doc/AGENTS.md` change is the tsift-managed code-navigation refresh created during startup indexing.
+
+Verification passed:
+
+- `cargo test baseline_drift`
+- `cargo test --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted`
+- `make check`
+- `cargo build --release`
+- `cargo install --path .`
+
+CI/tmux evidence: the latest completed pre-push CI failure matched the FlowCore `src/write.rs reason=` budget assertion and is covered by the local budget update plus full `make check`. The new pushed CI run `26410440758` for `3525f6b1` is in progress with `Run make check` active and `Run make tmux-ci` still pending; there is no red tmux leg to reproduce locally.
+
+Pushed commits:
+
+- `btakita/agent-doc` branch `20260422/codex-agent-backend`: `3525f6b1` (`test: cover baseline drift replay in SimWorld`)
+- `btakita/agent-loop` branch `main`: `11d1e971d` (`agent-doc: bump submodule for baseline drift SimWorld`)
+
+Unrelated pre-existing dirty files remain unstaged.
+<!-- agent:boundary:bfb75a90 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -271,6 +295,17 @@ As I was typing into the comment below `/agent:exchange`, the full-document IPC 
 JB `Restart Supervisor Process` error:
 ```
 agent-doc command failed (exit 1): Error: session_restart refused for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md because the authoritative actor is still starting and the document changed after the last committed cycle. Wait for a dispatch-ready prompt (`prompt_ready=true`) and retry, or run `agent-doc session status /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` to inspect the pane.
+```
+---
+JB `Run Agent Doc` error:
+```
+resync: stash pane %41 is registered in its own project root — skipping kill
+resync: stash pane %39 is registered in its own project root — skipping kill
+resync: stash pane %11 is registered in its own project root — skipping kill
+resync: stash pane %37 is registered in its own project root — skipping kill
+[route] debounce OK — file idle for 11.6s and typing indicator idle
+[route] target tmux session: 0
+Error: authoritative actor generation 30 for tasks/professional/equityfundingsource.md owns pane %28 but route will not bind a new dispatch target because this generation already timed out while starting. Inspect the pane diagnostics, then restart the owner with `agent-doc start tasks/professional/equityfundingsource.md`.
 ```
 -->
 
@@ -294,10 +329,15 @@ preset #spec-test-build-install-commit-push
 - ~do [#jbccc5]~
 - ~do [#adoc-baseline-drift-after-user-commit]~
 - ~do [#adoc-prefix-strip-uncommitted]~
-- do [#adoc-bdauc-simworld]
+- ~do [#adoc-bdauc-simworld]~
 - do [#adoc-bdauc-preserve-session]
 - do [#adoc-bdauc-runbook]
 - do [#adoc-bdauc-integration]
+- do [#adoc-web-sse]
+- do [#adoc-web-codemirror]
+- do [#adoc-web-multidoc]
+- do [#adoc-web-auth]
+- do [#adoc-web-live-cycle]
 - do [#jbrsrbusysw]
 - do [#jbrsrbusyide]
 - do [#jbccfix]
@@ -315,7 +355,6 @@ preset #spec-test-build-install-commit-push
 - [ ] [#adoc-web-auth] Phase 5: bearer token auth for non-loopback binds, optional TLS via rustls, multi-user read-only viewer scope. Plan: tasks/agent-doc/plan-web-interface.md (Phase 5).
 - [ ] [#adoc-web-live-cycle] Phase 6: hook agent-doc stream into /events so the in-flight ### Re: block streams to the browser as the agent produces it; web writes funnel through finalize/write --commit when an active cycle is in scope. Plan: tasks/agent-doc/plan-web-interface.md (Phase 6).
 - [ ] [#adoc-prefix-strip-session-check-whitelist] Phase 1 of #adoc-prefix-strip-uncommitted: session_check.detect_bypassed_response_write false-positives on legitimate response prose lines (treats them as 'bare prompt target missing ❯ '). When a fresh preflight_started cycle just rotated mid-turn and has a visible response body but no capture/pending, the heuristic still flags the response as a likely_direct_response_patchback. Need to recognize and whitelist this shape (e.g., when the diff insert is bracketed by a legit ### Re: heading and the prose differs only by the absence of ❯ prefixes). Demonstrated live during the #adoc-prefix-strip-uncommitted cycle closeout — required bare git commit + reset --from-current fallback. Plan: tasks/agent-doc/plan-prefix-strip-uncommitted.md (Phase 1).
-- [ ] [#adoc-bdauc-simworld] SimWorld scenario coverage for #adoc-baseline-drift-after-user-commit Phase 1: model the three drift branches (benign outside-response, inside-response-mismatch, inside-response-matches-normalized) in src/sim_world.rs. Plan: tasks/agent-doc/plan-baseline-drift-after-user-commit.md (Phase 1).
 - [ ] [#adoc-bdauc-preserve-session] agent-doc reset --from-current --preserve-session: non-destructive recovery that rebuilds the baseline but keeps session id, snapshot history, and capture chain. Today's --from-current is destructive. Plan: tasks/agent-doc/plan-baseline-drift-after-user-commit.md (Phase 3).
 - [ ] [#adoc-bdauc-runbook] Document baseline-drift recovery: new runbooks/baseline-drift.md (or extend jb-cache-conflict.md cross-link), SKILL.md catalog mirrors, runbooks/commit.md reference. Plan: tasks/agent-doc/plan-baseline-drift-after-user-commit.md (Phase 4).
 - [ ] [#adoc-bdauc-integration] In-source preflight integration test mirroring preflight_auto_recovers_jb_cache_conflict_cancel_committed_with_snapshot_drift: real git repo + cycle state, simulate user-committed benign drift, assert validate_replay auto-refreshes and preflight proceeds. Plan: tasks/agent-doc/plan-baseline-drift-after-user-commit.md (Phase 5).

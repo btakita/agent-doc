@@ -54,12 +54,19 @@ The "full-document IPC corruption" the user observed appears to be the file-IPC 
 1. The visible-write guard already defers direct disk writes when the typing indicator is active. Extend the same defer to IPC retries during finalize: if the typing indicator is active when the socket-IPC ack arrives with `status=error`, wait the bounded debounce before falling back to file IPC.
 2. If the indicator does not become idle in the bounded wait, fail closed and surface a `flow_event stage=ipc_retry_guard reason=typing_defer_active_typing:finalize`.
 
-### Phase 4: Dedupe-only recovery must land through `agent-doc write --commit`
+### Phase 4: Dedupe-only recovery must land through `agent-doc write --commit` [done]
 
-**File:** `src/write.rs`, `src/repair.rs`
+**File:** `src/write.rs` (landed)
 
 1. When `agent-doc dedupe <FILE>` succeeds and the working tree differs from HEAD only by the dedupe deletions, a follow-up `agent-doc write --commit <FILE>` (no stdin) must accept "empty stdin + dedupe-only working-tree drift" as a recoverable closeout and commit the dedupe directly through the binary path.
 2. Do not regress the existing "empty response — nothing to write" guard for the normal case (no working-tree drift); only relax it when the drift is provably a dedupe outcome.
+
+**Implementation:** `recover_empty_response_for_strict_closeout` calls a new `recover_dedupe_only_drift(file)` helper. The helper compares the live file against `dedupe_responses(show_head(file))`; only when they match exactly (and HEAD itself had duplicates) does it save the snapshot, run `git::commit(file)`, and return `Ok(true)`. Arbitrary drift, drift against a clean HEAD, and absent HEAD all return `Ok(false)` so the existing "empty response" guard still fires.
+
+**Tests (`write::late_fallback_patch_guard_tests`):**
+- `recover_dedupe_only_drift_commits_when_file_matches_dedupe_of_head` — happy path: HEAD has a duplicate, file matches `dedupe(HEAD)`, recovery commits and snapshot reflects the deduped response.
+- `recover_dedupe_only_drift_skips_when_file_matches_head` — no drift means no recovery.
+- `recover_dedupe_only_drift_skips_when_drift_is_not_a_dedupe_outcome` — arbitrary user edit is never auto-committed.
 
 ### Phase 5: Regression coverage
 

@@ -57,7 +57,7 @@ Same reasoning as the previous two cycles. `#adcs-binary` is the binary-side pha
 Re-invoke `/agent-doc tasks/agent-doc/agent-doc-bugs2.md` and the new queue head will be `#adcs-binary` — that's a standalone cycle I can fully execute here. If you also want `#adcs-scripts` driven, that needs to happen from each sibling repo's own session.
 ### Re: do [#adcs-binary] — opus-4-7
 
-❯ Implemented Phase 2 of `#agent-doc-commit-sibling`: the `--commit-sibling <REPO>` / `--commit-sibling-message <MSG>` CLI flags on `agent-doc finalize` and `agent-doc write --commit`. Marking `#adcs-binary` done; parent gated until the sibling-script and convention phases land in their respective repos.
+This cycle landed Phase 2 of the commit-sibling parent: the `--commit-sibling <REPO>` and `--commit-sibling-message <MSG>` CLI flags on `agent-doc finalize` and `agent-doc write --commit`. Marking `#adcs-binary` done; parent stays gated until the sibling-script and convention phases land in their respective repos.
 
 #### Changes
 

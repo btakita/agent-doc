@@ -812,6 +812,18 @@ impl SimWorld {
         interrupt_outcome: RestartInterruptOutcome,
     ) -> Result<()> {
         let pane = self.current_dispatch_pane()?;
+        if matches!(self.route.durable.lifecycle, SupervisorLifecycle::Starting) && !force {
+            self.coverage.session_restart_busy_refusals += 1;
+            bail!(
+                "{}; seed={} trace={:?}",
+                crate::session_actor_cmd::restart_starting_refusal_message(
+                    Path::new("sim.md"),
+                    "the document changed after the last committed cycle"
+                ),
+                self.seed,
+                self.trace
+            );
+        }
         if self.restart_live_pane_is_busy() {
             if !force {
                 self.coverage.session_restart_busy_refusals += 1;
@@ -2001,6 +2013,35 @@ fn restart_supervisor_sim_records_pre_interrupt_idle_before_restart() {
     assert_eq!(world.coverage.session_restart_force_used, 1);
     assert_eq!(world.coverage.session_restart_busy_pre_interrupt_idle, 1);
     assert_eq!(world.coverage.session_restart_busy_force_killed, 0);
+    assert_eq!(world.coverage.session_restarts, 1);
+    assert_eq!(world.route.durable.lifecycle, SupervisorLifecycle::Starting);
+}
+
+#[test]
+fn restart_supervisor_sim_force_allows_starting_owner_restart() {
+    let mut world = SimWorld::new(2_018);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+
+    let err = world
+        .restart_supervisor(false, RestartInterruptOutcome::StillBusy)
+        .expect_err("starting restart without --force must fail closed");
+    assert!(err.to_string().contains("session_restart refused"));
+    assert!(
+        err.to_string()
+            .contains("the authoritative actor is still starting")
+    );
+    assert!(
+        err.to_string()
+            .contains("the document changed after the last committed cycle")
+    );
+    assert!(err.to_string().contains("Pass `--force`"));
+    assert_eq!(world.coverage.session_restart_busy_refusals, 1);
+    assert_eq!(world.coverage.session_restarts, 0);
+
+    world
+        .restart_supervisor(true, RestartInterruptOutcome::StillBusy)
+        .unwrap();
+
     assert_eq!(world.coverage.session_restarts, 1);
     assert_eq!(world.route.durable.lifecycle, SupervisorLifecycle::Starting);
 }

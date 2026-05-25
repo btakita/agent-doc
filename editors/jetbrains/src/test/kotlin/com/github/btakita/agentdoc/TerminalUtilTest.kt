@@ -439,6 +439,19 @@ class TerminalUtilTest {
     }
 
     @Test
+    fun `starting restart refusal parses force guidance details`() {
+        val output = """
+            agent-doc command failed (exit 1): Error: session_restart refused for /repo/tasks/root.md because the authoritative actor is still starting and the document changed after the last committed cycle. Wait for a dispatch-ready prompt (`prompt_ready=true`) and retry, or run `agent-doc session status /repo/tasks/root.md` to inspect the pane. Pass `--force` to interrupt the running turn and restart anyway.
+        """.trimIndent()
+
+        val refusal = TerminalUtil.parseStartingSessionRestartRefusal(output)
+
+        assertNotNull(refusal)
+        assertEquals("/repo/tasks/root.md", refusal!!.file)
+        assertEquals("the document changed after the last committed cycle", refusal.reason)
+    }
+
+    @Test
     fun `busy restart refusal message exposes interrupt restart action`() {
         val message = TerminalUtil.buildBusySessionRestartBlockedMessage(
             relativePath = "tasks/root.md",
@@ -453,6 +466,23 @@ class TerminalUtilTest {
 
         assertTrue(message.contains("Restart Supervisor is blocked"))
         assertTrue(message.contains("Pane %2 is busy (agent-doc)"))
+        assertTrue(message.contains("Interrupt and restart"))
+        assertFalse(message.contains("agent-doc command failed"))
+    }
+
+    @Test
+    fun `starting restart refusal message exposes interrupt restart action`() {
+        val message = TerminalUtil.buildStartingSessionRestartBlockedMessage(
+            relativePath = "tasks/root.md",
+            refusal = TerminalUtil.StartingSessionRestartRefusal(
+                file = "/repo/tasks/root.md",
+                reason = "the document changed after the last committed cycle",
+            ),
+        )
+
+        assertTrue(message.contains("Restart Supervisor is blocked"))
+        assertTrue(message.contains("authoritative actor is still starting"))
+        assertTrue(message.contains("document changed after the last committed cycle"))
         assertTrue(message.contains("Interrupt and restart"))
         assertFalse(message.contains("agent-doc command failed"))
     }

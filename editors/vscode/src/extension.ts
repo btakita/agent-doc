@@ -9,12 +9,17 @@ import { createEditorApplyProof, consumeClaimedPatch, isEditorApplyProofCurrent,
 import { appendPatchAlreadyPresent, isPureRepositionSignal } from './patchPlan';
 import { annotateExchangeHeadingsAgainstBaseline, repositionBoundaryToEnd, repositionBoundaryToEndPreserveHead } from './reposition';
 import {
+    buildBusySessionRestartBlockedMessage,
     buildBusySessionClearBlockedMessage,
+    buildForcedRestartSupervisorCommandArgs,
     buildRouteFailurePresentation,
     buildSessionCommandArgs,
     buildSessionStatusPresentation,
     buildSessionSuccessHint,
+    buildStartingSessionRestartBlockedMessage,
+    parseBusySessionRestartRefusal,
     parseBusySessionClearRefusal,
+    parseStartingSessionRestartRefusal,
     sessionStatusShowsIdleDirectPane,
     type SessionCommandName,
 } from './sessionUi';
@@ -632,6 +637,32 @@ async function restartSessionAction(): Promise<void> {
             showHint(buildSessionSuccessHint('restart-supervisor', rel, output));
         },
         'supervisor restart failed',
+        async (errorMessage, rel, cwd) => {
+            const busyRefusal = parseBusySessionRestartRefusal(errorMessage);
+            const startingRefusal = parseStartingSessionRestartRefusal(errorMessage);
+            if (!busyRefusal && !startingRefusal) {
+                showError(`supervisor restart failed: ${errorMessage}`);
+                return;
+            }
+            const message = busyRefusal
+                ? buildBusySessionRestartBlockedMessage(rel, busyRefusal)
+                : buildStartingSessionRestartBlockedMessage(rel, startingRefusal!);
+            const action = await vscode.window.showWarningMessage(
+                message,
+                { modal: false },
+                'Interrupt and restart',
+                'Show status',
+                'Copy details',
+            );
+            if (action === 'Interrupt and restart') {
+                await interruptAndRestartSupervisor(cwd, rel);
+            } else if (action === 'Show status') {
+                await showSessionStatusFor(cwd, rel);
+            } else if (action === 'Copy details') {
+                await vscode.env.clipboard.writeText(errorMessage);
+                showHint(`Copied restart details for ${rel}`);
+            }
+        },
     );
 }
 
@@ -734,6 +765,17 @@ async function interruptAndClearSessionContext(cwd: string, rel: string): Promis
     if (decision !== 'Interrupt and clear') return;
     const output = await runCli(buildSessionCommandArgs('interrupt-clear', rel), cwd);
     showHint(output || `Interrupted and cleared session context for ${rel}`);
+}
+
+async function interruptAndRestartSupervisor(cwd: string, rel: string): Promise<void> {
+    const decision = await vscode.window.showWarningMessage(
+        'Interrupt the running agent-doc turn and restart its supervisor? Unsaved work in the terminal session may be discarded.',
+        { modal: true },
+        'Interrupt and restart',
+    );
+    if (decision !== 'Interrupt and restart') return;
+    const output = await runCli(buildForcedRestartSupervisorCommandArgs(rel), cwd);
+    showHint(buildSessionSuccessHint('restart-supervisor', rel, output));
 }
 
 async function copySessionDiagnosticsAction(): Promise<void> {

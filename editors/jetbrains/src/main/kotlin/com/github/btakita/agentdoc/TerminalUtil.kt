@@ -35,6 +35,10 @@ object TerminalUtil {
         """session_restart refused for (.+?) because pane (\S+) is alive-busy""",
         RegexOption.DOT_MATCHES_ALL,
     )
+    private val STARTING_RESTART_REFUSAL_REGEX = Regex(
+        """session_restart refused for (.+?) because the authoritative actor is still starting and (.+?)\. Wait for a dispatch-ready prompt""",
+        RegexOption.DOT_MATCHES_ALL,
+    )
     private val PROTECTED_CLEAR_REASON_REGEX = Regex("""reason=([^,)]+)""")
     private val BUSY_CLEAR_SOURCE_REGEX = Regex("""source=([^,)]+)""")
     private val BUSY_CLEAR_COMMAND_REGEX = Regex("""current_command=([^,)]+)""")
@@ -144,6 +148,11 @@ object TerminalUtil {
         val source: String,
         val currentCommand: String,
         val tail: String,
+    )
+
+    internal data class StartingSessionRestartRefusal(
+        val file: String,
+        val reason: String,
     )
 
     internal data class RestartSupervisorTelemetry(
@@ -478,7 +487,12 @@ object TerminalUtil {
                     if (busyRefusal != null) {
                         notifyBusySessionRestartBlocked(project, file, relativePath, busyRefusal, output)
                     } else {
-                        notifyError(project, "agent-doc command failed (exit $exitCode):\n$output")
+                        val startingRefusal = parseStartingSessionRestartRefusal(output)
+                        if (startingRefusal != null) {
+                            notifyStartingSessionRestartBlocked(project, file, relativePath, startingRefusal, output)
+                        } else {
+                            notifyError(project, "agent-doc command failed (exit $exitCode):\n$output")
+                        }
                     }
                 }
             },
@@ -800,6 +814,14 @@ object TerminalUtil {
         )
     }
 
+    internal fun parseStartingSessionRestartRefusal(output: String): StartingSessionRestartRefusal? {
+        val match = STARTING_RESTART_REFUSAL_REGEX.find(output) ?: return null
+        return StartingSessionRestartRefusal(
+            file = match.groupValues[1],
+            reason = match.groupValues[2].trim(),
+        )
+    }
+
     private fun extractBusyClearTail(detail: String): String {
         val marker = "tail="
         val start = detail.indexOf(marker)
@@ -1027,6 +1049,35 @@ object TerminalUtil {
         }
     }
 
+    private fun notifyStartingSessionRestartBlocked(
+        project: Project,
+        file: VirtualFile,
+        relativePath: String,
+        refusal: StartingSessionRestartRefusal,
+        rawOutput: String,
+    ) {
+        val summary = buildStartingSessionRestartBlockedMessage(relativePath, refusal)
+        try {
+            val notification = NotificationGroupManager.getInstance()
+                .getNotificationGroup("Agent Doc")
+                .createNotification(summary, NotificationType.WARNING)
+            notification.isImportant = true
+            notification.addAction(NotificationAction.createSimple("Interrupt and restart") {
+                interruptAndRestartSession(project, file)
+            })
+            notification.addAction(NotificationAction.createSimple("Show status") {
+                showSessionStatus(project, file)
+            })
+            notification.addAction(NotificationAction.createSimple("Copy details") {
+                CopyPasteManager.getInstance().setContents(StringSelection(rawOutput))
+                showHint(project, "Copied starting-actor restart details for $relativePath")
+            })
+            notification.notify(project)
+        } catch (_: Exception) {
+            System.err.println("[agent-doc] $summary")
+        }
+    }
+
     internal fun buildBusySessionClearBlockedMessage(
         relativePath: String,
         refusal: BusySessionClearRefusal,
@@ -1083,6 +1134,20 @@ object TerminalUtil {
             append("\nLatest pane output: ")
             append(refusal.tail)
         }
+    }
+
+    internal fun buildStartingSessionRestartBlockedMessage(
+        relativePath: String,
+        refusal: StartingSessionRestartRefusal,
+    ): String = buildString {
+        append("Restart Supervisor is blocked for ")
+        append(relativePath)
+        append(".\nThe authoritative actor is still starting")
+        if (refusal.reason.isNotBlank()) {
+            append(" and ")
+            append(refusal.reason)
+        }
+        append(". Use Interrupt and restart to stop the current supervisor generation and restart anyway, or Show status to inspect the session.")
     }
 
     private fun notify(project: Project, content: String, type: NotificationType) {

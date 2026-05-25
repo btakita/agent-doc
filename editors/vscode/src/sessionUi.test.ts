@@ -1,12 +1,17 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import {
+    buildBusySessionRestartBlockedMessage,
     buildBusySessionClearBlockedMessage,
+    buildForcedRestartSupervisorCommandArgs,
     buildRouteFailurePresentation,
     buildSessionCommandArgs,
     buildSessionStatusPresentation,
     buildSessionSuccessHint,
+    buildStartingSessionRestartBlockedMessage,
+    parseBusySessionRestartRefusal,
     parseBusySessionClearRefusal,
+    parseStartingSessionRestartRefusal,
     sessionStatusShowsIdleDirectPane,
 } from './sessionUi';
 
@@ -29,6 +34,13 @@ describe('sessionUi', () => {
         assert.deepStrictEqual(
             buildSessionCommandArgs('restart-supervisor', 'tasks/agent-doc/agent-doc-bugs2.md'),
             ['session', 'restart-supervisor', 'tasks/agent-doc/agent-doc-bugs2.md'],
+        );
+    });
+
+    it('builds forced supervisor restart command args', () => {
+        assert.deepStrictEqual(
+            buildForcedRestartSupervisorCommandArgs('tasks/agent-doc/agent-doc-bugs2.md'),
+            ['session', 'restart-supervisor', '--force', 'tasks/agent-doc/agent-doc-bugs2.md'],
         );
     });
 
@@ -112,6 +124,63 @@ describe('sessionUi', () => {
         assert.match(message, /protected prompt input/);
         assert.match(message, /Interrupt and clear/);
         assert.doesNotMatch(message, /Refresh and retry/);
+    });
+
+    it('parses busy restart refusals for typed operator UX', () => {
+        const output =
+            'agent-doc command failed (exit 1): Error: session_restart refused for /repo/tasks/root.md because pane %2 is alive-busy (source=authoritative_actor, current_command=agent-doc, tail="gpt-5 high - ~/repo - Context 20% used"). Run `agent-doc session status /repo/tasks/root.md` and wait for an idle prompt, or pass `--force` to interrupt the running turn and restart anyway.';
+
+        const refusal = parseBusySessionRestartRefusal(output);
+
+        assert.ok(refusal);
+        assert.strictEqual(refusal.file, '/repo/tasks/root.md');
+        assert.strictEqual(refusal.pane, '%2');
+        assert.strictEqual(refusal.source, 'authoritative_actor');
+        assert.strictEqual(refusal.currentCommand, 'agent-doc');
+        assert.strictEqual(refusal.tail, 'gpt-5 high - ~/repo - Context 20% used');
+    });
+
+    it('parses starting restart refusals for typed operator UX', () => {
+        const output =
+            'agent-doc command failed (exit 1): Error: session_restart refused for /repo/tasks/root.md because the authoritative actor is still starting and the document changed after the last committed cycle. Wait for a dispatch-ready prompt (`prompt_ready=true`) and retry, or run `agent-doc session status /repo/tasks/root.md` to inspect the pane. Pass `--force` to interrupt the running turn and restart anyway.';
+
+        const refusal = parseStartingSessionRestartRefusal(output);
+
+        assert.ok(refusal);
+        assert.strictEqual(refusal.file, '/repo/tasks/root.md');
+        assert.strictEqual(refusal.reason, 'the document changed after the last committed cycle');
+    });
+
+    it('builds busy restart warning with interrupt action named', () => {
+        const message = buildBusySessionRestartBlockedMessage(
+            'tasks/root.md',
+            {
+                file: '/repo/tasks/root.md',
+                pane: '%2',
+                source: 'authoritative_actor',
+                currentCommand: 'agent-doc',
+                tail: 'gpt-5 high - ~/repo - Context 20% used',
+            },
+        );
+
+        assert.match(message, /Restart Supervisor is blocked/);
+        assert.match(message, /Pane %2 is busy \(agent-doc\)/);
+        assert.match(message, /Interrupt and restart/);
+    });
+
+    it('builds starting restart warning with interrupt action named', () => {
+        const message = buildStartingSessionRestartBlockedMessage(
+            'tasks/root.md',
+            {
+                file: '/repo/tasks/root.md',
+                reason: 'the document changed after the last committed cycle',
+            },
+        );
+
+        assert.match(message, /Restart Supervisor is blocked/);
+        assert.match(message, /authoritative actor is still starting/);
+        assert.match(message, /document changed after the last committed cycle/);
+        assert.match(message, /Interrupt and restart/);
     });
 
     it('detects only idle direct pane status as refresh-retry eligible', () => {

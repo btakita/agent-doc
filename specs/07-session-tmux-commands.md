@@ -298,16 +298,18 @@ single-owner actor controls:
   creating a new generation and refreshing the registry projection from that
   result. The registry helper used after controller acceptance must be
   projection-only and must not create another actor transition.
-- `agent-doc session restart <FILE> [--fresh]` requests an actor-owned
+- `agent-doc session restart <FILE> [--fresh] [--force]` requests an actor-owned
   supervisor restart through IPC instead of relying on route-side restart
   heuristics. Before contacting the supervisor, it must record a controller
   operator-command acceptance or fail with the rejected stage. If direct tmux
   evidence classifies the resolved pane as `alive-busy`, restart must fail
   closed before mutating the session, except when the pane is visibly at the
-  harness clean-exit restart prompt. A `starting` actor generation is also a
-  restart guard: restart may proceed only after the pane shows a
-  dispatch-ready prompt or that clean-exit restart prompt, and the document has
-  not changed after the last committed response cycle.
+  harness clean-exit restart prompt. The refusal must point to `--force` as the
+  explicit discard path. A `starting` actor generation is also a restart guard:
+  bare restart may proceed only after the pane shows a dispatch-ready prompt or
+  that clean-exit restart prompt, and the document has not changed after the
+  last committed response cycle. `--force` bypasses that starting guard and may
+  interrupt a busy live pane before requesting the supervisor restart.
 - `agent-doc session clear <FILE>` injects the harness-native `/clear`
   equivalent into the authoritative session through the same canonical
   single-line submit command used by routed reopen and queued slash-command

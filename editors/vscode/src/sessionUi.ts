@@ -22,10 +22,27 @@ export interface BusySessionClearRefusal {
     protectedReason?: string;
 }
 
+export interface BusySessionRestartRefusal {
+    file: string;
+    pane: string;
+    source: string;
+    currentCommand: string;
+    tail: string;
+}
+
+export interface StartingSessionRestartRefusal {
+    file: string;
+    reason: string;
+}
+
 const BUSY_CLEAR_REFUSAL_HEADER_REGEX =
     /session_clear refused for (.+?) because pane (\S+) is alive-busy/s;
 const PROTECTED_CLEAR_REFUSAL_HEADER_REGEX =
     /session_clear refused for (.+?) because pane (\S+) contains protected prompt input/s;
+const BUSY_RESTART_REFUSAL_HEADER_REGEX =
+    /session_restart refused for (.+?) because pane (\S+) is alive-busy/s;
+const STARTING_RESTART_REFUSAL_REGEX =
+    /session_restart refused for (.+?) because the authoritative actor is still starting and (.+?)\. Wait for a dispatch-ready prompt/s;
 const BUSY_CLEAR_SOURCE_REGEX = /source=([^,)]+)/s;
 const BUSY_CLEAR_COMMAND_REGEX = /current_command=([^,)]+)/s;
 const PROTECTED_CLEAR_REASON_REGEX = /reason=([^,)]+)/s;
@@ -35,6 +52,10 @@ export function buildSessionCommandArgs(
     relativePath: string,
 ): string[] {
     return ['session', command, relativePath];
+}
+
+export function buildForcedRestartSupervisorCommandArgs(relativePath: string): string[] {
+    return ['session', 'restart-supervisor', '--force', relativePath];
 }
 
 export function buildSessionStatusPresentation(
@@ -119,6 +140,31 @@ export function parseBusySessionClearRefusal(output: string): BusySessionClearRe
     };
 }
 
+export function parseBusySessionRestartRefusal(output: string): BusySessionRestartRefusal | undefined {
+    const match = BUSY_RESTART_REFUSAL_HEADER_REGEX.exec(output);
+    if (!match) return undefined;
+
+    const detail = output.slice((match.index ?? 0) + match[0].length);
+    const source = BUSY_CLEAR_SOURCE_REGEX.exec(detail)?.[1] || 'unknown';
+    const currentCommand = BUSY_CLEAR_COMMAND_REGEX.exec(detail)?.[1] || 'unknown';
+    return {
+        file: match[1],
+        pane: match[2],
+        source,
+        currentCommand,
+        tail: extractBusyClearTail(detail),
+    };
+}
+
+export function parseStartingSessionRestartRefusal(output: string): StartingSessionRestartRefusal | undefined {
+    const match = STARTING_RESTART_REFUSAL_REGEX.exec(output);
+    if (!match) return undefined;
+    return {
+        file: match[1],
+        reason: match[2].trim(),
+    };
+}
+
 export function buildBusySessionClearBlockedMessage(
     relativePath: string,
     refusal: BusySessionClearRefusal,
@@ -145,6 +191,35 @@ export function buildBusySessionClearBlockedMessage(
         'Wait for the turn to finish, then retry Clear Session Context.',
         'Use Refresh and retry if the pane has returned to an idle prompt, or Interrupt and clear to discard the running turn.',
     ].join(' ') + tail;
+}
+
+export function buildBusySessionRestartBlockedMessage(
+    relativePath: string,
+    refusal: BusySessionRestartRefusal,
+): string {
+    const command = refusal.currentCommand && refusal.currentCommand !== 'unknown'
+        ? ` (${refusal.currentCommand})`
+        : '';
+    const tail = refusal.tail && refusal.tail !== 'unknown'
+        ? `\nLatest pane output: ${refusal.tail}`
+        : '';
+    return [
+        `Restart Supervisor is blocked for ${relativePath}.`,
+        `Pane ${refusal.pane} is busy${command}.`,
+        'Use Interrupt and restart to stop the running turn and restart the supervisor, or Show status to inspect the session.',
+    ].join(' ') + tail;
+}
+
+export function buildStartingSessionRestartBlockedMessage(
+    relativePath: string,
+    refusal: StartingSessionRestartRefusal,
+): string {
+    const reason = refusal.reason ? ` and ${refusal.reason}` : '';
+    return [
+        `Restart Supervisor is blocked for ${relativePath}.`,
+        `The authoritative actor is still starting${reason}.`,
+        'Use Interrupt and restart to stop the current supervisor generation and restart anyway, or Show status to inspect the session.',
+    ].join(' ');
 }
 
 function normalizeOutputBody(output: string): string {

@@ -254,7 +254,9 @@ pub fn restart(file: &Path, mode: RestartMode, force: bool) -> Result<()> {
         "session_restart",
     )?;
     let tmux = Tmux::default_server();
-    guard_starting_actor_operator_command(&ctx, &tmux, OperatorAction::Restart)?;
+    if !force {
+        guard_starting_actor_operator_command(&ctx, &tmux, OperatorAction::Restart)?;
+    }
     prepare_restart_live_busy_pane(&ctx, &tmux, force)?;
     ensure_supervisor_socket(&ctx)?;
     let response = crate::supervisor::ipc::send_command(
@@ -559,11 +561,8 @@ fn guard_starting_actor_operator_command(
         ),
     );
     anyhow::bail!(
-        "{} refused for {} because the authoritative actor is still starting and {}. Wait for a dispatch-ready prompt (`prompt_ready=true`) and retry, or run `agent-doc session status {}` to inspect the pane.",
-        action.as_str(),
-        ctx.canonical_file.display(),
-        reason,
-        ctx.canonical_file.display()
+        "{}",
+        starting_operator_guard_refusal_message(action, &ctx.canonical_file, &reason)
     )
 }
 
@@ -584,6 +583,29 @@ fn starting_operator_guard_reason(
         return "the ready prompt could not be reconciled".to_string();
     }
     "the pane has not reached a dispatch-ready prompt (`prompt_ready=true`)".to_string()
+}
+
+fn starting_operator_guard_refusal_message(
+    action: OperatorAction,
+    file: &Path,
+    reason: &str,
+) -> String {
+    let mut message = format!(
+        "{} refused for {} because the authoritative actor is still starting and {}. Wait for a dispatch-ready prompt (`prompt_ready=true`) and retry, or run `agent-doc session status {}` to inspect the pane.",
+        action.as_str(),
+        file.display(),
+        reason,
+        file.display()
+    );
+    if action == OperatorAction::Restart {
+        message.push_str(" Pass `--force` to interrupt the running turn and restart anyway.");
+    }
+    message
+}
+
+#[cfg(test)]
+pub(crate) fn restart_starting_refusal_message(file: &Path, reason: &str) -> String {
+    starting_operator_guard_refusal_message(OperatorAction::Restart, file, reason)
 }
 
 fn operator_command_has_starting_actor(ctx: &SessionContext) -> bool {
@@ -2547,6 +2569,22 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             starting_operator_guard_reason(OperatorAction::Restart, false, false, true),
             "the pane has not reached a dispatch-ready prompt (`prompt_ready=true`)"
         );
+    }
+
+    #[test]
+    fn starting_restart_refusal_points_to_force() {
+        let message = starting_operator_guard_refusal_message(
+            OperatorAction::Restart,
+            Path::new("/tmp/doc.md"),
+            "the document changed after the last committed cycle",
+        );
+
+        assert!(message.contains("session_restart refused"));
+        assert!(message.contains("the authoritative actor is still starting"));
+        assert!(message.contains("the document changed after the last committed cycle"));
+        assert!(message.contains("agent-doc session status /tmp/doc.md"));
+        assert!(message.contains("Pass `--force`"));
+        assert!(message.contains("interrupt the running turn and restart anyway"));
     }
 
     #[test]

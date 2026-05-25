@@ -66,6 +66,35 @@ Marking the parent `#adoc-baseline-drift-after-user-commit` done — the wedge n
 - `cargo install --path .` + `cargo build --release` both ran; tmux + symlinked release binaries refreshed.
 
 Plan: `tasks/agent-doc/plan-baseline-drift-after-user-commit.md`.
+### Re: do [#adoc-prefix-strip-uncommitted] — opus-4-7 (HEAD)
+
+User-facing wedge closed — `validate_replay` now accepts the user-cleaned response body when a JB cache-conflict spill landed spurious `❯ ` markers and the user stripped them.
+
+#### What changed (binary)
+
+- **`src/agent-doc/src/repair.rs`** — new `pub(crate) fn response_already_applied_after_prefix_strip(doc, response)`. Mirrors `response_already_applied` but strips a single leading `❯ ` from each captured response line before the contiguous match. Non-prefixed response lines flow through unchanged so the helper degrades to the strict behavior when no spill happened.
+- **`src/agent-doc/src/capture.rs`** — `validate_replay`'s benign-drift branch (added for `#adoc-baseline-drift-after-user-commit` Phase 2) now tries the strict `response_already_applied` first and falls back to the prefix-strip match. On either success the capture's `file_hash` / `snapshot_hash` are refreshed via the existing `capture_baseline_refreshed_for_benign_drift` event, so the recovery is auditable.
+
+This implements the spirit of plan Phase 3 ("tighten the captured response contract — hash with the same normalization the file-IPC apply path uses, normalize prefix markers") without requiring a new `agent-doc repair --resync-capture` CLI surface (plan Phase 2). The recovery path is the existing implicit refresh; no new operator commands needed.
+
+#### Tests
+
+- `validate_replay_adopts_user_prefix_stripped_response_body` — new; pins the post-strip recovery path: captured body has a stray `❯ Submodule pointer updated.`, working tree has the cleaned `Submodule pointer updated.`, `validate_replay` returns Ok and the baseline refreshes.
+- Existing `validate_replay_refreshes_baseline_when_response_intact_after_user_commit`, `validate_replay_still_bails_when_response_body_removed_from_current`, and `validate_replay_rejects_diverged_file_hash` all still green — the strict-match path is preserved.
+- `cargo test validate_replay` green.
+
+#### Scope notes
+
+- Plan Phase 1 (session_check whitelist for `recovered_via_prefix_strip` distinct from `likely_direct_response_patchback`) and Phase 5 SimWorld coverage stay open. After this fix the failure mode that triggered Phase 1's concern no longer reaches session_check because validate_replay closes the cycle. If a regression shows session_check still misclassifying the pattern after this lands, that becomes a follow-up.
+- Plan Phase 2 (`agent-doc repair --resync-capture` CLI) is not added; the implicit refresh covers the documented repro and avoids a destructive operator command surface.
+
+#### Closeout
+
+- Submodule commit: `ea62709` — `fix: adopt user prefix-stripped response in validate_replay`.
+- Superproject commit: `f72e6e335` — `agent-doc: bump submodule for #adoc-prefix-strip-uncommitted`.
+- `cargo install --path .` + `cargo build --release` both ran.
+
+Plan: `tasks/agent-doc/plan-prefix-strip-uncommitted.md`.
 <!-- agent:boundary:d2e44e2f -->
 <!-- /agent:exchange -->
 ###
@@ -99,6 +128,10 @@ preset #spec-test-build-install-commit-push
 - ~do [#jbccc5]~
 - ~do [#adoc-baseline-drift-after-user-commit]~
 - do [#adoc-prefix-strip-uncommitted]
+- do [#adoc-bdauc-simworld]
+- do [#adoc-bdauc-preserve-session]
+- do [#adoc-bdauc-runbook]
+- do [#adoc-bdauc-integration]
 - do [#jbrsrbusysw]
 - do [#jbrsrbusyide]
 - do [#jbccfix]

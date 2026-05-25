@@ -460,7 +460,33 @@ Committed and pushed:
 CI check: submodule CI run `26414165097` for `5535828` is in progress with no red tmux leg when checked; the parent repo has no workflow named `CI`.
 
 Left unrelated existing dirty submodule files unstaged: `src/diff.rs`, `src/git_sibling.rs`, `src/route/tests.rs`, and `src/session_accretion.rs`.
-<!-- agent:boundary:707ab5d2 -->
+### Re: do [#adoc-web-auth] — gpt-5
+
+Completed `#adoc-web-auth`.
+
+Implemented Phase 5 serve security:
+- non-loopback `agent-doc serve --host ...` now requires bearer auth and prints generated edit/read-only URLs unless tokens are supplied;
+- read-only tokens can load sessions/docs/projections/SSE but cannot save, and the embedded UI disables editing for that scope;
+- added `/api/auth` so the UI can detect scope;
+- added optional rustls HTTPS through `--tls-cert` and `--tls-key`;
+- updated `tiny_http` to use its `ssl-rustls` feature and committed the resulting lockfile changes.
+
+Verification passed:
+- `cargo test serve`
+- `cargo test test_cli_help`
+- `make check`
+- `cargo build --release`
+- `cargo install --path .`
+- `git diff --cached --check`
+
+Committed and pushed:
+- agent-doc submodule `7917eb3` (`feat: secure serve remote access`)
+- parent repo `2f45859df` (`agent-doc: bump submodule for serve auth`)
+
+CI check: submodule CI run `26414656183` for `7917eb3` is in progress with no red tmux leg when checked; the parent repo has no workflow named `CI`.
+
+Left unrelated existing dirty submodule files unstaged: `src/diff.rs`, `src/git_sibling.rs`, `src/route/tests.rs`, and `src/session_accretion.rs`.
+<!-- agent:boundary:5023b86a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -512,7 +538,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#adoc-web-sse]~
 - ~do [#adoc-web-codemirror]~
 - ~do [#adoc-web-multidoc]~
-- do [#adoc-web-auth]
+- ~do [#adoc-web-auth]~
 - do [#adoc-web-live-cycle]
 - do [#jbrsrbusysw]
 - do [#jbrsrbusyide]
@@ -525,7 +551,6 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#adoc-web-auth] Phase 5: bearer token auth for non-loopback binds, optional TLS via rustls, multi-user read-only viewer scope. Plan: tasks/agent-doc/plan-web-interface.md (Phase 5).
 - [ ] [#adoc-web-live-cycle] Phase 6: hook agent-doc stream into /events so the in-flight ### Re: block streams to the browser as the agent produces it; web writes funnel through finalize/write --commit when an active cycle is in scope. Plan: tasks/agent-doc/plan-web-interface.md (Phase 6).
 - [ ] [#jbrsrbusysw] SimWorld scenario coverage for session_restart --force: route + Restart Supervisor while pane is alive-busy with and without --force, asserting the new refusal message and force success (including session_restart_busy_pre_interrupt_idle and session_restart_busy_force_killed event variants). Substantial — requires new Op variant + tmux/session_actor mock in src/sim_world.rs. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md phase 4 (SimWorld piece).
 - [ ] [#jbrsrbusyide] JB plugin IDE-side telemetry for session_restart --force: surface session_restart_force_used, session_restart_busy_pre_interrupt_idle, and session_restart_busy_force_killed events in the IntelliJ notification area or Logcat so users can see the recovery path the binary took. Kotlin work in editors/jetbrains/. Plan: tasks/agent-doc/plan-jb-restart-supervisor-busy-refusal.md phase 4 (IDE piece).

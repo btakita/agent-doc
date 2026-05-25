@@ -191,7 +191,7 @@ Six items added to the backlog, priority order:
 - `p6adfmerge` — feature branch `20260422/codex-agent-backend` carries this + prior Phase 4/5 prep. Needs a merge sweep to agent-doc main before any external consumer pulls.
 
 Auto-queue advances next to MCP install helper (`p6mcr`).
-<!-- agent:boundary:b92700c2 -->
+<!-- agent:boundary:6c33476c -->
 <!-- /agent:exchange -->
 ###
 
@@ -199,7 +199,7 @@ Auto-queue advances next to MCP install helper (`p6mcr`).
 preset #spec-test-build-install-commit-push
 - ~do [#p6tsi]~
 - ~do [#p6adf]~
-- do [#p6mcr]
+- ~do [#p6mcr]~
 - do [#p6skl]
 - do [#p6ren]
 - do [#p6meta]
@@ -212,7 +212,6 @@ preset #spec-test-build-install-commit-push
 - [ ] [#p6adfmerge] Merge agent-doc feature branch 20260422/codex-agent-backend to main: the p6adf commit (845ddfd6) and prior p4*/p5* prep ride on this branch. agent-loop superproject already tracks feature-branch commits, but agent-doc main is behind and will need a sweep before any external consumer pulls.
 - [ ] [#p6tsifull] Wire the remaining tsift consumer surfaces to the tagpath adapter: graph, explain, communities, path, federated-search. The adapter (src/tsift/src/tagpath_adapter.rs) and annotate helper are already public; each command needs TagpathSearchOpts plumbing + a per-row annotation pass + tagpath_handle field on StoredSymbol / StoredEdge / community report structs. Mechanical follow-up to p6tsi which only wired tsift search.
 - [ ] [#p6tspub] Restore tsift crates.io publishability after p6tsi: tsift now depends on tagpath via path = ../tagpath. Replace with version = "0.17.1" (or whatever ships first) before any tsift release. Already gated by the sift-publish blocker so no immediate regression, but track here.
-- [ ] [#p6mcr] tagpath mcp install helper: generate Claude Desktop / Codex / OpenCode / Cursor MCP config JSON blocks pointing at the local tagpath mcp binary. Drops integration friction so users get the 9 tools without hand-editing config files.
 - [ ] [#p6skl] Update .claude/skills/tagpath/SKILL.md — currently references v0.5.0 and pre-Phase-4 commands. Cover index / watch / lint --dialect agent-doc / MCP server / sidecar perf semantics so Claude Code can recommend the new surfaces without rediscovery.
 - [ ] [#p6ren] tagpath rename <old> <new>: cross-file, cross-convention identifier rename using the index. Walks every member of the matching family, rewrites in-place in each source convention (snake/camel/Pascal/kebab/UPPER/Ada). Foundation for the agent-loop intent-preserving refactor vision.
 - [ ] [#p6meta] [recommended] agent-loop meta-index: aggregate per-submodule .naming/index.json files into a top-level handle registry so cross-repo searches resolve. New CLI: tagpath meta-index <workspace-root>. Useful once 2+ siblings adopt tagpath.

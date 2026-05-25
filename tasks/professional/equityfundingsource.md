@@ -75,7 +75,7 @@ Post-deploy smoke on `https://equityfundingsource.brian-takita.workers.dev`:
 - `equityfundingsource.com` and `www.equityfundingsource.com` still resolve to DreamHost (`69.163.177.53`, DreamHost NS records). `/portal-admin` on the custom domain returns a WordPress/Apache 404, so custom-domain cutover is not complete.
 ❯ Use the CF api or chromium-bridge to create a token unblock the D1 API.
 ❯ Update the env variables. We will remain on the current cf url until further notice.
-### Re: Cloudflare D1 + Access — gpt-5 (HEAD)
+### Re: Cloudflare D1 + Access — gpt-5
 
 Done on the current `workers.dev` URL. I did not move `equityfundingsource.com` or `www.equityfundingsource.com`.
 
@@ -98,7 +98,7 @@ Verification:
 - GitHub Actions check: this repo has no `.github` workflows and `gh run list --workflow CI --limit 1` reports no workflow named `CI`.
 
 References used for the Cloudflare API shape: [Zero Trust organization create](https://developers.cloudflare.com/api/resources/zero_trust/subresources/organizations/methods/create/), [Access application create](https://developers.cloudflare.com/api/resources/zero_trust/subresources/access/subresources/applications/methods/create/), and [One-time PIN IdP setup](https://developers.cloudflare.com/cloudflare-one/integrations/identity-providers/one-time-pin/).
-<!-- agent:boundary:0d25faed -->
+<!-- agent:boundary:b5fc4e67 -->
 <!-- /agent:exchange -->
 ###
 <!--

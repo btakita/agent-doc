@@ -180,6 +180,44 @@ use crate::harness::HarnessConfig;
 use crate::sessions::Tmux;
 use crate::supervisor::ipc::IpcMethod;
 use crate::{frontmatter, prompt, resync, sessions, snapshot, sync};
+use std::cell::Cell;
+
+thread_local! {
+    /// Per-invocation override for the bounded wait that
+    /// `wait_for_authoritative_actor_ready` applies when the authoritative
+    /// actor is still `starting`. Set from `route::run_with_tmux` when the
+    /// caller passed `--wait-for-ready <SECONDS>` so user-initiated dispatches
+    /// (e.g. JB plugin Run Agent Doc on a slow-starting supervisor) can hold
+    /// the wait longer than the harness-specific default. `None` means no
+    /// override — the binary-specific timeout in
+    /// `authoritative_actor_ready_retry_budget` applies.
+    static WAIT_FOR_READY_OVERRIDE: Cell<Option<Duration>> = const { Cell::new(None) };
+}
+
+/// RAII guard that installs a `wait_for_ready` override on entry and restores
+/// the previous value on drop. Keeps the override scoped to the single
+/// `route::run_with_tmux` invocation even if it returns early via `?`.
+struct WaitForReadyOverrideGuard {
+    previous: Option<Duration>,
+}
+
+impl WaitForReadyOverrideGuard {
+    fn set(value: Option<Duration>) -> Self {
+        let previous = WAIT_FOR_READY_OVERRIDE.with(|cell| cell.replace(value));
+        Self { previous }
+    }
+}
+
+impl Drop for WaitForReadyOverrideGuard {
+    fn drop(&mut self) {
+        let previous = self.previous;
+        WAIT_FOR_READY_OVERRIDE.with(|cell| cell.set(previous));
+    }
+}
+
+fn wait_for_ready_override() -> Option<Duration> {
+    WAIT_FOR_READY_OVERRIDE.with(|cell| cell.get())
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct CommandDispatchResult {
@@ -1317,6 +1355,7 @@ pub fn run(
     col_args: &[String],
     mode: RouteMode,
     plain_trigger: bool,
+    wait_for_ready: Option<Duration>,
 ) -> Result<()> {
     run_with_tmux(
         file,
@@ -1326,6 +1365,7 @@ pub fn run(
         col_args,
         mode,
         plain_trigger,
+        wait_for_ready,
     )
 }
 
@@ -1337,7 +1377,9 @@ pub fn run_with_tmux(
     col_args: &[String],
     mode: RouteMode,
     plain_trigger: bool,
+    wait_for_ready: Option<Duration>,
 ) -> Result<()> {
+    let _wait_for_ready_guard = WaitForReadyOverrideGuard::set(wait_for_ready);
     tracing::debug!(file = %file.display(), pane, debounce_ms, cols = ?col_args, "route::run start");
     let _ = resync::prune_with_tmux(tmux); // Clean stale entries before lookup
 
@@ -2819,7 +2861,24 @@ fn wait_for_authoritative_actor_ready(
     harness: &HarnessConfig,
     initial: &AuthoritativeActorDispatchTarget,
 ) -> Result<Option<AuthoritativeActorDispatchTarget>> {
-    let budget = authoritative_actor_ready_retry_budget(Some(harness.binary.as_str()), cfg!(test));
+    let override_timeout = wait_for_ready_override();
+    let budget = match override_timeout {
+        Some(timeout) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_wait_for_ready_override file={} harness={} timeout_secs={}",
+                    file.display(),
+                    harness.binary,
+                    timeout.as_secs()
+                ),
+            );
+            crate::flow::routed_reopen::RetryBudget::new(timeout, Duration::from_millis(100))
+        }
+        None => {
+            authoritative_actor_ready_retry_budget(Some(harness.binary.as_str()), cfg!(test))
+        }
+    };
     let deadline = Instant::now() + budget.timeout;
     let mut last_facts = authoritative_actor_ready_facts_from_target(
         initial,
@@ -2866,6 +2925,18 @@ fn wait_for_authoritative_actor_ready(
                             &last_facts,
                         ),
                     );
+                    if override_timeout.is_some() {
+                        crate::ops_log::log_op(
+                            file,
+                            &format!(
+                                "route_wait_for_ready_elapsed file={} harness={} elapsed_ms={} timeout_ms={}",
+                                file.display(),
+                                harness.binary,
+                                elapsed.as_millis(),
+                                budget.timeout.as_millis()
+                            ),
+                        );
+                    }
                     return Ok(Some(refreshed));
                 }
                 PromptReadyBarrierDecision::Terminal => {
@@ -2928,6 +2999,18 @@ fn wait_for_authoritative_actor_ready(
                 RoutedReopenGuardReason::StartingActorNotReadyUnpersisted,
             );
         }
+    }
+    if override_timeout.is_some() {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_wait_for_ready_timeout file={} harness={} elapsed_ms={} timeout_ms={}",
+                file.display(),
+                harness.binary,
+                elapsed.as_millis(),
+                budget.timeout.as_millis()
+            ),
+        );
     }
     Ok(None)
 }
@@ -3038,7 +3121,7 @@ fn route_via_authoritative_actor(
             ),
         );
     }
-    rescue_from_stash(
+    let rescued_from_stash = rescue_from_stash(
         tmux,
         &dispatch_pane,
         session_id,
@@ -3047,6 +3130,71 @@ fn route_via_authoritative_actor(
         split_before,
     );
     register_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
+
+    // After a real stash rescue the pane is now visible in the agent-doc window,
+    // which can make the harness's dispatch-ready prompt observable for the first
+    // time. The pre-rescue Starting wait (line ~2952) may have timed out while the
+    // pane was still parked. Re-promote and, if still Starting, re-attempt the
+    // ready wait once on the freshly-visible pane before bailing out.
+    if rescued_from_stash && actor_state == crate::session_actor::ActorState::Starting {
+        let runtime = query_supervisor_runtime(file, session_id);
+        let (refreshed_record, refreshed_runtime) =
+            promote_starting_authoritative_actor_if_dispatch_ready(
+                tmux,
+                file,
+                file_path,
+                actor.record.clone(),
+                runtime,
+                harness,
+            );
+        let mut refreshed = AuthoritativeActorDispatchTarget {
+            record: refreshed_record,
+            runtime: refreshed_runtime,
+        };
+        if refreshed.actor_state() == crate::session_actor::ActorState::Ready {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_authoritative_actor_post_rescue_promoted_ready file={} pane={} generation={}",
+                    file.display(),
+                    dispatch_pane,
+                    refreshed.record.generation
+                ),
+            );
+            actor = refreshed;
+            actor_state = actor.actor_state();
+            dispatch_pane = actor.record.pane_id.clone();
+        } else if let Some(after_wait) = wait_for_authoritative_actor_ready(
+            tmux, file, session_id, file_path, harness, &refreshed,
+        )? {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_authoritative_actor_post_rescue_ready_after_wait file={} pane={} generation={}",
+                    file.display(),
+                    dispatch_pane,
+                    after_wait.record.generation
+                ),
+            );
+            actor = after_wait;
+            actor_state = actor.actor_state();
+            dispatch_pane = actor.record.pane_id.clone();
+        } else {
+            // Bind the unused refreshed target back so the diagnostic log captures
+            // the post-rescue facts even when the wait still failed.
+            refreshed.runtime = query_supervisor_runtime(file, session_id);
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_authoritative_actor_post_rescue_still_starting file={} pane={} generation={} runtime_state={}",
+                    file.display(),
+                    dispatch_pane,
+                    refreshed.record.generation,
+                    refreshed.actor_state().as_str()
+                ),
+            );
+        }
+    }
 
     let prompt_ready = actor_state == crate::session_actor::ActorState::Ready
         || current_generation_ready_prompt_proven(tmux, &actor, harness);
@@ -3191,14 +3339,20 @@ fn route_via_authoritative_actor(
         AuthoritativeActorDispatchAction::FailClosed => {
             let reason =
                 actor_dispatch_blocker_reason(actor_dispatch_state).unwrap_or("actor not ready");
+            let rescue_context = if rescued_from_stash {
+                " (after a fresh stash rescue — re-promotion still did not observe a dispatch-ready prompt)"
+            } else {
+                ""
+            };
             anyhow::bail!(
-                "authoritative actor generation {} for {} owns pane {} but route will not inject a new trigger because {} (waited {}s for {} startup). {}",
+                "authoritative actor generation {} for {} owns pane {} but route will not inject a new trigger because {} (waited {}s for {} startup){}. {}",
                 actor.record.generation,
                 file.display(),
                 dispatch_pane,
                 reason,
                 dispatch_only_starting_pane_recovery_timeout(Some(harness)).as_secs(),
                 harness.binary,
+                rescue_context,
                 authoritative_actor_dispatch_recovery_hint(actor_state, file)
             );
         }
@@ -4653,6 +4807,11 @@ fn wait_for_busy_restart_handoff(
 
 /// Rescue a pane from a stash window back to the agent-doc window.
 /// Only rescues if the pane is in the target session — never swaps across sessions.
+///
+/// Returns `true` when the pane was actually moved out of a stash window so callers
+/// can re-evaluate state that depends on pane location (e.g. Starting→Ready
+/// promotion after the rescue makes the pane visible). Returns `false` when the
+/// rescue was a no-op (pane not in stash, or session guard tripped).
 fn rescue_from_stash(
     tmux: &Tmux,
     pane_id: &str,
@@ -4660,7 +4819,7 @@ fn rescue_from_stash(
     file_path: &str,
     target_session: &str,
     split_before: bool,
-) {
+) -> bool {
     // Session guard: only rescue within the target session
     let pane_session = pane_session_name(tmux, pane_id).unwrap_or_default();
     if pane_session != target_session {
@@ -4668,7 +4827,7 @@ fn rescue_from_stash(
             "[route] Pane {} is in session '{}', not target '{}' — skipping stash rescue",
             pane_id, pane_session, target_session
         );
-        return;
+        return false;
     }
 
     let pane_win_name = pane_window_name(tmux, pane_id).unwrap_or_default();
@@ -4688,17 +4847,23 @@ fn rescue_from_stash(
         } else {
             target_panes.last()
         };
+        let mut moved = false;
         if let Some(target) = target {
             let join_flag = if split_before { "-dbh" } else { "-dh" };
             match sessions::join_pane_guarded(tmux, pane_id, target, target_session, join_flag) {
-                Ok(()) => eprintln!("[route] Rescued pane {} via join-pane", pane_id),
+                Ok(()) => {
+                    eprintln!("[route] Rescued pane {} via join-pane", pane_id);
+                    moved = true;
+                }
                 Err(e) => eprintln!("[route] join-pane rescue failed for {} ({})", pane_id, e),
             }
         }
         if let Err(e) = register_dispatch_target(tmux, session_id, pane_id, file_path) {
             eprintln!("[route] warning: re-register failed: {}", e);
         }
+        return moved;
     }
+    false
 }
 
 fn send_command_unchecked(

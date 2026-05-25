@@ -465,6 +465,15 @@ enum Commands {
         /// Wait for typing to settle before routing (milliseconds, 0 = no debounce)
         #[arg(long, default_value_t = 500)]
         debounce: u64,
+        /// Override the bounded wait for the authoritative actor to become
+        /// dispatch-ready (seconds). When the actor is still in `starting`
+        /// state, route normally fails closed after a harness-specific
+        /// timeout (e.g. 10s for claude). User-initiated dispatches —
+        /// especially the JB plugin's `Run Agent Doc` — can pass a longer
+        /// wait (e.g. 60) so the user does not have to manually rerun while
+        /// the supervisor is still booting. Capped at 600s.
+        #[arg(long)]
+        wait_for_ready: Option<u64>,
     },
     /// Detect permission prompts from a Claude Code or OpenCode session
     Prompt {
@@ -1580,6 +1589,7 @@ fn main() -> anyhow::Result<()> {
             cols,
             focus: _focus,
             debounce,
+            wait_for_ready,
         } => {
             // NOTE: sync::run_layout_only was previously called here after route when
             // --col args were provided. Removed because the JB plugin calls `agent-doc sync`
@@ -1591,7 +1601,17 @@ fn main() -> anyhow::Result<()> {
             } else {
                 route::RouteMode::Managed
             };
-            route::run(&file, pane.as_deref(), debounce, &cols, mode, plain_trigger)
+            let wait_for_ready = wait_for_ready
+                .map(|secs| std::time::Duration::from_secs(secs.min(600)));
+            route::run(
+                &file,
+                pane.as_deref(),
+                debounce,
+                &cols,
+                mode,
+                plain_trigger,
+                wait_for_ready,
+            )
         }
         Commands::Prompt { file, answer, all } => {
             if all {

@@ -3666,7 +3666,7 @@ fn run_with_tmux_dispatch_only_ignores_startup_miss_on_alive_registered_pane() {
         &format!("exec {} {}", ready_agent.display(), doc.display()),
     );
 
-    run_with_tmux(&doc, &iso, None, 0, &[], RouteMode::DispatchOnly, false)
+    run_with_tmux(&doc, &iso, None, 0, &[], RouteMode::DispatchOnly, false, None)
         .expect("dispatch-only route should ignore the stale startup-miss gate and send");
 
     let after = wait_for_pane_contains(
@@ -7951,7 +7951,7 @@ fn route_warns_on_nonexistent_tmux_session() {
         unsafe {
             std::env::set_var("AGENT_DOC_NO_AUTOSTART", "1");
         }
-        let r = run_with_tmux(&file, &iso, None, 0, &[], RouteMode::Managed, false);
+        let r = run_with_tmux(&file, &iso, None, 0, &[], RouteMode::Managed, false, None);
         unsafe {
             std::env::remove_var("AGENT_DOC_NO_AUTOSTART");
         }
@@ -8000,7 +8000,7 @@ fn route_falls_back_to_existing_session() {
         unsafe {
             std::env::set_var("AGENT_DOC_NO_AUTOSTART", "1");
         }
-        let r = run_with_tmux(&file, &iso, None, 0, &[], RouteMode::Managed, false);
+        let r = run_with_tmux(&file, &iso, None, 0, &[], RouteMode::Managed, false, None);
         unsafe {
             std::env::remove_var("AGENT_DOC_NO_AUTOSTART");
         }
@@ -9966,4 +9966,33 @@ fn starting_actor_timeout_record_clears_after_ready_or_terminal_refresh() {
         record_starting_actor_timeout(&file_path, &facts, "after clear").unwrap(),
         StartingActorTimeoutLogDecision::NewTimeout
     );
+}
+
+#[test]
+fn wait_for_ready_override_guard_sets_and_restores_thread_local() {
+    use std::time::Duration;
+
+    // Baseline: no override set.
+    assert_eq!(wait_for_ready_override(), None);
+
+    // Outer scope sets a 30s override.
+    let outer = WaitForReadyOverrideGuard::set(Some(Duration::from_secs(30)));
+    assert_eq!(wait_for_ready_override(), Some(Duration::from_secs(30)));
+
+    {
+        // Inner scope replaces with a 60s override.
+        let _inner = WaitForReadyOverrideGuard::set(Some(Duration::from_secs(60)));
+        assert_eq!(wait_for_ready_override(), Some(Duration::from_secs(60)));
+
+        // Nested unset is honored too.
+        let _none = WaitForReadyOverrideGuard::set(None);
+        assert_eq!(wait_for_ready_override(), None);
+    }
+
+    // Both nested guards dropped — back to outer 30s.
+    assert_eq!(wait_for_ready_override(), Some(Duration::from_secs(30)));
+
+    drop(outer);
+    // Outer dropped — back to unset baseline.
+    assert_eq!(wait_for_ready_override(), None);
 }

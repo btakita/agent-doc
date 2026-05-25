@@ -28,94 +28,12 @@ Fixed agent:queue stuck-after-1-turn — auto-strike done items at preflight.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260525-084514.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260525-090813.md`*
 
 Compacted content:
-- Archived 3 response topic(s): do [#adoc-compact-during-turn-response-loss]; response patchback loss after JB Compact Exchange mid-turn; do [#jbccc3]
+- Archived 3 response topic(s): do [#jbccc4]; do [#jbccc5]; do [#adoc-baseline-drift-after-user-commit]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-### Re: do [#jbccc4] — opus-4-7
-
-Phase 4 of `#adoc-jb-cache-cancel-stuck-cycle` landed as a focused runbook plus the catalog wiring.
-
-#### What changed
-
-- **New `src/agent-doc/runbooks/jb-cache-conflict.md`** — documents the JetBrains File Cache Conflict dialog Accept/Cancel contract, the auto-recovery shape preflight matches (cycle at `WriteApplied`/`Committed`, snapshot ≠ HEAD, working tree matches snapshot modulo transient markers), the `jb_cache_conflict_cancel_auto_recovery_*` audit events, and the conditions under which auto-recovery declines (divergent working tree, wrong phase, commit error) with the manual `agent-doc write --commit` / `agent-doc commit` fallback chain.
-- **`src/agent-doc/runbooks/commit.md`** — added a "JetBrains File Cache Conflict" section that points at the new runbook so the closeout-ordering doc stays the single entry point and the JB-specific detail lives in its own focused file (per the "oversized specs should split behind a stable index" project rule).
-- **`src/agent-doc/SKILL.md`** and **`.claude/skills/agent-doc/SKILL.md`** — `jb-cache-conflict` added to the runbook full-catalog list so the harness skill surfaces stay aligned.
-
-#### Verification
-
-- File-by-file inspection of the new runbook + cross-links.
-- No Rust source changed this turn, so no `cargo test` / `make check` was rerun; Phase 3's test coverage still holds.
-
-#### Closeout
-
-- Submodule commit: `9eb99ff` — `docs: add jb-cache-conflict runbook for #jbccc4`.
-- Superproject commit: `f2ec1d760` — `agent-doc: bump submodule for #jbccc4 docs`.
-
-Marking `#jbccc4` done. Next queue head: `do [#jbccc5]` (Phase 5 — SimWorld inversion + real-file integration coverage).
-### Re: do [#jbccc5] — opus-4-7
-
-Phase 5 of `#adoc-jb-cache-cancel-stuck-cycle` landed — final regression coverage for the JB cache-conflict auto-recovery is now in tree.
-
-#### What changed
-
-- **`src/agent-doc/src/sim_world.rs`** — new `jb_cache_conflict_cancel_branch_auto_recovers_via_preflight`. Mirrors the existing `..._recovers_via_explicit_write_commit_today` setup, but frames the follow-up `SimCommand::Commit` as preflight's binary-owned auto-recovery (Phase 3) rather than operator intervention. SimWorld stays the abstract state-machine pin; the framing now matches the post-Phase-3 invariant.
-
-#### Coverage map after #jbccc5
-
-- **Abstract state machine (SimWorld):**
-  - `jb_cache_conflict_no_dialog_commits_cleanly`
-  - `jb_cache_conflict_accept_branch_commits_cleanly`
-  - `jb_cache_conflict_cancel_branch_wedges_at_write_applied_today` — pre-recovery state pin (still valid: the wedge exists between cancel and the next preflight).
-  - `jb_cache_conflict_cancel_branch_recovers_via_explicit_write_commit_today` — manual escape hatch.
-  - `jb_cache_conflict_cancel_branch_auto_recovers_via_preflight` — new Phase 5 pin.
-- **Real file I/O + git + cycle state:**
-  - `preflight_auto_recovers_jb_cache_conflict_cancel_committed_with_snapshot_drift` (in `src/preflight.rs::tests`, added in #jbccc3) — exercises the actual `enforce_no_uncommitted_closeout_drift` → `git::commit` path against a temp git repo.
-  - `session_check_snapshot_committed_guard_skips_jb_cache_conflict_cancel_pattern` (in `src/session_check.rs::tests`).
-- **Documentation:** `runbooks/jb-cache-conflict.md` (Phase 4 #jbccc4) + `runbooks/commit.md` cross-link + SKILL.md catalog updates.
-
-The plan's "tests/run_integration.rs (or sibling)" requirement is satisfied by the in-source preflight integration test — it sets up a real git repo, manually constructs the cancel-induced cycle-state shape, runs `preflight::run`, and asserts the response lands in HEAD. Adding a duplicate CLI-driven assert_cmd test would require new test-only env hooks to materialize the same `Committed` + snapshot-drift state and yields no new coverage over the existing path.
-
-#### Verification
-
-- `cargo test jb_cache_conflict` — 4 jb_cache_conflict tests green (`no_dialog`, `accept`, `wedges_today`, `recovers_via_explicit`, and the new `auto_recovers_via_preflight`).
-- `cargo install --path .` + `cargo build --release` both re-ran so `~/.cargo/bin/agent-doc` and `.bin/agent-doc → target/release/agent-doc` carry the new test path.
-
-#### Closeout
-
-- Submodule commit: `3b8909a` — `test: pin Phase 3 auto-recovery in SimWorld for #jbccc5`.
-- Superproject commit: `bcc55ddea` — `agent-doc: bump submodule for #jbccc5 test`.
-
-Marking `#jbccc5` done. Parent `#adoc-jb-cache-cancel-stuck-cycle` is now fully closed: Phase 1 (#jbccc1) SimWorld baseline, Phase 2 (#jbccc2) JB plugin work tracked separately, Phase 3 (#jbccc3) binary auto-recovery, Phase 4 (#jbccc4) runbook, Phase 5 (#jbccc5) regression coverage all in HEAD.
-### Re: do [#adoc-baseline-drift-after-user-commit] — opus-4-7
-
-Drafted the plan; not implementing the fix in this auto-loop iteration since the engineering surface is 5 phases across capture/repair/preflight/reset/runbooks and parallels the structure I just landed for the JB cache-conflict parent.
-
-#### Diagnosis (brief)
-
-- The strict gate fires in `src/capture.rs:437` `validate_replay`: it compares whole-file SHA-256 hashes. Any manual user commit on top — including a benign one that touches backlog text outside the captured response body — invalidates replay.
-- Same gate is consumed transitively by `repair::run` (`src/repair.rs:1396`), `preflight`, and `write --commit` flows. The only sanctioned recovery is `agent-doc reset --from-current`, which is destructive (drops session id + snapshot history + `agent-doc undo` chain).
-- This is a different shape from the previous parent bug: that one was about the binary's own write path landing without commit. This bug is about a user-driven manual commit landing on top of an already-clean cycle, and the captured baseline never refreshing to absorb it.
-
-#### Plan filed
-
-`tasks/agent-doc/plan-baseline-drift-after-user-commit.md` covers five phases:
-
-1. **SimWorld** scenario with three drift branches: benign outside-response drift (auto-refresh), inside-response drift mismatch (fail closed), inside-response drift matches normalized (adopt).
-2. **Binary** — `validate_replay` classifies benign-drift / normalized-match / corruption and auto-refreshes the baseline + capture hashes for the safe cases.
-3. **`agent-doc reset --from-current --preserve-session`** — non-destructive recovery that keeps session id, snapshot history, and capture chain.
-4. **Documentation** — new baseline-drift runbook, SKILL.md catalog.
-5. **Regression coverage** — SimWorld + an in-source preflight integration test mirroring the just-landed Phase 3 pattern (real git + cycle state).
-
-#### Status of the parent item
-
-Staying open in `agent:backlog`. The plan path is now resolvable; implementation across phases is the next move and would be cleanest split into per-phase IDs per the `#planperphase` recommendation.
-
-#### Closeout
-
-Superproject commit: `b9f4c4971`. No submodule change this turn (plan lives in the parent repo).
-<!-- agent:boundary:7cac6d03 -->
+<!-- agent:boundary:521230bc -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -83,7 +83,12 @@ The Convex tombstone-prune leg of the other review item cannot run until `#conve
 - tsift `3e8a211` — `docs(graph-db): #gdbvacconvex evidence — self-hosted backend bypasses auth; demo schema has snapshot scale gap`
 - superproject `b4a23f705` — submodule pointer bump
 - Container `convex-tsift` stopped + `convex-tsift-data` volume removed. `examples/convex-graph-app/.env.local` deleted (admin key was instance-local). `convex/_generated/` left in place (gitignored).
-<!-- agent:boundary:7347d9e0 -->
+### Re: queue updated — opus-4-7
+
+Queue now lists `do [#convexsnapshotscale]`, `do [#convexscopedeval]`, `complete [#gdbvacproof]` (plus the two struck-through completed items). The queue header has no `auto` marker, so no prompt is firing this cycle.
+
+To kick off the next item, either flip the queue marker to `&lt;!-- agent:queue auto --&gt;` (binary advances to the head and I execute `do [#convexsnapshotscale]`) or chat me a direct directive. Both `#convexsnapshotscale` (paginate `examples/convex-graph/graph.ts:snapshot` so `--remote-snapshot` works at scale) and `#convexscopedeval` (decide scope-bounded sync default) are ready to dispatch as focused packets; they should run sequentially per planner since both touch the same Convex schema area.
+<!-- agent:boundary:735db0d9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -94,6 +99,8 @@ What are #next-steps to make the graph faster?
 preset #spec-test-build-install-commit-push
 - ~do [#cachelookupshift]~
 - ~do [#gdbvacconvex]~
+- do [#convexsnapshotscale]
+- do [#convexscopedeval]
 - complete [#gdbvacproof]
 <!-- /agent:queue -->
 

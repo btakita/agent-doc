@@ -33,7 +33,24 @@ Fixed agent:queue stuck-after-1-turn — auto-strike done items at preflight.
 Compacted content:
 - Archived 2 response topic(s): JB Run Agent Doc starting-timeout recovery; JB Restart Supervisor Process starting guard
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:57ea5e64 -->
+❯ Which tasks in review can be completed? Please order by priority.
+### Re: Review Completion Priority — gpt-5
+
+
+❯ Priority order:
+
+❯ 1. `#agent-doc-commit-sibling` can be completed now. The parent phases are all archived in done (`#adcs-binary`, `#adcs-scripts`, `#adcs-convention`), the source contains the CLI/trailer implementation in `src/git_sibling.rs`, `src/main.rs`, and `src/write.rs`, and `cargo test --bin agent-doc commit_sibling` passed 6/6.
+
+❯ 2. `#jbresstart` is the next-best close candidate, but I would only complete it if the existing route coverage is accepted as sufficient. The route code now refuses cross-file dispatch and rechecks Starting actors after stash rescue; `cargo test --bin agent-doc cross_file` passed 1/1 with one live tmux test ignored, and `cargo test --bin agent-doc starting_timeout` passed 2/2. The plan's exact stash-rescue SimWorld/live proof is still not explicit, so strict review should keep it gated.
+
+❯ 3. `#adoc-jb-cache-cancel-stuck-cycle` should stay gated until `#jbccc2` closes. Binary phases `#jbccc1`, `#jbccc3`, `#jbccc4`, and `#jbccc5` are archived and `cargo test --bin agent-doc jb_cache_conflict` passed 7/7, but the parent plan still includes the JetBrains plugin cancel behavior.
+
+❯ 4. `#jbccc2` cannot be completed yet. `PatchWatcher.kt` has IPC ack machinery, but I did not find the required defer-write-until-dialog-resolution behavior, nor the Cancel path that leaves the patch file in place without modifying the document.
+
+❯ 5. `#stuckcycledup` cannot be completed yet. The review text says the `stuck_captured_cycle` warning exists, but `src/flow/closeout.rs` still returns `None`; `cargo test --bin agent-doc stuck_captured_cycle` found 0 tests. Keep it gated or rewrite the review item to match the actual partial state.
+
+❯ Changed paths: none by me. Verification: `cargo test --bin agent-doc commit_sibling`, `cargo test --bin agent-doc jb_cache_conflict`, `cargo test --bin agent-doc cross_file`, `cargo test --bin agent-doc starting_timeout`, `cargo test --bin agent-doc cycle_already_committed`, and `cargo test --bin agent-doc stuck_captured_cycle`. Confidence: high for `#agent-doc-commit-sibling`, medium for `#jbresstart`, high that the other three should remain gated. Escalation: none.
+<!-- agent:boundary:0b96c2b3 -->
 <!-- /agent:exchange -->
 ###
 <!--

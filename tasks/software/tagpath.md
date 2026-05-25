@@ -128,7 +128,33 @@ v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-gramm
 Compacted content:
 - Archived 4 response topic(s): do [#p6tsifullcommunities]; Can tagpath handle mixed name conventions?; Is there a chance for lossy community lookups with tsift or agent-doc using tagpath?; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-<!-- agent:boundary:bce39154 -->
+### Re: do [#commhx] — opus-4-7
+
+Fixed in tsift 0.1.56 (committed b27cde570 in the superproject).
+
+#### Fix
+`resolve_tagpath_handles_for_names` in `src/tsift/src/main.rs` now iterates every `db.symbol_info` row for a given name and keeps the first one that resolves through the tagpath index, instead of stopping at the first row by `(file, line)`. When two symbols share a name across files (e.g. `main` in `bin/foo/main.rs` + `bin/bar/main.rs`) and the first-by-`(file, line)` definition lives outside the tagpath walk (vendored, generated, or skipped dir), the handle for the in-index copy is no longer silently dropped.
+
+The fix is the "cheap" variant from the backlog item — call-graph caller_file disambiguation is still open as a stronger follow-up (federated subitem can layer on top).
+
+#### Test
+`tests/exit_code.rs::communities_json_resolves_handle_through_name_collision` — uses a `__pycache__/main.rs` + `src/main.rs` fixture. Tagpath skips `__pycache__/` via SKIP_DIRS; tsift's `ignore`-based walker indexes both files. ASCII `_` (0x5F) < `s` (0x73), so `__pycache__/main.rs` is the first row from `symbol_info("helper")`. Verified the test fails before the fix (exit 101) and passes after.
+
+#### Verification
+- `cargo test --test exit_code` — green
+- `make check` — green (full clippy + suite)
+- `cargo build --release` + `cargo install --path .` — installed `tsift 0.1.56` to `~/.cargo/bin/`
+
+#### Files
+- `src/tsift/src/main.rs` — fix at `resolve_tagpath_handles_for_names`
+- `src/tsift/tests/exit_code.rs` — name-collision regression test
+- `src/tsift/SPEC.md` — collision-handling clause in §`tagpath_handle semantics`
+- `src/tsift/VERSIONS.md` — 0.1.56 entry (bundled with prior 0.1.55 convex pagination work that was prepared but uncommitted)
+- `src/tsift/Cargo.toml`, `src/tsift/Cargo.lock` — version → 0.1.56
+- Superproject `src/tsift` submodule pointer bumped
+
+This unblocks the federated subitem (`#p6tsifullfederated`), which can now assume per-name file-correct resolution.
+<!-- agent:boundary:5afc6086 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -136,7 +162,7 @@ Compacted content:
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#commhx]
+- ~do [#commhx]~
 - do [#p6tsifullfederated]
 - do [#tpstdiag]
 - do [#tpaudit]
@@ -149,7 +175,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 (<!-- agent:backlog -->
-- [ ] [#commhx] Name-collision wrong-handle in `resolve_tagpath_handles_for_names` (src/tsift/src/main.rs:3438). When two symbols share a name across files (e.g. `main` in `bin/foo/main.rs` and `bin/bar/main.rs`), the resolver picks the first `db.symbol_info` row by `(file, line)` and calls `adapter.handle_for_member(abs, name)` against that file. Result: silent wrong-handle for the community member, or silent no-handle when the wrong file is not in the tagpath index. Cheap fix: iterate every symbol_info row and pick the first that returns a handle. Stronger fix: disambiguate via call-graph caller_file evidence inside the same community. Should land before the federated subitem (p6tsifullfederated) so federated work can assume a per-name file-correct resolution. Tests: extend tests/exit_code.rs path/explain/graph/communities with a name-collision fixture (two files defining `main`).
 - [ ] [#p6tsifullfederated] Subitem of p6tsifull. Wire tagpath adapter into tsift search --federated (workspace-scoped search across multiple scoped index.db files). Most complex of the five — federated search loops over scopes; adapter load must respect per-scope project_root. Defer until p6tsifullpath/explain/graph/communities establish the per-command template.
 - [ ] [#tpstdiag] Surface the tagpath stale-index signal into the structured `tsift --envelope` / `--json` output. Today `annotate_*_with_tagpath` only emits `tagpath_index_stale: true (reason=…)` on stderr; tsift / agent-doc consumers reading the JSON response cannot see the diagnostic and therefore cannot decide to re-run with `--tagpath-strict` or trigger a rebuild. Add a top-level `tagpath_index_stale: true` + `tagpath_stale_reason` field to the envelope when any of the helpers reported `stale=true`. Touches `cmd_search`, `cmd_path`, `cmd_explain`, `cmd_graph`, `cmd_communities`, and the budget-mode reports. Tests: extend `tests/exit_code.rs` with a stale-index fixture (mutate a source file after `write_fresh_tagpath_index`, assert the JSON carries the new field).
 - [ ] [#tpaudit] Reconcile tsift tree-sitter source walk against tagpath `.naming.toml` walk and surface the diff. Today silent recall loss happens when tagpath `[exclude]` or `extends` skip files / languages that tsift indexes; the tsift symbols in those files get no handle even with a fresh tagpath index. New CLI: `tsift audit tagpath [--path .] [--scope <name>] [--json]` that reports (a) tsift symbols whose definition file is outside the tagpath source set, (b) tagpath families whose source files no longer exist in tsift index.db, and (c) the policy hints (excluded paths, language coverage gaps). Tests: extend `tests/exit_code.rs` with a fixture where `.naming.toml` excludes a path tsift still indexes.

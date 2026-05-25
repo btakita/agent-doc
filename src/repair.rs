@@ -1493,6 +1493,37 @@ pub(crate) fn response_already_applied(doc: &str, response: &str) -> bool {
         .any(|window| window == response_lines.as_slice())
 }
 
+/// Phase 2/3 of `#adoc-prefix-strip-uncommitted`: accepts the response as
+/// applied when the captured `response` had spurious leading `❯ ` markers
+/// (e.g. JB cache-conflict applied prompt-prefix markers to agent response
+/// body lines) that the user has since stripped from the document. Compares
+/// the response's normalized lines against the document after also stripping
+/// a single leading `❯ ` from response lines. Returns true on a strict
+/// contiguous match — non-prefixed response lines therefore behave the same
+/// as `response_already_applied`.
+pub(crate) fn response_already_applied_after_prefix_strip(doc: &str, response: &str) -> bool {
+    let response_lines: Vec<String> = response
+        .lines()
+        .filter_map(normalize_response_line)
+        .map(|line| {
+            let trimmed = line.trim_start();
+            if let Some(stripped) = trimmed.strip_prefix("❯ ") {
+                let indent_len = line.len() - trimmed.len();
+                format!("{}{}", &line[..indent_len], stripped)
+            } else {
+                line
+            }
+        })
+        .collect();
+    if response_lines.is_empty() {
+        return false;
+    }
+    let doc_lines = normalized_response_lines(doc);
+    doc_lines
+        .windows(response_lines.len())
+        .any(|window| window == response_lines.as_slice())
+}
+
 fn normalized_response_lines(content: &str) -> Vec<String> {
     content
         .lines()

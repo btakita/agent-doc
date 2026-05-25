@@ -479,9 +479,11 @@ pub fn validate_replay(file: &Path, capture: &CaptureRecord) -> Result<()> {
 
 /// Returns true when the captured `response_body` is still contiguously
 /// present in the current document (modulo blank-line / transient marker
-/// normalization). Defers to `repair::response_already_applied` so the same
-/// presence check protects both the orphaned-response repair gate and the
-/// baseline auto-refresh path.
+/// normalization, and modulo `❯ ` prompt-prefix markers stripped by the
+/// user after a JB cache-conflict-induced prefix spill). Defers to
+/// `repair::response_already_applied` for the strict match and falls back
+/// to `repair::response_already_applied_after_prefix_strip` for the
+/// post-strip recovery path covered by `#adoc-prefix-strip-uncommitted`.
 fn response_body_intact_in_current(
     file: &Path,
     response_body: &str,
@@ -490,8 +492,11 @@ fn response_body_intact_in_current(
     if response_body.trim().is_empty() {
         return Ok(false);
     }
-    let _ = file; // reserved for richer structural checks (#adoc-bdauc Phase 2 stretch goals)
-    Ok(crate::repair::response_already_applied(
+    let _ = file; // reserved for richer structural checks (#adoc-bdauc stretch goals)
+    if crate::repair::response_already_applied(current_file, response_body) {
+        return Ok(true);
+    }
+    Ok(crate::repair::response_already_applied_after_prefix_strip(
         current_file,
         response_body,
     ))
@@ -899,6 +904,45 @@ mod tests {
         assert!(
             log.contains("capture_baseline_refreshed_for_benign_drift"),
             "refresh must be logged for audit:\n{log}"
+        );
+    }
+
+    /// Phase 2/3 of #adoc-prefix-strip-uncommitted: when the captured
+    /// response_body had spurious `❯ ` markers on response prose lines
+    /// (e.g. from the JB cache-conflict prefix spill) and the user has
+    /// since stripped them with sed, the `response_already_applied_after_prefix_strip`
+    /// match accepts the cleaned working tree and refreshes the baseline.
+    #[test]
+    fn validate_replay_adopts_user_prefix_stripped_response_body() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        let original = "## Exchange\n\nuser prompt\n";
+        std::fs::write(&doc, original).unwrap();
+        crate::snapshot::save(&doc, original).unwrap();
+        // Captured body simulates the JB cache-conflict spill: a stray "❯ "
+        // accidentally prepended to one of the agent's response prose lines.
+        let captured_response =
+            "### Re: topic — gpt-5\n\nImplemented and verified.\n❯ Submodule pointer updated.\n";
+        let capture = capture_response(&doc, captured_response).unwrap();
+
+        // User ran sed (or equivalent) to strip the spurious ❯ markers.
+        let cleaned_doc = "## Exchange\n\nuser prompt\n### Re: topic — gpt-5\n\nImplemented and verified.\nSubmodule pointer updated.\n";
+        std::fs::write(&doc, cleaned_doc).unwrap();
+        crate::snapshot::save(&doc, cleaned_doc).unwrap();
+
+        validate_replay(&doc, &capture)
+            .expect("user-normalized prefix strip must auto-refresh the baseline");
+
+        let refreshed = load_active(&doc).unwrap().unwrap();
+        assert_eq!(
+            refreshed.file_hash.as_deref(),
+            Some(crate::ops_log::content_hash(cleaned_doc).as_str()),
+            "file_hash should reflect the user-cleaned document"
+        );
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("capture_baseline_refreshed_for_benign_drift"),
+            "prefix-strip refresh should use the same audit event:\n{log}"
         );
     }
 

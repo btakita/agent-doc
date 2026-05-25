@@ -68,6 +68,9 @@ enum SimCommand {
     CrashAt(FaultPoint),
     Recover,
     SessionClear,
+    SessionRestart,
+    SessionRestartForce,
+    SessionRestartForcePreInterruptIdle,
     BindRouteOwner,
     SupervisorReady,
     SupervisorBusy,
@@ -99,6 +102,12 @@ enum SupervisorLifecycle {
     WaitingInput,
     Blocked,
     Closed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RestartInterruptOutcome {
+    StillBusy,
+    IdleBeforeForceKill,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -291,6 +300,11 @@ struct Coverage {
     route_dispatch_acceptances: usize,
     route_dispatch_proofs: usize,
     session_clears: usize,
+    session_restart_busy_refusals: usize,
+    session_restart_force_used: usize,
+    session_restart_busy_pre_interrupt_idle: usize,
+    session_restart_busy_force_killed: usize,
+    session_restarts: usize,
     starting_dispatch_blocks: usize,
     starting_timeout_records: usize,
     starting_timeout_coalesces: usize,
@@ -357,6 +371,9 @@ impl Coverage {
         if message.contains("supervisor lifecycle Closed cannot accept route dispatch") {
             self.closed_dispatch_blocks += 1;
         }
+        if message.contains("session_restart refused") {
+            self.session_restart_busy_refusals += 1;
+        }
     }
 
     fn merge(&mut self, other: Coverage) {
@@ -374,6 +391,12 @@ impl Coverage {
         self.route_dispatch_acceptances += other.route_dispatch_acceptances;
         self.route_dispatch_proofs += other.route_dispatch_proofs;
         self.session_clears += other.session_clears;
+        self.session_restart_busy_refusals += other.session_restart_busy_refusals;
+        self.session_restart_force_used += other.session_restart_force_used;
+        self.session_restart_busy_pre_interrupt_idle +=
+            other.session_restart_busy_pre_interrupt_idle;
+        self.session_restart_busy_force_killed += other.session_restart_busy_force_killed;
+        self.session_restarts += other.session_restarts;
         self.starting_dispatch_blocks += other.starting_dispatch_blocks;
         self.starting_timeout_records += other.starting_timeout_records;
         self.starting_timeout_coalesces += other.starting_timeout_coalesces;
@@ -438,7 +461,7 @@ impl SimWorld {
         let mut rng = DeterministicRng::new(seed);
         let mut world = Self::new(seed);
         for _ in 0..steps {
-            let command = match rng.next_usize(42) {
+            let command = match rng.next_usize(45) {
                 0 => SimCommand::EditPrompt,
                 1 => SimCommand::EditLaterPrompt,
                 2 => SimCommand::AddMalformedBacklogItem,
@@ -455,26 +478,29 @@ impl SimWorld {
                 }
                 19 => SimCommand::Recover,
                 20 => SimCommand::SessionClear,
-                21 => SimCommand::BindRouteOwner,
-                22 => SimCommand::SupervisorReady,
-                23 => SimCommand::SupervisorBusy,
-                24 => SimCommand::SupervisorWaitingInput,
-                25 => SimCommand::SupervisorBlocked,
-                26 => SimCommand::SupervisorClosed,
-                27 => SimCommand::DispatchRoutePrompt,
-                28 => SimCommand::ProveDispatchAccepted,
-                29 => SimCommand::StaleSupervisorUpdate,
-                30 => SimCommand::ObserveStalePane,
-                31 => SimCommand::ObserveMissingPane,
-                32 => SimCommand::DriftProjection,
-                33 => SimCommand::RepairProjection,
-                34 => SimCommand::PromoteStartingPromptReady,
-                35 => SimCommand::BusyInterruptRecoveryReady,
-                36 => SimCommand::SyncProtectedGrowthManual,
-                37 => SimCommand::SyncProtectedGrowthPassive,
-                38 => SimCommand::SyncProtectedGrowthFocusVisible,
-                39 => SimCommand::SyncDetachableReplaceManual,
-                40 => SimCommand::SyncDetachableReplacePassive,
+                21 => SimCommand::SessionRestart,
+                22 => SimCommand::SessionRestartForce,
+                23 => SimCommand::SessionRestartForcePreInterruptIdle,
+                24 => SimCommand::BindRouteOwner,
+                25 => SimCommand::SupervisorReady,
+                26 => SimCommand::SupervisorBusy,
+                27 => SimCommand::SupervisorWaitingInput,
+                28 => SimCommand::SupervisorBlocked,
+                29 => SimCommand::SupervisorClosed,
+                30 => SimCommand::DispatchRoutePrompt,
+                31 => SimCommand::ProveDispatchAccepted,
+                32 => SimCommand::StaleSupervisorUpdate,
+                33 => SimCommand::ObserveStalePane,
+                34 => SimCommand::ObserveMissingPane,
+                35 => SimCommand::DriftProjection,
+                36 => SimCommand::RepairProjection,
+                37 => SimCommand::PromoteStartingPromptReady,
+                38 => SimCommand::BusyInterruptRecoveryReady,
+                39 => SimCommand::SyncProtectedGrowthManual,
+                40 => SimCommand::SyncProtectedGrowthPassive,
+                41 => SimCommand::SyncProtectedGrowthFocusVisible,
+                42 => SimCommand::SyncDetachableReplaceManual,
+                43 => SimCommand::SyncDetachableReplacePassive,
                 _ => SimCommand::SyncVisibleFocusPreserve,
             };
             world.apply(command)?;
@@ -578,6 +604,25 @@ impl SimWorld {
             }
             SimCommand::SessionClear => {
                 if let Err(err) = self.clear_session_context() {
+                    self.coverage.record_block(&err.to_string());
+                }
+            }
+            SimCommand::SessionRestart => {
+                if let Err(err) = self.restart_supervisor(false, RestartInterruptOutcome::StillBusy)
+                {
+                    self.coverage.record_block(&err.to_string());
+                }
+            }
+            SimCommand::SessionRestartForce => {
+                if let Err(err) = self.restart_supervisor(true, RestartInterruptOutcome::StillBusy)
+                {
+                    self.coverage.record_block(&err.to_string());
+                }
+            }
+            SimCommand::SessionRestartForcePreInterruptIdle => {
+                if let Err(err) =
+                    self.restart_supervisor(true, RestartInterruptOutcome::IdleBeforeForceKill)
+                {
                     self.coverage.record_block(&err.to_string());
                 }
             }
@@ -759,6 +804,58 @@ impl SimWorld {
         self.route.pending_dispatch = None;
         self.coverage.session_clears += 1;
         Ok(())
+    }
+
+    fn restart_supervisor(
+        &mut self,
+        force: bool,
+        interrupt_outcome: RestartInterruptOutcome,
+    ) -> Result<()> {
+        let pane = self.current_dispatch_pane()?;
+        if self.restart_live_pane_is_busy() {
+            if !force {
+                self.coverage.session_restart_busy_refusals += 1;
+                bail!(
+                    "{}; seed={} trace={:?}",
+                    crate::session_actor_cmd::restart_busy_refusal_message(
+                        Path::new("sim.md"),
+                        &pane,
+                        "authoritative_actor",
+                        "agent-doc",
+                        "Working..."
+                    ),
+                    self.seed,
+                    self.trace
+                );
+            }
+
+            self.coverage.session_restart_force_used += 1;
+            match interrupt_outcome {
+                RestartInterruptOutcome::IdleBeforeForceKill => {
+                    self.route.durable.lifecycle = SupervisorLifecycle::Ready;
+                    self.route.projection.lifecycle = SupervisorLifecycle::Ready;
+                    self.coverage.session_restart_busy_pre_interrupt_idle += 1;
+                }
+                RestartInterruptOutcome::StillBusy => {
+                    self.coverage.session_restart_busy_force_killed += 1;
+                }
+            }
+        }
+
+        self.route.pending_dispatch = None;
+        self.route.durable.lifecycle = SupervisorLifecycle::Starting;
+        self.route.projection = self.route.durable.clone();
+        self.coverage.session_restarts += 1;
+        Ok(())
+    }
+
+    fn restart_live_pane_is_busy(&self) -> bool {
+        matches!(
+            self.route.durable.lifecycle,
+            SupervisorLifecycle::Busy
+                | SupervisorLifecycle::WaitingInput
+                | SupervisorLifecycle::Blocked
+        )
     }
 
     fn repair_ipc_snapshot_duplicate_prompts(&mut self, before: &str, file: &Path) -> Result<()> {
@@ -1858,6 +1955,54 @@ fn route_sim_blocks_starting_to_busy_bootstrap_until_current_ready_prompt() {
 
     assert_eq!(world.coverage.route_dispatch_acceptances, 1);
     assert_eq!(world.coverage.route_dispatch_proofs, 1);
+}
+
+#[test]
+fn restart_supervisor_sim_refuses_alive_busy_without_force_then_force_kills() {
+    let mut world = SimWorld::new(2_016);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorBusy).unwrap();
+
+    let err = world
+        .restart_supervisor(false, RestartInterruptOutcome::StillBusy)
+        .expect_err("busy restart without --force must fail closed");
+    assert!(err.to_string().contains("session_restart refused"));
+    assert!(err.to_string().contains("pane %2 is alive-busy"));
+    assert!(err.to_string().contains("pass `--force`"));
+    assert_eq!(world.coverage.session_restart_busy_refusals, 1);
+    assert_eq!(world.coverage.session_restarts, 0);
+
+    world
+        .restart_supervisor(true, RestartInterruptOutcome::StillBusy)
+        .unwrap();
+
+    assert_eq!(world.coverage.session_restart_force_used, 1);
+    assert_eq!(world.coverage.session_restart_busy_force_killed, 1);
+    assert_eq!(world.coverage.session_restart_busy_pre_interrupt_idle, 0);
+    assert_eq!(world.coverage.session_restarts, 1);
+    assert_eq!(world.route.durable.lifecycle, SupervisorLifecycle::Starting);
+    world.apply(SimCommand::DispatchRoutePrompt).unwrap();
+    assert_eq!(
+        world.coverage.starting_dispatch_blocks, 1,
+        "route must remain prompt-gated while the restarted supervisor is booting"
+    );
+}
+
+#[test]
+fn restart_supervisor_sim_records_pre_interrupt_idle_before_restart() {
+    let mut world = SimWorld::new(2_017);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorBusy).unwrap();
+
+    world
+        .restart_supervisor(true, RestartInterruptOutcome::IdleBeforeForceKill)
+        .unwrap();
+
+    assert_eq!(world.coverage.session_restart_force_used, 1);
+    assert_eq!(world.coverage.session_restart_busy_pre_interrupt_idle, 1);
+    assert_eq!(world.coverage.session_restart_busy_force_killed, 0);
+    assert_eq!(world.coverage.session_restarts, 1);
+    assert_eq!(world.route.durable.lifecycle, SupervisorLifecycle::Starting);
 }
 
 #[test]

@@ -246,7 +246,7 @@ pub fn attach(file: &Path, pane: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-pub fn restart(file: &Path, mode: RestartMode) -> Result<()> {
+pub fn restart(file: &Path, mode: RestartMode, force: bool) -> Result<()> {
     let ctx = build_context(file)?;
     let authorization = crate::project_controller::authorize_operator_command(
         &ctx.base_dir,
@@ -255,7 +255,7 @@ pub fn restart(file: &Path, mode: RestartMode) -> Result<()> {
     )?;
     let tmux = Tmux::default_server();
     guard_starting_actor_operator_command(&ctx, &tmux, OperatorAction::Restart)?;
-    guard_destructive_operator_on_live_busy_pane(&ctx, &tmux, "session_restart")?;
+    prepare_restart_live_busy_pane(&ctx, &tmux, force)?;
     ensure_supervisor_socket(&ctx)?;
     let response = crate::supervisor::ipc::send_command(
         &ctx.supervisor_socket,
@@ -283,6 +283,61 @@ pub fn restart(file: &Path, mode: RestartMode) -> Result<()> {
         ctx.canonical_file.display(),
         authorization.accepted_stage
     );
+    Ok(())
+}
+
+fn prepare_restart_live_busy_pane(ctx: &SessionContext, tmux: &Tmux, force: bool) -> Result<()> {
+    if !force {
+        return guard_destructive_operator_on_live_busy_pane(ctx, tmux, "session_restart");
+    }
+    let evidence = live_pane_evidence(ctx, tmux);
+    if evidence.state == LivePaneState::AliveBusy {
+        if pane_shows_clean_exit_prompt(ctx, tmux, &evidence) {
+            return Ok(());
+        }
+        force_restart_live_busy_pane(ctx, tmux, &evidence)?;
+        return Ok(());
+    }
+    if evidence.state == LivePaneState::AliveIdle {
+        reconcile_idle_projection_from_evidence(ctx, &evidence)?;
+    }
+    Ok(())
+}
+
+fn force_restart_live_busy_pane(
+    ctx: &SessionContext,
+    tmux: &Tmux,
+    evidence: &LivePaneEvidence,
+) -> Result<()> {
+    let pane = evidence.pane_id.as_deref().unwrap_or("unknown");
+    log_restart_evidence_event(ctx, "session_restart_force_used", evidence);
+    if let Err(err) = send_operator_interrupt_sequence(tmux, pane, &ctx.harness) {
+        crate::ops_log::log_op(
+            &ctx.canonical_file,
+            &format!(
+                "session_restart_force_interrupt_failed file={} pane={} source={} error={:?}",
+                ctx.canonical_file.display(),
+                pane,
+                evidence.source,
+                err.to_string()
+            ),
+        );
+        log_restart_evidence_event(ctx, "session_restart_busy_force_killed", evidence);
+        return Ok(());
+    }
+
+    match wait_for_restart_interrupt_settle(ctx, tmux, pane, Duration::from_secs(2)) {
+        RestartInterruptSettleOutcome::Idle { evidence } => {
+            let _ = reconcile_idle_projection_from_evidence(ctx, &evidence);
+            log_restart_evidence_event(ctx, "session_restart_busy_pre_interrupt_idle", &evidence);
+        }
+        RestartInterruptSettleOutcome::Closed { evidence } => {
+            log_restart_evidence_event(ctx, "session_restart_busy_force_killed", &evidence);
+        }
+        RestartInterruptSettleOutcome::TimedOut { evidence } => {
+            log_restart_evidence_event(ctx, "session_restart_busy_force_killed", &evidence);
+        }
+    }
     Ok(())
 }
 
@@ -977,6 +1032,37 @@ fn wait_for_interrupt_clear_settle(
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum RestartInterruptSettleOutcome {
+    Idle { evidence: LivePaneEvidence },
+    Closed { evidence: LivePaneEvidence },
+    TimedOut { evidence: LivePaneEvidence },
+}
+
+fn wait_for_restart_interrupt_settle(
+    ctx: &SessionContext,
+    tmux: &Tmux,
+    pane: &str,
+    timeout: Duration,
+) -> RestartInterruptSettleOutcome {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if !tmux.pane_alive(pane) {
+            return RestartInterruptSettleOutcome::Closed {
+                evidence: live_pane_evidence(ctx, tmux),
+            };
+        }
+        let evidence = live_pane_evidence(ctx, tmux);
+        if evidence.state == LivePaneState::AliveIdle {
+            return RestartInterruptSettleOutcome::Idle { evidence };
+        }
+        if Instant::now() >= deadline {
+            return RestartInterruptSettleOutcome::TimedOut { evidence };
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+}
+
 fn resolve_direct_submit_pane(
     ctx: &SessionContext,
     tmux: &Tmux,
@@ -1016,6 +1102,18 @@ fn guard_destructive_operator_on_live_busy_pane(
         let pane = evidence.pane_id.as_deref().unwrap_or("unknown");
         let command = evidence.current_command.as_deref().unwrap_or("unknown");
         let tail = evidence.tail.as_deref().unwrap_or("unknown");
+        if action == "session_restart" {
+            anyhow::bail!(
+                "{}",
+                restart_busy_refusal_message(
+                    &ctx.canonical_file,
+                    pane,
+                    evidence.source,
+                    command,
+                    tail
+                )
+            );
+        }
         anyhow::bail!(
             "{} refused for {} because pane {} is alive-busy (source={}, current_command={}, tail={:?}). Run `agent-doc session status {}` and wait for an idle prompt, or inspect/stop the pane explicitly before clearing or restarting it.",
             action,
@@ -1031,6 +1129,44 @@ fn guard_destructive_operator_on_live_busy_pane(
         reconcile_idle_projection_from_evidence(ctx, &evidence)?;
     }
     Ok(())
+}
+
+pub(crate) fn restart_busy_refusal_message(
+    file: &Path,
+    pane: &str,
+    source: &str,
+    command: &str,
+    tail: &str,
+) -> String {
+    format!(
+        "session_restart refused for {} because pane {} is alive-busy (source={}, current_command={}, tail={:?}). Run `agent-doc session status {}` and wait for an idle prompt, or pass `--force` to interrupt the running turn and restart anyway.",
+        file.display(),
+        pane,
+        source,
+        command,
+        tail,
+        file.display()
+    )
+}
+
+fn log_restart_evidence_event(ctx: &SessionContext, event: &str, evidence: &LivePaneEvidence) {
+    crate::ops_log::log_op(
+        &ctx.canonical_file,
+        &format!(
+            "{} file={} pane={} source={} state={} current_command={} prompt_ready={} tail={:?}",
+            event,
+            ctx.canonical_file.display(),
+            evidence.pane_id.as_deref().unwrap_or("unknown"),
+            evidence.source,
+            evidence.state.as_str(),
+            evidence.current_command.as_deref().unwrap_or("unknown"),
+            evidence
+                .prompt_ready
+                .map(|ready| ready.to_string())
+                .unwrap_or_else(|| "unknown".to_string()),
+            evidence.tail.as_deref().unwrap_or("unknown")
+        ),
+    );
 }
 
 fn reconcile_idle_projection_from_live_pane(ctx: &SessionContext, tmux: &Tmux) -> Result<bool> {
@@ -2183,6 +2319,26 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         assert!(message.contains("pane %7 is alive-busy"));
         assert!(message.contains("reason=active codex turn"));
         assert!(message.contains("agent-doc session interrupt-clear /tmp/doc.md"));
+    }
+
+    #[test]
+    fn restart_busy_refusal_points_to_force() {
+        let message = restart_busy_refusal_message(
+            Path::new("/tmp/doc.md"),
+            "%7",
+            "authoritative_actor",
+            "agent-doc",
+            "Working...",
+        );
+
+        assert!(message.contains("session_restart refused"));
+        assert!(message.contains("pane %7 is alive-busy"));
+        assert!(message.contains("source=authoritative_actor"));
+        assert!(message.contains("current_command=agent-doc"));
+        assert!(message.contains("tail=\"Working...\""));
+        assert!(message.contains("agent-doc session status /tmp/doc.md"));
+        assert!(message.contains("pass `--force`"));
+        assert!(message.contains("interrupt the running turn and restart anyway"));
     }
 
     #[test]

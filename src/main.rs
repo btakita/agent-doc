@@ -1406,6 +1406,9 @@ enum SessionAction {
         /// Request a fresh restart instead of the default continue-mode restart
         #[arg(long)]
         fresh: bool,
+        /// Interrupt a busy live pane and restart the supervisor anyway
+        #[arg(long)]
+        force: bool,
     },
     /// Clear the configured tmux session when no file is provided, or clear the bound harness session when FILE is provided
     Clear {
@@ -2196,13 +2199,14 @@ fn main() -> anyhow::Result<()> {
             Some(SessionAction::Attach { file, pane }) => {
                 session_actor_cmd::attach(&file, pane.as_deref())
             }
-            Some(SessionAction::Restart { file, fresh }) => session_actor_cmd::restart(
+            Some(SessionAction::Restart { file, fresh, force }) => session_actor_cmd::restart(
                 &file,
                 if fresh {
                     session_actor_cmd::RestartMode::Fresh
                 } else {
                     session_actor_cmd::RestartMode::Continue
                 },
+                force,
             ),
             Some(SessionAction::Clear { file: Some(file) }) => session_actor_cmd::clear(&file),
             Some(SessionAction::Clear { file: None }) => session_cmd::clear(),

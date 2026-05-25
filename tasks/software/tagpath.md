@@ -168,7 +168,49 @@ Submodule won the canonical-version decision on dates alone — its copy is from
 - `agent-loop`: `f1f3138de skills: symlink corky SKILL.md to submodule canonical (p6sklsymcorky)` — pushed to main
 
 The pattern for the three "diverge then symlink" follow-ups (tagpath, agent-doc, corky) is now fully applied. Per-skill symlinks documented; release flow implication tracked under `#p6sklsymadocrunbooks` for the agent-doc runbooks question.
-<!-- agent:boundary:aea4a149 -->
+### Re: do [#p6adfmerge] — opus-4-7
+
+
+**Gated, not done.** Recording the response here after a missed-patchback recovery; the prior finalize raced with a parallel cycle and the response body was dropped while the gate + pending-add still landed. Repaired by sweeping nine pre-existing `state: "superseded"` capture sidecars (an unknown variant the current binary couldn't parse), then re-running finalize.
+
+#### Why this stops
+
+Feature branch `20260422/codex-agent-backend` is a clean fast-forward candidate: **832 commits ahead** of `origin/main`, `origin/main` is **0 commits behind**. No merge conflicts possible.
+
+But the three most recent CI runs (`26384722723`, `26384538884`, `26384031366`) are **red**. All three fail in `cargo clippy` at `make check`:
+
+```
+error: failed to get `tagpath` as a dependency of package `agent-doc v0.34.0`
+Caused by: failed to load source for dependency `tagpath`
+Caused by: unable to update /home/runner/work/agent-doc/tagpath
+Caused by: failed to read `/home/runner/work/agent-doc/tagpath/Cargo.toml`
+Caused by: No such file or directory (os error 2)
+```
+
+Root cause: agent-doc `Cargo.toml` declares `tagpath = { path = "../tagpath", version = "0.18", default-features = false }`. Locally that resolves to the agent-loop sibling; the agent-doc CI workflow doesn't clone tagpath, so the path lookup fails.
+
+#### Decision required (operator)
+
+Three independent fix paths — picking one is operator judgment:
+
+1. **Checkout sibling in CI**: add a step to clone `btakita/tagpath` into the parent dir before `make check`. Cheapest, adds CI coupling.
+2. **Switch to git source**: `git = "https://github.com/btakita/tagpath", branch = "main"`. Loses the local-dev convenience.
+3. **Publish tagpath 0.18 and drop the override**: cleanest long-term, but tagpath crates.io tops out at 0.10.0 — the publish gap noted in `#p6lintbnd`.
+
+#### What I did NOT do
+
+- No `git merge` or `git push` on agent-doc main
+- No bump of the agent-loop superproject pointer (already tracks feature-branch HEAD)
+- No skip-CI / force merge — the backlog item is explicit about waiting for CI before external consumers pull
+
+#### Side effect of the race
+
+The previous finalize attempt left nine stale `superseded`-state capture sidecars in `.agent-doc/captures/<doc-hash>/` that the running binary couldn't parse (unknown enum variant). Moved them to `/tmp/agent-doc-superseded-captures/`. This is a pre-existing binary/capture-format compatibility gap worth tracking on agent-doc's side; recording inline rather than as a new backlog item here since the symptom only surfaced incidentally and the cleanup is reversible.
+
+#### Queue handling
+
+Auto-loop stops here. Backlog now has `#p6adfcitagpath` (the CI fix) at the top; `#p6adfmerge` lives under Review with `[/]` waiting for CI to clear. Remaining unblocked queue (`#p6tsifull`, `#p6tspub`, `#p6skl`, `#p6ren`, `#p6meta`) is yours to reorder or restart at will.
+<!-- agent:boundary:c243d992 -->
 <!-- /agent:exchange -->
 ###
 
@@ -182,7 +224,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#p6lintbnd]~
 - ~do [#p6sklsymagentdoc]~
 - ~do [#p6sklsymcorky]~
-- do [#p6adfmerge]
+- ~do [#p6adfmerge]~
 - do [#p6tsifull]
 - do [#p6tspub]
 - do [#p6skl]
@@ -193,13 +235,19 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 (<!-- agent:backlog -->
+- [ ] [#p6adfcitagpath] CI fix prerequisite for p6adfmerge: agent-doc Cargo.toml declares tagpath = { path = '../tagpath', ... } but the agent-doc CI workflow doesn't clone tagpath as a sibling, so cargo clippy errors with 'No such file or directory' on ../tagpath/Cargo.toml. Fix options: (a) checkout-and-place tagpath sibling in CI before make check, (b) switch to git source pointing at btakita/tagpath, or (c) publish tagpath 0.18 to crates.io and drop the path override. Until this clears, the feature branch CI stays red and p6adfmerge stays gated.
 - [ ] [#p6sklsymadocrunbooks] After agent-doc SKILL.md symlinking (p6sklsymagentdoc), check whether the runbooks under agent-loop/.claude/skills/agent-doc/runbooks/ should also be symlinked. Source of truth lives in src/agent-doc/runbooks/ but installed copies are in src/agent-doc/.claude/skills/agent-doc/runbooks/ (created by agent-doc skill install, so currently absent from the submodule). Either install once into the submodule and symlink, or leave install owning the parent copy and accept the duplication.
-- [ ] [#p6adfmerge] Merge agent-doc feature branch 20260422/codex-agent-backend to main: the p6adf commit (845ddfd6) and prior p4*/p5* prep ride on this branch. agent-loop superproject already tracks feature-branch commits, but agent-doc main is behind and will need a sweep before any external consumer pulls.
 - [ ] [#p6tsifull] Wire the remaining tsift consumer surfaces to the tagpath adapter: graph, explain, communities, path, federated-search. The adapter (src/tsift/src/tagpath_adapter.rs) and annotate helper are already public; each command needs TagpathSearchOpts plumbing + a per-row annotation pass + tagpath_handle field on StoredSymbol / StoredEdge / community report structs. Mechanical follow-up to p6tsi which only wired tsift search.
 - [ ] [#p6tspub] Restore tsift crates.io publishability after p6tsi: tsift now depends on tagpath via path = ../tagpath. Replace with version = "0.17.1" (or whatever ships first) before any tsift release. Already gated by the sift-publish blocker so no immediate regression, but track here.
 - [ ] [#p6ren] tagpath rename <old> <new>: cross-file, cross-convention identifier rename using the index. Walks every member of the matching family, rewrites in-place in each source convention (snake/camel/Pascal/kebab/UPPER/Ada). Foundation for the agent-loop intent-preserving refactor vision.
 - [ ] [#p6meta] [recommended] agent-loop meta-index: aggregate per-submodule .naming/index.json files into a top-level handle registry so cross-repo searches resolve. New CLI: tagpath meta-index <workspace-root>. Useful once 2+ siblings adopt tagpath.
 <!-- /agent:backlog -->
+
+## Review
+
+<!-- agent:review -->
+- [/] [#p6adfmerge] Merge agent-doc feature branch 20260422/codex-agent-backend to main: the p6adf commit (845ddfd6) and prior p4*/p5* prep ride on this branch. agent-loop superproject already tracks feature-branch commits, but agent-doc main is behind and will need a sweep before any external consumer pulls.
+<!-- /agent:review -->
 
 ## Completed / Reaped
 

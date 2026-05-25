@@ -2427,3 +2427,31 @@ fn jb_cache_conflict_cancel_branch_recovers_via_explicit_write_commit_today() {
     assert_eq!(world.snapshot, world.doc);
     world.strict_closeout_invariants().unwrap();
 }
+
+/// Phase 5 regression (#jbccc5): after the Phase 3 (#jbccc3) binary fix lands,
+/// the next `agent-doc preflight` automatically runs `git::commit` for the
+/// cancel-induced wedge — no manual `agent-doc write --commit` required. The
+/// simulator mirrors that auto-recovery as a follow-up `Commit` driven by the
+/// preflight contract rather than the operator. This test pins the
+/// post-Phase-3 invariant: from the WriteApplied wedge, the binary-owned
+/// recovery alone is sufficient to reach `Committed` with `strict_closeout_invariants`
+/// clean.
+#[test]
+fn jb_cache_conflict_cancel_branch_auto_recovers_via_preflight() {
+    let mut world = SimWorld::new(2026_05_25 + 4);
+    world.apply(SimCommand::EditPrompt).unwrap();
+    world.apply(SimCommand::CaptureResponse).unwrap();
+    apply_jb_cache_conflict_cancel(&mut world);
+    assert_eq!(world.phase, CyclePhase::WriteApplied);
+    assert_ne!(world.snapshot, world.doc);
+
+    // Auto-recovery — driven by the next `agent-doc preflight`, not by the
+    // operator. In real code this is preflight detecting the cancel pattern
+    // (cycle phase WriteApplied + snapshot ≠ HEAD + working tree matches
+    // snapshot modulo transient markers) and dispatching `git::commit`.
+    world.apply(SimCommand::Commit).unwrap();
+
+    assert_eq!(world.phase, CyclePhase::Committed);
+    assert_eq!(world.snapshot, world.doc);
+    world.strict_closeout_invariants().unwrap();
+}

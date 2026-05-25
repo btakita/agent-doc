@@ -7105,6 +7105,61 @@ fn read_ack_content_sidecar(project_root: &Path, patch_id: &str) -> Result<Optio
 }
 
 /// Remove any stale ipc-degraded marker left by older versions.
+/// Extract `### Re:` response headings from a slice of `PatchBlock`s.
+///
+/// Used by the late-fallback gate to decide whether an "already committed"
+/// cycle's state belongs to the incoming response (skip the apply) or to a
+/// different operation that landed mid-turn (rotate the cycle and apply).
+///
+/// Only the leading `### Re: ...` line of each patch's content is considered.
+/// Section bodies and subheadings are ignored so callers can compare against
+/// HEAD content via a substring check without false positives from common
+/// boilerplate. Returns the trimmed heading lines (without the trailing
+/// newline) in order of appearance.
+fn extract_response_headings_from_patches(
+    patches: &[crate::template::PatchBlock],
+) -> Vec<String> {
+    let mut out = Vec::new();
+    for patch in patches {
+        for line in patch.content.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("### Re:") {
+                out.push(trimmed.to_string());
+                break;
+            }
+        }
+    }
+    out
+}
+
+/// Return `true` when every `### Re:` response heading carried in the
+/// incoming patches is already present in the document's `HEAD` content.
+///
+/// Used inside the late-fallback gate (see `#adoc-compact-during-turn-response-loss`)
+/// to distinguish:
+/// - "cycle committed because this response already landed" (skip apply), and
+/// - "cycle committed by an unrelated mid-turn operation, but the response
+///   is still waiting to be written" (rotate the cycle, apply the patch).
+///
+/// Returns `true` when there are no headings to check (no patches), which
+/// preserves the gate's previous conservative behavior for empty patch lists.
+/// Returns `false` if `git show HEAD:<file>` fails — the caller treats that
+/// the same as "not in HEAD" and rotates the cycle, which is fail-safe for
+/// the mid-turn race.
+fn patch_response_headings_already_in_head(
+    file: &Path,
+    patches: &[crate::template::PatchBlock],
+) -> bool {
+    let headings = extract_response_headings_from_patches(patches);
+    if headings.is_empty() {
+        return true;
+    }
+    let Ok(Some(head)) = crate::git::show_head(file) else {
+        return false;
+    };
+    headings.iter().all(|h| head.contains(h.as_str()))
+}
+
 fn cleanup_legacy_ipc_degraded(project_root: &Path) {
     let marker = project_root.join(".agent-doc/ipc-degraded");
     if marker.exists() {
@@ -8264,33 +8319,70 @@ pub fn try_ipc(
 
     // Guard: if the cycle is already committed, reject the patch to prevent
     // a late fallback from re-dirtying the document.
+    //
+    // Exception (#adoc-compact-during-turn-response-loss): when a binary-owned
+    // commit lands mid-turn (for example a JetBrains-initiated
+    // `agent-doc compact exchange` between this turn's preflight and finalize),
+    // the cycle state's `Committed` phase belongs to that other operation —
+    // not to the response we are about to apply. Detect that case by checking
+    // whether the response headings carried in the incoming patches are
+    // already present in HEAD. If they are, the gate is correct (skip).
+    // If they are not, the "committed" cycle is unrelated to this response:
+    // rotate the cycle state to start fresh and let the patch flow continue.
     if let Some(ref cycle_id) = cycle_already_committed(file) {
-        eprintln!(
-            "[write] rejecting late fallback patch: cycle {} already committed for {}",
-            cycle_id,
-            file.display()
-        );
-        log_closeout_guard(
-            file,
-            crate::flow::types::FlowStage::TerminalGuard,
-            crate::flow::types::FlowOutcome::Blocked,
-            crate::flow::closeout::CloseoutGuardReason::AlreadyCommitted,
-        );
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "late_fallback_patch_rejected file={} cycle_id={} patch_id={} reason=already_committed",
+        let response_in_head = patch_response_headings_already_in_head(file, patches);
+        if !response_in_head {
+            eprintln!(
+                "[write] mid-turn cycle rotation detected for {}: cycle {} marked committed \
+                 but the incoming response heading(s) are absent from HEAD — starting a fresh \
+                 cycle instead of rejecting (see #adoc-compact-during-turn-response-loss)",
                 file.display(),
+                cycle_id
+            );
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "mid_turn_cycle_rotation file={} prior_cycle={} patch_id={} action=fresh_cycle",
+                    file.display(),
+                    cycle_id,
+                    patch_id
+                ),
+            );
+            let snapshot_content = crate::snapshot::load(file)?;
+            let file_content_for_state = std::fs::read_to_string(file).ok();
+            let _ = crate::cycle_state::start_preflight(
+                file,
+                snapshot_content.as_deref(),
+                file_content_for_state.as_deref(),
+            );
+        } else {
+            eprintln!(
+                "[write] rejecting late fallback patch: cycle {} already committed for {}",
                 cycle_id,
-                patch_id
-            ),
-        );
-        cleanup_fallback_patch_files(file);
-        return Ok(IpcResult {
-            success: false,
-            patch_id,
-            skipped_committed_cycle: true,
-        });
+                file.display()
+            );
+            log_closeout_guard(
+                file,
+                crate::flow::types::FlowStage::TerminalGuard,
+                crate::flow::types::FlowOutcome::Blocked,
+                crate::flow::closeout::CloseoutGuardReason::AlreadyCommitted,
+            );
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "late_fallback_patch_rejected file={} cycle_id={} patch_id={} reason=already_committed",
+                    file.display(),
+                    cycle_id,
+                    patch_id
+                ),
+            );
+            cleanup_fallback_patch_files(file);
+            return Ok(IpcResult {
+                success: false,
+                patch_id,
+                skipped_committed_cycle: true,
+            });
+        }
     }
 
     // Clean up any legacy degraded marker from older versions
@@ -10489,6 +10581,143 @@ mod tests {
     use std::fs::OpenOptions;
     use std::time::Duration;
     use tempfile::TempDir;
+
+    fn patch_with_heading(heading: &str) -> crate::template::PatchBlock {
+        crate::template::PatchBlock::new(
+            "exchange",
+            format!("{heading}\n\nbody line one\n"),
+        )
+    }
+
+    #[test]
+    fn extract_response_headings_returns_re_lines_in_order() {
+        let patches = vec![
+            patch_with_heading("### Re: first topic — opus-4-7"),
+            patch_with_heading("### Re: second topic — opus-4-7"),
+            // Patch with no Re: heading should be skipped.
+            crate::template::PatchBlock::new("status", "Just a status update.\n"),
+        ];
+        let headings = extract_response_headings_from_patches(&patches);
+        assert_eq!(
+            headings,
+            vec![
+                "### Re: first topic — opus-4-7".to_string(),
+                "### Re: second topic — opus-4-7".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn extract_response_headings_picks_first_re_per_patch() {
+        let patch = crate::template::PatchBlock::new(
+            "exchange",
+            "### Re: outer — opus-4-7\n\nbody mentioning ### Re: inner — opus-4-7 elsewhere\n",
+        );
+        let headings = extract_response_headings_from_patches(&[patch]);
+        assert_eq!(headings, vec!["### Re: outer — opus-4-7".to_string()]);
+    }
+
+    #[test]
+    fn patch_response_headings_already_in_head_true_when_no_patches() {
+        // Empty patch list — conservatively preserve the existing late-fallback
+        // gate behavior (reject when no response evidence is present).
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        fs::write(&doc, "doc body\n").unwrap();
+        assert!(patch_response_headings_already_in_head(&doc, &[]));
+    }
+
+    fn init_repo_with_doc(dir: &Path, name: &str, body: &str) -> std::path::PathBuf {
+        std::process::Command::new("git")
+            .current_dir(dir)
+            .args(["init", "-q", "--initial-branch=main"])
+            .status()
+            .unwrap();
+        std::process::Command::new("git")
+            .current_dir(dir)
+            .args(["config", "user.email", "test@example.com"])
+            .status()
+            .unwrap();
+        std::process::Command::new("git")
+            .current_dir(dir)
+            .args(["config", "user.name", "Test"])
+            .status()
+            .unwrap();
+        let path = dir.join(name);
+        fs::write(&path, body).unwrap();
+        std::process::Command::new("git")
+            .current_dir(dir)
+            .args(["add", name])
+            .status()
+            .unwrap();
+        std::process::Command::new("git")
+            .current_dir(dir)
+            .args(["commit", "-q", "-m", "seed"])
+            .status()
+            .unwrap();
+        path
+    }
+
+    #[test]
+    fn patch_response_headings_already_in_head_true_when_heading_in_head() {
+        let dir = TempDir::new().unwrap();
+        let doc = init_repo_with_doc(
+            dir.path(),
+            "session.md",
+            "## Exchange\n\n### Re: shipped — opus-4-7\n\nbody\n",
+        );
+        let patch = patch_with_heading("### Re: shipped — opus-4-7");
+        assert!(patch_response_headings_already_in_head(&doc, &[patch]));
+    }
+
+    #[test]
+    fn patch_response_headings_already_in_head_false_when_heading_missing_from_head() {
+        // Mid-turn rotation signature: HEAD has been advanced by a different
+        // operation (compact, sibling commit) and does not yet contain the
+        // response we're about to apply. The late-fallback gate must allow
+        // the patch through.
+        let dir = TempDir::new().unwrap();
+        let doc = init_repo_with_doc(
+            dir.path(),
+            "session.md",
+            "## Exchange\n\n### Re: prior cycle — opus-4-7\n\nold\n",
+        );
+        let patch = patch_with_heading("### Re: new response — opus-4-7");
+        assert!(
+            !patch_response_headings_already_in_head(&doc, &[patch]),
+            "mid-turn rotation must allow the patch (response not in HEAD)"
+        );
+    }
+
+    #[test]
+    fn patch_response_headings_already_in_head_false_when_any_heading_missing() {
+        let dir = TempDir::new().unwrap();
+        let doc = init_repo_with_doc(
+            dir.path(),
+            "session.md",
+            "## Exchange\n\n### Re: first — opus-4-7\n\nbody\n",
+        );
+        let patches = vec![
+            patch_with_heading("### Re: first — opus-4-7"),
+            patch_with_heading("### Re: second — opus-4-7"),
+        ];
+        assert!(
+            !patch_response_headings_already_in_head(&doc, &patches),
+            "all headings must be in HEAD for the gate to skip"
+        );
+    }
+
+    #[test]
+    fn patch_response_headings_already_in_head_false_when_file_not_in_git() {
+        // No git repo → show_head returns Ok(None). Fail-safe: treat as not
+        // in HEAD so the late-fallback gate rotates the cycle rather than
+        // rejecting the patch.
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        fs::write(&doc, "no git\n").unwrap();
+        let patch = patch_with_heading("### Re: something — opus-4-7");
+        assert!(!patch_response_headings_already_in_head(&doc, &[patch]));
+    }
 
     #[test]
     fn write_appends_response() {

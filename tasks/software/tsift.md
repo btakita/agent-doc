@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -82,14 +82,14 @@ The `tsift` submodule commit is pushed to `origin/main`; the superproject/sessio
 ### Re: closeout repair — gpt-5
 
 Closeout repair: the prior finalize committed the `#gprojrows` response, status update, queue consumption, and backlog reap, but post-commit `session-check` detected active-session drift. This write reopens the binary-owned commit path for the same completed work; no additional repo changes were made.
-<!-- agent:boundary:63f7d25f -->
+<!-- agent:boundary:27087e3d -->
 <!-- /agent:exchange -->
 ###
 <!--
 What are #next-steps to make the graph faster?
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#gprojrows]~
 - do [#gsqlwrite]
@@ -101,7 +101,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [x] [#gsqlwrite] [recommended] Reduce SQLite graph refresh write and staging cost: bulk upsert nodes, edges, and properties through prepared chunks or temp-table merge, avoid unchanged property rewrites in replace_projection_with_version, and gate on full_projection.sqlite.sqlite_delta_write, sqlite_edge_staging, post_write_reads, and total_duration_micros_per_1k_graph_rows.
 - [ ] [#gcommcache] [recommended] Cache and bound tagpath-annotated community detection: key Louvain results by index graph watermark, scope, and tagpath freshness, avoid re-running db.all_edges plus full in-memory Louvain for unchanged graphs, and add JSON diagnostics for cache hit, edge count, iterations, and tagpath state.
 - [ ] [#gcommtagctx] [recommended] Improve community search quality by carrying file/ref context into CommunityMember and resolving tagpath handles with community or edge evidence instead of name-only fallback; cover duplicate-name, skipped-directory, scoped, and federated fixtures with handle coverage and ambiguous-member diagnostics.
 - [ ] [#gcommgate] [recommended] Add a community search quality and performance gate to metric-digest and fixtures: track communities runtime, handle coverage, stale/no-tagpath behavior, duplicate-name precision, and top-community stability across real and synthetic multi-module workloads.

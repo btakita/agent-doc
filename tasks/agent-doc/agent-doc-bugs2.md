@@ -21,7 +21,7 @@ queue_active: false
 
 <!-- agent:status patch=replace -->
 
-Closed stale duplicate #agent-doc-commit-sibling prompt; review remains at 3 gated items.
+Prioritized review-item next steps; top backlog item is #next-jbccc2.
 <!-- /agent:status -->
 
 ## Exchange
@@ -34,7 +34,19 @@ Closed stale duplicate #agent-doc-commit-sibling prompt; review remains at 3 gat
 Compacted content:
 - Archived 1 response topic(s): compacted IPC scratch comment
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:0efadd0f -->
+❯ What are #next-steps in completing the review items?
+### Re: next steps for review items — gpt-5
+
+Top backlog item: `#next-jbccc2`.
+
+I added the next-step backlog in priority order. The live blocker is `#jbccc2`, because the binary-side recovery and several stuck-cycle follow-ups are already archived as completed, while `PatchWatcher.kt` still needs the JetBrains File Cache Conflict Cancel behavior fixed and verified.
+
+Order of work:
+
+1. `#next-jbccc2` — implement the JetBrains plugin undo-on-cancel path, then run focused plugin tests and a manual IntelliJ cancel repro.
+2. `#next-adoc-jbcc` — after Phase 2 lands, reconcile the parent `#adoc-jb-cache-cancel-stuck-cycle` review item against completed phases and close it only with plugin repro evidence.
+3. `#next-stuckcycledup` — audit the partial stuck-cycle review item against the archived split fixes; close it if the implemented guards still cover the duplicated-response path, otherwise keep only one narrow residual bug.
+<!-- agent:boundary:0367b61d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -42,12 +54,19 @@ As I was typing into the comment below `/agent:exchange`, the full-document IPC 
 #spec-test-build-install-commit-push
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+preset #spec-test-build-install-commit-push
+- do [#next-jbccc2]
+- do [#next-adoc-jbcc]
+- do [#next-stuckcycledup]
 <!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#next-jbccc2] Implement and validate Phase 2 of #adoc-jb-cache-cancel-stuck-cycle in editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt: defer the write until the File Cache Conflict dialog is accepted, return 0/2 on Cancel, leave file-IPC patch files in place on cancel, then run the focused plugin tests plus a manual IntelliJ cancel repro.
+- [ ] [#next-adoc-jbcc] After #next-jbccc2 lands, reconcile the parent #adoc-jb-cache-cancel-stuck-cycle review item with completed phases #jbccc1, #jbccc3, #jbccc4, and #jbccc5; mark the parent done only when the plugin cancel path and manual IDE repro are verified.
+- [ ] [#next-stuckcycledup] Audit #stuckcycledup against archived split items #stuckcycleorphan, #stuckcyclerepair, and #stuckcyclesuperseded; close the gated review item if the implemented guards and tests still cover the duplicated-response path, otherwise open one narrow residual bug with a plan path.
 <!-- /agent:backlog -->
 
 ## Review

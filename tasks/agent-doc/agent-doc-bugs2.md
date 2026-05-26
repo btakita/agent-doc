@@ -29,32 +29,12 @@ Queue advanced: #jbccreviewcloseout completed; #jbccresidualdecision completed b
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260526-214402.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260526-221307.md`*
 
 Compacted content:
-- Archived 1 response topic(s): markdown list prompt prefix
+- Archived 1 response topic(s): live Cancel residual
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#jbcclivecancelresid]. #spec-test-build-install-commit-push
-### Re: live Cancel residual — gpt-5
-Kept open: `#jbcclivecancelresid`.
-
-I did not mark the residual done. The controlled live attempt reached useful evidence but not the required pass/fail proof for the Cancel / Keep Memory Changes branch: IDEA logs show the live 0.2.133 plugin loaded, the temporary `/tmp` root registered, and a normal no-dialog patch applied to `/tmp/agent-doc-jb-cache-cancel-live.md`; a later thread dump also shows a JetBrains `File Cache Conflict` modal. What is still missing is plugin-side evidence that the user chose Cancel/Keep Memory Changes and that `PatchWatcher` returned the expected conflict/cancel recovery outcome without mutating the buffer. I stopped GUI automation when desktop focus moved outside IDEA, so I did not continue trying to drive the modal automatically.
-
-Changed paths: no source/spec edits were made in this cycle. The existing dirty files under `src/agent-doc` (`src/diff.rs`, `src/git_sibling.rs`, `src/route/tests.rs`, `src/session_accretion.rs`, `tests/finalize_integration.rs`) predated this run and were left untouched. Temporary `/tmp` repro state was cleaned up.
-
-Verification and install:
-- `cargo test jb_cache_conflict -- --test-threads=2` passed.
-- `cargo test write::tests::try_ipc_returns_false_when_no_patches_dir -- --test-threads=1` passed after removing the temporary `/tmp/.agent-doc` root.
-- `make check` passed, including the deterministic medium SimWorld target.
-- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin` passed for the JetBrains plugin.
-- `make install` installed `agent-doc 0.34.0` and `libagent_doc-0.34.0.so`.
-- `agent-doc plugin install --local jetbrains` installed `agent-doc-jetbrains-0.2.133` to `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`; IDEA needs restart to load a freshly copied plugin.
-- Latest GitHub CI run `26475982495` for `20260422/codex-agent-backend` was green, including the `Run make tmux-ci` step.
-
-Commit/push: no non-session source commit or push was created because there were no task-owned source changes to stage, and the visible source diffs were pre-existing. This closeout is the session-document commit only.
-
-Confidence: medium for the existing automated recovery coverage and local install state; low for closing the live residual, because the required controlled Cancel decision evidence is still absent.
-<!-- agent:boundary:ffba78b3 -->
+<!-- agent:boundary:4824238d -->
 <!-- /agent:exchange -->
 ###
 <!--

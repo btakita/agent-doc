@@ -21,7 +21,7 @@ queue_active: false
 
 <!-- agent:status patch=replace -->
 
-Gated JetBrains manual cancel repro on missing controlled Cancel evidence.
+Gated live Cancel repro on interactive IntelliJ modal; deterministic verification/build/install passed.
 <!-- /agent:status -->
 
 ## Exchange
@@ -55,7 +55,20 @@ Proof:
 - Verification: no code changed; review dependency is external/manual JetBrains repro evidence.
 - Confidence: high; all review gates point to the same live cancel repro.
 - Escalation: none.
-<!-- agent:boundary:88357263 -->
+❯ do [#next-jbcc-controlled-repro]. #spec-test-build-install-commit-push
+### Re: next-jbcc-controlled-repro — gpt-5
+
+I could not close `#next-jbcc-controlled-repro` as done. The deterministic code/spec/test/build/install path is clean, but the actual controlled Cancel branch still needs a live IntelliJ File Cache Conflict dialog and an operator Cancel/Keep-memory selection. I did not synthesize GUI input into the active editor, so I gated the item instead of closing the six review gates.
+
+Evidence:
+- Plugin state: IntelliJIdea2026.1 is running, and the installed JetBrains plugin artifact is `agent-doc-jetbrains 0.2.132`; I reinstalled the local build to `/home/brian/.config/JetBrains/IntelliJIdea2026.1`.
+- Existing coverage: `editors/jetbrains/SPEC.md` covers deferred File Cache Conflict writes; tests cover `memoryDiskConflictCancelLikelyUtil`, plugin conflict deferral source guards, preflight auto-recovery, and the SimWorld cancel branch.
+- Commands: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `agent-doc orchestrate --from-exchange --plan`, `make check`, `./gradlew test buildPlugin`, `cargo install --path .`, `agent-doc plugin install --local jetbrains`, `gh run list --workflow CI --limit 1`, `gh run view 26434026320 --json jobs`.
+- Verification: `make check` passed; JetBrains `test buildPlugin` passed; `cargo install --path .` completed; latest GitHub CI run `26434026320` is successful and its `Run make tmux-ci` step is successful.
+- Changed paths: no code/spec/test files were changed by me; pre-existing dirty files in `src/agent-doc` were left unstaged.
+- Commit/push: no manual non-session code commit was made because there were no intended non-session changes to stage; this session document closeout is committed by `agent-doc finalize`, and push happens after the binary-owned closeout boundary.
+- Escalation: none.
+<!-- agent:boundary:b8a7422e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -72,12 +85,12 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#next-jbcc-controlled-repro] Run the IntelliJIdea2026.1 File Cache Conflict Cancel repro with plugin 0.2.132 active, capture controlled pass/fail evidence, then close or rework review items #next-jbcc-live-repro-closeout, #next-jbcc-manual-repro, #next-adoc-jbcc, #next-jbccc2, #jbccc2, and #adoc-jb-cache-cancel-stuck-cycle.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#next-jbcc-controlled-repro] Run the IntelliJIdea2026.1 File Cache Conflict Cancel repro with plugin 0.2.132 active, capture controlled pass/fail evidence, then close or rework review items #next-jbcc-live-repro-closeout, #next-jbcc-manual-repro, #next-adoc-jbcc, #next-jbccc2, #jbccc2, and #adoc-jb-cache-cancel-stuck-cycle.
 - [/] [#next-jbcc-live-repro-closeout] Run the IntelliJIdea2026.1 File Cache Conflict Cancel repro with plugin 0.2.132 active, capture controlled pass/fail evidence, then use that evidence to decide the review state for #next-jbcc-manual-repro, #next-adoc-jbcc, #next-jbccc2, #jbccc2, and #adoc-jb-cache-cancel-stuck-cycle.
 - [/] [#next-jbcc-manual-repro] Restart IntelliJIdea2026.1 so installed plugin 0.2.132 is active, run the manual File Cache Conflict Cancel repro, capture pass/fail evidence, and then close or rework #next-jbccc2/#jbccc2/#next-adoc-jbcc/#adoc-jb-cache-cancel-stuck-cycle.
 - [/] [#next-adoc-jbcc] Reconcile the parent #adoc-jb-cache-cancel-stuck-cycle review item after #next-jbccc2 is manually verified in IntelliJIdea2026.1; code is pushed in 068a1752 and plugin 0.2.132 is installed, but parent closure still needs the live cancel repro evidence.

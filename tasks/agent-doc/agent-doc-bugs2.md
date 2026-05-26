@@ -21,7 +21,7 @@ queue_active: false
 
 <!-- agent:status patch=replace -->
 
-Recovered recursive queue dispatch; gated items remain pending manual IDE repro.
+Answered review completion question; review items remain gated pending manual repro/residual implementation.
 <!-- /agent:status -->
 
 ## Exchange
@@ -58,7 +58,17 @@ I gated `#next-jbccc2` and `#next-adoc-jbcc` rather than marking them done becau
 The direct `agent-doc` command started the queue handoff but then refused recursive dispatch because this Codex pane already owns the document. I continued in-process with preflight; it repaired the stale `preflight_started` cycle and found no new document diff to execute.
 
 No repo changes were needed in this recovery cycle. `#next-jbccc2` and `#next-adoc-jbcc` remain gated on the IntelliJIdea2026.1 restart plus manual File Cache Conflict Cancel repro. The previous implementation and verification remain current: agent-doc commit `068a1752`, parent submodule pointer commit `cd2cfe5a6`, local verification green, and GitHub CI run `26431487457` passed including `make tmux-ci`.
-<!-- agent:boundary:211a5ead -->
+❯ Can the review items be completed?
+### Re: review completion status — gpt-5
+
+Not responsibly yet.
+
+The JetBrains cache-conflict implementation is code-complete and verified by automated checks, but `#next-jbccc2`, `#jbccc2`, `#next-adoc-jbcc`, and `#adoc-jb-cache-cancel-stuck-cycle` still depend on the live IntelliJIdea2026.1 restart plus manual File Cache Conflict Cancel repro. The prior cycle installed plugin `0.2.132`; that evidence is enough to keep them gated, not enough to close the review path.
+
+`#stuckcycledup` also should stay gated because the audit found a real residual gap: `flow/closeout.rs::stuck_captured_cycle` still returns `None`, so the preflight warning hook exists but does not yet detect the captured-cycle case.
+
+So the review list should not be cleared as-is. The shortest path to clearing it is: restart IntelliJIdea2026.1, run the manual cancel repro for the JetBrains items, then implement the `stuck_captured_cycle` residual or split it into a smaller plan-backed item if it is not going to be fixed in this batch.
+<!-- agent:boundary:a26e518b -->
 <!-- /agent:exchange -->
 ###
 <!--

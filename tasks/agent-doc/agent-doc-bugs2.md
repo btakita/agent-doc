@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -53,7 +53,7 @@ Implemented `#next-jbccc2` through the JetBrains plugin path. `PatchWatcher.kt` 
 Verification is green: focused plugin test, full `make check`, `./gradlew buildPlugin`, `cargo install --path .`, local plugin install to IntelliJIdea2026.1 as `agent-doc-jetbrains-0.2.132`, and GitHub CI run `26431487457` passed including `make tmux-ci`. Code is pushed in submodule commit `068a1752` and the parent submodule pointer is pushed in `cd2cfe5a6`.
 
 I gated `#next-jbccc2` and `#next-adoc-jbcc` rather than marking them done because the installed plugin requires an IntelliJ restart before the manual File Cache Conflict Cancel repro can be run. I completed the `#next-stuckcycledup` audit and kept `#stuckcycledup` open as one residual implementation bug: `flow/closeout.rs::stuck_captured_cycle` is still a stub returning `None`, so the warning hook exists but the real captured-cycle detection still needs to land.
-<!-- agent:boundary:d6661d0c -->
+<!-- agent:boundary:26db3ce4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -61,7 +61,7 @@ As I was typing into the comment below `/agent:exchange`, the full-document IPC 
 #spec-test-build-install-commit-push
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - do [#next-jbccc2]
 - do [#next-adoc-jbcc]

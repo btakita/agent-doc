@@ -76,10 +76,33 @@ Commit / push / deploy:
 Notes:
 - I left pre-existing unstaged submodule changes alone: `AGENTS.md`, `wrangler.toml`, and `tmp/` under `src/equityfundingsource-dev`.
 - No escalation was needed. Confidence is high: local suite, remote migration, deployed Worker, and production smoke checks all passed.
-<!-- agent:boundary:9a42fad1 -->
+❯ The /apply page is a 404. The home page has an "Apply for a loan". What is your current context on Apply for a loan?
+### Re: Apply for a loan — gpt-5
+
+Current context: `/apply` is an orphaned public URL. It is defined in `URLS.apply` and several public UI templates still link to it, but the Worker does not mount an `/apply` route, so production returns `404`.
+
+What exists today:
+- The real borrower application UI is inside the authenticated borrower portal at `/portal-borrower/new-application`.
+- The borrower portal root `/portal-borrower` exists and redirects unauthenticated visitors to `/login?role=borrower`.
+- The home hero's main `Apply for a Loan` button points to `/portal-borrower`, so that path does not 404, but it lands borrowers at the borrower dashboard after login rather than directly at the new application form.
+- Other home/footer CTAs still point to `/apply`: the borrower audience card via `cta_href: '/apply'`, the rate estimator formal quote button, the bottom CTA, and the footer via `URLS.apply`.
+
+So the product intent is clear: “Apply for a loan” should mean borrower signup/login, then the borrower new-application form. The implementation is split between an old public `/apply` placeholder and the newer portal form.
+
+Best fix when we implement it: keep `/apply` as the public canonical CTA URL, but add a Worker route that redirects unauthenticated users to `/login?role=borrower&next=/portal-borrower/new-application`, redirects logged-in borrowers to `/portal-borrower/new-application`, and handles already-logged-in non-borrower roles safely. Then leave public CTAs pointing at `/apply` or normalize them through `URLS.apply`.
+
+Verification/context gathered:
+- `rg` found `URLS.apply = '/apply'` plus public links in home/footer templates.
+- `worker.ts` has no `app.get('/apply', ...)` route.
+- `curl` against production confirmed `/apply` returns `404`.
+- `curl` against production confirmed `/portal-borrower` returns `303` to `/login?role=borrower`.
+
+Changed paths: none besides this session document closeout. Escalation: none. Confidence: high.
+<!-- agent:boundary:3ce1585d -->
 <!-- /agent:exchange -->
 ###
 <!--
+Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
 <!-- agent:queue -->

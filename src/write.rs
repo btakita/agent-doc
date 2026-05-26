@@ -3157,14 +3157,19 @@ fn patchback_marker_count_outside_code(response: &str) -> usize {
 /// plain git repos without `.agent-doc/`, then the file's parent directory.
 fn resolve_ipc_project_root(canonical: &Path) -> std::path::PathBuf {
     let parent = canonical.parent().unwrap_or(Path::new("/"));
+    let git_toplevel = crate::git::git_toplevel_at(parent);
     // 1. Nearest .agent-doc/ root — mirrors IDE plugin's resolveRootFor.
     //    Submodule files resolve to the submodule root, not the superproject,
     //    so ack-content and patch paths agree between Rust and Kotlin.
-    if let Some(p) = find_project_root(canonical) {
+    if let Some(p) = find_project_root(canonical)
+        && git_toplevel
+            .as_ref()
+            .is_none_or(|toplevel| p.starts_with(toplevel))
+    {
         return p;
     }
     // 2. Plain git repo without .agent-doc: use the toplevel.
-    if let Some(toplevel) = crate::git::git_toplevel_at(parent) {
+    if let Some(toplevel) = git_toplevel {
         return toplevel;
     }
     // 3. Last resort: file's parent directory.
@@ -16462,6 +16467,31 @@ mod submodule_patch_routing_tests {
         assert_ne!(
             project_root, parent,
             "must not return the superproject — ack-content written at submodule root would not be found"
+        );
+    }
+
+    #[test]
+    fn resolve_ipc_project_root_ignores_agent_doc_outside_git_toplevel() {
+        let outer_dir = TempDir::new().unwrap();
+        let outer = outer_dir.path().canonicalize().unwrap();
+        std::fs::create_dir_all(outer.join(".agent-doc/patches")).unwrap();
+
+        let nested = outer.join("nested");
+        std::fs::create_dir_all(&nested).unwrap();
+        git(&nested, &["init"]);
+        let doc = nested.join("session.md");
+        std::fs::write(
+            &doc,
+            "---\n---\n\n<!-- agent:exchange -->c<!-- /agent:exchange -->\n",
+        )
+        .unwrap();
+
+        let canonical = doc.canonicalize().unwrap();
+        let project_root = resolve_ipc_project_root(&canonical);
+
+        assert_eq!(
+            project_root, nested,
+            "a parent .agent-doc outside the current git toplevel must not capture IPC routing"
         );
     }
 

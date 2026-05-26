@@ -4410,6 +4410,75 @@ mod tests {
         );
     }
 
+    /// Phase 3 (#jbccc3): the direct Cancel shape can also leave the cycle at
+    /// `write_applied` rather than `committed`: the response is visible and
+    /// saved in the snapshot, but the post-write commit never landed in HEAD.
+    /// The next preflight must treat that as the same recoverable
+    /// jb_cache_conflict_cancel pattern and close the missing commit boundary.
+    #[test]
+    fn preflight_auto_recovers_jb_cache_conflict_cancel_write_applied_with_snapshot_drift() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+
+        let original = "---\nsession: test\n---\n\n## User\n\nHello\n";
+        std::fs::write(&doc, original).unwrap();
+        snapshot::save(&doc, original).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let patched = "---\nsession: test\n---\n\n## User\n\nHello\n\n## Assistant\n\nReply\n";
+        std::fs::write(&doc, patched).unwrap();
+        snapshot::save(&doc, patched).unwrap();
+        crate::cycle_state::mark_write_applied(
+            &doc,
+            "write_template",
+            Some(patched),
+            Some(patched),
+        )
+        .unwrap();
+
+        let pre_state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            pre_state.phase,
+            crate::cycle_state::CyclePhase::WriteApplied
+        );
+        assert!(matches!(
+            crate::git::verify_snapshot_committed(&doc).unwrap(),
+            crate::git::SnapshotCommitStatus::SnapshotDiffersFromHead { .. }
+        ));
+        assert!(
+            crate::session_check::detect_jb_cache_conflict_cancel_recoverable(&doc).unwrap(),
+            "preconditions: write_applied cancel pattern should be detected before recovery"
+        );
+
+        run(&doc).unwrap();
+
+        assert!(matches!(
+            crate::git::verify_snapshot_committed(&doc).unwrap(),
+            crate::git::SnapshotCommitStatus::Committed
+        ));
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        let show = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:session.md"])
+            .output()
+            .unwrap();
+        assert!(
+            String::from_utf8_lossy(&show.stdout).contains("Reply"),
+            "HEAD should now contain the response after write_applied auto-recovery"
+        );
+    }
+
     #[test]
     fn preflight_repairs_jb_cache_conflict_accept_duplicate_replay() {
         let dir = setup_project();

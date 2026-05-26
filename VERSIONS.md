@@ -6,6 +6,15 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **JetBrains File Cache Conflict Cancel recovery is now pinned for the
+  direct `write_applied` wedge.** The preflight regression suite now covers
+  the exact Cancel-shaped closeout where the working tree and snapshot already
+  contain the response but `HEAD` does not and the cycle is still
+  `write_applied`. Preflight must classify that as
+  `jb_cache_conflict_cancel` and close the missing commit boundary
+  automatically, matching the already-covered committed-cycle variant and the
+  JetBrains plugin Cancel contract.
+
 - **Claude Code auto-loop guard no longer blocks on routine
   managed-component state edits.** The SKILL.md auto-loop rule previously
   fired only when `prompt_bearing_changes` was empty or exactly the

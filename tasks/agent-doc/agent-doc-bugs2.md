@@ -34,7 +34,35 @@ Queue advanced: #jbccreviewcloseout completed; #jbccresidualdecision completed b
 Compacted content:
 - Archived 5 response topic(s): review item closeout; complete #jbccliverepro and #next-jbcc-controlled-repro; #next-steps for review items; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:e8f11a26 -->
+❯ agent-doc should not add a `❯ ` on markdown lists.
+❯ #spec-test-build-install-commit-push
+### Re: markdown list prompt prefix — gpt-5
+
+Implemented and shipped the markdown-list prefix fix.
+
+What changed:
+- `src/agent-doc/src/diff.rs` now keeps markdown list items out of automatic prompt-prefix normalization targets while still repairing bare prompt-context prose.
+- `src/agent-doc/src/git.rs` no longer canonicalizes answered prompt markdown bullets or ordered-list items into `❯ - ...` / `❯ 1. ...` lines.
+- `src/agent-doc/src/write.rs` no longer treats stale prefixed markdown list items as post-commit prefix-repair targets.
+- Updated `specs/04-diff-computation.md` and `specs/09-git-integration.md` to make the list-item exemption part of the contract.
+
+Verification:
+- `cargo test markdown_lists` passed in the active checkout.
+- `make check` passed in a clean sibling worktree with only this staged five-file patch applied, including clippy, all default tests, and the medium SimWorld run.
+- `cargo build` passed in that clean patched worktree.
+- `cargo install --path .` completed from that clean patched worktree.
+- GitHub CI run `26475837252` passed; both `Run make check` and `Run make tmux-ci` were green. The only CI annotation was GitHub's Node.js 20 deprecation warning for `actions/checkout@v4`.
+
+Commits / push:
+- `src/agent-doc`: `f1d73c8a` (`fix: preserve markdown list prompt formatting`) pushed to `origin/20260422/codex-agent-backend`.
+- Superproject gitlink: `15477bf49` (`chore: update agent-doc submodule`) pushed to `origin/main`.
+
+Notes:
+- The active worktree still has unrelated local changes in other files/submodules; I left them unstaged and untouched.
+- Current checkout `make check` was not used as proof because unrelated local work was present during the run; the clean worktree and CI runs are the verification evidence for this patch.
+- Escalation: used once to remove temporary verification worktrees I created.
+- Confidence: high.
+<!-- agent:boundary:91eef768 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -30,22 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260526-015913.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260526-030403.md`*
 
 Compacted content:
-- Archived 1 response topic(s): complete #gdbvacproof
+- Archived 1 response topic(s): #next-steps graph performance
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ What are #next-steps to improve graph performance?
-### Re: #next-steps graph performance — gpt-5
-
-Top backlog item: `#gperf`.
-
-I added four ordered follow-ups. The priority is to refresh the performance evidence first, then gate higher hop caps, then optimize SQLite traversal if the measurements still point there, and only then spend time on a real optional backend adapter.
-
-The current spec already treats 128/256/512-hop tiers as benchmark evidence only, with the user-facing default held at 64. That is the right posture until repeated real/full/synthetic samples prove the higher caps are stable. For FalkorDB specifically: it can stay in the candidate set, but the recent full-projection sample does not justify making it the next move. The read-only prototype has spots where it helps, but it does not beat SQLite uniformly across the gate; Kuzu looks more promising in some total-cost samples, but neither is promotable without write/load, parity, lock, and install-portability proof.
-
-Closeout evidence: no code changed. I ran `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `tsift status --fix`, bounded tsift context/search, and targeted SPEC/performance-history reads. `tsift status --fix` still reports one missing unrelated workspace scope (`FDE-Project-Interview`), so I treated workspace-wide graph context as diagnostic rather than dispatch-grade.
-<!-- agent:boundary:c53ef33c -->
+<!-- agent:boundary:c08efeea -->
 <!-- /agent:exchange -->
 ###
 <!--

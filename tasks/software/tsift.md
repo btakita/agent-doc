@@ -19,7 +19,7 @@ queue_active: false
 
 <!-- agent:status patch=replace -->
 
-Answered whether tsift auto-updates stale indexes. No source changes; confirmed behavior from SPEC.md and src/main.rs.
+Answered why the session-share tsift DB appeared stale. No source changes; refreshed indexes with tsift status --fix and confirmed session-share is now fresh while workspace remains stale only because the FDE-Project-Interview scope is missing.
 <!-- /agent:status -->
 
 ## Spec
@@ -76,7 +76,32 @@ Proof for this cycle:
 - Verification: no code tests were run because this was an explanatory response with no source changes.
 - Confidence: high; behavior is documented in `SPEC.md` and reflected in `src/main.rs` search/status handling.
 - Escalation: none.
-<!-- agent:boundary:a995acbe -->
+❯ Why was the tsift db in session-share ~5 days stale?
+### Re: session-share stale index — gpt-5
+
+It was stale because tsift indexing is demand-driven, not a background daemon. A scope can sit at its last indexed state until one of these happens: a command targets that scope and autoindexes it, `tsift status --fix` runs, or someone explicitly runs `tsift index` / `tsift index --workspace`.
+
+So the likely chain is:
+
+1. `session-share` had been indexed during an older workspace-wide index pass.
+2. Agent-doc/session-share work kept changing tracked markdown files afterward.
+3. No tsift search/graph command targeted `session-share` for a while, so nothing forced that scope to refresh.
+4. Plain `tsift status` reported the stale state; it does not generally refresh all stale scopes unless `--fix` is used.
+
+For the current state, `tsift index --check --submodule session-share --json` reported exactly one stale tracked file: `tasks/20260526-orbit-arch.md`. The index DB was refreshed at `2026-05-26 15:57:26 -0400`, then that file changed at `2026-05-26 15:59:51 -0400` via `agent-doc(20260526-orbit-arch)`, so it immediately became stale again. `src/session-share` also currently has local edits to `tasks/.gitignore` and `tasks/20260526-orbit-arch.md`.
+
+After running `tsift status --fix`, `session-share` is fresh again. The overall workspace still says `index: stale` because the configured `FDE-Project-Interview` scope is missing on disk, so tsift cannot build its missing index. That is separate from `session-share`.
+
+Net: nothing mysterious happened to the SQLite DB; it was old because no demand-triggered refresh hit that scope, and active session-share document edits made it stale again shortly after refresh.
+
+Proof for this cycle:
+
+- Changed paths: session document only, through `agent-doc finalize`.
+- Commands: `agent-doc preflight`, `agent-doc plan`, `tsift status`, `tsift status --json`, `tsift index --check --submodule session-share --json`, `git -C src/session-share status --short`, `stat`, `sqlite3` inspection of the session-share index DB, `git -C src/session-share log`, and `tsift status --fix`.
+- Verification: no code tests were run because this was an explanatory response with no source changes. `tsift status --fix` completed and refreshed `session-share`; workspace staleness remains only from the missing configured scope.
+- Confidence: high for the current stale cause; medium for the historical “~5 days” cause because the old DB timestamp was overwritten by the refresh, but the demand-driven behavior explains how that age accumulates.
+- Escalation: none.
+<!-- agent:boundary:5db4d7c9 -->
 <!-- /agent:exchange -->
 ###
 <!--

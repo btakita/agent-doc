@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -116,17 +116,20 @@ Verification completed:
 Note: `cargo fmt --check` still reports broad pre-existing rustfmt drift in unrelated files, so I left formatting spillover out of this commit and relied on the project `make check` target for required verification.
 
 The tsift submodule commit is pushed to `origin/main`; the root pointer commit `5a88f58ee` is already in the current root history. This write is the response repair for the earlier IPC/visible-buffer interrupted finalize.
-<!-- agent:boundary:68a37e01 -->
+### Re: closeout repair — gpt-5
+
+Closeout repair: the previous write inserted the `#gsqlwrite` response body, but post-commit session-check left the queue reap, `(HEAD)` working-tree marker, and done-archive drift outside the committed snapshot. This write commits that agent-owned closeout state only; no additional tsift code changes were made.
+<!-- agent:boundary:aee12dc3 -->
 <!-- /agent:exchange -->
 ###
 <!--
 What are #next-steps to make the graph faster?
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#gprojrows]~
-- do [#gsqlwrite]
+- ~do [#gsqlwrite]~
 - do [#gcommcache]
 - do [#gcommtagctx]
 - do [#gcommgate]

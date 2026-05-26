@@ -10198,28 +10198,30 @@ fn adopt_current_response_without_duplication(
     Ok(Some(repaired))
 }
 
-/// Strip a leaked harness user-prompt marker (`❯ `) from the first non-empty
-/// line of every `### Re: ...` response block inside `agent:exchange`.
+/// Strip leaked harness user-prompt markers (`❯ `) from the leading response
+/// body lines of every `### Re: ...` response block inside `agent:exchange`.
 ///
 /// Background: when finalize falls through to the CRDT merge path while the
 /// live document had a `❯ ` user input at the same column position as the
-/// incoming response body, the merge can splice the new agent line *into* the
-/// existing prompt run, leaving the first response paragraph prefixed with
-/// `❯ `. `session-check` then classifies the corrupted block as a prompt-only
-/// closeout tail and refuses to close.
+/// incoming response body, or when repair adopts an already-visible response
+/// while the snapshot only contains the response heading, prompt normalization
+/// can leave the response paragraphs prefixed with `❯ `. `session-check` then
+/// classifies the corrupted block as a prompt-only closeout tail or the next
+/// closeout replays the same response.
 ///
-/// Real response bodies never start with `❯ ` — that's the harness prompt
-/// marker, not Markdown. Stripping it is safe at this position. Returns
+/// Real response bodies do not use `❯ ` as a paragraph marker. Strip a leading
+/// run of prefixed response-body lines until the first unprefixed body line; any
+/// later `❯ ` text is preserved as quoted/user-visible prose. Returns
 /// `Some(repaired)` when any prefix was stripped, `None` when the document is
 /// clean. See `tasks/agent-doc/plan-crdt-merge-prompt-prefix-leaks-into-response-body.md`.
-fn strip_prompt_prefix_from_response_body_first_lines(content: &str) -> Option<String> {
+pub(crate) fn strip_prompt_prefix_from_response_body_first_lines(content: &str) -> Option<String> {
     let components = component::parse(content).ok()?;
     let exchange = components.iter().find(|c| c.name == "exchange")?;
     let exchange_body = exchange.content(content);
 
     let mut repaired_lines: Vec<String> = Vec::with_capacity(exchange_body.lines().count());
     let mut in_response_block = false;
-    let mut saw_response_body_line = false;
+    let mut saw_unprefixed_response_body_line = false;
     let mut stripped_any = false;
     for line in exchange_body.lines() {
         let trimmed_start = line.trim_start();
@@ -10233,28 +10235,38 @@ fn strip_prompt_prefix_from_response_body_first_lines(content: &str) -> Option<S
 
         if is_response_heading {
             in_response_block = true;
-            saw_response_body_line = false;
+            saw_unprefixed_response_body_line = false;
             repaired_lines.push(line.to_string());
             continue;
         }
         if is_other_heading || is_exchange_marker {
             in_response_block = false;
-            saw_response_body_line = false;
+            saw_unprefixed_response_body_line = false;
             repaired_lines.push(line.to_string());
             continue;
         }
-        if in_response_block && !saw_response_body_line && !line.trim().is_empty() {
-            saw_response_body_line = true;
-            if let Some(rest) = line.strip_prefix("❯ ") {
+        if in_response_block && !line.trim().is_empty() {
+            if !saw_unprefixed_response_body_line
+                && starts_prompt_run_after_response(trimmed_start, false)
+            {
+                in_response_block = false;
+                saw_unprefixed_response_body_line = false;
+                repaired_lines.push(line.to_string());
+                continue;
+            }
+            if let Some(rest) = line.strip_prefix("❯ ")
+                && !saw_unprefixed_response_body_line
+            {
                 stripped_any = true;
                 repaired_lines.push(rest.to_string());
                 continue;
             }
-            if line.trim_start() == "❯" {
+            if line.trim_start() == "❯" && !saw_unprefixed_response_body_line {
                 stripped_any = true;
                 repaired_lines.push(String::new());
                 continue;
             }
+            saw_unprefixed_response_body_line = true;
         }
         repaired_lines.push(line.to_string());
     }
@@ -16933,6 +16945,32 @@ Implemented.
         assert!(repaired.contains("### Re: #respfx — opus-4-7"));
         assert!(repaired.contains("#### Details"));
         assert!(repaired.contains("`agent-doc <FILE>` now accepts `--wait-for-ready <SECONDS>`."));
+    }
+
+    #[test]
+    fn strip_prompt_prefix_from_response_body_first_lines_strips_leading_run() {
+        // Repair adoption can see every response paragraph prefixed when the
+        // stale snapshot already had the response heading but not the body.
+        let content = "\
+<!-- agent:exchange patch=append -->
+❯ do #leading-run. spec-test-build-install-commit-push
+### Re: #leading-run — gpt-5
+
+❯ First response paragraph.
+
+❯ Second response paragraph.
+❯ - Proof line.
+<!-- /agent:exchange -->
+";
+        let repaired = strip_prompt_prefix_from_response_body_first_lines(content)
+            .expect("leading response-body prompt markers must be stripped");
+
+        assert!(repaired.contains("\nFirst response paragraph.\n"));
+        assert!(repaired.contains("\nSecond response paragraph.\n- Proof line.\n"));
+        assert!(!repaired.contains("❯ First response paragraph."));
+        assert!(!repaired.contains("❯ Second response paragraph."));
+        assert!(!repaired.contains("❯ - Proof line."));
+        assert!(repaired.contains("❯ do #leading-run. spec-test-build-install-commit-push"));
     }
 
     #[test]

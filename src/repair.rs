@@ -816,6 +816,19 @@ fn repair_template_doc_if_needed(
             &snapshot_content,
             file,
         );
+        if known_response.is_some()
+            && let Some(stripped) =
+                write::strip_prompt_prefix_from_response_body_first_lines(&repaired)
+        {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "repair_response_body_prompt_prefix_stripped file={}",
+                    file.display()
+                ),
+            );
+            repaired = stripped;
+        }
         repaired = write::normalize_template_structure_or_fail_preserving(
             &repaired,
             file,
@@ -2170,6 +2183,60 @@ mod tests {
             saved_snapshot, repaired,
             "snapshot should advance to the canonicalized repaired document"
         );
+    }
+
+    #[test]
+    fn recover_already_applied_template_keeps_response_body_unprefixed() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let snapshot = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Do the repair.\n",
+            "### Re: repair — gpt-5\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: repair — gpt-5\n\n",
+            "First response paragraph.\n\n",
+            "Second response paragraph.\n",
+            "- Proof line.\n",
+            "<!-- /patch:exchange -->"
+        );
+        let current = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Do the repair.\n",
+            "### Re: repair — gpt-5\n\n",
+            "First response paragraph.\n\n",
+            "Second response paragraph.\n",
+            "- Proof line.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, current).unwrap();
+        snapshot::save(&doc, snapshot).unwrap();
+        save_pending(&doc, response).unwrap();
+
+        let recovered = run(&doc).unwrap();
+        assert_eq!(recovered, RepairOutcome::AlreadyApplied);
+
+        let repaired = std::fs::read_to_string(&doc).unwrap();
+        assert!(repaired.contains("\nFirst response paragraph.\n"));
+        assert!(repaired.contains("\nSecond response paragraph.\n- Proof line.\n"));
+        assert!(
+            !repaired.contains("❯ First response paragraph.")
+                && !repaired.contains("❯ Second response paragraph.")
+                && !repaired.contains("❯ - Proof line."),
+            "already-applied response body lines must not be prompt-prefixed:\n{repaired}"
+        );
+
+        let saved_snapshot = snapshot::load(&doc).unwrap().unwrap();
+        assert_eq!(saved_snapshot, repaired);
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("repair_response_body_prompt_prefix_stripped"));
     }
 
     #[test]

@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -34,7 +34,32 @@ Gated JetBrains manual cancel repro on missing controlled Cancel evidence.
 Compacted content:
 - Archived 1 response topic(s): next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:eb5b8296 -->
+### Re: full-document IPC prompt drift — gpt-5
+
+Implemented `#ipcfullprompt`.
+
+The IPC snapshot adoption path now blocks socket ACK content and file IPC fallback content from becoming the committed snapshot when that candidate contains prompt-bearing `agent:exchange` drift that appeared after the preflight baseline and is absent from the agent-owned response image. When blocked, it logs `flow=document_mutation stage=ipc_snapshot_adoption outcome=blocked reason=live_prompt_drift_after_preflight`, saves the snapshot from `content_ours`, and leaves the live prompt visible for the next response cycle.
+
+I updated the closeout spec and corruption-chain reference, added deterministic SimWorld coverage, added the file IPC ACK-content regression, and updated the hot-path flow token budget for the new audited guard/reason markers.
+
+Verification passed:
+
+- `cargo test live_prompt_drift -- --nocapture`
+- `cargo test try_ipc_snapshot_saves_disk_state -- --nocapture`
+- `cargo test file_ipc_accepts_ack_content_sidecar_when_disk_lags_live_exchange -- --nocapture`
+- `cargo test normalization_fallback -- --nocapture`
+- `cargo test flowcore_hot_path_guard_and_proof_tokens_are_budgeted --test test_cli -- --nocapture`
+- `make check`
+- `make install`
+- GitHub CI run `26434026320` passed for `c8789c43`, including `Run make check` and `Run make tmux-ci`.
+
+Committed and pushed:
+
+- `src/agent-doc` commit `c8789c43` (`fix: guard ipc snapshot live prompt drift`) to `origin/20260422/codex-agent-backend`.
+- Parent gitlink commit `1623ae382` is included in pushed `origin/main`; later unrelated parent/local dirty state was left untouched.
+
+No follow-up items remain for `#ipcfullprompt`.
+<!-- agent:boundary:86fc947d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,14 +69,13 @@ As I was typing into the comment below `/agent:exchange`, the full-document IPC 
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#ipcfullprompt]
+- ~do [#ipcfullprompt]~
 - do [#next-jbcc-live-repro-closeout]
 <!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#ipcfullprompt] agent-doc-bug: full-document IPC corruption while the user is typing a live prompt; capture the real IPC packet, add SimWorld/editor regressions, and block stale full-buffer replacement or snapshot adoption when prompt-bearing drift appears after preflight. Plan: tasks/agent-doc/plan-full-document-ipc-corruption-typing-prompt.md
 - [ ] [#next-jbcc-live-repro-closeout] Run the IntelliJIdea2026.1 File Cache Conflict Cancel repro with plugin 0.2.132 active, capture controlled pass/fail evidence, then use that evidence to decide the review state for #next-jbcc-manual-repro, #next-adoc-jbcc, #next-jbccc2, #jbccc2, and #adoc-jb-cache-cancel-stuck-cycle.
 <!-- /agent:backlog -->
 

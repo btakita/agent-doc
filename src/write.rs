@@ -472,6 +472,15 @@ pub(crate) fn ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
     snapshot_candidate: &str,
     content_ours: &str,
 ) -> bool {
+    let baseline_norm = strip_boundary_for_dedup(baseline);
+    let candidate_norm = strip_boundary_for_dedup(snapshot_candidate);
+    let ours_norm = strip_boundary_for_dedup(content_ours);
+    if outside_component_content_changed(&baseline_norm, &candidate_norm, "exchange")
+        && outside_component_content_changed(&ours_norm, &candidate_norm, "exchange")
+    {
+        return true;
+    }
+
     let candidate_changes = prompt_bearing_user_changes_between(baseline, snapshot_candidate);
     if candidate_changes.is_empty() {
         return false;
@@ -12022,6 +12031,127 @@ scratch
                 && log.contains("reason=live_prompt_drift_after_preflight")
                 && log.contains("ipc_snapshot_adoption_blocked"),
             "unsafe snapshot adoption should be logged:\n{log}"
+        );
+    }
+
+    #[test]
+    fn file_ipc_ack_content_post_exchange_comment_drift_uses_content_ours_snapshot() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let baseline = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!--\n",
+            "-->\n"
+        );
+        let before = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!--\n",
+            "Typing a new prompt below exchange during closeout. #next-steps\n",
+            "-->\n"
+        );
+        let content_ours = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "### Re: Please reply — gpt-5\n\n",
+            "Answered.\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!--\n",
+            "-->\n"
+        );
+        let ack_content = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "### Re: Please reply — gpt-5\n\n",
+            "Answered.\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!--\n",
+            "Typing a new prompt below exchange during closeout. #next-steps\n",
+            "-->\n"
+        );
+        fs::write(&doc, before).unwrap();
+
+        let patches_dir = agent_doc_dir.join("patches");
+        let watcher_dir = patches_dir.clone();
+        let ack_dir = agent_doc_dir.join("ack-content");
+        let doc_for_watcher = doc.clone();
+        let ack_for_watcher = ack_content.to_string();
+        let watcher = std::thread::spawn(move || {
+            for _ in 0..40 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                let Ok(mut entries) = fs::read_dir(&watcher_dir) else {
+                    continue;
+                };
+                if let Some(Ok(entry)) = entries.next() {
+                    if let Ok(text) = fs::read_to_string(entry.path())
+                        && let Ok(json) = serde_json::from_str::<serde_json::Value>(&text)
+                        && let Some(pid) = json.get("patch_id").and_then(|v| v.as_str())
+                    {
+                        let _ = fs::write(&doc_for_watcher, &ack_for_watcher);
+                        let _ = fs::write(ack_dir.join(format!("{pid}.md")), &ack_for_watcher);
+                    }
+                    let _ = fs::remove_file(entry.path());
+                    return;
+                }
+            }
+        });
+
+        let patch = crate::template::PatchBlock::new(
+            "exchange",
+            "### Re: Please reply — gpt-5\n\nAnswered.",
+        );
+        let result = try_ipc(
+            &doc,
+            &[patch],
+            "",
+            None,
+            Some(baseline),
+            Some(content_ours),
+            None,
+            Some("patch-post-exchange-comment-drift"),
+        )
+        .unwrap();
+        watcher.join().unwrap();
+
+        assert!(
+            result.success,
+            "IPC delivery itself should remain successful"
+        );
+        assert_eq!(
+            snapshot::load(&doc).unwrap().as_deref(),
+            Some(content_ours),
+            "snapshot must not absorb post-exchange comment text typed after preflight"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            ack_content,
+            "visible post-exchange comment text should remain in the working tree for the next cycle"
+        );
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("flow=document_mutation")
+                && log.contains("stage=ipc_snapshot_adoption")
+                && log.contains("reason=live_prompt_drift_after_preflight")
+                && log.contains("ipc_snapshot_adoption_blocked"),
+            "unsafe post-exchange drift adoption should be logged:\n{log}"
         );
     }
 

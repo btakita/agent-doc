@@ -57,7 +57,7 @@ Verification:
 - GitHub Actions CI run `26459272826`: success for `clippy + test` and `live Convex graph acceptance`
 
 CI notes: this repo's CI workflow has no separate `tmux-test` job. The run completed with non-blocking annotations for GitHub's Node.js 20 action deprecation and the existing live Convex configuration note.
-<!-- agent:boundary:209f2e80 -->
+<!-- agent:boundary:637e4f3a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -69,14 +69,14 @@ preset #spec-test-build-install-commit-push
 - ~do [#gprojrows]~
 - ~do [#gsqlwrite]~
 - ~do [#gcommcache]~
-- do [#gcommtagctx]
+- ~do [#gcommtagctx]~
 - do [#gcommgate]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gcommtagctx] [recommended] Improve community search quality by carrying file/ref context into CommunityMember and resolving tagpath handles with community or edge evidence instead of name-only fallback; cover duplicate-name, skipped-directory, scoped, and federated fixtures with handle coverage and ambiguous-member diagnostics.
+- [ ] [#f14h] tsift graph auto-update: tsift index is currently stale by default (339 stale files, 5d since last manual reindex on Brian's machine). No commit hook, no nightly job. Options: (a) pre-commit hook scoped to changed scopes (cheap, deterministic, but per-clone install), (b) post-commit background reindex (zero blocking cost), (c) GitHub Actions nightly + on-push job that publishes a fresh graph.db artifact (no per-clone setup, lets graphs travel with the repo). Decide and implement. See session-share/tasks/20260526-doc-graph.md.
 - [ ] [#gcommgate] [recommended] Add a community search quality and performance gate to metric-digest and fixtures: track communities runtime, handle coverage, stale/no-tagpath behavior, duplicate-name precision, and top-community stability across real and synthetic multi-module workloads.
 <!-- /agent:backlog -->
 

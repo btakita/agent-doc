@@ -58,6 +58,7 @@ As I was typing into the comment below `/agent:exchange`, the full-document IPC 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#ipcfullprompt] agent-doc-bug: full-document IPC corruption while the user is typing a live prompt; capture the real IPC packet, add SimWorld/editor regressions, and block stale full-buffer replacement or snapshot adoption when prompt-bearing drift appears after preflight. Plan: tasks/agent-doc/plan-full-document-ipc-corruption-typing-prompt.md
 - [ ] [#next-jbcc-live-repro-closeout] Run the IntelliJIdea2026.1 File Cache Conflict Cancel repro with plugin 0.2.132 active, capture controlled pass/fail evidence, then use that evidence to decide the review state for #next-jbcc-manual-repro, #next-adoc-jbcc, #next-jbccc2, #jbccc2, and #adoc-jb-cache-cancel-stuck-cycle.
 <!-- /agent:backlog -->
 

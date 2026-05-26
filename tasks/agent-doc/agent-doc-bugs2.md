@@ -34,7 +34,17 @@ Queue halted; #jbccliverepro remains gated pending live IntelliJ File Cache Conf
 Compacted content:
 - Archived 4 response topic(s): #jbccprecheck; #jbccevidence; #jbccliverepro; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:9e38a662 -->
+❯ What review items can be completed?
+### Re: review item closeout — gpt-5
+
+None of the eight review items can be completed from the evidence currently in the document. They are all still gated on the same missing live proof: IntelliJIdea2026.1 must show the File Cache Conflict Cancel path with plugin 0.2.133 active.
+
+The first actionable item is #jbccliverepro / #next-jbcc-controlled-repro: capture the live Cancel evidence. If that passes, the dependent review items can then be closed or reworked in this order: #next-jbcc-live-repro-closeout, #next-jbcc-manual-repro, #next-adoc-jbcc, #next-jbccc2, #jbccc2, and #adoc-jb-cache-cancel-stuck-cycle.
+
+I did not mark any review item done in this cycle. #next-jbccc2 has strong implementation evidence already recorded, including commit 068a1752, focused tests, make check, buildPlugin, cargo install, local plugin install, and GitHub CI, but the document still explicitly leaves it gated on the manual live Cancel repro.
+
+Proof for this cycle: changed paths before finalize: none; commands run: `tsift status`, `tsift status --fix`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `git status --short`; verification: inspected the current Review section and confirmed all eight entries are `[/]` gated; escalation: none.
+<!-- agent:boundary:e6747696 -->
 <!-- /agent:exchange -->
 ###
 <!--

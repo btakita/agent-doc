@@ -18,7 +18,7 @@ queue_active: true
 ## Status
 
 <!-- agent:status patch=replace -->
-Completed: #gperf recorded fresh graph-db backend-eval performance evidence in tsift c48a073 and pinned it in agent-loop de6e2381. Local verification passed (`make check`, `cargo build`, `cargo install --path .`); latest tsift CI run 26418433229 is green.
+Completed: #ghop added the hop-cap promotion gate in tsift 06a0383 and pinned it in agent-loop 242b99610. Local verification passed (`cargo test -q perf_gate`, backend-eval contract test, `make check`, `cargo build`, `cargo install --path .`); latest tsift CI run 26430632139 is green, and root Agent Doc run 26430663631 remains an external empty-step runner-start blocker.
 <!-- /agent:status -->
 
 ## Spec
@@ -63,7 +63,34 @@ Verification:
 - No `tmux-test` workflow is present in the tsift repo; root agent-loop has only the `Agent Doc` workflow, whose latest failures are separate 3-4 second session-document jobs, not a tsift test leg.
 
 Per the agent-doc commit boundary, I will push the tsift commit, the agent-loop pointer commit, and this session-document commit after finalize succeeds.
-<!-- agent:boundary:2bfbc99d -->
+### Re: #ghop hop-cap promotion gate — gpt-5
+
+Completed #ghop. The user-facing graph path default remains 64 hops until `perf_gate::evaluate_hop_cap_promotion` promotes a measured candidate tier.
+
+Implemented:
+
+- `src/tsift/src/perf_gate.rs`: added hop-cap constants, `HopCapGateReport`, workload verdicts, and evaluator. The gate requires 128/256/512 candidates only; repeated SQLite samples for `real`, `full_projection`, and `synthetic_deep_chain`; latency within the allowed regression budget against 64-hop `path_max_hops.duration_micros`; useful rows; and deeper synthetic-chain rows beyond the 64-hop median.
+- `src/tsift/src/main.rs`: `graph-db backend-eval` now emits `performance_gate.hop_cap_promotion` with current default, candidate tiers, required workloads/metrics, and decision rule.
+- `src/tsift/tests/perf_gate.rs` and `src/tsift/tests/graph_db_conformance.rs`: covered fixture blocking, synthetic pass, missing full-projection proof, deep-chain row usefulness, unmeasured candidate tiers, and backend-eval JSON contract.
+- `src/tsift/SPEC.md` and `src/tsift/VERSIONS.md`: documented the hop-cap promotion rule.
+
+Commits prepared locally before this document closeout:
+
+- `src/tsift`: `06a0383` (`feat(graph-db): gate hop-cap promotion`)
+- `agent-loop`: `242b99610` (`chore(tsift): pin hop-cap promotion gate`)
+
+Verification:
+
+- `cargo test -q perf_gate`: passed.
+- `cargo test -q graph_db_backend_eval_benchmarks_candidate_stores_against_sqlite`: passed.
+- `make check` in `src/tsift`: passed (`cargo clippy --all-targets -- -D warnings`, `cargo test`: 692 unit tests, 124 exit-code tests, 33 graph-db conformance tests, 30 perf-gate tests, 4 scan-plan tests).
+- `cargo build` in `src/tsift`: passed.
+- `cargo install --path .` in `src/tsift`: passed; installed `tsift 0.1.62`.
+- GitHub Actions: latest tsift `CI` run `26430632139` passed (`clippy + test`, `live Convex graph acceptance`).
+- Tmux/Agent Doc CI: root `Agent Doc` run `26430663631` failed before job startup with empty-step `tmux-ci` and `check` jobs; I treated this as an external CI-start blocker, not a code/tmux regression.
+
+Per the agent-doc commit boundary, I will push the tsift commit, the agent-loop pointer commit, and this session-document commit after finalize succeeds.
+<!-- agent:boundary:f9a9b230 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -73,7 +100,7 @@ What are #next-steps to make the graph faster?
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#gperf]~
-- do [#ghop]
+- ~do [#ghop]~
 - do [#gfront]
 - do [#gback]
 <!-- /agent:queue -->
@@ -82,7 +109,6 @@ preset #spec-test-build-install-commit-push
 
 <!-- agent:backlog -->
 - [ ] [#gcachemiss] Stabilize full-projection source-watermark/cache reuse: reproduce repeated #gperf cache misses on a quiescent checkout, identify which watermark input shifts between runs, and gate cache-hit evidence before cap/backend changes.
-- [ ] [#ghop] Add a hop-cap promotion gate before raising user-facing graph max-hop defaults: keep the 64-hop default until repeated real, full-projection, and synthetic deep-chain samples prove 128/256/512-hop tiers stay within the performance gate and produce useful rows.
 - [ ] [#gfront] Optimize SQLite high-hop/frontier traversal if refreshed metrics show path/evidence latency is still hot: use indexed frontier expansion or recursive CTEs, avoid per-hop broad scans, emit cap diagnostics, and lock query-plan regressions for full-projection plus synthetic deep-chain fixtures.
 - [ ] [#gback] [recommended] Spike a real optional graph backend adapter only after SQLite gate evidence is fresh: compare Kuzu and FalkorDB behind GraphStore with projection writes/load, lock semantics, install portability, and full parity; do not promote a read-only prototype unless it beats SQLite across every required workload.
 <!-- /agent:backlog -->

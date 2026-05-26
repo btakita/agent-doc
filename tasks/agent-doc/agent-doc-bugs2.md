@@ -93,7 +93,47 @@ Proof:
 - Verification: no code changed and no tests were required; answer checked against `tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md` and `src/agent-doc/runbooks/jb-cache-conflict.md`; recovery was needed because IPC prefixed assistant body lines as prompts.
 - Confidence: high.
 - Escalation: none.
-<!-- agent:boundary:35f550e5 -->
+❯ When I run a prompt, I'm seeing the prompt be removed by one of agent-doc's steps. Please investigate why this is happening. Add logging if necessary.
+❯ ---
+❯ As I was typing into the comment below `/agent:exchange`, the full-document IPC corruption happened. It seems if I type in a longer prompt, the full-document IPC corruption occurs.
+❯ #spec-test-build-install-commit-push
+### Re: prompt removal and full-document IPC corruption — gpt-5
+
+I traced this failure through the ops log rather than treating it as another generic `fullContent` issue. The observed corruption came from the already-applied repair path: a stale snapshot could already contain the `### Re:` heading but not the assistant body, then prompt normalization classified the adopted response body as newly inserted user text and wrote it back with leading `❯ ` markers. The next closeout then saw the prefixed assistant prose as prompt text, producing the duplicated/prompt-prefixed response sequence.
+
+Implemented fix:
+
+- `src/agent-doc/src/write.rs`: made the response-body prefix scrubber reusable and expanded it from “first body line only” to a leading response-body run, while preserving real prompt lines such as `❯ do #id` after a response.
+- `src/agent-doc/src/repair.rs`: wired that scrubber into template repair adoption when a known pending response is being recovered, before snapshot advancement, with an ops-log proof line `repair_response_body_prompt_prefix_stripped`.
+- `src/agent-doc/SPEC.md`: added the invariant that already-applied response repair must strip leaked leading `❯ ` markers from response body paragraphs before advancing the snapshot.
+
+Regression coverage added:
+
+- `strip_prompt_prefix_from_response_body_first_lines_strips_leading_run`
+- `recover_already_applied_template_keeps_response_body_unprefixed`
+
+Verification run:
+
+- `cargo test response_body -- --nocapture`
+- `cargo test normalize_user_prompts_user_text_after_equal_heading -- --nocapture`
+- `make check`
+- `./gradlew test buildPlugin` from `src/agent-doc/editors/jetbrains`
+- `cargo install --path .`
+- `agent-doc plugin install --local jetbrains` installed the local build into `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`
+- `agent-doc --version` reports `agent-doc 0.34.0`
+
+CI/tmux evidence:
+
+- Latest post-push CI run `26457217481` was checked after push and was in progress in `Run make check`; `Run make tmux-ci` had not started yet, so there was no failing tmux leg to fix.
+- Previous CI run `26434026320` completed successfully, including `Run make check` and `Run make tmux-ci`.
+
+Commit/push:
+
+- Source commit: `1e551818 fix: strip leaked prompt prefixes from repaired responses`
+- Pushed to `origin/20260422/codex-agent-backend`
+
+Escalation: none. Confidence: high for the diagnosed class, because the new repair regression reproduces the stale-heading/already-applied shape and asserts both disk content and saved snapshot remain unprefixed.
+<!-- agent:boundary:81c235ef -->
 <!-- /agent:exchange -->
 ###
 <!--

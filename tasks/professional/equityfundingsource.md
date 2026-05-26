@@ -36,7 +36,47 @@ EFS workers.dev production: D1 API unblocked; remote D1 migrations are current; 
 Compacted content:
 - Archived 9 response topic(s): next-steps; Cloudflare D1 + Access; Google admin credentials; 6 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:4213a2f4 -->
+❯ Make the chat sessions persist.
+❯ #spec-test-commit-push-deploy
+### Re: chat sessions persist — gpt-5
+
+Implemented persistent borrower chat sessions.
+
+Changed paths:
+- `app/equityfundingsource/migrations/0028_borrower_chat_sessions.sql`
+- `app/equityfundingsource/lib/borrower_messages/repo.ts`
+- `app/equityfundingsource/lib/borrower_messages/routes.ts`
+- `app/equityfundingsource/worker.ts`
+- `lib/ui--browser--efs/portal/borrower/messages.tsx`
+- `prds/equity-funding-source-lending-portal-prd.md`
+- `tests/borrower-messages.test.ts`
+- `tests/prd.test.ts`
+
+What changed:
+- Added D1 `chat_sessions` and `chat_messages` tables with borrower ownership, optional loan linkage, sender role, message body, timestamps, and indexes.
+- Added borrower-only `GET /api/borrower/messages` and `POST /api/borrower/messages` routes. Loan-linked sessions verify that the loan belongs to the borrower before creating a thread.
+- Replaced the borrower Messages mock/local-only state with API-backed load/send behavior, loading/error/empty states, persisted session tracking, and append-on-send.
+- Updated the PRD and drift tests so the persisted messaging contract is covered.
+
+Verification:
+- `bun test tests/borrower-messages.test.ts` passed: 5 tests.
+- `make check` passed: 178 tests, browser build, Worker build.
+- GitHub Actions check: this repo has no configured workflows; `gh run list --workflow CI --limit 1` reported no `CI` workflow and `gh workflow list` returned none.
+- Remote D1 migration list before apply showed `0028_borrower_chat_sessions.sql` pending.
+- `bun run cf:d1:migrate:remote` applied `0028_borrower_chat_sessions.sql` successfully.
+- Remote D1 smoke query confirmed `chat_messages` and `chat_sessions` exist.
+- Remote migration list after apply reports no pending migrations.
+- Live API smoke: unauthenticated `GET /api/borrower/messages` returns `401`, as expected.
+
+Commit / push / deploy:
+- EFS app commit: `788ebeb` (`feat: persist borrower chat sessions`) pushed to `btakita/equityfundingsource-dev` `main`.
+- Superproject submodule pointer commit: `00601b413` (`chore: update equityfundingsource submodule`) committed locally before this session closeout.
+- Deployed Worker: `https://equityfundingsource.brian-takita.workers.dev`, version `71617ca4-7892-4785-9301-0d2ef663d39d`.
+
+Notes:
+- I left pre-existing unstaged submodule changes alone: `AGENTS.md`, `wrangler.toml`, and `tmp/` under `src/equityfundingsource-dev`.
+- No escalation was needed. Confidence is high: local suite, remote migration, deployed Worker, and production smoke checks all passed.
+<!-- agent:boundary:9a42fad1 -->
 <!-- /agent:exchange -->
 ###
 <!--

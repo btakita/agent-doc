@@ -34,7 +34,34 @@ Closed stale duplicate #agent-doc-commit-sibling prompt; review remains at 3 gat
 Compacted content:
 - Archived 4 response topic(s): Stale queue / IPC corruption note; Closeout repair; Review completion; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:a94c53cc -->
+❯ As I was typing into the comment below `/agent:exchange`, the full-document IPC corruption happened.
+❯ #spec-test-build-install-commit-push
+### Re: compacted IPC scratch comment — gpt-5
+
+Implemented the spec/test regression for the compacted-session scratch-comment case.
+
+Changed paths:
+- `src/agent-doc/specs/04-diff-computation.md`
+- `src/agent-doc/specs/07-closeout-commands.md`
+- `src/agent-doc/tests/finalize_integration.rs`
+- parent submodule pointer `src/agent-doc`
+
+Verification:
+- `cargo test --test finalize_integration finalize_preserves_compacted_exchange_ipc_scratch_comment -- --exact`
+- `make check`
+- `cargo install --path .`
+- `agent-doc --version` reports `agent-doc 0.34.0`
+- Latest GitHub `CI` workflow is `completed/success` for `20260422/codex-agent-backend` (run `26428367988`, `2026-05-26T02:13:21Z`), so no local `make tmux-ci` rerun was required.
+
+Commits:
+- `b80dd1ba` in `src/agent-doc`: `test: cover compacted exchange scratch comments`, pushed to `origin/20260422/codex-agent-backend`.
+- `f29919327` in parent: `chore: update agent-doc submodule`; parent push follows this binary closeout so the session document stays on the finalize path.
+
+Notes:
+- Existing modified source files in `src/agent-doc` were left unstaged/uncommitted.
+- Escalation: none.
+- Confidence: high.
+<!-- agent:boundary:36f33ad3 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -120,7 +120,34 @@ Proof for this pass:
 - Verification: no test suite run because this cycle only answers the product-routing question.
 - Escalation: none.
 - Confidence: high.
-<!-- agent:boundary:bb317e60 -->
+❯ Please do the lightweight public prequalification and lead-capture step. The applications should be accessible in the admin portal and send an email notification to the EFS staff.
+### Re: public /apply lead capture — gpt-5
+
+Implemented the lightweight public prequalification and lead-capture workflow.
+
+What changed:
+
+- `/apply` is now a dynamic public page with a bounded prequalification form for borrower/contact details, property basics, loan amount, estimated value, lien position, purpose, timeline, and optional context.
+- Submissions create durable D1 `application_leads` records through a new `0029_application_leads.sql` migration.
+- The Worker attempts an EFS staff email notification through Resend after saving the lead, and records notification state as `pending`, `sent`, `failed`, or `skipped` so the admin portal still has the lead even if email delivery is unavailable.
+- Admins can review the submissions at `/portal-admin/application-leads`, filter by status, see contact/property/loan details, inspect staff notification state, and move leads through `new`, `contacted`, `converted`, and `archived`.
+- Header/home/contact apply CTAs now send visitors to `/apply` instead of the borrower portal root.
+- The admin dashboard now includes the count of new public application leads.
+- PRD and Bun tests now cover the public apply, admin review, D1 persistence, and staff notification contract.
+
+Commits:
+
+- EFS subproject: `1240c56 feat: add public application lead capture`
+- Root submodule pointer: `143ad3f64 feat: update EFS application lead capture`
+
+Proof:
+
+- Changed paths: `src/equityfundingsource-dev` feature files and root submodule pointer, plus this session document. Existing unrelated dirty files in the EFS submodule (`AGENTS.md`, `wrangler.toml`, `tmp/`) were left unstaged and unchanged by this work.
+- Commands: refreshed `tsift`, ran `agent-doc preflight` and `agent-doc plan`, added the D1 migration/routes/UI/tests, staged only the intended feature paths, committed the EFS subproject, staged only the root submodule pointer, and committed the root pointer update.
+- Verification: `bun test tests/application-leads.test.ts` passed; `make check` passed with 183 tests, app build, and Worker build. `gh run list --workflow CI --limit 1` reported no workflow named `CI`, so there was no matching CI run to inspect.
+- Escalation: none.
+- Confidence: high.
+<!-- agent:boundary:2015afaa -->
 <!-- /agent:exchange -->
 ###
 <!--

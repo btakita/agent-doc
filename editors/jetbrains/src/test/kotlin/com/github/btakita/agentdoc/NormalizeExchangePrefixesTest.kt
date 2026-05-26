@@ -136,6 +136,65 @@ Already applied.
     }
 
     @Test
+    fun `patch replay dedupe detects response already present on disk with head marker`() {
+        val disk = """
+<!-- agent:exchange patch=append -->
+### Re: #gsqlwrite — gpt-5 (HEAD)
+
+Committed response.
+<!-- agent:boundary:abc12345 -->
+<!-- /agent:exchange -->
+""".trimStart()
+        val patch = IpcPatch(
+            file = "/repo/tasks/software/tsift.md",
+            patches = listOf(ComponentPatch("exchange", "### Re: #gsqlwrite — gpt-5\n\nCommitted response.\n")),
+            unmatched = "",
+            frontmatter = null,
+            fullContent = null,
+        )
+
+        assertTrue(patchReplayAlreadyPresentUtil(patch, listOf(disk)))
+    }
+
+    @Test
+    fun `patch replay dedupe requires all response payloads to be present`() {
+        val disk = """
+<!-- agent:exchange patch=append -->
+### Re: first — gpt-5
+
+One.
+<!-- /agent:exchange -->
+""".trimStart()
+        val patch = IpcPatch(
+            file = "/repo/doc.md",
+            patches = listOf(
+                ComponentPatch("exchange", "### Re: first — gpt-5\n\nOne.\n"),
+                ComponentPatch("exchange", "### Re: second — gpt-5\n\nTwo.\n"),
+            ),
+            unmatched = "",
+            frontmatter = null,
+            fullContent = null,
+        )
+
+        assertFalse(patchReplayAlreadyPresentUtil(patch, listOf(disk)))
+    }
+
+    @Test
+    fun `patch replay dedupe can use safe committed proof`() {
+        val patch = IpcPatch(
+            file = "/repo/doc.md",
+            patches = listOf(ComponentPatch("exchange", "### Re: committed — gpt-5\n\nDone.\n")),
+            unmatched = "",
+            frontmatter = null,
+            fullContent = null,
+        )
+
+        assertTrue(patchReplayAlreadyPresentUtil(patch, emptyList()) { payload ->
+            payload.contains("committed")
+        })
+    }
+
+    @Test
     fun `editor apply proof rejects content or generation drift`() {
         val proof = EditorApplyProof("before", 7L)
 

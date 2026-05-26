@@ -720,6 +720,21 @@ class PatchWatcher(private val project: Project) : Disposable {
 
         // Component-based patching (template/stream-mode documents)
         var result = content
+        val diskContent = try {
+            String(targetFile.contentsToByteArray(), targetFile.charset)
+        } catch (_: Exception) {
+            null
+        }
+        if (patchReplayAlreadyPresentUtil(
+                patch,
+                listOfNotNull(content, diskContent),
+            ) { payload -> NativePatching.patchContentAlreadyCommitted(patch.file, payload) }
+        ) {
+            LOG.info("[patch-watcher] dedup: response patch_id ${patch.patchId} already present in live disk/committed content — skipping stale replay")
+            writeAckContent(patch.patchId, diskContent ?: content, patch.file)
+            lastApplyWasNoOp = true
+            return true
+        }
 
         // Apply frontmatter patch first (before component patches)
         if (!patch.frontmatter.isNullOrBlank()) {
@@ -889,6 +904,16 @@ class PatchWatcher(private val project: Project) : Disposable {
 
             // Component-based patching
             var result = content
+            if (patchReplayAlreadyPresentUtil(
+                    patch,
+                    listOf(content),
+                ) { payload -> NativePatching.patchContentAlreadyCommitted(patch.file, payload) }
+            ) {
+                LOG.info("[patch-watcher] dedup: VFS response patch_id ${patch.patchId} already present in disk/committed content — skipping stale replay")
+                writeAckContent(patch.patchId, content, patch.file)
+                lastApplyWasNoOp = true
+                return true
+            }
 
             if (!patch.frontmatter.isNullOrBlank()) {
                 result = NativePatching.mergeFrontmatter(result, patch.frontmatter)
@@ -1515,6 +1540,40 @@ internal fun appendPatchAlreadyPresentUtil(doc: String, component: String, conte
     if (patch.isEmpty()) return false
     val existing = normalizeAppendPatchContentForCompare(doc.substring(range.first, range.second))
     return existing.contains(patch)
+}
+
+internal fun patchReplayAlreadyPresentUtil(
+    patch: IpcPatch,
+    candidateContents: List<String>,
+    committedContentAlreadyPresent: (String) -> Boolean = { false },
+): Boolean {
+    val payloads = replayResponsePayloads(patch)
+    if (payloads.isEmpty()) return false
+    return payloads.all { payload ->
+        candidateContents.any { content -> appendPatchAlreadyPresentUtil(content, "exchange", payload) } ||
+            committedContentAlreadyPresent(payload)
+    }
+}
+
+private fun replayResponsePayloads(patch: IpcPatch): List<String> {
+    val payloads = mutableListOf<String>()
+    for (componentPatch in patch.patches) {
+        if (componentPatch.component == "exchange" && looksLikeResponseReplayPayload(componentPatch.content)) {
+            payloads.add(componentPatch.content)
+        }
+    }
+    if (looksLikeResponseReplayPayload(patch.unmatched)) {
+        payloads.add(patch.unmatched)
+    }
+    return payloads
+}
+
+private fun looksLikeResponseReplayPayload(content: String): Boolean {
+    val trimmed = content.trim()
+    return trimmed.contains("\n### Re:") ||
+        trimmed.startsWith("### Re:") ||
+        trimmed.contains("\n## Assistant") ||
+        trimmed.startsWith("## Assistant")
 }
 
 private fun normalizeAppendPatchContentForCompare(content: String): String {

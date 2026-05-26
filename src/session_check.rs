@@ -316,6 +316,47 @@ fn closeout_recovery_hint(file: &Path) -> String {
     )
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct JbCacheConflictAcceptDuplicateReplay {
+    pub(crate) heading: String,
+    pub(crate) deduped_content: String,
+}
+
+/// Detect the late JetBrains File Cache Conflict "accept" replay shape.
+///
+/// The stale editor/cache payload lands after the cycle already committed, so
+/// the working tree contains an extra adjacent response block while `HEAD`
+/// still contains the correct single-response document. This is not a fresh
+/// direct patchback; it is safe to repair by replacing the working tree and
+/// snapshot with `dedupe(current)` when that result matches `HEAD` modulo
+/// transient editor markers.
+pub(crate) fn detect_jb_cache_conflict_accept_duplicate_replay(
+    file: &Path,
+) -> Result<Option<JbCacheConflictAcceptDuplicateReplay>> {
+    let current = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {}", file.display()))?;
+    let Some(heading) = crate::dedupe::first_duplicate_response_heading(&current) else {
+        return Ok(None);
+    };
+    let deduped = crate::dedupe::dedupe_responses(&current);
+    if deduped == current {
+        return Ok(None);
+    }
+    let Some(head) = crate::git::show_head(file)? else {
+        return Ok(None);
+    };
+    if crate::git::normalize_transient_agent_doc_markers(&deduped)
+        != crate::git::normalize_transient_agent_doc_markers(&head)
+    {
+        return Ok(None);
+    }
+
+    Ok(Some(JbCacheConflictAcceptDuplicateReplay {
+        heading,
+        deduped_content: head,
+    }))
+}
+
 fn parent_pointer_recovery_hint(file: &Path) -> String {
     format!(
         "Use `agent-doc commit {}` to finish the missing parent pointer commit, then re-run `agent-doc session-check {}`.",
@@ -628,6 +669,16 @@ pub fn enforce_clean_closeout(file: &Path) -> Result<()> {
 }
 
 fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
+    if let Some(replay) = detect_jb_cache_conflict_accept_duplicate_replay(file)? {
+        return Ok(SessionCheckStatus::Interrupted(format!(
+            "[session-check] INTERRUPTED: found JetBrains File Cache Conflict accept replay duplicate at `{}`; `dedupe(current)` matches committed HEAD. Run `agent-doc preflight {}` to auto-repair, or run `agent-doc dedupe {}` followed by `agent-doc write --commit {}`.",
+            replay.heading,
+            file.display(),
+            file.display(),
+            file.display()
+        )));
+    }
+
     if let Some(heading) = detect_duplicate_response_patchback(file)? {
         return Ok(SessionCheckStatus::Interrupted(format!(
             "[session-check] INTERRUPTED: found consecutive duplicate response patchback at `{}`. Run `agent-doc dedupe {}` or rerun closeout so the write path can repair it before commit.",
@@ -4687,6 +4738,87 @@ Body\n\
             matches!(status, SessionCheckStatus::Ok(_)),
             "expected Ok (auto-recoverable), got: {status:?}"
         );
+    }
+
+    #[test]
+    fn session_check_classifies_jb_cache_conflict_accept_duplicate_replay() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("doc.md");
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: #gsqlwrite — gpt-5\n\n",
+            "Committed response.\n",
+            "<!-- agent:boundary:committed -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "doc.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "committed response", "--no-verify"])
+            .output()
+            .unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
+
+        let replayed = committed.replace(
+            "<!-- agent:boundary:committed -->\n<!-- /agent:exchange -->",
+            "### Re: #gsqlwrite — gpt-5 (HEAD)\n\nCommitted response.\n<!-- agent:boundary:replayed -->\n<!-- /agent:exchange -->",
+        );
+        fs::write(&doc, replayed).unwrap();
+
+        let replay = detect_jb_cache_conflict_accept_duplicate_replay(&doc)
+            .unwrap()
+            .expect("duplicate replay should be detected");
+        assert_eq!(replay.deduped_content, committed);
+        assert_eq!(replay.heading, "### Re: #gsqlwrite — gpt-5 (HEAD)");
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(
+                    message.contains("File Cache Conflict accept replay duplicate"),
+                    "expected dedicated accept-replay classification: {message}"
+                );
+                assert!(
+                    message.contains("matches committed HEAD"),
+                    "expected committed-HEAD proof in message: {message}"
+                );
+            }
+            other => panic!("expected accept replay interruption, got {other:?}"),
+        }
     }
 
     #[test]

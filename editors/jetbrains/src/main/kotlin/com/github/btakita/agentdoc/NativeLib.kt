@@ -221,6 +221,13 @@ interface AgentDocLib : Library {
      */
     fun agent_doc_is_claimed_by_force_disk(project_root: String, patch_id: String): Boolean
 
+    /**
+     * True when the current disk file matches committed HEAD and HEAD already
+     * contains the incoming response patch content. Used to no-op stale editor
+     * replays after a JetBrains File Cache Conflict accept.
+     */
+    fun agent_doc_patch_content_already_committed(file_path: String, content: String): Boolean
+
     /** Callback interface for socket IPC messages. */
     interface IpcMessageCallback : Callback {
         /** Called with each JSON message. Return true if handled, false on error. */
@@ -420,6 +427,16 @@ object NativePatching {
         val start: Int,
         val end: Int,
     )
+
+    fun patchContentAlreadyCommitted(filePath: String, content: String): Boolean {
+        val lib = AgentDocLib.get() ?: return false
+        return try {
+            lib.agent_doc_patch_content_already_committed(filePath, content)
+        } catch (e: Throwable) {
+            LOG.debug("[native] patch_content_already_committed unavailable: ${e.message}")
+            false
+        }
+    }
 
     /**
      * Apply a component patch using the native library.

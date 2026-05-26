@@ -1200,6 +1200,131 @@ pub unsafe extern "C" fn agent_doc_is_claimed_by_force_disk(
     }
 }
 
+/// Return true when the current disk file still matches committed `HEAD` and
+/// that committed document already contains the incoming response patch body.
+///
+/// This gives editor plugins a safe late-replay gate: a stale File Cache
+/// Conflict accept should no-op only when both disk and HEAD prove that the
+/// response is already committed. If disk has drifted away from HEAD, the
+/// plugin must not use HEAD alone as proof because the patch may be needed to
+/// restore a stale editor buffer.
+///
+/// # Safety
+///
+/// `file_path` and `content` must be valid, NUL-terminated UTF-8 strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_patch_content_already_committed(
+    file_path: *const c_char,
+    content: *const c_char,
+) -> i32 {
+    let file = match unsafe { CStr::from_ptr(file_path) }.to_str() {
+        Ok(s) => std::path::PathBuf::from(s),
+        Err(_) => return 0,
+    };
+    let patch_content = match unsafe { CStr::from_ptr(content) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return 0,
+    };
+    let Some(head) = ffi_show_head(&file) else {
+        return 0;
+    };
+    let Ok(current) = std::fs::read_to_string(&file) else {
+        return 0;
+    };
+    if ffi_normalize_transient_agent_doc_markers(&current)
+        != ffi_normalize_transient_agent_doc_markers(&head)
+    {
+        return 0;
+    }
+    ffi_response_already_applied(&head, patch_content) as i32
+}
+
+fn ffi_show_head(file: &std::path::Path) -> Option<String> {
+    let parent = file.parent()?;
+    let root = std::process::Command::new("git")
+        .current_dir(parent)
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|stdout| std::path::PathBuf::from(stdout.trim()))?;
+    let relative = file.strip_prefix(&root).ok()?;
+    let spec = format!("HEAD:{}", relative.to_string_lossy());
+    std::process::Command::new("git")
+        .current_dir(root)
+        .args(["show", &spec])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+}
+
+fn ffi_normalize_transient_agent_doc_markers(content: &str) -> String {
+    content
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            if trimmed.starts_with("<!-- agent:boundary:") {
+                return None;
+            }
+            let stripped = if (trimmed.starts_with('#') || trimmed.starts_with("**"))
+                && line.ends_with(" (HEAD)")
+            {
+                line.strip_suffix(" (HEAD)").unwrap_or(line)
+            } else {
+                line
+            };
+            Some(stripped.to_string())
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn ffi_response_already_applied(doc: &str, response: &str) -> bool {
+    let response_lines = ffi_normalized_response_lines(response);
+    if response_lines.is_empty() {
+        return false;
+    }
+    let doc_lines = ffi_normalized_response_lines(doc);
+    doc_lines
+        .windows(response_lines.len())
+        .any(|window| window == response_lines.as_slice())
+}
+
+fn ffi_normalized_response_lines(content: &str) -> Vec<String> {
+    content
+        .lines()
+        .filter_map(ffi_normalize_response_line)
+        .collect()
+}
+
+fn ffi_normalize_response_line(line: &str) -> Option<String> {
+    let raw = line.trim_end_matches('\r');
+    let trimmed = raw.trim();
+    if trimmed.is_empty()
+        || trimmed.starts_with("<!-- patch:")
+        || trimmed.starts_with("<!-- /patch:")
+        || trimmed.starts_with("<!-- agent:")
+        || trimmed.starts_with("<!-- /agent:")
+    {
+        return None;
+    }
+    if let Some(stripped) = raw.strip_suffix(" (HEAD)") {
+        let trimmed = stripped.trim_start();
+        if trimmed.starts_with("### Re:") || trimmed.starts_with("**Re:") && trimmed.ends_with("**")
+        {
+            return Some(stripped.to_string());
+        }
+    }
+    let trimmed_start = raw.trim_start();
+    if let Some(stripped) = trimmed_start.strip_prefix("❯ ") {
+        let indent_len = raw.len() - trimmed_start.len();
+        return Some(format!("{}{}", &raw[..indent_len], stripped));
+    }
+    Some(raw.to_string())
+}
+
 /// Commit the document at `file_path` to git (Fix 4: plugin post-apply commit).
 ///
 /// Defense-in-depth guarantee: editor plugins call this after successfully applying
@@ -1877,6 +2002,70 @@ mod ack_content_tests {
         let claimed =
             unsafe { agent_doc_is_claimed_by_force_disk(project_root.as_ptr(), patch_id.as_ptr()) };
         assert_eq!(claimed, 0, "should return 0 when sentinel absent");
+    }
+
+    #[test]
+    fn patch_content_already_committed_requires_disk_to_match_head() {
+        use std::process::Command;
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+
+        macro_rules! git {
+            ($($arg:expr),+) => {
+                Command::new("git")
+                    .current_dir(root)
+                    .env_remove("GIT_DIR")
+                    .env_remove("GIT_INDEX_FILE")
+                    .env_remove("GIT_WORK_TREE")
+                    .args([$($arg),+])
+                    .output()
+                    .unwrap()
+            };
+        }
+
+        git!["init"];
+        git!["config", "user.email", "test@test.com"];
+        git!["config", "user.name", "Test"];
+
+        let doc = root.join("doc.md");
+        let committed = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: committed — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, committed).unwrap();
+        git!["add", "doc.md"];
+        git!["commit", "-m", "committed response", "--no-verify"];
+
+        let file_path = CString::new(doc.to_string_lossy().as_ref()).unwrap();
+        let patch_content = CString::new("### Re: committed — gpt-5\n\nDone.\n").unwrap();
+        assert_eq!(
+            unsafe {
+                agent_doc_patch_content_already_committed(
+                    file_path.as_ptr(),
+                    patch_content.as_ptr(),
+                )
+            },
+            1,
+            "committed disk content should prove the patch is already present"
+        );
+
+        std::fs::write(
+            &doc,
+            "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n",
+        )
+        .unwrap();
+        assert_eq!(
+            unsafe {
+                agent_doc_patch_content_already_committed(
+                    file_path.as_ptr(),
+                    patch_content.as_ptr(),
+                )
+            },
+            0,
+            "HEAD alone must not be enough when disk drifted away from HEAD"
+        );
     }
 
     // --- Fix 4: agent_doc_commit FFI export ---

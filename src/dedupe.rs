@@ -110,14 +110,12 @@ fn dedupe_responses_with_report(content: &str) -> (String, Option<String>) {
         let (s2, e2) = pair[1];
         let block1: String = lines[s1..e1]
             .iter()
-            .filter(|l| !l.trim().starts_with("<!-- agent:boundary:"))
-            .map(|l| l.trim())
+            .filter_map(|l| normalize_response_block_line(l))
             .collect::<Vec<_>>()
             .join("\n");
         let block2: String = lines[s2..e2]
             .iter()
-            .filter(|l| !l.trim().starts_with("<!-- agent:boundary:"))
-            .map(|l| l.trim())
+            .filter_map(|l| normalize_response_block_line(l))
             .collect::<Vec<_>>()
             .join("\n");
         if block1 == block2 {
@@ -153,6 +151,22 @@ fn dedupe_responses_with_report(content: &str) -> (String, Option<String>) {
     (result, first_duplicate)
 }
 
+fn normalize_response_block_line(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    if trimmed.starts_with("<!-- agent:boundary:") {
+        return None;
+    }
+    if trimmed.starts_with("### Re:") {
+        return Some(
+            trimmed
+                .strip_suffix(" (HEAD)")
+                .unwrap_or(trimmed)
+                .to_string(),
+        );
+    }
+    Some(trimmed.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,6 +187,27 @@ mod tests {
         let content = "### Re: Foo\nContent.\n### Re: Bar\nOther.\n### Re: Foo\nContent.\n";
         let result = dedupe_responses(content);
         assert_eq!(result, content);
+    }
+
+    #[test]
+    fn dedupe_treats_head_marker_as_transient() {
+        let content = "\
+### Re: Foo — gpt-5
+Content.
+<!-- agent:boundary:old -->
+### Re: Foo — gpt-5 (HEAD)
+Content.
+<!-- agent:boundary:new -->
+";
+        let result = dedupe_responses(content);
+        assert_eq!(
+            result,
+            "### Re: Foo — gpt-5\nContent.\n<!-- agent:boundary:old -->\n"
+        );
+        assert_eq!(
+            first_duplicate_response_heading(content).as_deref(),
+            Some("### Re: Foo — gpt-5 (HEAD)")
+        );
     }
 
     #[test]

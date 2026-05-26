@@ -1015,6 +1015,31 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
 }
 
 fn enforce_no_uncommitted_closeout_drift(file: &Path) -> Result<()> {
+    // Accepted JetBrains File Cache Conflict dialogs can replay a stale editor
+    // patch after the response already reached HEAD. If the only working-tree
+    // drift is an adjacent duplicate response and dedupe(current) is HEAD, drop
+    // the replay before the generic direct-patchback guard fires.
+    if let Some(replay) =
+        crate::session_check::detect_jb_cache_conflict_accept_duplicate_replay(file)?
+    {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "jb_cache_conflict_accept_duplicate_replay_repaired file={} heading={}",
+                file.display(),
+                replay.heading.replace('\n', " ")
+            ),
+        );
+        eprintln!(
+            "[preflight] jb_cache_conflict_accept: removing duplicate response replay at `{}` for {}",
+            replay.heading,
+            file.display()
+        );
+        crate::write::atomic_write_pub(file, &replay.deduped_content)?;
+        crate::snapshot::save(file, &replay.deduped_content)?;
+        return Ok(());
+    }
+
     // Phase 3 (#jbccc3): JB File Cache Conflict cancel auto-recovery.
     //
     // When the binary-owned write path applied the response (snapshot has it,
@@ -4345,8 +4370,7 @@ mod tests {
 
         // Simulate the post-cancel state: snapshot and working tree both
         // contain the response, HEAD does not, cycle is marked Committed.
-        let patched =
-            "---\nsession: test\n---\n\n## User\n\nHello\n\n## Assistant\n\nReply\n";
+        let patched = "---\nsession: test\n---\n\n## User\n\nHello\n\n## Assistant\n\nReply\n";
         std::fs::write(&doc, patched).unwrap();
         snapshot::save(&doc, patched).unwrap();
         crate::cycle_state::mark_write_applied(
@@ -4383,6 +4407,69 @@ mod tests {
         assert!(
             String::from_utf8_lossy(&show.stdout).contains("Reply"),
             "HEAD should now contain the response after auto-recovery"
+        );
+    }
+
+    #[test]
+    fn preflight_repairs_jb_cache_conflict_accept_duplicate_replay() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: #gsqlwrite — gpt-5\n\n",
+            "Committed response.\n",
+            "<!-- agent:boundary:committed -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, committed).unwrap();
+        snapshot::save(&doc, committed).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "committed response", "--no-verify"])
+            .output()
+            .unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
+
+        let replayed = committed.replace(
+            "<!-- agent:boundary:committed -->\n<!-- /agent:exchange -->",
+            "### Re: #gsqlwrite — gpt-5 (HEAD)\n\nCommitted response.\n<!-- agent:boundary:replayed -->\n<!-- /agent:exchange -->",
+        );
+        std::fs::write(&doc, replayed).unwrap();
+        assert!(
+            crate::session_check::detect_jb_cache_conflict_accept_duplicate_replay(&doc)
+                .unwrap()
+                .is_some(),
+            "preconditions: accepted-conflict duplicate replay should be detected"
+        );
+
+        run(&doc).unwrap();
+
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), committed);
+        assert_eq!(snapshot::load(&doc).unwrap().unwrap(), committed);
+        let diff = Command::new("git")
+            .current_dir(root)
+            .args(["diff", "--", "session.md"])
+            .output()
+            .unwrap();
+        assert!(
+            diff.stdout.is_empty(),
+            "preflight repair should restore the working tree to committed HEAD"
         );
     }
 

@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -78,7 +78,30 @@ Verification:
 - GitHub CI `26460423804` passed on `btakita/tsift` (`clippy + test`, `live Convex graph acceptance`)
 
 CI/tmux note: the `tsift` repo has no separate tmux-test workflow; `gh workflow list` shows `CI` and `Release`, and the pushed `CI` run passed. The parent `agent-loop` repo has no workflow named `CI` for `gh run list --workflow CI --limit 1`.
-<!-- agent:boundary:312f2ce1 -->
+### Re: do [#gcommgate] — gpt-5
+
+Implemented `#gcommgate`.
+
+- Added an optional `community_search_gate` section to `tsift metric-digest` for `communities.<workload>.*` and `community_search.<workload>.*` metrics.
+- The gate requires both `real` and `synthetic_multi_module` workloads and tracks runtime, handle coverage, stale behavior, no-tagpath behavior, duplicate-name precision, and top-community stability.
+- Runtime now blocks only when it regresses by more than 25% against the compared run; quality metrics fail closed on missing values or threshold misses.
+- Added CLI human/compact output for the gate, a canonical fixture at `fixtures/community-search-gate-history.json`, unit coverage, an integration CLI fixture test, and SPEC documentation.
+
+Verification completed:
+
+- `cargo test -q metric_digest`
+- `cargo test -q community_search_gate`
+- `cargo test -q --test exit_code metric_digest_reports_community_search_gate_fixture`
+- `cargo build`
+- `cargo install --path .`
+- `make check`
+- GitHub CI run `26461131045` passed for `btakita/tsift` with jobs `live Convex graph acceptance` and `clippy + test`. The only annotations were the existing Node.js 20 deprecation and live Convex URL note. No tmux-test workflow exists for this repo; `gh workflow list` shows `CI` and `Release`.
+
+Commits prepared:
+
+- `btakita/tsift` pushed `79e371c` (`feat: add community search metric gate`).
+- Parent repo committed the submodule pointer as `071e8cd34` (`chore: update tsift community gate`); I will push the parent after this document closeout so the session-document commit travels with it.
+<!-- agent:boundary:7d23f53e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -87,20 +110,13 @@ re [#f14h]: The auto-update should primarily be driven in the development enviro
 What are #next-steps to make the graph faster?
 -->
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~do [#gprojrows]~
-- ~do [#gsqlwrite]~
-- ~do [#gcommcache]~
-- ~do [#gcommtagctx]~
-- do [#gcommgate]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
 - [ ] [#f14h] tsift graph auto-update: tsift index is currently stale by default (339 stale files, 5d since last manual reindex on Brian's machine). No commit hook, no nightly job. Options: (a) pre-commit hook scoped to changed scopes (cheap, deterministic, but per-clone install), (b) post-commit background reindex (zero blocking cost), (c) GitHub Actions nightly + on-push job that publishes a fresh graph.db artifact (no per-clone setup, lets graphs travel with the repo). Decide and implement. See session-share/tasks/20260526-doc-graph.md.
-- [ ] [#gcommgate] [recommended] Add a community search quality and performance gate to metric-digest and fixtures: track communities runtime, handle coverage, stale/no-tagpath behavior, duplicate-name precision, and top-community stability across real and synthetic multi-module workloads.
 <!-- /agent:backlog -->
 
 ## Review

@@ -58,7 +58,35 @@ None of the three active review items should be marked done as written.
 So the current completion set is empty. If we want to reduce review noise, the clean move is to replace `#stuckcycledup` with explicit child review/backlog entries for `#stuckcycleorphan`, `#stuckcyclerepair`, and `#stuckcyclesuperseded`, then leave the parent out of Review rather than marking it done.
 
 Verification: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, inspected `tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md`, `tasks/agent-doc/plan-stuck-cycle-causes-duplicated-uncommitted-response.md`, `src/agent-doc/runbooks/jb-cache-conflict.md`, `src/agent-doc/src/sim_world.rs`, and `src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt`. No repo code changed.
-<!-- agent:boundary:f218a4a4 -->
+❯ As I was typing into the comment below `/agent:exchange`, the full-document IPC corruption happened, then the duplicate line happened.
+❯ #spec-test-build-install-commit-push
+### Re: Duplicate scratch comment closeout — gpt-5
+
+Captured the new reproduction as a spec/test invariant for the closeout path.
+
+Changed paths:
+- `src/agent-doc/specs/04-diff-computation.md` documents that same-turn HTML scratch-comment drift below `agent:exchange` is not response content, must remain visible, must stay out of the response commit when absent from the baseline, and must not block `session-check`.
+- `src/agent-doc/tests/finalize_integration.rs` adds `finalize_ignores_concurrent_duplicate_prompt_comment_for_session_check`, covering the exact duplicate prompt/preset line shape while finalizing.
+
+Verification:
+- `cargo fmt`
+- `cargo build`
+- `cargo test finalize_ignores_concurrent_duplicate_prompt_comment_for_session_check`
+- `cargo test` initially exposed a pre-existing parallel test race in plan/tsift graph tests; the failing test passed in isolation.
+- `cargo test -- --test-threads=1` passed: 2440 unit/bin tests plus integration/doc test suites.
+- `cargo install --path .` completed and replaced `/home/brian/.cargo/bin/agent-doc`.
+- `make check` passed, including agent-doc clippy/tests, `closeout_sim_medium_seed_corpus_runs_wider_deterministic_budget`, and sibling checks.
+
+CI/tmux evidence:
+- `gh workflow list` shows this repo has `Agent Doc`, not `CI`; `gh run list --workflow CI --limit 1` failed because no `CI` workflow exists.
+- Latest `Agent Doc` run `26424833124` failed in 3s with empty `tmux-ci` and `check` job steps; `gh run view 26424833124 --log-failed` reported `log not found: 77786273213`. I’m classifying that as an external CI-start/log-allocation failure, not a code or tmux regression.
+
+Commits:
+- `src/agent-doc`: `2148a1e2 test: cover duplicate scratch comment closeout`
+- parent repo: `8cf90f09e agent-doc: bump duplicate scratch comment test`
+
+Push is intentionally deferred until after this session-document closeout lands, per the agent-doc commit/push ordering rule, so the response commit is included in the push.
+<!-- agent:boundary:1a94b628 -->
 <!-- /agent:exchange -->
 ###
 <!--

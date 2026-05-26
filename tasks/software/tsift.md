@@ -30,45 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260526-163522.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260526-165359.md`*
 
 Compacted content:
-- Archived 3 response topic(s): #gcommcache; do #gcommtagctx; do [#gcommgate]
+- Archived 1 response topic(s): #f14h automatic graph refresh
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ re [#f14h]: The auto-update should primarily be driven in the development environment. A github action can be added but the primary driver is through actions on a development machine. Can we make this process automatic? Can it be part of the tsift cli tool call chain?
-### Re: #f14h automatic graph refresh — gpt-5
-
-Yes. I made the development-machine auto-update path part of the `tsift` CLI chain.
-
-What changed:
-
-- `tsift graph`, `tsift communities`, `tsift path`, and `tsift explain` now resolve the local/scoped index target and incrementally refresh missing or stale indexes before opening `index.db`.
-- If another live tsift writer already owns `index.lock` and an older database exists, those graph-query commands now skip the refresh with a concise stderr note and continue against the current read-only snapshot instead of failing closed.
-- Agent-doc task paths named after workspace scopes, such as `tasks/software/tsift.md`, now resolve to that scope's index for read-only graph queries too, matching the existing search behavior.
-- `SPEC.md` now documents search/default autoindex behavior plus the new graph-query freshness chain.
-
-Changed paths in `btakita/tsift`:
-
-- `src/main.rs`
-- `SPEC.md`
-
-Verification:
-
-- `cargo test -q autoindexes`
-- `cargo test -q writer_lock_is_held`
-- `cargo test -q agent_doc_task_path_infers_matching_workspace_scope`
-- `cargo test -q autoindexes_missing_index_by_default`
-- `cargo test -q graph_cmd_autoindexes_stale_index_by_default`
-- `cargo build`
-- `cargo install --path .`
-- `make check`
-- GitHub CI run `26461951197` passed for `btakita/tsift` with jobs `clippy + test` and `live Convex graph acceptance`. The only annotations were the existing Node.js 20 deprecation and live Convex URL note. This repo has no separate tmux workflow; `gh workflow list` shows `CI` and `Release`.
-
-Commits:
-
-- `btakita/tsift` pushed `6e3d6d0` (`feat: auto-refresh graph query indexes`).
-- Parent repo pointer committed locally as `bd533c9b3` (`chore: update tsift graph autoindex`). I did not push parent `main` because it already has unrelated local commits ahead of `origin/main`; pushing would publish those too.
-<!-- agent:boundary:91bd46d1 -->
+<!-- agent:boundary:4307bcc5 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -28,57 +28,12 @@ Gated live Cancel repro on interactive IntelliJ modal; deterministic verificatio
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260526-153407.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260526-160900.md`*
 
 Compacted content:
-- Archived 6 response topic(s): next steps to complete review items; next-jbcc-controlled-repro; next-jbcc-controlled-repro manual verification; 3 more
+- Archived 1 response topic(s): #socketackdup and #jbccacceptdup
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-### Re: #socketackdup and #jbccacceptdup — gpt-5
-
-Completed both items.
-
-Changed paths:
-- `src/agent-doc/src/dedupe.rs`
-- `src/agent-doc/src/session_check.rs`
-- `src/agent-doc/src/preflight.rs`
-- `src/agent-doc/src/ffi.rs`
-- `src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/NativeLib.kt`
-- `src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt`
-- `src/agent-doc/editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/NormalizeExchangePrefixesTest.kt`
-- `src/agent-doc/editors/jetbrains/gradle.properties`
-- `src/agent-doc/specs/06-config.md`
-- `src/agent-doc/specs/07-closeout-commands.md`
-
-What changed:
-- Response duplicate comparison now ignores transient `agent:boundary` comments and `(HEAD)` suffixes on response headings.
-- `session-check` classifies the JetBrains File Cache Conflict accept replay shape separately when `dedupe(current)` matches committed `HEAD` modulo transient markers.
-- `preflight` repairs that accept-replay shape by restoring the committed single-response document and snapshot before the generic duplicate patchback guard runs.
-- The JetBrains plugin now skips stale response patch replays when the payload is already present in the live document/disk, or when native proof shows disk still matches `HEAD` and `HEAD` already contains the response payload.
-- Added the native `agent_doc_patch_content_already_committed` proof helper so the plugin does not trust `HEAD` alone after disk drift.
-- Bumped the JetBrains plugin version to `0.2.133`, rebuilt it, and installed the local plugin artifact into `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`.
-
-Verification:
-- `cargo test jb_cache_conflict_accept`
-- `cargo test dedupe_treats_head_marker_as_transient`
-- `cargo test patch_content_already_committed_requires_disk_to_match_head`
-- `./gradlew test --tests com.github.btakita.agentdoc.NormalizeExchangePrefixesTest`
-- `make check`
-- `./gradlew test buildPlugin`
-- `make install`
-- `make tmux-ci` passed locally with 228 ignored live-tmux tests run and 0 failures.
-- `make plugin-version-check`
-
-CI / tmux evidence:
-- The required `gh run list --workflow CI --limit 1` lookup fails because this repo has no workflow named `CI`.
-- The post-push `Agent Doc` workflow run `26459785375` for `24b85733a` failed before executing any steps: both `check` and `tmux-ci` jobs have empty `steps`, and `gh run view 26459785375 --log-failed` returned `log not found`. I’m classifying that as an external CI-start blocker, not a code or tmux regression, with local `make check` and `make tmux-ci` as the verification evidence.
-
-Commits / push:
-- Submodule: `d8367ad7 fix: guard agent-doc duplicate replays`, pushed to `btakita/agent-doc` `20260422/codex-agent-backend`.
-- Superproject: `24b85733a agent-doc: update duplicate replay guard`, pushed to `btakita/agent-loop` `main`.
-
-Escalation: none.
-Confidence: high; the fix has targeted regression coverage, full local Rust verification, JetBrains plugin verification, and the live tmux sweep.
-<!-- agent:boundary:3a2bdcad -->
+<!-- agent:boundary:b31cbedc -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -1,163 +1,114 @@
----
-session: cf853a21-3aaf-4775-9cc8-0e789109f9dd
-agent: null
-model: null
-branch: null
----
+Moved to [tasks/plan.md](tasks/plan.md).
 
-# Plan: agent-doc & agent-loop
+- [x] Inspect `tasks/software/agent-loop.md` and `src/agent-doc/CLAUDE.md` to identify the concrete requested transfer.
+- [x] Inspect `tasks/agent-doc/agent-doc-feat.md` to find the correct insertion points for exchanged context and pending items.
+- [x] Transfer the snapshot-GC feature context into `tasks/agent-doc/agent-doc-feat.md` with a concrete, configurable-reap-cycle spec and pending item.
+- [x] Update `tasks/software/agent-loop.md` to mark the transfer item complete and record the transfer in the exchange.
+- [x] Review the diffs for only the touched files.
 
-## Status
+## 2026-04-23 — `agent-doc-bugs` `#cshk`
 
-v0.1.1 released. Core CLI functional. Dog-fooding via `/agent-doc plan.md`. 78 tests passing.
+- [x] Confirm the current Codex hook contract and decide the minimal binary-owned integration surface for `#cshk`.
+- [x] Implement the Codex hook state/capture flow in `src/agent-doc`, keeping deterministic logic in Rust rather than in generated hook scripts.
+- [x] Install the Codex hook/config artifacts from `agent-doc skill install`, add regression coverage, then run the requested verification (`cargo test`, `make check`, `cargo build --release`, `cargo install --path .`).
+- [x] Patch the result back into `tasks/agent-doc/agent-doc-bugs.md` and commit the required repo changes in the correct repo boundaries.
 
-## What's Next
+## 2026-04-23 — `agent-doc-bugs` failing tests follow-up
 
-### agent-doc
+- [x] Reproduce the current `src/agent-doc` failures for the open `#cyc1` follow-up and isolate whether the implementation or test expectations are wrong.
+- [x] Patch the minimal `src/agent-doc` fix, keeping docs/specs aligned if behavior changed.
+- [x] Re-run the relevant verification, patch the outcome into `tasks/agent-doc/agent-doc-bugs.md`, and commit the required repo changes.
 
-1. Make `audit-docs` work outside Rust projects (currently requires Cargo.toml)
-2. Codex frontend skill (same pattern as Claude skill)
+## 2026-04-23 — `agent-doc-bugs` `#wcmp`
 
-### Future
+- [x] Inspect the current `src/agent-doc` skill, runbooks, specs, and tests to find any manual-repair guidance that still stops at bare `agent-doc write`.
+- [x] Update the shared/manual-repair guidance so both Codex and Claude default to `agent-doc write --commit <FILE>` and keep installed-content parity intact.
+- [x] Add or adjust regression coverage for the new guidance, then run build/install verification and patch the result back into `tasks/agent-doc/agent-doc-bugs.md`.
 
-- Streaming responses
-- Document-only permission flow (no terminal)
-- Desktop notifications on completion
-- Multi-agent documents (sections routed to different agents)
-- Email transport for async human-agent loops (bridge with corky)
+## 2026-04-23 — `agent-doc-bugs` `#cmiv`
 
-## Reference
+- [x] Inspect the current commit/write guidance in `src/agent-doc` to decide whether `#cmiv` should land as a new `runbooks/commit.md`, a skill rewrite, or both, while avoiding overlap with the existing `finalize` worktree changes.
+- [x] Update the minimal source docs/runbooks so the hard invariant is explicit: every appended `agent-doc` response must cross a commit boundary unless the user explicitly says otherwise, with Claude/Codex-specific invocation differences still delegated to `harness-invocation.md`.
+- [x] Add regression coverage in `src/agent-doc/src/skill.rs` (and any other necessary tests) to lock installed-content parity for the new commit invariant.
+- [x] Run the requested verification in `src/agent-doc` (`cargo test`, `make check`, `cargo build --release`, `cargo install --path .`) and only then patch the outcome back into `tasks/agent-doc/agent-doc-bugs.md`.
 
-- **Decisions & architecture:** `agent-doc/SPECS.md`
-- **Module layout & conventions:** `agent-doc/CLAUDE.md`
-- **Workspace structure:** `SPECS.md`
-- **Workflow orchestration:** `AGENTS.md`
+## 2026-04-23 — `agent-doc-bugs` `#cyc1` follow-up
 
-## User
+- [x] Reproduce the current `src/agent-doc` failures around the open cycle-completion work and identify whether the breakage is in the implementation or the tests.
+- [x] Patch the minimal `src/agent-doc` fix, keeping docs/specs/tests aligned with the enforced cycle contract.
+- [x] Re-run the relevant verification, patch the result back into `tasks/agent-doc/agent-doc-bugs.md`, and commit the required repo changes in the correct repo boundaries.
 
-Read https://x.com/heygurisingh/status/2025572300658287030 and look at the image in the tweet.
+## 2026-04-23 — `agent-doc-bugs` Codex follow-up verification
 
-Please update our AGENTS.md with these instructions. I want the improve the experience for everyone.
+- [x] Inspect the unfinished `src/agent-doc` changes and identify the failing tests or checks tied to the Codex follow-up.
+- [x] Decide whether the right action is a code/test fix or verification-only closeout based on the live worktree.
+- [x] Verify the current `src/agent-doc` tree with targeted Codex tests and `make -C src/agent-doc check`.
+- [x] Update `tasks/agent-doc/agent-doc-bugs.md` with the outcome.
 
-Is there anything else to do from plan.md? Please clear out anything that's been done. Move the info to the README.md, SPECS.md, etc.
+## 2026-04-23 — `agent-doc-bugs` Codex patchback not committed analysis
 
-## Assistant
+- [x] Compare the committed vs working-tree state for `tasks/agent-doc/agent-doc-bugs.md` to identify exactly which response patchback never crossed a parent commit boundary.
+- [x] Verify the live `agent-doc` guard state for this workspace (`session-check`, cycle-state file, and installed `.codex` hook/config artifacts) to determine whether the failure came from a bypassed write path, missing hook installation, or both.
+- [x] Patch the evidence-backed analysis into `tasks/agent-doc/agent-doc-bugs.md` without disturbing unrelated root or submodule worktree changes.
 
-Done. Here's what happened:
+## 2026-04-23 — `agent-doc-bugs` Codex deterministic patchback closeout
 
-**AGENTS.md updated** with workflow orchestration from Boris Cherny's CLAUDE.md template (via the tweet). Added:
-- **Workflow Orchestration** — 6 sections: Plan Mode Default, Subagent Strategy, Self-Improvement Loop, Verification Before Done, Demand Elegance, Autonomous Bug Fixing
-- **Task Management** — 6-step flow: Plan First, Verify Plan, Track Progress, Explain Changes, Document Results, Capture Lessons
-- **Core Principles** — Simplicity First, No Laziness, Minimal Impact
-- **Conventions** — branch naming (`yyyymmdd/short-description`), `make check`, `make precommit`
+- [x] Inspect the current Codex stop-hook and response-persistence boundary to decide the minimal deterministic closeout path when Codex reaches `Stop` with an open `agent-doc` cycle.
+- [x] Implement the binary-owned fix in `src/agent-doc`, keeping Codex/manual-repair docs and tests aligned with the enforced ordering.
+- [x] Run focused verification first, then the requested broader build/install checks if the code change lands cleanly.
+- [ ] Patch the result back into `tasks/agent-doc/agent-doc-bugs.md`.
 
-Adapted to our conventions: uses auto memory instead of `tasks/lessons.md`, uses `plan.md` instead of `tasks/todo.md`, references our existing tooling.
+## 2026-04-23 — `agent-doc-bugs` harness-priority next steps
 
-**plan.md cleaned up** — removed ~130 lines:
-- Removed Decisions table (already in `agent-doc/SPECS.md`)
-- Removed Repo Structure block (already in `SPECS.md`)
-- Removed Modules/CLI blocks (already in `agent-doc/CLAUDE.md` and `agent-doc/SPECS.md`)
-- Removed 25-line Completed checklist (historical, info preserved in git)
-- Removed 6 struck-through Immediate items (all done)
-- Added Reference section pointing to the canonical locations
-- Trimmed conversation history
+- [x] Inspect the current `tasks/agent-doc/agent-doc-bugs.md` ask plus the unfinished `src/agent-doc` worktree to separate already-in-flight closeout fixes from still-missing workspace/runtime steps.
+- [ ] Verify the current Codex closeout WIP in `src/agent-doc` with focused hook/session tests and `make -C src/agent-doc check`, so the next action is based on the live tree rather than prior turn assumptions.
+- [ ] Install the updated `agent-doc` skill/artifacts into this `agent-loop` workspace and confirm the repo-local `.codex/hooks.json` and `.codex/config.toml` backstop are actually present here.
+- [ ] Run an end-to-end Codex closeout check in `agent-loop` that proves both the normal `finalize` + `session-check` path and the `Stop` hook backstop leave no uncommitted patchback.
+- [ ] Patch the verified outcome back into `tasks/agent-doc/agent-doc-bugs.md`, update pending state, and only then commit/push in the correct repo boundaries.
 
-**Nothing else outstanding from plan.md.** The only remaining items are future work (agent-doc: audit-docs portability, Codex skill) and long-term features (streaming, notifications, multi-agent, email transport).
+## 2026-04-23 — `agent-doc-bugs` `#bndy`
 
-## User
+- [x] Re-read the current boundary cleanup contract in `src/agent-doc` and reproduce the targeted `git.rs` boundary tests so the task is grounded in the live tree.
+- [x] Patch the minimal `src/agent-doc` code/spec/test surface needed to prove post-commit boundary cleanup stays clean with both a live IPC listener and a stale `.agent-doc/patches/` directory.
+- [x] Run the requested verification in `src/agent-doc` (`cargo test`, `make check`, `cargo build --release`, `cargo install --path .`), then patch the verified outcome back into `tasks/agent-doc/agent-doc-bugs.md`.
 
-commit and push changes.
+## 2026-04-23 — `agent-doc-bugs` `#ha3h`
 
-subagents:
-1. Make `audit-docs` work outside Rust projects (currently requires Cargo.toml)
-2. Codex frontend skill (same pattern as Claude skill)
-3. corky: Telegram integration strategy. Support export/import. API integration would be nice.
-4. corky: Slack integration strategy. Support export/import. API integration would be nice.
+- [x] Re-read the open bug item plus the linked `agent-doc` issue to confirm the intended recipient-side config shape and any explicit ship gate.
+- [x] Verify from the live `src/agent-doc` tree whether multi-user workspace support is already present or still explicitly absent.
+- [ ] If the prerequisite is present, implement the shared recipient-policy path for pending auto-create in `write`/`notify`, update specs/tests, and run the relevant verification.
+- [x] If the prerequisite is absent, patch `tasks/agent-doc/agent-doc-bugs.md` with the evidence-backed deferral/blocker instead of shipping the config early.
 
-## Assistant
+## 2026-04-23 — `agent-doc-bugs` boost-client `monsterrodholders` patchback analysis
 
-Committed and pushed. All 4 research subagents completed. Here are the findings:
+- [x] Inspect the committed vs working-tree state for `src/boost-client/tasks/monsterrodholders.md` to see whether the `#h6gx` patchback ever crossed a commit boundary.
+- [x] Compare the recent `src/boost-client` commits with the `.agent-doc` snapshot / cycle-state / ops-log evidence to determine whether the patchback was skipped, reverted, or left as out-of-band drift.
+- [x] Patch the evidence-backed answer back into `tasks/agent-doc/agent-doc-bugs.md` without changing `src/agent-doc`.
 
-### 1. audit-docs portability (agent-doc)
+## 2026-04-23 — `agent-doc-bugs` snapshot-drift recovery question
 
-**Problem**: `find_root()` hard-exits if no `Cargo.toml` found. `check_staleness()` only scans `.rs` files.
+- [x] Inspect the current `src/agent-doc` selective-commit, recovery, and session-check paths to determine what already happens when the live file drifts from the snapshot.
+- [x] Decide whether the right fix is new recovery logic, stricter fail-closed behavior, or just documentation based on the existing product contract and the `monsterrodholders` evidence.
+- [x] Patch the conclusion back into `tasks/agent-doc/agent-doc-bugs.md`, and implement/test in `src/agent-doc` only if the investigation shows a contract gap rather than expected fail-closed behavior.
 
-**Plan** (3 changes to `agent-doc/src/audit_docs.rs`):
+## 2026-04-23 — `agent-doc-bugs` snapshot-drift closeout
 
-1. **Replace `find_root()`** with multi-strategy root finder:
-   - Pass 1: Walk up from CWD looking for project markers (`Cargo.toml`, `package.json`, `pyproject.toml`, `go.mod`, `Gemfile`, `pom.xml`, `Makefile`, etc.)
-   - Pass 2: Walk up looking for `.git` directory
-   - Pass 3: Fall back to CWD with warning (no hard exit)
-   - Two-pass design avoids monorepo `.git` being chosen over a nested project's `Cargo.toml`
+- [x] Run the remaining requested local verification for the new `preflight_started` fail-closed guard in `src/agent-doc` (`cargo build --release`, `cargo install --path .`).
+- [x] Patch the verified build/install + commit/push outcome back into `tasks/agent-doc/agent-doc-bugs.md`.
+- [x] Commit and push the `src/agent-doc` changes on the current branch, then update the parent repo submodule pointer / task docs in a separate `agent-loop` commit.
 
-2. **Replace `check_staleness()`** with language-agnostic scanner:
-   - Scan multiple source dirs: `src/`, `lib/`, `app/`, `pkg/`, `cmd/`, `internal/`
-   - Scan 25+ file extensions: `.rs`, `.ts`, `.tsx`, `.js`, `.py`, `.go`, `.rb`, `.java`, etc.
-   - Skip: `node_modules/`, `target/`, `build/`, `dist/`, `.git/`, `__pycache__/`, `vendor/`
+## 2026-04-23 — `agent-doc-bugs` bare-path + historical-drift repair
 
-3. **Add `--root` CLI flag** to override root detection when needed
+- [x] Reproduce the two reported regressions in the live `src/agent-doc` tree: bare `agent-doc <FILE>` invocation failure and `session-check` refusing a document with only historical agent-owned snapshot drift.
+- [x] Implement the minimal binary-owned fix in `src/agent-doc`, keeping the CLI/spec/runbook surface and drift-repair invariants aligned.
+- [x] Add or update regression coverage for both behaviors, then run the requested verification/build/install steps in `src/agent-doc`.
+- [x] Patch the verified outcome back into `tasks/agent-doc/agent-doc-bugs.md`, then commit and push the submodule and parent-repo boundary updates separately.
 
-### 2. Codex frontend skill (agent-doc)
+<!-- agent:exchange -->
+### Re: turn closeout — gpt-5
 
-**Problem**: agent-doc only has a Claude backend. Need a Codex backend following the same pattern.
+I treated the root `plan.md` edit as a document-move/stub cleanup, not as a fresh implementation batch. The required `agent-doc orchestrate plan.md --mode dag --from-exchange` handoff was attempted and failed because this file no longer has an `agent:exchange` component, so I did not dispatch the historical checklist as live work.
 
-**Plan**:
-
-1. **Create `src/agent/codex.rs`** implementing the `Agent` trait:
-   - Non-interactive: `codex exec --json --full-auto -` (prompt via stdin)
-   - Session resume: `codex exec resume <session_id>` (vs Claude's `--resume`)
-   - Output: JSONL stream (vs Claude's single JSON blob)
-   - Extract `thread_id` from `thread.started` event, response text from `item.completed` events
-   - System prompt: Prepend instructions to user prompt (no `--append-system-prompt` equivalent)
-
-2. **Update `src/agent/mod.rs`**: Add `pub mod codex;` and `"codex"` match arm in `resolve()`
-
-3. **Update `CLAUDE.md`**: Add `codex.rs` to module layout diagram
-
-Key difference table:
-
-| Feature | Claude CLI | Codex CLI |
-|---------|-----------|-----------|
-| Non-interactive | `claude -p` | `codex exec` |
-| JSON output | single JSON blob | JSONL stream |
-| Session resume | `--resume <id>` | `codex exec resume <id>` |
-| Session fork | `--continue --fork` | not available in exec mode |
-| Response field | `.result` | `item.completed` events |
-| Session ID | `.session_id` | `thread.started.thread_id` |
-
-### 3. Telegram integration (corky)
-
-**Recommended crate**: `grammers` (MTProto user API -- full history access, unlike bot API)
-
-**Phased plan**:
-
-- **Phase 1: Offline import** (`corky sync telegram-import FILE`) -- parse Telegram Desktop JSON exports. Zero new deps. Thread ID: `tg:{chat_id}`. Reuses `merge_message_to_file()`.
-- **Phase 2: Live sync** via `grammers-client` -- connect with user auth, iterate dialogs, fetch history incrementally. Feature-gated: `[features] telegram = ["grammers-client", "grammers-session"]`. Sync state: per-chat `last_message_id`.
-- **Phase 3: Watch** -- extend `corky watch` to call `sync_telegram_account()`. Or use `client.next_update()` for real-time push.
-- **Phase 4: Send** -- extend `draft push` to detect `tg:` prefix in `**To**` field and send via grammers.
-
-Config: `[accounts.tg-personal] provider = "telegram"`, with `api_id`, `api_hash_cmd`, `phone`, optional `chats`/`chat_ids` filters.
-
-### 4. Slack integration (corky)
-
-**Recommended crate**: `slack-morphism` (full type-safe Web API + Socket Mode)
-
-**Phased plan**:
-
-- **Phase 1: Export/Import** (`corky slack import FILE.zip`) -- parse Slack workspace export ZIPs. Only needs `zip` crate. Thread ID: `slack:{channel_id}:{thread_ts}`. Groups messages by `thread_ts`. Subject = first line of parent message.
-- **Phase 2: API sync** via `slack-morphism` -- `conversations.history` + `conversations.replies`, incremental via `oldest` param. Feature-gated. Needs Slack mrkdwn-to-plain text conversion.
-- **Phase 3: Socket Mode** -- real-time push via WebSocket. Needs app-level token (`xapp-...`). No public HTTP endpoint needed.
-
-**Rate limit warning**: Slack imposed harsh limits in May 2025 -- non-Marketplace apps get 1 req/min on `conversations.history`. Mitigation: register as an internal app (retains Tier 3: ~50 req/min).
-
-Config: `[accounts.slack-work] provider = "slack"`, reuse `password_cmd` for bot token, `labels` for channel filter.
-
-### Both Telegram and Slack share the same architecture pattern:
-
-- Thread IDs namespaced with prefix (`tg:`, `slack:`) to avoid collisions with email
-- Feature-gated Cargo dependencies to keep default binary small
-- `merge_message_to_file()` reused for all dedup/routing/manifest infrastructure
-- Export/import first (validates data model), live sync second
-
-## User
-
+I refreshed tsift, verified the detailed session content lives in `tasks/plan.md`, and am closing the root `plan.md` drift through the binary-owned `agent-doc finalize` path. One preflight sweep also committed the already-visible `tasks/software/tsift.md` patchback as `8aea3967`. There is no new actionable follow-up item from this closeout.
+<!-- agent:boundary:47f1f325 -->
+<!-- /agent:exchange -->

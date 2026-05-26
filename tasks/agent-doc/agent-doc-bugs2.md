@@ -29,22 +29,12 @@ Gated JetBrains manual cancel repro on missing controlled Cancel evidence.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260526-045751.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260526-050456.md`*
 
 Compacted content:
-- Archived 2 response topic(s): do [#next-jbcc-manual-repro]; do [#next-stuckcycle-impl]
+- Archived 1 response topic(s): next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ What are #next-steps to complete the review items?
-### Re: next steps — gpt-5
-
-Top backlog item: #next-jbcc-live-repro-closeout.
-
-Priority order: capture the controlled IntelliJIdea2026.1 File Cache Conflict Cancel evidence with plugin 0.2.132 active before doing more implementation. That single proof is the blocker for all five gated review entries. If the repro passes, use the same evidence to update #next-jbcc-manual-repro first, then reconcile #next-adoc-jbcc, #next-jbccc2, #jbccc2, and #adoc-jb-cache-cancel-stuck-cycle. If it fails, keep the parent bug in review and rework the JetBrains IPC/cancel path from the observed failure.
-
-I added one backlog item at the top because the current review list is already specific and the remaining work is evidence gathering, not another code task.
-
-Changed paths: tasks/agent-doc/agent-doc-bugs2.md. Commands: tsift status, tsift status --fix, agent-doc --version, agent-doc preflight, agent-doc read, agent-doc plan, git status --short, git diff --stat, agent-doc finalize. Verification: no code changed; this is a session-doc/backlog update only. Escalation: none.
-<!-- agent:boundary:34dc7d69 -->
+<!-- agent:boundary:270dc9eb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -52,7 +42,10 @@ As I was typing into the comment below `/agent:exchange`, the full-document IPC 
 #spec-test-build-install-commit-push
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+preset #spec-test-build-install-commit-push
+- do [#ipcfullprompt]
+- do [#next-jbcc-live-repro-closeout]
 <!-- /agent:queue -->
 
 ## Pending / Not Built

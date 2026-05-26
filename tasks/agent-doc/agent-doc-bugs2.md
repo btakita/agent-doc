@@ -34,7 +34,28 @@ Gated JetBrains manual cancel repro on missing controlled Cancel evidence.
 Compacted content:
 - Archived 3 response topic(s): full-document IPC prompt drift; File Cache Conflict Cancel repro; auto-queue closeout
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:da2af81e -->
+❯ What are #next-steps to complete the review items?
+### Re: next steps to complete review items — gpt-5
+
+
+The top next step is `#next-jbcc-controlled-repro`: run the IntelliJIdea2026.1 File Cache Conflict Cancel repro with plugin `0.2.132` active, capture controlled pass/fail evidence, then use that evidence to close or rework the six gated review items.
+
+Priority order:
+1. Restart IntelliJIdea2026.1 so plugin `0.2.132` is actually loaded.
+2. Run the controlled File Cache Conflict Cancel repro and record pass/fail evidence.
+3. If it passes, close `#next-jbcc-live-repro-closeout`, `#next-jbcc-manual-repro`, `#next-adoc-jbcc`, `#next-jbccc2`, `#jbccc2`, and `#adoc-jb-cache-cancel-stuck-cycle`.
+4. If it fails, keep the parent item gated, record the failure evidence, and reopen implementation work against `PatchWatcher.kt`.
+5. After the review state is reconciled, clean the inactive queue residue so `#spec-test-build-install-commit-push` does not look executable while `queue_active: false`.
+
+The backlog now has `#next-jbcc-controlled-repro` as the top priority item.
+
+Proof:
+- Changed paths: session document backlog/exchange only.
+- Commands: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `agent-doc orchestrate --from-exchange --plan`.
+- Verification: no code changed; review dependency is external/manual JetBrains repro evidence.
+- Confidence: high; all review gates point to the same live cancel repro.
+- Escalation: none.
+<!-- agent:boundary:88357263 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -51,6 +72,7 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#next-jbcc-controlled-repro] Run the IntelliJIdea2026.1 File Cache Conflict Cancel repro with plugin 0.2.132 active, capture controlled pass/fail evidence, then close or rework review items #next-jbcc-live-repro-closeout, #next-jbcc-manual-repro, #next-adoc-jbcc, #next-jbccc2, #jbccc2, and #adoc-jb-cache-cancel-stuck-cycle.
 <!-- /agent:backlog -->
 
 ## Review

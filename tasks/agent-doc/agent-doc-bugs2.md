@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -44,7 +44,23 @@ I also found recent IDE evidence that the target dialog surface is still reprodu
 I am gating `#next-jbcc-manual-repro`, not marking it done. The related review items should remain gated until the live Cancel path is performed and the result records whether the cycle reaches `committed` or fails closed with the patch file left in place.
 
 Changed paths: session-document closeout only. Verification: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, process/plugin-path inspection, `idea.log` inspection. No code changed, so I did not run `make check` or CI checks. Confidence: high that the installed plugin is active; no pass/fail claim for the Cancel behavior. Escalation: none.
-<!-- agent:boundary:b4b341e9 -->
+### Re: do [#next-stuckcycle-impl] — gpt-5
+
+Implemented the residual stuck-cycle detection in `flow::closeout::stuck_captured_cycle`. Preflight now cross-checks committed cycle state, the matching durable capture, response hash, capture state, and `HEAD`; it only emits `stuck_captured_cycle` when the captured response materializes nowhere in `HEAD`, and stays quiet for discarded captures, mismatched captures, hash drift, empty responses, and already-committed materialized responses.
+
+I also added the SPEC invariant for this warning path and two regression tests for the missing-response and already-in-HEAD cases. The code change is committed in `src/agent-doc` as `c568bbfa` and pushed to `origin/20260422/codex-agent-backend`; the root submodule pointer commit is `50487b2fc` and will be pushed after this session-document closeout, per the session document staging rule.
+
+Verification passed:
+
+- `cargo test stuck_captured_cycle`
+- `make check`
+- `cargo build`
+- `cargo install --path .` (`agent-doc 0.34.0` installed)
+- `gh run list --workflow CI --limit 1` plus `gh run view 26431487457 --json jobs`: latest CI succeeded, including `Run make tmux-ci`
+- local `make tmux-ci`: 228 ignored/live tmux tests passed
+
+Left the pre-existing unrelated dirty files in `src/agent-doc` and the root worktree untouched.
+<!-- agent:boundary:8f43bbe6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -52,16 +68,12 @@ As I was typing into the comment below `/agent:exchange`, the full-document IPC 
 #spec-test-build-install-commit-push
 -->
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~do [#next-jbcc-manual-repro]~
-- do [#next-stuckcycle-impl]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#next-stuckcycle-impl] Implement the residual stuck-cycle fix: replace flow/closeout.rs::stuck_captured_cycle stub with real captured-response/HEAD detection, add regression tests, and then resolve #stuckcycledup. Plan: tasks/agent-doc/plan-stuck-cycle-causes-duplicated-uncommitted-response.md.
 <!-- /agent:backlog -->
 
 ## Review
@@ -72,7 +84,6 @@ preset #spec-test-build-install-commit-push
 - [/] [#next-jbccc2] Implemented Phase 2 of #adoc-jb-cache-cancel-stuck-cycle in editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt and pushed agent-doc commit 068a1752; focused plugin tests, make check, buildPlugin, cargo install, local plugin install, and GitHub CI passed. Gated on restarting IntelliJIdea2026.1 and running the manual File Cache Conflict Cancel repro.
 - [/] [#jbccc2] Phase 2 of #adoc-jb-cache-cancel-stuck-cycle: JB plugin undo-on-cancel. editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt — defer the write until user resolves the File Cache Conflict dialog (never queue change beforehand); on Cancel return 0/2 from socket IPC callback; on file-IPC cancel leave patch file in place. Plan: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md
 - [/] [#adoc-jb-cache-cancel-stuck-cycle] agent-doc-bug: after canceling a JetBrains File Cache Conflict dialog during IPC patch delivery, the response patch lands in the working tree but the cycle does not reach committed state. Recovery requires running agent-doc write --commit FILE manually. Repro: have JB IDE open with the file in an editor; run finalize; cancel the JB cache-conflict dialog when it appears. Expected: cycle reaches committed cleanly or surfaces a clear error. Actual: response is in working tree but next preflight reports post-commit local drift requiring manual recovery. Plan path: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md (to be authored). Related: #jbccfix, #jbccreg, #jbccdocs in this same file.
-- [/] [#stuckcycledup] [recommended] [residual] Wedged-cycle pattern still has one uncovered implementation gap: flow/closeout.rs::stuck_captured_cycle is currently a stub returning None, so preflight has the warning hook but does not actually detect captured-but-uncommitted response bodies absent from HEAD. Implement the real capture/cycle/HEAD detection and any missing superseded/prune behavior, or split that work into narrower plan-backed items. Plan: tasks/agent-doc/plan-stuck-cycle-causes-duplicated-uncommitted-response.md.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

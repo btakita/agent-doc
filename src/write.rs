@@ -4068,6 +4068,9 @@ fn exchange_prompt_prefix_eligible_lines<'a>(
                 is_prefixed_exchange_response_heading_for_prefix_repair(trimmed);
             continue;
         }
+        if crate::diff::line_looks_like_markdown_list_item(trimmed) {
+            continue;
+        }
 
         let is_target =
             target_counts.is_some_and(|counts| normalization_target_matches_line(line, counts));
@@ -16310,6 +16313,39 @@ Done.
         assert!(
             targets.is_empty(),
             "a stale prefixed assistant sentence must not become a repair target: {targets:?}"
+        );
+    }
+
+    #[test]
+    fn extract_post_commit_targets_ignores_prefixed_markdown_lists() {
+        let committed = "\
+<!-- agent:exchange patch=append -->
+❯ Please compare these options:
+❯ - keep this bullet bare
+❯   - keep this nested bullet bare
+❯ 1. keep this ordered bullet bare
+### Re: options — gpt-5
+Done.
+<!-- agent:boundary:abc -->
+<!-- /agent:exchange -->
+";
+        let working = "\
+<!-- agent:exchange patch=append -->
+❯ Please compare these options:
+- keep this bullet bare
+  - keep this nested bullet bare
+1. keep this ordered bullet bare
+### Re: options — gpt-5 (HEAD)
+Done.
+<!-- agent:boundary:def -->
+<!-- /agent:exchange -->
+";
+
+        let targets = extract_post_commit_normalization_targets(committed, working);
+
+        assert!(
+            targets.is_empty(),
+            "stale prefixed markdown list items must not become repair targets: {targets:?}"
         );
     }
 

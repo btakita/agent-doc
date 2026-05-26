@@ -577,7 +577,10 @@ fn fence_close(trimmed: &str, fence_char: char, fence_len: usize) -> bool {
 
 fn prefix_prompt_line(line: &str) -> Option<String> {
     let trimmed = line.trim_start();
-    if trimmed.is_empty() || trimmed.starts_with('❯') {
+    if trimmed.is_empty()
+        || trimmed.starts_with('❯')
+        || crate::diff::line_looks_like_markdown_list_item(trimmed)
+    {
         return None;
     }
     let indent_len = line.len() - trimmed.len();
@@ -4322,6 +4325,34 @@ Done.
         assert!(
             normalized.contains("\n❯ Please rerun the deploy check.\n"),
             "soft prompt requests before a response heading should still be canonicalized:\n{normalized}"
+        );
+    }
+
+    #[test]
+    fn canonicalize_answered_prompt_prefixes_preserves_markdown_lists() {
+        let exchange = "\
+Please compare these options:
+- keep this bullet bare
+  - keep this nested bullet bare
+1. keep this ordered bullet bare
+### Re: options — gpt-5
+
+Done.
+";
+
+        let normalized = canonicalize_answered_prompt_prefixes(exchange);
+
+        assert!(
+            normalized.starts_with(
+                "❯ Please compare these options:\n- keep this bullet bare\n  - keep this nested bullet bare\n1. keep this ordered bullet bare\n"
+            ),
+            "prompt prose should be prefixed without rewriting markdown list items:\n{normalized}"
+        );
+        assert!(
+            !normalized.contains("\n❯ - keep this bullet bare")
+                && !normalized.contains("\n❯   - keep this nested bullet bare")
+                && !normalized.contains("\n❯ 1. keep this ordered bullet bare"),
+            "markdown list items must not receive prompt prefixes:\n{normalized}"
         );
     }
 

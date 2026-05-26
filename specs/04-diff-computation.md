@@ -13,6 +13,8 @@ Prompt-bearing diff triage is part of the diff contract, not just a prompt-build
 
 Mixed changes must preserve encounter order across those kinds. The classifier must not bubble later `prompt_target` items ahead of earlier `content_edit` or artifact lines from the same changed tail.
 
+Prompt-prefix normalization targets are narrower than prompt-target blocks: bare prompt prose in an answered prompt block may be repaired to `❯ prose`, but markdown list items (`- `, `* `, `+ `, `1. `, `1) `, including nested items) are context and must not be selected as lines that need an automatic `❯ ` prefix.
+
 `flow::session_cycle` consumes the ordered prompt-bearing changes and owns the prompt-target list used by both `preflight` and `plan`. Command modules may still compute the underlying diff, but they must not derive a separate prompt-target order or pending-mutation closeout contract.
 
 `boundary_artifact` is intentionally narrow: it applies only to actual response-heading `(HEAD)` reposition churn and `agent:boundary` marker churn. User prose that merely mentions `(HEAD)` remains ordinary prompt-bearing content and must not be collapsed to `no_changes`.

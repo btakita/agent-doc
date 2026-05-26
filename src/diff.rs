@@ -1168,6 +1168,10 @@ fn prompt_prefix_lines_from_block(block: &str) -> Vec<PromptPrefixLine> {
             continue;
         }
 
+        if line_looks_like_markdown_list_item(trimmed) {
+            continue;
+        }
+
         if is_exchange_response_heading(trimmed) {
             in_response_block = true;
             continue;
@@ -2140,6 +2144,10 @@ fn parse_markdown_list_item(line: &str) -> Option<&str> {
     }
 
     None
+}
+
+pub(crate) fn line_looks_like_markdown_list_item(line: &str) -> bool {
+    parse_markdown_list_item(line).is_some()
 }
 
 fn strip_prompt_prefix(line: &str) -> &str {
@@ -4284,6 +4292,9 @@ Please fix the bug.\n\
             ctx\n\
             +❯ In src/boost-client, why did patchback miss the prefix?\n\
             +See my inquiry:\n\
+            +- keep this markdown bullet bare\n\
+            +  - keep nested markdown bullets bare\n\
+            +1. keep ordered markdown bullets bare\n\
             +```text\n\
             +line one\n\
             +line two\n\
@@ -4293,7 +4304,7 @@ Please fix the bug.\n\
         assert_eq!(
             targets,
             vec!["See my inquiry:".to_string(),],
-            "only the bare prompt-context line should need fresh prefixing"
+            "only bare prompt-context prose should need fresh prefixing"
         );
     }
 
@@ -4308,6 +4319,20 @@ Please fix the bug.\n\
 
         let bare = first_bare_prompt_prefix_target(diff);
         assert_eq!(bare.as_deref(), Some("Follow-up context."));
+    }
+
+    #[test]
+    fn first_bare_prompt_prefix_target_skips_markdown_lists() {
+        let diff = "--- snapshot\n+++ document\n@@ -1,2 +1,6 @@\n\
+            ctx\n\
+            +❯ Please compare these options:\n\
+            +- option one\n\
+            +  - nested option detail\n\
+            +1. ordered option\n\
+            +### Re: answer — gpt-5\n";
+
+        let bare = first_bare_prompt_prefix_target(diff);
+        assert_eq!(bare, None);
     }
 
     // Plan: tasks/agent-doc/plan-claude-code-queue-auto-loop.md `#ccloopguard`.

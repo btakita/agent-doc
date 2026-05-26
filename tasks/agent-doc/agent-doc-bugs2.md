@@ -133,7 +133,31 @@ Commit/push:
 - Pushed to `origin/20260422/codex-agent-backend`
 
 Escalation: none. Confidence: high for the diagnosed class, because the new repair regression reproduces the stale-heading/already-applied shape and asserts both disk content and saved snapshot remain unprefixed.
-<!-- agent:boundary:81c235ef -->
+❯ As I was typing into the comment below `/agent:exchange`, the full-document IPC corruption happened, then the duplicate line happened twice.
+
+❯ Please isolate why the full-document IPC is needed. I want to remove this if possible. Full-document IPC should rarely be needed. agent-doc should be treated as another writer to the document. People don't copy/paste an entire document snapshot into a Google Doc while collaboratively writing. They make smaller changes. Sometimes there's copy/pase.p
+### Re: full-document IPC — gpt-5
+
+I isolated the current full-document IPC question to this: first-party full-document editor IPC is no longer needed for the active paths, and the current source already disables it before socket or file payload construction. The remaining `fullContent` references are compatibility/guard surfaces: parser fields, stale/foreign payload rejection in editor plugins, diagnostics, and regression tests that prove the disabled path does not mutate the editor buffer.
+
+The recent corruption report in this document was not a `fullContent` write. The ops log for the relevant cycle shows `source=try_ipc_socket write_mode=socket_ipc`, `patches=1`, `ipc_patches=1`, `normalize_targets=4`, and ACK sidecar adoption. Later, when your follow-up prompt was present, preflight/commit logged `commit_pre_stage_prompt_duplicate_repaired`. That means the remaining issue to chase is the socket IPC ACK/prompt-normalization path producing or exposing duplicate prompt residue, not full-document IPC being required.
+
+What replaced full-document IPC:
+- Normal responses use component patches, including synthesized `exchange` patches for unmatched response text.
+- Prompt prefix normalization uses narrow payloads: `patches: []`, `unmatched: ""`, `normalize_prefix_lines`, and `reposition_boundary`.
+- Compact Exchange uses guarded direct disk write instead of editor `fullContent`.
+- Duplicate/normalization repair either sends a narrow repair payload when eligible or falls back to guarded disk/snapshot repair.
+
+I did not remove the legacy schema field or receiver guards because they are still useful for rejecting stale payloads from older binaries/plugins and for making that rejection observable. I added recommended backlog item `#socketackdup` for the actual remaining duplicate-prompt path.
+
+Proof:
+- Changed paths: session document exchange/backlog only; no source edits.
+- Commands: `tsift status`, `tsift status --fix`, `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `tsift search`, `rg`, `sed`, `git status`, `cargo test full_content -- --nocapture`.
+- Verification: `cargo test full_content -- --nocapture` passed, 16 focused tests.
+- Notes: preflight warning carried forward: inactive `agent:queue` residue exists but is not executable while `queue_active: false`.
+- Confidence: high that current first-party full-document IPC is disabled; medium on the remaining duplicate root cause until `#socketackdup` is worked directly.
+- Escalation: none.
+<!-- agent:boundary:eb184da6 -->
 <!-- /agent:exchange -->
 ###
 <!--

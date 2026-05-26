@@ -44,7 +44,7 @@ I also found recent IDE evidence that the target dialog surface is still reprodu
 I am gating `#next-jbcc-manual-repro`, not marking it done. The related review items should remain gated until the live Cancel path is performed and the result records whether the cycle reaches `committed` or fails closed with the patch file left in place.
 
 Changed paths: session-document closeout only. Verification: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, process/plugin-path inspection, `idea.log` inspection. No code changed, so I did not run `make check` or CI checks. Confidence: high that the installed plugin is active; no pass/fail claim for the Cancel behavior. Escalation: none.
-<!-- agent:boundary:211e6bf6 -->
+<!-- agent:boundary:b4b341e9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -54,7 +54,7 @@ As I was typing into the comment below `/agent:exchange`, the full-document IPC 
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#next-jbcc-manual-repro]
+- ~do [#next-jbcc-manual-repro]~
 - do [#next-stuckcycle-impl]
 <!-- /agent:queue -->
 

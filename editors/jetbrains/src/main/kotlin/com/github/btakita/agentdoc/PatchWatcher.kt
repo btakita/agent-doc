@@ -10,8 +10,11 @@ import com.intellij.openapi.fileEditor.TextEditor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vcs.changes.VcsDirtyScopeManager
 import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.util.Alarm
 import java.io.File
+import java.lang.reflect.Field
+import java.lang.reflect.Method
 import java.nio.file.FileSystems
 import java.nio.file.Path
 import java.nio.file.StandardWatchEventKinds
@@ -60,6 +63,11 @@ class PatchWatcher(private val project: Project) : Disposable {
     /** Boundary reposition requests delayed because the target document is still being edited. */
     private val scheduledRepositionRetries = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
+    /** Patch ids that already hit an IntelliJ File Cache Conflict and must not write on Cancel. */
+    private val memoryDiskConflictDeferredPatchIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    @Volatile private var memoryDiskConflictReflectionWarned = false
+
     /**
      * Signal that the most recent successful [applyPatch] / [applyPatchViaVfs]
      * call was structurally a no-op against the live buffer (response was
@@ -75,6 +83,10 @@ class PatchWatcher(private val project: Project) : Disposable {
      * `#ipcpluginalready`.
      */
     @Volatile private var lastApplyWasNoOp = false
+
+    @Volatile private var lastApplyWasDeferredForConflict = false
+
+    @Volatile private var lastApplyRejectedConflictCancel = false
 
     @Volatile private var running = false
 
@@ -531,6 +543,10 @@ class PatchWatcher(private val project: Project) : Disposable {
                 if (applied) {
                     recordApplied(patch.patchId)
                     patchFile.delete()
+                } else if (lastApplyWasDeferredForConflict) {
+                    schedulePatchRetry(patchFile, "File Cache Conflict pending")
+                } else if (lastApplyRejectedConflictCancel) {
+                    LOG.warn("Patch rejected after File Cache Conflict cancel, leaving file for explicit retry: ${patchFile.name}")
                 } else {
                     LOG.warn("Patch not applied, leaving file for retry: ${patchFile.name}")
                 }
@@ -621,6 +637,10 @@ class PatchWatcher(private val project: Project) : Disposable {
     }
 
     private fun applyPatch(patch: IpcPatch): Boolean {
+        lastApplyWasNoOp = false
+        lastApplyWasDeferredForConflict = false
+        lastApplyRejectedConflictCancel = false
+
         var targetFile = LocalFileSystem.getInstance().findFileByPath(patch.file)
         if (targetFile == null) {
             // Retry once after a short delay — file might not be indexed yet
@@ -646,6 +666,29 @@ class PatchWatcher(private val project: Project) : Disposable {
             // This avoids the "externally modified" dialog for background tabs.
             LOG.info("No document for ${patch.file}, applying via VFS")
             return applyPatchViaVfs(targetFile, patch)
+        }
+
+        if (hasPendingMemoryDiskConflict(targetFile)) {
+            markPatchDeferredForMemoryDiskConflict(patch)
+            lastApplyWasDeferredForConflict = true
+            LOG.warn("[patch-watcher] File Cache Conflict pending for ${patch.file}; deferring patch until user resolves dialog")
+            return false
+        }
+
+        val wasDeferredForConflict = wasPatchDeferredForMemoryDiskConflict(patch)
+        if (memoryDiskConflictCancelLikelyUtil(
+                wasDeferredForConflict,
+                fdm.isDocumentUnsaved(document),
+                document.modificationStamp,
+                targetFile.modificationStamp,
+            )
+        ) {
+            lastApplyRejectedConflictCancel = true
+            LOG.warn("[patch-watcher] File Cache Conflict kept memory changes for ${patch.file}; rejecting patch without mutating document")
+            return false
+        }
+        if (wasDeferredForConflict) {
+            clearPatchDeferredForMemoryDiskConflict(patch)
         }
 
         if (fdm.isDocumentUnsaved(document)) {
@@ -757,6 +800,64 @@ class PatchWatcher(private val project: Project) : Disposable {
         // markers and HEAD repositioning; the FFI commit skips all of that. The preflight
         // sweep (Fix 5) handles missed commits as a backstop for interrupted sessions.
         return true
+    }
+
+    private fun patchConflictKey(patch: IpcPatch): String =
+        patch.patchId ?: patch.file
+
+    private fun markPatchDeferredForMemoryDiskConflict(patch: IpcPatch) {
+        memoryDiskConflictDeferredPatchIds.add(patchConflictKey(patch))
+    }
+
+    private fun wasPatchDeferredForMemoryDiskConflict(patch: IpcPatch): Boolean =
+        memoryDiskConflictDeferredPatchIds.contains(patchConflictKey(patch))
+
+    private fun clearPatchDeferredForMemoryDiskConflict(patch: IpcPatch) {
+        memoryDiskConflictDeferredPatchIds.remove(patchConflictKey(patch))
+    }
+
+    private fun hasPendingMemoryDiskConflict(targetFile: VirtualFile): Boolean {
+        val fdm = FileDocumentManager.getInstance()
+        return try {
+            val resolverField = findFieldInHierarchy(fdm.javaClass, "myConflictResolver")
+                ?: return false
+            resolverField.isAccessible = true
+            val resolver = resolverField.get(fdm) ?: return false
+            val hasConflict = findMethodInHierarchy(resolver.javaClass, "hasConflict", VirtualFile::class.java)
+                ?: return false
+            hasConflict.isAccessible = true
+            hasConflict.invoke(resolver, targetFile) as? Boolean ?: false
+        } catch (e: Exception) {
+            if (!memoryDiskConflictReflectionWarned) {
+                memoryDiskConflictReflectionWarned = true
+                LOG.warn("[patch-watcher] unable to inspect IntelliJ File Cache Conflict state; proceeding without conflict deferral", e)
+            }
+            false
+        }
+    }
+
+    private fun findFieldInHierarchy(type: Class<*>, name: String): Field? {
+        var current: Class<*>? = type
+        while (current != null) {
+            try {
+                return current.getDeclaredField(name)
+            } catch (_: NoSuchFieldException) {
+                current = current.superclass
+            }
+        }
+        return null
+    }
+
+    private fun findMethodInHierarchy(type: Class<*>, name: String, vararg parameterTypes: Class<*>): Method? {
+        var current: Class<*>? = type
+        while (current != null) {
+            try {
+                return current.getDeclaredMethod(name, *parameterTypes)
+            } catch (_: NoSuchMethodException) {
+                current = current.superclass
+            }
+        }
+        return null
     }
 
     private fun applyProofStillCurrent(
@@ -1303,6 +1404,14 @@ internal fun fullContentExpectedBufferMatchesUtil(
     }
     return sha256HexUtf8(currentContent) == expectedHash
 }
+
+internal fun memoryDiskConflictCancelLikelyUtil(
+    wasDeferredForConflict: Boolean,
+    documentUnsaved: Boolean,
+    documentModificationStamp: Long,
+    fileModificationStamp: Long,
+): Boolean =
+    wasDeferredForConflict && documentUnsaved && documentModificationStamp != fileModificationStamp
 
 internal fun findCodeBlockRangesUtil(doc: String): List<Pair<Int, Int>> {
     val ranges = mutableListOf<Pair<Int, Int>>()

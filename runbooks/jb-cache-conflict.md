@@ -42,7 +42,12 @@ After a successful compact commit, the binary writes the VCS refresh signal when
 
 ## Plugin-Side Notes
 
-The JetBrains plugin should not queue the IPC write before showing the dialog, and on Cancel should leave the patch file in place so the binary can either retry or fall closed cleanly. That work is tracked separately as `#jbccc2`; this runbook stays focused on the binary-side recovery contract that runs regardless of plugin status.
+The JetBrains plugin refuses to mutate an open document while IntelliJ has a pending File Cache Conflict for that file. It records the patch as conflict-deferred, waits for the dialog to resolve, and then:
+
+- after **Accept / Load FS changes**, retries against the reloaded document and can apply normally;
+- after **Cancel / Keep memory changes**, detects the still-unsaved memory/disk divergence, returns a failed socket acknowledgement, and leaves file-IPC patch files in place instead of writing over the user's chosen memory state.
+
+The binary-side auto-recovery above remains the defense-in-depth path for older plugin versions or any case where the response had already reached the working tree before the refusal.
 
 ## See Also
 

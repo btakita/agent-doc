@@ -156,6 +156,14 @@ Already applied.
     }
 
     @Test
+    fun `memory disk conflict cancel classifier only rejects deferred unsaved divergence`() {
+        assertTrue(memoryDiskConflictCancelLikelyUtil(true, true, 11L, 12L))
+        assertFalse(memoryDiskConflictCancelLikelyUtil(false, true, 11L, 12L))
+        assertFalse(memoryDiskConflictCancelLikelyUtil(true, false, 11L, 12L))
+        assertFalse(memoryDiskConflictCancelLikelyUtil(true, true, 12L, 12L))
+    }
+
+    @Test
     fun `plugin rejects full content patch application paths`() {
         val sourcePath = listOf(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
@@ -166,6 +174,20 @@ Already applied.
         assertTrue(source.contains("full-content IPC is disabled"))
         assertFalse(source.contains("document.setText(patch.fullContent)"))
         assertFalse(source.contains("setBinaryContent(patch.fullContent"))
+    }
+
+    @Test
+    fun `plugin defers file cache conflict writes before mutating document`() {
+        val sourcePath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
+        ).first { Files.exists(it) }
+        val source = Files.readString(sourcePath)
+
+        assertTrue(source.contains("memoryDiskConflictDeferredPatchIds"))
+        assertTrue(source.contains("hasPendingMemoryDiskConflict(targetFile)"))
+        assertTrue(source.contains("File Cache Conflict kept memory changes"))
+        assertTrue(source.contains("schedulePatchRetry(patchFile, \"File Cache Conflict pending\")"))
     }
 
     @Test

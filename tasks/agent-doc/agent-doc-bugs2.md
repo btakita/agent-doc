@@ -29,24 +29,12 @@ Use active JetBrains plugin 0.2.133 for the Cancel repro; top backlog item remai
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260526-160900.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260526-162205.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #socketackdup and #jbccacceptdup
+- Archived 2 response topic(s): #next-steps; #jbccprecheck
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ What are #next-steps to complete the items in review? Add a task to complete items that can be immediately completed into the backlog. Add additional prerequisite tasks to complete review items into the backlog.
-### Re: #next-steps — gpt-5
-
-The review items are all gated on the same live JetBrains Cancel evidence. I added the next work in priority order: verify the IDE/plugin state, prepare the evidence checklist, then run the controlled repro and reconcile the review chain from that evidence.
-
-Top backlog item: #jbccprecheck.
-❯ re [#jbccprecheck]: 0.2.133 is active. Should I go back to 0.2.132?
-### Re: #jbccprecheck — gpt-5
-
-No, do not go back to 0.2.132 for the normal closeout repro. Use the active 0.2.133 plugin and record that version in the evidence. 0.2.133 is the current local JetBrains plugin build, and it is newer than the 0.2.132 build named in the older review text, so it is the better target for proving the current installed behavior.
-
-Only downgrade to 0.2.132 if we need a bisect or an exact historical-repro comparison after the 0.2.133 run fails in a way that points at a regression. I did not run the live IDE repro in this cycle; the remaining review work is still gated on the interactive IntelliJ cancel test.
-<!-- agent:boundary:90e985dd -->
+<!-- agent:boundary:214de487 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -56,7 +44,11 @@ As I was typing into the comment below `/agent:exchange`, the full-document IPC 
 #spec-test-build-install-commit-push
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+preset #spec-test-build-install-commit-push
+- do [#jbccprecheck]
+- do [#jbccevidence]
+- do [#jbccliverepro]
 <!-- /agent:queue -->
 
 ## Pending / Not Built

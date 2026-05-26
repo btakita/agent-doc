@@ -93,7 +93,31 @@ Evidence:
 ❯ - Verification: no code changed and no tests were required; answer checked against `tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md` and `src/agent-doc/runbooks/jb-cache-conflict.md`.
 ❯ - Confidence: high.
 ❯ - Escalation: none.
-<!-- agent:boundary:49d4b187 -->
+### Re: next-jbcc-controlled-repro manual verification — gpt-5
+
+Yes, if the goal is to close `#next-jbcc-controlled-repro` and the six dependent review gates, it still needs live/manual verification. The deterministic tests and docs already cover the modeled branch, but this review item is explicitly gated on a real IntelliJIdea2026.1 File Cache Conflict dialog with plugin `0.2.132` active and an operator choosing Cancel / Keep memory changes.
+
+You do not need manual verification merely to keep working; the item can stay gated. You do need controlled evidence to mark it done.
+
+Actionable closeout steps:
+
+1. Restart IntelliJIdea2026.1 and confirm the locally installed `agent-doc-jetbrains` plugin `0.2.132` is active.
+2. Open an agent-doc session file in IntelliJ. Use `tasks/agent-doc/agent-doc-bugs2.md` if you want evidence directly tied to this review item, or a disposable session doc if you only need to prove the plugin behavior.
+3. Force a File Cache Conflict shape: keep the IDE buffer open while an external `agent-doc finalize <FILE>` or compact-then-finalize cycle writes the same file, so IntelliJ shows the File Cache Conflict dialog.
+4. When the dialog appears during `agent-doc finalize <FILE>`, choose Cancel / Keep memory changes.
+5. Immediately capture evidence: terminal output from `finalize`, `agent-doc preflight <FILE>`, `agent-doc session-check <FILE>`, `git status --short`, and relevant ops/plugin log lines such as `jb_cache_conflict_cancel_*`, `File Cache Conflict pending`, or `File Cache Conflict kept memory changes`.
+6. Treat it as passing only if the cycle does not wedge: either the plugin refuses the apply without mutating the document and the binary fails closed clearly, or the response already landed and the next `agent-doc preflight <FILE>` auto-recovers to a committed state. It fails if the response remains only in the working tree, the next preflight demands manual `agent-doc write --commit`, or prompt-prefix/document corruption appears.
+7. If it passes, mark `#next-jbcc-controlled-repro` and the dependent review items done, citing the captured evidence. If it fails, keep the parent item gated and reopen implementation work against `PatchWatcher.kt` or the preflight recovery path, depending on where the evidence points.
+
+Preflight warning carried forward: `agent:queue` still contains inactive residue while `queue_active: false`; that is cleanup context, not an executable directive for this prompt.
+
+Proof:
+- Changed paths: session document exchange only.
+- Commands: `tsift status`, `agent-doc --version`, `tsift status --fix`, `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `rg -n ...`, `sed -n ...`, `agent-doc finalize --stream`, `agent-doc repair`, `agent-doc write --commit --force-disk`.
+- Verification: no code changed and no tests were required; answer checked against `tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md` and `src/agent-doc/runbooks/jb-cache-conflict.md`; recovery was needed because IPC prefixed assistant body lines as prompts.
+- Confidence: high.
+- Escalation: none.
+<!-- agent:boundary:ef9ff7fa -->
 <!-- /agent:exchange -->
 ###
 <!--

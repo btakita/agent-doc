@@ -35,7 +35,17 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): complete #gdbvacproof
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:1126fa9f -->
+❯ What are #next-steps to improve graph performance?
+### Re: #next-steps graph performance — gpt-5
+
+Top backlog item: `#gperf`.
+
+I added four ordered follow-ups. The priority is to refresh the performance evidence first, then gate higher hop caps, then optimize SQLite traversal if the measurements still point there, and only then spend time on a real optional backend adapter.
+
+The current spec already treats 128/256/512-hop tiers as benchmark evidence only, with the user-facing default held at 64. That is the right posture until repeated real/full/synthetic samples prove the higher caps are stable. For FalkorDB specifically: it can stay in the candidate set, but the recent full-projection sample does not justify making it the next move. The read-only prototype has spots where it helps, but it does not beat SQLite uniformly across the gate; Kuzu looks more promising in some total-cost samples, but neither is promotable without write/load, parity, lock, and install-portability proof.
+
+Closeout evidence: no code changed. I ran `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `tsift status --fix`, bounded tsift context/search, and targeted SPEC/performance-history reads. `tsift status --fix` still reports one missing unrelated workspace scope (`FDE-Project-Interview`), so I treated workspace-wide graph context as diagnostic rather than dispatch-grade.
+<!-- agent:boundary:c53ef33c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,16 +54,15 @@ What are #next-steps to make the graph faster?
 
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
-- ~do [#cachelookupshift]~
-- ~do [#gdbvacconvex]~
-- ~do [#convexsnapshotscale]~
-- ~do [#convexscopedeval]~
-- ~complete [#gdbvacproof]~
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#gperf] Run fresh graph-db performance triage after the cache and tombstone-prune work: collect three clean backend-eval samples for real, full-projection, high-degree, and deep-chain workloads; refresh the performance history; use metric-digest to rank remaining hotspots before changing caps or backends.
+- [ ] [#ghop] Add a hop-cap promotion gate before raising user-facing graph max-hop defaults: keep the 64-hop default until repeated real, full-projection, and synthetic deep-chain samples prove 128/256/512-hop tiers stay within the performance gate and produce useful rows.
+- [ ] [#gfront] Optimize SQLite high-hop/frontier traversal if refreshed metrics show path/evidence latency is still hot: use indexed frontier expansion or recursive CTEs, avoid per-hop broad scans, emit cap diagnostics, and lock query-plan regressions for full-projection plus synthetic deep-chain fixtures.
+- [ ] [#gback] [recommended] Spike a real optional graph backend adapter only after SQLite gate evidence is fresh: compare Kuzu and FalkorDB behind GraphStore with projection writes/load, lock semantics, install portability, and full parity; do not promote a read-only prototype unless it beats SQLite across every required workload.
 <!-- /agent:backlog -->
 
 ## Review

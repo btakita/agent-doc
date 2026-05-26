@@ -29,57 +29,12 @@ Captured next steps for gated review items.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260526-034459.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260526-043147.md`*
 
 Compacted content:
-- Archived 1 response topic(s): compacted IPC scratch comment
+- Archived 5 response topic(s): next steps for review items; active queue implementation; queue recovery; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ What are #next-steps in completing the review items?
-### Re: next steps for review items — gpt-5
-
-Top backlog item: `#next-jbccc2`.
-
-I added the next-step backlog in priority order. The live blocker is `#jbccc2`, because the binary-side recovery and several stuck-cycle follow-ups are already archived as completed, while `PatchWatcher.kt` still needs the JetBrains File Cache Conflict Cancel behavior fixed and verified.
-
-Order of work:
-
-1. `#next-jbccc2` — implement the JetBrains plugin undo-on-cancel path, then run focused plugin tests and a manual IntelliJ cancel repro.
-2. `#next-adoc-jbcc` — after Phase 2 lands, reconcile the parent `#adoc-jb-cache-cancel-stuck-cycle` review item against completed phases and close it only with plugin repro evidence.
-3. `#next-stuckcycledup` — audit the partial stuck-cycle review item against the archived split fixes; close it if the implemented guards still cover the duplicated-response path, otherwise keep only one narrow residual bug.
-### Re: active queue implementation — gpt-5
-
-Implemented `#next-jbccc2` through the JetBrains plugin path. `PatchWatcher.kt` now detects IntelliJ File Cache Conflict state before mutating the document, defers the patch while the conflict dialog is pending, retries after the IDE resolves it, and treats a deferred unsaved stamp-divergence case as the cancel path so the patch file remains available instead of being consumed. I added focused regression coverage and updated `editors/jetbrains/SPEC.md` plus `runbooks/jb-cache-conflict.md`.
-
-Verification is green: focused plugin test, full `make check`, `./gradlew buildPlugin`, `cargo install --path .`, local plugin install to IntelliJIdea2026.1 as `agent-doc-jetbrains-0.2.132`, and GitHub CI run `26431487457` passed including `make tmux-ci`. Code is pushed in submodule commit `068a1752` and the parent submodule pointer is pushed in `cd2cfe5a6`.
-
-I gated `#next-jbccc2` and `#next-adoc-jbcc` rather than marking them done because the installed plugin requires an IntelliJ restart before the manual File Cache Conflict Cancel repro can be run. I completed the `#next-stuckcycledup` audit and kept `#stuckcycledup` open as one residual implementation bug: `flow/closeout.rs::stuck_captured_cycle` is still a stub returning `None`, so the warning hook exists but the real captured-cycle detection still needs to land.
-### Re: queue recovery — gpt-5
-
-The direct `agent-doc` command started the queue handoff but then refused recursive dispatch because this Codex pane already owns the document. I continued in-process with preflight; it repaired the stale `preflight_started` cycle and found no new document diff to execute.
-
-No repo changes were needed in this recovery cycle. `#next-jbccc2` and `#next-adoc-jbcc` remain gated on the IntelliJIdea2026.1 restart plus manual File Cache Conflict Cancel repro. The previous implementation and verification remain current: agent-doc commit `068a1752`, parent submodule pointer commit `cd2cfe5a6`, local verification green, and GitHub CI run `26431487457` passed including `make tmux-ci`.
-❯ Can the review items be completed?
-### Re: review completion status — gpt-5
-
-Not responsibly yet.
-
-The JetBrains cache-conflict implementation is code-complete and verified by automated checks, but `#next-jbccc2`, `#jbccc2`, `#next-adoc-jbcc`, and `#adoc-jb-cache-cancel-stuck-cycle` still depend on the live IntelliJIdea2026.1 restart plus manual File Cache Conflict Cancel repro. The prior cycle installed plugin `0.2.132`; that evidence is enough to keep them gated, not enough to close the review path.
-
-`#stuckcycledup` also should stay gated because the audit found a real residual gap: `flow/closeout.rs::stuck_captured_cycle` still returns `None`, so the preflight warning hook exists but does not yet detect the captured-cycle case.
-
-So the review list should not be cleared as-is. The shortest path to clearing it is: restart IntelliJIdea2026.1, run the manual cancel repro for the JetBrains items, then implement the `stuck_captured_cycle` residual or split it into a smaller plan-backed item if it is not going to be fixed in this batch.
-❯ What are #next-steps to complete the review items?
-### Re: next steps to complete review items — gpt-5
-
-Top backlog item: `#next-jbcc-manual-repro`.
-
-I added the review-completion next steps to the backlog in priority order.
-
-1. `#next-jbcc-manual-repro` — restart IntelliJIdea2026.1 so the installed `agent-doc-jetbrains-0.2.132` plugin is active, run the manual File Cache Conflict Cancel repro, capture pass/fail evidence, then close or rework the JetBrains review cluster: `#next-jbccc2`, `#jbccc2`, `#next-adoc-jbcc`, and `#adoc-jb-cache-cancel-stuck-cycle`.
-2. `#next-stuckcycle-impl` — implement the residual stuck-cycle fix by replacing the `flow/closeout.rs::stuck_captured_cycle` stub with real captured-response/HEAD detection, add regression tests, then resolve `#stuckcycledup`.
-
-The existing review items stay gated until those two follow-ups produce evidence.
-<!-- agent:boundary:40978cc4 -->
+<!-- agent:boundary:4df481da -->
 <!-- /agent:exchange -->
 ###
 <!--

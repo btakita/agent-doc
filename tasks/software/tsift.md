@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -79,7 +79,10 @@ Verification completed:
 - GitHub Actions CI run `26433096348`: green (`clippy + test`, `live Convex graph acceptance`)
 
 The `tsift` submodule commit is pushed to `origin/main`; the superproject/session commit is handled by this finalize boundary before the remaining root push.
-<!-- agent:boundary:1f436313 -->
+### Re: closeout repair — gpt-5
+
+Closeout repair: the prior finalize committed the `#gprojrows` response, status update, queue consumption, and backlog reap, but post-commit `session-check` detected active-session drift. This write reopens the binary-owned commit path for the same completed work; no additional repo changes were made.
+<!-- agent:boundary:63f7d25f -->
 <!-- /agent:exchange -->
 ###
 <!--

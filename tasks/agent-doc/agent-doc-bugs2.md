@@ -136,6 +136,7 @@ Escalation: none. Confidence: high for the diagnosed class, because the new repa
 ❯ As I was typing into the comment below `/agent:exchange`, the full-document IPC corruption happened, then the duplicate line happened twice.
 
 ❯ Please isolate why the full-document IPC is needed. I want to remove this if possible. Full-document IPC should rarely be needed. agent-doc should be treated as another writer to the document. People don't copy/paste an entire document snapshot into a Google Doc while collaboratively writing. They make smaller changes. Sometimes there's copy/pase.p
+
 ### Re: full-document IPC — gpt-5
 
 I isolated the current full-document IPC question to this: first-party full-document editor IPC is no longer needed for the active paths, and the current source already disables it before socket or file payload construction. The remaining `fullContent` references are compatibility/guard surfaces: parser fields, stale/foreign payload rejection in editor plugins, diagnostics, and regression tests that prove the disabled path does not mutate the editor buffer.
@@ -157,10 +158,24 @@ Proof:
 - Notes: preflight warning carried forward: inactive `agent:queue` residue exists but is not executable while `queue_active: false`.
 - Confidence: high that current first-party full-document IPC is disabled; medium on the remaining duplicate root cause until `#socketackdup` is worked directly.
 - Escalation: none.
-<!-- agent:boundary:eb184da6 -->
+### Re: closeout recovery — gpt-5
+
+Closeout recovery note: the prior response did land and commit, but session-check caught post-commit working-tree drift before the turn could close. The remaining visible differences are the `(HEAD)` heading marker, the recommended backlog entry from the investigation, and a post-exchange HTML comment. The commented `#spec-test-build-install-commit-push` text is preserved as scratch/comment content; it is not an active directive while `queue_active: false` and the queue is inactive residue.
+
+I am closing this through `agent-doc finalize` rather than manually editing the file so the session document crosses the binary-owned write/commit path.
+
+Proof:
+- Changed paths: session document exchange/backlog only.
+- Commands: `agent-doc session-check`, `git diff -- tasks/agent-doc/agent-doc-bugs2.md`, `agent-doc repair`, `agent-doc write --commit --pending-only`, `agent-doc preflight`, `agent-doc plan`, `agent-doc finalize`.
+- Verification: recovery path is document-only; earlier focused `cargo test full_content -- --nocapture` passed.
+- Confidence: high for closeout state, pending final `session-check`.
+- Escalation: none.
+<!-- agent:boundary:e41aee5c -->
 <!-- /agent:exchange -->
 ###
 <!--
+When I ran the last turn, #spec-test-build-install-commit-push was removed by agent-doc.
+---
 As I was typing into the comment below `/agent:exchange`, the full-document IPC corruption happened, then the duplicate line happened, then the full-document IPC corruption happened again.
 #spec-test-build-install-commit-push
 -->
@@ -174,6 +189,7 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#socketackdup] [recommended] agent-doc-bug: recent agent-doc-bugs2 live duplicate prompt report was socket IPC ACK-sidecar/prompt-normalization flow, not fullContent. Evidence: cycle-1779807539565 patch bcbebb87-6925-44d8-bbcb-059fc9b91615 used try_ipc_socket with normalize_targets=4, then stale preflight cycle cycle-1779808941281 triggered commit_pre_stage_prompt_duplicate_repaired. Investigate why post-commit duplicate prompt residue still appears and make socket/ACK adoption preserve live prompt edits without duplicate repair.
 - [ ] [#jbccacceptdup] [recommended] agent-doc-bug: accepting a JetBrains File Cache Conflict after a cycle already reached commit_success can replay a stale IPC/cache payload and duplicate an already-committed response block. Repro: tasks/software/tsift.md gained a second #gsqlwrite response after accepting the conflict; session-check reported direct patchback although HEAD already contained the response. Plan: tasks/agent-doc/plan-jb-cache-conflict-accept-duplicates-response.md
 <!-- /agent:backlog -->
 

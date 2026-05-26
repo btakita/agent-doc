@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -34,7 +34,7 @@ Captured next steps for gated review items.
 Compacted content:
 - Archived 5 response topic(s): next steps for review items; active queue implementation; queue recovery; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:4df481da -->
+<!-- agent:boundary:ef2a964a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -42,11 +42,10 @@ As I was typing into the comment below `/agent:exchange`, the full-document IPC 
 #spec-test-build-install-commit-push
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- ~do [#next-jbccc2]~
-- ~do [#next-adoc-jbcc]~
-- ~do [#next-stuckcycledup]~
+- do [#next-jbcc-manual-repro]
+- do [#next-stuckcycle-impl]
 <!-- /agent:queue -->
 
 ## Pending / Not Built

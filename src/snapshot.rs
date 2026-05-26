@@ -590,11 +590,15 @@ fn save_unlocked(doc: &Path, content: &str) -> Result<()> {
     if let Some(parent) = snap.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    // Atomic write: temp file + rename to avoid partial reads
+    // Atomic write: temp file + rename to avoid partial reads.
+    // Redact known secret shapes (API keys, AWS access keys, etc.) before
+    // persistence so `.agent-doc/snapshots/<hash>.md` never carries plaintext
+    // tokens. `passage open …` invocations are exempt — see secret_redact.
+    let redacted = crate::secret_redact::redact(content);
     let parent = snap.parent().unwrap_or(Path::new("."));
     let mut tmp = tempfile::NamedTempFile::new_in(parent)
         .with_context(|| format!("failed to create temp file in {}", parent.display()))?;
-    std::io::Write::write_all(&mut tmp, content.as_bytes())
+    std::io::Write::write_all(&mut tmp, redacted.as_bytes())
         .with_context(|| "failed to write snapshot temp file")?;
     tmp.persist(&snap)
         .with_context(|| format!("failed to rename temp file to {}", snap.display()))?;
@@ -626,10 +630,11 @@ pub fn save_pre_response(doc: &Path, content: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
+    let redacted = crate::secret_redact::redact(content);
     let parent = path.parent().unwrap_or(Path::new("."));
     let mut tmp = tempfile::NamedTempFile::new_in(parent)
         .with_context(|| format!("failed to create temp file in {}", parent.display()))?;
-    std::io::Write::write_all(&mut tmp, content.as_bytes())
+    std::io::Write::write_all(&mut tmp, redacted.as_bytes())
         .with_context(|| "failed to write pre-response temp file")?;
     tmp.persist(&path)
         .with_context(|| format!("failed to rename temp file to {}", path.display()))?;

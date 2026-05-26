@@ -330,7 +330,13 @@ fn stream_loop(
                     }
                     Err(e) => {
                         let label = if is_done { "final flush" } else { "flush" };
-                        eprintln!("[stream] {} error: {}", label, e);
+                        // Redact in case the error body interpolates document
+                        // content (e.g. a failed atomic write echoing a chunk).
+                        eprintln!(
+                            "[stream] {} error: {}",
+                            label,
+                            crate::secret_redact::redact(&e.to_string())
+                        );
                     }
                 }
             }
@@ -343,7 +349,10 @@ fn stream_loop(
                             last_thinking = thinking_text;
                         }
                         Err(e) => {
-                            eprintln!("[stream] thinking flush error: {}", e);
+                            eprintln!(
+                                "[stream] thinking flush error: {}",
+                                crate::secret_redact::redact(&e.to_string())
+                            );
                         }
                     }
                 } else {

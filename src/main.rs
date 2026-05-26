@@ -111,6 +111,7 @@ mod response_toc;
 mod resync;
 mod route;
 mod run;
+mod secret_redact;
 mod security;
 mod serve;
 mod session_accretion;

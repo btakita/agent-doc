@@ -43,6 +43,7 @@ dependencies = [
  "predicates",
  "proptest",
  "pulldown-cmark",
+ "regex",
  "rusqlite",
  "serde",
  "serde_json",

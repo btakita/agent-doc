@@ -223,6 +223,12 @@ pub fn capture_response(file: &Path, response: &str) -> Result<CaptureRecord> {
 
     let metadata = metadata_from_frontmatter(&file_content);
 
+    // Redact secrets from the response body before it lands in the capture
+    // sidecar JSON. The `response_sha256` keeps the original-bytes hash so
+    // cycle-state correlation (which references the live in-memory response)
+    // stays intact — only the persisted body changes.
+    let redacted_response = crate::secret_redact::redact(response);
+
     let record = CaptureRecord {
         capture_id: capture_id.clone(),
         cycle_id: capture_id.clone(),
@@ -243,7 +249,7 @@ pub fn capture_response(file: &Path, response: &str) -> Result<CaptureRecord> {
             .map(crate::ops_log::content_hash),
         file_hash: Some(crate::ops_log::content_hash(&file_content)),
         response_sha256: response_sha256.clone(),
-        response_body: response.to_string(),
+        response_body: redacted_response,
         state: CaptureState::Captured,
     };
     write_record(file, &record)?;
@@ -280,6 +286,7 @@ fn checkpoint_partial_response_for_cycle(
         .as_ref()
         .map_or_else(now_secs, |record| record.captured_at);
 
+    let redacted_response = crate::secret_redact::redact(response);
     let record = PartialCaptureRecord {
         checkpoint_id,
         cycle_id: cycle_id.to_string(),
@@ -297,7 +304,7 @@ fn checkpoint_partial_response_for_cycle(
             .map(crate::ops_log::content_hash),
         file_hash: Some(crate::ops_log::content_hash(&file_content)),
         response_sha256,
-        response_body: response.to_string(),
+        response_body: redacted_response,
     };
     write_partial_record(file, &record)?;
     crate::ops_log::log_op(

@@ -12,13 +12,13 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
-Completed: #gback locked the optional Kuzu/FalkorDB adapter spike into backend-eval without adding a new graph database dependency. Local verification passed (`cargo test -q graph_db_backend_eval_benchmarks_candidate_stores_against_sqlite`, `make check`, `cargo build`, `cargo install --path .`); latest pre-push tsift CI run 26431654177 is green, while root Agent Doc CI still shows empty-step runner-start failures.
+Completed: #gprojrows is locked as proof debt rather than speculative production work: full-projection cache hits now have an explicit spec/test gate requiring `full_projection.source_graph_build=0` and `full_projection.projection_rows=0`, with fresh three-sample cache-hit evidence recorded in tsift. Local verification passed (`cargo test -q graph_db_backend_eval_benchmarks_candidate_stores_against_sqlite`, `cargo build`, `cargo install --path .`, `make check`); latest tsift CI run 26433096348 is green, and the tsift submodule commit `cd2b020` is pushed.
 <!-- /agent:status -->
 
 ## Spec
@@ -52,7 +52,34 @@ Priority order now:
 5. `#gcommgate` — add repeatable community quality/performance metrics so future tuning has a hard gate.
 
 The important constraint is to keep backend and hop-cap changes behind the existing evidence gates until `backend-eval --full-projection` shows stable cache-hit samples and the projection/write hotspots stop dominating.
-<!-- agent:boundary:ae696b32 -->
+### Re: #gprojrows — gpt-5
+
+Closed `#gprojrows` without adding a speculative production refactor. The full-projection cache path already reuses the source graph and provider-neutral projection rows on unchanged source/summary inputs; this cycle made that contract explicit and verifiable.
+
+Changes committed in `tsift@cd2b020`:
+
+- Updated `SPEC.md` to require full-projection cache hits to report `full_projection.source_graph_build=0us` and `full_projection.projection_rows=0us`.
+- Tightened `tests/graph_db_conformance.rs` so the second `backend-eval --full-projection` run must skip both phases.
+- Added `plans/gprojrows-evidence.md` with three fresh cache-hit samples.
+
+Fresh sample evidence from `target/perf/gprojrows-cache-{1,2,3}.json`:
+
+| Sample | cache.hit | source_graph_build | projection_rows | cache_lookup | SQLite total |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1 | 1 | 0us | 0us | 3us | 302,627us |
+| 2 | 1 | 0us | 0us | 4us | 310,104us |
+| 3 | 1 | 0us | 0us | 4us | 304,030us |
+
+Verification completed:
+
+- `cargo test -q graph_db_backend_eval_benchmarks_candidate_stores_against_sqlite`
+- `cargo build`
+- `cargo install --path .`
+- `make check`
+- GitHub Actions CI run `26433096348`: green (`clippy + test`, `live Convex graph acceptance`)
+
+The `tsift` submodule commit is pushed to `origin/main`; the superproject/session commit is handled by this finalize boundary before the remaining root push.
+<!-- agent:boundary:1f436313 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -61,7 +88,7 @@ What are #next-steps to make the graph faster?
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#gprojrows]
+- ~do [#gprojrows]~
 - do [#gsqlwrite]
 - do [#gcommcache]
 - do [#gcommtagctx]
@@ -71,7 +98,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gprojrows] [recommended] Optimize the full-projection source_graph_build/projection_rows hot path before backend or hop-cap changes: add dirty-scope/source-watermark reuse for unchanged symbol and summary inputs, skip rebuilding provider-neutral rows on cache hits, and prove with three backend-eval --full-projection samples that full_projection.source_graph_build and full_projection.projection_rows drop without cache-hit instability.
 - [ ] [#gsqlwrite] [recommended] Reduce SQLite graph refresh write and staging cost: bulk upsert nodes, edges, and properties through prepared chunks or temp-table merge, avoid unchanged property rewrites in replace_projection_with_version, and gate on full_projection.sqlite.sqlite_delta_write, sqlite_edge_staging, post_write_reads, and total_duration_micros_per_1k_graph_rows.
 - [ ] [#gcommcache] [recommended] Cache and bound tagpath-annotated community detection: key Louvain results by index graph watermark, scope, and tagpath freshness, avoid re-running db.all_edges plus full in-memory Louvain for unchanged graphs, and add JSON diagnostics for cache hit, edge count, iterations, and tagpath state.
 - [ ] [#gcommtagctx] [recommended] Improve community search quality by carrying file/ref context into CommunityMember and resolving tagpath handles with community or edge evidence instead of name-only fallback; cover duplicate-name, skipped-directory, scoped, and federated fixtures with handle coverage and ambiguous-member diagnostics.

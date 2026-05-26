@@ -21,7 +21,7 @@ queue_active: false
 
 <!-- agent:status patch=replace -->
 
-Queue halted; #jbccliverepro remains gated pending live IntelliJ File Cache Conflict Cancel evidence with plugin 0.2.133.
+Queue halted; #jbccliverepro and #next-jbcc-controlled-repro completed by explicit document directive. Remaining review items stay gated pending dependent live Cancel closeout decisions.
 <!-- /agent:status -->
 
 ## Exchange
@@ -44,7 +44,15 @@ The first actionable item is #jbccliverepro / #next-jbcc-controlled-repro: captu
 I did not mark any review item done in this cycle. #next-jbccc2 has strong implementation evidence already recorded, including commit 068a1752, focused tests, make check, buildPlugin, cargo install, local plugin install, and GitHub CI, but the document still explicitly leaves it gated on the manual live Cancel repro.
 
 Proof for this cycle: changed paths before finalize: none; commands run: `tsift status`, `tsift status --fix`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `git status --short`; verification: inspected the current Review section and confirmed all eight entries are `[/]` gated; escalation: none.
-<!-- agent:boundary:e6747696 -->
+❯ complete #jbccliverepro and #next-jbcc-controlled-repro
+### Re: complete #jbccliverepro and #next-jbcc-controlled-repro — gpt-5
+
+Completed #jbccliverepro and #next-jbcc-controlled-repro as requested. I treated this as an explicit review-state directive and did not run a new live IntelliJ repro in this cycle.
+
+The other six review entries remain gated because their wording depends on follow-on closeout decisions after the live Cancel evidence path.
+
+Proof for this cycle: changed paths before finalize were `tasks/agent-doc/agent-doc-bugs2.md` and `tasks/agent-doc-bugs2.done.md`; commands run: `tsift status`, `tsift status --fix`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `agent-doc finalize --done jbccliverepro --done next-jbcc-controlled-repro`; verification: reviewed the current Review section and targeted exactly the two requested IDs; confidence: high for document-state closeout; escalation: none.
+<!-- agent:boundary:d81178d9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -69,8 +77,6 @@ preset #spec-test-build-install-commit-push
 ## Review
 
 <!-- agent:review -->
-- [/] [#jbccliverepro] Gated on live IntelliJIdea2026.1 File Cache Conflict Cancel evidence with active plugin 0.2.133; 2026-05-26 shell attempt found no active dialog, so no Cancel branch was captured.
-- [/] [#next-jbcc-controlled-repro] Gated on live IntelliJIdea2026.1 File Cache Conflict Cancel evidence with current active plugin 0.2.133; after capture, close or rework review items #next-jbcc-live-repro-closeout, #next-jbcc-manual-repro, #next-adoc-jbcc, #next-jbccc2, #jbccc2, and #adoc-jb-cache-cancel-stuck-cycle.
 - [/] [#next-jbcc-live-repro-closeout] Gated on live IntelliJIdea2026.1 File Cache Conflict Cancel evidence with current active plugin 0.2.133; use that evidence to decide the review state for #next-jbcc-manual-repro, #next-adoc-jbcc, #next-jbccc2, #jbccc2, and #adoc-jb-cache-cancel-stuck-cycle.
 - [/] [#next-jbcc-manual-repro] Gated on restart confirmation that IntelliJIdea2026.1 has plugin 0.2.133 active plus manual File Cache Conflict Cancel evidence; after capture, close or rework #next-jbccc2/#jbccc2/#next-adoc-jbcc/#adoc-jb-cache-cancel-stuck-cycle.
 - [/] [#next-adoc-jbcc] Gated on #next-jbccc2 live verification in IntelliJIdea2026.1; code is pushed in 068a1752 and plugin 0.2.133 is active, but parent closure still needs the live cancel repro evidence.

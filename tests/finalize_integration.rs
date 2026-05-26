@@ -1638,6 +1638,73 @@ fn finalize_preserves_current_duplicate_prompt_html_comment_body() {
 }
 
 #[test]
+fn finalize_ignores_concurrent_duplicate_prompt_comment_for_session_check() {
+    let (tmp, doc) = setup_session_stream_doc();
+    let prompt = "As I was typing into the comment below `/agent:exchange`, the full-document IPC corruption happened, then the duplicate line happened. #spec-test-build-install-commit-push";
+    let baseline_shaped = fs::read_to_string(&doc)
+        .unwrap()
+        .replace("❯ Please reply", &format!("❯ {prompt}"));
+    fs::write(&doc, baseline_shaped).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    let baseline_content = fs::read_to_string(&doc).unwrap();
+    let baseline = write_baseline(tmp.path(), &baseline_content);
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["preflight", doc.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let scratch_comment = format!("<!--\n{prompt}\n#spec-test-build-install-commit-push\n-->");
+    let current_with_duplicate = fs::read_to_string(&doc).unwrap().replace(
+        "<!-- /agent:exchange -->\n\n<!-- agent:backlog -->",
+        &format!("<!-- /agent:exchange -->\n###\n\n{scratch_comment}\n\n<!-- agent:backlog -->"),
+    );
+    fs::write(&doc, current_with_duplicate).unwrap();
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--baseline-file",
+            baseline.to_str().unwrap(),
+            "--stream",
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: IPC comment typing — gpt-5\nPreserved the scratch comment without replaying it into the exchange.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert_eq!(
+        content.matches(&scratch_comment).count(),
+        1,
+        "visible scratch comment should survive exactly once:\n{content}"
+    );
+    assert_eq!(
+        content
+            .matches("### Re: IPC comment typing — gpt-5")
+            .count(),
+        1,
+        "response heading should not be duplicated by closeout repair:\n{content}"
+    );
+
+    let head = head_blob(tmp.path());
+    assert!(head.contains("### Re: IPC comment typing — gpt-5"));
+    assert!(
+        !head.contains(&scratch_comment),
+        "concurrent duplicate-prompt scratch comment must stay outside the closeout commit:\n{head}"
+    );
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["session-check", doc.to_str().unwrap()])
+        .assert()
+        .success();
+}
+
+#[test]
 fn finalize_preserves_baseline_prompt_html_comment_body() {
     let (tmp, doc) = setup_session_stream_doc();
     let prompt = "What are #next-steps to improve the sqlitedb graph performance?";

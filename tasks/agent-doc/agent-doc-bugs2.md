@@ -29,78 +29,12 @@ Queue advanced: #jbccreviewcloseout completed; #jbccresidualdecision completed b
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260526-165339.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260526-210551.md`*
 
 Compacted content:
-- Archived 4 response topic(s): #jbccprecheck; #jbccevidence; #jbccliverepro; 1 more
+- Archived 5 response topic(s): review item closeout; complete #jbccliverepro and #next-jbcc-controlled-repro; #next-steps for review items; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ What review items can be completed?
-### Re: review item closeout — gpt-5
-
-None of the eight review items can be completed from the evidence currently in the document. They are all still gated on the same missing live proof: IntelliJIdea2026.1 must show the File Cache Conflict Cancel path with plugin 0.2.133 active.
-
-The first actionable item is #jbccliverepro / #next-jbcc-controlled-repro: capture the live Cancel evidence. If that passes, the dependent review items can then be closed or reworked in this order: #next-jbcc-live-repro-closeout, #next-jbcc-manual-repro, #next-adoc-jbcc, #next-jbccc2, #jbccc2, and #adoc-jb-cache-cancel-stuck-cycle.
-
-I did not mark any review item done in this cycle. #next-jbccc2 has strong implementation evidence already recorded, including commit 068a1752, focused tests, make check, buildPlugin, cargo install, local plugin install, and GitHub CI, but the document still explicitly leaves it gated on the manual live Cancel repro.
-
-Proof for this cycle: changed paths before finalize: none; commands run: `tsift status`, `tsift status --fix`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `git status --short`; verification: inspected the current Review section and confirmed all eight entries are `[/]` gated; escalation: none.
-❯ complete #jbccliverepro and #next-jbcc-controlled-repro
-### Re: complete #jbccliverepro and #next-jbcc-controlled-repro — gpt-5
-
-Completed #jbccliverepro and #next-jbcc-controlled-repro as requested. I treated this as an explicit review-state directive and did not run a new live IntelliJ repro in this cycle.
-
-The other six review entries remain gated because their wording depends on follow-on closeout decisions after the live Cancel evidence path.
-
-Proof for this cycle: changed paths before finalize were `tasks/agent-doc/agent-doc-bugs2.md` and `tasks/agent-doc-bugs2.done.md`; commands run: `tsift status`, `tsift status --fix`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `agent-doc finalize --done jbccliverepro --done next-jbcc-controlled-repro`; verification: reviewed the current Review section and targeted exactly the two requested IDs; confidence: high for document-state closeout; escalation: none.
-❯ What are #next-steps to complete the review items?
-### Re: #next-steps for review items — gpt-5
-
-Added two backlog items for the remaining review closeout. Top backlog item: #jbccreviewcloseout.
-
-Use #jbccreviewcloseout first to inspect the completed live Cancel evidence and decide which remaining review entries can be closed or reworked. Then use #jbccresidualdecision only if that pass finds residual risk; otherwise the parent implementation and bug review entries can be marked done.
-
-I did not complete additional review entries in this cycle. The remaining review state still depends on that evidence-based closeout pass.
-
-Proof for this cycle: changed paths before finalize were `tasks/agent-doc/agent-doc-bugs2.md` and `tasks/agent-doc-bugs2.done.md`; commands run: `tsift status`, `tsift status --fix`, `agent-doc preflight`, `agent-doc plan`, `agent-doc orchestrate --from-exchange --plan`, `agent-doc read`, `git status --short`, and `agent-doc finalize`; verification: read the live backlog and review sections, confirmed the backlog now contains the two ordered closeout items and six gated review entries remained; confidence: high for backlog ordering and document-state update; escalation: none.
-### Re: do #jbccreviewcloseout and #jbccresidualdecision — gpt-5
-
-Completed the closeout pass. I found implementation and automated-verification evidence for the JetBrains fix, but no controlled live IntelliJIdea2026.1 Cancel pass/fail evidence with plugin 0.2.133.
-
-Because that is residual risk, I added #jbcclivecancelresid as the narrow plan-backed blocker and reworked the remaining review entries to gate on it. I marked #jbccreviewcloseout and #jbccresidualdecision done.
-
-Proof for this cycle: changed document paths before finalize were `tasks/agent-doc/agent-doc-bugs2.md` and `tasks/agent-doc-bugs2.done.md`; commands run: `tsift status`, `tsift status --fix`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, targeted `rg`, `sed`, `git status`, `git show`, and `agent-doc finalize`; verification: confirmed plan file `tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md` exists, found the prior notes saying no controlled Cancel branch was captured, and checked commit 068a1752 for the implementation evidence; confidence: high that the remaining blocker is live evidence, not another known code task; escalation: none.
-❯ I saw a recent full-document IPC corruption in another document. Please look in logs.
-❯ As I was typing this prompt, the duplicate content issue occurred.
-❯ #spec-test-build-install-commit-push
-### Re: IPC corruption while typing — gpt-5
-
-I found the log trail and patched the narrower snapshot-adoption gap.
-
-The logs did not show a new normal-response `fullContent` path. They showed socket patch IPC with ACK content. In this document at `[1779825176]`, snapshot adoption was blocked from `ack_content_sidecar` and saved `content_ours`, but the same cycle then hit stale snapshot drift during commit. In `tasks/software/tsift.md` at `[1779825303]` and `[1779825541]`, ACK-content snapshot adoption was also blocked, then commit later ran `snapshot_absorb` from the visible editor file. That made the remaining unsafe case clear: ordinary text typed after preflight outside `agent:exchange`, such as a post-exchange scratch/comment prompt, could still be treated as adoptable visible state even when it was absent from the agent-owned response image.
-
-Fix in `src/agent-doc`:
-- `src/write.rs` now blocks IPC snapshot adoption when the ACK/file candidate contains non-`exchange` component drift that appeared after preflight and is absent from `content_ours`.
-- Added `file_ipc_ack_content_post_exchange_comment_drift_uses_content_ours_snapshot`, which simulates typing a prompt inside a post-exchange HTML comment during closeout and proves the snapshot stays on `content_ours` while the visible editor text remains for the next cycle.
-- Updated `SPEC.md` and `specs/07-closeout-commands.md` so ACK-content snapshots are not allowed to absorb post-exchange scratch/comment drift.
-- Updated the FlowCore token budget in `tests/test_cli.rs` for the added audited `reason=` guard.
-
-Verification:
-- `cargo test file_ipc_ack_content_`
-- `cargo test flowcore_hot_path_guard_and_proof_tokens_are_budgeted --test test_cli`
-- `make check`
-- `cargo build`
-- `cargo install --path .`
-- `agent-doc --version` -> `agent-doc 0.34.0`
-- `git diff --check -- SPEC.md specs/07-closeout-commands.md src/write.rs tests/test_cli.rs`
-- `cargo fmt --check`
-- GitHub CI run `26472473406` passed after push; the hosted `check` job ran both `Run make check` and `Run make tmux-ci` successfully in 9m28s. The only annotation was the upstream Node.js 20 deprecation warning for `actions/checkout@v4`.
-
-Commit / push:
-- `src/agent-doc` commit `507f2f82` (`fix: guard ipc snapshot comment drift`) pushed to `origin/20260422/codex-agent-backend`.
-- Parent gitlink commit `b954212b7` (`agent-doc: guard ipc snapshot comment drift`) pushed to `origin/main`.
-
-I left unrelated pre-existing local modifications alone, including the formatted-but-unstaged files under `src/agent-doc` and other dirty superproject paths. Escalation: none. Confidence: high.
-<!-- agent:boundary:be80987d -->
+<!-- agent:boundary:e8f11a26 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -21,7 +21,7 @@ queue_active: false
 
 <!-- agent:status patch=replace -->
 
-Answered review completion question; review items remain gated pending manual repro/residual implementation.
+Captured next steps for gated review items.
 <!-- /agent:status -->
 
 ## Exchange
@@ -68,7 +68,18 @@ The JetBrains cache-conflict implementation is code-complete and verified by aut
 `#stuckcycledup` also should stay gated because the audit found a real residual gap: `flow/closeout.rs::stuck_captured_cycle` still returns `None`, so the preflight warning hook exists but does not yet detect the captured-cycle case.
 
 So the review list should not be cleared as-is. The shortest path to clearing it is: restart IntelliJIdea2026.1, run the manual cancel repro for the JetBrains items, then implement the `stuck_captured_cycle` residual or split it into a smaller plan-backed item if it is not going to be fixed in this batch.
-<!-- agent:boundary:a26e518b -->
+❯ What are #next-steps to complete the review items?
+### Re: next steps to complete review items — gpt-5
+
+Top backlog item: `#next-jbcc-manual-repro`.
+
+I added the review-completion next steps to the backlog in priority order.
+
+1. `#next-jbcc-manual-repro` — restart IntelliJIdea2026.1 so the installed `agent-doc-jetbrains-0.2.132` plugin is active, run the manual File Cache Conflict Cancel repro, capture pass/fail evidence, then close or rework the JetBrains review cluster: `#next-jbccc2`, `#jbccc2`, `#next-adoc-jbcc`, and `#adoc-jb-cache-cancel-stuck-cycle`.
+2. `#next-stuckcycle-impl` — implement the residual stuck-cycle fix by replacing the `flow/closeout.rs::stuck_captured_cycle` stub with real captured-response/HEAD detection, add regression tests, then resolve `#stuckcycledup`.
+
+The existing review items stay gated until those two follow-ups produce evidence.
+<!-- agent:boundary:40978cc4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -86,6 +97,8 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#next-jbcc-manual-repro] Restart IntelliJIdea2026.1 so installed plugin 0.2.132 is active, run the manual File Cache Conflict Cancel repro, capture pass/fail evidence, and then close or rework #next-jbccc2/#jbccc2/#next-adoc-jbcc/#adoc-jb-cache-cancel-stuck-cycle.
+- [ ] [#next-stuckcycle-impl] Implement the residual stuck-cycle fix: replace flow/closeout.rs::stuck_captured_cycle stub with real captured-response/HEAD detection, add regression tests, and then resolve #stuckcycledup. Plan: tasks/agent-doc/plan-stuck-cycle-causes-duplicated-uncommitted-response.md.
 <!-- /agent:backlog -->
 
 ## Review

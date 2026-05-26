@@ -12,13 +12,13 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
-Completed: #gprojrows is locked as proof debt rather than speculative production work: full-projection cache hits now have an explicit spec/test gate requiring `full_projection.source_graph_build=0` and `full_projection.projection_rows=0`, with fresh three-sample cache-hit evidence recorded in tsift. Local verification passed (`cargo test -q graph_db_backend_eval_benchmarks_candidate_stores_against_sqlite`, `cargo build`, `cargo install --path .`, `make check`); latest tsift CI run 26433096348 is green, and the tsift submodule commit `cd2b020` is pushed.
+Completed: #gsqlwrite reduces repeated SQLite graph refresh property-row work by staging and mutating materialized node/edge properties only for new or row-hash changed owners. Full-projection backend-eval now emits and requires the requested SQLite write phase metrics. Local verification passed (`cargo test -q sqlite_projection_refresh_handles_bulk_row_replacement`, `cargo test -q graph_db_backend_eval_benchmarks_candidate_stores_against_sqlite`, `cargo build`, `cargo install --path .`, `make check`); tsift CI run 26435208332 is green. The tsift submodule commit `7534c13` is pushed, and the root pointer commit `5a88f58ee` is in the current root history.
 <!-- /agent:status -->
 
 ## Spec
@@ -82,14 +82,48 @@ The `tsift` submodule commit is pushed to `origin/main`; the superproject/sessio
 ### Re: closeout repair — gpt-5
 
 Closeout repair: the prior finalize committed the `#gprojrows` response, status update, queue consumption, and backlog reap, but post-commit `session-check` detected active-session drift. This write reopens the binary-owned commit path for the same completed work; no additional repo changes were made.
-<!-- agent:boundary:27087e3d -->
+### Re: #gsqlwrite — gpt-5
+
+Closed `#gsqlwrite` with a scoped write-path optimization plus the missing full-projection metric gates.
+
+Changes committed in `tsift@7534c13`:
+
+- `replace_projection_with_version` now builds temp `next_graph_changed_nodes` and `next_graph_changed_edges` owner sets before materializing property rows.
+- Normal refreshes expand property JSON, delete materialized property rows, and upsert materialized property rows only for new or row-hash changed owners. Unchanged owners reuse existing materialized property rows.
+- Forced refreshes still include all owners, preserving the explicit refresh semantics.
+- Full-projection backend-eval now publishes direct metric keys for `full_projection.sqlite.sqlite_delta_write`, `full_projection.sqlite.sqlite_edge_staging`, and `full_projection.sqlite.post_write_reads`, and requires those keys in `performance_gate.required_metrics` alongside `full_projection.sqlite.total_duration_micros_per_1k_graph_rows`.
+- `SPEC.md`, `tests/graph_db_conformance.rs`, and `plans/gsqlwrite-evidence.md` document and lock the contract.
+
+Fresh installed-binary full-projection samples from `target/perf/gsqlwrite-cache-{1,2,3}.json`:
+
+| Sample | cache.hit | sqlite_delta_write | sqlite_edge_staging | post_write_reads | total/1k rows |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1 | 1 | 146,361us | 58,267us | 50,322us | 12,211.481 |
+| 2 | 1 | 148,544us | 57,270us | 49,824us | 12,202.692 |
+| 3 | 1 | 147,382us | 57,348us | 51,085us | 12,201.357 |
+
+Important scope note: the full-projection backend-eval path intentionally writes cached provider-neutral rows into a fresh in-memory SQLite store each run, so every owner is new to that store. The changed-owner property staging win is therefore proven by the persistent-refresh test, where a second refresh with unchanged surviving owners stages `0` node property rows and `0` edge property rows.
+
+Verification completed:
+
+- `cargo test -q sqlite_projection_refresh_handles_bulk_row_replacement`
+- `cargo test -q graph_db_backend_eval_benchmarks_candidate_stores_against_sqlite`
+- `cargo build`
+- `cargo install --path .`
+- `make check`
+- GitHub Actions CI run `26435208332`: green (`clippy + test`, `live Convex graph acceptance`)
+
+Note: `cargo fmt --check` still reports broad pre-existing rustfmt drift in unrelated files, so I left formatting spillover out of this commit and relied on the project `make check` target for required verification.
+
+The tsift submodule commit is pushed to `origin/main`; the root pointer commit `5a88f58ee` is already in the current root history. This write is the response repair for the earlier IPC/visible-buffer interrupted finalize.
+<!-- agent:boundary:68a37e01 -->
 <!-- /agent:exchange -->
 ###
 <!--
 What are #next-steps to make the graph faster?
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#gprojrows]~
 - do [#gsqlwrite]

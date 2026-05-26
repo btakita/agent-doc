@@ -11,7 +11,7 @@ prompt_presets:
   '#code-review': Please review agent-doc codebase. Inspect the architecture and look for edge cases. Isolate concurrency issues and other workflow bugs. Let's find root causes to fix.
   '#commit-push': commit + push all uncommitted files
   '#follow-up-backlog': Any follow-up items to place in the backlog?
-  '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
+  '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
 queue_active: false
@@ -52,7 +52,17 @@ Completed #jbccliverepro and #next-jbcc-controlled-repro as requested. I treated
 The other six review entries remain gated because their wording depends on follow-on closeout decisions after the live Cancel evidence path.
 
 Proof for this cycle: changed paths before finalize were `tasks/agent-doc/agent-doc-bugs2.md` and `tasks/agent-doc-bugs2.done.md`; commands run: `tsift status`, `tsift status --fix`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `agent-doc finalize --done jbccliverepro --done next-jbcc-controlled-repro`; verification: reviewed the current Review section and targeted exactly the two requested IDs; confidence: high for document-state closeout; escalation: none.
-<!-- agent:boundary:d81178d9 -->
+❯ What are #next-steps to complete the review items?
+### Re: #next-steps for review items — gpt-5
+
+Added two backlog items for the remaining review closeout. Top backlog item: #jbccreviewcloseout.
+
+Use #jbccreviewcloseout first to inspect the completed live Cancel evidence and decide which remaining review entries can be closed or reworked. Then use #jbccresidualdecision only if that pass finds residual risk; otherwise the parent implementation and bug review entries can be marked done.
+
+I did not complete additional review entries in this cycle. The remaining review state still depends on that evidence-based closeout pass.
+
+Proof for this cycle: changed paths before finalize were `tasks/agent-doc/agent-doc-bugs2.md` and `tasks/agent-doc-bugs2.done.md`; commands run: `tsift status`, `tsift status --fix`, `agent-doc preflight`, `agent-doc plan`, `agent-doc orchestrate --from-exchange --plan`, `agent-doc read`, `git status --short`, and `agent-doc finalize`; verification: read the live backlog and review sections, confirmed the backlog now contains the two ordered closeout items and six gated review entries remained; confidence: high for backlog ordering and document-state update; escalation: none.
+<!-- agent:boundary:85f5740a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -72,6 +82,8 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#jbccreviewcloseout] Review completed live Cancel evidence and close or rework the remaining JetBrains Cancel review entries in priority order.
+- [ ] [#jbccresidualdecision] If closeout finds residual risk, create one narrow plan-backed residual bug and gate the parent review entries on that item; otherwise mark the parent implementation/bug review entries done.
 <!-- /agent:backlog -->
 
 ## Review

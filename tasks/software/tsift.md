@@ -30,103 +30,19 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260526-052021.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260526-153847.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #gcachemiss
+- Archived 5 response topic(s): #next-steps for SQLite graph + tagpath community search; #gprojrows; closeout repair; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
-❯ What are #next-steps to improve performance and effectiveness of the sqlite graph and tagpath community search?
-### Re: #next-steps for SQLite graph + tagpath community search — gpt-5
-
-Top backlog item: `#gprojrows`.
-
-I added the follow-up backlog in priority order. The ordering follows the current evidence: SQLite high-hop path reads are already microsecond-scale, while full-projection source graph build, projection row construction, and SQLite refresh/write phases dominate. So the next step is not raising hop caps or promoting FalkorDB/Kuzu; it is reducing the measured SQLite/projection costs, then making community detection and tagpath handle quality measurable.
-
-Priority order now:
-
-1. `#gprojrows` — reduce full-projection source graph build and projection-row generation.
-2. `#gsqlwrite` — reduce SQLite refresh/write and property staging cost.
-3. `#gcommcache` — cache/bound community detection instead of recomputing all edges and Louvain every time.
-4. `#gcommtagctx` — improve tagpath community effectiveness by resolving members with file/community context, not name-only fallback.
-5. `#gcommgate` — add repeatable community quality/performance metrics so future tuning has a hard gate.
-
-The important constraint is to keep backend and hop-cap changes behind the existing evidence gates until `backend-eval --full-projection` shows stable cache-hit samples and the projection/write hotspots stop dominating.
-### Re: #gprojrows — gpt-5
-
-Closed `#gprojrows` without adding a speculative production refactor. The full-projection cache path already reuses the source graph and provider-neutral projection rows on unchanged source/summary inputs; this cycle made that contract explicit and verifiable.
-
-Changes committed in `tsift@cd2b020`:
-
-- Updated `SPEC.md` to require full-projection cache hits to report `full_projection.source_graph_build=0us` and `full_projection.projection_rows=0us`.
-- Tightened `tests/graph_db_conformance.rs` so the second `backend-eval --full-projection` run must skip both phases.
-- Added `plans/gprojrows-evidence.md` with three fresh cache-hit samples.
-
-Fresh sample evidence from `target/perf/gprojrows-cache-{1,2,3}.json`:
-
-| Sample | cache.hit | source_graph_build | projection_rows | cache_lookup | SQLite total |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| 1 | 1 | 0us | 0us | 3us | 302,627us |
-| 2 | 1 | 0us | 0us | 4us | 310,104us |
-| 3 | 1 | 0us | 0us | 4us | 304,030us |
-
-Verification completed:
-
-- `cargo test -q graph_db_backend_eval_benchmarks_candidate_stores_against_sqlite`
-- `cargo build`
-- `cargo install --path .`
-- `make check`
-- GitHub Actions CI run `26433096348`: green (`clippy + test`, `live Convex graph acceptance`)
-
-The `tsift` submodule commit is pushed to `origin/main`; the superproject/session commit is handled by this finalize boundary before the remaining root push.
-### Re: closeout repair — gpt-5
-
-Closeout repair: the prior finalize committed the `#gprojrows` response, status update, queue consumption, and backlog reap, but post-commit `session-check` detected active-session drift. This write reopens the binary-owned commit path for the same completed work; no additional repo changes were made.
-### Re: #gsqlwrite — gpt-5
-
-Closed `#gsqlwrite` with a scoped write-path optimization plus the missing full-projection metric gates.
-
-Changes committed in `tsift@7534c13`:
-
-- `replace_projection_with_version` now builds temp `next_graph_changed_nodes` and `next_graph_changed_edges` owner sets before materializing property rows.
-- Normal refreshes expand property JSON, delete materialized property rows, and upsert materialized property rows only for new or row-hash changed owners. Unchanged owners reuse existing materialized property rows.
-- Forced refreshes still include all owners, preserving the explicit refresh semantics.
-- Full-projection backend-eval now publishes direct metric keys for `full_projection.sqlite.sqlite_delta_write`, `full_projection.sqlite.sqlite_edge_staging`, and `full_projection.sqlite.post_write_reads`, and requires those keys in `performance_gate.required_metrics` alongside `full_projection.sqlite.total_duration_micros_per_1k_graph_rows`.
-- `SPEC.md`, `tests/graph_db_conformance.rs`, and `plans/gsqlwrite-evidence.md` document and lock the contract.
-
-Fresh installed-binary full-projection samples from `target/perf/gsqlwrite-cache-{1,2,3}.json`:
-
-| Sample | cache.hit | sqlite_delta_write | sqlite_edge_staging | post_write_reads | total/1k rows |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| 1 | 1 | 146,361us | 58,267us | 50,322us | 12,211.481 |
-| 2 | 1 | 148,544us | 57,270us | 49,824us | 12,202.692 |
-| 3 | 1 | 147,382us | 57,348us | 51,085us | 12,201.357 |
-
-Important scope note: the full-projection backend-eval path intentionally writes cached provider-neutral rows into a fresh in-memory SQLite store each run, so every owner is new to that store. The changed-owner property staging win is therefore proven by the persistent-refresh test, where a second refresh with unchanged surviving owners stages `0` node property rows and `0` edge property rows.
-
-Verification completed:
-
-- `cargo test -q sqlite_projection_refresh_handles_bulk_row_replacement`
-- `cargo test -q graph_db_backend_eval_benchmarks_candidate_stores_against_sqlite`
-- `cargo build`
-- `cargo install --path .`
-- `make check`
-- GitHub Actions CI run `26435208332`: green (`clippy + test`, `live Convex graph acceptance`)
-
-Note: `cargo fmt --check` still reports broad pre-existing rustfmt drift in unrelated files, so I left formatting spillover out of this commit and relied on the project `make check` target for required verification.
-
-The tsift submodule commit is pushed to `origin/main`; the root pointer commit `5a88f58ee` is already in the current root history. This write is the response repair for the earlier IPC/visible-buffer interrupted finalize.
-### Re: closeout repair — gpt-5
-
-Closeout repair: the previous write inserted the `#gsqlwrite` response body, but post-commit session-check left the queue reap, `(HEAD)` working-tree marker, and done-archive drift outside the committed snapshot. This write commits that agent-owned closeout state only; no additional tsift code changes were made.
-<!-- agent:boundary:aee12dc3 -->
+<!-- agent:boundary:798b9214 -->
 <!-- /agent:exchange -->
 ###
 <!--
 What are #next-steps to make the graph faster?
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#gprojrows]~
 - ~do [#gsqlwrite]~

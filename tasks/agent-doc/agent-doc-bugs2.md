@@ -29,38 +29,12 @@ Gated JetBrains manual cancel repro on missing controlled Cancel evidence.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260526-043147.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260526-045751.md`*
 
 Compacted content:
-- Archived 5 response topic(s): next steps for review items; active queue implementation; queue recovery; 2 more
+- Archived 2 response topic(s): do [#next-jbcc-manual-repro]; do [#next-stuckcycle-impl]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-### Re: do [#next-jbcc-manual-repro] — gpt-5
-
-
-I could not honestly close the manual repro as passed this cycle. I verified the live setup: IntelliJIdea2026.1 is running from `/home/brian/opt/idea-IU-252.26830.84/bin/idea` (PID 1980397, started 2026-05-25 19:01:36), the installed plugin jar is `agent-doc-jetbrains-0.2.132.jar` in both JetBrains plugin locations, and `idea.log` shows `PatchWatcher` active for `tasks/agent-doc/agent-doc-bugs2.md`.
-
-I also found recent IDE evidence that the target dialog surface is still reproducible: `MemoryDiskConflictResolver` logged `reload agent-doc-bugs2.md from disk?` at 2026-05-26 00:34:25. That proves the IDE/plugin setup can surface the memory/disk conflict, but I did not get a controlled Cancel click plus post-cancel closeout evidence from this terminal-only cycle.
-
-I am gating `#next-jbcc-manual-repro`, not marking it done. The related review items should remain gated until the live Cancel path is performed and the result records whether the cycle reaches `committed` or fails closed with the patch file left in place.
-
-Changed paths: session-document closeout only. Verification: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, process/plugin-path inspection, `idea.log` inspection. No code changed, so I did not run `make check` or CI checks. Confidence: high that the installed plugin is active; no pass/fail claim for the Cancel behavior. Escalation: none.
-### Re: do [#next-stuckcycle-impl] — gpt-5
-
-Implemented the residual stuck-cycle detection in `flow::closeout::stuck_captured_cycle`. Preflight now cross-checks committed cycle state, the matching durable capture, response hash, capture state, and `HEAD`; it only emits `stuck_captured_cycle` when the captured response materializes nowhere in `HEAD`, and stays quiet for discarded captures, mismatched captures, hash drift, empty responses, and already-committed materialized responses.
-
-I also added the SPEC invariant for this warning path and two regression tests for the missing-response and already-in-HEAD cases. The code change is committed in `src/agent-doc` as `c568bbfa` and pushed to `origin/20260422/codex-agent-backend`; the root submodule pointer commit is `50487b2fc` and will be pushed after this session-document closeout, per the session document staging rule.
-
-Verification passed:
-
-- `cargo test stuck_captured_cycle`
-- `make check`
-- `cargo build`
-- `cargo install --path .` (`agent-doc 0.34.0` installed)
-- `gh run list --workflow CI --limit 1` plus `gh run view 26431487457 --json jobs`: latest CI succeeded, including `Run make tmux-ci`
-- local `make tmux-ci`: 228 ignored/live tmux tests passed
-
-Left the pre-existing unrelated dirty files in `src/agent-doc` and the root worktree untouched.
-<!-- agent:boundary:8f43bbe6 -->
+<!-- agent:boundary:9cfbb7f1 -->
 <!-- /agent:exchange -->
 ###
 <!--

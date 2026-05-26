@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -129,7 +129,7 @@ Verification: current active plugin/version evidence was rechecked; no active Fi
 Commands run: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `git rev-parse HEAD`, `git status --short`, `lsof -p 3818906 | rg ...`, `agent-doc session-check`, `date --iso-8601=seconds`, `tail .../idea.log | rg ...`, `rg ... idea.log`, `xdotool search --name 'File Cache Conflict'`, and this `agent-doc finalize`.
 
 Confidence: high that the live Cancel evidence was not captured. Escalation: none.
-<!-- agent:boundary:f5059ac5 -->
+<!-- agent:boundary:a74d6c35 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -139,7 +139,7 @@ As I was typing into the comment below `/agent:exchange`, the full-document IPC 
 #spec-test-build-install-commit-push
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#jbccprecheck]~
 - ~do [#jbccevidence]~

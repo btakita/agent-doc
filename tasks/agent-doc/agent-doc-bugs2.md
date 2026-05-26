@@ -21,7 +21,7 @@ queue_active: false
 
 <!-- agent:status patch=replace -->
 
-Implemented JetBrains cache-conflict defer path; code pushed; #next-jbccc2/#next-adoc-jbcc gated pending manual IDE repro.
+Recovered recursive queue dispatch; gated items remain pending manual IDE repro.
 <!-- /agent:status -->
 
 ## Exchange
@@ -53,7 +53,12 @@ Implemented `#next-jbccc2` through the JetBrains plugin path. `PatchWatcher.kt` 
 Verification is green: focused plugin test, full `make check`, `./gradlew buildPlugin`, `cargo install --path .`, local plugin install to IntelliJIdea2026.1 as `agent-doc-jetbrains-0.2.132`, and GitHub CI run `26431487457` passed including `make tmux-ci`. Code is pushed in submodule commit `068a1752` and the parent submodule pointer is pushed in `cd2cfe5a6`.
 
 I gated `#next-jbccc2` and `#next-adoc-jbcc` rather than marking them done because the installed plugin requires an IntelliJ restart before the manual File Cache Conflict Cancel repro can be run. I completed the `#next-stuckcycledup` audit and kept `#stuckcycledup` open as one residual implementation bug: `flow/closeout.rs::stuck_captured_cycle` is still a stub returning `None`, so the warning hook exists but the real captured-cycle detection still needs to land.
-<!-- agent:boundary:26db3ce4 -->
+### Re: queue recovery — gpt-5
+
+The direct `agent-doc` command started the queue handoff but then refused recursive dispatch because this Codex pane already owns the document. I continued in-process with preflight; it repaired the stale `preflight_started` cycle and found no new document diff to execute.
+
+No repo changes were needed in this recovery cycle. `#next-jbccc2` and `#next-adoc-jbcc` remain gated on the IntelliJIdea2026.1 restart plus manual File Cache Conflict Cancel repro. The previous implementation and verification remain current: agent-doc commit `068a1752`, parent submodule pointer commit `cd2cfe5a6`, local verification green, and GitHub CI run `26431487457` passed including `make tmux-ci`.
+<!-- agent:boundary:211a5ead -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -63,9 +68,9 @@ As I was typing into the comment below `/agent:exchange`, the full-document IPC 
 
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
-- do [#next-jbccc2]
-- do [#next-adoc-jbcc]
-- do [#next-stuckcycledup]
+- ~do [#next-jbccc2]~
+- ~do [#next-adoc-jbcc]~
+- ~do [#next-stuckcycledup]~
 <!-- /agent:queue -->
 
 ## Pending / Not Built

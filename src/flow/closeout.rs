@@ -183,17 +183,79 @@ pub(crate) struct StuckCapturedCycleInfo {
 }
 
 /// Detect a "stuck captured cycle" wedge for `file`. Returns `None` when the
-/// document is healthy or when detection is not yet implemented for the
-/// observed cycle/capture combination.
-///
-/// Stub for now — the full detection logic (cross-referencing
-/// `cycle_state::load(file)`, `capture::latest(file)`, and `git::show_head`
-/// to prove the captured response body is absent from HEAD) is tracked under
-/// the parent stuck-cycle plan and lands separately. Returning `None`
-/// preserves the existing preflight behavior (no false-positive warnings)
-/// while keeping the call site stable for future implementation.
-pub(crate) fn stuck_captured_cycle(_file: &Path) -> Option<StuckCapturedCycleInfo> {
-    None
+/// document is healthy or when there is not enough durable state to prove the
+/// captured response body is absent from `HEAD`.
+pub(crate) fn stuck_captured_cycle(file: &Path) -> Option<StuckCapturedCycleInfo> {
+    let state = match crate::cycle_state::load(file) {
+        Ok(Some(state)) => state,
+        Ok(None) => return None,
+        Err(err) => {
+            eprintln!(
+                "[preflight] warning: failed to load cycle state for stuck-cycle detection on {}: {err}",
+                file.display()
+            );
+            return None;
+        }
+    };
+    if state.phase != crate::cycle_state::CyclePhase::Committed {
+        return None;
+    }
+    let capture_id = state.capture_id.as_deref()?;
+    let capture = match crate::capture::load_by_id(file, capture_id) {
+        Ok(Some(capture)) => capture,
+        Ok(None) => return None,
+        Err(err) => {
+            eprintln!(
+                "[preflight] warning: failed to load capture {capture_id} for stuck-cycle detection on {}: {err}",
+                file.display()
+            );
+            return None;
+        }
+    };
+    if capture.cycle_id != state.cycle_id {
+        return None;
+    }
+    if let Some(response_sha256) = state.response_sha256.as_deref()
+        && response_sha256 != capture.response_sha256
+    {
+        return None;
+    }
+    if capture.response_body.trim().is_empty()
+        || matches!(capture.state, crate::capture::CaptureState::Discarded)
+    {
+        return None;
+    }
+    let head = match crate::git::show_head(file) {
+        Ok(Some(head)) => head,
+        Ok(None) => return None,
+        Err(err) => {
+            eprintln!(
+                "[preflight] warning: failed to read HEAD for stuck-cycle detection on {}: {err}",
+                file.display()
+            );
+            return None;
+        }
+    };
+    if crate::write::response_materialized_in_content(&capture.response_body, &head) {
+        return None;
+    }
+
+    Some(StuckCapturedCycleInfo {
+        cycle_id: state.cycle_id,
+        response_body_len: capture.response_body.len(),
+        capture_id: capture.capture_id,
+        capture_state: capture_state_label(capture.state).to_string(),
+    })
+}
+
+fn capture_state_label(state: crate::capture::CaptureState) -> &'static str {
+    match state {
+        crate::capture::CaptureState::Captured => "captured",
+        crate::capture::CaptureState::WriteApplied => "write_applied",
+        crate::capture::CaptureState::Replayed => "replayed",
+        crate::capture::CaptureState::Committed => "committed",
+        crate::capture::CaptureState::Discarded => "discarded",
+    }
 }
 
 pub(crate) fn cleanup_fallback_patch_files(file: &Path) {
@@ -343,6 +405,7 @@ fn closeout_latency_message(file: &Path, total_ms: u128, phases: &[(String, u128
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
 
     #[test]
     fn committed_is_terminal_completed() {
@@ -407,5 +470,69 @@ mod tests {
 
         assert!(message.contains("closeout_latency file=tasks/doc.md total_ms=300"));
         assert!(message.contains("git_commit:12ms,session_check:4ms"));
+    }
+
+    fn setup_git_project_with_doc(base: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = dir.path().join("doc.md");
+        std::fs::write(&doc, base).unwrap();
+        crate::snapshot::save(&doc, base).unwrap();
+        run_git(dir.path(), &["init"]);
+        run_git(dir.path(), &["config", "user.email", "test@example.com"]);
+        run_git(dir.path(), &["config", "user.name", "Test User"]);
+        run_git(dir.path(), &["add", "doc.md"]);
+        run_git(dir.path(), &["commit", "-m", "initial", "--no-verify"]);
+        (dir, doc)
+    }
+
+    fn run_git(root: &Path, args: &[&str]) {
+        let status = Command::new("git")
+            .current_dir(root)
+            .args(args)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?} failed with {status}");
+    }
+
+    #[test]
+    fn stuck_captured_cycle_detects_committed_cycle_missing_response_in_head() {
+        let base = "---\nsession: test\n---\n\n## User\n\nHello\n";
+        let response = "### Re: hello — gpt-5\n\nCaptured but never committed.\n";
+        let (_dir, doc) = setup_git_project_with_doc(base);
+
+        let state = crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        let capture = crate::capture::capture_response(&doc, response).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(base), Some(base)).unwrap();
+
+        let info = stuck_captured_cycle(&doc).expect("missing HEAD response should be detected");
+        assert_eq!(info.cycle_id, state.cycle_id);
+        assert_eq!(info.capture_id, capture.capture_id);
+        assert_eq!(info.response_body_len, response.len());
+        assert_eq!(info.capture_state, "captured");
+    }
+
+    #[test]
+    fn stuck_captured_cycle_ignores_committed_cycle_when_response_is_in_head() {
+        let base = "---\nsession: test\n---\n\n## User\n\nHello\n";
+        let response = "### Re: hello — gpt-5\n\nCommitted response.\n";
+        let full_doc = format!("{base}\n{response}");
+        let (dir, doc) = setup_git_project_with_doc(base);
+
+        crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        crate::capture::capture_response(&doc, response).unwrap();
+        std::fs::write(&doc, &full_doc).unwrap();
+        crate::snapshot::save(&doc, &full_doc).unwrap();
+        run_git(dir.path(), &["add", "doc.md"]);
+        run_git(dir.path(), &["commit", "-m", "response", "--no-verify"]);
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(&full_doc),
+            Some(&full_doc),
+        )
+        .unwrap();
+
+        assert!(stuck_captured_cycle(&doc).is_none());
     }
 }

@@ -40,13 +40,25 @@ Compacted content:
 
 ❯ I’m treating the IPC corruption / duplicate-line note as reproduced context for the existing JetBrains cache-conflict review items, not as a new distinct backlog entry. The same failure surface is already represented by `#adoc-jb-cache-cancel-stuck-cycle`, with `#jbccc2` as the active plugin-side phase.
 
-❯ Verification: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`; no repo code changed.
+Verification: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`; no repo code changed.
 ### Re: Closeout repair — gpt-5
 
 The stale queue has been cleared and the review-gated items remain gated. This repair response closes the prior IPC recovery body that was mistakenly written with prompt prefixes, so the document has an assistant response after that prompt-only tail.
 
 Verification: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`; no repo code changed.
-<!-- agent:boundary:b7c5aeaf -->
+❯ Which items in the review can be completed?
+### Re: Review completion — gpt-5
+
+None of the three active review items should be marked done as written.
+
+- `#jbccc2` stays gated. `PatchWatcher.kt` still applies the patch through the Document API and saves it; I do not see the planned File Cache Conflict cancel contract implemented yet: defer the write until the dialog resolves, return the socket/file-IPC cancel status, and leave the patch file in place on cancel.
+- `#adoc-jb-cache-cancel-stuck-cycle` stays gated because it is the parent issue. Binary-side recovery/runbook coverage exists, but the parent should not close until `#jbccc2` is done and the JetBrains cancel repro passes end-to-end.
+- `#stuckcycledup` stays gated or should be split/reworded, not completed. The `cycle_already_committed` / `stuck_captured_cycle` part exists, but the plan still has remaining orphan/superseded/repair work, and the referenced split IDs are not present as completed review items in this document.
+
+So the current completion set is empty. If we want to reduce review noise, the clean move is to replace `#stuckcycledup` with explicit child review/backlog entries for `#stuckcycleorphan`, `#stuckcyclerepair`, and `#stuckcyclesuperseded`, then leave the parent out of Review rather than marking it done.
+
+Verification: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, inspected `tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md`, `tasks/agent-doc/plan-stuck-cycle-causes-duplicated-uncommitted-response.md`, `src/agent-doc/runbooks/jb-cache-conflict.md`, `src/agent-doc/src/sim_world.rs`, and `src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt`. No repo code changed.
+<!-- agent:boundary:f218a4a4 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -59,7 +59,18 @@ Committed and pushed:
 - Parent gitlink commit `1623ae382` is included in pushed `origin/main`; later unrelated parent/local dirty state was left untouched.
 
 No follow-up items remain for `#ipcfullprompt`.
-<!-- agent:boundary:86fc947d -->
+### Re: File Cache Conflict Cancel repro — gpt-5
+
+I could not complete `#next-jbcc-live-repro-closeout` in this cycle because the remaining proof requires controlled, user-visible IntelliJ File Cache Conflict Cancel interaction and pass/fail observation.
+
+What I verified from shell:
+
+- IntelliJIdea2026.1 is running from `/home/brian/opt/idea-IU-252.26830.84/bin/idea`.
+- Plugin `agent-doc-jetbrains-0.2.132.jar` is installed under both `/home/brian/.config/JetBrains/IntelliJIdea2026.1/agent-doc-jetbrains/lib/` and `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1/agent-doc-jetbrains/lib/`.
+- The current `idea.log` shows `com.github.btakita.agentdoc.PatchWatcher` activity for this document, including the 01:36:06 patch application and VCS refresh after the previous closeout.
+
+I did not synthesize Cancel evidence from logs or force GUI interaction from the shell. I gated `#next-jbcc-live-repro-closeout` pending a controlled manual Cancel repro result, and I left the dependent review items gated.
+<!-- agent:boundary:6215bff1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -76,12 +87,12 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#next-jbcc-live-repro-closeout] Run the IntelliJIdea2026.1 File Cache Conflict Cancel repro with plugin 0.2.132 active, capture controlled pass/fail evidence, then use that evidence to decide the review state for #next-jbcc-manual-repro, #next-adoc-jbcc, #next-jbccc2, #jbccc2, and #adoc-jb-cache-cancel-stuck-cycle.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#next-jbcc-live-repro-closeout] Run the IntelliJIdea2026.1 File Cache Conflict Cancel repro with plugin 0.2.132 active, capture controlled pass/fail evidence, then use that evidence to decide the review state for #next-jbcc-manual-repro, #next-adoc-jbcc, #next-jbccc2, #jbccc2, and #adoc-jb-cache-cancel-stuck-cycle.
 - [/] [#next-jbcc-manual-repro] Restart IntelliJIdea2026.1 so installed plugin 0.2.132 is active, run the manual File Cache Conflict Cancel repro, capture pass/fail evidence, and then close or rework #next-jbccc2/#jbccc2/#next-adoc-jbcc/#adoc-jb-cache-cancel-stuck-cycle.
 - [/] [#next-adoc-jbcc] Reconcile the parent #adoc-jb-cache-cancel-stuck-cycle review item after #next-jbccc2 is manually verified in IntelliJIdea2026.1; code is pushed in 068a1752 and plugin 0.2.132 is installed, but parent closure still needs the live cancel repro evidence.
 - [/] [#next-jbccc2] Implemented Phase 2 of #adoc-jb-cache-cancel-stuck-cycle in editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt and pushed agent-doc commit 068a1752; focused plugin tests, make check, buildPlugin, cargo install, local plugin install, and GitHub CI passed. Gated on restarting IntelliJIdea2026.1 and running the manual File Cache Conflict Cancel repro.

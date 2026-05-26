@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -70,7 +70,7 @@ What I verified from shell:
 - The current `idea.log` shows `com.github.btakita.agentdoc.PatchWatcher` activity for this document, including the 01:36:06 patch application and VCS refresh after the previous closeout.
 
 I did not synthesize Cancel evidence from logs or force GUI interaction from the shell. I gated `#next-jbcc-live-repro-closeout` pending a controlled manual Cancel repro result, and I left the dependent review items gated.
-<!-- agent:boundary:6215bff1 -->
+<!-- agent:boundary:03e96aff -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -78,7 +78,7 @@ As I was typing into the comment below `/agent:exchange`, the full-document IPC 
 #spec-test-build-install-commit-push
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#ipcfullprompt]~
 - do [#next-jbcc-live-repro-closeout]

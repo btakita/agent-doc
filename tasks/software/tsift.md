@@ -18,7 +18,7 @@ queue_active: true
 ## Status
 
 <!-- agent:status patch=replace -->
-Completed: #gsqlwrite reduces repeated SQLite graph refresh property-row work by staging and mutating materialized node/edge properties only for new or row-hash changed owners. Full-projection backend-eval now emits and requires the requested SQLite write phase metrics. Local verification passed (`cargo test -q sqlite_projection_refresh_handles_bulk_row_replacement`, `cargo test -q graph_db_backend_eval_benchmarks_candidate_stores_against_sqlite`, `cargo build`, `cargo install --path .`, `make check`); tsift CI run 26435208332 is green. The tsift submodule commit `7534c13` is pushed, and the root pointer commit `5a88f58ee` is in the current root history.
+Completed: #gcommcache caches Louvain community detection under `.tsift/community-cache`, emits community diagnostics, and bounds tagpath annotation to displayed/focused communities. Local verification passed (`cargo test -q communities_json`, `cargo test -q explain_json`, `cargo build`, `cargo install --path .`, `make check`); tsift CI run 26459272826 is green. The tsift submodule commit `bb542cd` is pushed, and the root pointer commit `13d447159` is pushed.
 <!-- /agent:status -->
 
 ## Spec
@@ -35,7 +35,29 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 5 response topic(s): #next-steps for SQLite graph + tagpath community search; #gprojrows; closeout repair; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:006ee47b -->
+### Re: #gcommcache — gpt-5
+
+Implemented and pushed `#gcommcache`.
+
+- Added cached community detection keyed by cache version, root/scope, index graph watermark, and tagpath state/hash; cache hits skip `db.all_edges()` and Louvain.
+- Added `community_diagnostics` to `tsift communities --json` and `tsift explain --json` with cache hit, edge count, iterations, tagpath state, and annotation counts.
+- Bounded tagpath member annotation to displayed communities for `communities --limit N` and the focused symbol community for `explain`.
+- Updated `SPEC.md` and integration coverage for cache diagnostics plus bounded annotation.
+
+Commits:
+- tsift `bb542cd` (`feat: cache community detection`) pushed to `btakita/tsift main`
+- root pointer `13d447159` (`chore: update tsift community cache`) pushed to `btakita/agent-loop main`
+
+Verification:
+- `cargo test -q communities_json`
+- `cargo test -q explain_json`
+- `cargo build`
+- `cargo install --path .`
+- `make check`
+- GitHub Actions CI run `26459272826`: success for `clippy + test` and `live Convex graph acceptance`
+
+CI notes: this repo's CI workflow has no separate `tmux-test` job. The run completed with non-blocking annotations for GitHub's Node.js 20 action deprecation and the existing live Convex configuration note.
+<!-- agent:boundary:209f2e80 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +68,7 @@ What are #next-steps to make the graph faster?
 preset #spec-test-build-install-commit-push
 - ~do [#gprojrows]~
 - ~do [#gsqlwrite]~
-- do [#gcommcache]
+- ~do [#gcommcache]~
 - do [#gcommtagctx]
 - do [#gcommgate]
 <!-- /agent:queue -->
@@ -54,7 +76,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gcommcache] [recommended] Cache and bound tagpath-annotated community detection: key Louvain results by index graph watermark, scope, and tagpath freshness, avoid re-running db.all_edges plus full in-memory Louvain for unchanged graphs, and add JSON diagnostics for cache hit, edge count, iterations, and tagpath state.
 - [ ] [#gcommtagctx] [recommended] Improve community search quality by carrying file/ref context into CommunityMember and resolving tagpath handles with community or edge evidence instead of name-only fallback; cover duplicate-name, skipped-directory, scoped, and federated fixtures with handle coverage and ambiguous-member diagnostics.
 - [ ] [#gcommgate] [recommended] Add a community search quality and performance gate to metric-digest and fixtures: track communities runtime, handle coverage, stale/no-tagpath behavior, duplicate-name precision, and top-community stability across real and synthetic multi-module workloads.
 <!-- /agent:backlog -->

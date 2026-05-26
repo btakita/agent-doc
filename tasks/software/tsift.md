@@ -57,10 +57,33 @@ Verification:
 - GitHub Actions CI run `26459272826`: success for `clippy + test` and `live Convex graph acceptance`
 
 CI notes: this repo's CI workflow has no separate `tmux-test` job. The run completed with non-blocking annotations for GitHub's Node.js 20 action deprecation and the existing live Convex configuration note.
-<!-- agent:boundary:637e4f3a -->
+### Re: do #gcommtagctx — gpt-5
+
+Done.
+
+Implemented context-aware community member annotation in tsift. Community JSON members now carry `file`, `line`, and bounded caller/callee `refs`; duplicate-name tagpath handles resolve by unique tagpath candidate, edge-file evidence, then community-file evidence instead of the previous name-only fallback. `community_diagnostics` now reports ambiguous duplicate-member cases with candidate counts, selected evidence, and chosen file. Scoped community/explain annotation now loads tagpath from the scope source root so per-submodule `.naming` indexes resolve handles.
+
+Updated spec coverage and regression tests for skipped-directory duplicate names, duplicate same-name members resolved by edge evidence, scoped workspace tagpath handles across two scope fixtures, and the existing graph callee duplicate-name case.
+
+Commits pushed:
+- `src/tsift` `b79fe86` (`feat: resolve community member tagpaths with context`)
+- parent repo `ecd915169` (`chore: update tsift community tagpath context`)
+
+Verification:
+- `cargo test -q communities_json`
+- `cargo test -q graph_json_resolves_callee_handle_with_caller_file_name_collision`
+- `cargo build`
+- `cargo install --path .`
+- `make check`
+- GitHub CI `26460423804` passed on `btakita/tsift` (`clippy + test`, `live Convex graph acceptance`)
+
+CI/tmux note: the `tsift` repo has no separate tmux-test workflow; `gh workflow list` shows `CI` and `Release`, and the pushed `CI` run passed. The parent `agent-loop` repo has no workflow named `CI` for `gh run list --workflow CI --limit 1`.
+<!-- agent:boundary:312f2ce1 -->
 <!-- /agent:exchange -->
 ###
 <!--
+re [#f14h]: The auto-update should primarily be driven in the development environment. A github action can be added but the primary driver is through actions on a development machine. Can we make this process automatic? Can it be part of the tsift cli tool call chain?
+---
 What are #next-steps to make the graph faster?
 -->
 

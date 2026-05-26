@@ -53,7 +53,55 @@ Changed paths: no source code changes. The only intended mutation for this cycle
 Verification: plugin version verified from both the loaded live process mapping and the jar descriptor; log context verified from the active IntelliJIdea2026.1 log. No test suite was run because this prerequisite was evidence capture only, with no source/test/build edits.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:ce94ed16 -->
+### Re: #jbccevidence — gpt-5
+
+Prepared the focused evidence checklist for the next live IntelliJIdea2026.1 File Cache Conflict Cancel repro.
+
+Use this fixture and context:
+- Session document: `/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`.
+- Active IDE: IntelliJ IDEA `2026.1.2`, build `IU-261.24374.151`, process `3818906`.
+- Active plugin: live process maps `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1/agent-doc-jetbrains/lib/agent-doc-jetbrains-0.2.133.jar`; stale `0.2.132` exists under `.config` but is not loaded.
+- Relevant log: `/home/brian/.cache/JetBrains/IntelliJIdea2026.1/log/idea.log`.
+
+Before the repro, capture:
+- `git rev-parse HEAD`.
+- `git status --short -- tasks/agent-doc/agent-doc-bugs2.md tasks/agent-doc-bugs2.done.md`.
+- `lsof -p 3818906 2>/dev/null | rg 'agent-doc-jetbrains|0\.2\.133|0\.2\.132'`.
+- `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`.
+- A timestamp immediately before clicking Cancel.
+
+During the repro:
+- Keep `agent-doc-bugs2.md` open in IntelliJIdea2026.1 with plugin `0.2.133` active.
+- Trigger the next queued closeout (`#jbccliverepro`) through the normal agent-doc finalize path.
+- When IntelliJ shows the File Cache Conflict dialog for `agent-doc-bugs2.md`, click Cancel. Do not click Accept for the primary Cancel evidence run.
+- Preserve the full console output from `agent-doc finalize`, especially any socket IPC status, file IPC fallback line, commit line, or interruption.
+
+Expected plugin-side evidence for a passing Cancel path:
+- `PatchWatcher` notices the pending File Cache Conflict and logs a deferral like `File Cache Conflict pending ... deferring patch until user resolves dialog`.
+- After Cancel, `PatchWatcher` rejects without mutating the document, with a line like `File Cache Conflict kept memory changes ... rejecting patch without mutating document`.
+- For file-IPC retry, the patch file is left for explicit retry rather than deleted as successfully applied.
+- No `Patch applied to ... agent-doc-bugs2.md` entry should correspond to the canceled patch unless the subsequent accepted/retry run intentionally applies it.
+
+Expected binary/session evidence:
+- A pass is either a clean committed closeout after a non-Cancel retry, or a fail-closed Cancel result that does not leave the response body in the working tree and does not wedge the cycle in `write_applied` local drift.
+- A fail is any canceled run where the response text appears in the working tree without a commit, `agent-doc preflight` reports post-commit local drift/stuck-cycle recovery, `agent-doc session-check` rejects the closeout as a direct patchback/duplicate tail, or the exchange shows duplicate response headings/full-document IPC corruption.
+
+After the repro, capture:
+- `git status --short -- tasks/agent-doc/agent-doc-bugs2.md tasks/agent-doc-bugs2.done.md`.
+- `git log -1 --oneline -- tasks/agent-doc/agent-doc-bugs2.md tasks/agent-doc-bugs2.done.md`.
+- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`.
+- `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`.
+- Focused log slice around the Cancel timestamp from `idea.log`, including `PatchWatcher`, `MemoryDiskConflictResolver`, socket IPC, and VCS refresh lines.
+- If the working tree is dirty, capture `git diff -- tasks/agent-doc/agent-doc-bugs2.md tasks/agent-doc-bugs2.done.md` before any repair.
+
+Changed paths: no source code changes. The intended mutation is only this session response plus reaping `#jbccevidence` through `agent-doc finalize`.
+
+Verification: checked the existing bug plan and current `PatchWatcher.kt` behavior. The current code tracks deferred memory/disk conflicts, rejects likely Cancel after a deferred conflict, and leaves file-IPC patches in place for explicit retry after Cancel.
+
+Commands run: `agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` (hit the owner-pane recursion guard), `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `tsift status`, `tsift status --fix`, `tsift source-read`, `rg`, and `git status --short`.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:e6ee27a8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -66,14 +114,13 @@ As I was typing into the comment below `/agent:exchange`, the full-document IPC 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#jbccprecheck]~
-- do [#jbccevidence]
+- ~do [#jbccevidence]~
 - do [#jbccliverepro]
 <!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#jbccevidence] Prerequisite for #jbccliverepro: prepare a focused live repro/evidence checklist covering the session document fixture, expected finalize/write behavior after Cancel, IDE/plugin logs, git state, and agent-doc session-check output.
 - [ ] [#jbccliverepro] Complete the immediately completable review closeout once prerequisites are satisfied: run the controlled IntelliJIdea2026.1 File Cache Conflict Cancel repro with the current active plugin 0.2.133, capture pass/fail evidence, and close or rework #next-jbcc-controlled-repro, #next-jbcc-live-repro-closeout, #next-jbcc-manual-repro, #next-adoc-jbcc, #next-jbccc2, #jbccc2, and #adoc-jb-cache-cancel-stuck-cycle.
 <!-- /agent:backlog -->
 

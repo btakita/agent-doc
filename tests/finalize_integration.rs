@@ -1705,6 +1705,94 @@ fn finalize_ignores_concurrent_duplicate_prompt_comment_for_session_check() {
 }
 
 #[test]
+fn finalize_preserves_compacted_exchange_ipc_scratch_comment() {
+    let (tmp, doc) = setup_session_stream_doc();
+    let prompt = "As I was typing into the comment below `/agent:exchange`, the full-document IPC corruption happened.";
+    let preset = "#spec-test-build-install-commit-push";
+    let compacted_exchange = format!(
+        "### Session Summary\n\n\
+         *Compacted. Content archived to `.agent-doc/archives/session.md`*\n\n\
+         Compacted content:\n\
+         - Archived 4 response topic(s): Stale queue / IPC corruption note; Closeout repair\n\
+         - Prior summary/context: previous compacted exchange content\n\
+         <!-- agent:boundary:a94c53cc -->\n\
+         {prompt}\n\
+         {preset}",
+    );
+    let baseline_shaped = fs::read_to_string(&doc)
+        .unwrap()
+        .replace(
+            "❯ Please reply\n<!-- agent:boundary:1234abcd -->",
+            &compacted_exchange,
+        );
+    fs::write(&doc, baseline_shaped).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    let baseline_content = fs::read_to_string(&doc).unwrap();
+    let baseline = write_baseline(tmp.path(), &baseline_content);
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["preflight", doc.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let scratch_comment = format!(
+        "<!--\n\
+         {prompt} Then the duplicate line happened, then the full-document IPC corruption happened again.\n\
+         {preset}\n\
+         -->",
+    );
+    let current_with_scratch = fs::read_to_string(&doc).unwrap().replace(
+        "<!-- /agent:exchange -->\n\n<!-- agent:backlog -->",
+        &format!("<!-- /agent:exchange -->\n###\n\n{scratch_comment}\n\n<!-- agent:backlog -->"),
+    );
+    fs::write(&doc, current_with_scratch).unwrap();
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--baseline-file",
+            baseline.to_str().unwrap(),
+            "--stream",
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: compact IPC scratch — gpt-5\nPreserved the compacted-session scratch comment without whole-document replay.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert_eq!(
+        content.matches(&scratch_comment).count(),
+        1,
+        "visible compacted-session scratch comment should survive exactly once:\n{content}"
+    );
+    assert_eq!(
+        content.matches("### Re: compact IPC scratch — gpt-5").count(),
+        1,
+        "response heading should not be duplicated by closeout repair:\n{content}"
+    );
+    assert!(
+        content.contains("### Session Summary"),
+        "compacted exchange summary should remain intact:\n{content}"
+    );
+
+    let head = head_blob(tmp.path());
+    assert!(head.contains("### Re: compact IPC scratch — gpt-5"));
+    assert!(
+        !head.contains(&scratch_comment),
+        "concurrent compacted-session scratch comment must stay outside the closeout commit:\n{head}"
+    );
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["session-check", doc.to_str().unwrap()])
+        .assert()
+        .success();
+}
+
+#[test]
 fn finalize_preserves_baseline_prompt_html_comment_body() {
     let (tmp, doc) = setup_session_stream_doc();
     let prompt = "What are #next-steps to improve the sqlitedb graph performance?";

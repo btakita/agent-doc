@@ -21,7 +21,7 @@ queue_active: true
 
 <!-- agent:status patch=replace -->
 
-Captured next steps for gated review items.
+Gated JetBrains manual cancel repro on missing controlled Cancel evidence.
 <!-- /agent:status -->
 
 ## Exchange
@@ -34,7 +34,27 @@ Captured next steps for gated review items.
 Compacted content:
 - Archived 5 response topic(s): next steps for review items; active queue implementation; queue recovery; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:ef2a964a -->
+### Re: do [#next-jbcc-manual-repro] — gpt-5
+
+
+❯ I could not honestly close the manual repro as passed this cycle. I verified the live setup: IntelliJIdea2026.1 is running from `/home/brian/opt/idea-IU-252.26830.84/bin/idea` (PID 1980397, started 2026-05-25 19:01:36), the installed plugin jar is `agent-doc-jetbrains-0.2.132.jar` in both JetBrains plugin locations, and `idea.log` shows `PatchWatcher` active for `tasks/agent-doc/agent-doc-bugs2.md`.
+
+❯ I also found recent IDE evidence that the target dialog surface is still reproducible: `MemoryDiskConflictResolver` logged `reload agent-doc-bugs2.md from disk?` at 2026-05-26 00:34:25. That proves the IDE/plugin setup can surface the memory/disk conflict, but I did not get a controlled Cancel click plus post-cancel closeout evidence from this terminal-only cycle.
+
+❯ I am gating `#next-jbcc-manual-repro`, not marking it done. The related review items should remain gated until the live Cancel path is performed and the result records whether the cycle reaches `committed` or fails closed with the patch file left in place.
+
+❯ Changed paths: session-document closeout only. Verification: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, process/plugin-path inspection, `idea.log` inspection. No code changed, so I did not run `make check` or CI checks. Confidence: high that the installed plugin is active; no pass/fail claim for the Cancel behavior. Escalation: none.
+### Re: do [#next-jbcc-manual-repro] — gpt-5
+
+
+I could not honestly close the manual repro as passed this cycle. I verified the live setup: IntelliJIdea2026.1 is running from `/home/brian/opt/idea-IU-252.26830.84/bin/idea` (PID 1980397, started 2026-05-25 19:01:36), the installed plugin jar is `agent-doc-jetbrains-0.2.132.jar` in both JetBrains plugin locations, and `idea.log` shows `PatchWatcher` active for `tasks/agent-doc/agent-doc-bugs2.md`.
+
+❯ I also found recent IDE evidence that the target dialog surface is still reproducible: `MemoryDiskConflictResolver` logged `reload agent-doc-bugs2.md from disk?` at 2026-05-26 00:34:25. That proves the IDE/plugin setup can surface the memory/disk conflict, but I did not get a controlled Cancel click plus post-cancel closeout evidence from this terminal-only cycle.
+
+❯ I am gating `#next-jbcc-manual-repro`, not marking it done. The related review items should remain gated until the live Cancel path is performed and the result records whether the cycle reaches `committed` or fails closed with the patch file left in place.
+
+❯ Changed paths: session-document closeout only. Verification: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, process/plugin-path inspection, `idea.log` inspection. No code changed, so I did not run `make check` or CI checks. Confidence: high that the installed plugin is active; no pass/fail claim for the Cancel behavior. Escalation: none.
+<!-- agent:boundary:16a08ee5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -51,13 +71,13 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#next-jbcc-manual-repro] Restart IntelliJIdea2026.1 so installed plugin 0.2.132 is active, run the manual File Cache Conflict Cancel repro, capture pass/fail evidence, and then close or rework #next-jbccc2/#jbccc2/#next-adoc-jbcc/#adoc-jb-cache-cancel-stuck-cycle.
 - [ ] [#next-stuckcycle-impl] Implement the residual stuck-cycle fix: replace flow/closeout.rs::stuck_captured_cycle stub with real captured-response/HEAD detection, add regression tests, and then resolve #stuckcycledup. Plan: tasks/agent-doc/plan-stuck-cycle-causes-duplicated-uncommitted-response.md.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#next-jbcc-manual-repro] Restart IntelliJIdea2026.1 so installed plugin 0.2.132 is active, run the manual File Cache Conflict Cancel repro, capture pass/fail evidence, and then close or rework #next-jbccc2/#jbccc2/#next-adoc-jbcc/#adoc-jb-cache-cancel-stuck-cycle.
 - [/] [#next-adoc-jbcc] Reconcile the parent #adoc-jb-cache-cancel-stuck-cycle review item after #next-jbccc2 is manually verified in IntelliJIdea2026.1; code is pushed in 068a1752 and plugin 0.2.132 is installed, but parent closure still needs the live cancel repro evidence.
 - [/] [#next-jbccc2] Implemented Phase 2 of #adoc-jb-cache-cancel-stuck-cycle in editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt and pushed agent-doc commit 068a1752; focused plugin tests, make check, buildPlugin, cargo install, local plugin install, and GitHub CI passed. Gated on restarting IntelliJIdea2026.1 and running the manual File Cache Conflict Cancel repro.
 - [/] [#jbccc2] Phase 2 of #adoc-jb-cache-cancel-stuck-cycle: JB plugin undo-on-cancel. editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt — defer the write until user resolves the File Cache Conflict dialog (never queue change beforehand); on Cancel return 0/2 from socket IPC callback; on file-IPC cancel leave patch file in place. Plan: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md

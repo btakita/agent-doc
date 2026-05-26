@@ -14,14 +14,14 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
 
-Prioritized review-item next steps; top backlog item is #next-jbccc2.
+Implemented JetBrains cache-conflict defer path; code pushed; #next-jbccc2/#next-adoc-jbcc gated pending manual IDE repro.
 <!-- /agent:status -->
 
 ## Exchange
@@ -46,7 +46,14 @@ Order of work:
 1. `#next-jbccc2` — implement the JetBrains plugin undo-on-cancel path, then run focused plugin tests and a manual IntelliJ cancel repro.
 2. `#next-adoc-jbcc` — after Phase 2 lands, reconcile the parent `#adoc-jb-cache-cancel-stuck-cycle` review item against completed phases and close it only with plugin repro evidence.
 3. `#next-stuckcycledup` — audit the partial stuck-cycle review item against the archived split fixes; close it if the implemented guards still cover the duplicated-response path, otherwise keep only one narrow residual bug.
-<!-- agent:boundary:0367b61d -->
+### Re: active queue implementation — gpt-5
+
+Implemented `#next-jbccc2` through the JetBrains plugin path. `PatchWatcher.kt` now detects IntelliJ File Cache Conflict state before mutating the document, defers the patch while the conflict dialog is pending, retries after the IDE resolves it, and treats a deferred unsaved stamp-divergence case as the cancel path so the patch file remains available instead of being consumed. I added focused regression coverage and updated `editors/jetbrains/SPEC.md` plus `runbooks/jb-cache-conflict.md`.
+
+Verification is green: focused plugin test, full `make check`, `./gradlew buildPlugin`, `cargo install --path .`, local plugin install to IntelliJIdea2026.1 as `agent-doc-jetbrains-0.2.132`, and GitHub CI run `26431487457` passed including `make tmux-ci`. Code is pushed in submodule commit `068a1752` and the parent submodule pointer is pushed in `cd2cfe5a6`.
+
+I gated `#next-jbccc2` and `#next-adoc-jbcc` rather than marking them done because the installed plugin requires an IntelliJ restart before the manual File Cache Conflict Cancel repro can be run. I completed the `#next-stuckcycledup` audit and kept `#stuckcycledup` open as one residual implementation bug: `flow/closeout.rs::stuck_captured_cycle` is still a stub returning `None`, so the warning hook exists but the real captured-cycle detection still needs to land.
+<!-- agent:boundary:d6661d0c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -64,17 +71,16 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#next-jbccc2] Implement and validate Phase 2 of #adoc-jb-cache-cancel-stuck-cycle in editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt: defer the write until the File Cache Conflict dialog is accepted, return 0/2 on Cancel, leave file-IPC patch files in place on cancel, then run the focused plugin tests plus a manual IntelliJ cancel repro.
-- [ ] [#next-adoc-jbcc] After #next-jbccc2 lands, reconcile the parent #adoc-jb-cache-cancel-stuck-cycle review item with completed phases #jbccc1, #jbccc3, #jbccc4, and #jbccc5; mark the parent done only when the plugin cancel path and manual IDE repro are verified.
-- [ ] [#next-stuckcycledup] Audit #stuckcycledup against archived split items #stuckcycleorphan, #stuckcyclerepair, and #stuckcyclesuperseded; close the gated review item if the implemented guards and tests still cover the duplicated-response path, otherwise open one narrow residual bug with a plan path.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#next-adoc-jbcc] Reconcile the parent #adoc-jb-cache-cancel-stuck-cycle review item after #next-jbccc2 is manually verified in IntelliJIdea2026.1; code is pushed in 068a1752 and plugin 0.2.132 is installed, but parent closure still needs the live cancel repro evidence.
+- [/] [#next-jbccc2] Implemented Phase 2 of #adoc-jb-cache-cancel-stuck-cycle in editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt and pushed agent-doc commit 068a1752; focused plugin tests, make check, buildPlugin, cargo install, local plugin install, and GitHub CI passed. Gated on restarting IntelliJIdea2026.1 and running the manual File Cache Conflict Cancel repro.
 - [/] [#jbccc2] Phase 2 of #adoc-jb-cache-cancel-stuck-cycle: JB plugin undo-on-cancel. editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt — defer the write until user resolves the File Cache Conflict dialog (never queue change beforehand); on Cancel return 0/2 from socket IPC callback; on file-IPC cancel leave patch file in place. Plan: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md
 - [/] [#adoc-jb-cache-cancel-stuck-cycle] agent-doc-bug: after canceling a JetBrains File Cache Conflict dialog during IPC patch delivery, the response patch lands in the working tree but the cycle does not reach committed state. Recovery requires running agent-doc write --commit FILE manually. Repro: have JB IDE open with the file in an editor; run finalize; cancel the JB cache-conflict dialog when it appears. Expected: cycle reaches committed cleanly or surfaces a clear error. Actual: response is in working tree but next preflight reports post-commit local drift requiring manual recovery. Plan path: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md (to be authored). Related: #jbccfix, #jbccreg, #jbccdocs in this same file.
-- [/] [#stuckcycledup] [recommended] [partial] Wedged-cycle pattern: cycle_already_committed gate now refuses the short-circuit when the active capture body is absent from HEAD (flow/closeout.rs::cycle_already_committed + new stuck_captured_cycle helper), and preflight emits a stuck_captured_cycle warning. Remaining plan parts split into #stuckcycleorphan, #stuckcyclerepair, and #stuckcyclesuperseded. Plan: tasks/agent-doc/plan-stuck-cycle-causes-duplicated-uncommitted-response.md.
+- [/] [#stuckcycledup] [recommended] [residual] Wedged-cycle pattern still has one uncovered implementation gap: flow/closeout.rs::stuck_captured_cycle is currently a stub returning None, so preflight has the warning hook but does not actually detect captured-but-uncommitted response bodies absent from HEAD. Implement the real capture/cycle/HEAD detection and any missing superseded/prune behavior, or split that work into narrower plan-backed items. Plan: tasks/agent-doc/plan-stuck-cycle-causes-duplicated-uncommitted-response.md.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

@@ -29,53 +29,12 @@ Gated JetBrains manual cancel repro on missing controlled Cancel evidence.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260526-050456.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260526-054352.md`*
 
 Compacted content:
-- Archived 1 response topic(s): next steps
+- Archived 3 response topic(s): full-document IPC prompt drift; File Cache Conflict Cancel repro; auto-queue closeout
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-### Re: full-document IPC prompt drift — gpt-5
-
-Implemented `#ipcfullprompt`.
-
-The IPC snapshot adoption path now blocks socket ACK content and file IPC fallback content from becoming the committed snapshot when that candidate contains prompt-bearing `agent:exchange` drift that appeared after the preflight baseline and is absent from the agent-owned response image. When blocked, it logs `flow=document_mutation stage=ipc_snapshot_adoption outcome=blocked reason=live_prompt_drift_after_preflight`, saves the snapshot from `content_ours`, and leaves the live prompt visible for the next response cycle.
-
-I updated the closeout spec and corruption-chain reference, added deterministic SimWorld coverage, added the file IPC ACK-content regression, and updated the hot-path flow token budget for the new audited guard/reason markers.
-
-Verification passed:
-
-- `cargo test live_prompt_drift -- --nocapture`
-- `cargo test try_ipc_snapshot_saves_disk_state -- --nocapture`
-- `cargo test file_ipc_accepts_ack_content_sidecar_when_disk_lags_live_exchange -- --nocapture`
-- `cargo test normalization_fallback -- --nocapture`
-- `cargo test flowcore_hot_path_guard_and_proof_tokens_are_budgeted --test test_cli -- --nocapture`
-- `make check`
-- `make install`
-- GitHub CI run `26434026320` passed for `c8789c43`, including `Run make check` and `Run make tmux-ci`.
-
-Committed and pushed:
-
-- `src/agent-doc` commit `c8789c43` (`fix: guard ipc snapshot live prompt drift`) to `origin/20260422/codex-agent-backend`.
-- Parent gitlink commit `1623ae382` is included in pushed `origin/main`; later unrelated parent/local dirty state was left untouched.
-
-No follow-up items remain for `#ipcfullprompt`.
-### Re: File Cache Conflict Cancel repro — gpt-5
-
-I could not complete `#next-jbcc-live-repro-closeout` in this cycle because the remaining proof requires controlled, user-visible IntelliJ File Cache Conflict Cancel interaction and pass/fail observation.
-
-What I verified from shell:
-
-- IntelliJIdea2026.1 is running from `/home/brian/opt/idea-IU-252.26830.84/bin/idea`.
-- Plugin `agent-doc-jetbrains-0.2.132.jar` is installed under both `/home/brian/.config/JetBrains/IntelliJIdea2026.1/agent-doc-jetbrains/lib/` and `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1/agent-doc-jetbrains/lib/`.
-- The current `idea.log` shows `com.github.btakita.agentdoc.PatchWatcher` activity for this document, including the 01:36:06 patch application and VCS refresh after the previous closeout.
-
-I did not synthesize Cancel evidence from logs or force GUI interaction from the shell. I gated `#next-jbcc-live-repro-closeout` pending a controlled manual Cancel repro result, and I left the dependent review items gated.
-### Re: auto-queue closeout — gpt-5
-
-The auto-queue continuation for `#next-jbcc-live-repro-closeout` is already resolved into a review-gated state, so preflight struck the queue head and deactivated the queue. No new implementation work or test run was needed in this continuation cycle.
-
-The live IntelliJ Cancel repro remains gated on controlled manual evidence, as recorded in the previous response.
-<!-- agent:boundary:4a872006 -->
+<!-- agent:boundary:da2af81e -->
 <!-- /agent:exchange -->
 ###
 <!--

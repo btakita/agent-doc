@@ -101,7 +101,35 @@ Verification: checked the existing bug plan and current `PatchWatcher.kt` behavi
 Commands run: `agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` (hit the owner-pane recursion guard), `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `tsift status`, `tsift status --fix`, `tsift source-read`, `rg`, and `git status --short`.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:e6ee27a8 -->
+### Re: #jbccliverepro — gpt-5
+
+I could not complete the live File Cache Conflict Cancel repro in this cycle, so I am keeping `#jbccliverepro` gated instead of marking it done.
+
+What I verified before the attempt:
+- Pre-repro HEAD was `1c87eab82553a036bf4a218725f21c2a69ea33f9`.
+- The live IntelliJ process still maps plugin `0.2.133`: `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1/agent-doc-jetbrains/lib/agent-doc-jetbrains-0.2.133.jar`.
+- `tasks/agent-doc/agent-doc-bugs2.md` was clean before this closeout attempt; `tasks/agent-doc-bugs2.done.md` was already modified from agent-doc archival/reaping state.
+- `xdotool search --name 'File Cache Conflict'` found no active dialog before the closeout attempt.
+- The active cycle was in `preflight_started` state for `#jbccliverepro`, which is expected after `agent-doc preflight`/`plan` and before persistence.
+
+Controlled attempt:
+- Started a short `xdotool` watcher that would send Escape only if a `File Cache Conflict` dialog appeared.
+- The watcher completed with `no-dialog` before this retry, so no human-confirmed Cancel action occurred.
+- I do not have enough evidence to claim the Cancel branch was exercised.
+
+Why this stays gated:
+- The review gate requires real live evidence of the IntelliJ File Cache Conflict Cancel path with plugin `0.2.133`.
+- A normal finalize or an absent dialog is not a valid pass/fail result for the Cancel fix.
+- The related gated review items remain unchanged because the required Cancel evidence is still missing.
+
+Changed paths: no source code changes. This cycle only records the blocked live-repro attempt and gates the existing pending item.
+
+Verification: current active plugin/version evidence was rechecked; no active File Cache Conflict dialog was present before the finalize attempt. A post-closeout session-check still needs to pass after this write commits.
+
+Commands run: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `git rev-parse HEAD`, `git status --short`, `lsof -p 3818906 | rg ...`, `agent-doc session-check`, `date --iso-8601=seconds`, `tail .../idea.log | rg ...`, `rg ... idea.log`, `xdotool search --name 'File Cache Conflict'`, and this `agent-doc finalize`.
+
+Confidence: high that the live Cancel evidence was not captured. Escalation: none.
+<!-- agent:boundary:f5059ac5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -121,12 +149,12 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#jbccliverepro] Complete the immediately completable review closeout once prerequisites are satisfied: run the controlled IntelliJIdea2026.1 File Cache Conflict Cancel repro with the current active plugin 0.2.133, capture pass/fail evidence, and close or rework #next-jbcc-controlled-repro, #next-jbcc-live-repro-closeout, #next-jbcc-manual-repro, #next-adoc-jbcc, #next-jbccc2, #jbccc2, and #adoc-jb-cache-cancel-stuck-cycle.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#jbccliverepro] Complete the immediately completable review closeout once prerequisites are satisfied: run the controlled IntelliJIdea2026.1 File Cache Conflict Cancel repro with the current active plugin 0.2.133, capture pass/fail evidence, and close or rework #next-jbcc-controlled-repro, #next-jbcc-live-repro-closeout, #next-jbcc-manual-repro, #next-adoc-jbcc, #next-jbccc2, #jbccc2, and #adoc-jb-cache-cancel-stuck-cycle.
 - [/] [#next-jbcc-controlled-repro] Gated on live IntelliJIdea2026.1 File Cache Conflict Cancel evidence with current active plugin 0.2.133; after capture, close or rework review items #next-jbcc-live-repro-closeout, #next-jbcc-manual-repro, #next-adoc-jbcc, #next-jbccc2, #jbccc2, and #adoc-jb-cache-cancel-stuck-cycle.
 - [/] [#next-jbcc-live-repro-closeout] Gated on live IntelliJIdea2026.1 File Cache Conflict Cancel evidence with current active plugin 0.2.133; use that evidence to decide the review state for #next-jbcc-manual-repro, #next-adoc-jbcc, #next-jbccc2, #jbccc2, and #adoc-jb-cache-cancel-stuck-cycle.
 - [/] [#next-jbcc-manual-repro] Gated on restart confirmation that IntelliJIdea2026.1 has plugin 0.2.133 active plus manual File Cache Conflict Cancel evidence; after capture, close or rework #next-jbccc2/#jbccc2/#next-adoc-jbcc/#adoc-jb-cache-cancel-stuck-cycle.

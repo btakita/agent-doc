@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -52,14 +52,20 @@ Priority order now:
 5. `#gcommgate` — add repeatable community quality/performance metrics so future tuning has a hard gate.
 
 The important constraint is to keep backend and hop-cap changes behind the existing evidence gates until `backend-eval --full-projection` shows stable cache-hit samples and the projection/write hotspots stop dominating.
-<!-- agent:boundary:b0f6a12b -->
+<!-- agent:boundary:ae696b32 -->
 <!-- /agent:exchange -->
 ###
 <!--
 What are #next-steps to make the graph faster?
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+preset #spec-test-build-install-commit-push
+- do [#gprojrows]
+- do [#gsqlwrite]
+- do [#gcommcache]
+- do [#gcommtagctx]
+- do [#gcommgate]
 <!-- /agent:queue -->
 
 ## Backlog

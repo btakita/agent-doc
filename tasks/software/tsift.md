@@ -35,7 +35,30 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 4 response topic(s): #gperf graph performance; #ghop hop-cap promotion gate; #gfront SQLite frontier guard; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:01cd992a -->
+❯ do [#gcachemiss]. #spec-test-build-install-commit-push
+### Re: #gcachemiss — gpt-5
+Completed `#gcachemiss`.
+
+Changed `src/tsift` so traversal cache watermarks hash stable `.tsift/summaries.db` semantic rows instead of SQLite file metadata/header churn. The watermark now records absent/readable/unreadable summary DB states explicitly, keeps unreadable DBs conservative, and changes only when summary semantics change.
+
+I also tightened the graph-db backend performance gate: full-projection backend or hop-cap promotion now requires a cold populate leg followed by cache-leg samples with `full_projection.cache.hit=1`; cache-miss samples remain diagnostics only. The rule is reflected in `SPEC.md`, `VERSIONS.md`, `plans/gcachemiss-evidence.md`, and the graph-db conformance contract.
+
+Commits/pushes:
+
+- `src/tsift` commit `c3ac29a` pushed to `btakita/tsift main`.
+- Root submodule-pointer commit `8a0e94d9a` pushed to `btakita/agent-loop main`.
+- Root `main` is now at `50487b2fc`; the fast-forward push also included already-local submodule-pointer commits present on the branch.
+
+Verification:
+
+- Passed `cargo test --bin tsift traversal_source_watermark_uses_summary_rows_not_summaries_db_metadata`.
+- Passed `cargo test --test graph_db_conformance graph_db_backend_eval_benchmarks_candidate_stores_against_sqlite`.
+- Passed full local `make check`.
+- Passed `cargo build` and `cargo install --path .`.
+- Ran full-projection backend eval twice against the agent-loop root: the first run populated the cache; the second run reused cached source graph/projection rows with `full_projection.source_graph_build 0us` and `full_projection.projection_rows 0us`.
+- GitHub Actions tsift CI run `26433096348` passed.
+- Root Agent Doc CI run `26433131298` failed before job steps started: both `tmux-ci` and `check` jobs completed in about two seconds with empty `steps`, so I classified it as an external CI-start blocker rather than a code or tmux regression.
+<!-- agent:boundary:18db4aa9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -48,7 +71,6 @@ What are #next-steps to make the graph faster?
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gcachemiss] Stabilize full-projection source-watermark/cache reuse: reproduce repeated #gperf cache misses on a quiescent checkout, identify which watermark input shifts between runs, and gate cache-hit evidence before cap/backend changes.
 <!-- /agent:backlog -->
 
 ## Review

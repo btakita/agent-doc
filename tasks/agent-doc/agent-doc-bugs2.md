@@ -20,7 +20,8 @@ queue_active: false
 ## Status
 
 <!-- agent:status patch=replace -->
-Gated live Cancel repro on interactive IntelliJ modal; deterministic verification/build/install passed.
+
+Top backlog item: #jbccprecheck; live JetBrains Cancel review closeout now has prerequisite and repro tasks captured.
 <!-- /agent:status -->
 
 ## Exchange
@@ -33,7 +34,13 @@ Gated live Cancel repro on interactive IntelliJ modal; deterministic verificatio
 Compacted content:
 - Archived 1 response topic(s): #socketackdup and #jbccacceptdup
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:b31cbedc -->
+❯ What are #next-steps to complete the items in review? Add a task to complete items that can be immediately completed into the backlog. Add additional prerequisite tasks to complete review items into the backlog.
+### Re: #next-steps — gpt-5
+
+The review items are all gated on the same live JetBrains Cancel evidence. I added the next work in priority order: verify the IDE/plugin state, prepare the evidence checklist, then run the controlled repro and reconcile the review chain from that evidence.
+
+Top backlog item: #jbccprecheck.
+<!-- agent:boundary:e0c21901 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -49,6 +56,9 @@ As I was typing into the comment below `/agent:exchange`, the full-document IPC 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#jbccprecheck] Prerequisite for the gated JetBrains Cancel review items: restart IntelliJIdea2026.1, confirm installed agent-doc plugin 0.2.132 is active, and record the active plugin/version/log context before running the live File Cache Conflict Cancel repro.
+- [ ] [#jbccevidence] Prerequisite for #jbccliverepro: prepare a focused live repro/evidence checklist covering the session document fixture, expected finalize/write behavior after Cancel, IDE/plugin logs, git state, and agent-doc session-check output.
+- [ ] [#jbccliverepro] Complete the immediately completable review closeout once prerequisites are satisfied: run the controlled IntelliJIdea2026.1 File Cache Conflict Cancel repro with plugin 0.2.132 active, capture pass/fail evidence, and close or rework #next-jbcc-controlled-repro, #next-jbcc-live-repro-closeout, #next-jbcc-manual-repro, #next-adoc-jbcc, #next-jbccc2, #jbccc2, and #adoc-jb-cache-cancel-stuck-cycle.
 <!-- /agent:backlog -->
 
 ## Review

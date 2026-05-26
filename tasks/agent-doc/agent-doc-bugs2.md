@@ -14,14 +14,14 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
 
-Queue halted; #jbccliverepro and #next-jbcc-controlled-repro completed by explicit document directive. Remaining review items stay gated pending dependent live Cancel closeout decisions.
+Queue advanced: #jbccreviewcloseout completed; #jbccresidualdecision completed by adding #jbcclivecancelresid. Remaining review items are gated on that residual live Cancel proof.
 <!-- /agent:status -->
 
 ## Exchange
@@ -62,7 +62,14 @@ Use #jbccreviewcloseout first to inspect the completed live Cancel evidence and 
 I did not complete additional review entries in this cycle. The remaining review state still depends on that evidence-based closeout pass.
 
 Proof for this cycle: changed paths before finalize were `tasks/agent-doc/agent-doc-bugs2.md` and `tasks/agent-doc-bugs2.done.md`; commands run: `tsift status`, `tsift status --fix`, `agent-doc preflight`, `agent-doc plan`, `agent-doc orchestrate --from-exchange --plan`, `agent-doc read`, `git status --short`, and `agent-doc finalize`; verification: read the live backlog and review sections, confirmed the backlog now contains the two ordered closeout items and six gated review entries remained; confidence: high for backlog ordering and document-state update; escalation: none.
-<!-- agent:boundary:c36dc02c -->
+### Re: do #jbccreviewcloseout and #jbccresidualdecision — gpt-5
+
+Completed the closeout pass. I found implementation and automated-verification evidence for the JetBrains fix, but no controlled live IntelliJIdea2026.1 Cancel pass/fail evidence with plugin 0.2.133.
+
+Because that is residual risk, I added #jbcclivecancelresid as the narrow plan-backed blocker and reworked the remaining review entries to gate on it. I marked #jbccreviewcloseout and #jbccresidualdecision done.
+
+Proof for this cycle: changed document paths before finalize were `tasks/agent-doc/agent-doc-bugs2.md` and `tasks/agent-doc-bugs2.done.md`; commands run: `tsift status`, `tsift status --fix`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, targeted `rg`, `sed`, `git status`, `git show`, and `agent-doc finalize`; verification: confirmed plan file `tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md` exists, found the prior notes saying no controlled Cancel branch was captured, and checked commit 068a1752 for the implementation evidence; confidence: high that the remaining blocker is live evidence, not another known code task; escalation: none.
+<!-- agent:boundary:70564317 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -72,28 +79,24 @@ As I was typing into the comment below `/agent:exchange`, the full-document IPC 
 #spec-test-build-install-commit-push
 -->
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- do [#jbccreviewcloseout]
-- do [#jbccresidualdecision]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#jbccreviewcloseout] Review completed live Cancel evidence and close or rework the remaining JetBrains Cancel review entries in priority order.
-- [ ] [#jbccresidualdecision] If closeout finds residual risk, create one narrow plan-backed residual bug and gate the parent review entries on that item; otherwise mark the parent implementation/bug review entries done.
+- [ ] [#jbcclivecancelresid] [residual] agent-doc-bug: live IntelliJIdea2026.1 File Cache Conflict Cancel pass/fail evidence is still missing after plugin 0.2.133; capture controlled Cancel behavior and decide whether PatchWatcher/IPC recovery needs rework. Plan: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
-- [/] [#next-jbcc-live-repro-closeout] Gated on live IntelliJIdea2026.1 File Cache Conflict Cancel evidence with current active plugin 0.2.133; use that evidence to decide the review state for #next-jbcc-manual-repro, #next-adoc-jbcc, #next-jbccc2, #jbccc2, and #adoc-jb-cache-cancel-stuck-cycle.
-- [/] [#next-jbcc-manual-repro] Gated on restart confirmation that IntelliJIdea2026.1 has plugin 0.2.133 active plus manual File Cache Conflict Cancel evidence; after capture, close or rework #next-jbccc2/#jbccc2/#next-adoc-jbcc/#adoc-jb-cache-cancel-stuck-cycle.
-- [/] [#next-adoc-jbcc] Gated on #next-jbccc2 live verification in IntelliJIdea2026.1; code is pushed in 068a1752 and plugin 0.2.133 is active, but parent closure still needs the live cancel repro evidence.
-- [/] [#next-jbccc2] Implemented Phase 2 of #adoc-jb-cache-cancel-stuck-cycle in editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt and pushed agent-doc commit 068a1752; focused plugin tests, make check, buildPlugin, cargo install, local plugin install, and GitHub CI passed. Remaining gate: manual File Cache Conflict Cancel repro evidence with active plugin 0.2.133.
-- [/] [#jbccc2] Phase 2 of #adoc-jb-cache-cancel-stuck-cycle: JB plugin undo-on-cancel. editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt — defer the write until user resolves the File Cache Conflict dialog (never queue change beforehand); on Cancel return 0/2 from socket IPC callback; on file-IPC cancel leave patch file in place. Plan: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md
-- [/] [#adoc-jb-cache-cancel-stuck-cycle] agent-doc-bug: after canceling a JetBrains File Cache Conflict dialog during IPC patch delivery, the response patch lands in the working tree but the cycle does not reach committed state. Recovery requires running agent-doc write --commit FILE manually. Repro: have JB IDE open with the file in an editor; run finalize; cancel the JB cache-conflict dialog when it appears. Expected: cycle reaches committed cleanly or surfaces a clear error. Actual: response is in working tree but next preflight reports post-commit local drift requiring manual recovery. Plan path: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md (to be authored). Related: #jbccfix, #jbccreg, #jbccdocs in this same file.
+- [/] [#next-jbcc-live-repro-closeout] Gated on #jbcclivecancelresid: no controlled live Cancel pass/fail evidence is present; use that residual evidence to decide whether dependent review entries can close or need rework.
+- [/] [#next-jbcc-manual-repro] Gated on #jbcclivecancelresid: confirm IntelliJIdea2026.1 is using plugin 0.2.133, run the manual File Cache Conflict Cancel repro, and capture session-check/commit behavior.
+- [/] [#next-adoc-jbcc] Gated on #jbcclivecancelresid: code is pushed in 068a1752 and plugin 0.2.133 is active, but parent closure still needs controlled live Cancel pass/fail proof.
+- [/] [#next-jbccc2] Gated on #jbcclivecancelresid: implementation and automated verification exist, but the manual live Cancel evidence is still missing.
+- [/] [#jbccc2] Gated on #jbcclivecancelresid: plugin undo-on-cancel implementation remains review-open until controlled live Cancel evidence confirms the dialog path.
+- [/] [#adoc-jb-cache-cancel-stuck-cycle] Gated on #jbcclivecancelresid: parent bug stays open until the residual live Cancel proof is captured; plan path: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

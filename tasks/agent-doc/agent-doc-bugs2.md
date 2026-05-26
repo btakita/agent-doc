@@ -21,7 +21,7 @@ queue_active: false
 
 <!-- agent:status patch=replace -->
 
-Top backlog item: #jbccprecheck; live JetBrains Cancel review closeout now has prerequisite and repro tasks captured.
+Use active JetBrains plugin 0.2.133 for the Cancel repro; top backlog item remains #jbccprecheck.
 <!-- /agent:status -->
 
 ## Exchange
@@ -40,7 +40,13 @@ Compacted content:
 The review items are all gated on the same live JetBrains Cancel evidence. I added the next work in priority order: verify the IDE/plugin state, prepare the evidence checklist, then run the controlled repro and reconcile the review chain from that evidence.
 
 Top backlog item: #jbccprecheck.
-<!-- agent:boundary:e0c21901 -->
+❯ re [#jbccprecheck]: 0.2.133 is active. Should I go back to 0.2.132?
+### Re: #jbccprecheck — gpt-5
+
+No, do not go back to 0.2.132 for the normal closeout repro. Use the active 0.2.133 plugin and record that version in the evidence. 0.2.133 is the current local JetBrains plugin build, and it is newer than the 0.2.132 build named in the older review text, so it is the better target for proving the current installed behavior.
+
+Only downgrade to 0.2.132 if we need a bisect or an exact historical-repro comparison after the 0.2.133 run fails in a way that points at a regression. I did not run the live IDE repro in this cycle; the remaining review work is still gated on the interactive IntelliJ cancel test.
+<!-- agent:boundary:90e985dd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -56,19 +62,19 @@ As I was typing into the comment below `/agent:exchange`, the full-document IPC 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#jbccprecheck] Prerequisite for the gated JetBrains Cancel review items: restart IntelliJIdea2026.1, confirm installed agent-doc plugin 0.2.132 is active, and record the active plugin/version/log context before running the live File Cache Conflict Cancel repro.
+- [ ] [#jbccprecheck] Prerequisite for the gated JetBrains Cancel review items: use the current active IntelliJIdea2026.1 agent-doc plugin 0.2.133, record the active plugin/version/log context, and only downgrade to 0.2.132 if a later bisect explicitly asks for it.
 - [ ] [#jbccevidence] Prerequisite for #jbccliverepro: prepare a focused live repro/evidence checklist covering the session document fixture, expected finalize/write behavior after Cancel, IDE/plugin logs, git state, and agent-doc session-check output.
-- [ ] [#jbccliverepro] Complete the immediately completable review closeout once prerequisites are satisfied: run the controlled IntelliJIdea2026.1 File Cache Conflict Cancel repro with plugin 0.2.132 active, capture pass/fail evidence, and close or rework #next-jbcc-controlled-repro, #next-jbcc-live-repro-closeout, #next-jbcc-manual-repro, #next-adoc-jbcc, #next-jbccc2, #jbccc2, and #adoc-jb-cache-cancel-stuck-cycle.
+- [ ] [#jbccliverepro] Complete the immediately completable review closeout once prerequisites are satisfied: run the controlled IntelliJIdea2026.1 File Cache Conflict Cancel repro with the current active plugin 0.2.133, capture pass/fail evidence, and close or rework #next-jbcc-controlled-repro, #next-jbcc-live-repro-closeout, #next-jbcc-manual-repro, #next-adoc-jbcc, #next-jbccc2, #jbccc2, and #adoc-jb-cache-cancel-stuck-cycle.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
-- [/] [#next-jbcc-controlled-repro] Run the IntelliJIdea2026.1 File Cache Conflict Cancel repro with plugin 0.2.132 active, capture controlled pass/fail evidence, then close or rework review items #next-jbcc-live-repro-closeout, #next-jbcc-manual-repro, #next-adoc-jbcc, #next-jbccc2, #jbccc2, and #adoc-jb-cache-cancel-stuck-cycle.
-- [/] [#next-jbcc-live-repro-closeout] Run the IntelliJIdea2026.1 File Cache Conflict Cancel repro with plugin 0.2.132 active, capture controlled pass/fail evidence, then use that evidence to decide the review state for #next-jbcc-manual-repro, #next-adoc-jbcc, #next-jbccc2, #jbccc2, and #adoc-jb-cache-cancel-stuck-cycle.
-- [/] [#next-jbcc-manual-repro] Restart IntelliJIdea2026.1 so installed plugin 0.2.132 is active, run the manual File Cache Conflict Cancel repro, capture pass/fail evidence, and then close or rework #next-jbccc2/#jbccc2/#next-adoc-jbcc/#adoc-jb-cache-cancel-stuck-cycle.
-- [/] [#next-adoc-jbcc] Reconcile the parent #adoc-jb-cache-cancel-stuck-cycle review item after #next-jbccc2 is manually verified in IntelliJIdea2026.1; code is pushed in 068a1752 and plugin 0.2.132 is installed, but parent closure still needs the live cancel repro evidence.
-- [/] [#next-jbccc2] Implemented Phase 2 of #adoc-jb-cache-cancel-stuck-cycle in editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt and pushed agent-doc commit 068a1752; focused plugin tests, make check, buildPlugin, cargo install, local plugin install, and GitHub CI passed. Gated on restarting IntelliJIdea2026.1 and running the manual File Cache Conflict Cancel repro.
+- [/] [#next-jbcc-controlled-repro] Gated on live IntelliJIdea2026.1 File Cache Conflict Cancel evidence with current active plugin 0.2.133; after capture, close or rework review items #next-jbcc-live-repro-closeout, #next-jbcc-manual-repro, #next-adoc-jbcc, #next-jbccc2, #jbccc2, and #adoc-jb-cache-cancel-stuck-cycle.
+- [/] [#next-jbcc-live-repro-closeout] Gated on live IntelliJIdea2026.1 File Cache Conflict Cancel evidence with current active plugin 0.2.133; use that evidence to decide the review state for #next-jbcc-manual-repro, #next-adoc-jbcc, #next-jbccc2, #jbccc2, and #adoc-jb-cache-cancel-stuck-cycle.
+- [/] [#next-jbcc-manual-repro] Gated on restart confirmation that IntelliJIdea2026.1 has plugin 0.2.133 active plus manual File Cache Conflict Cancel evidence; after capture, close or rework #next-jbccc2/#jbccc2/#next-adoc-jbcc/#adoc-jb-cache-cancel-stuck-cycle.
+- [/] [#next-adoc-jbcc] Gated on #next-jbccc2 live verification in IntelliJIdea2026.1; code is pushed in 068a1752 and plugin 0.2.133 is active, but parent closure still needs the live cancel repro evidence.
+- [/] [#next-jbccc2] Implemented Phase 2 of #adoc-jb-cache-cancel-stuck-cycle in editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt and pushed agent-doc commit 068a1752; focused plugin tests, make check, buildPlugin, cargo install, local plugin install, and GitHub CI passed. Remaining gate: manual File Cache Conflict Cancel repro evidence with active plugin 0.2.133.
 - [/] [#jbccc2] Phase 2 of #adoc-jb-cache-cancel-stuck-cycle: JB plugin undo-on-cancel. editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt — defer the write until user resolves the File Cache Conflict dialog (never queue change beforehand); on Cancel return 0/2 from socket IPC callback; on file-IPC cancel leave patch file in place. Plan: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md
 - [/] [#adoc-jb-cache-cancel-stuck-cycle] agent-doc-bug: after canceling a JetBrains File Cache Conflict dialog during IPC patch delivery, the response patch lands in the working tree but the cycle does not reach committed state. Recovery requires running agent-doc write --commit FILE manually. Repro: have JB IDE open with the file in an editor; run finalize; cancel the JB cache-conflict dialog when it appears. Expected: cycle reaches committed cleanly or surfaces a clear error. Actual: response is in working tree but next preflight reports post-commit local drift requiring manual recovery. Plan path: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md (to be authored). Related: #jbccfix, #jbccreg, #jbccdocs in this same file.
 <!-- /agent:review -->

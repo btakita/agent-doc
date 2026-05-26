@@ -69,7 +69,38 @@ Completed the closeout pass. I found implementation and automated-verification e
 Because that is residual risk, I added #jbcclivecancelresid as the narrow plan-backed blocker and reworked the remaining review entries to gate on it. I marked #jbccreviewcloseout and #jbccresidualdecision done.
 
 Proof for this cycle: changed document paths before finalize were `tasks/agent-doc/agent-doc-bugs2.md` and `tasks/agent-doc-bugs2.done.md`; commands run: `tsift status`, `tsift status --fix`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, targeted `rg`, `sed`, `git status`, `git show`, and `agent-doc finalize`; verification: confirmed plan file `tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md` exists, found the prior notes saying no controlled Cancel branch was captured, and checked commit 068a1752 for the implementation evidence; confidence: high that the remaining blocker is live evidence, not another known code task; escalation: none.
-<!-- agent:boundary:70564317 -->
+❯ I saw a recent full-document IPC corruption in another document. Please look in logs.
+❯ As I was typing this prompt, the duplicate content issue occurred.
+❯ #spec-test-build-install-commit-push
+### Re: IPC corruption while typing — gpt-5
+
+I found the log trail and patched the narrower snapshot-adoption gap.
+
+The logs did not show a new normal-response `fullContent` path. They showed socket patch IPC with ACK content. In this document at `[1779825176]`, snapshot adoption was blocked from `ack_content_sidecar` and saved `content_ours`, but the same cycle then hit stale snapshot drift during commit. In `tasks/software/tsift.md` at `[1779825303]` and `[1779825541]`, ACK-content snapshot adoption was also blocked, then commit later ran `snapshot_absorb` from the visible editor file. That made the remaining unsafe case clear: ordinary text typed after preflight outside `agent:exchange`, such as a post-exchange scratch/comment prompt, could still be treated as adoptable visible state even when it was absent from the agent-owned response image.
+
+Fix in `src/agent-doc`:
+- `src/write.rs` now blocks IPC snapshot adoption when the ACK/file candidate contains non-`exchange` component drift that appeared after preflight and is absent from `content_ours`.
+- Added `file_ipc_ack_content_post_exchange_comment_drift_uses_content_ours_snapshot`, which simulates typing a prompt inside a post-exchange HTML comment during closeout and proves the snapshot stays on `content_ours` while the visible editor text remains for the next cycle.
+- Updated `SPEC.md` and `specs/07-closeout-commands.md` so ACK-content snapshots are not allowed to absorb post-exchange scratch/comment drift.
+- Updated the FlowCore token budget in `tests/test_cli.rs` for the added audited `reason=` guard.
+
+Verification:
+- `cargo test file_ipc_ack_content_`
+- `cargo test flowcore_hot_path_guard_and_proof_tokens_are_budgeted --test test_cli`
+- `make check`
+- `cargo build`
+- `cargo install --path .`
+- `agent-doc --version` -> `agent-doc 0.34.0`
+- `git diff --check -- SPEC.md specs/07-closeout-commands.md src/write.rs tests/test_cli.rs`
+- `cargo fmt --check`
+- GitHub CI run `26472473406` passed after push; the hosted `check` job ran both `Run make check` and `Run make tmux-ci` successfully in 9m28s. The only annotation was the upstream Node.js 20 deprecation warning for `actions/checkout@v4`.
+
+Commit / push:
+- `src/agent-doc` commit `507f2f82` (`fix: guard ipc snapshot comment drift`) pushed to `origin/20260422/codex-agent-backend`.
+- Parent gitlink commit `b954212b7` (`agent-doc: guard ipc snapshot comment drift`) pushed to `origin/main`.
+
+I left unrelated pre-existing local modifications alone, including the formatted-but-unstaged files under `src/agent-doc` and other dirty superproject paths. Escalation: none. Confidence: high.
+<!-- agent:boundary:be80987d -->
 <!-- /agent:exchange -->
 ###
 <!--

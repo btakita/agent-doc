@@ -30,83 +30,15 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260526-153847.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260526-163522.md`*
 
 Compacted content:
-- Archived 5 response topic(s): #next-steps for SQLite graph + tagpath community search; #gprojrows; closeout repair; 2 more
+- Archived 3 response topic(s): #gcommcache; do #gcommtagctx; do [#gcommgate]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-### Re: #gcommcache — gpt-5
-
-Implemented and pushed `#gcommcache`.
-
-- Added cached community detection keyed by cache version, root/scope, index graph watermark, and tagpath state/hash; cache hits skip `db.all_edges()` and Louvain.
-- Added `community_diagnostics` to `tsift communities --json` and `tsift explain --json` with cache hit, edge count, iterations, tagpath state, and annotation counts.
-- Bounded tagpath member annotation to displayed communities for `communities --limit N` and the focused symbol community for `explain`.
-- Updated `SPEC.md` and integration coverage for cache diagnostics plus bounded annotation.
-
-Commits:
-- tsift `bb542cd` (`feat: cache community detection`) pushed to `btakita/tsift main`
-- root pointer `13d447159` (`chore: update tsift community cache`) pushed to `btakita/agent-loop main`
-
-Verification:
-- `cargo test -q communities_json`
-- `cargo test -q explain_json`
-- `cargo build`
-- `cargo install --path .`
-- `make check`
-- GitHub Actions CI run `26459272826`: success for `clippy + test` and `live Convex graph acceptance`
-
-CI notes: this repo's CI workflow has no separate `tmux-test` job. The run completed with non-blocking annotations for GitHub's Node.js 20 action deprecation and the existing live Convex configuration note.
-### Re: do #gcommtagctx — gpt-5
-
-Done.
-
-Implemented context-aware community member annotation in tsift. Community JSON members now carry `file`, `line`, and bounded caller/callee `refs`; duplicate-name tagpath handles resolve by unique tagpath candidate, edge-file evidence, then community-file evidence instead of the previous name-only fallback. `community_diagnostics` now reports ambiguous duplicate-member cases with candidate counts, selected evidence, and chosen file. Scoped community/explain annotation now loads tagpath from the scope source root so per-submodule `.naming` indexes resolve handles.
-
-Updated spec coverage and regression tests for skipped-directory duplicate names, duplicate same-name members resolved by edge evidence, scoped workspace tagpath handles across two scope fixtures, and the existing graph callee duplicate-name case.
-
-Commits pushed:
-- `src/tsift` `b79fe86` (`feat: resolve community member tagpaths with context`)
-- parent repo `ecd915169` (`chore: update tsift community tagpath context`)
-
-Verification:
-- `cargo test -q communities_json`
-- `cargo test -q graph_json_resolves_callee_handle_with_caller_file_name_collision`
-- `cargo build`
-- `cargo install --path .`
-- `make check`
-- GitHub CI `26460423804` passed on `btakita/tsift` (`clippy + test`, `live Convex graph acceptance`)
-
-CI/tmux note: the `tsift` repo has no separate tmux-test workflow; `gh workflow list` shows `CI` and `Release`, and the pushed `CI` run passed. The parent `agent-loop` repo has no workflow named `CI` for `gh run list --workflow CI --limit 1`.
-### Re: do [#gcommgate] — gpt-5
-
-Implemented `#gcommgate`.
-
-- Added an optional `community_search_gate` section to `tsift metric-digest` for `communities.<workload>.*` and `community_search.<workload>.*` metrics.
-- The gate requires both `real` and `synthetic_multi_module` workloads and tracks runtime, handle coverage, stale behavior, no-tagpath behavior, duplicate-name precision, and top-community stability.
-- Runtime now blocks only when it regresses by more than 25% against the compared run; quality metrics fail closed on missing values or threshold misses.
-- Added CLI human/compact output for the gate, a canonical fixture at `fixtures/community-search-gate-history.json`, unit coverage, an integration CLI fixture test, and SPEC documentation.
-
-Verification completed:
-
-- `cargo test -q metric_digest`
-- `cargo test -q community_search_gate`
-- `cargo test -q --test exit_code metric_digest_reports_community_search_gate_fixture`
-- `cargo build`
-- `cargo install --path .`
-- `make check`
-- GitHub CI run `26461131045` passed for `btakita/tsift` with jobs `live Convex graph acceptance` and `clippy + test`. The only annotations were the existing Node.js 20 deprecation and live Convex URL note. No tmux-test workflow exists for this repo; `gh workflow list` shows `CI` and `Release`.
-
-Commits prepared:
-
-- `btakita/tsift` pushed `79e371c` (`feat: add community search metric gate`).
-- Parent repo committed the submodule pointer as `071e8cd34` (`chore: update tsift community gate`); I will push the parent after this document closeout so the session-document commit travels with it.
-<!-- agent:boundary:7d23f53e -->
+<!-- agent:boundary:ff08abd2 -->
 <!-- /agent:exchange -->
 ###
 <!--
-re [#f14h]: The auto-update should primarily be driven in the development environment. A github action can be added but the primary driver is through actions on a development machine. Can we make this process automatic? Can it be part of the tsift cli tool call chain?
----
 What are #next-steps to make the graph faster?
 -->
 

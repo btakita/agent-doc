@@ -98,7 +98,29 @@ Verification/context gathered:
 - `curl` against production confirmed `/portal-borrower` returns `303` to `/login?role=borrower`.
 
 Changed paths: none besides this session document closeout. Escalation: none. Confidence: high.
-<!-- agent:boundary:3ce1585d -->
+❯ Should /apply go directly to the borrower portal or have a workflow to fill out loan info and create a borrower account?
+### Re: /apply workflow — gpt-5
+
+`/apply` should be the canonical borrower application entry point, but it should not simply send everyone to the borrower portal root.
+
+The shortest correct fix is:
+
+- Unauthenticated visitors: `/apply` sends them to `/signup?role=borrower&next=/portal-borrower/new-application`, with an obvious existing-account path to `/login?role=borrower&next=/portal-borrower/new-application`.
+- Authenticated borrower users: `/apply` sends them directly to `/portal-borrower/new-application`.
+- Authenticated non-borrower users: show a role/account-state message instead of dropping them into the wrong portal.
+
+That keeps the CTA behavior clear while reusing the existing borrower application surface. The current application flow already posts to `/api/borrower/loan-applications` and relies on the borrower-authenticated portal context, and the form asks for sensitive borrower/property information. Moving that whole form into a public unauthenticated `/apply` flow would create more product and security decisions: draft storage, account creation timing, resumability, email verification, upload handling, and what happens if a partially completed lead never creates an account.
+
+A richer future version of `/apply` could start with a lightweight public prequalification or lead-capture step, then create/sign into a borrower account and resume the full application. I would treat that as a separate workflow design, not the first fix for the current 404.
+
+Proof for this pass:
+
+- Changed paths: session document only.
+- Commands/context: inspected the URL constants, home CTA links, auth `next` handling, and borrower `new-application` route; previous live check showed `/apply` returning `404` and `/portal-borrower` redirecting to borrower login.
+- Verification: no test suite run because this cycle only answers the product-routing question.
+- Escalation: none.
+- Confidence: high.
+<!-- agent:boundary:bb317e60 -->
 <!-- /agent:exchange -->
 ###
 <!--

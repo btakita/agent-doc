@@ -35,7 +35,8 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): #gcachemiss
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:4b5d1242 -->
+What are #next-steps to improve performance and effectiveness of the sqlite graph and tagpath community search?
+<!-- agent:boundary:2c61b6cf -->
 <!-- /agent:exchange -->
 ###
 <!--

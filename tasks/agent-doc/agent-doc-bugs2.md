@@ -34,7 +34,17 @@ Gated JetBrains manual cancel repro on missing controlled Cancel evidence.
 Compacted content:
 - Archived 2 response topic(s): do [#next-jbcc-manual-repro]; do [#next-stuckcycle-impl]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:9cfbb7f1 -->
+❯ What are #next-steps to complete the review items?
+### Re: next steps — gpt-5
+
+Top backlog item: #next-jbcc-live-repro-closeout.
+
+Priority order: capture the controlled IntelliJIdea2026.1 File Cache Conflict Cancel evidence with plugin 0.2.132 active before doing more implementation. That single proof is the blocker for all five gated review entries. If the repro passes, use the same evidence to update #next-jbcc-manual-repro first, then reconcile #next-adoc-jbcc, #next-jbccc2, #jbccc2, and #adoc-jb-cache-cancel-stuck-cycle. If it fails, keep the parent bug in review and rework the JetBrains IPC/cancel path from the observed failure.
+
+I added one backlog item at the top because the current review list is already specific and the remaining work is evidence gathering, not another code task.
+
+Changed paths: tasks/agent-doc/agent-doc-bugs2.md. Commands: tsift status, tsift status --fix, agent-doc --version, agent-doc preflight, agent-doc read, agent-doc plan, git status --short, git diff --stat, agent-doc finalize. Verification: no code changed; this is a session-doc/backlog update only. Escalation: none.
+<!-- agent:boundary:34dc7d69 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -48,6 +58,7 @@ As I was typing into the comment below `/agent:exchange`, the full-document IPC 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#next-jbcc-live-repro-closeout] Run the IntelliJIdea2026.1 File Cache Conflict Cancel repro with plugin 0.2.132 active, capture controlled pass/fail evidence, then use that evidence to decide the review state for #next-jbcc-manual-repro, #next-adoc-jbcc, #next-jbccc2, #jbccc2, and #adoc-jb-cache-cancel-stuck-cycle.
 <!-- /agent:backlog -->
 
 ## Review

@@ -18,7 +18,7 @@ queue_active: true
 ## Status
 
 <!-- agent:status patch=replace -->
-Completed: #ghop added the hop-cap promotion gate in tsift 06a0383 and pinned it in agent-loop 242b99610. Local verification passed (`cargo test -q perf_gate`, backend-eval contract test, `make check`, `cargo build`, `cargo install --path .`); latest tsift CI run 26430632139 is green, and root Agent Doc run 26430663631 remains an external empty-step runner-start blocker.
+Completed: #gfront recorded fresh full-projection path/evidence metrics and tightened the SQLite frontier guard in tsift 3012a32 and agent-loop 1543ea55f. Local verification passed (`cargo test -q --test scan_plan`, backend-eval contract test, `make check`, `cargo build`, `cargo install --path .`); latest pre-push tsift CI run 26431208328 is green, while root Agent Doc CI still shows empty-step runner-start failures.
 <!-- /agent:status -->
 
 ## Spec
@@ -90,7 +90,36 @@ Verification:
 - Tmux/Agent Doc CI: root `Agent Doc` run `26430663631` failed before job startup with empty-step `tmux-ci` and `check` jobs; I treated this as an external CI-start blocker, not a code/tmux regression.
 
 Per the agent-doc commit boundary, I will push the tsift commit, the agent-loop pointer commit, and this session-document commit after finalize succeeds.
-<!-- agent:boundary:f9a9b230 -->
+### Re: #gfront SQLite frontier guard — gpt-5
+
+Completed #gfront. I took a fresh full-projection backend-eval sample before changing code. SQLite path/evidence reads are not the current hotspot: full-projection SQLite `path_max_hops` was 45 us, `path_max_hops_512` was 26 us, `evidence_target_resolution` was 515 us, and `evidence` was 957 us. Synthetic deep-chain SQLite `path_max_hops_512` was 564 us. The roughly 1.1s path timings are in the prototype read-only stores, not SQLite frontier traversal, so I did not rewrite SQLite traversal without a measured SQLite hotspot.
+
+Implemented the guard instead:
+
+- `src/tsift/plans/gfront-evidence.md`: recorded the fresh real/full-projection/high-degree/deep-chain path and evidence metrics plus the decision not to rewrite SQLite frontier traversal.
+- `src/tsift/src/main.rs`: full-projection performance gate now requires SQLite evidence-target, evidence, and 64/128/256/512-hop path duration metrics.
+- `src/tsift/tests/scan_plan.rs`: added chunked frontier coverage proving multi-node frontier probes use `idx_graph_edges_from_kind`, extending the existing single-node frontier plan test.
+- `src/tsift/tests/graph_db_conformance.rs`: locks the new full-projection required metric contract.
+- `src/tsift/SPEC.md` and `src/tsift/VERSIONS.md`: documented the SQLite frontier guard and evidence boundary.
+
+Commits prepared locally before this document closeout:
+
+- `src/tsift`: `3012a32` (`test(graph-db): guard sqlite frontier metrics`)
+- `agent-loop`: `1543ea55f` (`chore(tsift): pin sqlite frontier guard`)
+
+Verification:
+
+- Fresh metric sample: `tsift graph-db --path /home/brian/work/btakita/agent-loop --json backend-eval --full-projection | jq ...` passed after known Kotlin grammar warnings.
+- `cargo test -q --test scan_plan`: passed (5 tests).
+- `cargo test -q graph_db_backend_eval_benchmarks_candidate_stores_against_sqlite`: passed.
+- `make check` in `src/tsift`: passed (`cargo clippy --all-targets -- -D warnings`, `cargo test`: 692 unit tests, 124 exit-code tests, 33 graph-db conformance tests, 30 perf-gate tests, 5 scan-plan tests).
+- `cargo build` in `src/tsift`: passed.
+- `cargo install --path .` in `src/tsift`: passed; installed `tsift 0.1.62`.
+- GitHub Actions before this push: tsift `CI` run `26431208328` passed (`clippy + test`, `live Convex graph acceptance`).
+- Tmux/Agent Doc CI before this push: root `Agent Doc` run `26431210323` failed before job startup with empty-step `tmux-ci` and `check` jobs; I treated this as an external CI-start blocker.
+
+Per the agent-doc commit boundary, I will push the tsift commit, the agent-loop pointer commit, and this session-document commit after finalize succeeds.
+<!-- agent:boundary:6e1601b0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -101,7 +130,7 @@ What are #next-steps to make the graph faster?
 preset #spec-test-build-install-commit-push
 - ~do [#gperf]~
 - ~do [#ghop]~
-- do [#gfront]
+- ~do [#gfront]~
 - do [#gback]
 <!-- /agent:queue -->
 
@@ -109,7 +138,6 @@ preset #spec-test-build-install-commit-push
 
 <!-- agent:backlog -->
 - [ ] [#gcachemiss] Stabilize full-projection source-watermark/cache reuse: reproduce repeated #gperf cache misses on a quiescent checkout, identify which watermark input shifts between runs, and gate cache-hit evidence before cap/backend changes.
-- [ ] [#gfront] Optimize SQLite high-hop/frontier traversal if refreshed metrics show path/evidence latency is still hot: use indexed frontier expansion or recursive CTEs, avoid per-hop broad scans, emit cap diagnostics, and lock query-plan regressions for full-projection plus synthetic deep-chain fixtures.
 - [ ] [#gback] [recommended] Spike a real optional graph backend adapter only after SQLite gate evidence is fresh: compare Kuzu and FalkorDB behind GraphStore with projection writes/load, lock semantics, install portability, and full parity; do not promote a read-only prototype unless it beats SQLite across every required workload.
 <!-- /agent:backlog -->
 

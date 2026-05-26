@@ -70,7 +70,12 @@ What I verified from shell:
 - The current `idea.log` shows `com.github.btakita.agentdoc.PatchWatcher` activity for this document, including the 01:36:06 patch application and VCS refresh after the previous closeout.
 
 I did not synthesize Cancel evidence from logs or force GUI interaction from the shell. I gated `#next-jbcc-live-repro-closeout` pending a controlled manual Cancel repro result, and I left the dependent review items gated.
-<!-- agent:boundary:03e96aff -->
+### Re: auto-queue closeout — gpt-5
+
+The auto-queue continuation for `#next-jbcc-live-repro-closeout` is already resolved into a review-gated state, so preflight struck the queue head and deactivated the queue. No new implementation work or test run was needed in this continuation cycle.
+
+The live IntelliJ Cancel repro remains gated on controlled manual evidence, as recorded in the previous response.
+<!-- agent:boundary:4a872006 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -81,7 +86,7 @@ As I was typing into the comment below `/agent:exchange`, the full-document IPC 
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#ipcfullprompt]~
-- do [#next-jbcc-live-repro-closeout]
+- ~do [#next-jbcc-live-repro-closeout]~
 <!-- /agent:queue -->
 
 ## Pending / Not Built

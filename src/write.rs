@@ -391,6 +391,13 @@ fn outside_component_content_changed(left: &str, right: &str, component_name: &s
 }
 
 fn has_prompt_bearing_user_drift(base: &str, current: &str) -> bool {
+    !prompt_bearing_user_changes_between(base, current).is_empty()
+}
+
+fn prompt_bearing_user_changes_between(
+    base: &str,
+    current: &str,
+) -> Vec<crate::diff::PromptBearingChange> {
     let base_norm = strip_boundary_for_dedup(base);
     let current_norm = strip_boundary_for_dedup(current);
     let base_prompt_norm = crate::diff::strip_comments(&base_norm);
@@ -398,8 +405,18 @@ fn has_prompt_bearing_user_drift(base: &str, current: &str) -> bool {
     let Some(diff_text) =
         crate::diff::unified_diff_from_contents(&base_prompt_norm, &current_prompt_norm)
     else {
-        return false;
+        return Vec::new();
     };
+    let mut changes: Vec<_> = crate::diff::classify_prompt_bearing_changes(&diff_text)
+        .into_iter()
+        .filter(|change| {
+            matches!(
+                change.kind,
+                crate::diff::PromptBearingChangeKind::PromptTarget
+                    | crate::diff::PromptBearingChangeKind::ContentEdit
+            )
+        })
+        .collect();
     if diff_text.lines().any(|line| {
         let Some(added) = line.strip_prefix('+') else {
             return false;
@@ -410,17 +427,59 @@ fn has_prompt_bearing_user_drift(base: &str, current: &str) -> bool {
         let trimmed = added.trim();
         trimmed.starts_with('❯') || crate::diff::text_line_looks_like_prompt_target(trimmed)
     }) {
-        return true;
+        for line in diff_text.lines() {
+            let Some(added) = line.strip_prefix('+') else {
+                continue;
+            };
+            if line.starts_with("+++") {
+                continue;
+            }
+            let trimmed = added.trim();
+            if trimmed.starts_with('❯') || crate::diff::text_line_looks_like_prompt_target(trimmed)
+            {
+                let text = trimmed
+                    .strip_prefix('❯')
+                    .unwrap_or(trimmed)
+                    .trim()
+                    .to_string();
+                if !changes.iter().any(|change| {
+                    change.kind == crate::diff::PromptBearingChangeKind::PromptTarget
+                        && change.text.trim() == text
+                }) {
+                    changes.push(crate::diff::PromptBearingChange {
+                        kind: crate::diff::PromptBearingChangeKind::PromptTarget,
+                        text,
+                    });
+                }
+            }
+        }
     }
-    crate::diff::classify_prompt_bearing_changes(&diff_text)
+    changes
+}
+
+fn prompt_bearing_change_owned_by_content_ours(
+    change: &crate::diff::PromptBearingChange,
+    owned_changes: &[crate::diff::PromptBearingChange],
+) -> bool {
+    let text = normalized_prompt_line(&change.text);
+    owned_changes
         .iter()
-        .any(|change| {
-            matches!(
-                change.kind,
-                crate::diff::PromptBearingChangeKind::PromptTarget
-                    | crate::diff::PromptBearingChangeKind::ContentEdit
-            )
-        })
+        .any(|owned| owned.kind == change.kind && normalized_prompt_line(&owned.text) == text)
+}
+
+pub(crate) fn ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
+    baseline: &str,
+    snapshot_candidate: &str,
+    content_ours: &str,
+) -> bool {
+    let candidate_changes = prompt_bearing_user_changes_between(baseline, snapshot_candidate);
+    if candidate_changes.is_empty() {
+        return false;
+    }
+    let owned_changes = prompt_bearing_user_changes_between(baseline, content_ours);
+    candidate_changes
+        .iter()
+        .any(|change| !prompt_bearing_change_owned_by_content_ours(change, &owned_changes))
 }
 
 fn snapshot_content_to_persist<'a>(
@@ -7118,9 +7177,7 @@ fn read_ack_content_sidecar(project_root: &Path, patch_id: &str) -> Result<Optio
 /// HEAD content via a substring check without false positives from common
 /// boilerplate. Returns the trimmed heading lines (without the trailing
 /// newline) in order of appearance.
-fn extract_response_headings_from_patches(
-    patches: &[crate::template::PatchBlock],
-) -> Vec<String> {
+fn extract_response_headings_from_patches(patches: &[crate::template::PatchBlock]) -> Vec<String> {
     let mut out = Vec::new();
     for patch in patches {
         for line in patch.content.lines() {
@@ -7426,6 +7483,65 @@ impl IpcRepairDecision {
     fn ack_content_proven(&self) -> bool {
         self.snap_source.is_ack_content_proven()
     }
+
+    fn replace_snapshot_with_content_ours_for_live_prompt_drift(&mut self, content_ours: &str) {
+        self.snapshot_content = content_ours.to_string();
+        self.snap_source = IpcSnapshotSource::ContentOurs;
+        self.disk_repair_reason = None;
+        self.editor_bad_state = None;
+        self.normalize_prefix_lines.clear();
+        self.redeliver_editor = false;
+    }
+}
+
+fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
+    file: &Path,
+    source: &str,
+    patch_id: Option<&str>,
+    baseline: Option<&str>,
+    content_ours: Option<&str>,
+    decision: &mut IpcRepairDecision,
+) -> bool {
+    if decision.snap_source == IpcSnapshotSource::ContentOurs {
+        return false;
+    }
+    let (Some(base), Some(ours)) = (baseline, content_ours) else {
+        return false;
+    };
+    if !ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
+        base,
+        &decision.snapshot_content,
+        ours,
+    ) {
+        return false;
+    }
+
+    let prior_source = decision.snap_source.label();
+    crate::flow::proof::log_flow_event(
+        file,
+        crate::flow::types::FlowEvent::new(
+            crate::flow::types::FlowName::DocumentMutation,
+            crate::flow::types::FlowStage::IpcSnapshotAdoption,
+            crate::flow::types::FlowOutcome::Blocked,
+        )
+        .with_reason("live_prompt_drift_after_preflight"),
+    );
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "ipc_snapshot_adoption_blocked file={} source={} patch_id={} snap_source={} reason=live_prompt_drift_after_preflight candidate_len={} candidate_hash={} content_ours_len={} content_ours_hash={}",
+            file.display(),
+            source,
+            patch_id.unwrap_or("-"),
+            prior_source,
+            decision.snapshot_content.len(),
+            crate::ops_log::content_hash(&decision.snapshot_content),
+            ours.len(),
+            crate::ops_log::content_hash(ours)
+        ),
+    );
+    decision.replace_snapshot_with_content_ours_for_live_prompt_drift(ours);
+    true
 }
 
 fn normalization_prefix_observation_counts(
@@ -8528,6 +8644,14 @@ pub fn try_ipc(
                     } else {
                         repair_decision.snapshot_content = effective_snap;
                     }
+                    guard_ipc_snapshot_adoption_against_live_prompt_drift(
+                        file,
+                        "socket_ack_content",
+                        Some(&patch_id),
+                        baseline,
+                        content_ours,
+                        &mut repair_decision,
+                    );
 
                     let expected_response = response_materialization_probe(patches, unmatched);
                     if !ipc_response_materialized_or_fallback(
@@ -9483,6 +9607,17 @@ fn write_ipc_and_poll(
             ) {
                 return Ok(false);
             }
+            guard_ipc_snapshot_adoption_against_live_prompt_drift(
+                doc_file,
+                "file_ipc",
+                Some(patch_id),
+                payload
+                    .get("baseline")
+                    .and_then(|value| value.as_str())
+                    .filter(|value| !value.is_empty()),
+                options.content_ours,
+                &mut repair_decision,
+            );
             repair_ipc_decision_visible_state(doc_file, &repair_decision, Some(patch_id))?;
             crate::ops_log::log_op(
                 doc_file,
@@ -10585,10 +10720,7 @@ mod tests {
     use tempfile::TempDir;
 
     fn patch_with_heading(heading: &str) -> crate::template::PatchBlock {
-        crate::template::PatchBlock::new(
-            "exchange",
-            format!("{heading}\n\nbody line one\n"),
-        )
+        crate::template::PatchBlock::new("exchange", format!("{heading}\n\nbody line one\n"))
     }
 
     #[test]
@@ -11773,6 +11905,115 @@ scratch
     }
 
     #[test]
+    fn file_ipc_ack_content_live_prompt_drift_uses_content_ours_snapshot() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let baseline = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let before = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "❯ New prompt typed during closeout\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let content_ours = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "### Re: Please reply — gpt-5\n\n",
+            "Answered.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let ack_content = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "❯ New prompt typed during closeout\n",
+            "### Re: Please reply — gpt-5\n\n",
+            "Answered.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, before).unwrap();
+
+        let patches_dir = agent_doc_dir.join("patches");
+        let watcher_dir = patches_dir.clone();
+        let ack_dir = agent_doc_dir.join("ack-content");
+        let doc_for_watcher = doc.clone();
+        let ack_for_watcher = ack_content.to_string();
+        let watcher = std::thread::spawn(move || {
+            for _ in 0..40 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                let Ok(mut entries) = fs::read_dir(&watcher_dir) else {
+                    continue;
+                };
+                if let Some(Ok(entry)) = entries.next() {
+                    if let Ok(text) = fs::read_to_string(entry.path())
+                        && let Ok(json) = serde_json::from_str::<serde_json::Value>(&text)
+                        && let Some(pid) = json.get("patch_id").and_then(|v| v.as_str())
+                    {
+                        let _ = fs::write(&doc_for_watcher, &ack_for_watcher);
+                        let _ = fs::write(ack_dir.join(format!("{pid}.md")), &ack_for_watcher);
+                    }
+                    let _ = fs::remove_file(entry.path());
+                    return;
+                }
+            }
+        });
+
+        let patch = crate::template::PatchBlock::new(
+            "exchange",
+            "### Re: Please reply — gpt-5\n\nAnswered.",
+        );
+        let result = try_ipc(
+            &doc,
+            &[patch],
+            "",
+            None,
+            Some(baseline),
+            Some(content_ours),
+            None,
+            Some("patch-live-prompt-drift"),
+        )
+        .unwrap();
+        watcher.join().unwrap();
+
+        assert!(
+            result.success,
+            "IPC delivery itself should remain successful"
+        );
+        assert_eq!(
+            snapshot::load(&doc).unwrap().as_deref(),
+            Some(content_ours),
+            "snapshot must not absorb prompt-bearing drift typed after preflight"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            ack_content,
+            "visible live prompt should remain in the working tree for the next cycle"
+        );
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("flow=document_mutation")
+                && log.contains("stage=ipc_snapshot_adoption")
+                && log.contains("reason=live_prompt_drift_after_preflight")
+                && log.contains("ipc_snapshot_adoption_blocked"),
+            "unsafe snapshot adoption should be logged:\n{log}"
+        );
+    }
+
+    #[test]
     fn file_ipc_post_dedupe_unchanged_exchange_requires_ack_content() {
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
@@ -12030,8 +12271,9 @@ scratch
 
         let content_ours = "---\nsession: test\n---\n\n<!-- agent:exchange -->\nagent response content\n<!-- /agent:exchange -->\n";
 
-        // Simulate user editing the file (working tree has additional content)
-        let after_plugin_write = "---\nsession: test\n---\n\n<!-- agent:exchange -->\nagent response content\nuser typed something new\n<!-- /agent:exchange -->\n";
+        // Simulate the plugin applying the patch and performing a safe boundary
+        // reposition in the same editor-visible write.
+        let after_plugin_write = "---\nsession: test\n---\n\n<!-- agent:exchange -->\nagent response content\n<!-- agent:boundary:plugin-boundary -->\n<!-- /agent:exchange -->\n";
 
         // Spawn "plugin" thread that watches for patch files, writes content, then deletes
         let patches_dir = agent_doc_dir.join("patches");
@@ -12077,10 +12319,7 @@ scratch
             "snapshot must contain agent response, got: {}",
             snap
         );
-        assert!(
-            snap.contains("user typed something new"),
-            "snapshot must match disk state (include user edits written by plugin)"
-        );
+        assert!(snap.contains("plugin-boundary"));
         assert_eq!(
             snap, after_plugin_write,
             "snapshot must exactly match post-write disk state"

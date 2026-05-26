@@ -312,6 +312,7 @@ struct Coverage {
     normalization_repair_patches: usize,
     sidecar_normalization_divergences: usize,
     stale_source_buffer_skips: usize,
+    ipc_snapshot_live_prompt_blocks: usize,
     ack_sidecar_only_repairs: usize,
     visible_duplicate_repairs: usize,
     post_commit_follow_up_handoffs: usize,
@@ -952,6 +953,25 @@ impl SimWorld {
             );
             self.snapshot = fallback;
             self.coverage.sidecar_normalization_divergences += 1;
+        }
+    }
+
+    fn adopt_ipc_snapshot_candidate(
+        &mut self,
+        baseline: &str,
+        content_ours: &str,
+        snapshot_candidate: &str,
+    ) {
+        self.doc = snapshot_candidate.to_string();
+        if crate::write::ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
+            baseline,
+            snapshot_candidate,
+            content_ours,
+        ) {
+            self.snapshot = content_ours.to_string();
+            self.coverage.ipc_snapshot_live_prompt_blocks += 1;
+        } else {
+            self.snapshot = snapshot_candidate.to_string();
         }
     }
 
@@ -2161,6 +2181,50 @@ fn full_content_source_proof_sim_rejects_stale_editor_buffers() {
             "{source:?} must not apply stale compact/repair/timeout replacement content"
         );
     }
+}
+
+#[test]
+fn ipc_snapshot_adoption_sim_blocks_live_prompt_drift_after_preflight() {
+    let mut world = SimWorld::new(2_021);
+    world.append_to_exchange("❯ Please reply\n").unwrap();
+    let baseline = world.doc.clone();
+    let content_ours = baseline.replace(
+        "<!-- /agent:exchange -->",
+        "### Re: Please reply — gpt-5\n\nAnswered.\n<!-- /agent:exchange -->",
+    );
+    let snapshot_candidate = baseline.replace(
+        "<!-- /agent:exchange -->",
+        "❯ New prompt typed during closeout\n### Re: Please reply — gpt-5\n\nAnswered.\n<!-- /agent:exchange -->",
+    );
+
+    world.adopt_ipc_snapshot_candidate(&baseline, &content_ours, &snapshot_candidate);
+
+    assert_eq!(world.coverage.ipc_snapshot_live_prompt_blocks, 1);
+    assert_eq!(
+        world.snapshot, content_ours,
+        "IPC snapshot adoption must keep the committed snapshot to agent-owned response content"
+    );
+    assert!(
+        world.doc.contains("❯ New prompt typed during closeout"),
+        "the live prompt remains visible for the next response cycle"
+    );
+    assert!(
+        !world.snapshot.contains("New prompt typed during closeout"),
+        "the live prompt must not be absorbed into the snapshot"
+    );
+    assert_eq!(
+        world
+            .doc
+            .matches("❯ New prompt typed during closeout")
+            .count(),
+        1,
+        "the live prompt must remain exactly once"
+    );
+    assert_eq!(
+        world.doc.matches("### Re: Please reply — gpt-5").count(),
+        1,
+        "the response heading must not be duplicated"
+    );
 }
 
 #[test]

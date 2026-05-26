@@ -25,7 +25,9 @@ flowchart TD
   disabledBinary["New binary: try_ipc_full_content logs disabled and returns false before socket/file payload construction"]
   guardedDisk["Caller uses guarded disk/snapshot repair or narrow component patching"]
   disabledPlugin["New editor plugins: delete file-watch fullContent patches and reject socket fullContent payloads"]
+  adoptionGuard["New binary: ACK/file-read snapshot adoption rejects live prompt drift after preflight"]
   noReplace["No whole-buffer editor replacement occurs"]
+  promptHandoff["Live prompt remains visible and outside the committed snapshot"]
   narrowPatch["Only component patches, prefix normalization patches, reposition patches, or guarded disk repair remain"]
 
   typing --> staleState --> fullPayload
@@ -33,6 +35,7 @@ flowchart TD
   duplicateRepair -- "yes" --> committedClean
   duplicateRepair -- "no" --> residue --> nextTyping --> repeat --> fullPayload
   fullPayload -- "yes, after this fix" --> disabledPlugin --> noReplace --> narrowPatch
+  staleState --> adoptionGuard --> promptHandoff --> narrowPatch
   staleState --> disabledBinary --> guardedDisk --> narrowPatch
   fullPayload -- "no" --> narrowPatch
 ```
@@ -46,6 +49,12 @@ flowchart TD
 - File-watch payloads containing `fullContent` are logged and deleted as
   disabled stale/foreign patches so they cannot retry indefinitely.
 - Socket payloads containing `fullContent` fail closed.
+- Socket/file ACK content and file-read IPC fallback content are not adopted as
+  the committed snapshot when they contain prompt-bearing exchange drift that
+  appeared after preflight and is absent from the agent-owned response image;
+  the binary logs `stage=ipc_snapshot_adoption` with
+  `reason=live_prompt_drift_after_preflight` and keeps that prompt for the
+  next cycle.
 - Duplicate prompt repair remains as defense in depth, but correctness no
   longer depends on it catching corruption caused by a whole-buffer editor
   replacement.

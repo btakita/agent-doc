@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -62,7 +62,7 @@ Use #jbccreviewcloseout first to inspect the completed live Cancel evidence and 
 I did not complete additional review entries in this cycle. The remaining review state still depends on that evidence-based closeout pass.
 
 Proof for this cycle: changed paths before finalize were `tasks/agent-doc/agent-doc-bugs2.md` and `tasks/agent-doc-bugs2.done.md`; commands run: `tsift status`, `tsift status --fix`, `agent-doc preflight`, `agent-doc plan`, `agent-doc orchestrate --from-exchange --plan`, `agent-doc read`, `git status --short`, and `agent-doc finalize`; verification: read the live backlog and review sections, confirmed the backlog now contains the two ordered closeout items and six gated review entries remained; confidence: high for backlog ordering and document-state update; escalation: none.
-<!-- agent:boundary:85f5740a -->
+<!-- agent:boundary:c36dc02c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -72,11 +72,10 @@ As I was typing into the comment below `/agent:exchange`, the full-document IPC 
 #spec-test-build-install-commit-push
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- ~do [#jbccprecheck]~
-- ~do [#jbccevidence]~
-- ~do [#jbccliverepro]~
+- do [#jbccreviewcloseout]
+- do [#jbccresidualdecision]
 <!-- /agent:queue -->
 
 ## Pending / Not Built

@@ -50,7 +50,61 @@ resync: stash pane %16 is unregistered but still owns /home/brian/work/btakita/a
 Error: dispatch-only opencode reopen refused to inject into pane %21 for tasks/software/tsift.md because the pane still shows opencode active turn; restore an idle prompt and retry
 ```
 #spec-test-build-install-commit-push #mermaid
-<!-- agent:boundary:2df1fd71 -->
+
+### Re: JB Run Agent Doc on tsift.md — gpt-5
+
+Fixed the Run Agent Doc failure path that produced:
+
+`dispatch-only opencode reopen refused ... pane still shows opencode active turn`
+
+Root cause: route could rediscover a live OpenCode or Codex pane after stash/supervisor recovery, then the final pre-submit blocker check saw an active turn and returned a persistent error. Because that late blocker happened after the normal authoritative busy-actor queue branch, JetBrains treated it as a hard route failure and saved route diagnostics instead of reporting a still-running state or queueing the rerun.
+
+Now prompt-bearing dispatch-only reroutes that hit a plain active Codex/OpenCode turn before input is submitted queue the rerun in `agent:queue auto`, sync the snapshot, and print `queued pending dispatch`. Protected states such as hook review, queued drafts, permission prompts, shell search, and clean-exit restart prompts still fail closed with their explicit recovery path. JetBrains also classifies the older direct `pane still shows opencode active turn` blocker as `BUSY_RUNNING`, so older binaries no longer surface that specific state as a persistent IDE route failure.
+
+```mermaid
+flowchart LR
+    A["JetBrains Run Agent Doc"] --> B["agent-doc route --dispatch-only"]
+    B --> C["Resolve live pane"]
+    C --> D["Pre-submit blocker check"]
+    D -->|"Idle composer"| E["Submit agent-doc FILE"]
+    D -->|"Active Codex/OpenCode turn + prompt text"| F["Write agent:queue auto"]
+    F --> G["Sync snapshot"]
+    G --> H["Print queued pending dispatch"]
+    D -->|"Protected prompt/input blocker"| I["Fail closed with specific recovery"]
+```
+
+Changed files:
+
+- `src/agent-doc/src/route.rs`
+- `src/agent-doc/src/route/tests.rs`
+- `src/agent-doc/specs/07-session-tmux-commands.md`
+- `src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt`
+- `src/agent-doc/editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/TerminalUtilTest.kt`
+
+Verification:
+
+- `cargo test dispatch_active_turn_blockers_are_queueable_for_prompt_bearing_reroutes`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test`
+- `make check`
+- `make tmux-ci`
+- `make install`
+- `printf '18\n' | agent-doc plugin install --local jetbrains`
+- GitHub Actions CI run `26544448556`: `make check` passed and `make tmux-ci` passed.
+
+```mermaid
+flowchart TD
+    P["Plain active turn"] --> Q["Queue rerun"]
+    X["Hook review"] --> Y["Keep explicit operator recovery"]
+    D["Queued draft"] --> Z["Preserve draft and fail closed"]
+    S["Shell search or restart prompt"] --> R["Manual recovery"]
+```
+
+Commit/push:
+
+- `btakita/agent-doc@6b233e87116981d17fa397f24af545c2210091cc` pushed to `20260422/codex-agent-backend`.
+- `btakita/agent-loop@3110abb96` pushed to `main` with the updated `src/agent-doc` submodule pointer.
+- The local `agent-doc` binary and JetBrains plugin were installed; restart IntelliJ IDEA 2026.1 to load the updated plugin.
+<!-- agent:boundary:01e0b85f -->
 <!-- /agent:exchange -->
 ###
 <!--

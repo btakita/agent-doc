@@ -35,9 +35,31 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 Compacted content:
 - Archived 1 response topic(s): message count
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:7f9e482c -->
 Place the header "Broker Portal" link between "Apply for a Loan" and "Investor Portal".
 #spec-test-commit-push
+### Re: Broker Portal header order — gpt-5
+
+Done. I moved the logged-out `Broker Portal` header action so it sits between `Apply for a Loan` and `Investor Portal` in both desktop and mobile header action groups.
+
+Changed paths:
+- `lib/ui--server--efs/header/index.ts`
+- `tests/public-header.test.ts`
+- `docs/UI_GUIDE.md`
+- `prds/equity-funding-source-lending-portal-prd.md`
+- `tests/prd.test.ts`
+
+Verification:
+- `bun test tests/public-header.test.ts tests/prd.test.ts` -> 14 pass, 0 fail
+- `make check` -> 194 pass, 0 fail; site build and Worker build completed
+- `gh run list --workflow CI --limit 1` could not find a workflow named `CI`; `gh workflow list` returned no workflows for this repo.
+
+Commit and push:
+- EFS header/spec/test patch is on `origin/main` at `bcb4c7d` (`wip: UI guide, header, prd, and test edits`).
+- The EFS branch is aligned with `origin/main`; explicit `git push origin main` returned `Everything up-to-date`.
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:98607935 -->
 <!-- /agent:exchange -->
 ###
 <!--

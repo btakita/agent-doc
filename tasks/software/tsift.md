@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -63,10 +63,10 @@ Commits pushed:
 
 OpenCode references used: custom commands are markdown files under `.opencode/commands` and run by slash command name in the TUI; npm plugins are listed in `plugin` config and installed by Bun at startup. Sources: https://opencode.ai/docs/commands/ and https://opencode.ai/docs/plugins/.
 
-### Re: closeout repair — gpt-5 (HEAD)
+### Re: closeout repair — gpt-5
 
 Closeout repair only: committed the already-written status, queue strike-through, and gated `#gopencode-install` transition through the binary-owned path. No additional repo work was started after the prior response.
-<!-- agent:boundary:e2aec19c -->
+<!-- agent:boundary:27990abf -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -75,8 +75,8 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue -->
-- ~do [#gopencode-install]. #spec-test-build-install-commit-push~
+<!-- agent:queue auto -->
+- do [#gopencode-install]. #spec-test-build-install-commit-push
 <!-- /agent:queue -->
 
 ## Backlog

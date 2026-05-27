@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -55,7 +55,6 @@ Both review items are substantially code-complete. Remaining work in priority or
 7. **Installer/config docs** — expand README with Permissions + Troubleshooting sections.
 
 Top of backlog: **#npm-publish**.
-
 ### Re: queue #spec-test-build-install-commit-push — glm-5.1
 
 Processed the 7 queued backlog items through the `#spec-test-build-install-commit-push` preset.
@@ -104,7 +103,11 @@ README expanded with:
 - **Troubleshooting** section covering: missing binary, stale index, command file conflicts, plugin not loading, and idempotent no-op behavior
 
 Committed and pushed: `a377431` (tsift) → `31996b0dc` (agent-loop).
-<!-- agent:boundary:731ce5b3 -->
+
+### Re: queue cleanup — glm-5.1
+
+Queue auto-halted: #npm-publish and #e2e-install are review-gated (blocked on npm auth). Remaining 5 items completed and reaped.
+<!-- agent:boundary:1c001a4d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -117,21 +120,20 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 preset #spec-test-build-install-commit-push
 - [#npm-publish]
 - [#e2e-install]
-- [#transcript-verify]
-- [#permission-diag]
-- [#integration-test]
-- [#smoke-session]
-- [#installer-docs]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#npm-publish] npm publish opencode-tsift to npm registry (blocked on npm auth token)
+- [ ] [#e2e-install] Verify end-to-end install: fresh opencode project + opencode plugin opencode-tsift + /tsift-status
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#e2e-install] Verify end-to-end install: fresh opencode project + opencode plugin opencode-tsift + /tsift-status
+- [/] [#npm-publish] npm publish opencode-tsift to npm registry (blocked on npm auth token)
 - [/] [#gopencode-install] Make tsift installable as an opencode harness via `tsift init --opencode`: publish the command shortcuts to the opencode marketplace/registry so users can install tsift opencode support without cloning the repo, document the install path, and verify end-to-end with a fresh opencode session.
 - [/] [#gopencode] [tag: opencode] [tag: integration] Make OpenCode a first-class tsift integration: add installer/config docs, envelope shortcuts for session/log/test/diff digest use, verify OpenCode transcript capture and permission-prompt diagnostics, add deterministic tests, then build/install and run an end-to-end agent-doc OpenCode smoke session.
 <!-- /agent:review -->

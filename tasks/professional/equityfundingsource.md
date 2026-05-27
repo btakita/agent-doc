@@ -30,45 +30,12 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260527-143025.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260527-144355.md`*
 
 Compacted content:
-- Archived 3 response topic(s): TMO replacement plan; no-new-build demo agenda; JB cache conflict cancel recovery
+- Archived 1 response topic(s): message count
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-❯ The number of messages is hard coded. ![img_8.png](img_8.png)
-❯ Can we hook up the message count?
-❯ #spec-test-commit-push
-### Re: message count — gpt-5
-
-Hooked the logged-in header badge up to the live secure-message unread count instead of a fixed badge value.
-
-Changed paths:
-- `app/equityfundingsource/lib/borrower_messages/repo.ts`
-- `app/equityfundingsource/lib/borrower_messages/routes.ts`
-- `lib/ui--server--efs/header/index.ts`
-- `prds/equity-funding-source-lending-portal-prd.md`
-- `tests/borrower-messages.test.ts`
-- `tests/prd.test.ts`
-- `tests/public-header.test.ts`
-
-What changed:
-- Added D1 unread-count helpers for borrower-side EFS replies and admin-side borrower/investor messages.
-- Added `GET /api/messages/count` for the logged-in header badge.
-- Changed the public header badge from `/api/notifications/count` to `/api/messages/count` with message-specific accessibility labels.
-- Updated the PRD and regression tests so the badge cannot drift back to a hard-coded `3`.
-
-Verification:
-- `bun test tests/borrower-messages.test.ts tests/public-header.test.ts tests/prd.test.ts` passed: 21 tests.
-- `make check` passed: 193 tests, app build, worker build.
-- `gh run list --workflow CI --limit 1` reported no workflow named `CI`, so there was no remote CI run to inspect.
-
-Commit / push:
-- EFS repo: `ca53a22` (`Wire header message count badge`) pushed to `origin/main`.
-- Parent repo submodule pointer: `ddea7a1f` (`Update equityfundingsource submodule`) pushed to `origin/main`.
-
-Escalation: none.
-Confidence: high.
-<!-- agent:boundary:4e64009f -->
+<!-- agent:boundary:7f9e482c -->
 <!-- /agent:exchange -->
 ###
 <!--

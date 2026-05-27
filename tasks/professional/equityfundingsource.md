@@ -84,7 +84,7 @@ For the demo meeting, I would make the decisions concrete:
 5. After approval, resume with the smallest replacement slice that proves the integrated model: borrower/broker intake to admin review to document collection to status/notification updates.
 
 Closeout evidence: no product code or deployment changes were made. I added backlog items for the demo agenda, TMO inventory, and phased replacement roadmap. Commands run: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, targeted `tsift` searches, targeted doc reads, and this `agent-doc finalize`. Verification is document-only; no test suite was needed. Confidence is medium-high pending the restored TMO access inventory. Escalation: none.
-<!-- agent:boundary:4f4c3743 -->
+<!-- agent:boundary:77fa174b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -97,6 +97,9 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#y17k] Prepare a no-new-build demo agenda for the EFS/TMO replacement meeting: current workers.dev walkthrough, TMO pain points, replacement MVP decisions, and post-meeting approval gates.
+- [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
+- [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document intelligence/search, borrower/broker/investor/admin portals, and tenant-ready resale packaging.
 - [ ] [#f4rq] Verify an EFS-owned sending domain in Resend, then switch APPLICATION_LEAD_NOTIFICATION_FROM and APPLICATION_LEAD_NOTIFICATION_TO from testing-mode values to EFS production addresses.
 - [ ] [#k2xg] Send Robert the six-question TMO outbound webhook prompt in src/equityfundingsource-dev/docs/tmo-webhooks-question.md for him to forward to Mortgage Office, then record the response and decide push vs. tightened polling.
 - [ ] [#qr72] [recommended] By May 27, 2026, send Lucas a written bridge plan: $500 now from personal funds if available, ask for the remaining $500 to be paid after EFS payment clears or by an agreed near-term date, and invoice EFS immediately for $5,000 with a smaller immediate continuation retainer accepted if Judith pushes back.

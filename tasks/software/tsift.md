@@ -84,7 +84,37 @@ Verification:
 - GitHub Actions `CI` run `26487656719` completed `success` for the pushed tsift commit
 
 I left the pre-existing unrelated dirty files in `src/tsift` unstaged.
-<!-- agent:boundary:9eac3c20 -->
+### Re: #gnbrank — gpt-5
+
+Implemented `#gnbrank`.
+
+`tsift graph-db neighborhood --json` now emits additive `ranked_neighbors` entries for returned neighborhood nodes. The ranking scores neighbors by traversal depth, edge kind, community co-membership signal, semantic relation signal, fresh source-handle evidence, duplicate-name precision, and page handle coverage.
+
+The existing `nodes` output remains stable node-id ordered for cursor pagination. I added a `neighborhood_ranking_gate` that records `ranked_output_default=false` and ties any future default-order change to the community-search quality gate: real plus synthetic_multi_module workloads, handle coverage, duplicate-name precision, stale/no-tagpath behavior, top-community stability, and latency regression thresholds.
+
+Updated coverage:
+
+- `src/main.rs` unit coverage for ranked neighborhood fields and the ranking gate.
+- `tests/graph_db_conformance.rs` CLI coverage for neighborhood JSON and SQLite/Convex parity.
+- `tests/exit_code.rs` coverage that the community-search gate fixture exposes the quality metrics consumed by the neighborhood default-change gate.
+- `SPEC.md` documents additive ranked output and the default-order hold.
+
+Verification:
+
+- `cargo check` passed.
+- `cargo test graph_db_api_queries_sqlite_neighborhood_and_schema` passed.
+- `cargo test --test graph_db_conformance graph_db_cli_conformance_matches_sqlite_and_convex_snapshot_queries` passed.
+- `cargo test --test graph_db_conformance graph_db_semantic_readiness_clears_after_summarize_extract_and_refresh` passed.
+- `cargo test --test exit_code metric_digest_reports_community_search_gate_fixture` passed.
+- `make check` passed.
+- `cargo install --path .` succeeded.
+- GitHub Actions `CI` run `26488163004` passed for tsift commit `b4bba5d`: `clippy + test` finished green in 2m48s and `live Convex graph acceptance` finished green in 59s. The run only reported the existing Node.js 20 deprecation/config annotations.
+
+Commits pushed:
+
+- `btakita/tsift` `b4bba5d` (`feat: rank graph neighborhoods`)
+- `btakita/agent-loop` `67d8d612d` (`chore: update tsift neighborhood ranking`)
+<!-- agent:boundary:bb1d6a27 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -97,7 +127,7 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 preset #spec-test-build-install-commit-push
 - ~do [#gneighgate]~
 - ~do [#gsemrows]~
-- do [#gnbrank]
+- ~do [#gnbrank]~
 - do [#gtombops]
 - do [#gbenchneigh]
 <!-- /agent:queue -->
@@ -105,7 +135,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gnbrank] Add ranked neighborhood output: score neighbors by depth, edge kind, community co-membership, semantic relation, source-handle freshness, duplicate-name precision, and handle coverage; gate with community-search quality metrics before changing defaults.
 - [ ] [#gtombops] Run and document the graph tombstone cleanup workflow on the tsift graph DB: Convex reconcile, refresh, compact, then record status/doctor/file-size/tombstone-scan deltas from the current 184,722 tombstone / 27,375 live-row state.
 - [ ] [#gbenchneigh] Refresh the graph performance history with dedicated neighborhood rows so future graph-backend or hop-cap decisions compare `neighborhood`, `path_max_hops`, evidence, conflict-matrix, and dispatch-trace together instead of optimizing one surface blind.
 <!-- /agent:backlog -->

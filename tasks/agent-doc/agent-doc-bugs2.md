@@ -36,7 +36,18 @@ Compacted content:
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
 JB `Run Agent Doc` does not complete the agent-doc <file-name> run.
 #spec-test-build-install-commit-push
-<!-- agent:boundary:c34cd76d -->
+### Re: JB Run Agent Doc and #rhdr-blank — gpt-5
+
+Implemented both requested fixes.
+
+- JetBrains `Run Agent Doc` now detects the busy-actor queued route outcome and shows a visible queued/still-running notification instead of silently completing. Submodule commit `d0a83540` is pushed on `20260422/codex-agent-backend`; the parent gitlink commit for that fix is `e930038c1`.
+- `#rhdr-blank` is fixed in the shared `agent:exchange` append path. Boundary replacement and fallback append now insert a blank line before a new `### Re:` heading when prior exchange content is non-empty, and the prompt-diff classifier now treats a following `### Re: ... (HEAD)` boundary artifact as an answering response so closeout guards stay consistent. Submodule commit `4d658120` is pushed on `20260422/codex-agent-backend`; parent gitlink commit `4407b8bd9` is ready for the post-closeout push.
+- I repaired the malformed auto-queue body through `agent-doc patch` before this finalize: the older JB prompt is preserved as completed queue residue and this `#rhdr-blank` item is being closed with `--done rhdr-blank`.
+
+Verification: `cargo test exchange_`; `cargo test blank_heading_gap`; `cargo test sim_world::jb_cache_conflict`; `cargo test jetbrains_clear_session_sim_keeps_starting_route_guard_and_repairs_prompt_duplicate`; `cargo test post_commit_follow_up_sim_keeps_prompt_out_of_snapshot`; `make check`; `cargo build`; `cargo install --path .`; `agent-doc --version`; latest GitHub Actions CI run `26532894161` succeeded, including `Run make check` and `Run make tmux-ci`.
+
+Local install: `/home/brian/.cargo/bin/agent-doc` now points at the updated `0.34.0` build. The JetBrains plugin was also built and installed earlier into IntelliJ IDEA 2026.1 for the queued-reroute fix; IntelliJ needs a restart to load that plugin update.
+<!-- agent:boundary:13bb55a3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -55,16 +66,11 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 -->
 
 <!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~do [#ipcmodel]~
-- ~do [#ipcreplay]~
-- ~do [#ipcdeny]~
-- ~do [#ipcfail]~
-- ~do [#jbrunbusy]~
----
+~~~done
 JB `Run Agent Doc` does not complete the agent-doc <file-name> run.
 #spec-test-build-install-commit-push
----
+~~~
+- ~do [#rhdr-blank]. #spec-test-build-install-commit-push~
 <!-- /agent:queue -->
 
 ## Backlog

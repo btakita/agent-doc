@@ -98,10 +98,98 @@ Commit:
 Push:
 - `agent-doc` pushed to `origin/20260422/codex-agent-backend`.
 - `agent-loop` pushed to `origin/main`.
-<!-- agent:boundary:701e6b29 -->
+❯ JB Plugin error
+```
+resync: stash pane %1 is registered in its own project root — skipping kill
+[route] debounce OK — file idle for 0.5s and typing indicator idle
+[route] target tmux session: 0
+[route] codex blocked after 0.5s in pane %4: active codex turn
+Error: dispatch-only codex reopen refused to inject into pane %4 for tasks/professional/equityfundingsource.md because the latest run is still booting and never reached a dispatch-ready prompt (active codex turn); wait for the pane to become ready and reroute again
+```
+### Re: JB Plugin active-turn route refusal — gpt-5
+
+I reviewed the pasted JB Plugin error against the current route contract, source, JetBrains helper, live session status, and ops log.
+
+The refusal is correct at the safety boundary: dispatch-only Codex reroutes must not inject into a pane that is still active or lacks a dispatch-ready prompt. Current status for `tasks/professional/equityfundingsource.md` shows actor generation `32` on pane `%4`, controller state `ready`, supervisor healthy, but the live pane is `alive-busy`, `current_command=agent-doc`, and `prompt_ready=false`.
+
+The bug is classification and IDE behavior. The ops log shows an earlier `Run Agent Doc` did succeed for `equityfundingsource.md` with `route_dispatch_start_proven` and `route_dispatch_only_sent`; the later failure collided with an already-active Codex turn. That should read as "active turn already running" or a typed busy/running route result, not as "latest run is still booting and never reached a dispatch-ready prompt". On the JetBrains side, `TerminalUtil.isStartingActorRouteFailure(...)` only retries the older `authoritative actor ... still starting` diagnostic, so this newer dispatch-only active-turn refusal becomes a persistent route failure instead of a retry/coalesced in-flight state.
+
+Added backlog item at the top: `#jbrunbusy`.
+
+Changed paths: none in source this cycle; this is diagnosis plus backlog capture through the session document.
+
+Commands:
+- `tsift status`; `tsift status --fix` (still reports one missing optional workspace scope, so I did not rely on tsift search)
+- `agent-doc preflight`, `agent-doc read`, `agent-doc plan`
+- `rg` over route/spec/plugin/log surfaces for dispatch-ready, active-turn, and dispatch-proof diagnostics
+- `agent-doc session status /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- `git status --short`
+
+Verification: live session status and ops log agree that the pane is currently busy and that a prior dispatch for this file succeeded before the later collision. No source tests were run because I did not change implementation code.
+
+Escalation: none.
+
+Confidence: medium-high. The active-turn diagnosis is directly supported by current session status and ops events; the remaining implementation work is the queued `#jbrunbusy` fix.
+<!-- agent:boundary:e50bec50 -->
 <!-- /agent:exchange -->
 ###
 <!--
+JB Plugin error
+```
+resync: stash pane %45 is registered in its own project root — skipping kill
+resync: stash pane %50 is registered in its own project root — skipping kill
+[sync] recovered live pane %28 for session 62fe1f41 via supervisor pid 1379842
+[sync] recovered live pane %66 for session 41264738 via path provenance pid=3472737 instance=e8bd26de-f551-4618-8184-b0e8d5ec0e44
+[sync] recovered live pane %17 for session b26b9957 via supervisor pid 1494092
+[sync] recovered live pane %13 for session tsift-v0 via supervisor pid 1502734
+resync: stash pane %23 is unregistered but still hosts live supervisor 361544a1-7f33-41bb-ba87-a8cacc3944b4 — skipping kill
+resync: stash pane %39 is registered in its own project root — skipping kill
+resync: stash pane %42 is registered in its own project root — skipping kill
+resync: stash pane %51 is registered in its own project root — skipping kill
+resync: stash pane %43 is registered in its own project root — skipping kill
+resync: stash pane %52 is registered in its own project root — skipping kill
+resync: stash pane %49 is registered in its own project root — skipping kill
+[sync] recovered live pane %28 for session 62fe1f41 via supervisor pid 1379842
+[sync] recovered live pane %66 for session 41264738 via path provenance pid=3472737 instance=e8bd26de-f551-4618-8184-b0e8d5ec0e44
+[sync] recovered live pane %17 for session b26b9957 via supervisor pid 1494092
+resync: stash pane %17 is unregistered but still owns tasks/agent-doc/agent-doc-bugs2.md — skipping kill
+[sync] recovered live pane %28 for session 62fe1f41 via supervisor pid 1379842
+[sync] recovered live pane %66 for session 41264738 via path provenance pid=3472737 instance=e8bd26de-f551-4618-8184-b0e8d5ec0e44
+[sync] recovered live pane %17 for session b26b9957 via supervisor pid 1494092
+[sync] recovered live pane %13 for session tsift-v0 via supervisor pid 1502734
+resync: stash pane %26 is unregistered but still hosts live supervisor 6cb2a9bf-8521-46d0-8670-e76cf4aeabd4 — skipping kill
+resync: stash pane %54 is registered in its own project root — skipping kill
+resync: stash pane %48 is registered in its own project root — skipping kill
+[sync] recovered live pane %28 for session 62fe1f41 via supervisor pid 1379842
+[sync] recovered live pane %66 for session 41264738 via path provenance pid=3472737 instance=e8bd26de-f551-4618-8184-b0e8d5ec0e44
+[sync] recovered live pane %17 for session b26b9957 via supervisor pid 1494092
+[sync] recovered live pane %13 for session tsift-v0 via supervisor pid 1502734
+resync: stash pane %62 is unregistered but still hosts live supervisor be20dd6e-31ce-4f16-93ed-42c9c2a21b98 — skipping kill
+[sync] recovered live pane %28 for session 62fe1f41 via supervisor pid 1379842
+[sync] recovered live pane %66 for session 41264738 via path provenance pid=3472737 instance=e8bd26de-f551-4618-8184-b0e8d5ec0e44
+[sync] recovered live pane %17 for session b26b9957 via supervisor pid 1494092
+[sync] recovered live pane %13 for session tsift-v0 via supervisor pid 1502734
+resync: stash pane %58 is unregistered but still hosts live supervisor e3100c11-0412-4a6f-adf4-c333b3cac215 — skipping kill
+resync: stash pane %37 is registered in its own project root — skipping kill
+[sync] recovered live pane %28 for session 62fe1f41 via supervisor pid 1379842
+[sync] recovered live pane %66 for session 41264738 via path provenance pid=3472737 instance=e8bd26de-f551-4618-8184-b0e8d5ec0e44
+[sync] recovered live pane %17 for session b26b9957 via supervisor pid 1494092
+[sync] recovered live pane %13 for session tsift-v0 via supervisor pid 1502734
+resync: stash pane %33 is unregistered but still hosts live supervisor 4602f467-ef2a-4094-a750-5eb533368988 — skipping kill
+resync: stash pane %55 is registered in its own project root — skipping kill
+[route] debounce OK — file idle for 7.8s and typing indicator idle
+[route] target tmux session: 0
+[route] Pane %64 is in stash window 'stash', rescuing to agent-doc window
+[route] Rescued pane %64 via join-pane
+[agent-doc] tmux_input_event source=route.direct_pane_submit destination=pane:%64 transform=routed_trigger_enter key=text bytes=80 harness=codex detail=sha256=b661f10b8ccdc18deab2cd9a7e4810bb6267952adda77865b8c25da29f780871
+[agent-doc] tmux_input_event source=route.direct_pane_submit destination=pane:%64 transform=routed_trigger_enter key=Enter bytes=5 harness=codex
+[agent-doc] tmux_input_event source=sessions.send_submitted_text_for_harness destination=pane:%64 transform=tmux_text_enter key=text bytes=80 harness=codex detail=sha256=b661f10b8ccdc18deab2cd9a7e4810bb6267952adda77865b8c25da29f780871
+[agent-doc] tmux_input_event source=sessions.send_submitted_text_for_harness destination=pane:%64 transform=tmux_text_enter key=Enter bytes=5 harness=codex
+[route] Sent agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md → pane %64
+[route] latency budget exceeded: phase dispatch_start_proof took 10104ms (budget 10000ms, pane=%64, harness=codex, outcome=unproven_but_accepted)
+Error: dispatch-only codex reopen for tasks/agent-doc/agent-doc-bugs2.md was accepted in pane %64 via direct_pane_submit (tmux_literal_enter_delayed), but only pane-input acceptance proof was available after waiting 10s; treating this as not dispatched because no dispatch-start proof was recorded. Restore an idle codex prompt or restart the session and reroute again
+```
+---
 Please review the agent-doc, claude, codex logs. What are #next-steps to fix bugs?
 ---
 When I ran the last turn, #spec-test-build-install-commit-push was removed by agent-doc.

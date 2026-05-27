@@ -29,191 +29,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260527-045224.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260527-064854.md`*
 
 Compacted content:
-- Archived 6 response topic(s): do [#ignorebypass]; #liveipcrace; #snapabsorb; 3 more
+- Archived 4 response topic(s): tsift.md full-document IPC corruption; do [#wkbs]; JB Plugin active-turn route refusal; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ tsift.md had the full-document IPC corruption as I was typing in a prompt.
-❯ #spec-test-build-install-commit-push
-### Re: tsift.md full-document IPC corruption — gpt-5
-
-Fixed the `already_applied` socket IPC gap that matched the latest `tsift.md` evidence.
-
-Root cause: the socket path correctly skipped file-IPC fallback after an `already_applied` ACK, but it returned success without saving the agent-owned `content_ours` snapshot or marking the cycle as unsafe for later snapshot absorption. The later commit pass could then see a larger live editor buffer and convert it into the committed snapshot via `snapshot_absorb`.
-
-Changed paths:
-- `src/agent-doc/src/write.rs`
-- `src/agent-doc/SPEC.md`
-- `src/agent-doc/specs/07-closeout-commands.md`
-- `src/agent-doc` gitlink in the parent repo
-
-Changed behavior:
-- Socket `already_applied` ACKs are now treated as snapshot-bearing IPC success.
-- The write path persists `content_ours`/CRDT state when available.
-- If the live editor buffer differs from `content_ours`, the cycle records an IPC snapshot-adoption block so later commit closeout cannot absorb editor drift.
-- A regression test now proves `already_applied` saves `content_ours`, leaves live editor drift visible, and blocks later snapshot absorption.
-
-Commands and verification:
-- `cargo fmt`
-- `cargo test try_ipc_already_applied_socket_saves_content_ours_and_blocks_snapshot_absorb`
-- `cargo test commit_blocks_snapshot_absorb_after_ipc_snapshot_adoption_blocked`
-- `make check`
-- `cargo install --path .`
-- Latest GitHub `CI` run `26491258001` was green, including `Run make tmux-ci`.
-
-Commit and push:
-- `src/agent-doc`: `257bec1e` (`fix: snapshot already-applied socket ipc`) pushed to `origin/20260422/codex-agent-backend`.
-- parent `agent-loop`: `2845f9b81` (`agent-doc: update submodule for ipc snapshot fix`) pushed to `origin/main`.
-
-Escalation: none.
-
-Confidence: high. The regression covers the observed socket `already_applied` corruption path, and the full project check suite plus installed CLI completed successfully.
-❯ do [#wkbs]. #spec-test-build-install-commit-push
-### Re: do [#wkbs] — opus-4-7
-
-Landed SimWorld coverage for the JB Cache Conflict late-accept replay (`#jbccacceptdup`).
-
-Changed paths:
-- `src/agent-doc/src/sim_world.rs` — two new tests:
-  - `jb_cache_conflict_accept_late_replays_duplicate_response_today` (failing baseline)
-  - `jb_cache_conflict_accept_late_replay_manual_repair_recovers_today` (documented manual recovery)
-- `src/agent-doc/runbooks/jb-cache-conflict.md` — new "Late-Accept Replay (`#jbccacceptdup`)" section cross-linking the existing plan `tasks/agent-doc/plan-jb-cache-conflict-accept-duplicates-response.md` and the two scenarios.
-
-Commands:
-- `cargo test --bin agent-doc jb_cache_conflict_accept_late` → 2 passed, 0 failed.
-- `make check` from `agent-loop/` root → all agent-doc lib + bin tests green except one pre-existing failure (`codex_bare_run_inside_owning_pane_fails_before_nested_dispatch` in `tests/run_integration.rs`); confirmed to fail identically on a clean tree before my edits — see Escalation below.
-- `cargo build --release` from `src/agent-doc/` → 1m55s, binary at `target/release/agent-doc` v0.34.0; `.bin/agent-doc` symlink resolves cleanly and `agent-doc --version` prints `0.34.0`.
-
-Verification: both new tests pin the post-`Committed` duplicate-response shape and the manual operator recovery. `dedupe_responses` is shown to only handle identical-body duplicates, so the operator-edit path is the safe baseline until the plugin / IPC apply path revalidates against HEAD before mutation (plan steps 2–5).
-
-Confidence: high for the SimWorld scenarios themselves — they assert the exact shape observed on `boost-client/tasks/astro-listings.md` earlier in this session (committed cycle → late `DuplicateVisibleResponse` → two `### Re:` blocks, snapshot pinned to original commit). Medium overall because the binary-side guard (plan steps 2–5) is not landed in this turn — the tests are repro evidence per the backlog item's stated scope ("Adds repro evidence for SimWorld coverage").
-
-Escalation: `codex_bare_run_inside_owning_pane_fails_before_nested_dispatch` (tests/run_integration.rs:570) fails before and after my edits — the binary's recursive-dispatch guard no longer fires and the cycle reaches `session-check INTERRUPTED` instead. Pre-existing regression on `20260422/codex-agent-backend`, unrelated to JB cache conflict work. Worth a separate `#agent-doc-bug` follow-up; not blocking this item.
-
-Commit:
-- `src/agent-doc` → `411ccadc` (`test: SimWorld coverage for JB cache late-accept replay (#jbccacceptdup)`) on `20260422/codex-agent-backend`.
-- `agent-loop` parent pointer bump → `dd7d05469` (`agent-doc: bump pointer for #jbccacceptdup SimWorld coverage`) on `main`.
-
-Push:
-- `agent-doc` pushed to `origin/20260422/codex-agent-backend`.
-- `agent-loop` pushed to `origin/main`.
-❯ JB Plugin error
-```
-resync: stash pane %1 is registered in its own project root — skipping kill
-[route] debounce OK — file idle for 0.5s and typing indicator idle
-[route] target tmux session: 0
-[route] codex blocked after 0.5s in pane %4: active codex turn
-Error: dispatch-only codex reopen refused to inject into pane %4 for tasks/professional/equityfundingsource.md because the latest run is still booting and never reached a dispatch-ready prompt (active codex turn); wait for the pane to become ready and reroute again
-```
-### Re: JB Plugin active-turn route refusal — gpt-5
-
-I reviewed the pasted JB Plugin error against the current route contract, source, JetBrains helper, live session status, and ops log.
-
-The refusal is correct at the safety boundary: dispatch-only Codex reroutes must not inject into a pane that is still active or lacks a dispatch-ready prompt. Current status for `tasks/professional/equityfundingsource.md` shows actor generation `32` on pane `%4`, controller state `ready`, supervisor healthy, but the live pane is `alive-busy`, `current_command=agent-doc`, and `prompt_ready=false`.
-
-The bug is classification and IDE behavior. The ops log shows an earlier `Run Agent Doc` did succeed for `equityfundingsource.md` with `route_dispatch_start_proven` and `route_dispatch_only_sent`; the later failure collided with an already-active Codex turn. That should read as "active turn already running" or a typed busy/running route result, not as "latest run is still booting and never reached a dispatch-ready prompt". On the JetBrains side, `TerminalUtil.isStartingActorRouteFailure(...)` only retries the older `authoritative actor ... still starting` diagnostic, so this newer dispatch-only active-turn refusal becomes a persistent route failure instead of a retry/coalesced in-flight state.
-
-Added backlog item at the top: `#jbrunbusy`.
-
-Changed paths: none in source this cycle; this is diagnosis plus backlog capture through the session document.
-
-Commands:
-- `tsift status`; `tsift status --fix` (still reports one missing optional workspace scope, so I did not rely on tsift search)
-- `agent-doc preflight`, `agent-doc read`, `agent-doc plan`
-- `rg` over route/spec/plugin/log surfaces for dispatch-ready, active-turn, and dispatch-proof diagnostics
-- `agent-doc session status /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
-- `git status --short`
-
-Verification: live session status and ops log agree that the pane is currently busy and that a prior dispatch for this file succeeded before the later collision. No source tests were run because I did not change implementation code.
-
-Escalation: none.
-
-Confidence: medium-high. The active-turn diagnosis is directly supported by current session status and ops events; the remaining implementation work is the queued `#jbrunbusy` fix.
-resync: stash pane %45 is registered in its own project root — skipping kill
-resync: stash pane %50 is registered in its own project root — skipping kill
-[sync] recovered live pane %28 for session 62fe1f41 via supervisor pid 1379842
-[sync] recovered live pane %66 for session 41264738 via path provenance pid=3472737 instance=e8bd26de-f551-4618-8184-b0e8d5ec0e44
-[sync] recovered live pane %17 for session b26b9957 via supervisor pid 1494092
-[sync] recovered live pane %13 for session tsift-v0 via supervisor pid 1502734
-resync: stash pane %23 is unregistered but still hosts live supervisor 361544a1-7f33-41bb-ba87-a8cacc3944b4 — skipping kill
-resync: stash pane %39 is registered in its own project root — skipping kill
-resync: stash pane %42 is registered in its own project root — skipping kill
-resync: stash pane %51 is registered in its own project root — skipping kill
-resync: stash pane %43 is registered in its own project root — skipping kill
-resync: stash pane %52 is registered in its own project root — skipping kill
-resync: stash pane %49 is registered in its own project root — skipping kill
-[sync] recovered live pane %28 for session 62fe1f41 via supervisor pid 1379842
-[sync] recovered live pane %66 for session 41264738 via path provenance pid=3472737 instance=e8bd26de-f551-4618-8184-b0e8d5ec0e44
-[sync] recovered live pane %17 for session b26b9957 via supervisor pid 1494092
-resync: stash pane %17 is unregistered but still owns tasks/agent-doc/agent-doc-bugs2.md — skipping kill
-[sync] recovered live pane %28 for session 62fe1f41 via supervisor pid 1379842
-[sync] recovered live pane %66 for session 41264738 via path provenance pid=3472737 instance=e8bd26de-f551-4618-8184-b0e8d5ec0e44
-[sync] recovered live pane %17 for session b26b9957 via supervisor pid 1494092
-[sync] recovered live pane %13 for session tsift-v0 via supervisor pid 1502734
-resync: stash pane %26 is unregistered but still hosts live supervisor 6cb2a9bf-8521-46d0-8670-e76cf4aeabd4 — skipping kill
-resync: stash pane %54 is registered in its own project root — skipping kill
-resync: stash pane %48 is registered in its own project root — skipping kill
-[sync] recovered live pane %28 for session 62fe1f41 via supervisor pid 1379842
-[sync] recovered live pane %66 for session 41264738 via path provenance pid=3472737 instance=e8bd26de-f551-4618-8184-b0e8d5ec0e44
-[sync] recovered live pane %17 for session b26b9957 via supervisor pid 1494092
-[sync] recovered live pane %13 for session tsift-v0 via supervisor pid 1502734
-resync: stash pane %62 is unregistered but still hosts live supervisor be20dd6e-31ce-4f16-93ed-42c9c2a21b98 — skipping kill
-[sync] recovered live pane %28 for session 62fe1f41 via supervisor pid 1379842
-[sync] recovered live pane %66 for session 41264738 via path provenance pid=3472737 instance=e8bd26de-f551-4618-8184-b0e8d5ec0e44
-[sync] recovered live pane %17 for session b26b9957 via supervisor pid 1494092
-[sync] recovered live pane %13 for session tsift-v0 via supervisor pid 1502734
-resync: stash pane %58 is unregistered but still hosts live supervisor e3100c11-0412-4a6f-adf4-c333b3cac215 — skipping kill
-resync: stash pane %37 is registered in its own project root — skipping kill
-[sync] recovered live pane %28 for session 62fe1f41 via supervisor pid 1379842
-[sync] recovered live pane %66 for session 41264738 via path provenance pid=3472737 instance=e8bd26de-f551-4618-8184-b0e8d5ec0e44
-[sync] recovered live pane %17 for session b26b9957 via supervisor pid 1494092
-[sync] recovered live pane %13 for session tsift-v0 via supervisor pid 1502734
-resync: stash pane %33 is unregistered but still hosts live supervisor 4602f467-ef2a-4094-a750-5eb533368988 — skipping kill
-resync: stash pane %55 is registered in its own project root — skipping kill
-[route] debounce OK — file idle for 7.8s and typing indicator idle
-[route] Pane %64 is in stash window 'stash', rescuing to agent-doc window
-[route] Rescued pane %64 via join-pane
-[agent-doc] tmux_input_event source=route.direct_pane_submit destination=pane:%64 transform=routed_trigger_enter key=text bytes=80 harness=codex detail=sha256=b661f10b8ccdc18deab2cd9a7e4810bb6267952adda77865b8c25da29f780871
-[agent-doc] tmux_input_event source=route.direct_pane_submit destination=pane:%64 transform=routed_trigger_enter key=Enter bytes=5 harness=codex
-[agent-doc] tmux_input_event source=sessions.send_submitted_text_for_harness destination=pane:%64 transform=tmux_text_enter key=text bytes=80 harness=codex detail=sha256=b661f10b8ccdc18deab2cd9a7e4810bb6267952adda77865b8c25da29f780871
-[agent-doc] tmux_input_event source=sessions.send_submitted_text_for_harness destination=pane:%64 transform=tmux_text_enter key=Enter bytes=5 harness=codex
-[route] Sent agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md → pane %64
-[route] latency budget exceeded: phase dispatch_start_proof took 10104ms (budget 10000ms, pane=%64, harness=codex, outcome=unproven_but_accepted)
-Error: dispatch-only codex reopen for tasks/agent-doc/agent-doc-bugs2.md was accepted in pane %64 via direct_pane_submit (tmux_literal_enter_delayed), but only pane-input acceptance proof was available after waiting 10s; treating this as not dispatched because no dispatch-start proof was recorded. Restore an idle codex prompt or restart the session and reroute again
-### Re: JB Plugin accepted-only route proof after stash rescue — gpt-5
-
-I reviewed the new pasted route/sync log against `agent-doc` ops, the document session log, current `session status`, and the existing plans.
-
-This is not the same shape as `#jbrunbusy`. The `%64` failure is the accepted-only dispatch-proof path: route successfully sent `agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` into pane `%64`, but Codex hook tracking did not produce routed-submit proof within the 10s proof budget. The binary is intentionally fail-closed here; pane-input acceptance is not enough to claim Codex consumed the reopen.
-
-Relevant evidence:
-- `controller_dispatch_accepted ... pane=%64 generation=197 state=ready kind=dispatch_only_reopen`
-- `route_latency phase=direct_pane_submit ... outcome=accepted`
-- `route_latency phase=dispatch_start_proof ... outcome=unproven_but_accepted`
-- `route_dispatch_only_submit_unproven ... proof=accepted proof_scope=accepted_only`
-- current status has moved on to pane `%6`, generation `199`, but still shows a projection mismatch: actor `ready`, supervisor/controller runtime `starting`, live pane `alive-busy`, `prompt_ready=false`.
-
-Next steps, in priority order:
-1. Top backlog item: `#snrun`. Implement `tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md`. This is the broader fix for `Run Agent Doc` after accepted-only Codex proof gaps: classify whether the pane was not truly dispatch-ready, the hook proof raced/dropped, or the route should retry/fresh-start once before showing the plugin failure.
-2. Keep `#jbrunbusy` next. That is the narrower active-turn classification bug from the prior `equityfundingsource.md` repro, where an already-running turn was surfaced as a misleading boot/startup refusal.
-3. Use `tasks/agent-doc/plan-sync-command-route-error-follow-up.md` as supporting context if the implementation touches stale route-error cleanup or `ready` vs `starting` projection reconciliation.
-4. Use `tasks/agent-doc/plan-jb-route-rescued-stash-pane-starting-actor.md` as supporting context for stash-rescue ownership checks, but the current `%64` evidence is not the cross-file version of that bug.
-
-Changed paths: no source changes this cycle; I added the `#snrun` backlog item through the session document.
-
-Commands:
-- `tsift status`; `tsift index --workspace .`
-- `agent-doc preflight`, `agent-doc read`, `agent-doc plan`
-- `agent-doc session status /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
-- targeted `rg`/`sed` inspection of `.agent-doc/logs/ops.log`, the session log, and existing plan files
-
-Verification: diagnosis only. No implementation tests were run because no source code changed.
-
-Escalation: none.
-
-Confidence: medium-high. The ops lines clearly separate tmux acceptance from missing Codex dispatch-start proof; the remaining uncertainty is whether the implementation should recover with a second proof source, one bounded restart, or both.
-<!-- agent:boundary:a0557b1b -->
+<!-- agent:boundary:d12ed8eb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -225,7 +46,10 @@ As I was typing into the comment below `/agent:exchange`, the full-document IPC 
 #spec-test-build-install-commit-push
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+preset #spec-test-build-install-commit-push
+- do [#snrun]
+- do [#jbrunbusy]
 <!-- /agent:queue -->
 
 ## Pending / Not Built

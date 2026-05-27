@@ -151,7 +151,30 @@ Repaired the `tasks/software/tsift.md` corruption from the JetBrains File Cache 
 I removed the stale replayed exchange tail, restored the session document to a single balanced `agent:queue` component, and kept the queue at the current committed state with only the backend proof item still open. `agent-doc session-check` passes for the document.
 
 For `#agent-doc-bug`, the existing backlog item `#0ep7` already tracks this class through `tasks/agent-doc/plan-jb-cache-conflict-cancel-uncommitted-response.md`. I updated that plan with this live `tsift.md` duplicate-response and duplicate-queue-tag incident and committed it as `1d34183c7`.
-<!-- agent:boundary:6408695f -->
+❯ Can tsift be made into a knowledge layer for realtime avatars and for agents?
+❯ tsift start off to navigate code, but it can also navigate markdown.
+❯ Should we have a separate project or should tsift support the db/knowledge retrieval for realtime voice avatars?
+### Re: tsift as an avatar/agent knowledge layer — gpt-5
+
+Yes, tsift can become the knowledge layer for realtime avatars and agents, but the boundary matters.
+
+The right split is: keep tsift as the substrate/index/retrieval engine, and put avatar runtime behavior in a separate integration layer. Tsift already has the pieces that should stay shared: provider-neutral `GraphStore` records, provenance/freshness, markdown/session projections, semantic rows, evidence packets, neighborhoods, paths, Convex sync, and optional backend evaluation. Those are useful for both coding agents and realtime avatars.
+
+What should not live directly in tsift is the product/runtime loop: LiveKit session state, voice interruption handling, persona policy, user-facing memory consent, per-user privacy rules, and model-specific response orchestration. Those should be in a small avatar/agent service or adapter that calls tsift for retrieval.
+
+So I would not create a separate knowledge database project yet. I would make tsift support the generic retrieval needs, then create a separate application adapter only for realtime voice specifics. Forking the knowledge substrate now would create two graph schemas, two freshness models, and two retrieval stacks before we know the actual latency and memory requirements.
+
+The missing proof is not whether tsift can store markdown. It can. The missing proof is whether it can serve the realtime shape well:
+
+- conversation transcript and memory adapters, not only code/session docs
+- topic/entity/event/time edges for non-code knowledge
+- low-latency read API, likely library or daemon, not only CLI process startup
+- incremental freshness for live conversations and edited markdown
+- permission/delete semantics for personal memory
+- retrieval evals for avatar turns: answer relevance, recency, source grounding, and p95 latency
+
+I added backlog item `#gavatar` to make that an explicit evaluation slice. The decision gate should be: if tsift can satisfy the avatar retrieval API with stable latency and clean privacy/freshness semantics, keep it as the common knowledge layer. If the realtime service needs domain-specific session state or persona policy, build that as a separate app layer on top, not as a competing database.
+<!-- agent:boundary:79a9d952 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -173,6 +196,7 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#gavatar] [tag: knowledge-layer] [tag: realtime] Evaluate tsift as a realtime avatar/agent knowledge layer: define GraphStore adapters for markdown/conversation memory, a low-latency retrieval API, freshness/privacy rules, and benchmark fixtures before deciding whether to split an application-specific service.
 - [ ] [#gbackendproof] [tag: graph] [tag: performance] Evaluate FalkorDB/Kuzu only as native optional GraphStore adapters: require provider-neutral projection writes/load, freshness/parity, lock behavior, install portability, and faster real/full-projection evidence/conflict/dispatch/path metrics than SQLite before promotion.
 <!-- /agent:backlog -->
 

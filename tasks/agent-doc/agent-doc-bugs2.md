@@ -118,12 +118,70 @@ The important boundary is that `agent-doc` owns the document lifecycle: prefligh
 So an apparently idle console can still fail as "busy" when `agent-doc` cannot prove prompt readiness. Common cases are:
 
 - the pane is idle at text that does not match the expected Claude/Codex ready prompt;
+❯ Can we have a more robust solution than reading the console state? Are hooks available or some file based IPC that agent-doc can read instead?
 - the authoritative actor store still points at a generation that never completed its closeout handshake;
+❯ If a previous turn did not complete, can agent-doc close out the previous turn without any conflicts?
 - the pane is waiting in a sub-state that looks quiet to a human, such as a tool/approval/recovery boundary;
+❯ Can we queue further dispatches? Perhaps we should make the agent:queue mechanism a central part of agent-doc dispatch? Where dispatched prompts can be added to an item on a queue? Can we ensure multiple dispatches for a document don't exceed 1 with this on-demand queuing?
 - the route is looking at a stale or wrong actor projection and fails closed rather than injecting into a possibly active turn.
+❯ Can we make the system more robust by using the queue mechanism? Can dispatch "self-heal" by routing a mis-routed dispatch to an existing claiming tmux pane/Supervisor or launch a new tmux pane/Supervisor?
 
 The error wording is the key detail: "did not return to a dispatch-ready prompt" is not proof that tokens were streaming. It means route had an authoritative actor for the document, but prompt-readiness proof did not arrive within the wait window, so it refused to send another trigger. The existing `#snrun` review item is aimed at splitting those cases apart so the UI can distinguish real active-turn collisions from stale actor/proof-miss states.
-<!-- agent:boundary:e2e92663 -->
+
+❯ As I was typing in this prompt, the duplicate document content was injected by agent-doc, corrupting the document. Please create a mermaid diagraming the failure cases that occurred.
+### Re: robust dispatch and duplicate IPC failure modes — gpt-5
+
+Yes: the more robust design is to stop treating console text as the primary source of truth. The prompt-ready check should be a final safety barrier, not the authority model. The authority model should be durable and typed:
+
+- controller actor state: document, pane, harness, generation, supervisor socket, lifecycle state;
+- supervisor lifecycle IPC: `starting`, `busy`, `ready`, `waiting_input`, `blocked`, `closed`;
+- Codex hooks where available: `UserPromptSubmit` tracks the active document and `Stop` can materialize a valid single assistant closeout;
+- closeout state files: cycle/capture state, response probe, snapshot hash, baseline hash;
+- a durable per-document dispatch queue/lease so reroutes become ordered work instead of direct pane injection attempts.
+
+So: yes, hooks and file/socket IPC are available, but the important rule is that no single channel should be trusted as whole-document authority. Console readiness, supervisor state, hook state, cycle state, and IPC ACK content need to agree on a typed transition. If they disagree, route should fail closed or enqueue, not inject.
+
+For an incomplete previous turn, `agent-doc` can close it out without conflict only when it can prove the missing closeout is exactly one assistant response for the still-current cycle. That means the response body probe is present, the baseline/cycle id still match, there is no live user prompt drift after preflight, and the candidate is not transcript-shaped duplicate content. If those proofs are missing, it must not silently close the previous turn; it should preserve the visible drift and force the next `preflight` / `finalize` recovery path.
+
+Queueing is the right direction. I would make dispatch single-flight per document:
+
+1. editor or CLI dispatch asks the controller for the authoritative document lease;
+2. if a turn is active, append the requested reopen/prompt to durable `agent:queue` or a queue-backed dispatch record;
+3. do not inject a second prompt into the pane;
+4. after committed closeout, the Stop hook or supervisor asks `agent-doc` to continue the next queue head;
+5. if the queue head does not advance after a continuation, fail closed to avoid a loop.
+
+Self-healing should also route through that lease. A misrouted dispatch can rebind to an existing claiming supervisor when the actor store, pane, harness, and generation prove ownership. It can launch a new pane only when the previous owner is dead, closed, unreachable, or explicitly stale. It should not treat an apparently idle pane as safe when the actor store still says another live generation owns the document.
+
+```mermaid
+flowchart TD
+    A["User edits prompt in document"] --> B["agent-doc preflight saves baseline"]
+    B --> C["Harness answers and calls finalize"]
+    C --> D["finalize builds agent-owned content_ours"]
+    D --> E["IPC patch sent to editor/plugin"]
+
+    A --> F["User keeps typing after baseline"]
+    F --> G["live buffer now has prompt drift"]
+
+    E --> H{"ACK content source"}
+    H -->|"patch ACK matches content_ours"| I["safe: save snapshot from response image"]
+    H -->|"whole-buffer ACK includes live typing"| J["danger: prompt drift after preflight"]
+    H -->|"stale cache/conflict replay"| K["danger: duplicate full document or old exchange"]
+    H -->|"late fallback patch after commit"| L["danger: stale response replay"]
+
+    J --> M{"guard blocks adoption?"}
+    K --> M
+    L --> M
+
+    M -->|"yes"| N["leave drift visible, save content_ours snapshot, next cycle answers drift"]
+    M -->|"no"| O["bad path: duplicate prompt/document content becomes editor-visible or committed"]
+
+    O --> P["preflight/session-check must repair or fail closed"]
+    N --> Q["session-check proves one committed turn"]
+```
+
+The concrete failure class you saw is the bad path through `whole-buffer ACK` or stale replay while live typing changed the document after preflight. The invariant that eliminates it is: IPC ACK content is an observation, not authority. Authority must remain the agent-owned response image plus explicit proof that no user-owned drift or duplicate prompt material was absorbed. This is exactly the kind of behavior I would fold into the existing `#snrun` route/replay review item rather than split into a second competing routing task.
+<!-- agent:boundary:5e2b5b75 -->
 <!-- /agent:exchange -->
 ###
 <!--

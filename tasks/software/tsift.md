@@ -36,7 +36,8 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 6 response topic(s): #gneighgate; closeout repair; #gsemrows; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:41551ed9 -->
+Please add #next-steps for graph and tag neighborhood effectiveness and performance.
+<!-- agent:boundary:10052b30 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -34,7 +34,31 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 5 response topic(s): IPC closeout state model; EFS IPC replay harness; fullContent receiver guards; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:302d3893 -->
+❯ do [#0ep7]. #spec-test-build-install-commit-push
+### Re: #0ep7 — gpt-5
+
+Implemented `#0ep7`.
+
+Changed paths:
+- `src/agent-doc/src/capture.rs`: terminal capture updates now refresh the active capture `file_hash` and `snapshot_hash` from the recovered document/snapshot when a capture reaches `committed`, so a JB cancel recovery does not leave stale replay sidecars behind.
+- `src/agent-doc/src/preflight.rs`: added `preflight_recovers_jb_cache_conflict_cancel_orphaned_capture_once`, covering the visible already-present response plus orphaned pending/capture sidecar shape. It proves one recovery commit, pending sidecar removal, terminal capture state, refreshed hashes, one response heading, balanced queue scaffold, and green `session-check`.
+- `src/agent-doc/specs/07-closeout-commands.md`: specified the JB File Cache Conflict cancel recovery invariant.
+
+Verification:
+- `cargo test preflight_recovers_jb_cache_conflict_cancel_orphaned_capture_once -- --nocapture`
+- `cargo test jb_cache_conflict -- --nocapture`
+- `cargo test mark_committed_updates_capture_state -- --nocapture`
+- `make check`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.34.0`
+- GitHub Actions CI run `26503616492` is green; its `Run make tmux-ci` step succeeded.
+
+Commits prepared before session closeout:
+- `src/agent-doc`: `98a81c06` (`fix: retire jb cancel orphaned captures`)
+- parent repo: `f46839242` (`agent-doc: update submodule for jb cancel recovery`)
+
+Push is intentionally after this binary-owned session closeout so the session response commit is included with the pushed parent branch.
+<!-- agent:boundary:609c0541 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -64,7 +88,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#0ep7] Implement tasks/agent-doc/plan-jb-cache-conflict-cancel-uncommitted-response.md: make JB File Cache Conflict cancel recovery commit a visible already-present response exactly once, refresh stale sidecars, retire orphaned captures, and make session-check pass.
 <!-- /agent:backlog -->
 
 ## Review

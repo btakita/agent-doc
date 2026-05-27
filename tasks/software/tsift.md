@@ -36,7 +36,29 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 3 response topic(s): next-steps to complete the review items; queue #spec-test-build-install-commit-push; queue cleanup
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:0e2d6374 -->
+❯ What are #next-steps to complete the review items?
+### Re: next-steps to complete the review items — glm-5.1
+
+All 6 review items are gated `[/]`. Here's the concrete path to closing them:
+
+**Code-complete, ready to mark done after local verification:**
+
+1. **#gopencode-install** — Code is complete: `tsift init --opencode` writes all 6 commands, 10 tests pass (5 Rust + 5 Node.js), cross-validation between npm package and Rust binary passes. Next step: run `tsift init --opencode` in a fresh temp project and confirm `/tsift-status` resolves in an opencode session, then mark done.
+
+2. **#gopencode** — Code is complete: installer, marker ownership, fail-closed conflict handling, README docs, CI verification, Node.js plugin. Same local e2e verification as above closes this.
+
+**Blocked on npm auth (operational, not code):**
+
+3. **#npm-publish** — Package is structurally ready (`npm run publish:check` dry-run passes in CI). Blocker: configure `NPM_TOKEN` as a GitHub repo secret and set `TSIFT_ENABLE_NPM_PUBLISH=true` as a repo variable. Then tag a release to trigger the `publish-opencode-plugin` CI job.
+
+4. **#e2e-install** — Two paths:
+   - *Local path (available now):* `tsift init --opencode` in a fresh opencode project, verify `/tsift-status` works. This doesn't need npm.
+   - *Full path (needs npm publish first):* `opencode plugin opencode-tsift` in a fresh project. Requires #npm-publish completion.
+
+**Duplicate items** — `#e2e-install` and `#npm-publish` each appear twice in review. Recommend dedup on next edit.
+
+Top of backlog: **#local-e2e-verify**
+<!-- agent:boundary:865133f5 -->
 <!-- /agent:exchange -->
 ###
 <!--

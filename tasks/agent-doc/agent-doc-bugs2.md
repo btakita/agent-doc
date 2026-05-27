@@ -39,7 +39,7 @@ When I restarted agent-doc on tsift.md, then ran JB `Run Agent Doc`, the dispatc
 ❯ When I ran JB `Run Agent Doc` on this file, dispatch did not occur but the prompt was added to the queue.
 ❯ If I update the prompt then rerun JB `Run Agent Doc`, the queue prompt should also be update.
 #spec-test-build-install-commit-push #mermaid
-### Re: queued Run Agent Doc prompt update — gpt-5 (HEAD)
+### Re: queued Run Agent Doc prompt update — gpt-5
 
 Fixed the queued JB `Run Agent Doc` rerun case.
 
@@ -82,7 +82,16 @@ Commits:
 - superproject: `4d59ff074 agent-doc: update queued rerun prompt handling`
 
 The push is intentionally after this binary-owned session closeout, so the session document stays out of the manual implementation commits.
-<!-- agent:boundary:e0e6b1c3 -->
+### Re: queued Run Agent Doc prompt update follow-up — gpt-5
+
+The recovery preflight found that the two edited prompt lines were visible locally but had not crossed the prior commit boundary. This response is the binary-owned closeout repair for those same prompts.
+
+The implementation fix above covers both reported behaviors: the first JB `Run Agent Doc` can queue behind a busy actor, and a later rerun with edited prompt text now supersedes the single live route-owned `agent:queue auto` prompt instead of leaving stale wording queued.
+
+Verification remains unchanged and passing: focused route tests, full `make check`, local `cargo install --path .`, and the latest GitHub Actions `CI` run `26540718037` including `Run make tmux-ci` all passed.
+
+No additional follow-up item is created by this closeout repair; the existing backlog entries already present in the document are left intact.
+<!-- agent:boundary:98e8072f -->
 <!-- /agent:exchange -->
 ###
 <!--

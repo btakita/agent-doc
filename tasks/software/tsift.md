@@ -199,7 +199,7 @@ tsift/
 - Splitting adds workspace overhead, version coordination, dependency management
 - The tokensave ports haven't started yet — crate boundaries should reflect the final architecture, not the current one
 - **Recommendation**: start the tokensave Phase 1 (DB reader adapter), then split as part of Phase 2 when you have concrete code to organize
-<!-- agent:boundary:2c5a53b8 -->
+<!-- agent:boundary:4f37ddf3 -->
 <!-- /agent:exchange -->
 ###
 <!--

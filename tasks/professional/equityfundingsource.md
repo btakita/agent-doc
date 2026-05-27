@@ -35,7 +35,10 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 Compacted content:
 - Archived 1 response topic(s): Borrower login, footer email, and /apply 404
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:13948e0a -->
+The mobile menu is bleeding into the desktop responsive view.
+![img_7.png](img_7.png)
+#spec-test-commit-push
+<!-- agent:boundary:f97890bd -->
 <!-- /agent:exchange -->
 ###
 <!--

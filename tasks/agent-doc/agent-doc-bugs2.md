@@ -69,7 +69,36 @@ Commit and push:
 Escalation: none.
 
 Confidence: high. The regression covers the observed socket `already_applied` corruption path, and the full project check suite plus installed CLI completed successfully.
-<!-- agent:boundary:5f234ab0 -->
+❯ do [#wkbs]. #spec-test-build-install-commit-push
+### Re: do [#wkbs] — opus-4-7
+
+Landed SimWorld coverage for the JB Cache Conflict late-accept replay (`#jbccacceptdup`).
+
+Changed paths:
+- `src/agent-doc/src/sim_world.rs` — two new tests:
+  - `jb_cache_conflict_accept_late_replays_duplicate_response_today` (failing baseline)
+  - `jb_cache_conflict_accept_late_replay_manual_repair_recovers_today` (documented manual recovery)
+- `src/agent-doc/runbooks/jb-cache-conflict.md` — new "Late-Accept Replay (`#jbccacceptdup`)" section cross-linking the existing plan `tasks/agent-doc/plan-jb-cache-conflict-accept-duplicates-response.md` and the two scenarios.
+
+Commands:
+- `cargo test --bin agent-doc jb_cache_conflict_accept_late` → 2 passed, 0 failed.
+- `make check` from `agent-loop/` root → all agent-doc lib + bin tests green except one pre-existing failure (`codex_bare_run_inside_owning_pane_fails_before_nested_dispatch` in `tests/run_integration.rs`); confirmed to fail identically on a clean tree before my edits — see Escalation below.
+- `cargo build --release` from `src/agent-doc/` → 1m55s, binary at `target/release/agent-doc` v0.34.0; `.bin/agent-doc` symlink resolves cleanly and `agent-doc --version` prints `0.34.0`.
+
+Verification: both new tests pin the post-`Committed` duplicate-response shape and the manual operator recovery. `dedupe_responses` is shown to only handle identical-body duplicates, so the operator-edit path is the safe baseline until the plugin / IPC apply path revalidates against HEAD before mutation (plan steps 2–5).
+
+Confidence: high for the SimWorld scenarios themselves — they assert the exact shape observed on `boost-client/tasks/astro-listings.md` earlier in this session (committed cycle → late `DuplicateVisibleResponse` → two `### Re:` blocks, snapshot pinned to original commit). Medium overall because the binary-side guard (plan steps 2–5) is not landed in this turn — the tests are repro evidence per the backlog item's stated scope ("Adds repro evidence for SimWorld coverage").
+
+Escalation: `codex_bare_run_inside_owning_pane_fails_before_nested_dispatch` (tests/run_integration.rs:570) fails before and after my edits — the binary's recursive-dispatch guard no longer fires and the cycle reaches `session-check INTERRUPTED` instead. Pre-existing regression on `20260422/codex-agent-backend`, unrelated to JB cache conflict work. Worth a separate `#agent-doc-bug` follow-up; not blocking this item.
+
+Commit:
+- `src/agent-doc` → `411ccadc` (`test: SimWorld coverage for JB cache late-accept replay (#jbccacceptdup)`) on `20260422/codex-agent-backend`.
+- `agent-loop` parent pointer bump → `dd7d05469` (`agent-doc: bump pointer for #jbccacceptdup SimWorld coverage`) on `main`.
+
+Push:
+- `agent-doc` pushed to `origin/20260422/codex-agent-backend`.
+- `agent-loop` pushed to `origin/main`.
+<!-- agent:boundary:701e6b29 -->
 <!-- /agent:exchange -->
 ###
 <!--

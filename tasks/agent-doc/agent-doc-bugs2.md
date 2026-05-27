@@ -130,12 +130,6 @@ Verification: live session status and ops log agree that the pane is currently b
 Escalation: none.
 
 Confidence: medium-high. The active-turn diagnosis is directly supported by current session status and ops events; the remaining implementation work is the queued `#jbrunbusy` fix.
-<!-- agent:boundary:bde7b904 -->
-<!-- /agent:exchange -->
-###
-<!--
-JB Plugin error
-```
 resync: stash pane %45 is registered in its own project root — skipping kill
 resync: stash pane %50 is registered in its own project root — skipping kill
 [sync] recovered live pane %28 for session 62fe1f41 via supervisor pid 1379842
@@ -178,7 +172,6 @@ resync: stash pane %37 is registered in its own project root — skipping kill
 resync: stash pane %33 is unregistered but still hosts live supervisor 4602f467-ef2a-4094-a750-5eb533368988 — skipping kill
 resync: stash pane %55 is registered in its own project root — skipping kill
 [route] debounce OK — file idle for 7.8s and typing indicator idle
-[route] target tmux session: 0
 [route] Pane %64 is in stash window 'stash', rescuing to agent-doc window
 [route] Rescued pane %64 via join-pane
 [agent-doc] tmux_input_event source=route.direct_pane_submit destination=pane:%64 transform=routed_trigger_enter key=text bytes=80 harness=codex detail=sha256=b661f10b8ccdc18deab2cd9a7e4810bb6267952adda77865b8c25da29f780871
@@ -188,8 +181,42 @@ resync: stash pane %55 is registered in its own project root — skipping kill
 [route] Sent agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md → pane %64
 [route] latency budget exceeded: phase dispatch_start_proof took 10104ms (budget 10000ms, pane=%64, harness=codex, outcome=unproven_but_accepted)
 Error: dispatch-only codex reopen for tasks/agent-doc/agent-doc-bugs2.md was accepted in pane %64 via direct_pane_submit (tmux_literal_enter_delayed), but only pane-input acceptance proof was available after waiting 10s; treating this as not dispatched because no dispatch-start proof was recorded. Restore an idle codex prompt or restart the session and reroute again
-```
----
+### Re: JB Plugin accepted-only route proof after stash rescue — gpt-5
+
+I reviewed the new pasted route/sync log against `agent-doc` ops, the document session log, current `session status`, and the existing plans.
+
+This is not the same shape as `#jbrunbusy`. The `%64` failure is the accepted-only dispatch-proof path: route successfully sent `agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` into pane `%64`, but Codex hook tracking did not produce routed-submit proof within the 10s proof budget. The binary is intentionally fail-closed here; pane-input acceptance is not enough to claim Codex consumed the reopen.
+
+Relevant evidence:
+- `controller_dispatch_accepted ... pane=%64 generation=197 state=ready kind=dispatch_only_reopen`
+- `route_latency phase=direct_pane_submit ... outcome=accepted`
+- `route_latency phase=dispatch_start_proof ... outcome=unproven_but_accepted`
+- `route_dispatch_only_submit_unproven ... proof=accepted proof_scope=accepted_only`
+- current status has moved on to pane `%6`, generation `199`, but still shows a projection mismatch: actor `ready`, supervisor/controller runtime `starting`, live pane `alive-busy`, `prompt_ready=false`.
+
+Next steps, in priority order:
+1. Top backlog item: `#snrun`. Implement `tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md`. This is the broader fix for `Run Agent Doc` after accepted-only Codex proof gaps: classify whether the pane was not truly dispatch-ready, the hook proof raced/dropped, or the route should retry/fresh-start once before showing the plugin failure.
+2. Keep `#jbrunbusy` next. That is the narrower active-turn classification bug from the prior `equityfundingsource.md` repro, where an already-running turn was surfaced as a misleading boot/startup refusal.
+3. Use `tasks/agent-doc/plan-sync-command-route-error-follow-up.md` as supporting context if the implementation touches stale route-error cleanup or `ready` vs `starting` projection reconciliation.
+4. Use `tasks/agent-doc/plan-jb-route-rescued-stash-pane-starting-actor.md` as supporting context for stash-rescue ownership checks, but the current `%64` evidence is not the cross-file version of that bug.
+
+Changed paths: no source changes this cycle; I added the `#snrun` backlog item through the session document.
+
+Commands:
+- `tsift status`; `tsift index --workspace .`
+- `agent-doc preflight`, `agent-doc read`, `agent-doc plan`
+- `agent-doc session status /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
+- targeted `rg`/`sed` inspection of `.agent-doc/logs/ops.log`, the session log, and existing plan files
+
+Verification: diagnosis only. No implementation tests were run because no source code changed.
+
+Escalation: none.
+
+Confidence: medium-high. The ops lines clearly separate tmux acceptance from missing Codex dispatch-start proof; the remaining uncertainty is whether the implementation should recover with a second proof source, one bounded restart, or both.
+<!-- agent:boundary:21edbd3d -->
+<!-- /agent:exchange -->
+###
+<!--
 Please review the agent-doc, claude, codex logs. What are #next-steps to fix bugs?
 ---
 When I ran the last turn, #spec-test-build-install-commit-push was removed by agent-doc.

@@ -18,7 +18,7 @@ queue_active: true
 ## Status
 
 <!-- agent:status patch=replace -->
-Reviewed inactive queue edits; no preset dispatched. #gopencode remains the top backlog item.
+OpenCode tsift shortcuts shipped and pushed. #gopencode is gated on the remaining live agent-doc OpenCode smoke; #gbackendproof is complete.
 <!-- /agent:status -->
 
 ## Spec
@@ -135,7 +135,39 @@ Current priority remains:
 Preflight warning noted: the post-exchange HTML comment that mentions `#next-steps` is preserved as a non-executable note. Move it into `agent:exchange` or activate `agent:queue` if it should run.
 
 No repo code changed in this cycle, and I did not run the build/test/install/push preset because the queue is inactive.
-<!-- agent:boundary:42b6e74a -->
+
+### Re: OpenCode + backend proof queue — gpt-5
+
+Implemented the OpenCode integration path for `tsift init` and ran the build/test/install/commit/push preset.
+
+What changed:
+
+- Added `tsift init --opencode`, which installs marker-owned `.opencode/commands/tsift-*.md` command shortcuts for status, session review, context pack, diff digest, test digest, and log digest workflows.
+- The OpenCode files are idempotent and fail closed if a same-name command file exists without a tsift ownership marker, so user-managed OpenCode commands are not overwritten.
+- Updated `README.md` and `SPEC.md` to document the OpenCode setup path and shortcut set.
+- Added deterministic init tests for OpenCode command creation, idempotency, and unmanaged-file conflict handling.
+
+I checked the current OpenCode docs while choosing the integration shape: OpenCode reads project `AGENTS.md` rules, and per-project custom commands live under `.opencode/commands/` ([rules](https://open-code.ai/en/docs/rules), [commands](https://open-code.ai/en/docs/commands)). That made command templates the right first-class surface rather than a background hook.
+
+# gbackendproof is complete: the FalkorDB/Kuzu requirement is already represented by `graph-db backend-eval` and its backend-adapter spike gate. The full conformance and perf-gate suites passed with that proof still enforced, including the adapter requirements for provider-neutral projection load, parity, lock behavior, install portability, full-projection evidence, and faster-than-SQLite promotion checks.
+
+# gopencode is code-complete but gated on live harness validation: I verified the CLI/install side with `opencode --version` (`1.14.50`) and a local `tsift init --opencode` smoke, but I did not run an interactive end-to-end `agent-doc` OpenCode TUI session in this Codex turn. I moved the item to review/gated instead of marking it done so the remaining live smoke is explicit.
+
+Verification and release evidence:
+
+- `cargo check` passed.
+- `cargo test init_` passed: 25 init tests.
+- `make check` passed: clippy plus all test suites.
+- `cargo build` passed.
+- `cargo install --path . --force` installed `tsift 0.1.62` to `/home/brian/.cargo/bin/tsift`.
+- Installed `tsift init --help` shows `--opencode`.
+- Fresh GitHub Actions CI run `26534384158` passed both jobs: `clippy + test` and `live Convex graph acceptance`. The current CI workflow has no tmux-test job; annotations were limited to the GitHub Actions Node 20 deprecation notice and the expected live Convex URL configuration note.
+
+Commits pushed:
+
+- `btakita/tsift`: `9ba9094 feat: add opencode tsift init shortcuts`
+- `btakita/agent-loop`: `fce172c80 chore: update tsift submodule`
+<!-- agent:boundary:b57a2c94 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -145,16 +177,11 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
 <!-- agent:queue auto -->
-- [#gopencode]
-- [#gbackendproof]
-- #spec-test-build-install-commit-push
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gopencode] [tag: opencode] [tag: integration] Make OpenCode a first-class tsift integration: add installer/config docs, envelope shortcuts for session/log/test/diff digest use, verify OpenCode transcript capture and permission-prompt diagnostics, add deterministic tests, then build/install and run an end-to-end agent-doc OpenCode smoke session.
-- [ ] [#gbackendproof] [tag: graph] [tag: performance] Evaluate FalkorDB/Kuzu only as native optional GraphStore adapters: require provider-neutral projection writes/load, freshness/parity, lock behavior, install portability, and faster real/full-projection evidence/conflict/dispatch/path metrics than SQLite before promotion.
 <!-- /agent:backlog -->
 
 ## Review

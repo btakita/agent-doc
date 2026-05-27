@@ -321,18 +321,41 @@ I updated `#qipc` so the implementation must force-close any active `finalize` /
 The `tasks/software/tsift.md` route error is the same failure shape: route found an authoritative actor for pane `%7`, but could not prove generation `87` was dispatch-ready within 8 seconds, so it failed closed instead of injecting. The fix belongs in `#qipc`: drain or enqueue under one document lease, and never treat a visually idle console as enough authority by itself.
 
 Top backlog item id: `qipc`.
-<!-- agent:boundary:fe386f7c -->
+❯ do [#qipc]. #spec-test-build-install-commit-push
+### Re: #qipc — gpt-5
+
+Implemented `#qipc`.
+
+Changed paths:
+- `src/agent-doc/src/flow/routed_reopen.rs`
+- `src/agent-doc/src/route.rs`
+- `src/agent-doc/src/route/tests.rs`
+- `src/agent-doc/specs/08a-session-actor-contract.md`
+
+Summary:
+- Busy dispatch-only authoritative actors now queue the pending prompt into visible `agent:queue auto` instead of injecting another trigger.
+- Route first tries to drain an open binary-owned closeout through repair plus `session-check`; if that remains blocked, the prompt-bearing reroute is queued instead of dispatched.
+- Route-created queue entries set `queue_active: true`, add or create `agent:queue auto`, dedupe existing prompts, and sync the snapshot to the visible queue state.
+- The session actor contract now documents the queue-first repeated-dispatch invariant, and route regressions cover new queue creation plus existing-queue activation without duplicates.
+
+Verification:
+- `cargo test route_enqueue_dispatch_prompt -- --nocapture`
+- `cargo test authoritative_actor_dispatch_action_classifies_delivery_boundary -- --nocapture`
+- `cargo test flowcore_hot_path_guard_and_proof_tokens_are_budgeted --test test_cli`
+- `make check`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.34.0`
+- GitHub CI run `26518764688` completed successfully; its `check` job includes successful `Run make check` and `Run make tmux-ci` steps.
+
+Commits:
+- `src/agent-doc`: `9e453c34` (`fix: queue busy route dispatches`)
+- parent repo: `df44a2584` (`agent-doc: update queue-first dispatch`)
+
+Push is intentionally after this binary-owned session closeout so the session response commit is included in the parent branch update.
+<!-- agent:boundary:395bddf7 -->
 <!-- /agent:exchange -->
 ###
 <!--
-JB `Run Agent Doc` error. The agent session was idle. Please draw a mermaid showing why the block happened on the agent-doc side.
-```
-resync: stash pane %1 is registered in its own project root — skipping kill
-[route] debounce OK — file idle for 14.2s and typing indicator idle
-[route] target tmux session: 0
-Error: authoritative actor generation 199 for tasks/agent-doc/agent-doc-bugs2.md owns pane %6 but dispatch-only route will not inject a new trigger because the authoritative actor is busy did not return to a dispatch-ready prompt in the current generation after waiting 8s. Wait for the active turn to finish before rerouting this document.
-```
----
 equityfundingsource.md had the full-document IPC duplicate corruption. Then a new full-document IPC deletion under the prompt corruption happened. Both several times while editing the prompt.
 #spec-test-build-install-commit-push
 ---
@@ -359,7 +382,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#qipc] Implement queue-first agent-doc dispatch and user-owned prompt entities: route repeated dispatches through a single-flight document lease; add an explicit force-finalize/dispatch-drain path that completes any active finalize/write-commit recovery before the next dispatch; immediately dispatch only when session-check is green and supervisor/prompt readiness proves the console is idle; otherwise append/activate agent:queue with visible state so no queued task can run unexpectedly; preserve post-baseline prompt entities during IPC snapshot adoption; and harden stale JetBrains conflict / late fallback replay handling with specs and regressions.
 <!-- /agent:backlog -->
 
 ## Review

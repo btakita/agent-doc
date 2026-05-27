@@ -56,7 +56,6 @@ The SPEC at `SPEC.md:71` confirms OpenCode has no prompt-submit hook equivalent.
 1. **Minimal** — change `dispatch_only_dispatch_start_proof_required` to return `false` for `"opencode"` (same as the `_` catch-all for Claude Code), since there is no proof mechanism available.
 2. **Future-proof** — implement an OpenCode-specific dispatch-start tracker (e.g. watching for pane state change or session log entry) so the proof gate can work.
 ❯ do option 2
-
 ### Re: do option 2 — OpenCode dispatch-start tracker plan — GLM-5.1
 
 Plan created at `tasks/agent-doc/plan-opencode-dispatch-start-proof.md`.
@@ -89,12 +88,63 @@ The only reliable observable for dispatch-only (non-managed) OpenCode sessions i
 #### Backlog transfer to agent-doc-bugs2.md
 
 - [ ] [#ocdsp] Implement OpenCode dispatch-start proof via pane state transition detection — plan at `tasks/agent-doc/plan-opencode-dispatch-start-proof.md` — extend `RoutedDispatchStartTracker`, add `PaneStateChanged` proof variant, poll `capture-pane` for idle→active transition
-<!-- agent:boundary:882768f9 -->
+❯ Should agent-doc be split into multiple rust crates to enable parallel development?
+### Re: Should agent-doc be split into multiple crates? — GLM-5.1
+
+**Yes, but selectively.** The monolith is ~196K lines with deep circular dependencies in the orchestration layer. A full split would be counterproductive, but one extraction boundary is clean and high-value.
+
+#### Current state
+
+- `tmux-router` is already a separate crate (8,627 lines)
+- `agent-kit`, `tagpath`, `instruction-files` are separate crates
+- `.cargo/config.toml` patches them to local paths — no formal Cargo workspace
+
+#### Recommended split
+
+**`agent-doc-core` — document model layer (~17K lines)**
+
+These modules have no upward dependencies on orchestration/session/git and form a clean, fast-compiling target:
+
+| Module | Lines | Role |
+|--------|------:|------|
+| template.rs | 5,749 | Template patching |
+| diff.rs | 4,456 | Diff computation |
+| pending.rs | 3,565 | Backlog/review items |
+| component.rs | 1,706 | `&lt;!-- agent:name --&gt;` parsing |
+| frontmatter.rs | 2,075 | YAML frontmatter |
+| crdt.rs | 1,255 | CRDT foundation |
+| model_tier.rs | 1,026 | Model tier selection |
+| + ~15 smaller leaf modules | ~5,000 | syntax, boundary, patch, dedupe, outline, debounce, mode, security, etc. |
+
+**Why this matters:** `ffi.rs` (2,128 lines) already depends only on core modules. Editor plugins (IntelliJ, VS Code) could compile against `agent-doc-core` without pulling in PTY handling, tmux routing, git operations, or agent backends.
+
+#### What NOT to split
+
+The orchestration layer (~60K lines: `write.rs`, `sync.rs`, `route.rs`, `start.rs`, `preflight.rs`, `git.rs`, `session_check.rs`) has deep circular dependencies:
+
+- `route` ↔ `sync` (mutual)
+- `git` → `write` → `git`
+- `preflight` → `write` → `preflight`
+- `session_check` → `write` → `session_check`
+
+Splitting these would require inverting all dependencies through trait objects or message passing — a massive refactor with unclear benefit.
+
+#### Future candidates (medium effort)
+
+- **Agent backends** (~8,700 lines) — possible but `codex.rs` depends on `frontmatter` and `harness.rs` depends on `git`; would need trait boundary work
+- **Supervisor/PTY layer** (~3,500 lines) — shallow deps on `harness` and `frontmatter`; small refactor to extract
+
+#### Recommended order
+
+1. Extract `agent-doc-core` — clean, high value for editor plugins
+2. Keep orchestration monolithic — circular deps make split costly
+3. Extract agent backends only when trait boundaries stabilize
+<!-- agent:boundary:df16c1c5 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 
 <!-- /agent:queue -->
 

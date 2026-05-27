@@ -84,7 +84,52 @@ Verification:
 - GitHub Actions CI run `26537671598` passed, including both `make check` and `make tmux-ci`. The only annotation was the existing Node.js 20 deprecation notice for `actions/checkout@v4`.
 
 Escalation: none. Confidence: high; this cycle reproduced the remaining queue-consumption failure live and the installed binary is now using the fix.
-<!-- agent:boundary:2881a0f1 -->
+
+### Re: #odsp2 — gpt-5
+
+Implemented `#odsp2`: OpenCode dispatch-only routes now require dispatch-start proof from a pane state transition, while Codex keeps the hook-backed proof path and Claude-style accepted-only routes remain clearly scoped as accepted-only.
+
+```mermaid
+flowchart TD
+  A["OpenCode dispatch-only route"] --> B["Capture idle pane before submit"]
+  B --> C["Submit routed trigger"]
+  C --> D{"Trigger still visible in composer?"}
+  D -->|"yes"| E["No dispatch-start proof"]
+  D -->|"no"| F{"Pane left idle chrome?"}
+  F -->|"no"| E
+  F -->|"yes"| G["PaneStateChanged proof"]
+  G --> H["proof=pane_state_changed proof_scope=dispatch_start"]
+  E --> I["Fail closed for OpenCode dispatch-start requirement"]
+```
+
+Changed paths:
+
+- `src/agent-doc/src/route.rs`
+- `src/agent-doc/src/flow/routed_reopen.rs`
+- `src/agent-doc/src/harness.rs`
+- `src/agent-doc/src/route/tests.rs`
+- `src/agent-doc/SPEC.md`
+- `src/agent-doc/specs/07-session-tmux-commands.md`
+- `src/agent-doc/README.md`
+- `src/agent-doc/VERSIONS.md`
+
+Verification completed before closeout:
+
+- `cargo fmt`
+- `cargo check`
+- Focused tests for OpenCode pane-state proof, OpenCode active-turn detection, dispatch proof scope, OpenCode timeout budget, and accepted-only behavior
+- `cargo test opencode`: passed, 69 passed / 3 ignored in the filtered OpenCode set
+- `make check`: passed, including clippy, main suite `2501 passed; 0 failed; 228 ignored`, integration suites, and the wider deterministic SimWorld corpus check
+- `make install`: passed, installed `agent-doc 0.34.0` into `/home/brian/.cargo/bin`
+- GitHub Actions CI run `26537671598`: completed success; job `check` passed, including `Run make check` and `Run make tmux-ci`
+
+Commits prepared before session-document closeout:
+
+- `src/agent-doc`: `259a70b7 feat: prove opencode dispatch start`
+- root: `b75047e38 agent-doc: update opencode dispatch proof`
+
+Push is deferred until this mandatory `agent-doc finalize` commit lands, per the session-document closeout rule. Escalation: none. Confidence: high.
+<!-- agent:boundary:0e04d75f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -118,7 +163,6 @@ JB `Run Agent Doc` on this document did not run agent-doc in the Codex console.
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#odsp2] Implement OpenCode dispatch-start proof via pane state transition detection — plan at tasks/agent-doc/plan-opencode-dispatch-start-proof.md
 - [ ] [#ocdsp] Implement OpenCode dispatch-start proof via pane state transition detection — plan at tasks/agent-doc/plan-opencode-dispatch-start-proof.md — extend RoutedDispatchStartTracker, add PaneStateChanged proof variant, poll capture-pane for idle→active transition
 - [ ] [#finovrwr] `agent-doc finalize` overwrites the prior response in `agent:exchange` instead of appending after it: HEAD ends with only the new response heading/body; the previous response is gone from the document on disk. Distinct from `#rhdr-blank`. Repro in `src/boost-client/tasks/monsterrodholders.md` between commits `7928306` and `a87ce95` — the "Re: Add brian.takita / monsterrodholder74 as manager" response was present after `7928306` and missing after the next finalize at `a87ce95`. The `session-check` interrupt fired ("found likely direct response patchback without agent-doc cycle") but recovery blessed the truncated state. Plan: `tasks/agent-doc/plan-finalize-overwrites-prior-response.md`. Fix: always read existing exchange content from HEAD before applying `<!-- patch:exchange -->`; harden `session-check` recovery so working-tree response sections never silently disappear; add regression for two back-to-back finalize cycles.
 <!-- /agent:backlog -->

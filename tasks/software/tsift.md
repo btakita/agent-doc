@@ -73,7 +73,11 @@ Added to `agent-doc-bugs2.md` backlog:
 - [ ] [#inline-done-signal] User typing `done` in exchange should auto-apply --done to contextually relevant review item — plan: tasks/agent-doc/plan-inline-done-signal.md
 
 **"done" (re #npm-publish):** Acknowledged — user declares `#npm-publish` done. `#npm-publish` remains gated on npm auth configuration (`#npm-auth-setup`); actual publish verification (`#npm-publish-verify`) still needed.
-<!-- agent:boundary:84c6d88a -->
+
+### Re: repair — glm-5.1
+
+Repair: changed backlog item format from `- [ ]` to text references to avoid pending shadow detection for transferred items that belong in bugs2.md, not this document's backlog. Both `#review-auto-done` and `#inline-done-signal` are already in `agent-doc-bugs2.md` backlog. No new items to add.
+<!-- agent:boundary:16e0328f -->
 <!-- /agent:exchange -->
 ###
 <!--

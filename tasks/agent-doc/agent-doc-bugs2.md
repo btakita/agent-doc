@@ -139,6 +139,8 @@ Yes: the more robust design is to stop treating console text as the primary sour
 - closeout state files: cycle/capture state, response probe, snapshot hash, baseline hash;
 - a durable per-document dispatch queue/lease so reroutes become ordered work instead of direct pane injection attempts.
 
+❯ Can we have similar hooks on Claude and Open Code? Should agent-doc consider using Pi for fuller control over the harness?
+
 So: yes, hooks and file/socket IPC are available, but the important rule is that no single channel should be trusted as whole-document authority. Console readiness, supervisor state, hook state, cycle state, and IPC ACK content need to agree on a typed transition. If they disagree, route should fail closed or enqueue, not inject.
 
 For an incomplete previous turn, `agent-doc` can close it out without conflict only when it can prove the missing closeout is exactly one assistant response for the still-current cycle. That means the response body probe is present, the baseline/cycle id still match, there is no live user prompt drift after preflight, and the candidate is not transcript-shaped duplicate content. If those proofs are missing, it must not silently close the previous turn; it should preserve the visible drift and force the next `preflight` / `finalize` recovery path.
@@ -147,6 +149,7 @@ Queueing is the right direction. I would make dispatch single-flight per documen
 
 1. editor or CLI dispatch asks the controller for the authoritative document lease;
 2. if a turn is active, append the requested reopen/prompt to durable `agent:queue` or a queue-backed dispatch record;
+❯ Append to the document agent:queue and activate queue. Add agent:queue to the document if missing. Should we deprecate the inline document mode?
 3. do not inject a second prompt into the pane;
 4. after committed closeout, the Stop hook or supervisor asks `agent-doc` to continue the next queue head;
 5. if the queue head does not advance after a continuation, fail closed to avoid a loop.
@@ -181,7 +184,76 @@ flowchart TD
 ```
 
 The concrete failure class you saw is the bad path through `whole-buffer ACK` or stale replay while live typing changed the document after preflight. The invariant that eliminates it is: IPC ACK content is an observation, not authority. Authority must remain the agent-owned response image plus explicit proof that no user-owned drift or duplicate prompt material was absorbed. This is exactly the kind of behavior I would fold into the existing `#snrun` route/replay review item rather than split into a second competing routing task.
-<!-- agent:boundary:5e2b5b75 -->
+
+❯ Re "whole-buffer ACK includes live typing": Can we identify the live typing surface so "danger: prompt drift after preflight" does not duplicate the old snapshot of the prompt? Do we need to create a document entity for the user prompt areas, where the user content is not modified by agent-doc at all?
+
+### Re: hooks queue surfaces and replay diagrams — gpt-5
+
+Claude and OpenCode can have analogous control points, but not the same native hook shape as Codex today. Codex has `UserPromptSubmit` and `Stop`, so `agent-doc` can observe both prompt submission and end-of-turn payloads. Claude Code has the `/agent-doc` Skill entrypoint and shell closeout path. OpenCode has the installed command wrapper and direct `finalize`/`session-check` path. The current spec explicitly treats Claude Code and OpenCode dispatch-only proof as weaker than Codex prompt-submit proof, so the robust path is a common adapter layer:
+
+- native hooks where the harness exposes them;
+- supervisor lifecycle IPC where `agent-doc` owns the child process;
+- PTY/screen-state observation as a fallback proof surface;
+- cycle/capture/session-check state as the closeout authority.
+
+If by "Pi" you mean fuller PTY/process integration, yes, but only as a transport/control layer. Owning the child PTY gives better resize, stdin, output, permission-prompt, and lifecycle control. It still must not become semantic authority for response completion; the semantic authority remains the document cycle, response probe, snapshot, and commit/session-check boundary.
+
+For dispatch queueing: yes, route should append to `agent:queue`, create the component when absent, activate it with `auto` or `queue_active`, and then rely on normal queue-head consumption. I would not deprecate inline document mode immediately. Keep inline exchange prompts as the interactive human surface, but make programmatic reroutes and repeated dispatches queue-backed. Longer term, inline mode can become a compatibility/import path that materializes into typed prompt entities.
+
+For live typing, the missing abstraction is an owned user-prompt entity. `agent-doc` needs to distinguish user-owned regions from agent-owned response regions, not just compare whole buffers. The durable shape should be closer to `prompt_entity{id, component, range/hash, owner=user, answered_by_cycle?}` and `response_entity{id, cycle, owner=agent}`. Then `agent-doc` can say: "this ACK includes a user entity created after my baseline; preserve it for the next cycle and never duplicate or overwrite it."
+
+```mermaid
+flowchart TD
+    A["preflight baseline"] --> B["user prompt entity P1"]
+    B --> C["agent builds response entity R1"]
+    C --> D["editor ACK returns whole buffer"]
+    B --> E["user keeps typing prompt entity P2 after baseline"]
+    E --> D
+    D --> F{"ACK contains post-baseline user entity?"}
+    F -->|"no"| G["adopt response snapshot"]
+    F -->|"yes"| H["block ACK adoption for user region"]
+    H --> I["commit R1 from agent-owned image"]
+    H --> J["leave P2 visible for next preflight"]
+    F -->|"duplicate P1/P2 detected"| K["repair duplicate artifact or fail closed"]
+```
+
+The intended stale cache/conflict replay reason is editor safety: JetBrains may still hold an older buffer/cache view and offer conflict resolution when disk changed underneath it. Accepting the conflict can replay that stale editor buffer into the visible document. That is acceptable only if the replay is recognized as already-committed content or repaired before commit.
+
+```mermaid
+flowchart TD
+    A["agent-doc commits document at HEAD"] --> B["editor still has older cached buffer"]
+    B --> C["JetBrains File Cache Conflict appears"]
+    C --> D{"operator choice"}
+    D -->|"reload from disk"| E["safe: editor matches HEAD"]
+    D -->|"accept cached editor buffer"| F["stale replay into working tree"]
+    F --> G{"dedupe/replay classifier matches HEAD?"}
+    G -->|"yes"| H["repair working tree/snapshot without new response"]
+    G -->|"no"| I["fail closed: preserve drift for investigation"]
+    G -->|"classifier misses duplicate"| J["bad path: duplicate exchange or old prompt can persist"]
+```
+
+Late fallback patch replay has a different intended reason. It exists so an IPC timeout can still deliver a response through a file-watcher path if the socket path failed. The failure is when that fallback arrives after the same cycle already committed.
+
+```mermaid
+flowchart TD
+    A["finalize sends socket IPC patch for cycle C"] --> B{"socket ACK before timeout?"}
+    B -->|"yes"| C["response visible and committed"]
+    B -->|"no"| D["write fallback patch file"]
+    D --> E{"cycle C still open?"}
+    E -->|"yes"| F["file watcher may apply fallback"]
+    F --> G["closeout commits cycle C"]
+    E -->|"no, already committed"| H["reject stale fallback and cleanup"]
+    C --> I["delayed watcher sees old fallback"]
+    I --> J{"cycle-state guard present?"}
+    J -->|"yes"| H
+    J -->|"no"| K["bad path: stale response patch re-dirties document"]
+```
+
+The duplicate late-fallback question is the same case twice: intended replay is only for still-open cycles; after `Committed`, every fallback for that cycle is stale and must be rejected by cycle id before it can touch the visible document or snapshot.
+Re "stale cache/conflict replay": Could you diagram the intended reason(s) for the replay? Could you also diagram the failure cases?
+
+Re "late fallback patch after commit": Could you diagram the intended reason(s) for the replay? Could you also diagram the failure cases?
+<!-- agent:boundary:b90af933 -->
 <!-- /agent:exchange -->
 ###
 <!--

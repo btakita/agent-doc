@@ -57,11 +57,36 @@ Commits prepared before session closeout:
 - `src/agent-doc`: `98a81c06` (`fix: retire jb cancel orphaned captures`)
 - parent repo: `f46839242` (`agent-doc: update submodule for jb cancel recovery`)
 
-Push is intentionally after this binary-owned session closeout so the session response commit is included with the pushed parent branch.
-<!-- agent:boundary:609c0541 -->
+❯ Push is intentionally after this binary-owned session closeout so the session response commit is included with the pushed parent branch.
+### Re: Run Agent Doc busy actor block — gpt-5
+
+The block was on the routing side, before any prompt text was injected. `agent-doc route` found that generation `199` was the authoritative actor for this document and owned pane `%6`, then waited for that same generation to return to a dispatch-ready prompt. It did not become ready within the 8 second dispatch-only recovery window, so the route failed closed instead of sending a second trigger into a busy active turn.
+
+```mermaid
+flowchart LR
+    A["User invokes Run Agent Doc"] --> B["route resolves document target"]
+    B --> C["authoritative actor store says generation 199 owns pane %6"]
+    C --> D["dispatch-only route checks if pane is prompt-ready"]
+    D --> E["pane is busy with active turn"]
+    E --> F["wait up to 8s for same generation to return ready"]
+    F --> G{"ready prompt observed?"}
+    G -->|"yes"| H["inject trigger into pane %6"]
+    G -->|"no"| I["fail closed: do not inject into busy actor"]
+```
+
+That guard is intentional: dispatch-only routing can reuse an authoritative actor only when the live pane proves it can consume input. Without that prompt-ready proof, injecting would risk mixing a new `agent-doc` trigger into an in-flight response.
+<!-- agent:boundary:e02c0834 -->
 <!-- /agent:exchange -->
 ###
 <!--
+JB `Run Agent Doc` error. The agent session was idle. Please draw a mermaid showing why the block happened on the agent-doc side.
+```
+resync: stash pane %1 is registered in its own project root — skipping kill
+[route] debounce OK — file idle for 14.2s and typing indicator idle
+[route] target tmux session: 0
+Error: authoritative actor generation 199 for tasks/agent-doc/agent-doc-bugs2.md owns pane %6 but dispatch-only route will not inject a new trigger because the authoritative actor is busy did not return to a dispatch-ready prompt in the current generation after waiting 8s. Wait for the active turn to finish before rerouting this document.
+```
+---
 equityfundingsource.md had the full-document IPC duplicate corruption. Then a new full-document IPC deletion under the prompt corruption happened. Both several times while editing the prompt.
 #spec-test-build-install-commit-push
 ---

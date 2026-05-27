@@ -3,7 +3,7 @@ agent_doc_session: 5ea015b4-bc31-4877-b589-7c03825eff72
 agent_doc_format: template
 agent_doc_write: crdt
 agent: codex
-claude_model: claude-opus-4-6
+claude_model: opus
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 prompt_presets:
@@ -44,6 +44,9 @@ I added a concise `## Feature Taxonomy` near the top, grouped around document mo
 Committed the README-only submodule change as `6407c27 docs: organize README feature catalog`, then committed the parent repo submodule pointer as `ab5432349 docs: point agent-doc to README feature taxonomy`. Verification: `git -C src/agent-doc diff --cached --check` passed. No test suite was run because this was documentation-only.
 <!-- agent:boundary:93e60b27 -->
 <!-- /agent:exchange -->
+###
+<!--
+-->
 
 ## Queue
 

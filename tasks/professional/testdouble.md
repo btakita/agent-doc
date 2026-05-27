@@ -2,7 +2,7 @@
 agent_doc_session: fec84885-6792-429c-9c0f-f8c7b32921b2
 resume: 019de476-ea8f-72f0-9d3a-ca2dfb01ef85
 agent: codex
-claude_model: claude-opus-4-6
+claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions

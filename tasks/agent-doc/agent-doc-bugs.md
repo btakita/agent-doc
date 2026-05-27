@@ -5,7 +5,7 @@ agent_doc_write: crdt
 agent: codex
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
-claude_model: claude-opus-4-6
+claude_model: opus
 prompt_presets:
   "#spec-test-build-install-commit-push": update spec + tests. build + install for local testing. commit + push
   "#spec-test-commit-push": update spec + tests. commit + push

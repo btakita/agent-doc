@@ -36,6 +36,8 @@ Compacted content:
 - Archived 1 response topic(s): message count
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
 <!-- agent:boundary:7f9e482c -->
+Place the header "Broker Portal" link between "Apply for a Loan" and "Investor Portal".
+#spec-test-commit-push
 <!-- /agent:exchange -->
 ###
 <!--

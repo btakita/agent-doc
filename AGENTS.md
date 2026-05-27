@@ -2,7 +2,7 @@
 description: "Interactive markdown session. TRIGGER: user invokes the harness-native agent-doc entrypoint. Requires a markdown session document, installed CLI, and write+commit every cycle."
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.33.16"
+agent-doc-version: "0.34.0"
 ---
 
 # agent-doc
@@ -133,7 +133,7 @@ Document format, frontmatter, component naming, and commit-boundary exceptions: 
 
 Use runbooks for detail that is not needed every turn. Key runbooks: [runbooks/harness-invocation.md](runbooks/harness-invocation.md), [runbooks/planning-dispatch.md](runbooks/planning-dispatch.md), [runbooks/pending-ops.md](runbooks/pending-ops.md), [runbooks/commit.md](runbooks/commit.md), [runbooks/split-spec-files.md](runbooks/split-spec-files.md). `split-spec-files` applies across agent-doc-managed surfaces; custom root files stay opt-in unless they still match the generated baseline. Full catalog: `compact-exchange`, `transfer-extract`, `model-tier-gate`, `command-synonyms`, `compound-task-steering`, `streaming-checkpoints`, `document-format`, `code-enforced-directives`.
 
-<!-- tsift:code-navigation v=0.1.42 -->
+<!-- tsift:code-navigation v=0.1.62 -->
 ## Code Navigation
 
 Run `tsift status` at session start from the owning repo root. If the task or file lives under a git submodule (for example `src/tsift/...`), switch to that submodule root first so the harness loads the narrower local instructions and repo state instead of the superproject root. If status prints a `run:` recommendation for stale or missing tsift state, run `tsift status --fix` before relying on tsift results; when the harness cannot perform write commands, ask the user to run the printed command instead. Codex projects can install a prompt-time auto-reindex hook with `tsift init --codex`.

@@ -1,7 +1,7 @@
 ---
 agent_doc_session: a94c7d23-e171-482f-93f4-530b7f2c436f
 agent: codex
-claude_model: claude-opus-4-6
+claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions

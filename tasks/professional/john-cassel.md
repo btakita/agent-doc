@@ -3,7 +3,7 @@ agent_doc_session: 9af37216-1e49-4cd5-b32a-d9b2da189ee5
 agent_doc_format: template
 agent_doc_write: crdt
 agent: codex
-claude_model: claude-opus-4-6
+claude_model: opus
 codex_args: -s danger-full-access
 claude_args: --dangerously-skip-permissions
 prompt_presets:

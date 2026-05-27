@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -123,7 +123,6 @@ Priority order remains:
 
 1. #gopencode — make OpenCode a first-class `tsift` integration, including installer/config docs, digest shortcuts, transcript and permission-prompt diagnostics, deterministic tests, local build/install, and an end-to-end OpenCode smoke session.
 2. #gbackendproof — evaluate optional graph backends only after OpenCode integration is not blocking daily workflow.
-
 ### Re: inactive queue + backlog refs — gpt-5
 
 The queue edits are visible, but `agent:queue` is not active (`queue_active: false` and no `auto`/start fence), so I did not dispatch or execute `#spec-test-build-install-commit-push`. I also confirmed the orchestrator refuses `--from-queue` in this state, so running spec/test/build/install/commit/push would cross the document's current execution boundary.
@@ -136,7 +135,7 @@ Current priority remains:
 Preflight warning noted: the post-exchange HTML comment that mentions `#next-steps` is preserved as a non-executable note. Move it into `agent:exchange` or activate `agent:queue` if it should run.
 
 No repo code changed in this cycle, and I did not run the build/test/install/push preset because the queue is inactive.
-<!-- agent:boundary:d51cc6ba -->
+<!-- agent:boundary:fe2e1104 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -145,7 +144,7 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 - [#gopencode]
 - [#gbackendproof]
 - #spec-test-build-install-commit-push

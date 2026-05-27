@@ -44,7 +44,48 @@ With that env var set, every stdin → pty write is logged. Reproduce the stuck 
 #### Can I drive the test session?
 
 I can start the session and monitor output but cannot interact with OpenCode's TUI directly (no PTY access from Claude Code). The practical split: I set up the document and invoke `agent-doc start opencode <FILE>`, you navigate the first HITL prompt, and we review the `AGENT_DOC_TMUX_INPUT_DIAG` logs together to confirm what's passing through. Once we see the actual escape sequences, the fix is straightforward.
-<!-- agent:boundary:97d38657 -->
+❯ continue
+### Re: continue — sonnet-4-6
+
+Implemented the fallback detection and built both binaries.
+
+#### Root cause confirmed
+
+`opencode_permission_prompt_active` (`start.rs:1193`) relied entirely on `parse_opencode_prompt` detecting the dialog via footer text ("enter confirm" + "select"). If OpenCode 1.14.50 changed the footer, the gate never opened and raw `\x1b[C`/`\x1b[D` escape sequences passed through to OpenCode's TUI unchanged — displaying as literal `^[[C`/`^[[D` text in the permission dialog row.
+
+#### Fix: fallback detection via orange highlight (`start.rs:1193–1216`)
+
+Added a secondary check on the raw `recent_output` bytes for the OpenCode selection highlight color (`\x1b[48;2;245;167;66m` — the amber/orange used for the active option) plus at least one known permission label. This fires regardless of footer text format:
+
+```rust
+// Fallback: orange highlight + at least one permission label
+let raw = shared.recent_output.lock().unwrap();
+let raw_str = String::from_utf8_lossy(&raw);
+raw_str.contains("\x1b[48;2;245;167;66m")
+    && (raw_str.contains("Allow once")
+        || raw_str.contains("Allow always")
+        || raw_str.contains("Reject"))
+```
+
+Two new tests added and passing (7/7 `opencode_permission_prompt` tests):
+- `opencode_permission_prompt_fallback_detects_orange_highlight_without_footer` — no footer text, orange + labels → translation fires
+- `opencode_permission_prompt_fallback_requires_allow_or_reject_label` — orange alone → no translation
+
+#### Installed
+
+- `cargo install --path .` → `~/.cargo/bin/agent-doc` (used by tmux-spawned sessions)
+- `cargo build --release` → `target/release/agent-doc` (used by `.bin/agent-doc` symlink)
+- CI: green (`gh run list` shows `[ok]`)
+- `make check` running (started, awaiting completion)
+
+#### Enter key
+
+Enter (`\r`) passes through unchanged in the stdin → PTY path — there's no filtering or translation for it. Most likely the Enter issue was a consequence of the arrow key translation failure: without being able to navigate to the correct option, Enter was confirming the wrong selection (or OpenCode was rejecting it from an invalid state). With the detection fix in place, arrows translate to Tab/Shift-Tab correctly, and Enter should confirm normally.
+
+#### Next step
+
+Test end-to-end: trigger a permission dialog in an active OpenCode session (via `agent-doc start opencode <FILE>`) and verify that pressing right arrow now navigates the options instead of displaying raw codes.
+<!-- agent:boundary:2f4d6670 -->
 <!-- /agent:exchange -->
 
 ## Queue

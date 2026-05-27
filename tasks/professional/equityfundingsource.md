@@ -174,7 +174,206 @@ Where Desktop/PRO fits:
 - Local EFS context: `src/equityfundingsource-dev/docs/business-logic.md`, `src/equityfundingsource-dev/prds/equity-funding-source-lending-portal-prd.md`, `src/equityfundingsource-dev/docs/tmo-webhooks-question.md`, and local `docs/TMO/*.md` endpoint notes.
 
 Closeout evidence: changed path is this session document only; no code changed. Commands used included `tsift status`, `tsift status --fix`, `agent-doc preflight/read/plan`, public-doc web/curl checks, local `rg`/`sed` inspection, `git status`, and this `agent-doc finalize`. Verification is source-review only; no test suite was run because there were no code changes. Confidence is high on public TMO offering/workflow shape, medium on EFS-specific TMO module usage until the EFS TMO inventory backlog item is finished. No escalation was used.
-<!-- agent:boundary:b30d7b6a -->
+❯ EFS is using TMO for Loan Origination and API access...meaning the cache then replacement feature set would be focused on Loan Origination.
+❯ Please expand the detail of the TMO Loan Origination process. Include diagrams.
+### Re: TMO Loan Origination process — gpt-5
+
+Yes. If EFS is only using TMO's Loan Origination Software module plus API access, the cache-then-replacement plan should narrow around the LOS workflow: application intake, borrower/property/loan data, statuses, conditions, documents, active-loan creation, attachments, and funding records. Loan servicing, borrower payments, escrow/payment schedules, and fund-management features should stay out of the replacement scope unless Judith explicitly expands the project later.
+
+#### TMO LOS process, expanded
+
+```mermaid
+flowchart TD
+  Config["Configure LOS"] --> Intake["Application intake"]
+  Intake --> Prequal["Review / prequalification"]
+  Prequal --> Conditions["Conditions + missing docs"]
+  Conditions --> Underwriting["Underwriting + terms"]
+  Underwriting --> Approval{"Approved?"}
+  Approval -->|"No"| Decline["Declined / closed / archived"]
+  Approval -->|"Yes"| Docs["Loan documents + disclosures"]
+  Docs --> Closing["Closing + funding"]
+  Closing --> ActiveLoan["Active TMO loan record"]
+  ActiveLoan --> PortalCache["EFS cache + portals"]
+  ActiveLoan --> Ops["TMO operator workflow"]
+```
+
+TMO's public LOS material describes the process as application through underwriting, approval, documentation, funding, and direct transition into servicing. The older public Loan Origination page adds useful specifics: online application portal, borrower document upload/messaging/status, credit pulls, e-signature, custom workflow, document generation, pipeline/forecasting, URLA, HMDA, and Mortgage Call Report support. The newer knowledge-base articles show the operational layer behind that marketing summary: configurable loan statuses, condition tracking, borrower profiles, user personas, workflow automation, custom document templates, and Lightning Docs integration.
+
+For EFS, I would model the process as these layers:
+
+1. **LOS configuration before data flow**
+   - Pull TMO Products with `GetProducts` and store the selected product `DocID`; do not hardcode loan products.
+   - Inventory EFS's actual TMO custom field IDs, status list, condition groups, condition phases, document templates, user/persona assignments, and any Lightning Docs setup.
+   - Treat TMO statuses as configurable. Public TMO docs say statuses can be edited to match the business, with `Application Received`, `Closed`, and `Unassigned` having special system behavior. Local support correspondence also shows the API status values are not fully aligned with the docs, so EFS should keep a normalized local status model and map to TMO carefully.
+
+2. **Application intake**
+   - Borrower direct path: EFS `/apply` or borrower portal captures borrower, contact, property, loan request, entity, and uploaded document data.
+   - Broker path: broker submits a deal on behalf of a borrower; EFS stores broker submitter identity separately from borrower identity.
+   - EFS writes the canonical portal submission into D1 first, stores original documents in `R2_DOCUMENTS`, and then queues or performs the TMO LOS write.
+   - TMO write choices:
+     - `NewLoanApplication` creates a TMO application and returns a Loan Application Reference Number.
+     - `IsSendPortalInvite` should normally be false if EFS is the borrower-facing portal.
+     - `IsCreateNewLoanFromLoanApplication` should be treated as an explicit workflow choice, not a default, because TMO separates LoanApplication from active Loan.
+
+3. **Review and prequalification**
+   - EFS Admin reviews the submitted package, requested amount, collateral, borrower/entity details, broker details, and uploaded docs.
+   - The borrower/broker-facing status should remain EFS-normalized: `Application Received`, `Processing`, `Underwriting`, `Documents`, `Funded`, with `Denied`, `Closed`, and `Unassigned` as special states.
+   - TMO's `GetLoanApplication` can refresh the application object by reference number, but EFS should not depend on live TMO reads during page rendering.
+
+4. **Conditions and missing documents**
+   - TMO condition tracking supports condition groups, individual conditions, condition phases, responsible parties, dates, borrower-portal document requests, condition document attachments, and condition reports.
+   - Public examples mention phases such as `Prior to Docs`, `Prior to Funding`, and `Prior to Closing`.
+   - EFS should mirror this as a first-class local checklist: condition name, phase, required party, due/ordered/received/cleared dates, required document type, R2 document linkage, TMO condition reference if available, and admin notes.
+   - This is a strong replacement wedge: EFS can replace the borrower/broker-facing condition experience first while still letting staff reconcile with TMO in the back office.
+
+```mermaid
+flowchart LR
+  Admin["EFS Admin"] --> Condition["Create / update condition"]
+  Condition --> Checklist["D1 condition checklist"]
+  Checklist --> Borrower["Borrower or broker portal"]
+  Borrower --> Upload["Upload required document"]
+  Upload --> R2["R2_DOCUMENTS"]
+  R2 --> Review["Admin review"]
+  Review --> Clear{"Clear condition?"}
+  Clear -->|"No"| Checklist
+  Clear -->|"Yes"| NextPhase["Advance phase / status"]
+  NextPhase --> Outbox["Optional TMO update outbox"]
+  Outbox --> TMO["TMO LOS"]
+```
+
+5. **Underwriting and terms**
+   - TMO's loan object carries the more detailed loan/collateral/borrower structure: `LoanNumber`, `DocID`, application dates, loan amount and terms, borrower array, collateral array, encumbrances, broker fees, categories, and custom fields.
+   - EFS should separate "application review data" from "active loan data." Until a loan is approved, the EFS record can be an application/deal. After approval, it maps to a TMO active loan by `LoanNumber` and TMO record IDs.
+   - Collateral updates require the active loan context. Robert's endpoint notes say collateral requires `GetLoan` first so EFS can obtain `LoanRecID`, and updates/deletes require the collateral `RecID` from the loan response.
+
+6. **Approval, documents, and closing package**
+   - TMO can generate/customize documents using TMO fields and custom fields; the knowledge base documents a Word add-in / Fields Dictionary pattern and optional Lightning Docs integration.
+   - EFS should not try to replace this immediately. The practical sequence is:
+     - EFS stores uploaded docs and extracted fields.
+     - Admin approves extracted fields.
+     - TMO gets the approved loan/application/borrower/collateral updates.
+     - Staff generates closing docs in TMO or Lightning Docs until EFS has a complete, reviewed document-generation replacement.
+   - If Lightning Docs is enabled, TMO can prefill available loan data into a Lightning Docs interview and pull generated docs back into TMO attachments.
+
+7. **Funding and active loan state**
+   - Once approved/closed, TMO active loans are keyed by `LoanNumber`.
+   - Funding lender/investor information is attached through the LOS funding endpoints (`GetLoanFundings`, `AddLoanFunding`, `UpdateLoanFunding`) and/or the TMO UI.
+   - EFS investor commitments should remain local until admin acceptance. On acceptance, EFS can call `AddLoanFunding` when configured and store the returned TMO reference.
+   - EFS should not add borrower payment UI right now. Robert's requirements say EFS does not service loans online and borrowers pay by check or wire.
+
+#### TMO object model EFS should cache
+
+```mermaid
+flowchart TB
+  Product["Product / DocID\nGetProducts"] --> Application["LoanApplication\nNew/Get/UpdateLoanApplication\nApplicationNumber"]
+  Application --> Loan["Active Loan\nNewLoan / GetLoan\nLoanNumber + LoanRecID"]
+  Loan --> Borrower["Borrowers\nNew/Update/DeleteBorrower\nBorrower RecID"]
+  Loan --> Collateral["Collateral\nNew/Update/DeleteCollateral\nCollateral RecID"]
+  Loan --> Attachments["Attachments\nGetLoanAttachments / GetLoanAttachment / AddAttachment\nAttachment RecID"]
+  Loan --> Funding["Funding\nGetLoanFundings / AddLoanFunding / UpdateLoanFunding\nFunding RecID"]
+  Application --> CustomFields["Application custom fields\nFields[] key/value"]
+  Loan --> LoanFields["Loan custom fields\nFields[] key/value"]
+```
+
+Minimum cache tables/read models should cover:
+
+- TMO application reference number, EFS application/deal ID, borrower user ID, broker submitter ID, normalized EFS status, raw TMO application status, last sync time, stale flag, and raw payload R2 key.
+- TMO `LoanNumber`, `LoanRecID`, product `DocID`, borrower RecIDs, collateral RecIDs, attachment RecIDs, funding RecIDs, and checksums/timestamps for sync.
+- Field mapping rows for TMO custom fields: TMO field key, EFS semantic field, direction, value transform, review requirement, and last verified date.
+- Condition/checklist rows, even if TMO does not expose full condition APIs, because conditions are central to the origination replacement path.
+
+#### Cache-then-replacement architecture, narrowed to LOS
+
+```mermaid
+flowchart LR
+  subgraph EFS["EFS Worker + D1/R2"]
+    Portals["Borrower / Broker / Admin / Investor portals"]
+    D1["D1 normalized LOS workflow"]
+    Docs["R2_DOCUMENTS"]
+    Raw["R2_TMO_CACHE raw API payloads"]
+    Outbox["D1 TMO outbox"]
+    Sync["scheduled/manual TMO sync"]
+  end
+
+  subgraph TMO["TMO Loan Origination Software"]
+    API["LOS API"]
+    UI["TMO operator UI / PRO"]
+    LOSDB["TMO company database"]
+  end
+
+  Portals --> D1
+  Portals --> Docs
+  D1 --> Outbox
+  Outbox -->|"staff-approved writes"| API
+  API --> LOSDB
+  UI --> LOSDB
+  Sync --> API
+  API --> Sync
+  Sync --> D1
+  Sync --> Raw
+  D1 --> Portals
+```
+
+The replacement plan should proceed in this order:
+
+1. **Cache TMO LOS reads**
+   - Pull `GetLoanApplication`, `GetLoan`, `GetLoanAttachments`, `GetLoanAttachment`, `GetLoanFundings`, and timestamp-based loan changes where available.
+   - Store raw payloads in `R2_TMO_CACHE` and normalized read models in D1.
+   - Portals read D1/R2 only and show stale/missing sync state instead of blocking on TMO.
+
+2. **Own the borrower/broker-facing workflow**
+   - EFS owns intake, uploads, secure messages, missing-document checklist, status explanations, and notifications.
+   - TMO remains the official LOS record for staff until replacement confidence is high.
+
+3. **Add staff-approved command outbox**
+   - Admin approval creates outbox operations for `NewLoanApplication`, `UpdateLoanApplication`, `NewLoan`, `UpdateLoan`, borrower/collateral updates, attachments, and funding.
+   - Every operation stores payload, idempotency key, retry count, last error, TMO response, and audit event.
+
+4. **Replace LOS subdomains gradually**
+   - First replacement candidate: EFS-native application/deal intake and document checklist.
+   - Second: condition tracking and status automation.
+   - Third: field extraction/review and TMO writeback.
+   - Later: document generation, if EFS wants to replace TMO/Lightning Docs document prep.
+   - Last or never in current scope: servicing math, borrower payments, escrow, tax docs, and investor accounting.
+
+#### Practical status rule
+
+The status model should be local-first because TMO's LOS API status behavior is inconsistent with its public docs and support has already confirmed odd behavior in testing. Use this policy:
+
+```mermaid
+stateDiagram-v2
+  [*] --> ApplicationReceived
+  ApplicationReceived --> Processing
+  Processing --> Underwriting
+  Underwriting --> Documents
+  Documents --> Funded
+  ApplicationReceived --> Denied
+  Processing --> Denied
+  Underwriting --> Denied
+  Documents --> Denied
+  ApplicationReceived --> Closed
+  Processing --> Closed
+  Underwriting --> Closed
+  Documents --> Closed
+  Closed --> ApplicationReceived
+  Closed --> Processing
+  Closed --> Underwriting
+  Closed --> Documents
+```
+
+- EFS normalized status is the borrower/broker/admin display source of truth.
+- TMO raw status is stored separately as integration evidence.
+- Status changes that must reach TMO go through the staff-approved outbox.
+- If TMO rejects a status value, EFS keeps the local status, records the TMO error, and exposes an admin reconciliation task.
+
+#### Sources and confidence
+
+Public sources checked: TMO Loan Origination product page, legacy TMO Loan Origination page, TMO Loan Origination knowledge-base index, condition tracking, workflow automation, loan statuses, borrower profiles, custom documents, Lightning Docs, and the public TMO API docs at https://developers.themortgageoffice.com/.
+
+Local EFS context checked: `src/equityfundingsource-dev/docs/business-logic.md`, `src/equityfundingsource-dev/prds/equity-funding-source-lending-portal-prd.md`, `src/equityfundingsource-dev/docs/TMO/create-loanapplication.md`, `get-loanapplication.md`, `update-loanapplication.md`, `new-loan.md`, `get-loans-by-timestamp.md`, and local EFS/TMO correspondence confirming EFS uses only TMO LOS endpoints.
+
+Closeout evidence: changed path is this session document only. Commands used included `tsift status`, `tsift status --fix`, `agent-doc --version`, `agent-doc preflight/read/plan`, public TMO web checks, `tsift --envelope search`, local `rg`/`sed` inspection, `git status`, and this `agent-doc finalize`. Verification is source review only; no test suite was run because no code changed. Confidence is high that the replacement scope should focus on LOS intake/status/conditions/documents/funding; confidence is medium on exact EFS-specific TMO field/status mapping until backlog item `#xt4d` inventories the live EFS TMO account.
+<!-- agent:boundary:9da4f502 -->
 <!-- /agent:exchange -->
 ###
 <!--

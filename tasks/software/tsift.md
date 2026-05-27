@@ -18,8 +18,7 @@ queue_active: true
 ## Status
 
 <!-- agent:status patch=replace -->
-
-Consumed the OpenCode next-steps queue prompt; #gopencode remains the top backlog item.
+Reviewed inactive queue edits; no preset dispatched. #gopencode remains the top backlog item.
 <!-- /agent:status -->
 
 ## Spec
@@ -124,7 +123,20 @@ Priority order remains:
 
 1. #gopencode — make OpenCode a first-class `tsift` integration, including installer/config docs, digest shortcuts, transcript and permission-prompt diagnostics, deterministic tests, local build/install, and an end-to-end OpenCode smoke session.
 2. #gbackendproof — evaluate optional graph backends only after OpenCode integration is not blocking daily workflow.
-<!-- agent:boundary:3f001905 -->
+
+### Re: inactive queue + backlog refs — gpt-5
+
+The queue edits are visible, but `agent:queue` is not active (`queue_active: false` and no `auto`/start fence), so I did not dispatch or execute `#spec-test-build-install-commit-push`. I also confirmed the orchestrator refuses `--from-queue` in this state, so running spec/test/build/install/commit/push would cross the document's current execution boundary.
+
+Current priority remains:
+
+1. #gopencode — top backlog item; make OpenCode a first-class `tsift` integration with installer/config docs, envelope shortcuts, transcript and permission-prompt diagnostics, deterministic tests, local build/install, and an end-to-end OpenCode smoke session.
+2. #gbackendproof — still deferred until OpenCode integration is not blocking daily workflow.
+
+Preflight warning noted: the post-exchange HTML comment that mentions `#next-steps` is preserved as a non-executable note. Move it into `agent:exchange` or activate `agent:queue` if it should run.
+
+No repo code changed in this cycle, and I did not run the build/test/install/push preset because the queue is inactive.
+<!-- agent:boundary:d51cc6ba -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -134,7 +146,9 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
 <!-- agent:queue auto -->
-- What are #next-steps to integrate opencode?
+- [#gopencode]
+- [#gbackendproof]
+- #spec-test-build-install-commit-push
 <!-- /agent:queue -->
 
 ## Backlog

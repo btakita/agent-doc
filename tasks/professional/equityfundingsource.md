@@ -128,7 +128,27 @@ End with a short decision, not admiration. The best close is:
 > The site and intake foundation are live. I need your decision on the next operational workflow to finish first, and Robert's help getting the credentials/assets so I can keep moving without guessing.
 
 Closeout notes: no code changes made. Context used: EFS session document, Judith/Robert/Bob/Robert Ward notes, current EFS progress/business-logic docs, route/source checks, borrower-message source checks, and live HTTP smoke checks.
-<!-- agent:boundary:2410f1db -->
+❯ Does /apply currently send an email? If yes, where is the email sent?
+### Re: /apply email notification — gpt-5
+
+No, not currently in production.
+
+The `/apply` POST flow does try to send a staff email after it saves a valid `application_leads` record, but only when the Worker has `RESEND_API_KEY` configured. I checked the deployed Worker secret list, and `RESEND_API_KEY` is not present, so the current behavior is:
+
+- Lead is saved in D1 `application_leads`.
+- Admin can review it at `/portal-admin/application-leads`.
+- Staff email notification is recorded as `skipped` with reason `RESEND_API_KEY is not configured`.
+
+If `RESEND_API_KEY` is added, the email will be sent via Resend to `site.email`, which is currently:
+
+`info@equityfundingsource.com`
+
+The message is sent from `Equity Funding Source <info@equityfundingsource.com>`, with `reply_to` set to the borrower's submitted email address. The subject format is:
+
+`[EFS application] <borrower name> - <requested loan amount>`
+
+Verification: inspected `application_leads/routes.ts`, `config/site.ts`, `wrangler.toml`, and ran the deployed Worker secret-list command. No code changes made.
+<!-- agent:boundary:c53f7899 -->
 <!-- /agent:exchange -->
 ###
 <!--

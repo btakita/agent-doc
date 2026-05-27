@@ -31,7 +31,7 @@ Demo prep focus: use the workers.dev production URL for Judith, keep custom-doma
 
 <!-- agent:exchange patch=append -->
 ❯ What are #next-steps for the demo with judith-krug?
-### Re: Judith demo next steps — gpt-5 (HEAD)
+### Re: Judith demo next steps — gpt-5
 
 For the Judith demo, keep the agenda narrow: show the working EFS portal layer, then use the TMO LOS discussion to explain where the next integration/replacement work starts. Do not make this a broad TMO-servicing replacement pitch; EFS is using TMO LOS/API, so the near-term story is intake, status, documents, cache, and staff-reviewed writeback.
 
@@ -79,7 +79,12 @@ The demo should answer three questions for Judith:
 6. Only then consider broader replacement pieces such as condition automation or document generation.
 
 Closeout evidence: changed path is this session document only. Commands used included `tsift status`, `tsift status --fix`, `agent-doc --version`, `agent-doc preflight/read/plan`, linked-doc `sed` reads, `tsift --envelope search`, and this `agent-doc finalize`. Verification is source-review only; no code changed and no tests were run. Confidence is high on the demo agenda and medium on exact route/data readiness until the pre-demo smoke-test backlog item is completed. No escalation was used.
-<!-- agent:boundary:e3badafb -->
+
+### Re: closeout repair — gpt-5
+
+The substantive demo next-steps answer is captured above, and the concrete pre-demo follow-ups are already in the backlog. This note only reopens the binary-owned closeout after the live document buffer normalized status/backlog content after the first commit.
+
+<!-- agent:boundary:858448de -->
 <!-- /agent:exchange -->
 
 ## Queue

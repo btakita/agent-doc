@@ -47,7 +47,11 @@ Compacted content:
 Marking #local-e2e-verify done. Cannot automate #gopencode-install and #gopencode (gated on npm auth). #npm-auth-setup gated — requires manual GitHub NPM_TOKEN + TSIFT_ENABLE_NPM_PUBLISH configuration in repo settings. Remaining backlog items (#npm-publish-verify, #full-e2e-verify) are blocked on npm auth.
 
 Also fixed `agent:backlog auto` → `auto=true` to satisfy lint gate.
-<!-- agent:boundary:57152325 -->
+
+### Re: repair — opus-4-6
+
+Removed duplicate response from stuck cycle. Restored gated backlog items. Fixed `agent:backlog` attribute.
+<!-- agent:boundary:5f5eb6cf -->
 <!-- /agent:exchange -->
 ###
 <!--

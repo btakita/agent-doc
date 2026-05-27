@@ -94,7 +94,37 @@ Commits/push:
 - Parent repo: `591db0a14` (`chore: advance agent-doc submodule`) pushed to `origin/main`.
 
 The pre-existing dirty files in `src/agent-doc` were left untouched outside this commit. No escalation was needed. Confidence: high.
-<!-- agent:boundary:3365e6c1 -->
+### Re: #snapabsorb — gpt-5
+
+Implemented and pushed the snapshot-absorb hardening.
+
+Changed paths:
+- `src/agent-doc/src/write.rs`
+- `src/agent-doc/src/cycle_state.rs`
+- `src/agent-doc/src/git.rs`
+- `src/agent-doc/src/start.rs`
+- `src/agent-doc/specs/07-closeout-commands.md`
+
+What changed:
+- `ipc_snapshot_adoption_blocked` is now recorded in cycle state when live prompt drift forces IPC snapshot adoption back to `content_ours`.
+- Later commit/status staging refuses `snapshot_absorb` for that same cycle after the IPC drift guard fired, stages the existing snapshot body instead, leaves the divergent live buffer visible for the next cycle, and logs `snapshot_absorb_blocked_after_ipc_snapshot_adoption`.
+- Added regression coverage for both the cycle-state flag and the commit guard, plus the closeout spec invariant.
+
+Verification:
+- `cargo test commit_blocks_snapshot_absorb_after_ipc_snapshot_adoption_blocked -- --test-threads=1`
+- `cargo test record_ipc_snapshot_adoption_blocked_sets_cycle_flag -- --test-threads=1`
+- `cargo test flowcore_hot_path_guard_and_proof_tokens_are_budgeted --test test_cli -- --test-threads=1`
+- `make check`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.34.0`
+- Latest GitHub CI run `26489432990` succeeded, including `Run make tmux-ci`.
+
+Commits pushed:
+- `btakita/agent-doc` `35b48ab3` (`fix: block snapshot absorb after IPC drift guard`)
+- `btakita/agent-loop` `9295602df` (`chore: advance agent-doc submodule`)
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:fff45b22 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -110,7 +140,7 @@ As I was typing into the comment below `/agent:exchange`, the full-document IPC 
 dispatch #spec-test-build-install-commit-push
 - ~do [#ignorebypass]~
 - ~do [#liveipcrace]~
-- do [#snapabsorb]
+- ~do [#snapabsorb]~
 - do [#compactstuck]
 - do [#commentpreset]
 - do [#cyclediag]
@@ -119,7 +149,6 @@ dispatch #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#snapabsorb] Harden write/commit closeout after ipc_snapshot_adoption_blocked: when live_prompt_drift_after_preflight selects content_ours for snapshot, later status/commit staging must not snapshot_absorb a divergent disk body unless the response body and live drift are both proven materialized.
 - [ ] [#compactstuck] Teach stuck_captured_cycle/preflight that compact exchange archives are valid materialization for committed captures, or retire the capture/cycle state during compact, so archived responses do not warn as missing from HEAD.
 - [ ] [#commentpreset] Define the contract for prompt-preset/directive text inside ordinary post-exchange HTML comments: either keep it non-executable but emit a visible diagnostic, or introduce a draft-prompt component so #spec-test-build-install-commit-push cannot look silently removed.
 - [ ] [#cyclediag] Add an agent-doc cycle diagnosis command/report that gathers ops.log, capture JSON, route/actor events, Codex session logs, Claude session logs, and editor plugin logs by cycle_id/patch_id to make future race reports reproducible without broad rg searches.

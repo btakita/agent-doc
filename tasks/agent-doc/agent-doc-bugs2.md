@@ -34,9 +34,51 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 3 response topic(s): JB Run Agent Doc and #rhdr-blank; src/agent-doc uncommitted files; closeout drift recovery
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-JB `Run Agent Doc` on tsift.md add the prompt into agent:queue but does not complete sending the `agent-doc .../tsift.md` in the Codex session. Please include a mermaid in the response explaining what happened.
+❯ JB `Run Agent Doc` on tsift.md add the prompt into agent:queue but does not complete sending the `agent-doc .../tsift.md` in the Codex session. Please include a mermaid in the response explaining what happened. Same with this file.
 #spec-test-build-install-commit-push
-<!-- agent:boundary:207fe962 -->
+
+### Re: JetBrains Run Agent Doc queued reroute — gpt-5
+
+Fixed the stuck queued-reroute path.
+
+Root cause: `route --dispatch-only` correctly wrote the busy-actor prompt into `agent:queue auto` and saved that queued state as the snapshot, but the snapshot had not reached `HEAD` yet. The existing preflight recovery only auto-committed that route-owned snapshot when the visible file still matched the snapshot exactly. After I edited this file with “Same with this file,” the working tree no longer matched the queued snapshot, so preflight fell through to the generic `snapshot differs from HEAD` guard and never reached the normal queue drain / `agent-doc <FILE>` send path.
+
+```mermaid
+flowchart LR
+  A[JetBrains Run Agent Doc] --> B[route --dispatch-only]
+  B --> C{Codex actor busy?}
+  C -->|yes| D[Write prompt to agent:queue auto]
+  D --> E[Save queued snapshot]
+  E --> F[HEAD still has old document]
+  F --> G[User edits visible prompt]
+  G --> H[preflight sees working tree != snapshot]
+  H --> I[old behavior: generic snapshot/HEAD guard blocks]
+  H --> J[new behavior: commit route-owned queued snapshot]
+  J --> K[leave later edit unstaged]
+  K --> L[fresh preflight diff handles live edit]
+```
+
+Implemented a narrow preflight recovery for this shape: when a terminal cycle has a route-owned queued snapshot (`queue_active: true`, `agent:queue auto`) that is missing from `HEAD`, preflight commits that saved snapshot before diffing. Any later visible prompt edit remains in the working tree and becomes the next prompt diff; it is not absorbed into the queued snapshot commit.
+
+Changed paths in `src/agent-doc`:
+- `src/preflight.rs`
+- `SPEC.md`
+- `specs/07-closeout-commands.md`
+- `VERSIONS.md`
+
+Commits pushed:
+- `btakita/agent-doc` `20260422/codex-agent-backend`: `62cdbbe1` (`fix: recover queued route snapshots before preflight`)
+- parent `btakita/agent-loop` `main`: `18786a6e7` (`agent-doc: update queued route recovery`)
+
+Verification:
+- `cargo test preflight_commits_route_queue_snapshot_before_live_prompt_edit`
+- `make check` via tsift digest runner: passed
+- `make install` via tsift digest runner: passed
+- Patched local `agent-doc preflight` on this file: auto-committed the queued snapshot and produced the expected fresh diff for “Same with this file”
+- GitHub Actions CI run `26536539309`: passed, including `make check` and `make tmux-ci`
+
+I left unrelated root working-tree state unstaged: `AGENTS.md`, `tasks/agent-doc/open-code.md`, `src/tsift`, and the `.opencode/commands/tsift-*.md` files created by the required `tsift status --fix` pass.
+<!-- agent:boundary:501a0767 -->
 <!-- /agent:exchange -->
 ###
 <!--

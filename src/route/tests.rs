@@ -531,6 +531,7 @@ fn route_enqueue_dispatch_prompt_activates_existing_queue_without_duplicate() {
 
     assert!(!outcome.appended);
     assert!(outcome.already_present);
+    assert!(!outcome.superseded);
     assert!(!outcome.component_created);
     assert!(outcome.activated);
     let updated = std::fs::read_to_string(&doc).unwrap();
@@ -542,6 +543,92 @@ fn route_enqueue_dispatch_prompt_activates_existing_queue_without_duplicate() {
             .count(),
         1,
         "route must not duplicate an already visible queue prompt:\n{updated}"
+    );
+}
+
+#[test]
+fn route_enqueue_dispatch_prompt_supersedes_single_auto_queue_prompt() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_format: template\n",
+        "queue_active: true\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue auto -->\n",
+        "- Run Agent Doc queued the first prompt.\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog -->\n",
+        "<!-- /agent:backlog -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    crate::snapshot::save(&doc, content).unwrap();
+
+    let outcome = enqueue_route_dispatch_prompt(
+        &doc,
+        "Run Agent Doc queued the edited prompt.",
+        "test_busy_actor",
+    )
+    .expect("route should update a stale single auto-queue prompt");
+
+    assert!(!outcome.appended);
+    assert!(!outcome.already_present);
+    assert!(outcome.superseded);
+    assert!(!outcome.component_created);
+    assert!(outcome.activated);
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    assert!(updated.contains("<!-- agent:queue auto -->"));
+    assert!(
+        !updated.contains("- Run Agent Doc queued the first prompt."),
+        "stale route-owned queue prompt should be replaced:\n{updated}"
+    );
+    assert!(
+        updated.contains("- Run Agent Doc queued the edited prompt."),
+        "edited prompt should become the single queued rerun:\n{updated}"
+    );
+    let snapshot = crate::snapshot::load(&doc).unwrap().unwrap();
+    assert_eq!(
+        snapshot, updated,
+        "queue prompt supersession must sync the route snapshot"
+    );
+}
+
+#[test]
+fn route_enqueue_dispatch_prompt_appends_to_multi_prompt_auto_queue() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_format: template\n",
+        "queue_active: true\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue auto -->\n",
+        "- first queued prompt\n",
+        "- second queued prompt\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog -->\n",
+        "<!-- /agent:backlog -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    crate::snapshot::save(&doc, content).unwrap();
+
+    let outcome = enqueue_route_dispatch_prompt(&doc, "third queued prompt", "test_busy_actor")
+        .expect("route should append to user-style multi-prompt auto queues");
+
+    assert!(outcome.appended);
+    assert!(!outcome.already_present);
+    assert!(!outcome.superseded);
+    assert!(!outcome.component_created);
+    assert!(outcome.activated);
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    assert!(
+        updated.contains("- first queued prompt\n- second queued prompt\n- third queued prompt")
     );
 }
 

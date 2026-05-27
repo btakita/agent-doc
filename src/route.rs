@@ -312,6 +312,7 @@ struct RouteQueueEnqueueOutcome {
     prompt_text: String,
     appended: bool,
     already_present: bool,
+    superseded: bool,
     component_created: bool,
     activated: bool,
 }
@@ -1785,6 +1786,7 @@ fn enqueue_route_dispatch_prompt(
     let mut component_created = false;
     let mut already_present = false;
     let mut appended = false;
+    let mut superseded = false;
 
     if let Some(queue_component) = components
         .iter()
@@ -1798,13 +1800,30 @@ fn enqueue_route_dispatch_prompt(
             .iter()
             .any(|prompt| prompt.text.trim() == prompt_text);
         if !already_present {
-            entries.push(crate::queue::QueueEntry::Prompt(
-                crate::queue::QueuePrompt {
-                    multiline: prompt_text.contains('\n'),
-                    text: prompt_text.clone(),
-                },
-            ));
-            appended = true;
+            let active_prompt_count = entries
+                .iter()
+                .filter(|entry| matches!(entry, crate::queue::QueueEntry::Prompt(_)))
+                .count();
+            let replace_single_auto_prompt =
+                crate::queue::has_auto_attr(&queue_component.attrs) && active_prompt_count == 1;
+            if replace_single_auto_prompt {
+                for entry in &mut entries {
+                    if let crate::queue::QueueEntry::Prompt(prompt) = entry {
+                        prompt.multiline = prompt_text.contains('\n');
+                        prompt.text = prompt_text.clone();
+                        superseded = true;
+                        break;
+                    }
+                }
+            } else {
+                entries.push(crate::queue::QueueEntry::Prompt(
+                    crate::queue::QueuePrompt {
+                        multiline: prompt_text.contains('\n'),
+                        text: prompt_text.clone(),
+                    },
+                ));
+                appended = true;
+            }
         }
         let rendered = crate::queue::render(&entries);
         content = queue_component.replace_content(&content, &rendered);
@@ -1829,11 +1848,12 @@ fn enqueue_route_dispatch_prompt(
     crate::ops_log::log_op(
         file,
         &format!(
-            "route_dispatch_queued file={} source={} appended={} already_present={} component_created={} activated={} prompt={:?}",
+            "route_dispatch_queued file={} source={} appended={} already_present={} superseded={} component_created={} activated={} prompt={:?}",
             file.display(),
             source,
             appended,
             already_present,
+            superseded,
             component_created,
             activated,
             prompt_text
@@ -1843,6 +1863,7 @@ fn enqueue_route_dispatch_prompt(
         prompt_text,
         appended,
         already_present,
+        superseded,
         component_created,
         activated,
     })
@@ -3501,11 +3522,12 @@ fn route_via_authoritative_actor(
                     "open_closeout_blocked",
                 )?;
                 eprintln!(
-                    "[route] active closeout for {} could not be drained before reroute; queued pending dispatch {:?} in agent:queue auto (appended={}, already_present={})",
+                    "[route] active closeout for {} could not be drained before reroute; queued pending dispatch {:?} in agent:queue auto (appended={}, already_present={}, superseded={})",
                     file.display(),
                     queued.prompt_text,
                     queued.appended,
-                    queued.already_present
+                    queued.already_present,
+                    queued.superseded
                 );
                 return Ok(dispatch_pane);
             }
@@ -3755,13 +3777,14 @@ fn route_via_authoritative_actor(
             if let Some(context) = prompt_context {
                 let queued = enqueue_route_dispatch_prompt(file, &context.prompt_text, reason)?;
                 eprintln!(
-                    "[route] authoritative actor generation {} for {} is busy on pane {}; queued pending dispatch {:?} in agent:queue auto (appended={}, already_present={}) instead of injecting a duplicate trigger",
+                    "[route] authoritative actor generation {} for {} is busy on pane {}; queued pending dispatch {:?} in agent:queue auto (appended={}, already_present={}, superseded={}) instead of injecting a duplicate trigger",
                     actor.record.generation,
                     file.display(),
                     dispatch_pane,
                     queued.prompt_text,
                     queued.appended,
-                    queued.already_present
+                    queued.already_present,
+                    queued.superseded
                 );
                 Ok(dispatch_pane)
             } else {

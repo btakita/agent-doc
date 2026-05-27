@@ -37,6 +37,9 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   If the user edits the visible prompt meanwhile, that edit stays uncommitted
   in the working tree and becomes the fresh prompt diff instead of wedging the
   queue behind the generic `snapshot differs from HEAD` recovery hint.
+  Repeating the editor action with updated prompt text now replaces the sole
+  live route-owned `agent:queue auto` prompt instead of leaving stale wording
+  queued behind the active turn.
 
 - **Template exchange appends now keep response headings block-separated.**
   When a `<!-- patch:exchange -->` response starts with `### Re:`, the

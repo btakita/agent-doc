@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -34,7 +34,7 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 2 response topic(s): log review and next steps; live queue IPC corruption
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:9ff166ce -->
+<!-- agent:boundary:3be9af0a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +46,14 @@ As I was typing into the comment below `/agent:exchange`, the full-document IPC 
 #spec-test-build-install-commit-push
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+dispatch #spec-test-build-install-commit-push
+- do [#ignorebypass]
+- do [#liveipcrace]
+- do [#snapabsorb]
+- do [#compactstuck]
+- do [#commentpreset]
+- do [#cyclediag]
 <!-- /agent:queue -->
 
 ## Pending / Not Built

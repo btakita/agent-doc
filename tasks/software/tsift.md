@@ -18,7 +18,7 @@ queue_active: false
 ## Status
 
 <!-- agent:status patch=replace -->
-Added prioritized graph/neighborhood next steps to the tsift backlog, tagged for neighborhood effectiveness and performance. Top backlog item: #gneighqual.
+Added prioritized graph/neighborhood next steps to the tsift backlog, tagged for neighborhood effectiveness and performance. Top backlog item: #gcommqual.
 <!-- /agent:status -->
 
 ## Spec
@@ -53,7 +53,27 @@ Priority shape:
 6. `#gbackendproof` — keep FalkorDB/Kuzu promotion behind native-adapter parity and performance proof.
 
 No source code changed this cycle.
-<!-- agent:boundary:6bef512c -->
+### Re: #gneighqual — gpt-5
+
+Completed `#gneighqual` by verifying the ranked-neighborhood effectiveness gate is already implemented in the pushed `tsift` history and marking the backlog item done.
+
+Evidence:
+
+- `b4bba5d feat: rank graph neighborhoods` added additive `ranked_neighbors`, held stable node-id ordering as the default, added the neighborhood ranking gate, updated `SPEC.md`, and covered metric-digest/CLI/conformance tests.
+- `d3a1f1f docs: refresh graph neighborhood benchmark history` is the current `origin/main`/`HEAD`; `git -C src/tsift log origin/main..HEAD` is empty, so no extra `tsift` source commit or push was needed this cycle.
+- Existing dirty files in `src/tsift` are unrelated to `#gneighqual` and were left untouched.
+
+Verification:
+
+- `tsift status --json .` from `src/tsift`: index fresh, instructions current at `0.1.62`.
+- `make check`: passed (`cargo clippy --all-targets -- -D warnings` plus full `cargo test`, including graph DB conformance).
+- `cargo build`: passed.
+- `cargo install --path . --force`: passed; installed `tsift 0.1.62`.
+- `gh run list --workflow CI --limit 1` in `src/tsift`: latest `CI` run for `d3a1f1f` succeeded.
+- Root `Agent Doc` tmux CI check: latest run `26492018957` failed with empty job step lists and `gh run view --log` returned `log not found`, so I classified it as an external CI-start failure rather than a local tmux regression.
+
+No escalation was needed. `#gneighqual` is done.
+<!-- agent:boundary:cf9f7919 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -62,13 +82,19 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+preset #spec-test-build-install-commit-push
+- ~do [#gneighqual]~
+- do [#gcommqual]
+- do [#gfullhot]
+- do [#gsqlstage]
+- do [#ghoppolicy]
+- do [#gbackendproof]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gneighqual] [tag: graph] [tag: neighborhood-effectiveness] [tag: performance] Build a ranked-neighborhood effectiveness gate before making ranked output default: seed real backlog/code queries plus synthetic_multi_module duplicate-name fixtures, compare stable node-id output vs ranked_neighbors top-k, and require handle coverage, duplicate precision, semantic/tagpath readiness, top-community stability, and latency metrics to pass through metric-digest.
 - [ ] [#gcommqual] [tag: graph] [tag: neighborhood-effectiveness] Improve tagpath/community context feeding neighborhoods: carry file/ref handles into CommunityMember, resolve tagpath matches through community or edge evidence instead of name-only fallback, and add scoped/federated/skipped-directory diagnostics for ambiguous members.
 - [ ] [#gfullhot] [tag: graph] [tag: performance] Reduce the full-projection graph hot path before backend changes: stabilize cache-hit source watermarks, skip provider-neutral row rebuilds on unchanged symbol/summary inputs, and prove full_projection.source_graph_build/projection_rows/cache metrics with three backend-eval --full-projection samples.
 - [ ] [#gsqlstage] [tag: graph] [tag: performance] Reduce SQLite graph refresh staging/write cost: bulk merge nodes, edges, and materialized property rows through prepared chunks or temp tables, avoid unchanged property rewrites, and gate on sqlite_delta_write, sqlite_edge_staging, post_write_reads, and duration_micros_per_1k_graph_rows.

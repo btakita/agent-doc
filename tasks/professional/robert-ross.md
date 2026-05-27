@@ -93,7 +93,48 @@ Transcribed and diarized the May 22 phone call (49:52, Brian + Rob). Saved to `m
 10. **Family / personal** — Brian's father (72, St. Augustine FL) just got a blood-cell mutation diagnosis, precursor to cancer, treatable. Rob expressed concern. Sophie ate last night. Brooke's sister visiting, family using the hotel pool/hot tubs.
 
 11. **Logistics** — Call wrapped to join Miguel on Zoom.
-<!-- agent:boundary:f4b39f27 -->
+❯ Please create a svg diagram that explains what I am sending to robert-ross.
+
+```
+Sounds good. I want to explain how/why the incorrect CLAUDE.md was used for SessionShare. We started with me working on ClaudeScore. I used the SessionShare repo with the claudescore.com and claudescore-plugin submodules. Both of the submodules needed a shared context, which is why CLAUDE.md was in SessionShare.
+We then worked on velvet-thunder. I added velvet-thunder to the SessionShare as a submodule to continue my work. This was the moment where I should have audited the entire harness and split out another superrepo to contain SessionShare and velvet-thunder as siblings.
+We were under time pressure, so I chose the expedient path. I also was aware that there were many git repos and it stresses you out to manage the git repos. So I did not really give the entire topic much thought. Without the time pressure and number of git repo concerns, I would have split out another git superrepo which would have prevented the SessionShare CLAUDE.md file to perform double-duty...being the common context for claudescore.com/claudescore-plugin and being a superrepo for my work.
+We then moved to buildparty, which was a monorepo with its own harness files.
+Going forward, I will update my process and awareness of whenever I deviate from my own processes...to be vigilant of the consequences of deviating from my process. Which would mean I would need to review what is lost from deviating from my process.
+I don't mean to attribute any blame. I want to give a debrief of what happened.
+```
+### Re: SVG diagram for SessionShare CLAUDE.md debrief — opus-4-7
+
+Saved [mail/contacts/robert-ross/diagrams/sessionshare-claudemd-debrief.svg](../../mail/contacts/robert-ross/diagrams/sessionshare-claudemd-debrief.svg) (file://` /home/brian/work/btakita/agent-loop/mail/contacts/robert-ross/diagrams/sessionshare-claudemd-debrief.svg`). XML validates clean.
+
+**Visual narrative — what the diagram shows, top to bottom:**
+
+1. **Three-phase timeline (top row)** — left-to-right, each phase a labeled card:
+   - *Phase 1 — ClaudeScore.* SessionShare repo (blue) with `CLAUDE.md ✓ shared context` over two submodules (`claudescore.com`, `claudescore-plugin`). Working as designed.
+   - *Phase 2 — velvet-thunder added.* Same SessionShare box, now red. `CLAUDE.md` is flagged "shared ctx + superrepo ⚠". velvet-thunder appears as a new yellow submodule alongside the originals.
+   - *Phase 3 — buildparty.* Green monorepo card with its own harness. The SessionShare/VT story stops driving the harness, but the lesson stays.
+
+2. **Decision banner (middle)** — amber strip labeled "THE MOMENT THAT MATTERED — adding velvet-thunder to SessionShare." Names this as the missed audit point. Time pressure + git-repo-fatigue won; expedient path was taken without weighing the cost.
+
+3. **Side-by-side outcomes (the heart of the diagram)** — red arrow vs. green arrow fanning out from the decision banner:
+   - *Left (red): What happened.* SessionShare card with three submodules nested under one double-duty `CLAUDE.md`. Caption: "CLAUDE.md confuses two scopes: shared-submodule context + superrepo workspace context."
+   - *Right (green): Should-have path.* `new-superrepo` parent containing **SessionShare as a child** (with its own single-duty CLAUDE.md serving claudescore.com + claudescore-plugin) **and velvet-thunder as a sibling**. Caption: "Each CLAUDE.md scopes one concern. Cross-project work lives in the new superrepo, not inside a child."
+
+4. **Bottom row — explanation + commitment:**
+   - *Why the expedient path won* — three named drivers (time pressure; awareness that many git repos stress you out, biasing toward fewer repos even when a new one was right; topic didn't get full thought; harness audit skipped). Closes with: "No blame — these were real constraints, just naming what drove the decision so it doesn't repeat silently."
+   - *Going forward* — catch the deviation moment; explicitly review what is lost; harness boundary audit on every structural add (new submodule, new repo nesting, new shared file). Punchline: **"One CLAUDE.md = one scope. If two scopes appear, split the repo."**
+
+**Why this layout for Rob specifically:**
+
+- The diagram leads with the timeline so the story is legible at a glance before any judgment lands.
+- The side-by-side red/green comparison is the *only* place where "wrong vs. right" is asserted, and it's structural, not behavioral — the wrongness is about scope-mixing in a file, not about who did what.
+- The "Why the expedient path won" block names the git-repo-fatigue constraint directly. That keeps it a debrief: the constraint was real and shared, not a personal failure to be relitigated.
+- The going-forward block commits to a checkable behavior (harness boundary audit on structural adds) rather than a vague intention.
+
+**Suggested send framing:** "Attaching a one-page diagram of the SessionShare CLAUDE.md story — three phases, the decision moment, what happened vs. what should have happened, and the rule going forward. Not blame, just a debrief so we can both spot the next one."
+
+Let me know if you want the diagram rerendered with: (a) a darker / lighter palette, (b) the "Why the expedient path won" block reworded to omit the git-repo-fatigue mention, or (c) a horizontal-only format that fits better in a Slack/SMS image preview.
+<!-- agent:boundary:6c91df47 -->
 <!-- /agent:exchange -->
 
 <!--

@@ -99,7 +99,21 @@ Priority order:
 5. Build/install locally and run one end-to-end OpenCode smoke session through `agent-doc`, then close with `agent-doc session-check` evidence.
 
 No repo code changed in this response; this is backlog capture and prioritization only.
-<!-- agent:boundary:1bec1165 -->
+### Re: OpenCode integration next steps — gpt-5
+
+
+Top backlog item: #gopencode.
+
+No additional backlog item is needed for this queue pass. The OpenCode integration work is already captured as #gopencode and is correctly ordered ahead of #gbackendproof because it unblocks daily harness use before optional graph backend experiments.
+
+The next actionable sequence remains:
+
+1. Define the OpenCode integration contract for `tsift`: config files, installed hooks, command shortcuts, and proof criteria.
+2. Add or document an OpenCode setup path that preserves existing user config and exposes `tsift` envelope workflows for session review, context packs, diff digests, test digests, and log digests.
+3. Verify OpenCode transcript capture and permission-prompt diagnostics, especially around HITL prompt navigation.
+4. Add deterministic tests for generated OpenCode config and command routing.
+5. Build/install locally, run an end-to-end `agent-doc start opencode ...` smoke session, and close with `agent-doc session-check` evidence.
+<!-- agent:boundary:94faf45c -->
 <!-- /agent:exchange -->
 ###
 <!--

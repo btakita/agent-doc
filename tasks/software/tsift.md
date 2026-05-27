@@ -63,7 +63,7 @@ Commits pushed:
 
 OpenCode references used: custom commands are markdown files under `.opencode/commands` and run by slash command name in the TUI; npm plugins are listed in `plugin` config and installed by Bun at startup. Sources: https://opencode.ai/docs/commands/ and https://opencode.ai/docs/plugins/.
 
-### Re: closeout repair — gpt-5
+### Re: closeout repair — gpt-5 (HEAD)
 
 Closeout repair only: committed the already-written status, queue strike-through, and gated `#gopencode-install` transition through the binary-owned path. No additional repo work was started after the prior response.
 <!-- agent:boundary:e7d0224a -->
@@ -75,7 +75,7 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

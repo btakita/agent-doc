@@ -23,14 +23,15 @@ queue_active: false
 ## Status
 
 <!-- agent:status patch=replace -->
+
+Demo prep focus: use the workers.dev production URL for Judith, keep custom-domain/email/Google/TMO-live access as explicit asks, and frame the next build around TMO LOS intake/status/docs/cache rather than broad servicing replacement.
 <!-- /agent:status -->
 
 ## Exchange
 
 <!-- agent:exchange patch=append -->
 ❯ What are #next-steps for the demo with judith-krug?
-
-### Re: Judith demo next steps — gpt-5
+### Re: Judith demo next steps — gpt-5 (HEAD)
 
 For the Judith demo, keep the agenda narrow: show the working EFS portal layer, then use the TMO LOS discussion to explain where the next integration/replacement work starts. Do not make this a broad TMO-servicing replacement pitch; EFS is using TMO LOS/API, so the near-term story is intake, status, documents, cache, and staff-reviewed writeback.
 
@@ -89,6 +90,10 @@ Closeout evidence: changed path is this session document only. Commands used inc
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#pctc] Before Judith demo, smoke-test the workers.dev demo path: public home, /apply, borrower login, broker portal entry, investor portal entry, and admin application-leads review.
+- [ ] [#m83y] Prepare a short Judith demo script: public site -> Apply lead -> admin lead review -> portal role overview -> TMO LOS cache/replacement boundary -> decisions needed.
+- [ ] [#t447] Create or verify demo-safe credentials/data for Judith: Cloudflare Access admin path, borrower/broker/investor examples, realistic application lead, and screenshots as fallback.
+- [ ] [#hz0m] Ask Judith/Robert for demo decisions: custom-domain timing, EFS Resend sending domain, Google Workspace admin credentials, TMO LOS access/screenshots, Dropbox folder/sample docs, and funded-deal/legal approval.
 <!-- /agent:backlog -->
 
 ## Icebox

@@ -50,7 +50,7 @@ resync: stash pane %16 is unregistered but still owns /home/brian/work/btakita/a
 Error: dispatch-only opencode reopen refused to inject into pane %21 for tasks/software/tsift.md because the pane still shows opencode active turn; restore an idle prompt and retry
 ```
 #spec-test-build-install-commit-push #mermaid
-<!-- agent:boundary:15bfef63 -->
+<!-- agent:boundary:2df1fd71 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -94,6 +94,7 @@ Error: dispatch-only opencode reopen refused to inject into pane %21 for tasks/s
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#already-applied-divergence] already_applied IPC path saves stale content_ours as snapshot, diverging HEAD from working tree — plan: tasks/agent-doc/plan-already-applied-snapshot-divergence.md
 <!-- /agent:backlog -->
 
 ## Review

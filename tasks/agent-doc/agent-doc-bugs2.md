@@ -64,7 +64,7 @@ Verification:
 Commit/push: `src/agent-doc` commit `e691220d` (`fix: retry transient Run Agent Doc booting routes`) was pushed to `origin/20260422/codex-agent-backend`.
 
 Confidence: high for the classifier and regression coverage; medium for the full live IDE path until the restarted plugin is replayed from the IDE. Escalation: none. Pre-existing unrelated dirty files in `src/agent-doc` were left unstaged.
-<!-- agent:boundary:4484f6e5 -->
+<!-- agent:boundary:5b2d62c0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -76,7 +76,7 @@ As I was typing into the comment below `/agent:exchange`, the full-document IPC 
 #spec-test-build-install-commit-push
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - do [#snrun]
 - do [#jbrunbusy]

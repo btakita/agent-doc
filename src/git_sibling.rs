@@ -146,7 +146,12 @@ pub fn absolute_git_dir(inside: &Path) -> Result<PathBuf> {
         .current_dir(&cwd)
         .args(["rev-parse", "--absolute-git-dir"])
         .output()
-        .with_context(|| format!("invoke git rev-parse --absolute-git-dir in {}", cwd.display()))?;
+        .with_context(|| {
+            format!(
+                "invoke git rev-parse --absolute-git-dir in {}",
+                cwd.display()
+            )
+        })?;
     if !output.status.success() {
         bail!(
             "git rev-parse --absolute-git-dir failed in {}: {}",
@@ -204,7 +209,11 @@ pub fn has_staged_changes(repo: &Path) -> Result<bool> {
 /// Run `git -C <sibling> commit -m <message> --trailer 'Session-Doc: <url>'`.
 ///
 /// Returns the resulting sibling-commit short sha for logging.
-pub fn commit_sibling_with_trailer(sibling: &Path, message: &str, trailer_url: &str) -> Result<String> {
+pub fn commit_sibling_with_trailer(
+    sibling: &Path,
+    message: &str,
+    trailer_url: &str,
+) -> Result<String> {
     let trailer = format!("Session-Doc: {}", trailer_url);
     let output = Command::new("git")
         .current_dir(sibling)
@@ -291,9 +300,8 @@ pub fn commit_siblings_for_session_doc(
                 sibling.display()
             );
         }
-        let sibling_top = toplevel(sibling).with_context(|| {
-            format!("{} is not a git working tree", sibling.display())
-        })?;
+        let sibling_top = toplevel(sibling)
+            .with_context(|| format!("{} is not a git working tree", sibling.display()))?;
         let sibling_git_dir = absolute_git_dir(sibling)?;
         let sibling_git_dir_canon =
             std::fs::canonicalize(&sibling_git_dir).unwrap_or(sibling_git_dir.clone());
@@ -342,7 +350,8 @@ mod tests {
 
     #[test]
     fn parse_remote_https() {
-        let parsed = parse_github_remote("https://github.com/ClaudeScore/SessionShare.git").unwrap();
+        let parsed =
+            parse_github_remote("https://github.com/ClaudeScore/SessionShare.git").unwrap();
         assert_eq!(parsed.org, "ClaudeScore");
         assert_eq!(parsed.repo, "SessionShare");
     }
@@ -482,15 +491,14 @@ mod tests {
         let sibling_root = tmp.path().join("sibling");
         std::fs::create_dir_all(&session_root).unwrap();
         std::fs::create_dir_all(&sibling_root).unwrap();
-        init_repo_with_origin(
+        init_repo_with_origin(&session_root, "git@github.com:btakita/agent-loop.git");
+        init_repo_with_origin(&sibling_root, "git@github.com:btakita/build-party.git");
+        commit_file(
             &session_root,
-            "git@github.com:btakita/agent-loop.git",
+            "tasks/doc.md",
+            "# doc\n",
+            "agent-doc(doc): seed",
         );
-        init_repo_with_origin(
-            &sibling_root,
-            "git@github.com:btakita/build-party.git",
-        );
-        commit_file(&session_root, "tasks/doc.md", "# doc\n", "agent-doc(doc): seed");
         commit_file(&sibling_root, "README.md", "# sibling\n", "initial");
         stage_file(&sibling_root, "scripts/run.sh", "#!/bin/sh\necho hi\n");
 
@@ -520,7 +528,12 @@ mod tests {
         init_repo_with_origin(&sibling_root, "https://github.com/foo/baz");
         commit_file(&session_root, "doc.md", "first\n", "agent-doc(doc): first");
         commit_file(&sibling_root, "x.md", "x\n", "initial");
-        commit_file(&session_root, "doc.md", "second\n", "agent-doc(doc): second");
+        commit_file(
+            &session_root,
+            "doc.md",
+            "second\n",
+            "agent-doc(doc): second",
+        );
         let session_sha = head_sha(&session_root.join("doc.md")).unwrap();
         stage_file(&sibling_root, "scripts/y.sh", "y\n");
 
@@ -576,10 +589,7 @@ mod tests {
         )
         .unwrap_err();
         let msg = err.to_string();
-        assert!(
-            msg.contains("no staged changes"),
-            "unexpected error: {msg}"
-        );
+        assert!(msg.contains("no staged changes"), "unexpected error: {msg}");
     }
 
     #[test]

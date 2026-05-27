@@ -3717,8 +3717,17 @@ fn run_with_tmux_dispatch_only_ignores_startup_miss_on_alive_registered_pane() {
         &format!("exec {} {}", ready_agent.display(), doc.display()),
     );
 
-    run_with_tmux(&doc, &iso, None, 0, &[], RouteMode::DispatchOnly, false, None)
-        .expect("dispatch-only route should ignore the stale startup-miss gate and send");
+    run_with_tmux(
+        &doc,
+        &iso,
+        None,
+        0,
+        &[],
+        RouteMode::DispatchOnly,
+        false,
+        None,
+    )
+    .expect("dispatch-only route should ignore the stale startup-miss gate and send");
 
     let after = wait_for_pane_contains(
         &iso,

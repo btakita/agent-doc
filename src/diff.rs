@@ -1021,10 +1021,7 @@ fn line_is_managed_state_only(line: &str) -> bool {
     // Done archive items often start with a date prefix: `- YYYY-MM-DD [#id]`
     if trimmed.len() >= 12
         && trimmed.starts_with("- ")
-        && trimmed
-            .chars()
-            .nth(2)
-            .is_some_and(|c| c.is_ascii_digit())
+        && trimmed.chars().nth(2).is_some_and(|c| c.is_ascii_digit())
     {
         return true;
     }

@@ -1776,12 +1776,10 @@ fn finalize_preserves_compacted_exchange_ipc_scratch_comment() {
          {prompt}\n\
          {preset}",
     );
-    let baseline_shaped = fs::read_to_string(&doc)
-        .unwrap()
-        .replace(
-            "❯ Please reply\n<!-- agent:boundary:1234abcd -->",
-            &compacted_exchange,
-        );
+    let baseline_shaped = fs::read_to_string(&doc).unwrap().replace(
+        "❯ Please reply\n<!-- agent:boundary:1234abcd -->",
+        &compacted_exchange,
+    );
     fs::write(&doc, baseline_shaped).unwrap();
     init_git_repo(tmp.path(), &doc);
     let baseline_content = fs::read_to_string(&doc).unwrap();
@@ -1826,7 +1824,9 @@ fn finalize_preserves_compacted_exchange_ipc_scratch_comment() {
         "visible compacted-session scratch comment should survive exactly once:\n{content}"
     );
     assert_eq!(
-        content.matches("### Re: compact IPC scratch — gpt-5").count(),
+        content
+            .matches("### Re: compact IPC scratch — gpt-5")
+            .count(),
         1,
         "response heading should not be duplicated by closeout repair:\n{content}"
     );

@@ -485,10 +485,9 @@ mod tests {
             report.guidance
         );
         assert!(
-            report
-                .guidance
-                .iter()
-                .any(|line| line.contains("ask the user") && line.contains("agent_doc_auto_compact")),
+            report.guidance.iter().any(
+                |line| line.contains("ask the user") && line.contains("agent_doc_auto_compact")
+            ),
             "expected opt-in gated compact guidance when agent_doc_auto_compact is unset, got {:?}",
             report.guidance
         );

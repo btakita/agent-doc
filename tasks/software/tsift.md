@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -60,7 +60,10 @@ Verification:
 - GitHub Actions CI run `26487042618`: success for `clippy + test` and `live Convex graph acceptance`.
 
 No `tmux-test` workflow exists in either the root `agent-loop` repo or the `tsift` submodule, so there was no tmux CI leg to inspect. Unrelated dirty files in the root checkout and in the `tsift` submodule were left unstaged.
-<!-- agent:boundary:9046bc1d -->
+### Re: closeout repair — gpt-5
+
+Binary closeout repair: the `#gneighgate` implementation response was already committed, and this follow-up write only reopens the agent-doc write/commit path so the post-closeout queue and `(HEAD)` annotations are not left as an interrupted cycle.
+<!-- agent:boundary:e60937a0 -->
 <!-- /agent:exchange -->
 ###
 <!--

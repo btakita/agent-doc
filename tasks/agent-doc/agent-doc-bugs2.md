@@ -120,6 +120,7 @@ JB `Run Agent Doc` on this document did not run agent-doc in the Codex console.
 <!-- agent:backlog -->
 - [ ] [#odsp2] Implement OpenCode dispatch-start proof via pane state transition detection — plan at tasks/agent-doc/plan-opencode-dispatch-start-proof.md
 - [ ] [#ocdsp] Implement OpenCode dispatch-start proof via pane state transition detection — plan at tasks/agent-doc/plan-opencode-dispatch-start-proof.md — extend RoutedDispatchStartTracker, add PaneStateChanged proof variant, poll capture-pane for idle→active transition
+- [ ] [#finovrwr] `agent-doc finalize` overwrites the prior response in `agent:exchange` instead of appending after it: HEAD ends with only the new response heading/body; the previous response is gone from the document on disk. Distinct from `#rhdr-blank`. Repro in `src/boost-client/tasks/monsterrodholders.md` between commits `7928306` and `a87ce95` — the "Re: Add brian.takita / monsterrodholder74 as manager" response was present after `7928306` and missing after the next finalize at `a87ce95`. The `session-check` interrupt fired ("found likely direct response patchback without agent-doc cycle") but recovery blessed the truncated state. Plan: `tasks/agent-doc/plan-finalize-overwrites-prior-response.md`. Fix: always read existing exchange content from HEAD before applying `<!-- patch:exchange -->`; harden `session-check` recovery so working-tree response sections never silently disappear; add regression for two back-to-back finalize cycles.
 <!-- /agent:backlog -->
 
 ## Review

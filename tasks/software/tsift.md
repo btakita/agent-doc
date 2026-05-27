@@ -101,7 +101,50 @@ Verification passed:
 - GitHub Actions CI run `26502654442`: `clippy + test` passed and live Convex graph acceptance passed
 
 The active workflows for this repo are `CI` and `Release`; I did not find a separate tmux-test workflow or tmux CI leg to inspect. The preflight `#next-steps` warning still refers to a post-exchange HTML comment only, so I treated it as a non-executable note.
-<!-- agent:boundary:4b0c5ed3 -->
+### Re: #ghoppolicy — gpt-5
+
+Completed `#ghoppolicy`.
+
+I kept the user-facing graph path default at 64 hops and tightened the promotion policy proof instead of raising the cap. Backend-eval already reports 64/128/256/512 `path_max_hops` duration and row metrics for the required SQLite workloads; this cycle locked that contract in the graph DB conformance test so partial tier evidence cannot be mistaken for promotion evidence.
+
+Changed paths in the tsift repo:
+
+- `SPEC.md`
+- `tests/graph_db_conformance.rs`
+- `plans/ghoppolicy-evidence.md`
+
+Evidence is recorded in `plans/ghoppolicy-evidence.md`. The three fresh full-projection samples show useful deep-chain rows at higher tiers, but not flat latency:
+
+| Workload | Hop cap | Median duration | Median rows |
+| --- | ---: | ---: | ---: |
+| real | 64 | 85us | 2 |
+| real | 128 | 38us | 2 |
+| real | 256 | 33us | 2 |
+| real | 512 | 31us | 2 |
+| full_projection | 64 | 71us | 2 |
+| full_projection | 128 | 35us | 2 |
+| full_projection | 256 | 31us | 2 |
+| full_projection | 512 | 30us | 2 |
+| synthetic_deep_chain | 64 | 89us | 65 |
+| synthetic_deep_chain | 128 | 139us | 129 |
+| synthetic_deep_chain | 256 | 267us | 257 |
+| synthetic_deep_chain | 512 | 530us | 513 |
+
+That means the policy holds: deep-chain rows prove higher caps are useful, but the 512-hop median is 530us versus the 64-hop median of 89us, so the 10% regression budget blocks promotion and keeps higher caps opt-in.
+
+Committed and pushed the tsift repo change as `00f9e54 test: lock hop cap promotion metrics` on `main`. I left the pre-existing unrelated dirty files in `src/tsift` untouched. The superproject still shows `src/tsift` modified because the submodule checkout advanced; I did not create a separate root gitlink commit.
+
+Verification passed:
+
+- `cargo test -q graph_db_backend_eval_benchmarks_candidate_stores_against_sqlite`
+- `cargo test -q hop_cap_gate`
+- `cargo build`
+- `make check`
+- `cargo install --path .`
+- GitHub Actions CI run `26503222930`: `clippy + test` passed and live Convex graph acceptance passed
+
+The active workflows for this repo are `CI` and `Release`; I did not find a separate tmux-test workflow or tmux CI leg to inspect. The preflight `#next-steps` warning still refers to a post-exchange HTML comment only, so I treated it as a non-executable note.
+<!-- agent:boundary:7c6ed814 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -116,7 +159,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#gcommqual]~
 - ~do [#gfullhot]~
 - ~do [#gsqlstage]~
-- do [#ghoppolicy]
+- ~do [#ghoppolicy]~
 - do [#gbackendproof]
 <!-- /agent:queue -->
 

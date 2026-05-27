@@ -53,7 +53,7 @@ Priority shape:
 6. `#gbackendproof` — keep FalkorDB/Kuzu promotion behind native-adapter parity and performance proof.
 
 No source code changed this cycle.
-<!-- agent:boundary:63319e96 -->
+<!-- agent:boundary:2a7bab2d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -63,7 +63,7 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
 <!-- agent:queue -->
-stop
+--- stop
 <!-- /agent:queue -->
 
 ## Backlog

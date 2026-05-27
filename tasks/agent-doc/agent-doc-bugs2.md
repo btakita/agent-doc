@@ -129,7 +129,49 @@ Commits prepared before session-document closeout:
 - root: `b75047e38 agent-doc: update opencode dispatch proof`
 
 Push is deferred until this mandatory `agent-doc finalize` commit lands, per the session-document closeout rule. Escalation: none. Confidence: high.
-<!-- agent:boundary:d3585a5c -->
+
+### Re: #finovrwr — gpt-5
+
+Implemented `#finovrwr`: strict template/CRDT closeouts now detect when an explicit preflight baseline is missing exchange content already committed in `HEAD`, and rebase append-mode `agent:exchange` response patch application onto `HEAD` before producing `content_ours`, IPC baselines, IPC snapshots, timeout fallback snapshots, or commit-staged snapshots. This prevents a later `finalize` from overwriting or subtracting a prior `### Re:` block.
+
+```mermaid
+flowchart TD
+  A["finalize --baseline-file"] --> B{"Baseline contains HEAD exchange?"}
+  B -->|"yes"| C["Apply response to baseline"]
+  B -->|"no"| D["Use HEAD as append base"]
+  D --> E["Build content_ours with prior responses preserved"]
+  C --> E
+  E --> F["Merge later live user drift"]
+  F --> G["Save snapshot and commit"]
+```
+
+Changed paths:
+
+- `src/agent-doc/src/write.rs`
+- `src/agent-doc/tests/finalize_integration.rs`
+- `src/agent-doc/SPEC.md`
+- `src/agent-doc/specs/07-closeout-commands.md`
+- `src/agent-doc/VERSIONS.md`
+
+Verification completed before closeout:
+
+- `cargo fmt`
+- `cargo check`
+- `cargo test finalize_stream_rebases_stale_exchange_baseline_to_head`
+- `cargo test opencode`: passed, 69 passed / 3 ignored
+- `make check`: passed, including clippy, main suite `2501 passed; 0 failed; 228 ignored`, integration suites, and the wider deterministic SimWorld corpus check
+- `make install`: passed, installed `agent-doc 0.34.0` executable and `libagent_doc-0.34.0.so`
+- GitHub Actions CI run `26537671598`: completed success; job `check` passed, including `Run make check` and `Run make tmux-ci`
+
+Commits prepared before this session-document closeout:
+
+- `src/agent-doc`: `259a70b7 feat: prove opencode dispatch start`
+- `src/agent-doc`: `e0269bca fix: rebase stale finalize baselines`
+- root: `b75047e38 agent-doc: update opencode dispatch proof`
+- root: `2c0a51c22 agent-doc: update stale finalize baseline fix`
+
+Push is deferred until this mandatory `agent-doc finalize` commit lands. Escalation: none. Confidence: high.
+<!-- agent:boundary:6d533c0c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -164,7 +206,6 @@ JB `Run Agent Doc` on this document did not run agent-doc in the Codex console.
 
 <!-- agent:backlog -->
 - [ ] [#ocdsp] Implement OpenCode dispatch-start proof via pane state transition detection — plan at tasks/agent-doc/plan-opencode-dispatch-start-proof.md — extend RoutedDispatchStartTracker, add PaneStateChanged proof variant, poll capture-pane for idle→active transition
-- [ ] [#finovrwr] `agent-doc finalize` overwrites the prior response in `agent:exchange` instead of appending after it: HEAD ends with only the new response heading/body; the previous response is gone from the document on disk. Distinct from `#rhdr-blank`. Repro in `src/boost-client/tasks/monsterrodholders.md` between commits `7928306` and `a87ce95` — the "Re: Add brian.takita / monsterrodholder74 as manager" response was present after `7928306` and missing after the next finalize at `a87ce95`. The `session-check` interrupt fired ("found likely direct response patchback without agent-doc cycle") but recovery blessed the truncated state. Plan: `tasks/agent-doc/plan-finalize-overwrites-prior-response.md`. Fix: always read existing exchange content from HEAD before applying `<!-- patch:exchange -->`; harden `session-check` recovery so working-tree response sections never silently disappear; add regression for two back-to-back finalize cycles.
 <!-- /agent:backlog -->
 
 ## Review

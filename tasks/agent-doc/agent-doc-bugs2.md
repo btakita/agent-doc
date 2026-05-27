@@ -34,7 +34,13 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 4 response topic(s): #snrun; closeout repair; equityfundingsource IPC corruption; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:31fad576 -->
+### Re: closeout repair — gpt-5
+
+Closeout repair recorded the backlog-only `#next-steps` update. The priority-ordered backlog is present, and the top backlog item remains `#ipcmodel`.
+
+The `#ipcmodel`, `#ipcreplay`, `#ipcdeny`, and `#ipcfail` entries were already captured as open backlog items in the prior commit. They are not executed tasks for this turn. I removed the accidental inactive-queue residue that made those ids look like executable queue directives. No repo code changed in this repair.
+
+<!-- agent:boundary:00bb69bd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -55,7 +61,7 @@ preset #spec-test-build-install-commit-push
 - do [#jbrunbusy]
 <!-- /agent:queue -->
 
-## Pending / Not Built
+## Backlog
 
 <!-- agent:backlog -->
 - [ ] [#ipcmodel] Formalize and test an IPC closeout state model: enumerate allowed snapshot sources and state transitions for socket/file/direct-disk paths, then add property/table tests proving bad ACK content, prompt drift, partial response materialization, stale patch replay, and post-block snapshot absorb cannot reach commit.

@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -75,7 +75,20 @@ Verification:
 Commits:
 - `src/agent-doc`: `ec328b3a` (`fix: guard partial IPC materialization`)
 - superproject pointer: `dfc6223b7` (`agent-doc: guard partial IPC materialization`)
-<!-- agent:boundary:1d54b315 -->
+### Re: EFS IPC replay harness — gpt-5
+
+Completed `#ipcreplay`.
+
+Added a deterministic `equityfundingsource` IPC replay harness in `tests/equityfundingsource_ipc_replay.rs` covering socket IPC while the live prompt is typed during finalize, file IPC with ACK sidecars, stale file-IPC patch cleanup before fallback, and forced direct-disk fallback.
+
+Updated `specs/07-closeout-commands.md` to name the `tasks/professional/equityfundingsource.md` incident as the closeout replay fixture.
+
+Verification: `cargo test --test equityfundingsource_ipc_replay` passed; `make check` passed; `cargo install --path .` replaced the local `agent-doc`; CI run `26498979417` passed, including `Run make check` and `Run make tmux-ci`.
+
+Commits: `src/agent-doc` `b5ea38a2 test: add EFS IPC replay harness`; superproject `bf0a9ef34 agent-doc: add EFS IPC replay harness`.
+
+No follow-ups needed.
+<!-- agent:boundary:5ba02efa -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -93,7 +106,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#ipcmodel]~
-- do [#ipcreplay]
+- ~do [#ipcreplay]~
 - do [#ipcdeny]
 - do [#ipcfail]
 - do [#jbrunbusy]
@@ -102,7 +115,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#ipcreplay] Add a deterministic equityfundingsource IPC race replay harness that replays typing during finalize against socket IPC, file IPC, ACK sidecars, stale patch files, and direct-disk fallback so historical corruption packets stay covered outside live editor runs.
 - [ ] [#ipcdeny] Add repo-wide receiver/static guards for full-document mutation APIs across CLI, JetBrains, and VS Code, with allowlisted parser/diagnostic references only, so legacy or foreign `fullContent` payloads remain unrepresentable as visible writes.
 - [ ] [#ipcfail] Strengthen closeout diagnostics for insufficient IPC proof: surface the exact failed invariant and recovery path in preflight/session-check, and add tests for no ACK, missing response probe, duplicate prompt ACK, and live prompt drift.
 - [ ] [#jbrunbusy] Fix JB Run Agent Doc active-turn retry classification: dispatch-only `latest run still booting ... active codex turn` refusals should be typed as busy/running, coalesced or retryable in the JetBrains plugin, and covered by route + plugin regression tests using the equityfundingsource repro.

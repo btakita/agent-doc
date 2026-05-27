@@ -864,6 +864,10 @@ fn wait_for_pane_contains(
     last
 }
 
+fn pane_capture_contains_wrapped(capture: &str, needle: &str) -> bool {
+    capture.contains(needle) || capture.replace(['\r', '\n'], "").contains(needle)
+}
+
 fn send_keys_with_retry(iso: &IsolatedTmux, pane: &str, text: &str) {
     let start = std::time::Instant::now();
     let timeout = std::time::Duration::from_secs(3);
@@ -5449,6 +5453,12 @@ fn resolve_or_create_pane_dispatch_only_prefers_authoritative_actor_dispatch_tar
     );
     let _ = wait_for_pane_contains(&iso, &stale_pane, "> ", std::time::Duration::from_secs(3));
     let actor_pane = iso.auto_start(session, &cwd).unwrap();
+    send_keys_with_retry(
+        &iso,
+        &actor_pane,
+        r#"exec /bin/sh -c 'printf "> \n"; read CMD; printf "ACTOR:%s\n" "$CMD"; cat'"#,
+    );
+    let _ = wait_for_pane_contains(&iso, &actor_pane, "> ", std::time::Duration::from_secs(3));
 
     let doc = dir.path().join("dispatch-only.md");
     let content = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n❯ follow-up question\n";
@@ -5529,14 +5539,15 @@ fn resolve_or_create_pane_dispatch_only_prefers_authoritative_actor_dispatch_tar
         Some(actor_pane.as_str())
     );
 
+    let trigger = HarnessConfig::codex().trigger_command(&file_path);
     let actor_after = wait_for_pane_contains(
         &iso,
         &actor_pane,
-        &HarnessConfig::codex().trigger_command(&file_path),
+        "ACTOR:agent-doc ",
         std::time::Duration::from_secs(3),
     );
     assert!(
-        actor_after.contains(&HarnessConfig::codex().trigger_command(&file_path)),
+        pane_capture_contains_wrapped(&actor_after, &trigger),
         "dispatch-only reroute should submit the reopen in the authoritative pane: {actor_after}"
     );
     let stale_content = sessions::capture_pane(&iso, &stale_pane).unwrap_or_default();

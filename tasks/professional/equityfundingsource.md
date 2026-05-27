@@ -130,7 +130,14 @@ What did not complete: the assistant response body with the demo agenda is still
 I did not bypass that guard because it exists to avoid overwriting unsaved editor changes. Please save or discard the open editor buffer for `tasks/professional/equityfundingsource.md`, then rerun:
 
 `agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
-<!-- agent:boundary:1c5e5b86 -->
+### Re: JB cache conflict cancel recovery — gpt-5
+
+Recovered the EFS document from the JetBrains File Cache Conflict cancel state. `agent-doc preflight` detected `jb_cache_conflict_cancel` and committed the visible response body, then repaired the orphaned captured response. The relevant EFS document commits are `835969589` and `0e4250ae3`.
+
+I also created the requested `#agent-doc-bug` plan at `tasks/agent-doc/plan-jb-cache-conflict-cancel-uncommitted-response.md` and added a plan-backed backlog item to `tasks/agent-doc/agent-doc-bugs2.md`. The plan is intentionally backlog-only; I did not implement the agent-doc fix.
+
+Closeout evidence: EFS document recovery committed; bug plan committed as `1fb430f80`; this finalize adds the response and cross-document backlog item. Commands run: `tsift status`, `git status --short`, `agent-doc session-check`, `agent-doc write --commit` attempt, `agent-doc reset --from-current --preserve-session`, `agent-doc preflight`, `agent-doc plan`, targeted file reads/diffs, `git add`, `git commit`, and this `agent-doc finalize --pending-add-to`. Verification is document-only; no product or agent-doc code changed, so no test suite was run. Confidence: high for document recovery and plan capture. Escalation: none.
+<!-- agent:boundary:03f23d2d -->
 <!-- /agent:exchange -->
 ###
 <!--

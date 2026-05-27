@@ -22,8 +22,7 @@ queue_active: false
 ## Status
 
 <!-- agent:status patch=replace -->
-
-EFS workers.dev production: D1 API unblocked; remote D1 migrations are current; Cloudflare Access protects /login/access-callback with ACCESS_TEAM_DOMAIN/AUD deployed in Worker version 252b1753-968b-4c90-8c49-0e63f46dd033. Custom-domain cutover is deferred; continue using https://equityfundingsource.brian-takita.workers.dev until further notice.
+EFS workers.dev production: `/apply` public prequalification + D1-backed `application_leads` admin review is deployed; remote D1 migrations are current through `0029_application_leads.sql`; Cloudflare Access protects /login/access-callback with ACCESS_TEAM_DOMAIN/AUD deployed in Worker version `3c35b2da-a599-4bc6-b732-9d12a2393018`. Custom-domain cutover is deferred; continue using https://equityfundingsource.brian-takita.workers.dev until further notice.
 <!-- /agent:status -->
 
 ## Exchange
@@ -147,7 +146,33 @@ Proof:
 - Verification: `bun test tests/application-leads.test.ts` passed; `make check` passed with 183 tests, app build, and Worker build. `gh run list --workflow CI --limit 1` reported no workflow named `CI`, so there was no matching CI run to inspect.
 - Escalation: none.
 - Confidence: high.
-<!-- agent:boundary:2015afaa -->
+❯ deploy
+### Re: deploy — gpt-5
+
+Deployed the public `/apply` lead-capture work to EFS workers.dev.
+
+Deployment results:
+
+- Applied remote D1 migration `0029_application_leads.sql` to the `equityfundingsource` database.
+- Confirmed remote migrations now report `No migrations to apply`.
+- Confirmed the remote `application_leads` table exists.
+- Deployed Worker `equityfundingsource` to `https://equityfundingsource.brian-takita.workers.dev`.
+- Current Worker version: `3c35b2da-a599-4bc6-b732-9d12a2393018`.
+
+Live smoke checks:
+
+- `GET /apply` returned `200` and the response contains `Loan prequalification` plus `Send prequalification request`.
+- `GET /portal-admin/application-leads` returned `303` to `/login?role=admin`, as expected for an unauthenticated admin page.
+- `GET /api/admin/application-leads` returned `401` with `{"error":"unauthenticated"}`, as expected for an unauthenticated admin API request.
+
+Proof:
+
+- Changed paths: no EFS source changes in this deploy cycle; this cycle changed remote D1/Worker state and this session document. `tsift init --workspace` refreshed root `AGENTS.md` metadata locally and left it uncommitted; existing unrelated dirty EFS files (`AGENTS.md`, `wrangler.toml`, `tmp/`) remained uncommitted.
+- Commands: `make check`, `bun run cf:d1:migrations:list:remote`, `bun run cf:d1:migrate:remote`, remote D1 table query, `bun run deploy:worker`, live `curl` smoke checks, and `gh run list --workflow CI --limit 1`.
+- Verification: `make check` passed with 183 tests plus app and Worker builds; Cloudflare deploy succeeded; live smoke checks passed. GitHub reported no workflow named `CI`, so there was no CI run to inspect.
+- Escalation: none.
+- Confidence: high.
+<!-- agent:boundary:1a003f2b -->
 <!-- /agent:exchange -->
 ###
 <!--

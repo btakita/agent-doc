@@ -21,7 +21,8 @@
 //!   prompt-bearing user edits (`prompt_target`) relative to the snapshot, but
 //!   no new `agent-doc` cycle ever started for them. Plain exchange-only
 //!   content edits without a fresh prompt target do not reopen a committed
-//!   cycle.
+//!   cycle. `agent:queue` prompt edits are excluded from this guard because
+//!   queue activation and consumption are owned by the next preflight cycle.
 //! - Also fails closed when a closed cycle leaves the live `agent:exchange` tail
 //!   ending in a prompt-looking block with no later assistant response. This
 //!   catches direct-harness turns where the prompt was already committed into
@@ -1786,7 +1787,7 @@ pub(crate) fn first_unstarted_prompt_bearing_change(
         let body = crate::frontmatter::parse(content)
             .map(|(_, body)| body.to_string())
             .unwrap_or_else(|_| content.to_string());
-        crate::diff::strip_comments(&body)
+        crate::diff::strip_comments(&strip_queue_components_for_unstarted_prompt_guard(&body))
     };
     let norm = |s: &str| crate::git::normalize_committed_exchange_artifacts(s);
     let snap_norm = norm(&prompt_bearing_body(&snapshot));
@@ -1827,6 +1828,19 @@ pub(crate) fn first_unstarted_prompt_bearing_change(
         }
     }
     Ok(None)
+}
+
+fn strip_queue_components_for_unstarted_prompt_guard(body: &str) -> String {
+    let Ok(components) = crate::component::parse(body) else {
+        return body.to_string();
+    };
+    let mut result = body.to_string();
+    for component in components.iter().rev() {
+        if component.name == "queue" {
+            result = component.replace_content(&result, "");
+        }
+    }
+    result
 }
 
 fn prompt_target_is_immediately_before_existing_response(
@@ -2865,6 +2879,47 @@ Body\n\
                 assert!(message.contains("prompt_target"));
             }
             other => panic!("expected interrupted status, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn session_check_allows_committed_state_with_live_queue_prompt_diff() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = tmp.path().join("doc.md");
+        let committed = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: done — gpt-5\n\n",
+            "Completed.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Queue\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let current = committed.replace(
+            "<!-- agent:queue -->\n<!-- /agent:queue -->",
+            "<!-- agent:queue -->\n- do #liveipcrace. #spec-test-build-install-commit-push\n<!-- /agent:queue -->",
+        );
+        fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
+        fs::write(&doc, current).unwrap();
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Ok(message) => {
+                assert!(message.contains("committed"), "unexpected ok: {message}");
+            }
+            other => panic!("expected ok status, got {other:?}"),
         }
     }
 

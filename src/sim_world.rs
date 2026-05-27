@@ -2578,6 +2578,45 @@ fn finalize_with_typing_in_post_exchange_comment_and_already_applied_ack_does_no
     assert_owned_scratch_comment_preserved(&deduped, prompt);
 }
 
+#[test]
+fn ipc_snapshot_guard_blocks_live_queue_drift_after_preflight() {
+    let mut world = SimWorld::new(2_022);
+    world
+        .insert_after_exchange("\n\n## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n")
+        .unwrap();
+    let baseline = world.doc.clone();
+    let response = response_patch("live queue IPC race");
+    let (patches, unmatched) = crate::template::parse_patches(&response).unwrap();
+    let content_ours =
+        crate::template::apply_patches(&baseline, &patches, &unmatched, Path::new("sim.md"))
+            .unwrap();
+    let live_queue_prompt = "- do #liveipcrace. #spec-test-build-install-commit-push";
+    let ack_candidate = content_ours.replace(
+        "<!-- agent:queue -->\n<!-- /agent:queue -->",
+        &format!("<!-- agent:queue -->\n{live_queue_prompt}\n<!-- /agent:queue -->"),
+    );
+
+    assert!(
+        crate::write::ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
+            &baseline,
+            &ack_candidate,
+            &content_ours,
+        ),
+        "IPC snapshot adoption must classify live queue edits typed after preflight as next-cycle drift"
+    );
+
+    world.doc = ack_candidate;
+    world.snapshot = content_ours;
+    assert!(
+        world.doc.contains(live_queue_prompt),
+        "live queue prompt should remain visible in the working tree"
+    );
+    assert!(
+        !world.snapshot.contains(live_queue_prompt),
+        "snapshot should stay on content_ours so the queue prompt remains a future diff"
+    );
+}
+
 // -------- #adoc-bdauc-simworld: deterministic SimWorld coverage for baseline
 // drift after a manual user commit. See
 // tasks/agent-doc/plan-baseline-drift-after-user-commit.md.

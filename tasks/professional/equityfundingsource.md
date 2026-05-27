@@ -30,50 +30,12 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260527-072131.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260527-073445.md`*
 
 Compacted content:
-- Archived 3 response topic(s): Demo prep; /apply email notification; Production Resend test routing
+- Archived 1 response topic(s): /apply email delivery
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-❯ I completed the apply workflow and the email was not received in the btak.dev@gmail.com mailbox.
-❯ #spec-test-commit-push-deploy
-### Re: /apply email delivery — gpt-5
-
-Root cause found and fixed. The original `/apply` submission was saved in production D1, but the staff notification failed with Resend `403` because `equityfundingsource.com` is not verified as a sending domain. I also tested the previous `btak.dev+efs-test@gmail.com` route directly against Resend; this Resend account is still in testing mode and can only send to `brian.takita@gmail.com` until a domain is verified.
-
-I changed the Worker so `/apply` notification delivery no longer depends on the public `site.email`. It now uses explicit Worker config:
-
-- `APPLICATION_LEAD_NOTIFICATION_TO=brian.takita@gmail.com`
-- `APPLICATION_LEAD_NOTIFICATION_FROM=Equity Funding Source <onboarding@resend.dev>`
-
-That gives production testing a sender and recipient Resend will actually accept. Once an EFS-owned sending domain is verified in Resend, switch those two vars back to production EFS-owned addresses.
-
-Changed paths:
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/application_leads/routes.ts`
-- `src/equityfundingsource-dev/app/equityfundingsource/worker.ts`
-- `src/equityfundingsource-dev/wrangler.toml`
-- `src/equityfundingsource-dev/.env.example`
-- `src/equityfundingsource-dev/prds/equity-funding-source-lending-portal-prd.md`
-- `src/equityfundingsource-dev/tests/application-leads.test.ts`
-- `src/equityfundingsource-dev/tests/borrower-messages.test.ts`
-- parent submodule pointer `src/equityfundingsource-dev`
-
-Verification:
-- `bun test tests/application-leads.test.ts` passed.
-- `bun test tests/borrower-messages.test.ts` passed after aligning a rebased admin-message string guard with the current `selected_user.user_id` implementation.
-- `make check` passed after rebase: 185 tests, app build, and Worker build.
-- `gh run list --workflow CI --limit 1` reported no workflow named `CI`; `gh workflow list` returned no workflows for this repo, so there was no remote CI/tmux leg to inspect.
-- `bun run deploy:worker` deployed Worker version `e1b8f2e2-142f-4ab8-8e37-80e0082e8d20` to `https://equityfundingsource.brian-takita.workers.dev`.
-- Live `POST /apply` returned `303` and created verification lead `f55cfa62-0905-4f38-bb52-57f24e6fb9b4` with `staff_notification_status='sent'`; I archived that labeled test lead afterward.
-- I manually replayed the previously failed `Brian Kenji Takita` lead notification through the accepted Resend test sender; Resend returned id `cc01c8dc-3202-4a95-a08b-155af453a396`, and production D1 now shows that lead as `staff_notification_status='sent'` with no error.
-- `GET /apply` on the deployed Worker returns HTTP 200.
-
-Commits and push:
-- EFS submodule pushed to `origin/main` through `4d00f51`.
-- Parent repo submodule pointer pushed to `origin/main` as `995e9b9de`.
-
-Escalation: none. Confidence: high for new `/apply` notifications to the Resend-allowed inbox; `btak.dev` delivery remains blocked by Resend testing-mode/domain-verification policy, not by the Worker code.
-<!-- agent:boundary:cd3a7138 -->
+<!-- agent:boundary:4a2d0287 -->
 <!-- /agent:exchange -->
 ###
 <!--

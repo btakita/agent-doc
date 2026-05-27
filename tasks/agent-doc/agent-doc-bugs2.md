@@ -312,7 +312,16 @@ Error: authoritative actor generation 87 for tasks/software/tsift.md owns pane %
 Preflight reports `no_changes: true` for `tasks/software/agent-loop.md`, so agent-doc says there is no new document diff to answer or persist.
 
 Warning surfaced: the document declares `agent: claude`, but the active harness is Codex. I also refreshed tsift; it still reports one missing workspace scope for `FDE-Project-Interview`, but no stale tracked files.
-<!-- agent:boundary:33e254f7 -->
+### Re: #qipc next steps — gpt-5
+
+The next step is still `#qipc`, but it needs an explicit dispatch-drain invariant rather than a passive queue-only path.
+
+I updated `#qipc` so the implementation must force-close any active `finalize` / `write --commit` recovery before accepting the next dispatch. If that closeout reaches a clean `session-check` and the supervisor or prompt-readiness proof says the console is idle, dispatch can run immediately under the same document lease. If not, the request must be appended to an activated `agent:queue` with visible state, so queued work cannot sit hidden and run later as a surprise.
+
+The `tasks/software/tsift.md` route error is the same failure shape: route found an authoritative actor for pane `%7`, but could not prove generation `87` was dispatch-ready within 8 seconds, so it failed closed instead of injecting. The fix belongs in `#qipc`: drain or enqueue under one document lease, and never treat a visually idle console as enough authority by itself.
+
+Top backlog item id: `qipc`.
+<!-- agent:boundary:c598c4ed -->
 <!-- /agent:exchange -->
 ###
 <!--

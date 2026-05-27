@@ -321,7 +321,7 @@ I updated `#qipc` so the implementation must force-close any active `finalize` /
 The `tasks/software/tsift.md` route error is the same failure shape: route found an authoritative actor for pane `%7`, but could not prove generation `87` was dispatch-ready within 8 seconds, so it failed closed instead of injecting. The fix belongs in `#qipc`: drain or enqueue under one document lease, and never treat a visually idle console as enough authority by itself.
 
 Top backlog item id: `qipc`.
-<!-- agent:boundary:c598c4ed -->
+<!-- agent:boundary:fe386f7c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -359,7 +359,7 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#qipc] Implement queue-first agent-doc dispatch and user-owned prompt entities: route repeated dispatches through a single-flight document lease that appends/activates agent:queue, preserve post-baseline prompt entities during IPC snapshot adoption, and harden stale JetBrains conflict / late fallback replay handling with specs and regressions.
+- [ ] [#qipc] Implement queue-first agent-doc dispatch and user-owned prompt entities: route repeated dispatches through a single-flight document lease; add an explicit force-finalize/dispatch-drain path that completes any active finalize/write-commit recovery before the next dispatch; immediately dispatch only when session-check is green and supervisor/prompt readiness proves the console is idle; otherwise append/activate agent:queue with visible state so no queued task can run unexpectedly; preserve post-baseline prompt entities during IPC snapshot adoption; and harden stale JetBrains conflict / late fallback replay handling with specs and regressions.
 <!-- /agent:backlog -->
 
 ## Review

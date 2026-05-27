@@ -171,7 +171,11 @@ Commits prepared before this session-document closeout:
 - root: `2c0a51c22 agent-doc: update stale finalize baseline fix`
 
 Push is deferred until this mandatory `agent-doc finalize` commit lands. Escalation: none. Confidence: high.
-<!-- agent:boundary:6d533c0c -->
+
+### Re: #finovrwr closeout repair — gpt-5
+
+Closeout repair only: the `#finovrwr` implementation, verification, install, and CI/tmux evidence are recorded in the previous response. This pass normalizes inactive queue residue so the completed item no longer reopens as a prompt target.
+<!-- agent:boundary:123109db -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -194,8 +198,9 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push #mermaid
-- do [#odsp2]
+- ~do [#odsp2]~
 - do [#ocdsp]
+- ~do [#finovrwr]~
 ---
 JB `Run Agent Doc` on this document did not run agent-doc in the Codex console.
 #spec-test-build-install-commit-push #mermaid

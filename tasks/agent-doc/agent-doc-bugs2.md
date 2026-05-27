@@ -34,7 +34,35 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 2 response topic(s): log review and next steps; live queue IPC corruption
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:3be9af0a -->
+### Re: do [#ignorebypass] — gpt-5
+
+Implemented #ignorebypass.
+
+Changed paths:
+- `src/agent-doc/src/git.rs`
+- `src/agent-doc/specs/09-git-integration.md`
+- `src/agent-doc/tests/finalize_integration.rs`
+
+What changed:
+- Added a closeout staging guard before `hash-object` + `update-index` and before the forced `git add -f` fallback.
+- The guard checks the repo-relative path with `git ls-files --error-unmatch` and `git check-ignore --quiet --no-index --`; untracked ignored paths are skipped with a visible commit diagnostic and ops-log entry.
+- Tracked files that match ignore rules remain stageable, matching normal Git porcelain behavior.
+- Updated the git integration spec and added regressions for direct commit staging and strict `finalize` on an ignored untracked session doc.
+
+Verification:
+- `cargo test commit_skips_ignored_untracked_path` passed.
+- `cargo test finalize_skips_ignored_untracked_session_doc` passed.
+- `make check` passed: clippy, full normal suite, medium SimWorld corpus, version sync.
+- `make install` passed: local `agent-doc` binary replaced and `libagent_doc-0.34.0.so` installed.
+- Latest GitHub CI on `20260422/codex-agent-backend` was green: run `26487146778`, job `check`, including step `Run make tmux-ci` success at `2026-05-27T02:40:05Z`. Local `make tmux-ci` was not rerun because the required CI tmux leg was already green.
+
+Commit / push:
+- `src/agent-doc`: `9ebb7bdc` (`fix: honor gitignore during closeout staging`) pushed to `origin/20260422/codex-agent-backend`.
+- Parent repo: `52accb0db` (`chore: advance agent-doc submodule`) pushed to `origin/main`.
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:8ae6a1f7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -48,7 +76,7 @@ As I was typing into the comment below `/agent:exchange`, the full-document IPC 
 
 <!-- agent:queue auto -->
 dispatch #spec-test-build-install-commit-push
-- do [#ignorebypass]
+- ~do [#ignorebypass]~
 - do [#liveipcrace]
 - do [#snapabsorb]
 - do [#compactstuck]
@@ -59,7 +87,6 @@ dispatch #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#ignorebypass] Teach the finalize/write/commit auto-sweep to honor `.gitignore`. Today it stages via `git hash-object` + `git update-index --add` (porcelain-bypassing plumbing), so any file the session document references gets committed regardless of ignore rules. Concrete repro: with `tasks/.gitignore` listing `scratch/`, an agent-doc session that references `tasks/scratch/<x>.md` commits that file silently on finalize. Fix surface: pre-stage check via `git check-ignore --quiet --no-index` (or libgit2 equivalent) per candidate path before `update-index`; skip ignored paths with a visible diagnostic (or behind an `--include-ignored` opt-in) so users don't have to rebase-force-push to undo. Bug class: similar to #snapabsorb in that plumbing-level staging skips the safety net users expect from porcelain.
 - [ ] [#liveipcrace] Reproduce and fix the live post-exchange typing/full-document IPC corruption path: build a failing SimWorld plus JetBrains/VSC fixture from cycle-1779845677327 where a scratch comment is edited during finalize/compact, assert no fullContent socket/file payload, no duplicate prompt line, no prompt preset/directive loss, and no silent snapshot_absorb of shorter disk content.
 - [ ] [#snapabsorb] Harden write/commit closeout after ipc_snapshot_adoption_blocked: when live_prompt_drift_after_preflight selects content_ours for snapshot, later status/commit staging must not snapshot_absorb a divergent disk body unless the response body and live drift are both proven materialized.
 - [ ] [#compactstuck] Teach stuck_captured_cycle/preflight that compact exchange archives are valid materialization for committed captures, or retire the capture/cycle state during compact, so archived responses do not warn as missing from HEAD.

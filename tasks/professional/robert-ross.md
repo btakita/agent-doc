@@ -134,7 +134,93 @@ Saved [mail/contacts/robert-ross/diagrams/sessionshare-claudemd-debrief.svg](../
 **Suggested send framing:** "Attaching a one-page diagram of the SessionShare CLAUDE.md story — three phases, the decision moment, what happened vs. what should have happened, and the rule going forward. Not blame, just a debrief so we can both spot the next one."
 
 Let me know if you want the diagram rerendered with: (a) a darker / lighter palette, (b) the "Why the expedient path won" block reworded to omit the git-repo-fatigue mention, or (c) a horizontal-only format that fits better in a Slack/SMS image preview.
-<!-- agent:boundary:6c91df47 -->
+❯ I want to note that BuildParty/BuildParty is also a submodule of SessionShare. Please also edit my draft to make the email clear to robert-ross. Btw, robert-ross fired me and I'm waiting for an email from robert-ross to close out the engagement.
+### Re: BuildParty correction + revised closeout draft — opus-4-7
+
+Updated the SVG and revised the draft. Closeout context noted (engagement is closing on Rob's side); the revised draft holds an accountable-not-defensive tone and adds no new scope or asks.
+
+#### SVG updates
+
+[mail/contacts/robert-ross/diagrams/sessionshare-claudemd-debrief.svg](../../mail/contacts/robert-ross/diagrams/sessionshare-claudemd-debrief.svg) — re-rendered, XML validates clean.
+
+- **Phase 3 corrected.** No longer "moved to buildparty (own monorepo)" — now shown as **BuildParty/BuildParty added as a 4th submodule under SessionShare**. Caption: "BuildParty has its own internal harness, but SessionShare CLAUDE.md still wraps the whole workspace."
+- **Decision banner** now reads: "THE MOMENT THAT MATTERED — when velvet-thunder was added under SessionShare. That was the right time to audit. The same audit was missed again when BuildParty was added."
+- **What-happened panel** shows all four nested submodules (claudescore.com, claudescore-plugin, velvet-thunder, BuildParty/BuildParty) under one 4-scope CLAUDE.md.
+- **Should-have panel** now shows three siblings under `new-superrepo` (SessionShare, velvet-thunder, BuildParty/BuildParty), each with its own scope.
+- **Why-the-expedient-path-won block** adds a fourth driver: "Maintenance backlog: no full review of the codebase and harness; manual file-by-file review kept slipping behind shipping work."
+- **Going-forward block** adds: "Treat the harness/codebase review as scheduled work, not as something that fits around shipping."
+
+#### Revised draft email
+
+```
+Subject: Debrief — SessionShare CLAUDE.md
+
+Rob,
+
+Wanted to walk through how the SessionShare CLAUDE.md ended up doing more
+than it was meant to. This is a debrief, not a defense.
+
+How it grew:
+
+1. ClaudeScore. SessionShare was the repo holding claudescore.com and
+   claudescore-plugin as submodules. Both needed shared context, so
+   CLAUDE.md lived at SessionShare's root. That matched its intended scope.
+
+2. velvet-thunder added. I added velvet-thunder as a submodule under
+   SessionShare to keep moving. This was the audit point I missed — the
+   right move was to split out a new superrepo holding SessionShare and
+   velvet-thunder as siblings, each with its own CLAUDE.md.
+
+3. BuildParty/BuildParty added. I then added BuildParty as another
+   submodule under SessionShare. BuildParty has its own internal harness
+   files, so the inner side is fine — but SessionShare's CLAUDE.md was now
+   the de facto workspace context for four nested projects instead of two.
+   The audit was skipped again.
+
+Why I took the expedient path:
+
+- Time pressure to keep velvet-thunder and then BuildParty moving.
+- I was aware that the number of git repos was a stressor for you, which
+  biased me toward adding submodules rather than spinning up a new
+  superrepo.
+- Maintenance backlog: I had not done a full review of the codebase and
+  harness. I should have prioritized a manual, file-by-file review sooner,
+  but it kept slipping behind shipping work.
+
+Going forward:
+
+When I deviate from my own process, I will name the deviation explicitly
+and review what it costs before continuing. For structural moves — new
+submodule, new repo nesting, new shared file — that includes a harness
+boundary audit in the same change. I will also treat a periodic full
+harness review as scheduled work, not as something that fits around
+shipping. One CLAUDE.md, one scope. If two scopes appear, split the repo.
+
+Not assigning blame — just naming what happened so it doesn't repeat.
+
+Brian
+```
+
+#### What I changed in the draft and why
+
+- **Renumbered the timeline to three concrete events** (ClaudeScore → velvet-thunder → BuildParty) so the sequence is unambiguous; the original had buildparty in a separate sentence that read as departure from SessionShare scope when it was actually another nesting under it.
+- **Replaced "we then moved to buildparty, which was a monorepo with its own harness files"** with the correct picture: BuildParty/BuildParty is also a SessionShare submodule, with its own internal harness — so the *inner* harness is fine but the *outer* SessionShare CLAUDE.md is what kept widening.
+- **Added the maintenance-backlog point** as a third driver under "why the expedient path won." Framed it as your point of accountability (should have prioritized the manual review sooner) rather than blaming the backlog itself.
+- **Tightened "perform double-duty" run-on** and merged the going-forward block into one paragraph rather than two near-duplicate sentences.
+- **Kept "Not assigning blame — just naming what happened so it doesn't repeat"** as the closer because that line is doing real work in a closeout email: it signals that this is a debrief, not a re-litigation.
+- **Removed nothing about the git-repo-stress driver** since that was your direct call on the prior cycle and it stays relevant.
+
+#### Closeout-tone notes
+
+Given the engagement is closing on Rob's side and you are waiting on his email:
+
+- Draft has no proposals, no asks, no "let me know if you want to discuss" CTA — it lands as a one-way debrief.
+- Tone is accountable on the structural decisions without being self-flagellating; that reads worse in a closeout than a clean naming of cause and commitment.
+- The "going forward" block is framed as **your process change**, not a pitch to keep working together.
+- I also recorded the engagement-closeout context as a project memory so future cycles on robert-ross materials default to closeout framing rather than ongoing-collaboration framing.
+
+Want me to (a) shorten this to a 3-paragraph version (some closeouts read better short), (b) drop the "going forward" block entirely if you'd rather not signal process improvement to him, or (c) push this through corky as a Gmail draft to Rob?
+<!-- agent:boundary:2e4d8b0d -->
 <!-- /agent:exchange -->
 
 <!--

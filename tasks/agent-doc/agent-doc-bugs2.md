@@ -15,7 +15,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -129,7 +129,7 @@ Commits prepared before session-document closeout:
 - root: `b75047e38 agent-doc: update opencode dispatch proof`
 
 Push is deferred until this mandatory `agent-doc finalize` commit lands, per the session-document closeout rule. Escalation: none. Confidence: high.
-<!-- agent:boundary:0e04d75f -->
+<!-- agent:boundary:d3585a5c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -150,7 +150,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 #spec-test-build-install-commit-push
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push #mermaid
 - do [#odsp2]
 - do [#ocdsp]

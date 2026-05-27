@@ -101,7 +101,7 @@ Verification:
 - `gh run list --workflow CI --limit 1` in `src/tsift`: latest `CI` run for `d3a1f1f` succeeded, including `clippy + test` and `live Convex graph acceptance`.
 
 No escalation was needed. `#gcommqual` is done.
-<!-- agent:boundary:dfaa8e08 -->
+<!-- agent:boundary:019801d4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -123,7 +123,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [x] [#gcommqual] [tag: graph] [tag: neighborhood-effectiveness] Improve tagpath/community context feeding neighborhoods: carry file/ref handles into CommunityMember, resolve tagpath matches through community or edge evidence instead of name-only fallback, and add scoped/federated/skipped-directory diagnostics for ambiguous members.
 - [ ] [#gfullhot] [tag: graph] [tag: performance] Reduce the full-projection graph hot path before backend changes: stabilize cache-hit source watermarks, skip provider-neutral row rebuilds on unchanged symbol/summary inputs, and prove full_projection.source_graph_build/projection_rows/cache metrics with three backend-eval --full-projection samples.
 - [ ] [#gsqlstage] [tag: graph] [tag: performance] Reduce SQLite graph refresh staging/write cost: bulk merge nodes, edges, and materialized property rows through prepared chunks or temp tables, avoid unchanged property rewrites, and gate on sqlite_delta_write, sqlite_edge_staging, post_write_reads, and duration_micros_per_1k_graph_rows.
 - [ ] [#ghoppolicy] [tag: graph] [tag: performance] Keep max-hop increases opt-in until useful-row evidence passes: compare 64/128/256/512 tiers on real, full-projection, and synthetic deep-chain workloads, require useful deeper rows and flat latency, then consider adaptive caps rather than raising the default blindly.

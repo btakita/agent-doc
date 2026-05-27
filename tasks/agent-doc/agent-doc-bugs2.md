@@ -64,7 +64,10 @@ Verification:
 Commit/push: `src/agent-doc` commit `e691220d` (`fix: retry transient Run Agent Doc booting routes`) was pushed to `origin/20260422/codex-agent-backend`.
 
 Confidence: high for the classifier and regression coverage; medium for the full live IDE path until the restarted plugin is replayed from the IDE. Escalation: none. Pre-existing unrelated dirty files in `src/agent-doc` were left unstaged.
-<!-- agent:boundary:5b2d62c0 -->
+### Re: closeout repair — gpt-5
+
+Closeout repair committed the visible #snrun response and gated-review state after editor IPC drift. No additional repo code changed in this repair.
+<!-- agent:boundary:39e86465 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -78,20 +81,20 @@ As I was typing into the comment below `/agent:exchange`, the full-document IPC 
 
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
-- do [#snrun]
+- ~do [#snrun]~
 - do [#jbrunbusy]
 <!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#snrun] [recommended] Implement tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md: make JB Run Agent Doc distinguish rescued-stash accepted-only proof misses, active-turn busy collisions, and stale starting projections; add route/plugin regressions plus live replay evidence.
 - [ ] [#jbrunbusy] Fix JB Run Agent Doc active-turn retry classification: dispatch-only `latest run still booting ... active codex turn` refusals should be typed as busy/running, coalesced or retryable in the JetBrains plugin, and covered by route + plugin regression tests using the equityfundingsource repro.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#snrun] [recommended] Implement tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md: make JB Run Agent Doc distinguish rescued-stash accepted-only proof misses, active-turn busy collisions, and stale starting projections; add route/plugin regressions plus live replay evidence.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

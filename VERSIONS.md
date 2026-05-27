@@ -6,6 +6,13 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **JetBrains Run Agent Doc retries transient dispatch-only Codex boot/busy
+  refusals without masking protected input.** The IDE retry loop now recognizes
+  the binary's `latest run is still booting` route refusal when the ready probe
+  ended on `active codex turn` or `timed_out`, so fast repeated clicks do not
+  strand behind a stale startup projection or still-running turn. Shell history
+  search and other protected-input blockers remain terminal route failures.
+
 - **JetBrains File Cache Conflict Cancel recovery is now pinned for the
   direct `write_applied` wedge.** The preflight regression suite now covers
   the exact Cancel-shaped closeout where the working tree and snapshot already

@@ -162,7 +162,26 @@ class TerminalUtilTest {
         """.trimIndent()
 
         assertTrue(TerminalUtil.isStartingActorRouteFailure(output))
+        assertTrue(TerminalUtil.isRetryableRunAgentDocRouteFailure(output))
         assertFalse(TerminalUtil.isStartingActorRouteFailure("[agent-doc] proof-timeout: accepted but unproven"))
+    }
+
+    @Test
+    fun `latest run booting route failures are retryable only for transient busy shapes`() {
+        val activeTurn = """
+            Error: dispatch-only codex reopen refused to inject into pane %42 for tasks/root.md because the latest run is still booting and never reached a dispatch-ready prompt (active codex turn); wait for the pane to become ready and reroute again
+        """.trimIndent()
+        val timedOut = """
+            Error: dispatch-only codex reopen refused to inject into pane %42 for tasks/root.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again
+        """.trimIndent()
+        val shellSearch = """
+            Error: dispatch-only codex reopen refused to inject into pane %42 for tasks/root.md because the latest run is still booting and never reached a dispatch-ready prompt (interactive shell reverse-i-search); wait for the pane to become ready and reroute again
+        """.trimIndent()
+
+        assertTrue(TerminalUtil.isRetryableRunAgentDocRouteFailure(activeTurn))
+        assertTrue(TerminalUtil.isRetryableRunAgentDocRouteFailure(timedOut))
+        assertFalse(TerminalUtil.isRetryableRunAgentDocRouteFailure(shellSearch))
+        assertFalse(TerminalUtil.isRetryableRunAgentDocRouteFailure("[agent-doc] proof-timeout: accepted but unproven"))
     }
 
     @Test

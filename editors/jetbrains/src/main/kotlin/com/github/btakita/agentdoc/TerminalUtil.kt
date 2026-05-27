@@ -281,7 +281,7 @@ object TerminalUtil {
                             break
                         } else if (
                             exitCode != 0 &&
-                            isStartingActorRouteFailure(output) &&
+                            isRetryableRunAgentDocRouteFailure(output) &&
                             attempt < STARTING_ACTOR_ROUTE_MAX_ATTEMPTS
                         ) {
                             val delayMillis = startingActorRouteRetryDelayMillis(attempt)
@@ -951,6 +951,22 @@ object TerminalUtil {
         return output.contains("authoritative actor generation") &&
             output.contains("route will not inject a new trigger") &&
             output.contains("the authoritative actor is still starting")
+    }
+
+    internal fun isRetryableRunAgentDocRouteFailure(output: String): Boolean {
+        return isStartingActorRouteFailure(output) || isLatestRunStillBootingRetryable(output)
+    }
+
+    private fun isLatestRunStillBootingRetryable(output: String): Boolean {
+        val lower = output.lowercase()
+        if (!lower.contains("dispatch-only") ||
+            !lower.contains("latest run is still booting") ||
+            !lower.contains("never reached a dispatch-ready prompt")
+        ) {
+            return false
+        }
+
+        return lower.contains("(active codex turn)") || lower.contains("(timed_out)")
     }
 
     internal fun startingActorRouteRetryDelayMillis(completedAttempts: Int): Long {

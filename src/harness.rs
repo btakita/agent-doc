@@ -1460,6 +1460,19 @@ reverse-i-search: bugs enter accept · esc cancel
     }
 
     #[test]
+    fn dispatch_blocker_reason_detects_codex_interactive_history_search() {
+        let h = HarnessConfig::codex();
+        let output = "\
+gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
+i-search: bug accept · cancel
+";
+        assert_eq!(
+            h.dispatch_blocker_reason(output).as_deref(),
+            Some("interactive shell history search")
+        );
+    }
+
+    #[test]
     fn dispatch_blocker_reason_detects_codex_clean_exit_restart_prompt() {
         let h = HarnessConfig::codex();
         let output = "\

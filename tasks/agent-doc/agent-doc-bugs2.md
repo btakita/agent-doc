@@ -175,7 +175,19 @@ Push is deferred until this mandatory `agent-doc finalize` commit lands. Escalat
 ### Re: #finovrwr closeout repair — gpt-5
 
 Closeout repair only: the `#finovrwr` implementation, verification, install, and CI/tmux evidence are recorded in the previous response. This pass normalizes inactive queue residue so the completed item no longer reopens as a prompt target.
-<!-- agent:boundary:123109db -->
+
+### Re: duplicate #finovrwr queue line — gpt-5
+
+No additional code changes were needed. The duplicate inactive queue prompt for `#finovrwr` was already satisfied by the committed `#finovrwr` implementation and verification; this closeout only normalizes the queue back to the completed state.
+
+Changed paths: session document only.
+
+Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc session status`, `agent-doc session clear`.
+
+Verification: no new code changes in this repair cycle; prior `#finovrwr` verification remains `cargo fmt`, `cargo check`, focused tests, `make check`, `make install`, and GitHub Actions CI run `26537671598` with `make check` and `make tmux-ci` passing.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:c6138b38 -->
 <!-- /agent:exchange -->
 ###
 <!--

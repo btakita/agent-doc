@@ -19,7 +19,7 @@ queue_active: true
 
 <!-- agent:status patch=replace -->
 
-Captured #gopencode as the top OpenCode integration follow-up.
+Consumed the OpenCode next-steps queue prompt; #gopencode remains the top backlog item.
 <!-- /agent:status -->
 
 ## Spec
@@ -113,7 +113,7 @@ The next actionable sequence remains:
 3. Verify OpenCode transcript capture and permission-prompt diagnostics, especially around HITL prompt navigation.
 4. Add deterministic tests for generated OpenCode config and command routing.
 5. Build/install locally, run an end-to-end `agent-doc start opencode ...` smoke session, and close with `agent-doc session-check` evidence.
-<!-- agent:boundary:94faf45c -->
+<!-- agent:boundary:1c231ed0 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -77,7 +77,29 @@ Both tools overlap on core code RAG (tree-sitter indexing, symbol search, call g
 **What tsift should keep owning** — envelopes, digests, session-review, agent-doc graph projection, conflict-matrix, Convex sync. These have no tokensave equivalent and are tsift's core value proposition.
 
 **Concrete first step**: implement a `tokensave` backend adapter in `substrate.rs` behind the existing `backend-eval` feature flag, then run it through `perf_gate.rs` to benchmark against the SQLite backend.
-<!-- agent:boundary:58c81034 -->
+❯ Implement support for libsql. #spec-test-build-install-commit-push
+### Re: libsql backend implementation — glm-5.1
+
+Implemented `LibsqlGraphStore` behind the `backend-libsql` feature flag, providing a libsql/Turso-compatible `GraphStore` backend.
+
+**Changes:**
+- `Cargo.toml`: Added `libsql = "0.9"` and `tokio = "1"` as optional dependencies behind `backend-libsql` feature
+- `src/libsql_backend.rs`: New `LibsqlGraphStore` implementing the full `GraphStore` trait — local (`open`, `in_memory`) and remote (`open_remote`) modes
+- `SPEC.md`: Documented libsql backend in architecture diagram and added dedicated section covering local/remote modes, schema compatibility, async bridge, and performance gate eligibility
+
+**Design:**
+- Reuses identical schema tables and indexes as `SqliteGraphStore`
+- Schema version and foreign key constraints are identical — database files are compatible between SQLite and libsql stores
+- Async `libsql::Connection` methods bridged through a `tokio::runtime::Runtime` to satisfy the synchronous `GraphStore` trait
+- 6 unit tests: round-trip, projection upsert, CRUD + neighborhood + ordering, shortest path, file creation, graph counts
+
+**Verification:**
+- `cargo build --features backend-libsql` — clean
+- `cargo test --features backend-libsql --bin tsift -- libsql` — 6 passed
+- `cargo test` (default features) — all 705 tests pass
+- `cargo install --path .` — installed for local testing
+- Committed and pushed to `main`
+<!-- agent:boundary:2ef00b84 -->
 <!-- /agent:exchange -->
 ###
 <!--

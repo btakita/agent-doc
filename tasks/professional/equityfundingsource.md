@@ -35,15 +35,59 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 Compacted content:
 - Archived 1 response topic(s): deploy
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:8dddf1fd -->
+❯ From judith-krug
+❯ > Plus hold up on any more work till we meet for the demo and discuss. We are trying to get access to TMO back now. We got locked out by mistake.
+
+❯ Please break down the features and how we can implement the features to replace TMO in a better, more integrated, easier to use, and resellable way.
+
+❯ What are #next-steps?
+### Re: TMO replacement plan — gpt-5
+
+I will hold on any new build work until the demo/meeting unless there is a production support issue you explicitly want handled. For the meeting, I would frame this as replacing the parts of TMO that actually run EFS day to day, not cloning every TMO screen. The better product is an EFS operating system: borrower, broker, investor, lender, document, funding, and staff workflows in one place, with TMO treated first as an integration/data source and later as something we can phase out module by module.
+
+Current foundation we can demo: public site and `/apply`, role-based login, borrower application/status/document areas, investor deal/funding flow, admin loan/deal/user/lender-request management, D1/R2-backed document cache direction, token upload work, and partial TMO status/funding integration. Broker is the biggest visible gap because the UI exists but backend/TMO-backed records are still pending.
+
+| Area | Replacement feature | Better, integrated, resellable implementation |
+| --- | --- | --- |
+| Borrower intake | Prequalification, full application, status tracker, profile, document upload | One borrower timeline from first lead through funded/declined/closed, with staff-visible status, upload links, and notifications. |
+| Broker intake | Submit deal, pipeline, document requests, commissions, referral status | Broker portal with real backend records, admin review, notifications, and commission tracking instead of static/demo data. |
+| Staff loan ops | Admin loan queue, status changes, tasks, underwriting checklist, closing/funding state | Single admin workflow across borrower and broker submissions with audit history, reusable checklists, and controlled TMO sync/writeback. |
+| Investor/lender ops | Deal marketplace, diligence docs, commitments, lender account requests, positions/distributions | Investor portal driven by EFS-approved opportunities, R2-secured documents, admin approval, and TMO funding calls only where still needed. |
+| Documents | Uploads, requested docs, secure download, document type tracking | R2 as canonical storage, D1 metadata, token uploads, Dropbox/TMO as adapters, and future OCR/search layered on top. |
+| Messaging/notifications | Borrower/admin messages, email alerts, broker/investor updates | D1 message threads plus email notifications and later inbound email replies, so users do not need to know which portal action triggered an update. |
+| TMO integration | Import/cache, webhook or polling sync, writeback, outbox replay | No live TMO dependency during page loads; use cache + outbox first, then replace TMO functions as each module becomes mature. |
+| Reporting/audit | Pipeline, funding, stale sync, staff activity, compliance proof | Built-in dashboards and event history that can be reused by future private-lending clients. |
+| Resale/productization | Tenant branding, configurable fields/statuses, permissions, document templates | Package the system as a white-label private-lending portal, not a one-off EFS custom app. |
+
+Implementation path:
+
+1. Stabilize the demo: freeze new feature work, show what exists on workers.dev, and use the demo to identify which workflows EFS actually needs before spending more build time.
+2. Restore and inventory TMO access: capture screenshots/exports for borrowers, loans, lenders, statuses, docs, funding, reports, notifications, and any API/webhook settings. This prevents us from guessing at replacement scope.
+3. Build the replacement in layers: EFS database/cache first, portal workflows second, TMO sync/writeback third, AI document extraction/search fourth, and tenant-ready configuration last.
+4. Keep TMO as a bridge, not the core: while access is unstable, the app should keep accepting leads/uploads/messages and queue anything that needs TMO replay later.
+5. Productize only the stable primitives: roles, portals, loan pipeline, documents, notifications, audit log, configurable statuses/fields, branding, and tenant isolation. Do not productize EFS-specific shortcuts.
+
+For the demo meeting, I would make the decisions concrete:
+
+- Which TMO workflows are must-replace first: borrower applications, broker submissions, admin pipeline, investor funding, documents, lender records, reports, or notifications.
+- Whether EFS wants a TMO bridge for 30-90 days or a harder cutover once core data is migrated.
+- Which roles must be usable in the first replacement release: admin + borrower only, or admin + borrower + broker + investor.
+- Whether resale means white-label for similar private lenders, or just a cleaner internal EFS system with optional future reuse.
+- Who approves legal/disclosure language, document types, status names, email copy, and funding workflow rules.
+
+#next-steps:
+
+1. Do not start new feature implementation before the demo unless explicitly approved.
+2. Prepare a demo script around the current live system: public site/apply, borrower flow, admin review, investor funding, document handling, and known broker/TMO gaps.
+3. Once TMO access is restored, inventory the actual screens, fields, statuses, reports, and integration options EFS uses.
+4. Turn the meeting decisions into a phased roadmap: demo stabilization, MVP replacement, TMO bridge/cutover, AI document/search layer, resale packaging.
+5. After approval, resume with the smallest replacement slice that proves the integrated model: borrower/broker intake to admin review to document collection to status/notification updates.
+
+Closeout evidence: no product code or deployment changes were made. I added backlog items for the demo agenda, TMO inventory, and phased replacement roadmap. Commands run: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, targeted `tsift` searches, targeted doc reads, and this `agent-doc finalize`. Verification is document-only; no test suite was needed. Confidence is medium-high pending the restored TMO access inventory. Escalation: none.
+<!-- agent:boundary:4f4c3743 -->
 <!-- /agent:exchange -->
 ###
 <!--
-From judith-krug
-> Plus hold up on any more work till we meet for the demo and discuss. We are trying to get access to TMO back now. We got locked out by mistake.
-
-Please break down the features and how we can implement the features to replace TMO in a better, more integrated, easier to use, and resellable way?
----
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 

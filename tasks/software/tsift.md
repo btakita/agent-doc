@@ -83,6 +83,7 @@ What I would consider stealing for `tsift`, if we decide to expand scope:
 
 Caveats: I did not build or run `tokensave`; this was a docs-and-code inspection. No code changed, so I did not run the project verification suite. Worktree note: existing modified paths were present before response persistence (`src/tsift` submodule pointer state, `tasks/agent-doc-bugs2.done.md`, `tasks/software/tsift.done.md`, and this session document); I did not stage or change non-session files.
 <!-- agent:boundary:40c04cc6 -->
+What are #next-steps to broaden
 <!-- /agent:exchange -->
 ###
 <!--

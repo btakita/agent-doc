@@ -58,6 +58,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 JB `Run Agent Doc` does not complete the agent-doc <file-name> run.
 #spec-test-build-install-commit-push
 ---
+do [#rhdr-blank]. #spec-test-build-install-commit-push
 <!-- /agent:queue -->
 
 ## Backlog

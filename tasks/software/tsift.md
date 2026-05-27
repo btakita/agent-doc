@@ -101,7 +101,13 @@ Verification:
 - `gh run list --workflow CI --limit 1` in `src/tsift`: latest `CI` run for `d3a1f1f` succeeded, including `clippy + test` and `live Convex graph acceptance`.
 
 No escalation was needed. `#gcommqual` is done.
-<!-- agent:boundary:019801d4 -->
+### Re: closeout repair — gpt-5
+
+Committed the remaining queue marker drift from the completed `#gcommqual` cycle. No source code changed in this repair.
+### Re: session-check repair — gpt-5
+
+Reopened the binary-owned closeout after committing the `#gcommqual` archive/queue marker drift, so the session-check state can close cleanly. No source code changed in this repair.
+<!-- agent:boundary:da55612e -->
 <!-- /agent:exchange -->
 ###
 <!--

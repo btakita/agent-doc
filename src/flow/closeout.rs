@@ -583,6 +583,53 @@ mod tests {
     }
 
     #[test]
+    fn stuck_captured_cycle_ignores_committed_template_patch_body_in_head() {
+        let base = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Hello\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: hello — gpt-5\n\n",
+            "Committed through template patching.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        let full_doc = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Hello\n",
+            "### Re: hello — gpt-5\n\n",
+            "Committed through template patching.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let (dir, doc) = setup_git_project_with_doc(base);
+
+        crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        crate::capture::capture_response(&doc, response).unwrap();
+        std::fs::write(&doc, full_doc).unwrap();
+        crate::snapshot::save(&doc, full_doc).unwrap();
+        run_git(dir.path(), &["add", "doc.md"]);
+        run_git(dir.path(), &["commit", "-m", "response", "--no-verify"]);
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(full_doc), Some(full_doc))
+            .unwrap();
+
+        assert!(
+            stuck_captured_cycle(&doc).is_none(),
+            "template patch wrappers are not expected in HEAD after materialization"
+        );
+    }
+
+    #[test]
     fn stuck_captured_cycle_ignores_committed_cycle_when_response_is_in_compact_archive() {
         let base = concat!(
             "---\n",

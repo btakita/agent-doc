@@ -2957,7 +2957,28 @@ fn response_materialization_probe(patches: &[template::PatchBlock], unmatched: &
             .collect();
     }
     let probe_unmatched = if selected_exchange { "" } else { unmatched };
-    serialize_template_response(&selected, probe_unmatched)
+    materialized_template_response(&selected, probe_unmatched)
+}
+
+fn materialized_template_response(patches: &[template::PatchBlock], unmatched: &str) -> String {
+    let mut out = String::new();
+    for patch in patches {
+        push_materialization_segment(&mut out, &patch.content);
+    }
+    push_materialization_segment(&mut out, unmatched);
+    out
+}
+
+fn push_materialization_segment(out: &mut String, segment: &str) {
+    let segment = segment.trim_matches(|c| c == '\n' || c == '\r');
+    if segment.trim().is_empty() {
+        return;
+    }
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(segment);
+    out.push('\n');
 }
 
 pub(crate) fn response_materialization_probe_from_response(response: &str) -> String {
@@ -2972,6 +2993,15 @@ pub(crate) fn response_materialized_in_content(response: &str, content: &str) ->
     probe.trim().is_empty()
         || crate::repair::response_already_applied(content, &probe)
         || crate::repair::response_already_applied_after_prefix_strip(content, &probe)
+}
+
+fn reject_marker_response_with_zero_patches(marker_count: usize, patch_count: usize) -> Result<()> {
+    if patch_count == 0 && marker_count > 0 {
+        anyhow::bail!(
+            "template patchback parsed zero patches despite {marker_count} patch marker(s); refusing to capture a malformed response"
+        );
+    }
+    Ok(())
 }
 
 fn ipc_response_materialized_or_fallback(
@@ -6414,6 +6444,7 @@ pub fn run_stream(
     // Parse and validate patchback shape before any visible document mutation.
     let parsed =
         crate::flow::document_mutation::parse_template_patchback(file, &response, "run_stream")?;
+    let parsed_marker_count = parsed.marker_count;
     let mut patches = parsed.patches;
     let mut unmatched = parsed.unmatched;
 
@@ -6450,14 +6481,20 @@ pub fn run_stream(
     auto_apply_pending_done_if_enabled(file, &response, &flags, &mut current_content)?;
     prewrite_pending_done_check(file, &response, &flags)?;
 
+    reject_marker_response_with_zero_patches(parsed_marker_count, patches.len())?;
+
     if patches.is_empty() {
         eprintln!(
-            "[write] WARNING: 0 template patches found — response may be missing or malformed. \
-             Only normalization/boundary changes will be applied."
+            "[write] WARNING: 0 template patches found for {} — response may be missing or malformed. \
+             Only normalization/boundary changes will be applied.",
+            file.display()
         );
         crate::ops_log::log_op(
             file,
-            "zero_patches_warning: response may be empty or malformed",
+            &format!(
+                "zero_patches_warning file={} source=run_stream markers=0 response may be empty or malformed",
+                file.display()
+            ),
         );
     }
 
@@ -11405,6 +11442,53 @@ mod tests {
         );
         let headings = extract_response_headings_from_patches(&[patch]);
         assert_eq!(headings, vec!["### Re: outer — opus-4-7".to_string()]);
+    }
+
+    #[test]
+    fn materialization_probe_uses_patch_body_not_patch_markers() {
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: materialized — gpt-5\n\n",
+            "Committed through boundary insertion.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+
+        let probe = response_materialization_probe_from_response(response);
+
+        assert!(probe.contains("### Re: materialized — gpt-5"));
+        assert!(!probe.contains("<!-- patch:exchange -->"));
+        assert!(!probe.contains("<!-- /patch:exchange -->"));
+    }
+
+    #[test]
+    fn patch_wrapped_response_is_materialized_by_visible_patch_body() {
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: visible body — gpt-5\n\n",
+            "The document contains the applied body only.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        let content = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: visible body — gpt-5\n\n",
+            "The document contains the applied body only.\n",
+            "<!-- agent:boundary:test -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert!(response_materialized_in_content(response, content));
+    }
+
+    #[test]
+    fn marker_bearing_zero_patch_parse_is_rejected_before_capture() {
+        let err = reject_marker_response_with_zero_patches(1, 0).unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("parsed zero patches despite 1 patch marker")
+        );
+        assert!(reject_marker_response_with_zero_patches(0, 0).is_ok());
+        assert!(reject_marker_response_with_zero_patches(2, 1).is_ok());
     }
 
     #[test]

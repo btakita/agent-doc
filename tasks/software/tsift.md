@@ -12,13 +12,14 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
-Added prioritized graph/neighborhood next steps to the tsift backlog, tagged for neighborhood effectiveness and performance. Top backlog item: #gcommqual.
+
+Completed #gneighqual; verified the ranked-neighborhood effectiveness gate is already implemented and pushed in tsift. Local make check, cargo build, and cargo install pass.
 <!-- /agent:status -->
 
 ## Spec
@@ -73,7 +74,10 @@ Verification:
 - Root `Agent Doc` tmux CI check: latest run `26492018957` failed with empty job step lists and `gh run view --log` returned `log not found`, so I classified it as an external CI-start failure rather than a local tmux regression.
 
 No escalation was needed. `#gneighqual` is done.
-<!-- agent:boundary:cf9f7919 -->
+### Re: closeout repair — gpt-5
+
+Committed the post-IPC closeout drift from the completed `#gneighqual` cycle: status text, boundary placement, and the done archive entry now match the live document state. No source code changed in this repair.
+<!-- agent:boundary:7ad1042e -->
 <!-- /agent:exchange -->
 ###
 <!--

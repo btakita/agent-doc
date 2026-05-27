@@ -32,12 +32,37 @@ prompt_presets:
 Compacted content:
 - Archived 2 response topic(s): next-steps for OpenCode integration; continue
 - Prior summary/context: ❯ What are #next-steps to ensure agent-doc integration works with opencode? ❯ Can you drive a session to test opencod...
-<!-- agent:boundary:b2b822e8 -->
+
+### Re: Clear Session Context error — GLM-5.1
+
+**Root cause:** The network probe constructs `opencode run --format json --model GLM-5.1 "probe..."` using the raw `opencode_model` frontmatter value. OpenCode expects `provider/model` format (e.g. `zai/GLM-5.1`); the bare `GLM-5.1` is parsed as a provider name, producing the malformed `GLM-5.1/.` internally.
+
+Two fix paths:
+1. **Quick** — update frontmatter to `opencode_model: zai/GLM-5.1` (or whatever the correct provider-prefixed identifier is).
+2. **Proper** — add validation in `canonical_model_name` (`src/agent-doc/src/model_tier.rs:256`) to reject or transform bare model names for the opencode harness before they reach the probe builder.
+
+The probe arg builder at `src/agent-doc/src/agent/codex.rs:534` (`opencode_run_args_for_probe`) copies `--model` through unchanged — no validation at that layer either.
+
+### Re: Run Agent Doc dispatch proof timeout
+
+**Root cause:** Design contradiction between two functions:
+
+- `dispatch_only_dispatch_start_proof_required` (`src/agent-doc/src/flow/routed_reopen.rs:314`) returns `true` for OpenCode — requiring dispatch-start proof.
+- `build_routed_dispatch_start_tracker` (`src/agent-doc/src/route.rs:486`) returns `None` for all non-Codex harnesses — meaning OpenCode can never produce anything beyond `CommandAcceptedOnly`.
+
+Result: `CommandAcceptedOnly` + `proof_required=true` always yields `FailClosedAcceptedOnly` (`routed_reopen.rs:276`). OpenCode will **always** fail this proof gate.
+
+The SPEC at `SPEC.md:71` confirms OpenCode has no prompt-submit hook equivalent. The fix is to align the policy with reality:
+
+1. **Minimal** — change `dispatch_only_dispatch_start_proof_required` to return `false` for `"opencode"` (same as the `_` catch-all for Claude Code), since there is no proof mechanism available.
+2. **Future-proof** — implement an OpenCode-specific dispatch-start tracker (e.g. watching for pane state change or session log entry) so the proof gate can work.
+<!-- agent:boundary:2760ddcf -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+
 <!-- /agent:queue -->
 
 ## Backlog

@@ -124,7 +124,34 @@ Commits pushed:
 - `btakita/agent-loop` `9295602df` (`chore: advance agent-doc submodule`)
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:fff45b22 -->
+### Re: #compactstuck — gpt-5
+
+Implemented and pushed the compact-archive materialization fix.
+
+Changed paths:
+- `src/agent-doc/src/flow/closeout.rs`
+- `src/agent-doc/specs/07-closeout-commands.md`
+
+What changed:
+- `stuck_captured_cycle` now treats a captured response as materialized when `HEAD` references a compact archive under `.agent-doc/archives/` and that archive contains the response body.
+- The archive reader resolves only project-owned compact archive paths and ignores missing/out-of-scope pointers, so ordinary missing-response detection still warns.
+- Added regression coverage for the archived-response case while preserving the existing HEAD-present and missing-response cases.
+- Updated the closeout spec with the archive-materialization invariant.
+
+Verification:
+- `cargo test stuck_captured_cycle_ignores_committed_cycle_when_response_is_in_compact_archive -- --test-threads=1`
+- `cargo test stuck_captured_cycle -- --test-threads=1`
+- `make check`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.34.0`
+- Latest completed GitHub CI run `26489917552` succeeded, including `Run make tmux-ci`; the newer run `26490215440` had just started after this push.
+
+Commits pushed:
+- `btakita/agent-doc` `c5e29056` (`fix: treat compact archives as captured response materialization`)
+- `btakita/agent-loop` `6012141d3` (`chore: advance agent-doc submodule`)
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:edf9b5cc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -141,7 +168,7 @@ dispatch #spec-test-build-install-commit-push
 - ~do [#ignorebypass]~
 - ~do [#liveipcrace]~
 - ~do [#snapabsorb]~
-- do [#compactstuck]
+- ~do [#compactstuck]~
 - do [#commentpreset]
 - do [#cyclediag]
 <!-- /agent:queue -->
@@ -149,7 +176,6 @@ dispatch #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#compactstuck] Teach stuck_captured_cycle/preflight that compact exchange archives are valid materialization for committed captures, or retire the capture/cycle state during compact, so archived responses do not warn as missing from HEAD.
 - [ ] [#commentpreset] Define the contract for prompt-preset/directive text inside ordinary post-exchange HTML comments: either keep it non-executable but emit a visible diagnostic, or introduce a draft-prompt component so #spec-test-build-install-commit-push cannot look silently removed.
 - [ ] [#cyclediag] Add an agent-doc cycle diagnosis command/report that gathers ops.log, capture JSON, route/actor events, Codex session logs, Claude session logs, and editor plugin logs by cycle_id/patch_id to make future race reports reproducible without broad rg searches.
 <!-- /agent:backlog -->

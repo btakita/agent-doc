@@ -21,7 +21,7 @@ queue_active: false
 
 <!-- agent:status patch=replace -->
 
-Queue advanced: #jbccreviewcloseout completed; #jbccresidualdecision completed by adding #jbcclivecancelresid. Remaining review items are gated on that residual live Cancel proof.
+Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual review items completed.
 <!-- /agent:status -->
 
 ## Exchange
@@ -65,7 +65,24 @@ Commit/push:
 - I did not push the root superproject because `main` already had an unrelated unpushed commit (`73467c0fe`, `src/session-share` submodule pointer) plus a broad dirty worktree. I kept the manual code commit scoped to `src/agent-doc` and left unrelated root state untouched.
 
 Confidence: high for deterministic binary-side recovery coverage; unresolved for the live IDE Cancel proof, which is why the residual is gated rather than completed.
-<!-- agent:boundary:b41d8409 -->
+❯ try again
+### Re: live Cancel retry — gpt-5
+
+I retried the live IntelliJ File Cache Conflict Cancel path against `.agent-doc/live-repro/jb-cache-cancel.md`, with IntelliJ IDEA 2026.1 and the active Agent Doc plugin using `libagent_doc v0.34.0`.
+
+Evidence captured:
+
+- Set up an unsaved editor-only sentinel, then changed disk separately to force a memory/disk conflict.
+- Scratch `agent-doc finalize ... --stream --origin live-jb-cache-cancel` hit socket ack error, fell back to file IPC, timed out, then failed closed with `visible_write_deferred_live_buffer_changed`.
+- IntelliJ logged `MemoryDiskConflictResolver - reload jb-cache-cancel.md from disk?` at 21:39:42.
+- PatchWatcher logged `File Cache Conflict pending ... deferring patch until user resolves dialog`.
+- After Escape/Cancel, PatchWatcher logged `File Cache Conflict kept memory changes ... rejecting patch without mutating document` and `Patch rejected after File Cache Conflict cancel, leaving file for explicit retry`.
+- The scratch file retained the IDE memory content and did not receive the response patch. I removed the scratch IPC patch afterward; `.agent-doc/patches` is empty, and the tracked scratch file diff is clean.
+
+Decision: this is a pass for the live Cancel proof. The current plugin behavior matches the intended contract: it defers while the conflict is pending, treats Cancel/keep-memory as a rejection, does not overwrite the memory buffer, leaves the file IPC patch for explicit retry, and the binary refuses a direct timeout write when visible editor state diverges.
+
+No code changes were needed, so I did not run `make check` this turn. I marked the residual JB Cancel review items done.
+<!-- agent:boundary:4b8c43cb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -86,13 +103,6 @@ As I was typing into the comment below `/agent:exchange`, the full-document IPC 
 ## Review
 
 <!-- agent:review -->
-- [/] [#jbcclivecancelresid] [residual] agent-doc-bug: live IntelliJIdea2026.1 File Cache Conflict Cancel pass/fail evidence is still missing after plugin 0.2.133; capture controlled Cancel behavior and decide whether PatchWatcher/IPC recovery needs rework. Plan: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md
-- [/] [#next-jbcc-live-repro-closeout] Gated on #jbcclivecancelresid: no controlled live Cancel pass/fail evidence is present; use that residual evidence to decide whether dependent review entries can close or need rework.
-- [/] [#next-jbcc-manual-repro] Gated on #jbcclivecancelresid: confirm IntelliJIdea2026.1 is using plugin 0.2.133, run the manual File Cache Conflict Cancel repro, and capture session-check/commit behavior.
-- [/] [#next-adoc-jbcc] Gated on #jbcclivecancelresid: code is pushed in 068a1752 and plugin 0.2.133 is active, but parent closure still needs controlled live Cancel pass/fail proof.
-- [/] [#next-jbccc2] Gated on #jbcclivecancelresid: implementation and automated verification exist, but the manual live Cancel evidence is still missing.
-- [/] [#jbccc2] Gated on #jbcclivecancelresid: plugin undo-on-cancel implementation remains review-open until controlled live Cancel evidence confirms the dialog path.
-- [/] [#adoc-jb-cache-cancel-stuck-cycle] Gated on #jbcclivecancelresid: parent bug stays open until the residual live Cancel proof is captured; plan path: tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

@@ -55,7 +55,56 @@ Both review items are substantially code-complete. Remaining work in priority or
 7. **Installer/config docs** — expand README with Permissions + Troubleshooting sections.
 
 Top of backlog: **#npm-publish**.
-<!-- agent:boundary:4ef667e4 -->
+
+### Re: queue #spec-test-build-install-commit-push — glm-5.1
+
+Processed the 7 queued backlog items through the `#spec-test-build-install-commit-push` preset.
+
+#### #npm-publish — gated
+
+`npm whoami` returns 401 Unauthorized. The npm registry auth token is not configured in this environment. `npm publish --access public --dry-run` succeeds, confirming the package is ready to publish once auth is set up.
+
+**Action needed:** configure `NPM_TOKEN` or run `npm login`, then `npm publish --access public` from `packages/opencode-tsift/`.
+
+#### #e2e-install — gated
+
+Depends on #npm-publish. Once the package is published, verify:
+
+```sh
+mkdir /tmp/test-project && cd /tmp/test-project
+opencode plugin opencode-tsift
+# then /tsift-status inside opencode
+```
+
+#### #transcript-verify — verified
+
+`tsift --envelope session-review` returns structured JSON with 12 matched sessions, 2 prompt targets, 5 failure categories, and next-digest command recommendations. OpenCode transcript capture via agent-doc logs is functional.
+
+#### #permission-diag — documented
+
+Documented required permissions per command in the README Permissions table. `/tsift-status` is the only write-capable command (index + instruction files). All other commands are read-only.
+
+#### #integration-test — added
+
+Added 2 deterministic tests to `test/install.test.js`:
+
+1. **Cross-tool parity** — runs `tsift init --opencode` then `npx opencode-tsift .` on separate temp dirs, asserts identical command file names and content.
+2. **Cross-tool idempotency** — runs `tsift init --opencode` then npm `installCommands`, asserts all files reported as `already present`.
+
+Both tests auto-skip when the `tsift` binary is not available.
+
+#### #smoke-session — passed
+
+`make check` green: 705 Rust unit tests + 129 integration tests + 34 conformance + 30 perf gate + 5 scan plan + 5 npm tests = **908 total**. Clippy clean. `npm publish --dry-run` clean.
+
+#### #installer-docs — expanded
+
+README expanded with:
+- **Permissions** table mapping each command to Bash/file-read/file-write requirements
+- **Troubleshooting** section covering: missing binary, stale index, command file conflicts, plugin not loading, and idempotent no-op behavior
+
+Committed and pushed: `a377431` (tsift) → `31996b0dc` (agent-loop).
+<!-- agent:boundary:731ce5b3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -64,7 +113,15 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+preset #spec-test-build-install-commit-push
+- [#npm-publish]
+- [#e2e-install]
+- [#transcript-verify]
+- [#permission-diag]
+- [#integration-test]
+- [#smoke-session]
+- [#installer-docs]
 <!-- /agent:queue -->
 
 ## Backlog

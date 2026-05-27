@@ -145,7 +145,7 @@ Based on deep analysis of tokensave's architecture, here are concrete next steps
 6. **Phase 3** — Extraction pipeline (5-7 days, if needed for language expansion)
 
 **Total Phase 1-2: ~1-2 weeks for core graph algorithms. Phase 3 adds another week.**
-<!-- agent:boundary:46ae12d8 -->
+<!-- agent:boundary:74ab411a -->
 <!-- /agent:exchange -->
 ###
 <!--

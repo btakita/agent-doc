@@ -19,7 +19,7 @@ queue_active: true
 
 <!-- agent:status patch=replace -->
 
-Completed #gneighqual; verified the ranked-neighborhood effectiveness gate is already implemented and pushed in tsift. Local make check, cargo build, and cargo install pass.
+Completed #gcommqual; verified community member tagpath context is already implemented and pushed in tsift. Local make check, cargo build, and cargo install pass.
 <!-- /agent:status -->
 
 ## Spec
@@ -77,7 +77,31 @@ No escalation was needed. `#gneighqual` is done.
 ### Re: closeout repair — gpt-5
 
 Committed the post-IPC closeout drift from the completed `#gneighqual` cycle: status text, boundary placement, and the done archive entry now match the live document state. No source code changed in this repair.
-<!-- agent:boundary:7ad1042e -->
+### Re: #gcommqual — gpt-5
+
+Completed `#gcommqual` by verifying the community-member tagpath/context work is already implemented in the pushed `tsift` history and marking the backlog item done.
+
+Evidence:
+
+- `b79fe86 feat: resolve community member tagpaths with context` added the matching implementation across `SPEC.md`, `src/graph.rs`, `src/main.rs`, and `tests/exit_code.rs`.
+- `CommunityMember` now carries selected `file` / `line`, bounded `refs`, and optional `tagpath_handle` context.
+- Community member annotation resolves duplicate names through unique tagpath candidates, edge-file evidence, then community-file evidence instead of name-only first-row fallback.
+- JSON diagnostics report ambiguous duplicate members through `community_diagnostics.ambiguous_members`.
+- Tests cover skipped-directory/name-collision behavior, edge-context duplicate resolution, and scoped workspace community handles from per-scope tagpath indexes.
+- `SPEC.md` documents the tagpath semantics for community member annotation, scoped communities, and duplicate-name evidence.
+- `git -C src/tsift log origin/main..HEAD` is empty, so no extra `tsift` source commit or push was needed this cycle.
+- Existing dirty files in `src/tsift` are unrelated to `#gcommqual` and were left untouched.
+
+Verification:
+
+- `tsift status --json .` from `src/tsift`: index fresh, instructions current at `0.1.62`.
+- `make check`: passed (`cargo clippy --all-targets -- -D warnings` plus full `cargo test`).
+- `cargo build`: passed.
+- `cargo install --path . --force`: passed; installed `tsift 0.1.62`.
+- `gh run list --workflow CI --limit 1` in `src/tsift`: latest `CI` run for `d3a1f1f` succeeded, including `clippy + test` and `live Convex graph acceptance`.
+
+No escalation was needed. `#gcommqual` is done.
+<!-- agent:boundary:dfaa8e08 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -99,7 +123,7 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gcommqual] [tag: graph] [tag: neighborhood-effectiveness] Improve tagpath/community context feeding neighborhoods: carry file/ref handles into CommunityMember, resolve tagpath matches through community or edge evidence instead of name-only fallback, and add scoped/federated/skipped-directory diagnostics for ambiguous members.
+- [x] [#gcommqual] [tag: graph] [tag: neighborhood-effectiveness] Improve tagpath/community context feeding neighborhoods: carry file/ref handles into CommunityMember, resolve tagpath matches through community or edge evidence instead of name-only fallback, and add scoped/federated/skipped-directory diagnostics for ambiguous members.
 - [ ] [#gfullhot] [tag: graph] [tag: performance] Reduce the full-projection graph hot path before backend changes: stabilize cache-hit source watermarks, skip provider-neutral row rebuilds on unchanged symbol/summary inputs, and prove full_projection.source_graph_build/projection_rows/cache metrics with three backend-eval --full-projection samples.
 - [ ] [#gsqlstage] [tag: graph] [tag: performance] Reduce SQLite graph refresh staging/write cost: bulk merge nodes, edges, and materialized property rows through prepared chunks or temp tables, avoid unchanged property rewrites, and gate on sqlite_delta_write, sqlite_edge_staging, post_write_reads, and duration_micros_per_1k_graph_rows.
 - [ ] [#ghoppolicy] [tag: graph] [tag: performance] Keep max-hop increases opt-in until useful-row evidence passes: compare 64/128/256/512 tiers on real, full-projection, and synthetic deep-chain workloads, require useful deeper rows and flat latency, then consider adaptive caps rather than raising the default blindly.

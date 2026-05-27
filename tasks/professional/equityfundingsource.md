@@ -16,7 +16,7 @@ prompt_presets:
   '#commit-push-deploy': commit all uncommitted files + push in claudescore-plugin, claudescore.com, and session-share. deploy
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -91,13 +91,17 @@ Closeout evidence: no product code or deployment changes were made. I added back
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+preset #spec-test-commit-push
+- do [#y17k]
+- do [#xt4d]
+- do [#0e1p]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#y17k] Prepare a no-new-build demo agenda for the EFS/TMO replacement meeting: current workers.dev walkthrough, TMO pain points, replacement MVP decisions, and post-meeting approval gates.
+- [x] [#y17k] Prepare a no-new-build demo agenda for the EFS/TMO replacement meeting: current workers.dev walkthrough, TMO pain points, replacement MVP decisions, and post-meeting approval gates.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
 - [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document intelligence/search, borrower/broker/investor/admin portals, and tenant-ready resale packaging.
 - [ ] [#f4rq] Verify an EFS-owned sending domain in Resend, then switch APPLICATION_LEAD_NOTIFICATION_FROM and APPLICATION_LEAD_NOTIFICATION_TO from testing-mode values to EFS production addresses.

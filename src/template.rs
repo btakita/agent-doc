@@ -3760,6 +3760,59 @@ real status content
     }
 
     #[test]
+    fn exchange_boundary_insert_adds_blank_line_before_response_heading() {
+        let dir = setup_project();
+        let file = dir.path().join("test.md");
+        let doc = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: Prior -- gpt-5\n\n",
+            "This guards against a future regression.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&file, doc).unwrap();
+
+        let response = "<!-- patch:exchange -->\n### Re: Follow-up -- gpt-5\n\nDone.\n<!-- /patch:exchange -->\n";
+        let (patches, unmatched) = parse_patches(response).unwrap();
+        let result = apply_patches(doc, &patches, &unmatched, &file).unwrap();
+
+        assert!(
+            result.contains("future regression.\n\n### Re: Follow-up"),
+            "response heading should be separated from the previous paragraph: {result}"
+        );
+        assert!(
+            !result.contains("future regression.\n### Re: Follow-up"),
+            "response heading must not attach to the previous paragraph: {result}"
+        );
+    }
+
+    #[test]
+    fn exchange_fallback_append_adds_blank_line_before_response_heading() {
+        let dir = setup_project();
+        let file = dir.path().join("test.md");
+        let doc = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: Prior -- gpt-5\n\n",
+            "This guards against a future regression.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&file, doc).unwrap();
+
+        let response = "<!-- patch:exchange -->\n### Re: Follow-up -- gpt-5\n\nDone.\n<!-- /patch:exchange -->\n";
+        let (patches, unmatched) = parse_patches(response).unwrap();
+        let result = apply_patches(doc, &patches, &unmatched, &file).unwrap();
+
+        assert!(
+            result.contains("future regression.\n\n### Re: Follow-up"),
+            "response heading should be separated from the previous paragraph: {result}"
+        );
+        assert!(
+            !result.contains("future regression.\n### Re: Follow-up"),
+            "response heading must not attach to the previous paragraph: {result}"
+        );
+    }
+
+    #[test]
     fn remove_all_boundaries_skips_code_blocks() {
         let doc = "before\n```\n<!-- agent:boundary:fake-id -->\n```\nafter\n<!-- agent:boundary:real-id -->\nend\n";
         let result = remove_all_boundaries(doc);

@@ -6,6 +6,13 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Template exchange appends now keep response headings block-separated.**
+  When a `<!-- patch:exchange -->` response starts with `### Re:`, the
+  boundary-replacement and fallback append paths insert a blank line after
+  non-empty prior exchange content. This prevents Markdown renderers from
+  joining a new response heading to the previous paragraph when the prior
+  response lacked a trailing blank line.
+
 - **JetBrains Run Agent Doc now surfaces queued busy-actor reroutes.** When
   `agent-doc route --dispatch-only` accepts a prompt by adding it to
   `agent:queue auto` behind a busy authoritative actor, the IDE action now

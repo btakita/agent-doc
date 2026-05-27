@@ -84,6 +84,9 @@ pub const REVIEW_COMPONENT: &str = "review";
 /// Canonical component name for the icebox component.
 pub const ICEBOX_COMPONENT: &str = "icebox";
 
+/// Canonical component name for the conversation exchange.
+const EXCHANGE_COMPONENT: &str = "exchange";
+
 /// Check whether a component name refers to the backlog component
 /// (accepts both canonical `"backlog"` and legacy `"pending"`).
 pub fn is_backlog_component(name: &str) -> bool {
@@ -250,9 +253,13 @@ impl Component {
 
                 // Clamp to component bounds
                 let insert_at = insert_at.max(self.open_end);
+                let prior = &doc[self.open_end..insert_at];
 
                 let mut result = String::with_capacity(doc.len() + content.len() + 1);
                 result.push_str(&doc[..insert_at]);
+                if needs_exchange_heading_separator(&self.name, prior, content) {
+                    result.push('\n');
+                }
                 result.push_str(content.trim_end());
                 result.push('\n');
                 result.push_str(&doc[insert_at..]);
@@ -263,7 +270,11 @@ impl Component {
         // Normal append: add after existing content
         let mut result = String::with_capacity(doc.len() + content.len() + 1);
         result.push_str(&doc[..self.open_end]);
-        result.push_str(existing.trim_end());
+        let trimmed_existing = existing.trim_end();
+        result.push_str(trimmed_existing);
+        if needs_exchange_heading_separator(&self.name, trimmed_existing, content) {
+            result.push('\n');
+        }
         result.push('\n');
         result.push_str(content.trim_end());
         result.push('\n');
@@ -329,7 +340,11 @@ impl Component {
             let new_id = crate::new_boundary_id();
             let new_marker = crate::format_boundary_marker(&new_id);
             let mut result = String::with_capacity(doc.len() + content.len() + new_marker.len());
+            let prior = &doc[self.open_end..line_start];
             result.push_str(&doc[..line_start]);
+            if needs_exchange_heading_separator(&self.name, prior, content) {
+                result.push('\n');
+            }
             result.push_str(content.trim_end());
             result.push('\n');
             result.push_str(&new_marker);
@@ -361,6 +376,17 @@ fn append_patch_already_present(existing: &str, content: &str) -> bool {
         return false;
     }
     normalize_append_patch_content(existing).contains(&patch)
+}
+
+fn needs_exchange_heading_separator(component_name: &str, prior: &str, content: &str) -> bool {
+    component_name == EXCHANGE_COMPONENT
+        && !prior.trim().is_empty()
+        && !prior.ends_with("\n\n")
+        && starts_with_response_heading(content)
+}
+
+fn starts_with_response_heading(content: &str) -> bool {
+    content.trim_start().starts_with("### Re:")
 }
 
 fn normalize_append_patch_content(content: &str) -> String {

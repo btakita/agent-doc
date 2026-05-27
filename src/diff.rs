@@ -668,7 +668,8 @@ pub(crate) fn prompt_change_is_answered_by_later_response(
     for later in changes.iter().skip(idx + 1) {
         match later.kind {
             PromptBearingChangeKind::PromptTarget => return false,
-            PromptBearingChangeKind::RecoveryArtifact => {
+            PromptBearingChangeKind::RecoveryArtifact
+            | PromptBearingChangeKind::BoundaryArtifact => {
                 let heading = later
                     .text
                     .lines()
@@ -679,7 +680,7 @@ pub(crate) fn prompt_change_is_answered_by_later_response(
                     return true;
                 }
             }
-            PromptBearingChangeKind::ContentEdit | PromptBearingChangeKind::BoundaryArtifact => {}
+            PromptBearingChangeKind::ContentEdit => {}
         }
     }
 
@@ -3858,6 +3859,32 @@ Please fix the bug.\n\
         assert_eq!(
             changes[0].text,
             "Updated local references for the renamed `ClaudeScore/buildparty-investor-demo` repo: `.gitmodules` now points at the new SSH URL, and the checked-out submodule's `origin` remote has been synced to match."
+        );
+    }
+
+    #[test]
+    fn classify_prompt_bearing_changes_ignores_answered_prompt_before_blank_heading_gap() {
+        let diff = concat!(
+            "--- snapshot\n",
+            "+++ document\n",
+            "@@ -1,3 +1,8 @@\n",
+            " <!-- agent:exchange patch=append -->\n",
+            "-<!-- agent:boundary:initial -->\n",
+            "+❯ do #sim1. spec-test-build-install-commit-push\n",
+            "+\n",
+            "+### Re: sim closeout — gpt-5 (HEAD)\n",
+            "+\n",
+            "+Done.\n",
+            "+<!-- agent:boundary:new -->\n",
+            " <!-- /agent:exchange -->\n",
+        );
+
+        let changes = classify_prompt_bearing_changes(diff);
+        assert!(
+            changes
+                .iter()
+                .all(|change| change.kind != PromptBearingChangeKind::PromptTarget),
+            "answered prompt should not remain unresolved: {changes:?}"
         );
     }
 

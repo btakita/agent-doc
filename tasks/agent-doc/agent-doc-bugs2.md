@@ -30,44 +30,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260527-221004.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260527-222330.md`*
 
 Compacted content:
-- Archived 6 response topic(s): #spec-test-build-install-commit-push; #odsp2; #finovrwr; 3 more
+- Archived 1 response topic(s): #ocdsp
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: #ocdsp — gpt-5
-
-`#ocdsp` is complete. I did not make another code edit in this cycle because the OpenCode dispatch-start proof implementation is already present in the agent-doc codebase:
-
-- `src/agent-doc/src/route.rs` has `RoutedDispatchStartTracker::OpenCodePane`, captures the pane before direct submit, waits for the trigger to leave the composer, and treats the pane leaving idle chrome as dispatch-start proof.
-- `src/agent-doc/src/flow/routed_reopen.rs` has `RoutedDispatchStartProof::PaneStateChanged` with `proof=pane_state_changed proof_scope=dispatch_start` and accepts it where accepted-only proof would fail closed for OpenCode.
-- `src/agent-doc/SPEC.md` and `src/agent-doc/specs/07-session-tmux-commands.md` document the OpenCode proof requirement.
-- `src/agent-doc/src/route/tests.rs` covers drafted-trigger rejection, successful pane-state proof, and accepted-only OpenCode failure.
-
-```mermaid
-flowchart LR
-    A["route --dispatch-only targets OpenCode pane"] --> B["capture idle pane before submit"]
-    B --> C["send agent-doc trigger into pane"]
-    C --> D{"trigger still visible in composer?"}
-    D -->|"yes"| E["not dispatch-start proof"]
-    D -->|"no"| F{"pane left idle chrome?"}
-    F -->|"no"| E
-    F -->|"yes"| G["PaneStateChanged"]
-    G --> H["proof_scope=dispatch_start"]
-    E --> I["CommandAcceptedOnly"]
-    I --> J["OpenCode fail-closed: accepted_only_dispatch_start_proof"]
-```
-
-Verification completed:
-
-- `make check` from the repo root passed for `instruction-files`, `src/agent-doc`, and `src/corky`.
-- `make install` in `src/agent-doc` passed, replacing `/home/brian/.cargo/bin/agent-doc` and installing `libagent_doc-0.34.0.so`.
-- `agent-doc --version` reports `agent-doc 0.34.0`.
-- Latest GitHub workflow check: the repo has `Agent Doc`, not `CI`. Run `26541236108` failed with empty `tmux-ci` and `check` jobs, no steps, and `gh run view --log-failed` returned `log not found`; I am classifying that as an external CI-start blocker rather than a code or tmux regression.
-
-Preflight warning surfaced: the post-exchange HTML comment contains prompt preset/directive text and is preserved as a non-executable note. Move that text into `agent:exchange` or `agent:queue` if it should run in a later cycle.
-<!-- agent:boundary:b8cfb080 -->
+<!-- agent:boundary:a002a8f6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -89,11 +57,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 -->
 
 <!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push #mermaid
-- do [#ocdsp]
----
-JB `Run Agent Doc` on this document did not run agent-doc in the Codex console.
-#spec-test-build-install-commit-push #mermaid
 <!-- /agent:queue -->
 
 ## Backlog

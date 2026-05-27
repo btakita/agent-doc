@@ -213,7 +213,7 @@ Verification: diagnosis only. No implementation tests were run because no source
 Escalation: none.
 
 Confidence: medium-high. The ops lines clearly separate tmux acceptance from missing Codex dispatch-start proof; the remaining uncertainty is whether the implementation should recover with a second proof source, one bounded restart, or both.
-<!-- agent:boundary:21edbd3d -->
+<!-- agent:boundary:a0557b1b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -231,6 +231,7 @@ As I was typing into the comment below `/agent:exchange`, the full-document IPC 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#snrun] [recommended] Implement tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md: make JB Run Agent Doc distinguish rescued-stash accepted-only proof misses, active-turn busy collisions, and stale starting projections; add route/plugin regressions plus live replay evidence.
 - [ ] [#jbrunbusy] Fix JB Run Agent Doc active-turn retry classification: dispatch-only `latest run still booting ... active codex turn` refusals should be typed as busy/running, coalesced or retryable in the JetBrains plugin, and covered by route + plugin regression tests using the equityfundingsource repro.
 <!-- /agent:backlog -->
 

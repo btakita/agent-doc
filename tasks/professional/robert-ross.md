@@ -302,7 +302,60 @@ Brian
 The line **"I was under severe time pressure for the investor demos"** appears once and is the only place blame-adjacent language could be read. It is factually grounded (investor demos are an external pressure, not a Rob choice), but if you want it more neutral you can swap to **"I was under severe time pressure"** without the demo attribution. Say the word and I will land that edit.
 
 Exchange is at 208 lines / 5 response sections — `agent-doc compact` is available if you want to trim before the next cycle. Say "compact" and I will run it.
-<!-- agent:boundary:2c38013c -->
+❯ Use a numbered list for robert-ross to read.
+### Re: Numbered-list version — opus-4-7
+
+
+Reformatted as a numbered list. Same voice, same content, just easier for Rob to scan alongside the SVG (the numbers line up with the three phases in the diagram).
+
+```
+Sounds good. Walking through how the SessionShare CLAUDE.md ended up
+doing more than it was meant to. Sending the SVG with this so the
+structure is easy to follow.
+
+1. ClaudeScore start. I used the SessionShare repo with the
+   claudescore.com and claudescore-plugin submodules. Both submodules
+   needed shared context, which is why CLAUDE.md was at the SessionShare
+   root. That matched what the file was for.
+
+2. velvet-thunder added. I added velvet-thunder to SessionShare as a
+   submodule to keep working. This is where we stopped following my
+   process. My process works...we just did not follow it here. I should
+   have noticed and done a full harness audit right then. I did not,
+   because I was under severe time pressure for the investor demos.
+
+3. BuildParty/BuildParty added. I then added BuildParty as another
+   submodule under SessionShare. BuildParty has its own internal harness
+   files so the inner side was fine. But SessionShare's CLAUDE.md was now
+   sitting over four projects instead of two. Same situation as
+   before...I should have stopped and audited, and I did not.
+
+4. The git-repo stressor. I was aware that the number of git repos was a
+   stressor for you. That is real and it shaped my decisions...I leaned
+   toward adding submodules instead of restructuring. That is not on you.
+   It just meant the place to hold the line was my own process, and I did
+   not hold it.
+
+5. Maintenance backlog. I had a backlog and I had not done a full manual
+   review of the codebase and harness. I should have prioritized that
+   review sooner. It kept slipping behind the demos and shipping work.
+
+6. Going forward. When I notice I am deviating from my own process, I
+   will name the deviation and review what is being lost before
+   continuing. For structural changes (new submodule, new nesting, new
+   shared file) that means a harness boundary audit in the same change.
+   And I will treat the periodic full-harness review as scheduled work,
+   not something that fits around shipping.
+
+Not assigning blame...just naming what happened so it does not repeat.
+
+Brian
+```
+
+Items 1, 2, and 3 map directly to the three SVG timeline cards (ClaudeScore → velvet-thunder → BuildParty), so Rob can read item 1, look at Phase 1 in the diagram, and so on. Items 4–6 mirror the lower-half panels (drivers + going-forward).
+
+Exchange is now at 284 lines across 6 response sections — preflight is flagging it. Want me to run `agent-doc compact` to trim before the next cycle?
+<!-- agent:boundary:85b7c887 -->
 <!-- /agent:exchange -->
 
 <!--

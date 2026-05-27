@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -167,7 +167,7 @@ Commits pushed:
 - `btakita/tsift`: `9ba9094 feat: add opencode tsift init shortcuts`
 - `btakita/agent-loop`: `fce172c80 chore: update tsift submodule`
 
-### Re: closeout repair — gpt-5
+### Re: closeout repair — gpt-5 (HEAD)
 
 No new repo work in this repair pass. This disk write closes the prior IPC-interrupted closeout state for the already-recorded OpenCode/backend-proof work.
 <!-- agent:boundary:ef111823 -->
@@ -179,7 +179,7 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

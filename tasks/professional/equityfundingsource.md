@@ -16,7 +16,7 @@ prompt_presets:
   '#commit-push-deploy': commit all uncommitted files + push in claudescore-plugin, claudescore.com, and session-share. deploy
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -84,6 +84,41 @@ For the demo meeting, I would make the decisions concrete:
 5. After approval, resume with the smallest replacement slice that proves the integrated model: borrower/broker intake to admin review to document collection to status/notification updates.
 
 Closeout evidence: no product code or deployment changes were made. I added backlog items for the demo agenda, TMO inventory, and phased replacement roadmap. Commands run: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, targeted `tsift` searches, targeted doc reads, and this `agent-doc finalize`. Verification is document-only; no test suite was needed. Confidence is medium-high pending the restored TMO access inventory. Escalation: none.
+### Re: no-new-build demo agenda — gpt-5
+
+Here is the no-new-build agenda I would use for the EFS/TMO replacement meeting. The goal is not to sell a fresh build in the room; it is to show the current workers.dev system, expose the TMO replacement decisions clearly, and leave with approval gates before any more feature work starts.
+
+| Time | Segment | What to show or decide |
+| --- | --- | --- |
+| 0-5 min | Reset the rules | Confirm we are paused on new build work until after the demo. State that the current live demo remains on `https://equityfundingsource.brian-takita.workers.dev`, custom domain cutover is still deferred, and TMO access is currently unstable/being restored. |
+| 5-15 min | Current workers.dev walkthrough | Open the public home page, `/apply`, and borrower login. Show the borrower-facing flow at the level available with demo credentials: application/status visibility, document handling, notifications, and messages. Then show admin review areas that are ready to discuss: application leads, loans/statuses, investor deal/funding review, lender requests, users, documents, and admin messages. |
+| 15-25 min | TMO pain points | Capture the business pain without debating implementation yet: account lockout fragility, split data across TMO/portal/Dropbox/email, hard-to-demo broker workflows, manual lender/account work, no unified borrower timeline, weak notification/audit trail, and limited resale value if the product stays TMO-shaped. |
+| 25-40 min | Replacement MVP decisions | Decide the first paid replacement slice: admin + borrower only, or admin + borrower + broker; whether EFS D1/R2 becomes the source of truth during the bridge; whether TMO sync starts as polling/sync-now or depends on webhooks; which statuses/fields/docs are mandatory; and whether messaging/email is in MVP or next phase. |
+| 40-50 min | TMO bridge/cutover | Decide whether TMO remains the operational backend for 30-90 days while EFS stores/cache/outbox work in parallel, or whether EFS wants a harder cutover after export/import. Confirm who will inventory TMO screens, fields, statuses, reports, docs, lender records, and API/webhook options once access is restored. |
+| 50-60 min | Approval gates and next step | Get explicit approval for scope, budget/retainer, legal/disclosure owner, email sending domain owner, demo users/data owner, and the first post-meeting implementation task. If there is no approval, backlog stays in planning mode and no new feature build starts. |
+
+Demo talk track:
+
+1. Start with the live public surface: home page, Apply for a Loan, Borrower Login, and the current footer/contact identity. The live smoke check returned `200` for `/`, `/apply`, and `/login?role=borrower`.
+2. Walk the borrower story as one timeline: lead or application, status, documents, notifications, messages, and admin follow-up. The important replacement point is that the borrower should not need to understand TMO.
+3. Show admin as the future EFS command center: leads, loan status, investor funding, lender requests, user management, documents, and messages. The existing admin messages surface is D1-backed with `/api/admin/messages`; this answers the first part of the messaging question: yes, there is an admin side for borrower portal messages.
+4. Call out the current messaging boundary plainly: portal chat persistence/admin inbox exists; borrower-message email alerts, borrower email alerts when admins respond, and reply-by-email back into chat are not wired into the send paths yet. Treat those as an approval decision for the replacement MVP, not something to improvise before the meeting.
+5. Show broker as a decision point, not a promise: broker UI and API/spec work exist, but the meeting should decide whether broker backend is in the first replacement slice or follows borrower/admin stabilization.
+6. Close with the productization angle: the reusable product is not a TMO clone. It is roles, pipeline, documents, messaging, notifications, audit, configurable statuses/fields, branding, and tenant-ready data boundaries.
+
+Decision worksheet for the meeting:
+
+- First release roles: admin + borrower, or admin + borrower + broker, or all four roles including investor.
+- Source of truth during bridge: TMO-first with EFS cache/outbox, or EFS-first with TMO sync/writeback.
+- Sync method: manual/scheduled pull first, outbound webhooks if TMO confirms support, and outbox replay for portal writes.
+- Document model: R2 as canonical portal storage, Dropbox/TMO as adapters, OCR/search later.
+- Messaging model: portal-only MVP, add outbound email notifications, then add inbound email replies into chat.
+- Required TMO inventory: screens, fields, statuses, document categories, reports, lender/account flows, notifications, API/webhook settings, and exports.
+- Resale target: internal EFS operating system first, then white-label/private-lender tenant packaging after the stable primitives exist.
+
+Post-meeting outputs should be concrete: a confirmed MVP scope, a TMO inventory checklist owner, a budget/retainer decision, and permission to start exactly one next implementation slice. If those are not decided, the correct next step is still planning/inventory, not feature work.
+
+Closeout evidence: changed paths should be only the session document via `agent-doc finalize`; no product code, spec, tests, or deployment files were intentionally edited. Commands run: `agent-doc --version`, `tsift status`, `tsift status --fix`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, targeted `tsift` search/source-read commands, live `curl` checks for `/`, `/apply`, and `/login?role=borrower`, and this `agent-doc finalize --done y17k`. Verification is document-only plus the live HTTP `200` checks; no test suite was run because no code changed. Confidence: medium-high on the agenda and current demo surface, with TMO-specific details still pending restored TMO access. Escalation: none.
 <!-- agent:boundary:77fa174b -->
 <!-- /agent:exchange -->
 ###
@@ -91,9 +126,9 @@ Closeout evidence: no product code or deployment changes were made. I added back
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-commit-push
-- do [#y17k]
+- ~do [#y17k]~
 - do [#xt4d]
 - do [#0e1p]
 <!-- /agent:queue -->
@@ -101,7 +136,6 @@ preset #spec-test-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [x] [#y17k] Prepare a no-new-build demo agenda for the EFS/TMO replacement meeting: current workers.dev walkthrough, TMO pain points, replacement MVP decisions, and post-meeting approval gates.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
 - [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document intelligence/search, borrower/broker/investor/admin portals, and tenant-ready resale packaging.
 - [ ] [#f4rq] Verify an EFS-owned sending domain in Resend, then switch APPLICATION_LEAD_NOTIFICATION_FROM and APPLICATION_LEAD_NOTIFICATION_TO from testing-mode values to EFS production addresses.

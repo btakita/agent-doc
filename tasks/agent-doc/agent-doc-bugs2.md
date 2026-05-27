@@ -110,7 +110,20 @@ sequenceDiagram
 ```
 
 The important boundary is that `agent-doc` owns the document lifecycle: preflight, baseline selection, diff classification, response merge, snapshot/capture state, commit, and `session-check`. Claude or Codex owns the live reasoning/tool turn between `plan` and `finalize`. A response that only appears in the console is not complete; it becomes part of the turn only when `finalize` writes it into the document and commits that state.
-<!-- agent:boundary:e28921a6 -->
+❯ Why does agent-doc think the turn is running when the agent console is idle?
+### Re: idle console versus running turn — gpt-5
+
+`agent-doc` is not asking whether the pane looks visually quiet. For dispatch-only routing, it asks a stricter question: does the authoritative actor for this document still own the pane, and can the live pane prove it is at a harness-specific dispatch-ready prompt for the same generation?
+
+So an apparently idle console can still fail as "busy" when `agent-doc` cannot prove prompt readiness. Common cases are:
+
+- the pane is idle at text that does not match the expected Claude/Codex ready prompt;
+- the authoritative actor store still points at a generation that never completed its closeout handshake;
+- the pane is waiting in a sub-state that looks quiet to a human, such as a tool/approval/recovery boundary;
+- the route is looking at a stale or wrong actor projection and fails closed rather than injecting into a possibly active turn.
+
+The error wording is the key detail: "did not return to a dispatch-ready prompt" is not proof that tokens were streaming. It means route had an authoritative actor for the document, but prompt-readiness proof did not arrive within the wait window, so it refused to send another trigger. The existing `#snrun` review item is aimed at splitting those cases apart so the UI can distinguish real active-turn collisions from stale actor/proof-miss states.
+<!-- agent:boundary:e2e92663 -->
 <!-- /agent:exchange -->
 ###
 <!--

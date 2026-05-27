@@ -55,13 +55,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 -->
 
 <!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~do [#ipcmodel]~
-- ~do [#ipcreplay]~
-- ~do [#ipcdeny]~
-- ~do [#ipcfail]~
-- ~do [#jbrunbusy]~
----
 JB `Run Agent Doc` does not complete the agent-doc <file-name> run.
 #spec-test-build-install-commit-push
 ---
@@ -70,6 +63,7 @@ JB `Run Agent Doc` does not complete the agent-doc <file-name> run.
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#rhdr-blank] Response heading lands immediately after the previous paragraph with no blank line, causing markdown renderers to glue the H3 into the prior block and making the user perceive the response as "not written". Repro captured in `src/boost-client/tasks/monsterrodholders.md` at commit `c32e5b4` (`…regression.\n### Re: Where the Developer token field is — opus-4-7`). Plan: `tasks/agent-doc/plan-response-heading-missing-blank-line.md`. Fix in the `<!-- patch:exchange -->` / boundary-insertion path: normalize prior tail to one `\n`, insert exactly one blank line before the new heading. Add regression covering two back-to-back patches where the first lacks a trailing newline.
 <!-- /agent:backlog -->
 
 ## Review

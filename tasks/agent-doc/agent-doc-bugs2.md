@@ -187,7 +187,19 @@ Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc session status`, `
 Verification: no new code changes in this repair cycle; prior `#finovrwr` verification remains `cargo fmt`, `cargo check`, focused tests, `make check`, `make install`, and GitHub Actions CI run `26537671598` with `make check` and `make tmux-ci` passing.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:c6138b38 -->
+
+### Re: duplicate #finovrwr queue normalization — gpt-5
+
+No code changed in this pass. I used the fresh preflight baseline so the duplicate inactive `#finovrwr` queue line could be intentionally normalized instead of preserved as concurrent drift.
+
+Changed paths: session document only.
+
+Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc finalize`.
+
+Verification: no new code changes in this repair cycle.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:46be1c6a -->
 <!-- /agent:exchange -->
 ###
 <!--

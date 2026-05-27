@@ -49,8 +49,22 @@ The JetBrains plugin refuses to mutate an open document while IntelliJ has a pen
 
 The binary-side auto-recovery above remains the defense-in-depth path for older plugin versions or any case where the response had already reached the working tree before the refusal.
 
+## Late-Accept Replay (`#jbccacceptdup`)
+
+When the user leaves the File Cache Conflict dialog open past the IPC ack window and accepts it **after** the cycle has already reached `commit_success`, the plugin still has a deferred IPC payload queued for the now-stale cycle. Accepting replays that payload on top of the committed working tree, producing a second `### Re: …` block that duplicates the response already in HEAD. The next `agent-doc preflight` then drift-recovers and auto-commits the duplicated state.
+
+Deterministic SimWorld coverage for this branch lives in `src/agent-doc/src/sim_world.rs`:
+
+- `jb_cache_conflict_accept_late_replays_duplicate_response_today` — failing baseline: post-commit replay yields two `### Re:` blocks with `snapshot` still pinned to the original commit.
+- `jb_cache_conflict_accept_late_replay_manual_repair_recovers_today` — documented manual recovery: operator removes the replayed block and re-commits so the snapshot tracks the cleaned working tree (`dedupe_responses` only handles identical-body duplicates, so the operator-edit path is the safe baseline).
+
+Full fix plan: `tasks/agent-doc/plan-jb-cache-conflict-accept-duplicates-response.md`. Both scenarios should be replaced (or their assertions inverted) once the plugin / IPC apply path revalidates against HEAD before mutation and rejects the duplicate replay at apply time.
+
+Operator workaround until that fix ships: accept the File Cache Conflict dialog immediately. Accepting after the IPC ack window has expired is what feeds the duplicate.
+
 ## See Also
 
 - `runbooks/commit.md` — overall closeout / repair ordering.
 - `runbooks/baseline-drift.md` — manual-commit baseline drift and preserve-session reset.
 - `tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md` — full plan with phases 1–5 and the deterministic SimWorld scenarios.
+- `tasks/agent-doc/plan-jb-cache-conflict-accept-duplicates-response.md` — `#jbccacceptdup` fix plan (late-accept replay).

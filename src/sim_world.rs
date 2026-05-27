@@ -2936,3 +2936,110 @@ fn jb_cache_conflict_cancel_branch_auto_recovers_via_preflight() {
     assert_eq!(world.snapshot, world.doc);
     world.strict_closeout_invariants().unwrap();
 }
+
+// -------- #jbccacceptdup: deterministic SimWorld scenario for the JB File
+// Cache Conflict **late-accept replay** wedge.
+//
+// See tasks/agent-doc/plan-jb-cache-conflict-accept-duplicates-response.md and
+// the repro logged on tasks/agent-doc/agent-doc-bugs2.md [#wkbs].
+//
+// Real-world incidents repro'd this on 2026-05-26 (`tasks/software/tsift.md`)
+// and 2026-05-27 (`boost-client/tasks/astro-listings.md`). Sequence:
+//
+// 1. The agent-doc cycle reaches `Committed` cleanly (response in HEAD).
+// 2. While the cycle was open, IntelliJ surfaced a File Cache Conflict dialog
+//    that the user did not resolve. The plugin stashed the IPC patch as a
+//    conflict-deferred payload instead of mutating the open document.
+// 3. Hours later the user accepts the dialog. The plugin replays the deferred
+//    payload against the open document. Because the response body is already
+//    in the committed file, the replay appends a second `### Re: …` block
+//    to the working tree.
+// 4. The next `agent-doc preflight` reaches the drift-recovery branch and
+//    auto-commits the duplicated state — the dupe wedges into HEAD.
+//
+// Today the closeout invariants only check `has_duplicate_response_heading()`
+// at phase `WriteApplied`, so once a duplicate lands *after* `Committed`, the
+// existing strict invariant is silent. This scenario pins the failing baseline
+// (duplicate visible in working tree post-commit) and the documented manual
+// recovery (`dedupe_responses` + re-commit) so a future binary-side guard has
+// a clear before/after assertion to flip.
+
+#[test]
+fn jb_cache_conflict_accept_late_replays_duplicate_response_today() {
+    // FAILING BASELINE for #jbccacceptdup.
+    //
+    // After a committed cycle, the late-accepted conflict replays a stale
+    // response payload back into the working tree. `self.doc` ends up with two
+    // `### Re: sim closeout` blocks while `self.snapshot` still matches the
+    // single-response commit — exactly the shape observed on
+    // `boost-client/tasks/astro-listings.md` on 2026-05-27.
+    //
+    // When the binary-side fix lands (plan steps 2–5 in
+    // `plan-jb-cache-conflict-accept-duplicates-response.md`), the plugin /
+    // IPC apply path will revalidate against HEAD before mutation and skip
+    // the replay. This test should then be replaced (or its assertions
+    // inverted) by `jb_cache_conflict_accept_late_replay_rejected_at_apply`.
+    let mut world = SimWorld::new(2026_05_27);
+    world.apply(SimCommand::EditPrompt).unwrap();
+    world.apply(SimCommand::CaptureResponse).unwrap();
+    apply_jb_cache_conflict_accept(&mut world);
+    world.apply(SimCommand::Commit).unwrap();
+    assert_eq!(world.phase, CyclePhase::Committed);
+    assert_eq!(world.snapshot, world.doc);
+
+    let committed_snapshot = world.snapshot.clone();
+
+    // Hours later: the long-pending File Cache Conflict dialog is accepted and
+    // the plugin replays its deferred IPC payload on top of the already-
+    // committed response.
+    world.apply(SimCommand::DuplicateVisibleResponse).unwrap();
+
+    assert_eq!(
+        world.doc.matches("### Re: sim closeout").count(),
+        2,
+        "late accept must replay the stale response into the working tree"
+    );
+    assert_eq!(
+        world.snapshot, committed_snapshot,
+        "snapshot must still match the original committed cycle until the dupe is recommitted"
+    );
+    assert!(
+        world.has_duplicate_response_heading(),
+        "duplicate-response detector must observe the replayed block"
+    );
+}
+
+#[test]
+fn jb_cache_conflict_accept_late_replay_manual_repair_recovers_today() {
+    // Today's documented manual recovery path for #jbccacceptdup: the operator
+    // resolves the duplicate by hand (the replayed block often has a different
+    // body than the committed one, so `dedupe_responses` — which only collapses
+    // identical-body duplicates — can't always help) and then crosses the
+    // binary-owned commit boundary via `agent-doc write --commit <FILE>` or
+    // `agent-doc commit <FILE>`. In the simulator that's an explicit `world.doc`
+    // edit (modeling the operator's edit) followed by a re-commit so the
+    // snapshot catches up. This test pins the recovery exit so a future
+    // binary-side replay guard can automate it without regressing the manual
+    // escape hatch.
+    let mut world = SimWorld::new(2026_05_27 + 1);
+    world.apply(SimCommand::EditPrompt).unwrap();
+    world.apply(SimCommand::CaptureResponse).unwrap();
+    apply_jb_cache_conflict_accept(&mut world);
+    world.apply(SimCommand::Commit).unwrap();
+    let committed_doc = world.doc.clone();
+    world.apply(SimCommand::DuplicateVisibleResponse).unwrap();
+    assert_eq!(world.doc.matches("### Re: sim closeout").count(), 2);
+
+    // Manual recovery: operator deletes the replayed block, restoring the
+    // committed doc. Then a re-commit updates the snapshot.
+    world.doc = committed_doc;
+    world.snapshot = world.doc.clone();
+
+    assert_eq!(
+        world.doc.matches("### Re: sim closeout").count(),
+        1,
+        "manual repair must leave a single response block in the working tree"
+    );
+    assert_eq!(world.snapshot, world.doc);
+    world.strict_closeout_invariants().unwrap();
+}

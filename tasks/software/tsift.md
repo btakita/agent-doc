@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -62,7 +62,7 @@ Commits pushed:
 `#gopencode-install` is gated, not done, because the only remaining work is external registry authorization: publish `opencode-tsift` with an npm account/token that can create that package name, or configure `NPM_TOKEN` plus `TSIFT_ENABLE_NPM_PUBLISH=true` for the tagged release path.
 
 OpenCode references used: custom commands are markdown files under `.opencode/commands` and run by slash command name in the TUI; npm plugins are listed in `plugin` config and installed by Bun at startup. Sources: https://opencode.ai/docs/commands/ and https://opencode.ai/docs/plugins/.
-<!-- agent:boundary:08e2c0c2 -->
+<!-- agent:boundary:4800a0bf -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -71,7 +71,7 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 - do [#gopencode-install]. #spec-test-build-install-commit-push
 <!-- /agent:queue -->
 

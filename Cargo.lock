@@ -1429,9 +1429,7 @@ dependencies = [
 
 [[package]]
 name = "module-harness"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c044ae430145a34a63117499f5afbcbab2047013d95b92ea4ff588e3a2e28515"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "clap",

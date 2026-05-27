@@ -64,12 +64,13 @@ tiny_http = { version = "0.12", default-features = false, features = ["ssl-rustl
 assert_cmd = "2"
 existence = "0.4"
 filetime = "0.2"
-module-harness = "0.2"
+module-harness = "0.2.1"
 predicates = "3"
 proptest = "1"
 tempfile = "3"
 
 [patch.crates-io]
+module-harness = { path = "../module-harness" }
 tmux-router = { path = "../tmux-router" }
 
 [profile.release]

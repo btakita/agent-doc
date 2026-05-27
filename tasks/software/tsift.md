@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -148,7 +148,53 @@ Verification:
 
 - `git diff --check -- plans/gdbvacproof-evidence.md` passed.
 - GitHub Actions `CI` run `26488560277` passed: `clippy + test` in 3m02s and `live Convex graph acceptance` in 1m00s. The run only showed the existing Node.js 20 deprecation/configuration annotations.
-<!-- agent:boundary:385abc00 -->
+### Re: #gbenchneigh — gpt-5
+
+Completed `#gbenchneigh` by refreshing the graph performance history with fresh neighborhood-ranked full-projection benchmark rows.
+
+What changed:
+
+- Appended three `#gbenchneigh` runs to `src/tsift/fixtures/graph-db-performance-history.json`:
+  - `agent-loop-gbenchneigh-full-projection-2026-05-26-sample-1` (`cache_state=miss`)
+  - `agent-loop-gbenchneigh-full-projection-2026-05-26-sample-2` (`cache_state=miss`)
+  - `agent-loop-gbenchneigh-full-projection-2026-05-26-sample-3` (`cache_state=hit`)
+- Added `src/tsift/plans/gbenchneigh-evidence.md` with the command log, raw artifact list, fixture-row details, and focused metric table.
+
+The new rows each carry the full `backend-eval --full-projection` metric map, so future decisions compare these surfaces together instead of optimizing one in isolation: `neighborhood`, `path_max_hops`, `path_max_hops_512`, `evidence`, `conflict_matrix`, and `dispatch_trace`.
+
+Focused medians from the three samples:
+
+| Metric | Median (us) |
+| --- | ---: |
+| `real.sqlite.neighborhood.duration_micros` | 42,408 |
+| `full_projection.sqlite.neighborhood.duration_micros` | 47,234 |
+| `full_projection.sqlite.path_max_hops.duration_micros` | 68 |
+| `full_projection.sqlite.path_max_hops_512.duration_micros` | 27 |
+| `full_projection.sqlite.evidence.duration_micros` | 967 |
+| `full_projection.sqlite.conflict_matrix.duration_micros` | 653,573 |
+| `full_projection.sqlite.dispatch_trace.duration_micros` | 3,843 |
+| `synthetic_deep_chain.sqlite.path_max_hops_512.duration_micros` | 553 |
+
+Verdict: the refreshed history still points away from raising the user-facing 64-hop default based only on path probes. The high-hop probes are cheap, but the larger full-projection comparison costs remain neighborhood/conflict/projection-refresh surfaces.
+
+Commits pushed:
+
+- `src/tsift`: `d3a1f1f` (`docs: refresh graph neighborhood benchmark history`)
+- root: `e5c6ad1f4` (`chore: update tsift benchmark history`)
+
+Verification:
+
+- `tsift status` fresh after reindex.
+- `jq empty fixtures/graph-db-performance-history.json` passed.
+- `git diff --check -- fixtures/graph-db-performance-history.json plans/gbenchneigh-evidence.md` passed.
+- `tsift metric-digest --input fixtures/graph-db-performance-history.json --json` passed and wrote `target/perf/gbenchneigh-metric-digest.json`.
+- `cargo test --test perf_gate` passed.
+- `cargo test graph_db_backend_eval_benchmarks_candidate_stores_against_sqlite` passed.
+- `make check` passed.
+- GitHub Actions `CI` run `26489247921` passed: `clippy + test` in 2m48s and `live Convex graph acceptance` in 55s. The run only showed the existing Node.js 20 deprecation/configuration annotations.
+
+Existing unrelated dirty files in the tsift worktree were left untouched.
+<!-- agent:boundary:b1a5afae -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -157,19 +203,12 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~do [#gneighgate]~
-- ~do [#gsemrows]~
-- ~do [#gnbrank]~
-- ~do [#gtombops]~
-- do [#gbenchneigh]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gbenchneigh] Refresh the graph performance history with dedicated neighborhood rows so future graph-backend or hop-cap decisions compare `neighborhood`, `path_max_hops`, evidence, conflict-matrix, and dispatch-trace together instead of optimizing one surface blind.
 <!-- /agent:backlog -->
 
 ## Review

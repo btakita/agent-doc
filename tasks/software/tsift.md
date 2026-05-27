@@ -68,7 +68,40 @@ I did not find a separate tmux-test workflow or tmux CI leg in this repo's activ
 ### Re: closeout repair — gpt-5
 
 Closeout repair only: the `#gfullhot` response above is already committed, and this write reopens the binary-owned write/commit path after the live IPC `HEAD` marker drift reported by `session-check`.
-<!-- agent:boundary:23181a1b -->
+### Re: #gsqlstage — gpt-5
+
+Completed `#gsqlstage`.
+
+I changed `SqliteGraphStore::replace_projection_with_version` so graph node and edge refresh staging now loads temp tables through bounded multi-row insert chunks instead of one insert execution per graph row. The existing SQL-side delta path still skips unchanged row-hash owner rewrites and only expands materialized property rows for new or changed node/edge owners.
+
+Changed paths in the tsift repo:
+
+- `src/substrate.rs`
+- `SPEC.md`
+- `plans/gsqlstage-evidence.md`
+
+Evidence is recorded in `plans/gsqlstage-evidence.md`. The three fresh `backend-eval --full-projection` samples from the updated installed binary produced the requested gate metrics:
+
+| Sample | cache hit | graph rows | `sqlite_node_staging` | `sqlite_edge_staging` | `sqlite_delta_write` | `post_write_reads` | `total_duration_micros_per_1k_graph_rows` |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 0 | 27,742 | 11,532us | 91,698us | 164,157us | 52,152us | 14,186.648 |
+| 2 | 1 | 27,742 | 10,810us | 87,936us | 168,047us | 51,666us | 14,093.829 |
+| 3 | 1 | 27,742 | 10,004us | 83,330us | 171,127us | 48,986us | 13,918.030 |
+
+Sample 2 phase details show the new staging path: `bulk stage 4147 graph_nodes rows` and `bulk stage 23595 graph_edges rows` using chunks up to 50 rows.
+
+Committed and pushed the tsift repo change as `6c83b12 perf: bulk stage sqlite graph refresh rows` on `main`. I left the pre-existing unrelated dirty files in `src/tsift` untouched. The superproject still shows `src/tsift` modified because the submodule checkout advanced; I did not create a separate root gitlink commit.
+
+Verification passed:
+
+- `cargo test -q sqlite_projection_refresh_handles_bulk_row_replacement`
+- `cargo build`
+- `cargo install --path .`
+- `make check`
+- GitHub Actions CI run `26502654442`: `clippy + test` passed and live Convex graph acceptance passed
+
+The active workflows for this repo are `CI` and `Release`; I did not find a separate tmux-test workflow or tmux CI leg to inspect. The preflight `#next-steps` warning still refers to a post-exchange HTML comment only, so I treated it as a non-executable note.
+<!-- agent:boundary:4b0c5ed3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -82,7 +115,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#gneighqual]~
 - ~do [#gcommqual]~
 - ~do [#gfullhot]~
-- do [#gsqlstage]
+- ~do [#gsqlstage]~
 - do [#ghoppolicy]
 - do [#gbackendproof]
 <!-- /agent:queue -->
@@ -90,7 +123,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gsqlstage] [tag: graph] [tag: performance] Reduce SQLite graph refresh staging/write cost: bulk merge nodes, edges, and materialized property rows through prepared chunks or temp tables, avoid unchanged property rewrites, and gate on sqlite_delta_write, sqlite_edge_staging, post_write_reads, and duration_micros_per_1k_graph_rows.
 - [ ] [#ghoppolicy] [tag: graph] [tag: performance] Keep max-hop increases opt-in until useful-row evidence passes: compare 64/128/256/512 tiers on real, full-projection, and synthetic deep-chain workloads, require useful deeper rows and flat latency, then consider adaptive caps rather than raising the default blindly.
 - [ ] [#gbackendproof] [tag: graph] [tag: performance] Evaluate FalkorDB/Kuzu only as native optional GraphStore adapters: require provider-neutral projection writes/load, freshness/parity, lock behavior, install portability, and faster real/full-projection evidence/conflict/dispatch/path metrics than SQLite before promotion.
 <!-- /agent:backlog -->

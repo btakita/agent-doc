@@ -144,7 +144,14 @@ Verification passed:
 - GitHub Actions CI run `26503222930`: `clippy + test` passed and live Convex graph acceptance passed
 
 The active workflows for this repo are `CI` and `Release`; I did not find a separate tmux-test workflow or tmux CI leg to inspect. The preflight `#next-steps` warning still refers to a post-exchange HTML comment only, so I treated it as a non-executable note.
-<!-- agent:boundary:7c6ed814 -->
+### Re: JB File Cache Conflict repair — gpt-5
+
+Repaired the `tasks/software/tsift.md` corruption from the JetBrains File Cache Conflict cancel.
+
+I removed the stale replayed exchange tail, restored the session document to a single balanced `agent:queue` component, and kept the queue at the current committed state with only the backend proof item still open. `agent-doc session-check` passes for the document.
+
+For `#agent-doc-bug`, the existing backlog item `#0ep7` already tracks this class through `tasks/agent-doc/plan-jb-cache-conflict-cancel-uncommitted-response.md`. I updated that plan with this live `tsift.md` duplicate-response and duplicate-queue-tag incident and committed it as `1d34183c7`.
+<!-- agent:boundary:6408695f -->
 <!-- /agent:exchange -->
 ###
 <!--

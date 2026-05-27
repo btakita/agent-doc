@@ -67,7 +67,63 @@ Confidence: high for the classifier and regression coverage; medium for the full
 ### Re: closeout repair — gpt-5
 
 Closeout repair committed the visible #snrun response and gated-review state after editor IPC drift. No additional repo code changed in this repair.
-<!-- agent:boundary:39e86465 -->
+❯ equityfundingsource.md had the full-document IPC corruption occur while I was typing in a prompt. In addition to diagnosing and fixing the issue, please provide a mermaid showing how the issue occurred and where in the agent-doc lifecycle the full-document IPC corruption can occur. Can we mathematically eliminate all possibility of the full-document IPC corruption from occurring? 
+❯ #spec-test-build-install-commit-push
+### Re: equityfundingsource IPC corruption — gpt-5
+
+I diagnosed the `equityfundingsource.md` corruption as a remaining whole-document IPC authority path, but not the already-disabled `fullContent` send path. The ops log shows the editor narrow socket patch succeeded, then the plugin returned an `ack-content` sidecar whose whole-buffer text was longer than the disk copy and had duplicated prompt text. The binary treated that sidecar as authoritative snapshot content, so the duplicate prompt was saved and committed.
+
+The fix makes ACK content observational rather than authoritative when it grows user prompt multiplicity relative to the agent-owned `content_ours` response image. On socket and file IPC ACK-content adoption, `agent-doc` now checks prompt counts with response-aware parsing. If the ACK sidecar contains extra user prompt copies, it logs and records `ipc_snapshot_adoption_blocked`, saves the clean `content_ours` snapshot, and repairs the visible duplicated buffer through the guarded disk repair path before commit.
+
+```mermaid
+flowchart TD
+  userTyping["User types prompt in session doc"]
+  preflight["preflight captures baseline and content_ours plan"]
+  responsePatch["finalize/write builds narrow exchange patch"]
+  editorPatch["Editor socket/file IPC applies narrow patch"]
+  ackSidecar{"Editor returns ack-content sidecar?\nwhole-buffer observation"}
+  badSidecar["Sidecar contains duplicated prompt text\nor live prompt drift"]
+  oldAdopt["Old path saved sidecar as snapshot"]
+  commitBad["Commit staged duplicated full document"]
+  newGuard["New prompt-duplication adoption guard"]
+  contentOurs["Save snapshot from content_ours"]
+  repairVisible["Repair visible duplicated buffer via guarded disk repair"]
+  commitClean["Commit stages clean agent-owned response image"]
+  noAck["No ack sidecar or response proof missing"]
+  failClosed["Fall back or fail closed before commit"]
+
+  userTyping --> preflight --> responsePatch --> editorPatch --> ackSidecar
+  ackSidecar -- "yes, clean" --> commitClean
+  ackSidecar -- "yes, duplicated or drifted" --> badSidecar
+  badSidecar -. "old vulnerable path" .-> oldAdopt --> commitBad
+  badSidecar --> newGuard --> contentOurs --> repairVisible --> commitClean
+  ackSidecar -- "no or incomplete" --> noAck --> failClosed
+```
+
+Can we mathematically eliminate all possibility of full-document IPC corruption? Not across the whole system boundary. An arbitrary editor plugin, OS write, foreign process, disk fault, or concurrent manual full-file rewrite can always corrupt a file outside `agent-doc`'s control. What we can eliminate is the class of `agent-doc`-owned whole-document replacement/adoption failures: disable full-document patch payloads, treat whole-buffer ACK data as observation only, require response materialization proof, block prompt multiplicity growth, fail closed before commit when proof is insufficient, and regression-test those invariants. This change closes the `equityfundingsource.md` class inside that controllable boundary.
+
+Changed paths in `src/agent-doc`:
+
+- `src/write.rs`
+- `tests/test_cli.rs`
+- `specs/07-closeout-commands.md`
+- `VERSIONS.md`
+
+Verification completed:
+
+- `cargo fmt`
+- `cargo test socket_ack_content_prompt_duplication_uses_content_ours_and_repairs_visible_buffer`
+- `cargo test ipc_snapshot_adoption`
+- `cargo test --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted`
+- `make check`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.34.0`
+- CI review: GitHub Actions run `26496136762` was successful; its `check` job included successful `make check` and `make tmux-ci` steps.
+
+Commit and push completed in the submodule: `ef2e592e fix: reject duplicated prompt ack content`, pushed to `origin/20260422/codex-agent-backend`.
+
+I left unrelated dirty files unstaged, including pre-existing submodule edits outside this fix and unrelated root worktree changes.
+<!-- agent:boundary:c0245044 -->
 <!-- /agent:exchange -->
 ###
 <!--

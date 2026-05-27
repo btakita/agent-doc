@@ -113,7 +113,18 @@ The next actionable sequence remains:
 3. Verify OpenCode transcript capture and permission-prompt diagnostics, especially around HITL prompt navigation.
 4. Add deterministic tests for generated OpenCode config and command routing.
 5. Build/install locally, run an end-to-end `agent-doc start opencode ...` smoke session, and close with `agent-doc session-check` evidence.
-<!-- agent:boundary:1c231ed0 -->
+### Re: OpenCode integration next steps — gpt-5
+
+
+Top backlog item: #gopencode.
+
+The queue prompt is now fully answered by the existing #gopencode backlog item. I am not adding another item because that would duplicate the current top priority.
+
+Priority order remains:
+
+1. #gopencode — make OpenCode a first-class `tsift` integration, including installer/config docs, digest shortcuts, transcript and permission-prompt diagnostics, deterministic tests, local build/install, and an end-to-end OpenCode smoke session.
+2. #gbackendproof — evaluate optional graph backends only after OpenCode integration is not blocking daily workflow.
+<!-- agent:boundary:3f001905 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -65,7 +65,7 @@ Compacted content:
 3. Benchmark through `perf_gate.rs` against SQLite
 
 This lets tsift query tokensave pre-built graph without re-indexing — highest-ROI integration with minimal new code.
-<!-- agent:boundary:f19ad0e8 -->
+<!-- agent:boundary:d30ae35f -->
 <!-- /agent:exchange -->
 ###
 <!--

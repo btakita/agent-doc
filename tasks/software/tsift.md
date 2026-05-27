@@ -36,7 +36,31 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 3 response topic(s): graph + neighborhood next steps; stale index auto-update; session-share stale index
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:f276ace8 -->
+### Re: #gneighgate — gpt-5
+
+Implemented and closed `#gneighgate`.
+
+What changed:
+- Reworked SQLite `paged_neighborhood` so node paging and page-edge materialization share one recursive reachable-set CTE instead of repeating the bounded walk.
+- Added a stable page diagnostic: `neighborhood nodes and page edges share one recursive reachable-set CTE`.
+- Added backend-eval `neighborhood` operation coverage and required performance-gate metrics for real, synthetic high-degree, synthetic deep-chain, and opt-in full-projection workloads.
+- Updated the spec and conformance tests to lock SQLite query-plan diagnostics plus SQLite/Convex snapshot parity.
+
+Commits/pushes:
+- tsift submodule: `9cd12f3 perf: gate graph neighborhood paging`, pushed to `btakita/tsift:main`.
+- agent-loop parent pointer: `d9474229f chore: update tsift neighborhood gate`, pushed to `btakita/agent-loop:main`.
+
+Verification:
+- `cargo check`
+- `cargo test --test graph_db_conformance graph_db_backend_eval_benchmarks_candidate_stores_against_sqlite`
+- `cargo test --test graph_db_conformance graph_db_cli_conformance_matches_sqlite_and_convex_snapshot_queries`
+- `cargo test --test graph_db_conformance graph_db_scale_caps_pagination_paths_doctor_and_sqlite_plans`
+- `make check`
+- `cargo install --path .`
+- GitHub Actions CI run `26487042618`: success for `clippy + test` and `live Convex graph acceptance`.
+
+No `tmux-test` workflow exists in either the root `agent-loop` repo or the `tsift` submodule, so there was no tmux CI leg to inspect. Unrelated dirty files in the root checkout and in the `tsift` submodule were left unstaged.
+<!-- agent:boundary:9046bc1d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -45,13 +69,18 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+preset #spec-test-build-install-commit-push
+- ~do [#gneighgate]~
+- do [#gsemrows]
+- do [#gnbrank]
+- do [#gtombops]
+- do [#gbenchneigh]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gneighgate] Add a neighborhood performance/quality gate, then optimize `paged_neighborhood`: run repeated real + full-projection + synthetic high-degree/deep-chain `graph-db neighborhood` samples, collapse the current node-page and edge-page recursive walks into one bounded reachable-set path if it is hot, and lock SQLite query-plan diagnostics plus Convex parity.
 - [ ] [#gsemrows] Make semantic rows and tagpath handles part of graph effectiveness: when `graph-db refresh` warns the summary cache is empty or `communities` reports `tagpath_state=missing`, surface a fail-closed/actionable readiness state, then run `summarize --extract` + refresh and prove neighborhood/evidence ranking improves.
 - [ ] [#gnbrank] Add ranked neighborhood output: score neighbors by depth, edge kind, community co-membership, semantic relation, source-handle freshness, duplicate-name precision, and handle coverage; gate with community-search quality metrics before changing defaults.
 - [ ] [#gtombops] Run and document the graph tombstone cleanup workflow on the tsift graph DB: Convex reconcile, refresh, compact, then record status/doctor/file-size/tombstone-scan deltas from the current 184,722 tombstone / 27,375 live-row state.

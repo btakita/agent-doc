@@ -62,7 +62,39 @@ Commit / push:
 
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:8ae6a1f7 -->
+### Re: #liveipcrace — gpt-5
+
+Implemented and pinned regression coverage for the cycle-1779845677327 live IPC race.
+
+Changed paths:
+- `src/agent-doc/specs/07-closeout-commands.md`
+- `src/agent-doc/editors/SPEC.md`
+- `src/agent-doc/src/sim_world.rs`
+- `src/agent-doc/src/compact.rs`
+- `src/agent-doc/tests/live_ipc_race_integration.rs`
+- `src/agent-doc/editors/vscode/src/patchGuard.test.ts`
+- `src/agent-doc/editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/NormalizeExchangePrefixesTest.kt`
+
+What changed:
+- Added an exact cycle fixture for post-exchange scratch-comment edits containing `#spec-test-build-install-commit-push` and `dispatch #spec-test-build-install-commit-push`.
+- Covered the finalize IPC path, compact direct-write CAS path, and SimWorld already-applied/dedupe path.
+- Added JetBrains and VS Code receiver fixtures proving legacy `fullContent` payloads are rejected before visible write APIs.
+- Extended closeout/editor specs so directive-looking text inside ordinary scratch comments remains user-owned and must not authorize full-document replacement, duplicate prompt/response text, directive loss, or silent `snapshot_absorb`.
+
+Verification:
+- `cargo test 1779845677327 -- --test-threads=1` passed.
+- `npm test` passed in `src/agent-doc/editors/vscode`.
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test` passed in `src/agent-doc/editors/jetbrains`.
+- `make check` passed in `src/agent-doc`.
+- `make install` passed; installed `agent-doc 0.34.0` and refreshed `libagent_doc.so`.
+- Latest CI run `26488883217` is green, including the `Run make tmux-ci` step.
+
+Commits/push:
+- `src/agent-doc`: `30e96224` (`test: cover live IPC scratch directive race`) pushed to `origin/20260422/codex-agent-backend`.
+- Parent repo: `591db0a14` (`chore: advance agent-doc submodule`) pushed to `origin/main`.
+
+The pre-existing dirty files in `src/agent-doc` were left untouched outside this commit. No escalation was needed. Confidence: high.
+<!-- agent:boundary:3365e6c1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -77,7 +109,7 @@ As I was typing into the comment below `/agent:exchange`, the full-document IPC 
 <!-- agent:queue auto -->
 dispatch #spec-test-build-install-commit-push
 - ~do [#ignorebypass]~
-- do [#liveipcrace]
+- ~do [#liveipcrace]~
 - do [#snapabsorb]
 - do [#compactstuck]
 - do [#commentpreset]
@@ -87,7 +119,6 @@ dispatch #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#liveipcrace] Reproduce and fix the live post-exchange typing/full-document IPC corruption path: build a failing SimWorld plus JetBrains/VSC fixture from cycle-1779845677327 where a scratch comment is edited during finalize/compact, assert no fullContent socket/file payload, no duplicate prompt line, no prompt preset/directive loss, and no silent snapshot_absorb of shorter disk content.
 - [ ] [#snapabsorb] Harden write/commit closeout after ipc_snapshot_adoption_blocked: when live_prompt_drift_after_preflight selects content_ours for snapshot, later status/commit staging must not snapshot_absorb a divergent disk body unless the response body and live drift are both proven materialized.
 - [ ] [#compactstuck] Teach stuck_captured_cycle/preflight that compact exchange archives are valid materialization for committed captures, or retire the capture/cycle state during compact, so archived responses do not warn as missing from HEAD.
 - [ ] [#commentpreset] Define the contract for prompt-preset/directive text inside ordinary post-exchange HTML comments: either keep it non-executable but emit a visible diagnostic, or introduce a draft-prompt component so #spec-test-build-install-commit-push cannot look silently removed.

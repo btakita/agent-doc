@@ -1023,8 +1023,11 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
         return Ok((false, false));
     }
 
+    let ipc_hint = crate::session_check::latest_ipc_proof_diagnostic_hint(file)?
+        .map(|hint| format!("; {hint}"))
+        .unwrap_or_default();
     eprintln!(
-        "[preflight] WARNING: previous cycle `{}` is still `{}` ({}) — attempting recovery before diff",
+        "[preflight] WARNING: previous cycle `{}` is still `{}` ({}){} — attempting recovery before diff",
         state.cycle_id,
         match state.phase {
             crate::cycle_state::CyclePhase::PreflightStarted => "preflight_started",
@@ -1033,7 +1036,8 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
             crate::cycle_state::CyclePhase::Committed => "committed",
             crate::cycle_state::CyclePhase::Abandoned => "abandoned",
         },
-        state.last_event
+        state.last_event,
+        ipc_hint
     );
     crate::ops_log::log_op(
         file,
@@ -1092,8 +1096,11 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
         } else {
             String::new()
         };
+        let ipc_hint = crate::session_check::latest_ipc_proof_diagnostic_hint(file)?
+            .map(|hint| format!("; {hint}"))
+            .unwrap_or_default();
         anyhow::bail!(
-            "previous cycle `{}` is still `{}` after recovery/commit ({}){}",
+            "previous cycle `{}` is still `{}` after recovery/commit ({}){}{}",
             after.cycle_id,
             match after.phase {
                 crate::cycle_state::CyclePhase::PreflightStarted => "preflight_started",
@@ -1103,7 +1110,8 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
                 crate::cycle_state::CyclePhase::Abandoned => "abandoned",
             },
             after.last_event,
-            marker_note
+            marker_note,
+            ipc_hint
         );
     }
 

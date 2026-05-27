@@ -2909,7 +2909,53 @@ fn ipc_response_materialized_or_fallback(
             content_hash
         ),
     );
+    log_ipc_proof_failure(
+        file,
+        source,
+        None,
+        "missing_response_probe",
+        "direct_write_fallback",
+        &format!(
+            "response_sha256={} content_len={} content_hash={}",
+            response_hash,
+            content.len(),
+            content_hash
+        ),
+    );
     false
+}
+
+fn log_ipc_proof_failure(
+    file: &Path,
+    source: &str,
+    patch_id: Option<&str>,
+    invariant: &str,
+    recovery: &str,
+    detail: &str,
+) {
+    eprintln!(
+        "[write] IPC proof insufficient for {}: source={} patch_id={} invariant={} recovery={}{}{}",
+        file.display(),
+        source,
+        patch_id.unwrap_or("-"),
+        invariant,
+        recovery,
+        if detail.is_empty() { "" } else { " " },
+        detail
+    );
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "ipc_proof_insufficient file={} source={} patch_id={} invariant={} recovery={}{}{}",
+            file.display(),
+            source,
+            patch_id.unwrap_or("-"),
+            invariant,
+            recovery,
+            if detail.is_empty() { "" } else { " " },
+            detail
+        ),
+    );
 }
 
 fn strip_partial_response_materialization_from_exchange(
@@ -5210,6 +5256,14 @@ fn file_ipc_consumed_without_live_exchange_ack(
             after_hash
         ),
     );
+    log_ipc_proof_failure(
+        file,
+        source,
+        patch_id,
+        "live_exchange_without_ack_content",
+        "direct_write_fallback",
+        &format!("before_hash={} after_hash={}", before_hash, after_hash),
+    );
     true
 }
 
@@ -7063,6 +7117,18 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
             "[write] IPC timeout ({}s) — falling back to direct write",
             timeout.as_secs()
         );
+        log_ipc_proof_failure(
+            file,
+            "explicit_file_ipc",
+            Some(&patch_id),
+            "no_ack",
+            "direct_write_fallback",
+            &format!(
+                "timeout_secs={} patch_file={}",
+                timeout.as_secs(),
+                patch_file.display()
+            ),
+        );
     }
     // Clean up the unconsumed patch file
     let _ = std::fs::remove_file(&patch_file);
@@ -7701,6 +7767,21 @@ fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
             crate::ops_log::content_hash(ours)
         ),
     );
+    log_ipc_proof_failure(
+        file,
+        source,
+        patch_id,
+        "live_prompt_drift_after_preflight",
+        "content_ours_snapshot_next_cycle",
+        &format!(
+            "snap_source={} candidate_len={} candidate_hash={} content_ours_len={} content_ours_hash={}",
+            prior_source,
+            decision.snapshot_content.len(),
+            crate::ops_log::content_hash(&decision.snapshot_content),
+            ours.len(),
+            crate::ops_log::content_hash(ours)
+        ),
+    );
     let _ = crate::cycle_state::record_ipc_snapshot_adoption_blocked(file);
     decision.replace_snapshot_with_content_ours_for_live_prompt_drift(ours);
     true
@@ -7742,6 +7823,22 @@ fn guard_ipc_snapshot_adoption_against_prompt_duplication(
             file.display(),
             source,
             patch_id.unwrap_or("-"),
+            prior_source,
+            duplicate_count,
+            decision.snapshot_content.len(),
+            crate::ops_log::content_hash(&decision.snapshot_content),
+            ours.len(),
+            crate::ops_log::content_hash(ours)
+        ),
+    );
+    log_ipc_proof_failure(
+        file,
+        source,
+        patch_id,
+        "prompt_duplication_in_ack_content",
+        "content_ours_snapshot_and_visible_repair",
+        &format!(
+            "snap_source={} duplicate_prompt_count={} candidate_len={} candidate_hash={} content_ours_len={} content_ours_hash={}",
             prior_source,
             duplicate_count,
             decision.snapshot_content.len(),
@@ -9068,6 +9165,14 @@ pub fn try_ipc(
                         file.display()
                     ),
                 );
+                log_ipc_proof_failure(
+                    file,
+                    "socket_ipc",
+                    Some(&patch_id),
+                    "no_ack_content_sidecar",
+                    "direct_write_fallback",
+                    "ack_content_timeout=true",
+                );
                 if let Some(ref cycle_id) = cycle_already_committed(file) {
                     eprintln!(
                         "[write] socket IPC fallback: cycle {} already committed — skipping file IPC",
@@ -9706,6 +9811,7 @@ fn write_ipc_and_poll(
     options: IpcPollOptions<'_>,
 ) -> Result<bool> {
     let before_content = std::fs::read_to_string(doc_file).ok();
+    let patch_id_for_diagnostics = payload.get("patch_id").and_then(|value| value.as_str());
     // Atomic write of patch file
     atomic_write(patch_file, &serde_json::to_string_pretty(payload)?)?;
 
@@ -10026,6 +10132,18 @@ fn write_ipc_and_poll(
     eprintln!(
         "[write] IPC timeout ({}s) — falling back to direct write",
         timeout.as_secs()
+    );
+    log_ipc_proof_failure(
+        doc_file,
+        "file_ipc",
+        patch_id_for_diagnostics,
+        "no_ack",
+        "direct_write_fallback",
+        &format!(
+            "timeout_secs={} patch_file={}",
+            timeout.as_secs(),
+            patch_file.display()
+        ),
     );
     let _ = std::fs::remove_file(patch_file);
     Ok(false)
@@ -11926,6 +12044,7 @@ scratch
         fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
         fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
 
         let doc = dir.path().join("test.md");
         fs::write(&doc, "---\nsession: test\n---\n\n<!-- agent:exchange -->\ncontent\n<!-- /agent:exchange -->\n").unwrap();
@@ -11948,6 +12067,13 @@ scratch
         assert!(
             entries.is_empty(),
             "patch file should be cleaned up after timeout"
+        );
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("ipc_proof_insufficient")
+                && log.contains("invariant=no_ack")
+                && log.contains("recovery=direct_write_fallback"),
+            "IPC timeout should log the failed invariant and recovery path:\n{log}"
         );
     }
 
@@ -12072,6 +12198,12 @@ scratch
             log.contains("ipc_materialization_missing_response") && log.contains("source=file_ipc"),
             "missing response materialization should be logged for operator repair:\n{log}"
         );
+        assert!(
+            log.contains("ipc_proof_insufficient")
+                && log.contains("invariant=missing_response_probe")
+                && log.contains("recovery=direct_write_fallback"),
+            "missing response materialization should name its invariant and recovery:\n{log}"
+        );
     }
 
     #[test]
@@ -12140,6 +12272,12 @@ scratch
             log.contains("file_ipc_live_exchange_unacknowledged")
                 && log.contains("patch_id=patch-live-edit"),
             "unacknowledged live-edit IPC should be logged:\n{log}"
+        );
+        assert!(
+            log.contains("ipc_proof_insufficient")
+                && log.contains("invariant=live_exchange_without_ack_content")
+                && log.contains("recovery=direct_write_fallback"),
+            "unacknowledged live-edit IPC should name its invariant and recovery:\n{log}"
         );
     }
 
@@ -12343,6 +12481,12 @@ scratch
                 && log.contains("reason=live_prompt_drift_after_preflight")
                 && log.contains("ipc_snapshot_adoption_blocked"),
             "unsafe snapshot adoption should be logged:\n{log}"
+        );
+        assert!(
+            log.contains("ipc_proof_insufficient")
+                && log.contains("invariant=live_prompt_drift_after_preflight")
+                && log.contains("recovery=content_ours_snapshot_next_cycle"),
+            "live prompt drift should name its failed invariant and recovery:\n{log}"
         );
     }
 
@@ -17301,6 +17445,12 @@ mod submodule_patch_routing_tests {
                 && log.contains("duplicate_prompt_count=1")
                 && log.contains("ipc_dedupe_repaired_working_tree"),
             "duplicate sidecar rejection and visible repair should be logged:\n{log}"
+        );
+        assert!(
+            log.contains("ipc_proof_insufficient")
+                && log.contains("invariant=prompt_duplication_in_ack_content")
+                && log.contains("recovery=content_ours_snapshot_and_visible_repair"),
+            "duplicate prompt ACK should name its failed invariant and recovery:\n{log}"
         );
     }
 

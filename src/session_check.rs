@@ -77,6 +77,7 @@ use crate::component::{is_backlog_component, is_tracked_work_component};
 pub const PREFLIGHT_START_EVENT: &str = "preflight_diff_start";
 pub const IPC_WRITE_CONSUMED_EVENT: &str = "ipc_write_consumed";
 pub const SNAPSHOT_SAVED_FILE_IPC_EVENT: &str = "snapshot_saved_file_ipc";
+pub const IPC_PROOF_INSUFFICIENT_EVENT: &str = "ipc_proof_insufficient";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionCheckStatus {
@@ -715,7 +716,9 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
             if let Some(message) = open_cycle_manual_patchback_message(file, &state)? {
                 return Ok(SessionCheckStatus::Interrupted(message));
             }
-            return Ok(SessionCheckStatus::Interrupted(open_cycle_message(&state)));
+            return Ok(SessionCheckStatus::Interrupted(open_cycle_message(
+                file, &state,
+            )?));
         }
         if let Some(reason) = crate::git::repair_committed_historical_snapshot_drift(file)? {
             if let Some(prompt_marker) = detect_unstarted_prompt_bearing_diff(file)? {
@@ -1546,19 +1549,23 @@ fn mask_components_by_name(doc: &str, names: &[&str]) -> Option<String> {
     saw_target.then_some(masked)
 }
 
-fn open_cycle_message(state: &crate::cycle_state::CycleState) -> String {
+fn open_cycle_message(file: &Path, state: &crate::cycle_state::CycleState) -> Result<String> {
+    let ipc_hint = latest_ipc_proof_diagnostic_hint(file)?
+        .map(|hint| format!(" {hint}"))
+        .unwrap_or_default();
     if state.last_event.starts_with("direct_invocation_timeout")
         || state
             .last_event
             .starts_with("recursive_direct_invocation_blocked")
     {
-        return format!(
-            "[session-check] INTERRUPTED: cycle `{}` is still `{}` ({}) — direct invocation did not reach response capture. Retry from outside the managed pane, restart the owner with `agent-doc start {}`, or abandon the stale cycle only after confirming no response exists.",
+        return Ok(format!(
+            "[session-check] INTERRUPTED: cycle `{}` is still `{}` ({}) — direct invocation did not reach response capture. Retry from outside the managed pane, restart the owner with `agent-doc start {}`, or abandon the stale cycle only after confirming no response exists.{}",
             state.cycle_id,
             phase_name(state.phase),
             state.last_event,
-            state.file
-        );
+            state.file,
+            ipc_hint
+        ));
     }
     let detail = match state.phase {
         crate::cycle_state::CyclePhase::PreflightStarted => {
@@ -1573,13 +1580,14 @@ fn open_cycle_message(state: &crate::cycle_state::CycleState) -> String {
         crate::cycle_state::CyclePhase::Committed => "no terminal commit followed",
         crate::cycle_state::CyclePhase::Abandoned => "cycle was abandoned",
     };
-    format!(
-        "[session-check] INTERRUPTED: cycle `{}` is still `{}` ({}) — {}",
+    Ok(format!(
+        "[session-check] INTERRUPTED: cycle `{}` is still `{}` ({}) — {}.{}",
         state.cycle_id,
         phase_name(state.phase),
         state.last_event,
-        detail
-    )
+        detail,
+        ipc_hint
+    ))
 }
 
 fn open_cycle_manual_patchback_message(
@@ -1633,6 +1641,38 @@ pub fn last_ops_event(file: &Path) -> Result<Option<String>> {
         .or_else(|| content.lines().rfind(|l| !l.trim().is_empty()))
         .map(|l| strip_timestamp_prefix(l).to_string());
     Ok(last)
+}
+
+pub(crate) fn latest_ipc_proof_diagnostic(file: &Path) -> Result<Option<String>> {
+    let canonical = match file.canonicalize() {
+        Ok(p) => p,
+        Err(_) => return Ok(None),
+    };
+    let Some(project_root) = crate::snapshot::find_project_root(&canonical) else {
+        return Ok(None);
+    };
+    let log_path = project_root.join(".agent-doc/logs/ops.log");
+    let Some(content) = crate::fs_util::read_optional_text(&log_path)? else {
+        return Ok(None);
+    };
+    let canonical_display = canonical.display().to_string();
+    let requested_display = file.display().to_string();
+    Ok(content
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .rev()
+        .map(strip_timestamp_prefix)
+        .find(|event| {
+            event.starts_with(IPC_PROOF_INSUFFICIENT_EVENT)
+                && (event.contains(&format!("file={canonical_display}"))
+                    || event.contains(&format!("file={requested_display}")))
+        })
+        .map(str::to_string))
+}
+
+pub(crate) fn latest_ipc_proof_diagnostic_hint(file: &Path) -> Result<Option<String>> {
+    Ok(latest_ipc_proof_diagnostic(file)?
+        .map(|event| format!("latest IPC proof diagnostic: {event}")))
 }
 
 /// Strip a leading `[NNN] ` timestamp prefix from a log line.
@@ -2658,6 +2698,27 @@ Body\n\
     }
 
     #[test]
+    fn latest_ipc_proof_diagnostic_prefers_matching_file_entry() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = make_project(tmp.path());
+        let other = tmp.path().join("other.md");
+        fs::write(&other, "body").unwrap();
+        fs::write(
+            tmp.path().join(".agent-doc/logs/ops.log"),
+            format!(
+                "[100] ipc_proof_insufficient file={} invariant=no_ack recovery=direct_write_fallback\n[101] ipc_proof_insufficient file={} invariant=missing_response_probe recovery=direct_write_fallback\n",
+                other.display(),
+                doc.display()
+            ),
+        )
+        .unwrap();
+
+        let diagnostic = latest_ipc_proof_diagnostic(&doc).unwrap().unwrap();
+        assert!(diagnostic.contains("invariant=missing_response_probe"));
+        assert!(diagnostic.contains("recovery=direct_write_fallback"));
+    }
+
+    #[test]
     fn detect_write_completed_commit_missing_returns_last_write_event() {
         let tmp = tempfile::TempDir::new().unwrap();
         let doc = make_project(tmp.path());
@@ -2682,6 +2743,29 @@ Body\n\
         match inspect(&doc).unwrap() {
             SessionCheckStatus::Interrupted(message) => {
                 assert!(message.contains("cycle started but no write/commit followed"));
+            }
+            other => panic!("expected interrupted state, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn session_check_open_cycle_surfaces_ipc_proof_diagnostic() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = make_project(tmp.path());
+        crate::cycle_state::start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        crate::ops_log::log_op(
+            &doc,
+            &format!(
+                "ipc_proof_insufficient file={} source=file_ipc patch_id=p1 invariant=no_ack recovery=direct_write_fallback",
+                doc.display()
+            ),
+        );
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(message.contains("latest IPC proof diagnostic"));
+                assert!(message.contains("invariant=no_ack"));
+                assert!(message.contains("recovery=direct_write_fallback"));
             }
             other => panic!("expected interrupted state, got {other:?}"),
         }

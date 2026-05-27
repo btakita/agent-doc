@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -77,7 +77,7 @@ Both tools overlap on core code RAG (tree-sitter indexing, symbol search, call g
 **What tsift should keep owning** — envelopes, digests, session-review, agent-doc graph projection, conflict-matrix, Convex sync. These have no tokensave equivalent and are tsift's core value proposition.
 
 **Concrete first step**: implement a `tokensave` backend adapter in `substrate.rs` behind the existing `backend-eval` feature flag, then run it through `perf_gate.rs` to benchmark against the SQLite backend.
-<!-- agent:boundary:0d95ecee -->
+<!-- agent:boundary:58c81034 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -89,9 +89,9 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~[#local-e2e-verify]~
-- [#npm-auth-setup]
-- [#npm-publish-verify]
-- [#full-e2e-verify]
+- ~[#npm-auth-setup]~
+- ~[#npm-publish-verify]~
+- ~[#full-e2e-verify]~
 <!-- /agent:queue -->
 
 ## Backlog

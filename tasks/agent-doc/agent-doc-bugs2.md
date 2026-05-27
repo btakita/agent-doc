@@ -271,7 +271,32 @@ Top backlog item id: qipc. It captures the next implementation track: queue-firs
 For stale File Cache Conflict dialogs, agent-doc should not choose accept or reject after a timeout. If the dialog remains unanswered for hours, the state is unresolved editor ownership, not authorization for agent-doc to pick content. The safe behavior is to ignore or remove agent-doc-owned stale patch/fallback artifacts, refuse to treat whole-buffer editor ACK content as authoritative, and wait for the next preflight/session-check after the user acts.
 
 If the user later reloads or keeps disk state, the document should match HEAD or the latest committed snapshot. If the user later accepts the stale cached editor buffer, the next managed cycle should classify that as delayed accepted-conflict replay, repair it if it dedupes to committed content, or fail closed when ownership cannot be proven. Agent-doc may warn, disable stale patch application, or clean up its own queued patch files after timeout; it should not dismiss the IDE conflict dialog by choosing file contents unless the IDE exposes an explicit cancel-agent-patch operation that preserves the user's content choice.
-<!-- agent:boundary:ec57c291 -->
+❯ Save the generated documents into the docs directory of agent-doc.
+❯ Ensure the docs will be update as the implementation, workflows, and architecture changes.
+### Re: generated docs location — gpt-5
+
+Saved the generated lifecycle and replay documentation under `src/agent-doc/docs`.
+
+Changed paths:
+- `src/agent-doc/docs/reference/active-turn-lifecycle-and-replay.md`
+- `src/agent-doc/docs/README.md`
+- `src/agent-doc/docs/SUMMARY.md`
+- `src/agent-doc/docs/development/conventions.md`
+
+The new reference page captures the active turn lifecycle, dispatch readiness block, prompt ownership after baseline, JetBrains stale cache replay, late fallback patch replay, and the elimination boundary for first-party full-document IPC corruption paths. The conventions doc now records that generated diagrams and workflow/architecture references belong in `docs/` and must be updated with behavior changes; README and SUMMARY link the new page.
+
+Verification:
+- `git -C src/agent-doc diff --check`
+- `make check`
+- GitHub CI run `26518764688` is green; its `Run make tmux-ci` step succeeded.
+
+Commits:
+- `src/agent-doc`: `04fd66de docs: add active turn replay diagrams`
+- parent repo: `9b9e79806 agent-doc: update lifecycle docs`
+
+Escalation: none. No push was requested in the active prompt.
+Confidence: high.
+<!-- agent:boundary:45f9c062 -->
 <!-- /agent:exchange -->
 ###
 <!--

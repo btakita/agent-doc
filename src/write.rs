@@ -2912,6 +2912,105 @@ fn ipc_response_materialized_or_fallback(
     false
 }
 
+fn strip_partial_response_materialization_from_exchange(
+    content: &str,
+    response: &str,
+) -> Option<String> {
+    if response_materialized_in_content(response, content) {
+        return None;
+    }
+    let headings = response
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("### Re:"))
+        .collect::<Vec<_>>();
+    if headings.is_empty() {
+        return None;
+    }
+
+    let components = component::parse(content).ok()?;
+    let exchange = components
+        .iter()
+        .find(|component| component.name == "exchange")?;
+    let exchange_body = &content[exchange.open_end..exchange.close_start];
+    let mut repaired_exchange = String::with_capacity(exchange_body.len());
+    let mut removed = false;
+    let mut skipping_partial = false;
+
+    for segment in exchange_body.split_inclusive('\n') {
+        let line = segment.trim_end_matches('\n');
+        let trimmed = line.trim();
+        let is_target_response_heading = headings.contains(&trimmed);
+        let is_structural_boundary = trimmed.starts_with("<!-- agent:boundary:")
+            || trimmed.starts_with("<!-- /agent:")
+            || trimmed.starts_with("<!-- agent:");
+        let is_other_response_heading =
+            trimmed.starts_with("### Re:") && !is_target_response_heading;
+        let is_user_prompt_line = trimmed.starts_with('❯');
+
+        if skipping_partial
+            && (is_structural_boundary || is_other_response_heading || is_user_prompt_line)
+        {
+            skipping_partial = false;
+        }
+
+        if is_target_response_heading {
+            skipping_partial = true;
+            removed = true;
+            continue;
+        }
+
+        if skipping_partial {
+            removed = true;
+            continue;
+        }
+
+        repaired_exchange.push_str(segment);
+    }
+
+    if !removed {
+        return None;
+    }
+
+    let mut repaired = String::with_capacity(content.len());
+    repaired.push_str(&content[..exchange.open_end]);
+    repaired.push_str(&repaired_exchange);
+    repaired.push_str(&content[exchange.close_start..]);
+    Some(repaired)
+}
+
+fn repair_partial_response_materialization_before_fallback(
+    file: &Path,
+    source: &str,
+    response: &str,
+) -> Result<()> {
+    let Ok(current) = std::fs::read_to_string(file) else {
+        return Ok(());
+    };
+    let Some(repaired) = strip_partial_response_materialization_from_exchange(&current, response)
+    else {
+        return Ok(());
+    };
+    eprintln!(
+        "[write] IPC {} partial response materialization removed before fallback for {}",
+        source,
+        file.display()
+    );
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "ipc_partial_materialization_removed file={} source={} response_sha256={} before_len={} after_len={}",
+            file.display(),
+            source,
+            crate::ops_log::content_hash(response),
+            current.len(),
+            repaired.len()
+        ),
+    );
+    atomic_write(file, &repaired)?;
+    Ok(())
+}
+
 fn response_materialization_probe_from_ipc_payload(payload: &serde_json::Value) -> String {
     let patches = payload
         .get("patches")
@@ -6904,6 +7003,11 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
                 &expected_response,
                 &content,
             ) {
+                repair_partial_response_materialization_before_fallback(
+                    file,
+                    "explicit_file_ipc",
+                    &expected_response,
+                )?;
                 consumed_without_materialization = true;
                 break;
             }
@@ -8854,6 +8958,11 @@ pub fn try_ipc(
                         &expected_response,
                         &repair_decision.snapshot_content,
                     ) {
+                        repair_partial_response_materialization_before_fallback(
+                            file,
+                            "socket_ack_content",
+                            &expected_response,
+                        )?;
                         return Ok(IpcResult {
                             success: false,
                             patch_id,
@@ -9760,6 +9869,11 @@ fn write_ipc_and_poll(
                 &expected_response,
                 &current_on_disk,
             ) {
+                repair_partial_response_materialization_before_fallback(
+                    doc_file,
+                    "file_ipc",
+                    &expected_response,
+                )?;
                 return Ok(false);
             }
             if file_ipc_consumed_without_live_exchange_ack(

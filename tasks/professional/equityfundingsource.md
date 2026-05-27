@@ -172,7 +172,44 @@ Proof:
 - Verification: `make check` passed with 183 tests plus app and Worker builds; Cloudflare deploy succeeded; live smoke checks passed. GitHub reported no workflow named `CI`, so there was no CI run to inspect.
 - Escalation: none.
 - Confidence: high.
-<!-- agent:boundary:1a003f2b -->
+❯ The prequalification form is not laid out correctly. https://equityfundingsource.brian-takita.workers.dev/apply#apply-form
+### Re: prequalification form layout — gpt-5
+
+Fixed and deployed the public `/apply` prequalification form layout.
+
+What changed:
+- Replaced the fragile Tailwind-dependent `lg:col-span-8` / `lg:col-span-4` apply-page layout with explicit local `efs-apply-*` CSS classes.
+- Added deterministic apply-page hero spacing, desktop form/sidebar columns, mobile stacking, and two-column form field groups at tablet/desktop widths.
+- Removed the missing `py-18` / `md:py-24` dependency from the apply hero.
+
+Commits:
+- EFS subproject: `2e233ee fix: stabilize apply form layout`
+- Root submodule pointer: `94b1264b2 chore: update EFS apply layout`
+
+Deployment:
+- Deployed Worker: `https://equityfundingsource.brian-takita.workers.dev`
+- Current Worker version: `e65f6663-d653-4db0-b20d-928d386e544a`
+
+Verification:
+- `bun run build` passed.
+- `bun run build:worker` passed.
+- Local headless Chromium layout check against `http://127.0.0.1:8787/apply#apply-form` passed: desktop rendered a `746.656px / 373.344px` apply shell and `330.328px / 330.328px` first form grid; mobile rendered a single `342px` shell and `292px` stacked form grid.
+- `make check` passed: 183 pass / 0 fail plus app and Worker builds. The digester flagged `error: limiter down`, but that line is the expected fall-open rate-limiter test fixture and the suite summary is clean.
+- `gh run list --workflow CI --limit 1` reported no workflow named `CI`, and `gh workflow list` returned no workflows, so there was no CI/tmux leg to inspect.
+- Live smoke confirmed `/apply` now serves `/index.server-HMLQPP4O_HRHOFTKE.css`, contains `efs-apply-layout` and `efs-apply-form`, and the live CSS contains the explicit `efs-apply-layout` and `efs-apply-form-grid` rules.
+- Live headless Chromium check against `https://equityfundingsource.brian-takita.workers.dev/apply#apply-form` passed with the same intended shape: desktop `746.656px / 373.344px` shell and `330.328px / 330.328px` form grid; mobile single-column shell and form grid.
+
+Changed paths:
+- `src/equityfundingsource-dev/app/equityfundingsource/app/index.css.ts`
+- `src/equityfundingsource-dev/lib/ui--server--efs/apply/index.ts`
+- `src/equityfundingsource-dev` submodule pointer
+- This session document
+
+Notes:
+- Existing unrelated dirty EFS files were left unchanged: `AGENTS.md`, `wrangler.toml`, and `tmp/`.
+- Escalation: none.
+- Confidence: high.
+<!-- agent:boundary:bcaea3ab -->
 <!-- /agent:exchange -->
 ###
 <!--

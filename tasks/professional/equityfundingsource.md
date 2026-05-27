@@ -35,10 +35,42 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 Compacted content:
 - Archived 1 response topic(s): Borrower login, footer email, and /apply 404
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-The mobile menu is bleeding into the desktop responsive view.
+
+❯ The mobile menu is bleeding into the desktop responsive view.
 ![img_7.png](img_7.png)
 #spec-test-commit-push
-<!-- agent:boundary:f97890bd -->
+### Re: Mobile menu desktop bleed — gpt-5
+
+Fixed and pushed the EFS public header breakpoint issue.
+
+Changed paths in `src/equityfundingsource-dev`:
+- `lib/ui--server--efs/header/index.ts`
+- `lib/ui--server--efs/styles/index.ts`
+- `app/equityfundingsource/app/index.css.ts`
+- `docs/UI_GUIDE.md`
+- `prds/equity-funding-source-lending-portal-prd.md`
+- `tests/prd.test.ts`
+- `tests/public-header.test.ts`
+
+What changed:
+- Replaced the header's Tailwind-only `xl:*` responsive classes with explicit EFS desktop/mobile classes.
+- Added matching 1280px rules to both inline critical CSS and the async stylesheet source, so desktop first paint cannot show the hamburger beside desktop actions.
+- Made desktop actions and nav links appear together at 1280px+, while sub-1280px uses the logo plus mobile menu only.
+- Added resize handling that closes the mobile overlay when the viewport crosses into desktop width.
+- Added PRD/UI guide coverage and tests for the public-header responsive contract.
+
+Verification:
+- `bun test tests/public-header.test.ts tests/prd.test.ts` passed: 12 pass, 0 fail.
+- `make check` passed through `tsift --envelope __digest-runner --kind test --path . --shell-command 'make check'`: suite summary showed 191 pass, 0 fail, then build and worker build completed. The digester flagged an expected `limiter down` fixture string, but the command exited 0 and the Bun test summary was green.
+- `git diff --check` and `git diff --cached --check` passed.
+- Browser smoke checked local `bun run dev` at 1440px and 390px with Chromium screenshots: desktop showed nav/actions with no hamburger; mobile showed hamburger with desktop actions hidden.
+- GitHub Actions: `gh run list --workflow CI --limit 1` found no workflow named `CI`; `gh workflow list` and `gh run list --limit 5` returned empty for `btakita/equityfundingsource-dev`, so there was no remote CI/tmux-test run available to inspect.
+
+Commit/push:
+- `4091081 Fix public header desktop breakpoint` pushed to `origin/main` in `btakita/equityfundingsource-dev`.
+
+Unrelated existing local changes in the EFS submodule (`AGENTS.md` and `tmp/`) were left unstaged.
+<!-- agent:boundary:e795ba32 -->
 <!-- /agent:exchange -->
 ###
 <!--

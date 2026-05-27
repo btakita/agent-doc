@@ -84,7 +84,6 @@ Verification:
 - GitHub Actions CI run `26537671598` passed, including both `make check` and `make tmux-ci`. The only annotation was the existing Node.js 20 deprecation notice for `actions/checkout@v4`.
 
 Escalation: none. Confidence: high; this cycle reproduced the remaining queue-consumption failure live and the installed binary is now using the fix.
-
 ### Re: #odsp2 — gpt-5
 
 Implemented `#odsp2`: OpenCode dispatch-only routes now require dispatch-start proof from a pane state transition, while Codex keeps the hook-backed proof path and Claude-style accepted-only routes remain clearly scoped as accepted-only.
@@ -128,8 +127,7 @@ Commits prepared before session-document closeout:
 - `src/agent-doc`: `259a70b7 feat: prove opencode dispatch start`
 - root: `b75047e38 agent-doc: update opencode dispatch proof`
 
-Push is deferred until this mandatory `agent-doc finalize` commit lands, per the session-document closeout rule. Escalation: none. Confidence: high.
-
+❯ Push is deferred until this mandatory `agent-doc finalize` commit lands, per the session-document closeout rule. Escalation: none. Confidence: high.
 ### Re: #finovrwr — gpt-5
 
 Implemented `#finovrwr`: strict template/CRDT closeouts now detect when an explicit preflight baseline is missing exchange content already committed in `HEAD`, and rebase append-mode `agent:exchange` response patch application onto `HEAD` before producing `content_ours`, IPC baselines, IPC snapshots, timeout fallback snapshots, or commit-staged snapshots. This prevents a later `finalize` from overwriting or subtracting a prior `### Re:` block.
@@ -199,7 +197,7 @@ Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc finalize`.
 Verification: no new code changes in this repair cycle.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:46be1c6a -->
+<!-- agent:boundary:67a36768 -->
 <!-- /agent:exchange -->
 ###
 <!--

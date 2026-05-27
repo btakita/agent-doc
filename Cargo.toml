@@ -70,7 +70,6 @@ proptest = "1"
 tempfile = "3"
 
 [patch.crates-io]
-module-harness = { path = "../module-harness" }
 tmux-router = { path = "../tmux-router" }
 
 [profile.release]

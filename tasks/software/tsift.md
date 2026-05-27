@@ -36,7 +36,33 @@ Compacted content:
 - Archived 7 response topic(s): tokensave vs tsift; OpenCode integration next steps; OpenCode integration next steps; 4 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
 do [#gopencode-install]. #spec-test-build-install-commit-push
-<!-- agent:boundary:ca565911 -->
+
+### Re: gopencode-install — gpt-5
+
+Implemented and pushed the OpenCode npm package path for tsift, but the registry publish itself is gated on npm permissions.
+
+What changed:
+- Added `packages/opencode-tsift`, an npm/OpenCode plugin package that carries the same marker-owned `/tsift-*` command templates as `tsift init --opencode`.
+- The package exposes an OpenCode server plugin entrypoint (`./server`) so `opencode plugin opencode-tsift` can load it after publication, writes the six command files into `.opencode/commands`, and refuses unmanaged same-name command conflicts.
+- Added a direct `opencode-tsift` CLI installer, Node tests, Rust parity coverage asserting the package command files match `tsift init --opencode`, and release workflow support for npm publish dry-run plus gated tagged npm publication.
+- Installed the generated tsift OpenCode shortcuts into the agent-loop root and advanced the `src/tsift` submodule pointer.
+
+Verification:
+- `make check` passed in `src/tsift` after the final tree, including clippy, all Rust tests, Node installer tests, and `npm publish --access public --dry-run`.
+- `cargo build --release` passed.
+- `cargo install --path . --force` replaced the local `~/.cargo/bin/tsift` with `tsift 0.1.62`.
+- Fresh OpenCode smoke passed with a temp project: `opencode plugin /home/brian/work/btakita/agent-loop/src/tsift/packages/opencode-tsift` detected the server target, then a fresh TUI startup loaded the plugin and created all six `.opencode/commands/tsift-*.md` files.
+- `npm publish --access public --dry-run` passed; actual `npm publish --access public` failed at the registry permission/auth gate (`E404 ... not found or you do not have permission`).
+- GitHub Actions `btakita/tsift` CI for `ac1ca49` passed. The root `agent-loop` Agent Doc workflow for `1fed363e9` failed with empty-step jobs and no logs, so I classified it as an external CI-start/runner allocation failure rather than a repo regression.
+
+Commits pushed:
+- `btakita/tsift` `ac1ca49` — `feat: add opencode npm package`
+- `btakita/agent-loop` `1fed363e9` — `chore: install tsift opencode shortcuts`
+
+`#gopencode-install` is gated, not done, because the only remaining work is external registry authorization: publish `opencode-tsift` with an npm account/token that can create that package name, or configure `NPM_TOKEN` plus `TSIFT_ENABLE_NPM_PUBLISH=true` for the tagged release path.
+
+OpenCode references used: custom commands are markdown files under `.opencode/commands` and run by slash command name in the TUI; npm plugins are listed in `plugin` config and installed by Bun at startup. Sources: https://opencode.ai/docs/commands/ and https://opencode.ai/docs/plugins/.
+<!-- agent:boundary:08e2c0c2 -->
 <!-- /agent:exchange -->
 ###
 <!--

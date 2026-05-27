@@ -30,77 +30,15 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260527-224056.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260527-230846.md`*
 
 Compacted content:
-- Archived 2 response topic(s): queued Run Agent Doc prompt update; queued Run Agent Doc prompt update follow-up
+- Archived 3 response topic(s): auto-done signal work; closeout repair; force-disk closeout repair
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-### Re: auto-done signal work — gpt-5
-
-Implemented the two requested agent-doc fixes and landed them in `src/agent-doc`.
-
-Changed paths:
-- `SPEC.md`
-- `src/frontmatter.rs`
-- `src/project_config.rs`
-- `src/session_check.rs`
-- `src/plan.rs`
-- `src/write.rs`
-- `src/tsift_graph.rs`
-- `src/jobs.rs`
-
-What changed:
-- Added `auto_done: true` frontmatter support and `[guards] auto_done = true` project config support.
-- Added inline done signal detection so prompts like `#id done`, `done #id`, `complete #id`, `resolved #id`, and `mark #id done` emit `ResolveExisting` / `--done <id>` plan mutations.
-- Added opt-in bare `done` handling when `auto_done` is enabled and exactly one open review item is the contextual target.
-- Added response-completion auto resolution in finalize/write closeout. When `auto_done` is enabled and the response clearly completes an open tracked item, the binary now applies the missing done mutation, records cycle-state pending-done ids, and gates backlog items through review before marking them done.
-- Updated pending-done repair guidance to use `agent-doc write <file> --done <id> --pending-only --commit`.
-- Fixed hyphen/underscore hash id extraction for do-target parsing.
-- Fixed a full-suite test race by sharing the process-global test environment lock in `jobs.rs`.
-
-Verification:
-- `cargo test` in `src/agent-doc`: passed.
-- `make check` from repo root: passed.
-- `cargo build` in `src/agent-doc`: passed.
-- `cargo install --path .` in `src/agent-doc`: passed; `agent-doc --version` reports `agent-doc 0.34.0`.
-- `cargo fmt --check`: passed.
-- `git diff --check`: passed.
-- `gh run list --workflow CI --limit 1`: no workflow named `CI` exists in this repo.
-- Latest `Agent Doc` post-push run `26543921559`: failed in 3s with both `check` and `tmux-ci` jobs reporting empty step lists and no logs. I classified this as an external CI-start failure, not a local code or tmux regression.
-
-Commits pushed:
-- `src/agent-doc`: `e69ddaed` (`feat: auto-resolve done signals`) pushed to `origin/20260422/codex-agent-backend`.
-- superproject: `dd4fba13c` (`chore: update agent-doc submodule`) pushed to `origin/main`.
-
-Queue note: `agent-doc orchestrate --from-queue --plan` could not use the local queue because `agent:queue` contained raw prose (`JB \`Run Agent Doc\` on this file did not dispatch.`) before the preset entry. I handled the two explicit preset targets manually in this cycle and cleared the malformed queue content below.
-
-Confidence: high for the local implementation and tests. Escalation: none; no approvals were needed.
-### Re: closeout repair — gpt-5
-
-Reopened the binary-owned write/commit path after the IPC closeout drift. The prior implementation response and pending mutations were already committed; this repair entry exists only to satisfy the post-commit session guard for the same turn.
-
-### Re: force-disk closeout repair — gpt-5
-
-The prior repair write still went through IDE IPC and hit the same live-buffer drift guard. This entry uses the disk path so the session document can reach a binary-owned closeout boundary for this turn.
-<!-- agent:boundary:40890643 -->
+<!-- agent:boundary:0e7169e7 -->
 <!-- /agent:exchange -->
 ###
 <!--
-JB `Run Agent Doc` on tsift.md error
-```
-[sync] recovered live pane %20 for session 7910a62f via supervisor pid 324491
-[sync] recovered live pane %6 for session b26b9957 via supervisor pid 270387
-[sync] recovered live pane %15 for session 6cb2a9bf via supervisor pid 1411216
-[sync] recovered live pane %21 for session tsift-v0 via supervisor pid 1465656
-[sync] recovered live pane %3 for session 4602f467 via supervisor pid 249731
-[sync] recovered live pane %4 for session 62fe1f41 via supervisor pid 249819
-[sync] recovered live pane %16 for session be20dd6e via supervisor pid 2722653
-resync: stash pane %16 is unregistered but still owns /home/brian/work/btakita/agent-loop/tasks/software/agent-loop.md — skipping kill
-[route] debounce OK — file idle for 3.1s and typing indicator idle
-[route] target tmux session: 0
-Error: dispatch-only opencode reopen refused to inject into pane %21 for tasks/software/tsift.md because the pane still shows opencode active turn; restore an idle prompt and retry
-```
----
 The completed queue item was not removed from the queue. #mermaid
 #spec-test-build-install-commit-push
 ---

@@ -29,18 +29,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260527-074315.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260527-074548.md`*
 
 Compacted content:
-- Archived 4 response topic(s): #snrun; closeout repair; equityfundingsource IPC corruption; 1 more
+- Archived 1 response topic(s): closeout repair
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-### Re: closeout repair — gpt-5
-
-Closeout repair recorded the backlog-only `#next-steps` update. The priority-ordered backlog is present, and the top backlog item remains `#ipcmodel`.
-
-The `#ipcmodel`, `#ipcreplay`, `#ipcdeny`, and `#ipcfail` entries were already captured as open backlog items in the prior commit. They are not executed tasks for this turn. I removed the accidental inactive-queue residue that made those ids look like executable queue directives. No repo code changed in this repair.
-
-<!-- agent:boundary:00bb69bd -->
+<!-- agent:boundary:40fc8248 -->
 <!-- /agent:exchange -->
 ###
 <!--

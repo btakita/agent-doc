@@ -145,7 +145,8 @@ Based on deep analysis of tokensave's architecture, here are concrete next steps
 6. **Phase 3** — Extraction pipeline (5-7 days, if needed for language expansion)
 
 **Total Phase 1-2: ~1-2 weeks for core graph algorithms. Phase 3 adds another week.**
-<!-- agent:boundary:74ab411a -->
+Should we architect separate rust crates in tsift?
+<!-- agent:boundary:6b4de7e7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -160,7 +161,7 @@ preset #spec-test-build-install-commit-push
 - ~[#npm-auth-setup]~
 - ~[#npm-publish-verify]~
 - ~[#full-e2e-verify]~
-- What are #next-steps to reverse-engineer tokensave to directly implement in tsift?
+- Should we architect separate rust crates in tsift?
 <!-- /agent:queue -->
 
 ## Backlog

@@ -190,6 +190,11 @@ fn all_commands() -> Vec<CommandInfo> {
         "Summarize high-signal ops.log events by document/session",
     ));
     cmds.push(cmd(
+        "/agent-doc ops diagnose",
+        "[--cycle-id ID] [--patch-id ID] [--session-id ID] [--file FILE] [--limit N] [--json]",
+        "Gather cycle/patch diagnostics from logs, captures, hooks, and actor state",
+    ));
+    cmds.push(cmd(
         "/agent-doc skill install",
         "",
         "Install Claude Code skill definition",

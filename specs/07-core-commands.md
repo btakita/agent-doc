@@ -124,6 +124,13 @@ Before preflight performs document-mutating recovery, commit, pending maintenanc
 - `--limit` scans only the trailing N log lines, defaulting to a bounded recent tail; `--limit 0` scans the full log.
 - Human output is optimized for quick operator review. `--json` emits the same buckets for editor plugins or dashboards.
 
+`agent-doc ops diagnose [--project-root DIR] [--file FILE] [--cycle-id ID] [--patch-id ID] [--session-id ID] [--limit N] [--json]`
+
+- Requires at least one correlation key from `--cycle-id`, `--patch-id`, `--session-id`, or `--file`.
+- Gathers a source-grouped diagnosis report from `.agent-doc/logs/ops.log`, cycle JSONL, harness session logs, editor/plugin debug logs, capture JSON, Codex hook records, hook payloads, patch files, actor/session state, and agent-doc state sidecars.
+- Text log sources match by path or line content and obey the same `--limit` tail contract as `ops summary`; `--limit 0` scans full text files.
+- JSON sources are redacted before output, large payload fields are summarized instead of dumped, and `--json` emits the structured source/match report for editor plugins or reproducible bug attachments.
+
 ## prompt
 
 `agent-doc prompt <FILE>`

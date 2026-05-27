@@ -443,6 +443,92 @@ fn test_cli_ops_summary_groups_ops_log_events() {
 }
 
 #[test]
+fn test_cli_ops_diagnose_gathers_cycle_artifacts() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+    fs::create_dir_all(root.join(".agent-doc/captures/doc")).unwrap();
+    fs::create_dir_all(root.join(".agent-doc/codex-hooks/sessions")).unwrap();
+    fs::create_dir_all(root.join(".agent-doc/hooks/post_write")).unwrap();
+    fs::create_dir_all(root.join(".agent-doc/patches")).unwrap();
+    fs::create_dir_all(root.join(".agent-doc/state/startup-miss")).unwrap();
+
+    fs::write(
+        root.join(".agent-doc/logs/ops.log"),
+        "[100] flow_event file=tasks/a.md flow=closeout stage=commit outcome=blocked cycle_id=cycle-a patch_id=patch-a\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join(".agent-doc/logs/cycles.jsonl"),
+        "{\"op\":\"commit\",\"file\":\"tasks/a.md\",\"cycle_id\":\"cycle-a\"}\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join(".agent-doc/logs/session-1.log"),
+        "[101] codex_start cycle_id=cycle-a patch_id=patch-a\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join(".agent-doc/captures/doc/cycle-a.json"),
+        r#"{"cycle_id":"cycle-a","capture_id":"cycle-a","state":"captured","response_body":"secret body"}"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join(".agent-doc/codex-hooks/sessions/thread.json"),
+        r#"{"thread_id":"thread-1","cycle_id":"cycle-a"}"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join(".agent-doc/hooks/post_write/patch-a.json"),
+        r#"{"patch_id":"patch-a","cycle_id":"cycle-a","payload":"large plugin payload"}"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join(".agent-doc/patches/patch-a.md"),
+        "patch_id=patch-a cycle_id=cycle-a\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join(".agent-doc/session-actors.json"),
+        r#"{"documents":[{"session_id":"session-1","cycle_id":"cycle-a"}]}"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join(".agent-doc/state/startup-miss/cycle-a.json"),
+        r#"{"cycle_baseline_id":"cycle-a","session_id":"session-1"}"#,
+    )
+    .unwrap();
+
+    let mut cmd = agent_doc_cmd();
+    cmd.args([
+        "ops",
+        "diagnose",
+        "--project-root",
+        root.to_str().unwrap(),
+        "--cycle-id",
+        "cycle-a",
+        "--patch-id",
+        "patch-a",
+        "--session-id",
+        "session-1",
+        "--limit",
+        "0",
+        "--json",
+    ]);
+    let output = cmd.assert().success().get_output().stdout.clone();
+    let stdout = String::from_utf8(output).unwrap();
+
+    assert!(stdout.contains("\"ops log\""), "{stdout}");
+    assert!(stdout.contains("\"captures\""), "{stdout}");
+    assert!(stdout.contains("\"codex hook sessions\""), "{stdout}");
+    assert!(stdout.contains("patch-a.md"), "{stdout}");
+    assert!(
+        stdout.contains("<13 bytes omitted from diagnosis summary>"),
+        "large JSON fields should be summarized instead of dumped:\n{stdout}"
+    );
+}
+
+#[test]
 fn test_cli_audit_docs_finds_claude_md() {
     let tmp = tempfile::TempDir::new().unwrap();
     let root = tmp.path();

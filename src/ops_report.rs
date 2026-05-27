@@ -1,6 +1,6 @@
 //! Operational log reports for `.agent-doc/logs/ops.log`.
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -40,6 +40,48 @@ pub struct OpsBugCluster {
     pub threads: Vec<String>,
     pub examples: Vec<String>,
     pub recommendation: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct CycleDiagnosisReport {
+    pub project_root: PathBuf,
+    pub query: CycleDiagnosisQuery,
+    pub sources: Vec<CycleDiagnosisSource>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct CycleDiagnosisQuery {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cycle_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub patch_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct CycleDiagnosisSource {
+    pub name: String,
+    pub path: PathBuf,
+    pub status: String,
+    pub scanned_files: usize,
+    pub scanned_lines: usize,
+    pub matched: usize,
+    pub matches: Vec<CycleDiagnosisMatch>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct CycleDiagnosisMatch {
+    pub path: PathBuf,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<usize>,
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub json: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -86,6 +128,140 @@ pub fn run_summary(project_root: Option<&Path>, limit: usize, json: bool) -> Res
         print_human_summary(&report);
     }
     Ok(())
+}
+
+pub fn run_diagnose(
+    project_root: Option<&Path>,
+    file: Option<&Path>,
+    cycle_id: Option<&str>,
+    patch_id: Option<&str>,
+    session_id: Option<&str>,
+    limit: usize,
+    json: bool,
+) -> Result<()> {
+    let report = diagnose_cycle(project_root, file, cycle_id, patch_id, session_id, limit)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        print_human_diagnosis(&report);
+    }
+    Ok(())
+}
+
+pub fn diagnose_cycle(
+    project_root: Option<&Path>,
+    file: Option<&Path>,
+    cycle_id: Option<&str>,
+    patch_id: Option<&str>,
+    session_id: Option<&str>,
+    limit: usize,
+) -> Result<CycleDiagnosisReport> {
+    let root = resolve_diagnosis_root(project_root, file)?;
+    let file_query = file.map(|file| normalize_file_query(file, &root));
+    let query = CycleDiagnosisQuery {
+        cycle_id: cycle_id.map(ToOwned::to_owned),
+        patch_id: patch_id.map(ToOwned::to_owned),
+        session_id: session_id.map(ToOwned::to_owned),
+        file: file_query.clone(),
+    };
+    let terms = diagnosis_terms(&query);
+    if terms.is_empty() {
+        bail!("provide at least one of --cycle-id, --patch-id, --session-id, or --file");
+    }
+
+    let agent_doc = root.join(".agent-doc");
+    let logs = agent_doc.join("logs");
+    let mut sources = Vec::new();
+
+    sources.push(scan_text_source(
+        "ops log",
+        logs.join("ops.log"),
+        &terms,
+        limit,
+    ));
+    sources.push(scan_text_source(
+        "cycle jsonl",
+        logs.join("cycles.jsonl"),
+        &terms,
+        limit,
+    ));
+
+    if let Some(session_id) = session_id {
+        sources.push(scan_text_source(
+            "harness session log",
+            logs.join(format!("{session_id}.log")),
+            &terms,
+            limit,
+        ));
+    } else {
+        sources.push(scan_text_tree_source(
+            "harness session logs",
+            &logs,
+            &terms,
+            limit,
+            |path| {
+                let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                    return false;
+                };
+                name.ends_with(".log") && name != "ops.log" && !name.starts_with("debug.log")
+            },
+        ));
+    }
+
+    sources.push(scan_text_tree_source(
+        "editor plugin/debug logs",
+        &logs,
+        &terms,
+        limit,
+        |path| {
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                return false;
+            };
+            name.starts_with("debug.log") || name.contains("plugin") || name.contains("jb")
+        },
+    ));
+    sources.push(scan_json_tree_source(
+        "captures",
+        &agent_doc.join("captures"),
+        &terms,
+    ));
+    sources.push(scan_json_tree_source(
+        "codex hook sessions",
+        &agent_doc.join("codex-hooks"),
+        &terms,
+    ));
+    sources.push(scan_json_tree_source(
+        "hook payloads",
+        &agent_doc.join("hooks"),
+        &terms,
+    ));
+    sources.push(scan_text_tree_source(
+        "patch files",
+        &agent_doc.join("patches"),
+        &terms,
+        limit,
+        |_| true,
+    ));
+    sources.push(scan_json_files_source(
+        "actor/session state",
+        &agent_doc,
+        &[
+            agent_doc.join("session-actors.json"),
+            agent_doc.join("sessions.json"),
+        ],
+        &terms,
+    ));
+    sources.push(scan_json_tree_source(
+        "agent-doc state",
+        &agent_doc.join("state"),
+        &terms,
+    ));
+
+    Ok(CycleDiagnosisReport {
+        project_root: root,
+        query,
+        sources,
+    })
 }
 
 pub fn summarize_ops_log(
@@ -155,6 +331,319 @@ pub fn summarize_ops_log(
         buckets,
         bug_clusters: build_bug_clusters(&events),
     }
+}
+
+fn print_human_diagnosis(report: &CycleDiagnosisReport) {
+    println!("cycle diagnosis: {}", report.project_root.display());
+    let mut query = Vec::new();
+    if let Some(cycle_id) = &report.query.cycle_id {
+        query.push(format!("cycle_id={cycle_id}"));
+    }
+    if let Some(patch_id) = &report.query.patch_id {
+        query.push(format!("patch_id={patch_id}"));
+    }
+    if let Some(session_id) = &report.query.session_id {
+        query.push(format!("session_id={session_id}"));
+    }
+    if let Some(file) = &report.query.file {
+        query.push(format!("file={file}"));
+    }
+    println!("query: {}", query.join(" "));
+
+    for source in &report.sources {
+        println!(
+            "\n{}: {} (status={}, files={}, lines={}, matches={})",
+            source.name,
+            source.path.display(),
+            source.status,
+            source.scanned_files,
+            source.scanned_lines,
+            source.matched
+        );
+        for matched in &source.matches {
+            let line = matched
+                .line
+                .map(|line| format!(":{line}"))
+                .unwrap_or_default();
+            println!("  - {}{} [{}]", matched.path.display(), line, matched.kind);
+            if let Some(text) = &matched.text {
+                println!("    {}", text);
+            }
+            if let Some(json) = &matched.json {
+                println!("    {}", json);
+            }
+        }
+    }
+}
+
+fn resolve_diagnosis_root(project_root: Option<&Path>, file: Option<&Path>) -> Result<PathBuf> {
+    if let Some(root) = project_root {
+        return Ok(root.to_path_buf());
+    }
+    if let Some(file) = file
+        && let Some(root) = crate::snapshot::find_project_root(file)
+    {
+        return Ok(root);
+    }
+    let cwd = std::env::current_dir()?;
+    Ok(crate::snapshot::find_project_root(&cwd).unwrap_or(cwd))
+}
+
+fn normalize_file_query(file: &Path, root: &Path) -> String {
+    let path = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    path.strip_prefix(root)
+        .unwrap_or(&path)
+        .to_string_lossy()
+        .to_string()
+}
+
+fn diagnosis_terms(query: &CycleDiagnosisQuery) -> Vec<String> {
+    let mut terms = Vec::new();
+    for value in [
+        query.cycle_id.as_deref(),
+        query.patch_id.as_deref(),
+        query.session_id.as_deref(),
+        query.file.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if !value.trim().is_empty() && !terms.iter().any(|term| term == value) {
+            terms.push(value.to_string());
+        }
+    }
+    terms
+}
+
+fn scan_text_source(
+    name: impl Into<String>,
+    path: PathBuf,
+    terms: &[String],
+    limit: usize,
+) -> CycleDiagnosisSource {
+    scan_text_files_source(name, path.clone(), vec![path], terms, limit)
+}
+
+fn scan_text_tree_source(
+    name: impl Into<String>,
+    root: &Path,
+    terms: &[String],
+    limit: usize,
+    include: impl Fn(&Path) -> bool,
+) -> CycleDiagnosisSource {
+    let files = collect_files(root, |path| include(path));
+    scan_text_files_source(name, root.to_path_buf(), files, terms, limit)
+}
+
+fn scan_text_files_source(
+    name: impl Into<String>,
+    source_path: PathBuf,
+    files: Vec<PathBuf>,
+    terms: &[String],
+    limit: usize,
+) -> CycleDiagnosisSource {
+    let mut source = empty_source(
+        name,
+        source_path.clone(),
+        if source_path.exists() {
+            "scanned"
+        } else {
+            "missing"
+        },
+    );
+    for file in files {
+        let Ok(contents) = std::fs::read_to_string(&file) else {
+            continue;
+        };
+        source.scanned_files += 1;
+        let lines: Vec<&str> = contents.lines().collect();
+        let start = if limit == 0 || limit >= lines.len() {
+            0
+        } else {
+            lines.len() - limit
+        };
+        source.scanned_lines += lines.len() - start;
+        let path_matches = path_matches_terms(&file, terms);
+        for (idx, line) in lines.iter().enumerate().skip(start) {
+            if path_matches || matches_terms(line, terms) {
+                source.matches.push(CycleDiagnosisMatch {
+                    path: file.clone(),
+                    line: Some(idx + 1),
+                    kind: "text".to_string(),
+                    text: Some(truncate_text(&crate::secret_redact::redact(line), 700)),
+                    json: None,
+                });
+            }
+        }
+    }
+    finalize_source(source)
+}
+
+fn scan_json_tree_source(
+    name: impl Into<String>,
+    root: &Path,
+    terms: &[String],
+) -> CycleDiagnosisSource {
+    let files = collect_files(root, |path| {
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext == "json" || ext == "jsonl")
+    });
+    scan_json_files_source(name, root, &files, terms)
+}
+
+fn scan_json_files_source(
+    name: impl Into<String>,
+    source_path: &Path,
+    files: &[PathBuf],
+    terms: &[String],
+) -> CycleDiagnosisSource {
+    let mut source = empty_source(
+        name,
+        source_path.to_path_buf(),
+        if source_path.exists() {
+            "scanned"
+        } else {
+            "missing"
+        },
+    );
+    for file in files {
+        let Ok(contents) = std::fs::read_to_string(file) else {
+            continue;
+        };
+        source.scanned_files += 1;
+        source.scanned_lines += contents.lines().count();
+        if !path_matches_terms(file, terms) && !matches_terms(&contents, terms) {
+            continue;
+        }
+        source.matches.push(CycleDiagnosisMatch {
+            path: file.clone(),
+            line: None,
+            kind: "json".to_string(),
+            text: None,
+            json: Some(json_summary(&contents)),
+        });
+    }
+    finalize_source(source)
+}
+
+fn empty_source(
+    name: impl Into<String>,
+    path: PathBuf,
+    status: impl Into<String>,
+) -> CycleDiagnosisSource {
+    CycleDiagnosisSource {
+        name: name.into(),
+        path,
+        status: status.into(),
+        scanned_files: 0,
+        scanned_lines: 0,
+        matched: 0,
+        matches: Vec::new(),
+    }
+}
+
+fn finalize_source(mut source: CycleDiagnosisSource) -> CycleDiagnosisSource {
+    source.matched = source.matches.len();
+    source
+}
+
+fn collect_files(root: &Path, include: impl Fn(&Path) -> bool) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    collect_files_inner(root, &include, &mut files);
+    files.sort();
+    files
+}
+
+fn collect_files_inner(root: &Path, include: &impl Fn(&Path) -> bool, files: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_dir() {
+            collect_files_inner(&path, include, files);
+        } else if file_type.is_file() && include(&path) {
+            files.push(path);
+        }
+    }
+}
+
+fn path_matches_terms(path: &Path, terms: &[String]) -> bool {
+    matches_terms(&path.to_string_lossy(), terms)
+}
+
+fn matches_terms(text: &str, terms: &[String]) -> bool {
+    terms.iter().any(|term| text.contains(term))
+}
+
+fn json_summary(contents: &str) -> serde_json::Value {
+    let redacted = crate::secret_redact::redact(contents);
+    match serde_json::from_str::<serde_json::Value>(&redacted) {
+        Ok(value) => summarize_json_value(&value),
+        Err(_) => serde_json::json!({
+            "unparsed": truncate_text(&redacted, 1000),
+        }),
+    }
+}
+
+fn summarize_json_value(value: &serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(map) => {
+            let mut out = serde_json::Map::new();
+            for (key, value) in map {
+                if is_large_payload_key(key) {
+                    out.insert(
+                        key.clone(),
+                        serde_json::Value::String(format!(
+                            "<{} bytes omitted from diagnosis summary>",
+                            value.to_string().len()
+                        )),
+                    );
+                } else {
+                    out.insert(key.clone(), summarize_json_value(value));
+                }
+            }
+            serde_json::Value::Object(out)
+        }
+        serde_json::Value::Array(items) => serde_json::Value::Array(
+            items
+                .iter()
+                .take(10)
+                .map(summarize_json_value)
+                .collect::<Vec<_>>(),
+        ),
+        serde_json::Value::String(text) => serde_json::Value::String(truncate_text(text, 700)),
+        other => other.clone(),
+    }
+}
+
+fn is_large_payload_key(key: &str) -> bool {
+    matches!(
+        key,
+        "response_body"
+            | "content"
+            | "full_content"
+            | "payload"
+            | "stdout"
+            | "stderr"
+            | "transcript"
+            | "text"
+    )
+}
+
+fn truncate_text(text: &str, limit: usize) -> String {
+    if text.len() <= limit {
+        return text.to_string();
+    }
+    let mut end = limit;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}...<truncated>", &text[..end])
 }
 
 fn print_human_summary(report: &OpsSummaryReport) {

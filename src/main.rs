@@ -1131,6 +1131,30 @@ enum OpsAction {
         #[arg(long)]
         json: bool,
     },
+    /// Gather cycle/patch diagnostics from agent-doc logs and sidecars
+    Diagnose {
+        /// Project root to inspect (defaults to --file root or nearest project from CWD)
+        #[arg(long)]
+        project_root: Option<PathBuf>,
+        /// Session document path used for project-root and file correlation
+        #[arg(long)]
+        file: Option<PathBuf>,
+        /// Cycle id to correlate, e.g. cycle-1779845677327
+        #[arg(long)]
+        cycle_id: Option<String>,
+        /// Editor IPC patch id to correlate
+        #[arg(long)]
+        patch_id: Option<String>,
+        /// agent_doc_session / harness session id to correlate
+        #[arg(long)]
+        session_id: Option<String>,
+        /// Number of trailing lines to scan in text logs; 0 scans full files
+        #[arg(long, default_value_t = ops_report::default_summary_limit())]
+        limit: usize,
+        /// Emit JSON instead of a human-readable report
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1579,6 +1603,23 @@ fn main() -> anyhow::Result<()> {
                 limit,
                 json,
             } => ops_report::run_summary(project_root.as_deref(), limit, json),
+            OpsAction::Diagnose {
+                project_root,
+                file,
+                cycle_id,
+                patch_id,
+                session_id,
+                limit,
+                json,
+            } => ops_report::run_diagnose(
+                project_root.as_deref(),
+                file.as_deref(),
+                cycle_id.as_deref(),
+                patch_id.as_deref(),
+                session_id.as_deref(),
+                limit,
+                json,
+            ),
         },
         Commands::Show {
             file,

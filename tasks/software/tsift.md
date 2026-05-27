@@ -145,8 +145,61 @@ Based on deep analysis of tokensave's architecture, here are concrete next steps
 6. **Phase 3** — Extraction pipeline (5-7 days, if needed for language expansion)
 
 **Total Phase 1-2: ~1-2 weeks for core graph algorithms. Phase 3 adds another week.**
-Should we architect separate rust crates in tsift?
-<!-- agent:boundary:6b4de7e7 -->
+❯ Should we architect separate rust crates in tsift?
+### Re: separate crates architecture — glm-5.1
+
+**Yes, but not yet.** The current monolith is manageable but approaching the point where decomposition pays off.
+
+#### Current state
+
+- **71K LOC** in a single crate, 28 source files
+- `main.rs` alone is **39K LOC** (command routing — the bulk)
+- `substrate.rs` is **4.8K LOC** (GraphStore trait + 3 backends)
+- `graph.rs` is **1.4K LOC** (tree-sitter extraction)
+
+#### When to split
+
+Split when you hit one of these triggers:
+1. **You're adding tokensave ports** (Phase 2-3 from previous response) — Tarjan SCC, health scores, extraction pipeline are distinct domains
+2. **Compile times exceed 60s** — currently single-crate means full recompilation on any change
+3. **Feature flags get complex** — `backend-libsql`, `backend-eval`, future `backend-tokensave` are backend concerns
+
+#### Proposed crate structure (when you split)
+
+```
+tsift/
+  crates/
+    tsift-core/          # GraphStore trait, GraphNode, GraphEdge, GraphProjection types
+                         # ~1.5K LOC (substrate.rs types + trait only)
+
+    tsift-sqlite/        # SqliteGraphStore (default backend)
+                         # ~3K LOC from substrate.rs
+
+    tsift-libsql/        # LibsqlGraphStore (feature-gated)
+                         # ~700 LOC (libsql_backend.rs)
+
+    tsift-graph/         # tree-sitter extraction, LanguageExtractor, complexity
+                         # ~2K LOC (graph.rs + lang/)
+
+    tsift-algorithms/    # Tarjan SCC, health scores, dead code, coupling, BFS/DFS
+                         # NEW — ports from tokensave Phase 2
+
+    tsift-extraction/    # Reference resolution, scoring heuristics
+                         # NEW — port from tokensave Phase 3
+
+    tsift-cli/           # main.rs command routing, clap definitions
+                         # ~39K LOC — depends on all other crates
+
+  Cargo.toml             # workspace root
+```
+
+#### Why NOT split now
+
+- The monolith is still coherent — all 28 files relate to one tool
+- Splitting adds workspace overhead, version coordination, dependency management
+- The tokensave ports haven't started yet — crate boundaries should reflect the final architecture, not the current one
+- **Recommendation**: start the tokensave Phase 1 (DB reader adapter), then split as part of Phase 2 when you have concrete code to organize
+<!-- agent:boundary:2c5a53b8 -->
 <!-- /agent:exchange -->
 ###
 <!--

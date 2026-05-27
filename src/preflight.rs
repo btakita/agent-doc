@@ -1126,6 +1126,17 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
 }
 
 fn enforce_no_uncommitted_closeout_drift(file: &Path) -> Result<()> {
+    // Route can enqueue a dispatch behind a busy authoritative actor by writing
+    // `agent:queue auto` plus the saved snapshot, then return before a normal
+    // response closeout exists. If the user keeps editing that prompt before
+    // the next preflight, the working tree no longer matches the queued
+    // snapshot and the generic snapshot-vs-HEAD guard used to require a manual
+    // `write --commit`. Commit the route-owned snapshot first; the later live
+    // edit stays unstaged and becomes the next prompt diff.
+    if recover_route_queue_snapshot_commit_boundary(file)? {
+        return Ok(());
+    }
+
     // Accepted JetBrains File Cache Conflict dialogs can replay a stale editor
     // patch after the response already reached HEAD. If the only working-tree
     // drift is an adjacent duplicate response and dedupe(current) is HEAD, drop
@@ -1217,6 +1228,167 @@ fn enforce_no_uncommitted_closeout_drift(file: &Path) -> Result<()> {
         anyhow::bail!("{}", message);
     }
     Ok(())
+}
+
+fn recover_route_queue_snapshot_commit_boundary(file: &Path) -> Result<bool> {
+    if !detect_route_queue_snapshot_commit_boundary_recoverable(file)? {
+        return Ok(false);
+    }
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "route_queue_snapshot_auto_recovery_attempt file={}",
+            file.display()
+        ),
+    );
+    eprintln!(
+        "[preflight] route_queue_snapshot: queued dispatch snapshot is not committed for {}; running auto-commit",
+        file.display()
+    );
+    match crate::git::commit(file) {
+        Ok(_) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_queue_snapshot_auto_recovery_succeeded file={}",
+                    file.display()
+                ),
+            );
+            Ok(true)
+        }
+        Err(e) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_queue_snapshot_auto_recovery_failed file={} error={}",
+                    file.display(),
+                    e.to_string().replace('\n', " ")
+                ),
+            );
+            eprintln!(
+                "[preflight] route_queue_snapshot auto-commit failed for {}: {}",
+                file.display(),
+                e
+            );
+            Ok(false)
+        }
+    }
+}
+
+fn detect_route_queue_snapshot_commit_boundary_recoverable(file: &Path) -> Result<bool> {
+    let Some(state) = crate::cycle_state::load(file)? else {
+        return Ok(false);
+    };
+    if state.is_open() {
+        return Ok(false);
+    }
+    if !matches!(
+        crate::git::verify_snapshot_committed(file)?,
+        crate::git::SnapshotCommitStatus::SnapshotDiffersFromHead { .. }
+    ) {
+        return Ok(false);
+    }
+
+    let Some(snapshot) = crate::snapshot::load(file)? else {
+        return Ok(false);
+    };
+    let Some(head) = crate::git::show_head(file)? else {
+        return Ok(false);
+    };
+    if crate::session_check::detect_bypassed_response_write_between(&head, &snapshot).is_some() {
+        return Ok(false);
+    }
+
+    let snapshot_prompts = route_queue_prompt_texts(&snapshot)?;
+    if snapshot_prompts.is_empty() {
+        return Ok(false);
+    }
+
+    let head_norm = strip_route_queue_state_for_boundary_compare(&head);
+    let snapshot_norm = strip_route_queue_state_for_boundary_compare(&snapshot);
+    let Some(diff_text) = crate::diff::unified_diff_from_contents(&head_norm, &snapshot_norm)
+    else {
+        return Ok(true);
+    };
+    let changes = crate::diff::classify_prompt_bearing_changes(&diff_text)
+        .into_iter()
+        .filter(|change| {
+            !matches!(
+                change.kind,
+                crate::diff::PromptBearingChangeKind::RecoveryArtifact
+                    | crate::diff::PromptBearingChangeKind::BoundaryArtifact
+            )
+        })
+        .collect::<Vec<_>>();
+    if changes.is_empty() {
+        return Ok(true);
+    }
+
+    Ok(changes.iter().all(|change| {
+        change.kind == crate::diff::PromptBearingChangeKind::PromptTarget
+            && snapshot_prompts
+                .iter()
+                .any(|prompt| prompt == &normalize_route_queue_prompt_text(&change.text))
+    }))
+}
+
+fn route_queue_prompt_texts(content: &str) -> Result<Vec<String>> {
+    let (fm, body) = crate::frontmatter::parse(content)?;
+    if fm.queue_active != Some(true) {
+        return Ok(Vec::new());
+    }
+    let components = crate::component::parse(body)?;
+    let Some(queue_component) = components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
+        return Ok(Vec::new());
+    };
+    if !crate::queue::has_auto_attr(&queue_component.attrs) {
+        return Ok(Vec::new());
+    }
+    let entries = crate::queue::parse(queue_component.content(body))?;
+    Ok(crate::queue::prompts(&entries)
+        .into_iter()
+        .map(|prompt| normalize_route_queue_prompt_text(&prompt.text))
+        .filter(|text| !text.is_empty())
+        .collect())
+}
+
+fn strip_route_queue_state_for_boundary_compare(content: &str) -> String {
+    let mut result = content
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("queue_active:"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    if content.ends_with('\n') {
+        result.push('\n');
+    }
+    if let Ok(components) = crate::component::parse(&result) {
+        for component in components.iter().rev() {
+            if component.name == "queue" {
+                result.replace_range(component.open_start..component.close_end, "");
+            }
+        }
+    }
+    crate::git::normalize_transient_agent_doc_markers(&result)
+}
+
+fn normalize_route_queue_prompt_text(text: &str) -> String {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with("<!-- agent:boundary:"))
+        .map(|line| {
+            line.strip_prefix('❯')
+                .or_else(|| line.strip_prefix('>'))
+                .map(str::trim)
+                .unwrap_or(line)
+        })
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string()
 }
 
 fn preflight_debounce_ms(file: &Path) -> u64 {
@@ -5641,6 +5813,107 @@ mod tests {
             String::from_utf8_lossy(&head.stdout).as_ref(),
             snapshot,
             "step-2 commit must not silently commit the compact follow-up prompt"
+        );
+    }
+
+    #[test]
+    fn preflight_commits_route_queue_snapshot_before_live_prompt_edit() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+        let original_prompt =
+            "Run Agent Doc queued this prompt. #spec-test-build-install-commit-push";
+        let edited_prompt = "Run Agent Doc queued this prompt. Same with this file. #spec-test-build-install-commit-push";
+        let head = concat!(
+            "---\n",
+            "agent_doc_format: template\n",
+            "agent_doc_session: test\n",
+            "queue_active: false\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        let queued = head
+            .replace("queue_active: false", "queue_active: true")
+            .replace(
+                "<!-- agent:boundary:abc123 -->\n",
+                &format!("{original_prompt}\n<!-- agent:boundary:abc123 -->\n"),
+            )
+            .replace(
+                "<!-- agent:queue -->\n<!-- /agent:queue -->",
+                &format!("<!-- agent:queue auto -->\n- {original_prompt}\n<!-- /agent:queue -->"),
+            );
+        let live = queued.replacen(original_prompt, edited_prompt, 1);
+
+        std::fs::write(&doc, head).unwrap();
+        crate::snapshot::save(&doc, head).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        crate::snapshot::save(&doc, &queued).unwrap();
+        std::fs::write(&doc, &live).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(head), Some(head)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(&queued), Some(&queued))
+            .unwrap();
+
+        run(&doc).unwrap();
+
+        let committed = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:session.md"])
+            .output()
+            .unwrap();
+        assert!(
+            committed.status.success(),
+            "git show HEAD:session.md failed"
+        );
+        let committed = String::from_utf8_lossy(&committed.stdout);
+        assert!(
+            committed.contains(original_prompt),
+            "route queued prompt should be committed from the saved snapshot:\n{committed}"
+        );
+        assert!(
+            !committed.contains("Same with this file"),
+            "live prompt edit must not be swallowed into the queue snapshot commit:\n{committed}"
+        );
+        let working = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            working.contains(edited_prompt),
+            "later live prompt edit should remain visible for the fresh preflight cycle:\n{working}"
+        );
+        let snapshot_after = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            snapshot_after.contains(original_prompt),
+            "snapshot should stay on the route queued prompt:\n{snapshot_after}"
+        );
+        assert!(
+            !snapshot_after.contains("Same with this file"),
+            "preflight must not absorb the live edit into the committed snapshot:\n{snapshot_after}"
+        );
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            state.phase,
+            crate::cycle_state::CyclePhase::PreflightStarted,
+            "after committing the queued snapshot, preflight should open a fresh cycle for the live edit"
+        );
+        let log = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("route_queue_snapshot_auto_recovery_succeeded file="),
+            "route queue commit-boundary recovery should be logged:\n{log}"
         );
     }
 

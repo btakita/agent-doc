@@ -6,6 +6,14 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Queued JetBrains Run Agent Doc reroutes now survive live prompt edits.**
+  When `route --dispatch-only` queues a busy-actor rerun by saving
+  `agent:queue auto` to the snapshot but `HEAD` still lacks that handoff, the
+  next preflight auto-commits the route-owned queued snapshot before diffing.
+  If the user edits the visible prompt meanwhile, that edit stays uncommitted
+  in the working tree and becomes the fresh prompt diff instead of wedging the
+  queue behind the generic `snapshot differs from HEAD` recovery hint.
+
 - **Template exchange appends now keep response headings block-separated.**
   When a `<!-- patch:exchange -->` response starts with `### Re:`, the
   boundary-replacement and fallback append paths insert a blank line after

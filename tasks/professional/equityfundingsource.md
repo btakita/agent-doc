@@ -73,7 +73,7 @@ Commits and push:
 - Parent repo submodule pointer pushed to `origin/main` as `995e9b9de`.
 
 Escalation: none. Confidence: high for new `/apply` notifications to the Resend-allowed inbox; `btak.dev` delivery remains blocked by Resend testing-mode/domain-verification policy, not by the Worker code.
-<!-- agent:boundary:f4d62067 -->
+<!-- agent:boundary:cd3a7138 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -86,6 +86,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#f4rq] Verify an EFS-owned sending domain in Resend, then switch APPLICATION_LEAD_NOTIFICATION_FROM and APPLICATION_LEAD_NOTIFICATION_TO from testing-mode values to EFS production addresses.
 - [ ] [#k2xg] Send Robert the six-question TMO outbound webhook prompt in src/equityfundingsource-dev/docs/tmo-webhooks-question.md for him to forward to Mortgage Office, then record the response and decide push vs. tightened polling.
 - [ ] [#qr72] [recommended] By May 27, 2026, send Lucas a written bridge plan: $500 now from personal funds if available, ask for the remaining $500 to be paid after EFS payment clears or by an agreed near-term date, and invoice EFS immediately for $5,000 with a smaller immediate continuation retainer accepted if Judith pushes back.
 - [ ] [#s62t] [recommended] Prepare EFS invoice with truthful hours/value; Lucas cost is $4,150 (83h @ $50), so floor is 42h/$4,200 and recommended ask is 50-60h/$5,000-$6,000 with any concession as an explicit courtesy credit.

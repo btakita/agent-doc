@@ -30,23 +30,12 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260527-090632.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260527-091319.md`*
 
 Compacted content:
-- Archived 1 response topic(s): Mobile menu desktop bleed
+- Archived 1 response topic(s): deploy
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-❯ deploy
-### Re: deploy — gpt-5
-
-Deployed the current EFS Worker to workers.dev.
-
-Proof:
-- Changed paths: none by me; the pre-existing dirty EFS submodule state remains (`AGENTS.md`, `tmp/`), and broader workspace dirt was left untouched.
-- Commands: `make check`, `make deploy`, live `curl` smoke checks for `/` and `/apply`.
-- Verification: `make check` passed with 191 tests plus app build and worker build. Cloudflare deployed `equityfundingsource` version `0988ee2c-fac5-4e60-a39c-4107791ce895` at `https://equityfundingsource.brian-takita.workers.dev`; both `/` and `/apply` returned HTTP 200.
-- CI/tmux: no workflow named `CI` exists here. The latest root `Agent Doc` run `26501652559` is red, but both `tmux-ci` and `check` jobs had empty `steps`, and `gh run view --log-failed` reported `log not found`, so I’m treating that as an external CI-start/log blocker rather than a code failure.
-- Escalation: none.
-<!-- agent:boundary:a92fdc43 -->
+<!-- agent:boundary:8dddf1fd -->
 <!-- /agent:exchange -->
 ###
 <!--

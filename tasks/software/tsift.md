@@ -63,7 +63,28 @@ No `tmux-test` workflow exists in either the root `agent-loop` repo or the `tsif
 ### Re: closeout repair — gpt-5
 
 Binary closeout repair: the `#gneighgate` implementation response was already committed, and this follow-up write only reopens the agent-doc write/commit path so the post-closeout queue and `(HEAD)` annotations are not left as an interrupted cycle.
-<!-- agent:boundary:e60937a0 -->
+### Re: #gsemrows — gpt-5
+Implemented `#gsemrows` and marked it done.
+
+What changed:
+- `graph-db refresh/status --json` now includes a semantic `readiness` object. Empty summary caches report `status=blocked`, `fail_closed=true`, `reason=summary_cache_empty`, diagnostics, and next commands for `tsift summarize --extract ...` plus graph refresh.
+- `communities --json` now includes `community_diagnostics.tagpath_readiness`. Missing or stale tagpath state is blocked/actionable; fresh tagpath state is ready.
+- Added conformance coverage that starts from empty semantic rows, seeds a current summary cache, runs `tsift summarize --extract main.rs --json`, refreshes graph-db, and proves neighborhood/evidence/conflict-matrix semantic ranking improves.
+- Updated `SPEC.md` for the new readiness contracts.
+
+Commits pushed:
+- `btakita/tsift@95044d5` `feat: surface graph effectiveness readiness`
+- `btakita/agent-loop@0238f5662` `chore: update tsift graph readiness`
+
+Verification:
+- `cargo check`
+- Targeted tests for communities readiness and graph semantic readiness
+- `make check`
+- `cargo install --path .`
+- GitHub Actions `CI` run `26487656719` completed `success` for the pushed tsift commit
+
+I left the pre-existing unrelated dirty files in `src/tsift` unstaged.
+<!-- agent:boundary:9eac3c20 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -75,7 +96,7 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#gneighgate]~
-- do [#gsemrows]
+- ~do [#gsemrows]~
 - do [#gnbrank]
 - do [#gtombops]
 - do [#gbenchneigh]
@@ -84,7 +105,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gsemrows] Make semantic rows and tagpath handles part of graph effectiveness: when `graph-db refresh` warns the summary cache is empty or `communities` reports `tagpath_state=missing`, surface a fail-closed/actionable readiness state, then run `summarize --extract` + refresh and prove neighborhood/evidence ranking improves.
 - [ ] [#gnbrank] Add ranked neighborhood output: score neighbors by depth, edge kind, community co-membership, semantic relation, source-handle freshness, duplicate-name precision, and handle coverage; gate with community-search quality metrics before changing defaults.
 - [ ] [#gtombops] Run and document the graph tombstone cleanup workflow on the tsift graph DB: Convex reconcile, refresh, compact, then record status/doctor/file-size/tombstone-scan deltas from the current 184,722 tombstone / 27,375 live-row state.
 - [ ] [#gbenchneigh] Refresh the graph performance history with dedicated neighborhood rows so future graph-backend or hop-cap decisions compare `neighborhood`, `path_max_hops`, evidence, conflict-matrix, and dispatch-trace together instead of optimizing one surface blind.

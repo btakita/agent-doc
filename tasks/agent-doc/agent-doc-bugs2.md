@@ -261,7 +261,17 @@ The stale cache/conflict replay diagram in the previous response is the intended
 ### Re: late fallback patch after commit — gpt-5
 
 The late fallback patch diagram in the previous response covers both repeated late-fallback prompts. The fallback is valid only while the cycle is still open after socket IPC did not complete. Once the cycle is `Committed`, the same patch id/cycle id is stale and must be rejected and cleaned up before it can mutate the editor buffer, snapshot, or working tree.
-<!-- agent:boundary:588136b1 -->
+❯ Given our analysis, what are #next-steps?
+
+❯ How does "stale cache/conflict replay" respond when the user does not respond to the File Cache Conflict until hours later? Whether it is to accept or reject the disk state? Can agent-doc remove the dialog after a timeout?
+### Re: next steps and stale conflict timeout — gpt-5
+
+Top backlog item id: qipc. It captures the next implementation track: queue-first dispatch, a single-flight document lease, user-owned prompt entities, and stale replay hardening for JetBrains conflict and late fallback paths. The existing gated review item remains the related diagnostics/proof track for Run Agent Doc route behavior.
+
+For stale File Cache Conflict dialogs, agent-doc should not choose accept or reject after a timeout. If the dialog remains unanswered for hours, the state is unresolved editor ownership, not authorization for agent-doc to pick content. The safe behavior is to ignore or remove agent-doc-owned stale patch/fallback artifacts, refuse to treat whole-buffer editor ACK content as authoritative, and wait for the next preflight/session-check after the user acts.
+
+If the user later reloads or keeps disk state, the document should match HEAD or the latest committed snapshot. If the user later accepts the stale cached editor buffer, the next managed cycle should classify that as delayed accepted-conflict replay, repair it if it dedupes to committed content, or fail closed when ownership cannot be proven. Agent-doc may warn, disable stale patch application, or clean up its own queued patch files after timeout; it should not dismiss the IDE conflict dialog by choosing file contents unless the IDE exposes an explicit cancel-agent-patch operation that preserves the user's content choice.
+<!-- agent:boundary:ec57c291 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -299,6 +309,7 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#qipc] Implement queue-first agent-doc dispatch and user-owned prompt entities: route repeated dispatches through a single-flight document lease that appends/activates agent:queue, preserve post-baseline prompt entities during IPC snapshot adoption, and harden stale JetBrains conflict / late fallback replay handling with specs and regressions.
 <!-- /agent:backlog -->
 
 ## Review

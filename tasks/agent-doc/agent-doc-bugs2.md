@@ -101,7 +101,16 @@ Verification: `cargo test --test full_content_static_guard` passed; `make check`
 Commits: `src/agent-doc` `7a0cf7eb test: guard fullContent receiver paths`; superproject `a82e91e54 agent-doc: guard fullContent receiver paths`.
 
 No follow-ups needed.
-<!-- agent:boundary:0f562597 -->
+### Re: do [#ipcfail] — gpt-5
+
+Implemented `#ipcfail`. The IPC write path now emits a stable `ipc_proof_insufficient` diagnostic with exact `invariant=` and `recovery=` fields for no-ACK timeouts, missing response-body materialization, unacknowledged live exchange edits, live prompt drift, and duplicate-prompt ACK rejection. Preflight and session-check interrupted-cycle messages now surface the latest matching IPC proof diagnostic.
+
+Updated the closeout spec and regression coverage for no ACK, missing response probe, unacknowledged live edit, live prompt drift, duplicate prompt ACK, and session-check diagnostic surfacing.
+
+Verification: `cargo test try_ipc_times_out_when_no_plugin`; `cargo test try_ipc_rejects_consumed_partial_response_materialization`; `cargo test file_ipc_consumed_with_live_exchange_edit_requires_ack_content`; `cargo test file_ipc_ack_content_live_prompt_drift_uses_content_ours_snapshot`; `cargo test socket_ack_content_prompt_duplication_uses_content_ours_and_repairs_visible_buffer`; `cargo test session_check_open_cycle_surfaces_ipc_proof_diagnostic`; `cargo test latest_ipc_proof_diagnostic_prefers_matching_file_entry`; `make check`; `cargo install --path .`; GitHub CI run `26501096866` passed with `Run make check` and `Run make tmux-ci`.
+
+Commits: `src/agent-doc` `f78f60a5`; parent `6d97d9512`.
+<!-- agent:boundary:4531bc8f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -121,14 +130,13 @@ preset #spec-test-build-install-commit-push
 - ~do [#ipcmodel]~
 - ~do [#ipcreplay]~
 - ~do [#ipcdeny]~
-- do [#ipcfail]
+- ~do [#ipcfail]~
 - do [#jbrunbusy]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#ipcfail] Strengthen closeout diagnostics for insufficient IPC proof: surface the exact failed invariant and recovery path in preflight/session-check, and add tests for no ACK, missing response probe, duplicate prompt ACK, and live prompt drift.
 - [ ] [#jbrunbusy] Fix JB Run Agent Doc active-turn retry classification: dispatch-only `latest run still booting ... active codex turn` refusals should be typed as busy/running, coalesced or retryable in the JetBrains plugin, and covered by route + plugin regression tests using the equityfundingsource repro.
 <!-- /agent:backlog -->
 

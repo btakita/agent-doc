@@ -32,74 +32,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260527-224338.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260527-234100.md`*
 
 Compacted content:
-- Archived 4 response topic(s): next-steps to complete the review items; completed items should be marked as done in review + done; repair; 1 more
+- Archived 3 response topic(s): local-e2e-verify; tsift + tokensave integration; libsql backend implementation
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-### Re: local-e2e-verify — opus-4-6
-
-`tsift init --opencode /tmp/tsift-test` passed. Created:
-- `AGENTS.md` with Code Navigation section
-- 6 opencode commands: tsift-status, tsift-session-review, tsift-context-pack, tsift-diff-digest, tsift-test-digest, tsift-log-digest
-- `.gitignore` with `.tsift/`
-
-#local-e2e-verify done. #gopencode-install and #gopencode gated on npm auth. #npm-auth-setup requires manual GitHub NPM_TOKEN + TSIFT_ENABLE_NPM_PUBLISH. Remaining items (#npm-publish-verify, #full-e2e-verify) blocked on npm auth.
-❯ Can tsift integrate well with https://github.com/aovestdipaperino/tokensave or should the features of tokensave be absorbed into tsift?
-### Re: tsift + tokensave integration — opus-4-6
-
-**Recommendation: integrate as complementary tools, not absorption.**
-
-Both tools overlap on core code RAG (tree-sitter indexing, symbol search, call graphs, impact analysis) but diverge architecturally and in their sweet spots:
-
-| | tsift | tokensave |
-|---|---|---|
-| Protocol | CLI (shell commands) | MCP server (48 tools) |
-| Graph DB | SQLite + Convex projection | libSQL + FTS5 |
-| Unique: envelopes | Budget-aware previews with stable handles | — |
-| Unique: digests | 8 digest surfaces (diff, test, log, session, metric, cost, review, context-pack) | — |
-| Unique: agent-doc | Graph projection of backlog/workers/dispatch | — |
-| Unique: code analysis | — | 48 tools: health, DSM, god class, dead code, type hierarchy |
-| Unique: edit primitives | — | str_replace, multi_replace, insert_at, ast_grep |
-| Unique: multi-branch | — | Per-branch DBs with cross-branch diff |
-| Unique: cost tracking | session-cost per-turn | Savings ledger, TUI monitor, dollar estimates |
-| Languages | 10 | 34 |
-
-**Integration path** — tsift already has a provider-neutral `GraphStore` trait (`substrate.rs`) with an experimental backend evaluation gate. tokensave's libSQL graph could become a backend candidate. Concretely:
-
-1. **Graph backend plug-in**: Add a tokensave adapter to tsift's `GraphStore` trait. tsift calls tokensave's MCP `tokensave_search`/`tokensave_callers`/`tokensave_context` as its graph resolution layer instead of (or in addition to) its own SQLite graph.
-2. **Envelope wrapping of tokensave results**: tsift's envelope system adds budget-aware truncation, stable handles, and follow-up expand commands to tokensave's already-rich tool responses. Agents benefit from both depth (tokensave tools) and token efficiency (tsift envelopes).
-3. **Digest surface augmentation**: tsift's diff-digest, test-digest, and session-review already transform noisy output into bounded evidence. Running `tokensave impact`/`tokensave affected` inside those digest pipelines would give symbol-level change context inside tsift's bounded output format.
-4. **Language expansion via tokensave**: tsift's 10-language tree-sitter support could delegate to tokensave's 34-language extraction for languages tsift doesn't cover natively.
-
-**What NOT to absorb** — tokensave's 48 MCP tools, edit primitives, multi-branch indexing, and cost/TUI infrastructure are deep and well-maintained. Reimplementing in tsift would be months of work for marginal gain when tsift can call tokensave as a backend.
-
-**What tsift should keep owning** — envelopes, digests, session-review, agent-doc graph projection, conflict-matrix, Convex sync. These have no tokensave equivalent and are tsift's core value proposition.
-
-**Concrete first step**: implement a `tokensave` backend adapter in `substrate.rs` behind the existing `backend-eval` feature flag, then run it through `perf_gate.rs` to benchmark against the SQLite backend.
-❯ Implement support for libsql. #spec-test-build-install-commit-push
-### Re: libsql backend implementation — glm-5.1
-
-Implemented `LibsqlGraphStore` behind the `backend-libsql` feature flag, providing a libsql/Turso-compatible `GraphStore` backend.
-
-**Changes:**
-- `Cargo.toml`: Added `libsql = "0.9"` and `tokio = "1"` as optional dependencies behind `backend-libsql` feature
-- `src/libsql_backend.rs`: New `LibsqlGraphStore` implementing the full `GraphStore` trait — local (`open`, `in_memory`) and remote (`open_remote`) modes
-- `SPEC.md`: Documented libsql backend in architecture diagram and added dedicated section covering local/remote modes, schema compatibility, async bridge, and performance gate eligibility
-
-**Design:**
-- Reuses identical schema tables and indexes as `SqliteGraphStore`
-- Schema version and foreign key constraints are identical — database files are compatible between SQLite and libsql stores
-- Async `libsql::Connection` methods bridged through a `tokio::runtime::Runtime` to satisfy the synchronous `GraphStore` trait
-- 6 unit tests: round-trip, projection upsert, CRUD + neighborhood + ordering, shortest path, file creation, graph counts
-
-**Verification:**
-- `cargo build --features backend-libsql` — clean
-- `cargo test --features backend-libsql --bin tsift -- libsql` — 6 passed
-- `cargo test` (default features) — all 705 tests pass
-- `cargo install --path .` — installed for local testing
-- Committed and pushed to `main`
-<!-- agent:boundary:2ef00b84 -->
+<!-- agent:boundary:4bf349cc -->
 <!-- /agent:exchange -->
 ###
 <!--

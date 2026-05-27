@@ -354,8 +354,26 @@ Brian
 
 Items 1, 2, and 3 map directly to the three SVG timeline cards (ClaudeScore → velvet-thunder → BuildParty), so Rob can read item 1, look at Phase 1 in the diagram, and so on. Items 4–6 mirror the lower-half panels (drivers + going-forward).
 
-Exchange is now at 284 lines across 6 response sections — preflight is flagging it. Want me to run `agent-doc compact` to trim before the next cycle?
-<!-- agent:boundary:85b7c887 -->
+❯ Exchange is now at 284 lines across 6 response sections — preflight is flagging it. Want me to run `agent-doc compact` to trim before the next cycle?
+❯ I already sent the email. robert-ross is very particular about the word shipping. He defines shipping as meaning shipping to the mass market. Meetings took too much of my time. I don't think I should send a follow up email. Unless you think it is important.
+### Re: Follow-up call — don't send one — opus-4-7
+
+
+Glad it's out. My read: **don't send a follow-up.**
+
+The "shipping" word choice is a real miss in your sent draft (I used it twice — "behind the demos and shipping work" and "not something that fits around shipping") and now that I know Rob defines shipping as mass-market only, those phrases will read off-key to him. But:
+
+1. **Rob has the full context.** He knows the actual state of the work. He will read "shipping work" as ongoing dev work in context, not as a claim of mass-market shipping. The misuse signals a word choice slip, not a factual error.
+2. **A follow-up re-opens a closed conversation.** You're waiting on his closeout email. A second message from you — even a clarifying one — invites a response cycle that neither of you wants.
+3. **A "I meant X not shipping" correction draws attention to the word.** Without the follow-up, the word is one phrase in a long email. With the follow-up, it becomes the thing he remembers.
+4. **The substantive content stands.** The debrief, the structural explanation, the going-forward commitment — none of those depend on the word "shipping."
+
+The only case where I'd say send a follow-up is if Rob actually replies and the "shipping" phrasing causes a real misunderstanding that hurts you (e.g., he infers you were claiming progress you didn't make). At that point you'd respond to the actual misread, not pre-empt it.
+
+Recorded for future Rob-adjacent drafts: shipping = mass-market only in his vocabulary; use "demo work" / "release work" / "rollout" / specific milestone names instead. Also noted the meetings-took-too-much-time point so I don't propose long meetings in any closing-out correspondence. Both saved as project memory.
+
+Want me to run `agent-doc compact` on this exchange now that the email is sent? It's at 337 lines / 7 sections and the immediate work is done.
+<!-- agent:boundary:1f5fad1f -->
 <!-- /agent:exchange -->
 
 <!--

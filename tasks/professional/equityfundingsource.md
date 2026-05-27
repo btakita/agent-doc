@@ -22,7 +22,7 @@ queue_active: false
 ## Status
 
 <!-- agent:status patch=replace -->
-EFS workers.dev production: `/apply` public prequalification + D1-backed `application_leads` admin review is deployed in Worker version `0988ee2c-fac5-4e60-a39c-4107791ce895` as of 2026-05-27; local `bun dev` on port 4200 mounts `/apply`; public site/footer email is `info@equityfundingsource.com`; logged-out navigation exposes a separate Borrower Login action alongside Apply for a Loan. Cloudflare Access protects /login/access-callback with ACCESS_TEAM_DOMAIN/AUD. Application lead notifications still route through Resend testing-mode config `APPLICATION_LEAD_NOTIFICATION_TO=brian.takita@gmail.com` and `APPLICATION_LEAD_NOTIFICATION_FROM=Equity Funding Source <onboarding@resend.dev>` until an EFS-owned sending domain is verified. Custom-domain cutover is deferred; continue using https://equityfundingsource.brian-takita.workers.dev until further notice.
+EFS workers.dev production: `/apply` public prequalification + D1-backed `application_leads` admin review is deployed in Worker version `dd2fa976-a72c-4661-8a2d-aee196c57eb3` as of 2026-05-27; local `bun dev` on port 4200 mounts `/apply`; public site/footer email is `info@equityfundingsource.com`; logged-out navigation exposes Borrower Login, Apply for a Loan, Broker Portal, and Investor Portal with Broker Portal placed between Apply and Investor. Cloudflare Access protects /login/access-callback with ACCESS_TEAM_DOMAIN/AUD. Application lead notifications still route through Resend testing-mode config `APPLICATION_LEAD_NOTIFICATION_TO=brian.takita@gmail.com` and `APPLICATION_LEAD_NOTIFICATION_FROM=Equity Funding Source <onboarding@resend.dev>` until an EFS-owned sending domain is verified. Custom-domain cutover is deferred; continue using https://equityfundingsource.brian-takita.workers.dev until further notice.
 <!-- /agent:status -->
 
 ## Exchange
@@ -59,7 +59,30 @@ Commit and push:
 
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:98607935 -->
+❯ deploy
+### Re: deploy — gpt-5
+
+Deployed the current EFS `main` Worker to workers.dev.
+
+Deploy command:
+- `bun run deploy:worker`
+
+Deployment result:
+- URL: `https://equityfundingsource.brian-takita.workers.dev`
+- Worker version ID: `dd2fa976-a72c-4661-8a2d-aee196c57eb3`
+- Cron trigger deployed: `9 19 * * *`
+- Wrangler reported no updated asset files to upload, then uploaded the Worker script and deployed triggers.
+
+Live smoke checks:
+- `GET /` -> 200
+- `GET /apply` -> 200
+- `GET /portal-broker` -> 303 to `/login?role=broker`
+- Live home HTML shows desktop and mobile header order as `Borrower Login`, `Apply for a Loan`, `Broker Portal`, `Investor Portal`.
+
+Changed paths: none in the EFS app repo from the deploy.
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:5978022e -->
 <!-- /agent:exchange -->
 ###
 <!--

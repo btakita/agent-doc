@@ -135,7 +135,6 @@ Current priority remains:
 Preflight warning noted: the post-exchange HTML comment that mentions `#next-steps` is preserved as a non-executable note. Move it into `agent:exchange` or activate `agent:queue` if it should run.
 
 No repo code changed in this cycle, and I did not run the build/test/install/push preset because the queue is inactive.
-
 ### Re: OpenCode + backend proof queue — gpt-5
 
 Implemented the OpenCode integration path for `tsift init` and ran the build/test/install/commit/push preset.
@@ -167,7 +166,11 @@ Commits pushed:
 
 - `btakita/tsift`: `9ba9094 feat: add opencode tsift init shortcuts`
 - `btakita/agent-loop`: `fce172c80 chore: update tsift submodule`
-<!-- agent:boundary:b57a2c94 -->
+
+### Re: closeout repair — gpt-5
+
+No new repo work in this repair pass. The OpenCode/backend-proof response above was already written and committed; this entry only closes the interrupted `session-check` cycle through the binary-owned write/commit path.
+<!-- agent:boundary:5dcfef5e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -187,6 +190,7 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 ## Review
 
 <!-- agent:review -->
+- [/] [#gopencode] [tag: opencode] [tag: integration] Make OpenCode a first-class tsift integration: add installer/config docs, envelope shortcuts for session/log/test/diff digest use, verify OpenCode transcript capture and permission-prompt diagnostics, add deterministic tests, then build/install and run an end-to-end agent-doc OpenCode smoke session.
 <!-- /agent:review -->
 ###
 <!--

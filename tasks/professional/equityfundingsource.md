@@ -30,51 +30,12 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260527-073445.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260527-083750.md`*
 
 Compacted content:
-- Archived 1 response topic(s): /apply email delivery
+- Archived 1 response topic(s): Borrower login, footer email, and /apply 404
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-❯ - In addition to the Apply for Loan, I need a Borrower Login button.
-❯ - The footer email should be info@equityfundingsource.com
-❯ - http://localhost:4200/apply responds with a 404
-
-❯ #spec-test-commit-push-deploy
-### Re: Borrower login, footer email, and /apply 404 — gpt-5
-
-Implemented, tested, committed, pushed, and deployed.
-
-Changed paths:
-- `src/equityfundingsource-dev/app/equityfundingsource/app/index.server.ts`
-- `src/equityfundingsource-dev/app/equityfundingsource/config/site.ts`
-- `src/equityfundingsource-dev/app/equityfundingsource/dev-routes.test.ts`
-- `src/equityfundingsource-dev/lib/ui--server--efs/header/index.ts`
-- `src/equityfundingsource-dev/prds/equity-funding-source-lending-portal-prd.md`
-- `src/equityfundingsource-dev/tests/application-leads.test.ts`
-- `src/equityfundingsource-dev` gitlink in the root repo
-
-What changed:
-- Mounted the existing application lead routes into the local port 4200 server, so `http://localhost:4200/apply` no longer 404s.
-- Added a distinct logged-out Borrower Login button linking to `/login?role=borrower` on desktop and mobile navigation.
-- Changed the shared site email source to `info@equityfundingsource.com`, which updates the footer and structured metadata.
-- Updated PRD/test coverage so local `/apply`, borrower login navigation, and the production email cannot drift silently.
-
-Verification:
-- `bun test app/equityfundingsource/dev-routes.test.ts tests/application-leads.test.ts` -> 13 pass, 0 fail.
-- `make check` -> 186 pass, 0 fail; server build and Worker bundle completed.
-- `curl --compressed -D - http://localhost:4200/apply` -> 200 OK; response contains `Borrower Login`, `info@equityfundingsource.com`, and the apply-page headline.
-- `curl --compressed -D - https://equityfundingsource.brian-takita.workers.dev/apply` -> 200 OK; deployed response contains the same markers.
-- `gh workflow list` returned no workflows in `equityfundingsource-dev`; `gh run list --workflow CI --limit 1` reported no `CI` workflow, so there was no GitHub CI/tmux leg to inspect for this repo.
-
-Commit/push/deploy:
-- EFS repo commit `607ab54` (`fix: mount local apply route`) pushed to `origin/main`.
-- Root repo gitlink commit `a43aa943d` (`chore: update equityfundingsource-dev`) created for the new submodule revision.
-- Cloudflare Worker deploy succeeded at `https://equityfundingsource.brian-takita.workers.dev` with version `2d3c78fa-cbaf-4614-b726-9dfac7e85397`.
-- Local dev server is running at `http://localhost:4200/apply`.
-
-Escalation: none.
-Confidence: high.
-<!-- agent:boundary:abbe1b0f -->
+<!-- agent:boundary:13948e0a -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -6,6 +6,17 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Strict finalize appends no longer overwrite prior exchange responses when
+  the explicit baseline is stale.** For template/CRDT append-mode exchange
+  writes under `finalize` or strict `write --commit`, if the supplied
+  `--baseline-file` is missing exchange content already committed in `HEAD`,
+  the write path now applies the response on top of `HEAD` before producing
+  `content_ours`, IPC snapshots, or commit-staged snapshots. This keeps
+  back-to-back finalizes from dropping the previous `### Re:` block and logs
+  `explicit_baseline_rebased_to_head` when the repair path is used. Regression:
+  `finalize_stream_rebases_stale_exchange_baseline_to_head`. Closes
+  `#finovrwr`.
+
 - **OpenCode dispatch-only reroutes now have dispatch-start proof.** Route
   captures the OpenCode pane before submit, waits for the routed trigger to
   leave the composer, and accepts proof only when the pane leaves idle chrome

@@ -881,6 +881,79 @@ fn finalize_writes_and_commits_template_response() {
 }
 
 #[test]
+fn finalize_stream_rebases_stale_exchange_baseline_to_head() {
+    let (tmp, doc) = setup_session_stream_doc();
+    init_git_repo(tmp.path(), &doc);
+
+    let original = fs::read_to_string(&doc).unwrap();
+    let stale_baseline = write_baseline(tmp.path(), &original);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--baseline-file",
+            stale_baseline.to_str().unwrap(),
+            "--stream",
+            "--origin",
+            "skill",
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: first — gpt-5\n\nFirst response.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success();
+
+    let after_first = head_blob(tmp.path());
+    assert!(
+        after_first.contains("### Re: first — gpt-5"),
+        "first finalize should commit the first response:\n{after_first}"
+    );
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--baseline-file",
+            stale_baseline.to_str().unwrap(),
+            "--stream",
+            "--origin",
+            "skill",
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: second — gpt-5\n\nSecond response.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success();
+
+    let head = head_blob(tmp.path());
+    let first = head
+        .find("### Re: first — gpt-5")
+        .expect("HEAD should keep the first response");
+    let second = head
+        .find("### Re: second — gpt-5")
+        .expect("HEAD should append the second response");
+    assert!(
+        first < second,
+        "stale-baseline finalize must append after the prior response:\n{head}"
+    );
+
+    let ops_log = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
+    assert!(
+        ops_log.contains("explicit_baseline_rebased_to_head"),
+        "strict finalize should log that the stale exchange baseline was rebased to HEAD:\n{ops_log}"
+    );
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["session-check", doc.to_str().unwrap()])
+        .assert()
+        .success();
+}
+
+#[test]
 fn finalize_rejects_status_only_response_for_imperative_directive() {
     let (tmp, doc) = setup_template_doc();
     init_git_repo(tmp.path(), &doc);

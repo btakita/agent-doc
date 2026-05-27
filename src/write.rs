@@ -5701,6 +5701,73 @@ fn patch_touches_exchange(patches: &[template::PatchBlock], unmatched: &str) -> 
     patches.iter().any(|patch| patch.name == "exchange") || !unmatched.trim().is_empty()
 }
 
+fn exchange_append_patch_can_rebase_to_head(
+    patches: &[template::PatchBlock],
+    unmatched: &str,
+    mode_overrides: &std::collections::HashMap<String, String>,
+) -> bool {
+    if mode_overrides
+        .get("exchange")
+        .is_some_and(|mode| mode == "replace")
+    {
+        return false;
+    }
+    patch_touches_exchange(patches, unmatched)
+}
+
+struct TemplatePatchApplicationBase<'a, 'b> {
+    file: &'b Path,
+    baseline: Option<&'a str>,
+    content_at_start: &'a str,
+    patches: &'b [template::PatchBlock],
+    unmatched: &'b str,
+    mode_overrides: &'b std::collections::HashMap<String, String>,
+    source: &'b str,
+    strict_closeout: bool,
+}
+
+fn template_patch_application_base<'a>(
+    input: TemplatePatchApplicationBase<'a, '_>,
+) -> Result<std::borrow::Cow<'a, str>> {
+    let Some(base) = input.baseline else {
+        return Ok(std::borrow::Cow::Borrowed(input.content_at_start));
+    };
+    if !input.strict_closeout
+        || !exchange_append_patch_can_rebase_to_head(
+            input.patches,
+            input.unmatched,
+            input.mode_overrides,
+        )
+    {
+        return Ok(std::borrow::Cow::Borrowed(base));
+    }
+
+    let Some(head) = crate::git::show_head(input.file)? else {
+        return Ok(std::borrow::Cow::Borrowed(base));
+    };
+    if !is_stale_baseline(base, &head) {
+        return Ok(std::borrow::Cow::Borrowed(base));
+    }
+
+    eprintln!(
+        "[write] explicit baseline is missing committed exchange content — using HEAD as {} patch base",
+        input.source
+    );
+    crate::ops_log::log_op(
+        input.file,
+        &format!(
+            "explicit_baseline_rebased_to_head file={} source={} base_len={} head_len={} patches={} unmatched_len={}",
+            input.file.display(),
+            input.source,
+            base.len(),
+            head.len(),
+            input.patches.len(),
+            input.unmatched.trim().len()
+        ),
+    );
+    Ok(std::borrow::Cow::Owned(head))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn log_exchange_write_diagnostic(
     file: &Path,
@@ -6058,7 +6125,17 @@ pub fn run_template(
     // prevents concurrent agent-doc writes from drifting the baseline. (#08yv)
     let (doc_lock, content_at_start) = capture_locked_pre_response(file)?;
 
-    let base = baseline.unwrap_or(&content_at_start);
+    let base_cow = template_patch_application_base(TemplatePatchApplicationBase {
+        file,
+        baseline,
+        content_at_start: &content_at_start,
+        patches: &patches,
+        unmatched: &unmatched,
+        mode_overrides: &mode_overrides,
+        source: "run_template",
+        strict_closeout: flags.strict_closeout,
+    })?;
+    let base = base_cow.as_ref();
     let snapshot_doc = snapshot::load(file).ok().flatten();
 
     // Apply patches to baseline
@@ -6330,7 +6407,18 @@ pub fn run_stream(
             // Compute content_ours (baseline + patches) for snapshot saving.
             // The IPC path sends patches to the plugin but we need a clean snapshot
             // that represents baseline+response WITHOUT user's concurrent edits.
-            let base = baseline.unwrap_or(&content_at_start);
+            let base_cow = template_patch_application_base(TemplatePatchApplicationBase {
+                file,
+                baseline,
+                content_at_start: &content_at_start,
+                patches: &patches,
+                unmatched: &unmatched,
+                mode_overrides: &mode_overrides,
+                source: "run_stream_ipc",
+                strict_closeout: flags.strict_closeout,
+            })?;
+            let base = base_cow.as_ref();
+            let ipc_baseline = baseline.map(|_| base);
             let t_apply = std::time::Instant::now();
             let mut content_ours = template::apply_patches_with_overrides(
                 base,
@@ -6432,7 +6520,7 @@ pub fn run_stream(
                 &patches,
                 &unmatched,
                 None,
-                baseline,
+                ipc_baseline,
                 Some(&content_ours),
                 norm_lines_opt,
                 None,
@@ -6527,7 +6615,7 @@ pub fn run_stream(
                 "file": canonical.to_string_lossy(),
                 "patches": ipc_patches,
                 "unmatched": effective_unmatched,
-                "baseline": baseline.unwrap_or(""),
+                "baseline": ipc_baseline.unwrap_or(""),
                 "reposition_boundary": true,
             });
             ipc_payload["patch_id"] = serde_json::Value::String(ipc_result.patch_id.clone());
@@ -6715,7 +6803,17 @@ pub fn run_stream(
     // Acquire advisory lock BEFORE reading document state.
     // Closing the window between content_at_start read and lock acquire
     // prevents concurrent agent-doc writes from drifting the baseline. (#08yv)
-    let base = baseline.unwrap_or(&content_at_start);
+    let base_cow = template_patch_application_base(TemplatePatchApplicationBase {
+        file,
+        baseline,
+        content_at_start: &content_at_start,
+        patches: &patches,
+        unmatched: &unmatched,
+        mode_overrides: &mode_overrides,
+        source: "run_stream_disk",
+        strict_closeout: flags.strict_closeout,
+    })?;
+    let base = base_cow.as_ref();
 
     // Apply patches using the mode resolution chain:
     // inline attr (patch=append on tag) > config.toml ([components] section) > built-in default.
@@ -7025,12 +7123,25 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
         .iter()
         .find(|p| p.name == "frontmatter")
         .map(|p| p.content.trim().to_string());
+    let mode_overrides = template_mode_overrides_for_current_doc(file, baseline, &content_at_start);
+    let base_cow = template_patch_application_base(TemplatePatchApplicationBase {
+        file,
+        baseline,
+        content_at_start: &content_at_start,
+        patches: &patches,
+        unmatched: &unmatched,
+        mode_overrides: &mode_overrides,
+        source: "run_ipc",
+        strict_closeout: flags.strict_closeout,
+    })?;
+    let base = base_cow.as_ref();
+    let ipc_baseline = baseline.map(|_| base);
 
     let mut ipc_payload = serde_json::json!({
         "file": canonical.to_string_lossy(),
         "patches": ipc_patches,
         "unmatched": effective_unmatched,
-        "baseline": baseline.unwrap_or(""),
+        "baseline": ipc_baseline.unwrap_or(""),
     });
     ipc_payload["patch_id"] = serde_json::Value::String(patch_id.clone());
     if let Ok(Some(ref cs)) = crate::cycle_state::load(file) {
@@ -7169,8 +7280,6 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     }
 
     // Fall back to stream write logic
-    let base = baseline.unwrap_or(&content_at_start);
-    let mode_overrides = template_mode_overrides_for_current_doc(file, baseline, &content_at_start);
     let mut content_ours =
         template::apply_patches_with_overrides(base, &patches, &unmatched, file, &mode_overrides)
             .context("failed to apply template patches")?;

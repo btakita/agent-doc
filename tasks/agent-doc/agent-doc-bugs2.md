@@ -88,7 +88,20 @@ Verification: `cargo test --test equityfundingsource_ipc_replay` passed; `make c
 Commits: `src/agent-doc` `b5ea38a2 test: add EFS IPC replay harness`; superproject `bf0a9ef34 agent-doc: add EFS IPC replay harness`.
 
 No follow-ups needed.
-<!-- agent:boundary:5ba02efa -->
+### Re: fullContent receiver guards — gpt-5
+
+Completed `#ipcdeny`.
+
+Added `tests/full_content_static_guard.rs`, a repo-wide static receiver guard for production CLI, JetBrains, and VS Code paths. It keeps `fullContent` references limited to parser DTOs, null/empty rejection branches, disabled-path diagnostics, and legacy source-buffer proof helpers; it also fails if `patch.fullContent` is reintroduced into visible whole-document write APIs or if first-party CLI payload emission comes back.
+
+Updated `specs/07-closeout-commands.md` to make that static receiver guard part of the full-content IPC closeout contract.
+
+Verification: `cargo test --test full_content_static_guard` passed; `make check` passed; `cargo install --path .` replaced the local `agent-doc`; latest available CI run `26499516608` passed, including `Run make check` and `Run make tmux-ci`.
+
+Commits: `src/agent-doc` `7a0cf7eb test: guard fullContent receiver paths`; superproject `a82e91e54 agent-doc: guard fullContent receiver paths`.
+
+No follow-ups needed.
+<!-- agent:boundary:0f562597 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -107,7 +120,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 preset #spec-test-build-install-commit-push
 - ~do [#ipcmodel]~
 - ~do [#ipcreplay]~
-- do [#ipcdeny]
+- ~do [#ipcdeny]~
 - do [#ipcfail]
 - do [#jbrunbusy]
 <!-- /agent:queue -->
@@ -115,7 +128,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#ipcdeny] Add repo-wide receiver/static guards for full-document mutation APIs across CLI, JetBrains, and VS Code, with allowlisted parser/diagnostic references only, so legacy or foreign `fullContent` payloads remain unrepresentable as visible writes.
 - [ ] [#ipcfail] Strengthen closeout diagnostics for insufficient IPC proof: surface the exact failed invariant and recovery path in preflight/session-check, and add tests for no ACK, missing response probe, duplicate prompt ACK, and live prompt drift.
 - [ ] [#jbrunbusy] Fix JB Run Agent Doc active-turn retry classification: dispatch-only `latest run still booting ... active codex turn` refusals should be typed as busy/running, coalesced or retryable in the JetBrains plugin, and covered by route + plugin regression tests using the equityfundingsource repro.
 <!-- /agent:backlog -->

@@ -293,6 +293,30 @@ impl HarnessConfig {
             return Some("help/usage screen detected".to_string());
         }
 
+        if self.binary == "opencode" {
+            let mut has_ready_prompt = false;
+            let mut has_non_idle_content = false;
+
+            for line in output.lines().map(crate::prompt::strip_ansi) {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                if self.is_dispatch_ready_prompt_line(trimmed) {
+                    has_ready_prompt = true;
+                    continue;
+                }
+                if !self.is_ignorable_output_line(trimmed) {
+                    has_non_idle_content = true;
+                }
+            }
+
+            if has_non_idle_content && !has_ready_prompt {
+                return Some("opencode active turn".to_string());
+            }
+            return None;
+        }
+
         if self.binary != "codex" {
             return None;
         }
@@ -1159,6 +1183,20 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
 ";
 
         assert!(!h.is_idle_chrome_only_output(output));
+    }
+
+    #[test]
+    fn dispatch_blocker_reason_detects_opencode_active_turn() {
+        let h = HarnessConfig::opencode();
+        let output = "\
+Working (21s - esc to interrupt)
+zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
+";
+
+        assert_eq!(
+            h.dispatch_blocker_reason(output).as_deref(),
+            Some("opencode active turn")
+        );
     }
 
     #[test]

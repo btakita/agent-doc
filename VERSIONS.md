@@ -6,6 +6,13 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **OpenCode dispatch-only reroutes now have dispatch-start proof.** Route
+  captures the OpenCode pane before submit, waits for the routed trigger to
+  leave the composer, and accepts proof only when the pane leaves idle chrome
+  within the OpenCode redraw budget. Proven OpenCode delivery now logs
+  `proof=pane_state_changed proof_scope=dispatch_start`; accepted-only
+  OpenCode delivery still fails closed.
+
 - **Finalize now consumes answered queue-synthetic prompts.** When an active
   `agent:queue auto` head is the only prompt diff, `finalize` can now consume
   it after the response is written if the captured `### Re:` heading targets

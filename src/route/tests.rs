@@ -1834,7 +1834,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
 
 #[test]
 fn codex_routed_dispatch_start_proof_accepts_any_newer_state_for_same_file() {
-    let tracker = RoutedDispatchStartTracker {
+    let tracker = RoutedDispatchStartTracker::CodexHook {
         trigger: "agent-doc /tmp/task.md".to_string(),
         previous_session_id: Some("codex-session".to_string()),
         previous_turn_id: Some("turn-1".to_string()),
@@ -1850,6 +1850,33 @@ fn codex_routed_dispatch_start_proof_accepts_any_newer_state_for_same_file() {
     assert_eq!(
         codex_routed_dispatch_start_proof(&tracker, &state),
         Some(RoutedDispatchStartProof::HookStateAdvanced)
+    );
+}
+
+#[test]
+fn opencode_pane_state_change_proof_requires_trigger_to_leave_composer() {
+    let harness = HarnessConfig::opencode();
+    let trigger = harness.trigger_command("tasks/bugs.md");
+    let before = ">\n";
+    let drafted = format!("> {trigger}\n");
+    assert!(
+        !opencode_pane_state_changed_from_idle(&harness, &trigger, before, &drafted),
+        "drafted trigger text is pane input, not dispatch-start proof"
+    );
+
+    let active = "\
+Working (2s - esc to interrupt)
+zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
+";
+    assert!(
+        opencode_pane_state_changed_from_idle(&harness, &trigger, before, active),
+        "OpenCode leaving idle chrome for active output should prove dispatch start"
+    );
+
+    let idle_status = "zai/glm-5 · ~/work/btakita/agent-loop · context 0% used\n";
+    assert!(
+        !opencode_pane_state_changed_from_idle(&harness, &trigger, before, idle_status),
+        "idle status chrome alone must not prove dispatch start"
     );
 }
 
@@ -2495,6 +2522,21 @@ fn dispatch_only_sent_log_marks_opencode_accepted_only_scope() {
 }
 
 #[test]
+fn dispatch_only_sent_log_marks_opencode_pane_state_dispatch_scope() {
+    let message = route_dispatch_only_sent_log_message(
+        Path::new("/tmp/monsterrodholders.md"),
+        "%13",
+        &HarnessConfig::opencode(),
+        DispatchOnlyReopenDelivery::DirectPaneSubmit,
+        RoutedDispatchStartProof::PaneStateChanged,
+    );
+
+    assert!(message.contains("harness=opencode"), "{message}");
+    assert!(message.contains("proof=pane_state_changed"), "{message}");
+    assert!(message.contains("proof_scope=dispatch_start"), "{message}");
+}
+
+#[test]
 fn dispatch_only_opencode_accepted_only_proof_is_not_successful_delivery() {
     let err = require_dispatch_only_dispatch_start_proof(
         Path::new("/tmp/monsterrodholders.md"),
@@ -2514,6 +2556,18 @@ fn dispatch_only_opencode_accepted_only_proof_is_not_successful_delivery() {
         message.contains("treating this as not dispatched"),
         "{message}"
     );
+}
+
+#[test]
+fn dispatch_only_opencode_pane_state_proof_is_successful_delivery() {
+    require_dispatch_only_dispatch_start_proof(
+        Path::new("/tmp/monsterrodholders.md"),
+        "%13",
+        &HarnessConfig::opencode(),
+        DispatchOnlyReopenDelivery::DirectPaneSubmit,
+        RoutedDispatchStartProof::PaneStateChanged,
+    )
+    .unwrap();
 }
 
 #[test]

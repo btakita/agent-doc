@@ -317,11 +317,18 @@ struct RouteQueueEnqueueOutcome {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct RoutedDispatchStartTracker {
-    trigger: String,
-    previous_session_id: Option<String>,
-    previous_turn_id: Option<String>,
-    previous_updated_at: Option<u64>,
+enum RoutedDispatchStartTracker {
+    CodexHook {
+        trigger: String,
+        previous_session_id: Option<String>,
+        previous_turn_id: Option<String>,
+        previous_updated_at: Option<u64>,
+    },
+    OpenCodePane {
+        pane: String,
+        trigger: String,
+        pre_dispatch_content: String,
+    },
 }
 
 fn route_latency_status(elapsed: Duration, budget: Duration) -> &'static str {
@@ -487,31 +494,63 @@ fn build_routed_dispatch_start_tracker(
     file: &Path,
     file_path: &str,
     harness: &HarnessConfig,
+    tmux: Option<&Tmux>,
+    pane: Option<&str>,
 ) -> Result<Option<RoutedDispatchStartTracker>> {
-    if harness.binary != "codex" || !codex_dispatch_start_tracking_enabled(file) {
-        return Ok(None);
+    match harness.binary.as_str() {
+        "codex" if codex_dispatch_start_tracking_enabled(file) => {
+            let latest = crate::codex_hook::load_latest_prompt_state_for_file(file)?;
+            Ok(Some(RoutedDispatchStartTracker::CodexHook {
+                trigger: harness.trigger_command(file_path),
+                previous_session_id: latest.as_ref().map(|state| state.session_id.clone()),
+                previous_turn_id: latest.as_ref().map(|state| state.last_turn_id.clone()),
+                previous_updated_at: latest.as_ref().map(|state| state.updated_at),
+            }))
+        }
+        "opencode" => {
+            let (Some(tmux), Some(pane)) = (tmux, pane) else {
+                return Ok(None);
+            };
+            let pre_dispatch_content = sessions::capture_pane(tmux, pane).with_context(|| {
+                format!(
+                    "failed to capture OpenCode pane {} before routed dispatch",
+                    pane
+                )
+            })?;
+            Ok(Some(RoutedDispatchStartTracker::OpenCodePane {
+                pane: pane.to_string(),
+                trigger: harness.trigger_command(file_path),
+                pre_dispatch_content,
+            }))
+        }
+        _ => Ok(None),
     }
-    let latest = crate::codex_hook::load_latest_prompt_state_for_file(file)?;
-    Ok(Some(RoutedDispatchStartTracker {
-        trigger: harness.trigger_command(file_path),
-        previous_session_id: latest.as_ref().map(|state| state.session_id.clone()),
-        previous_turn_id: latest.as_ref().map(|state| state.last_turn_id.clone()),
-        previous_updated_at: latest.as_ref().map(|state| state.updated_at),
-    }))
 }
 
-fn routed_dispatch_start_timeout() -> Duration {
-    crate::flow::routed_reopen::routed_dispatch_start_timeout(cfg!(test))
+fn routed_dispatch_start_timeout(harness: &HarnessConfig) -> Duration {
+    crate::flow::routed_reopen::routed_dispatch_start_timeout_for_binary(
+        Some(harness.binary.as_str()),
+        cfg!(test),
+    )
 }
 
 fn codex_state_advanced(
     tracker: &RoutedDispatchStartTracker,
     state: &crate::codex_hook::ActiveSessionState,
 ) -> bool {
+    let RoutedDispatchStartTracker::CodexHook {
+        previous_session_id,
+        previous_turn_id,
+        previous_updated_at,
+        ..
+    } = tracker
+    else {
+        return false;
+    };
     match (
-        tracker.previous_session_id.as_deref(),
-        tracker.previous_turn_id.as_deref(),
-        tracker.previous_updated_at,
+        previous_session_id.as_deref(),
+        previous_turn_id.as_deref(),
+        *previous_updated_at,
     ) {
         (None, None, None) => true,
         (previous_session_id, previous_turn_id, previous_updated_at) => {
@@ -526,30 +565,91 @@ fn codex_routed_dispatch_start_proof(
     tracker: &RoutedDispatchStartTracker,
     state: &crate::codex_hook::ActiveSessionState,
 ) -> Option<RoutedDispatchStartProof> {
+    let RoutedDispatchStartTracker::CodexHook { trigger, .. } = tracker else {
+        return None;
+    };
     if !codex_state_advanced(tracker, state) {
         return None;
     }
 
-    if state.last_prompt.trim() == tracker.trigger.trim() {
+    if state.last_prompt.trim() == trigger.trim() {
         Some(RoutedDispatchStartProof::HookPromptMatched)
     } else {
         Some(RoutedDispatchStartProof::HookStateAdvanced)
     }
 }
 
+fn opencode_pane_state_changed_from_idle(
+    harness: &HarnessConfig,
+    trigger: &str,
+    pre_dispatch_content: &str,
+    current_content: &str,
+) -> bool {
+    if current_content == pre_dispatch_content
+        || recent_lines_contain_trigger(current_content, trigger)
+    {
+        return false;
+    }
+    if ready_prompt_candidate(current_content, harness).is_some()
+        || harness.is_idle_chrome_only_output(current_content)
+    {
+        return false;
+    }
+    harness.has_busy_cue(current_content)
+        || current_content
+            .lines()
+            .map(crate::prompt::strip_ansi)
+            .any(|line| {
+                let trimmed = line.trim();
+                !trimmed.is_empty()
+                    && !harness.is_ignorable_output_line(trimmed)
+                    && !harness.is_dispatch_ready_prompt_line(trimmed)
+            })
+}
+
 fn wait_for_routed_dispatch_start(
+    tmux: &Tmux,
     file: &Path,
     tracker: &RoutedDispatchStartTracker,
+    harness: &HarnessConfig,
     timeout: Duration,
 ) -> Result<Option<RoutedDispatchStartProof>> {
     let start = std::time::Instant::now();
-    let poll = Duration::from_millis(200);
+    let poll = if matches!(tracker, RoutedDispatchStartTracker::OpenCodePane { .. }) {
+        Duration::from_millis(500)
+    } else {
+        Duration::from_millis(200)
+    };
 
     while start.elapsed() < timeout {
-        if let Some(state) = crate::codex_hook::load_latest_prompt_state_for_file(file)?
-            && let Some(proof) = codex_routed_dispatch_start_proof(tracker, &state)
-        {
-            return Ok(Some(proof));
+        match tracker {
+            RoutedDispatchStartTracker::CodexHook { .. } => {
+                if let Some(state) = crate::codex_hook::load_latest_prompt_state_for_file(file)?
+                    && let Some(proof) = codex_routed_dispatch_start_proof(tracker, &state)
+                {
+                    return Ok(Some(proof));
+                }
+            }
+            RoutedDispatchStartTracker::OpenCodePane {
+                pane,
+                trigger,
+                pre_dispatch_content,
+            } => {
+                let content = sessions::capture_pane(tmux, pane).with_context(|| {
+                    format!(
+                        "failed to capture OpenCode pane {} while awaiting routed dispatch proof",
+                        pane
+                    )
+                })?;
+                if opencode_pane_state_changed_from_idle(
+                    harness,
+                    trigger,
+                    pre_dispatch_content,
+                    &content,
+                ) {
+                    return Ok(Some(RoutedDispatchStartProof::PaneStateChanged));
+                }
+            }
         }
         std::thread::sleep(poll);
     }
@@ -2282,7 +2382,7 @@ fn require_dispatch_only_dispatch_start_proof(
         return Ok(());
     }
 
-    let timeout = routed_dispatch_start_timeout().as_secs();
+    let timeout = routed_dispatch_start_timeout(harness).as_secs();
     let file_display = file.display().to_string();
     let facts = DispatchOnlyProofOutcomeFacts {
         file_display: file_display.as_str(),
@@ -2314,7 +2414,7 @@ fn route_dispatch_only_sent_log_message(
         harness_binary: harness.binary.as_str(),
         delivery,
         dispatch_start,
-        timeout_secs: routed_dispatch_start_timeout().as_secs(),
+        timeout_secs: routed_dispatch_start_timeout(harness).as_secs(),
     })
 }
 
@@ -2332,7 +2432,7 @@ fn route_dispatch_only_sent_console_message(
         harness_binary: harness.binary.as_str(),
         delivery,
         dispatch_start,
-        timeout_secs: routed_dispatch_start_timeout().as_secs(),
+        timeout_secs: routed_dispatch_start_timeout(harness).as_secs(),
     })
 }
 
@@ -5378,7 +5478,8 @@ fn dispatch_via_supervisor_ipc_with_mode(
         eprintln!("[route] warning: display-message failed: {}", e);
     }
 
-    let tracker = build_routed_dispatch_start_tracker(file, file_path, harness)?;
+    let tracker =
+        build_routed_dispatch_start_tracker(file, file_path, harness, Some(tmux), Some(pane))?;
     let method = IpcMethod::Inject {
         bytes: routed_trigger_submit_payload(&payload),
     };
@@ -5435,9 +5536,9 @@ fn dispatch_via_supervisor_ipc_with_mode(
         return Ok(RoutedDispatchStartProof::CommandAcceptedOnly);
     };
 
-    let timeout = routed_dispatch_start_timeout();
+    let timeout = routed_dispatch_start_timeout(harness);
     let proof_start = Instant::now();
-    if let Some(proof) = wait_for_routed_dispatch_start(file, &tracker, timeout)? {
+    if let Some(proof) = wait_for_routed_dispatch_start(tmux, file, &tracker, harness, timeout)? {
         log_route_latency(
             file,
             "dispatch_start_proof",
@@ -5777,7 +5878,8 @@ fn dispatch_routed_reopen_with_mode(
     harness: &HarnessConfig,
     print_unproven_progress: bool,
 ) -> Result<RoutedDispatchStartProof> {
-    let tracker = build_routed_dispatch_start_tracker(file, file_path, harness)?;
+    let tracker =
+        build_routed_dispatch_start_tracker(file, file_path, harness, Some(tmux), Some(pane))?;
     let submit_result = send_command_checked(tmux, pane, file_path, harness)?;
     let Some(tracker) = tracker else {
         log_route_latency(
@@ -5792,9 +5894,9 @@ fn dispatch_routed_reopen_with_mode(
         return Ok(RoutedDispatchStartProof::CommandAcceptedOnly);
     };
 
-    let timeout = routed_dispatch_start_timeout();
+    let timeout = routed_dispatch_start_timeout(harness);
     let proof_start = Instant::now();
-    if let Some(proof) = wait_for_routed_dispatch_start(file, &tracker, timeout)? {
+    if let Some(proof) = wait_for_routed_dispatch_start(tmux, file, &tracker, harness, timeout)? {
         log_route_latency(
             file,
             "direct_pane_submit",

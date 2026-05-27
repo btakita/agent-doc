@@ -20,8 +20,21 @@ pub(crate) fn direct_pane_submit_acceptance_budget() -> Duration {
 }
 
 pub(crate) fn routed_dispatch_start_timeout(test_mode: bool) -> Duration {
+    routed_dispatch_start_timeout_for_binary(None, test_mode)
+}
+
+pub(crate) fn routed_dispatch_start_timeout_for_binary(
+    binary: Option<&str>,
+    test_mode: bool,
+) -> Duration {
     if test_mode {
-        Duration::from_secs(1)
+        if matches!(binary, Some("opencode")) {
+            Duration::from_secs(2)
+        } else {
+            Duration::from_secs(1)
+        }
+    } else if matches!(binary, Some("opencode")) {
+        Duration::from_secs(15)
     } else {
         Duration::from_secs(10)
     }
@@ -211,6 +224,7 @@ pub(crate) enum RoutedDispatchStartProof {
     CommandAcceptedOnly,
     HookPromptMatched,
     HookStateAdvanced,
+    PaneStateChanged,
 }
 
 impl RoutedDispatchStartProof {
@@ -219,13 +233,16 @@ impl RoutedDispatchStartProof {
             Self::CommandAcceptedOnly => "accepted",
             Self::HookPromptMatched => "consumed",
             Self::HookStateAdvanced => "submitted",
+            Self::PaneStateChanged => "pane_state_changed",
         }
     }
 
     pub(crate) const fn proof_scope_label(self) -> &'static str {
         match self {
             Self::CommandAcceptedOnly => "accepted_only",
-            Self::HookPromptMatched | Self::HookStateAdvanced => "dispatch_start",
+            Self::HookPromptMatched | Self::HookStateAdvanced | Self::PaneStateChanged => {
+                "dispatch_start"
+            }
         }
     }
 
@@ -236,6 +253,7 @@ impl RoutedDispatchStartProof {
             }
             Self::HookPromptMatched => "dispatch-start proof matched the routed prompt",
             Self::HookStateAdvanced => "dispatch-start proof observed newer harness prompt state",
+            Self::PaneStateChanged => "dispatch-start proof observed pane state leave idle chrome",
         }
     }
 
@@ -244,6 +262,7 @@ impl RoutedDispatchStartProof {
             Self::CommandAcceptedOnly => "acceptance",
             Self::HookPromptMatched => "consumption",
             Self::HookStateAdvanced => "submission",
+            Self::PaneStateChanged => "pane-state-change",
         }
     }
 
@@ -251,7 +270,7 @@ impl RoutedDispatchStartProof {
         match self {
             Self::CommandAcceptedOnly => DispatchProof::AcceptedOnly,
             Self::HookPromptMatched => DispatchProof::Consumed,
-            Self::HookStateAdvanced => DispatchProof::DispatchStarted,
+            Self::HookStateAdvanced | Self::PaneStateChanged => DispatchProof::DispatchStarted,
         }
     }
 }
@@ -1140,6 +1159,10 @@ mod tests {
             decide_dispatch_start_proof(RoutedDispatchStartProof::HookPromptMatched, true),
             DispatchStartProofDecision::Accepted
         );
+        assert_eq!(
+            decide_dispatch_start_proof(RoutedDispatchStartProof::PaneStateChanged, true),
+            DispatchStartProofDecision::Accepted
+        );
         let classification = classify_dispatch_start_proof(DispatchStartProofFacts {
             proof: RoutedDispatchStartProof::HookStateAdvanced,
             dispatch_start_proof_required: true,
@@ -1164,9 +1187,25 @@ mod tests {
         assert_eq!(
             direct_pane_submit_outcome(
                 DirectPaneSubmitStatus::TimedOut,
-                Some(RoutedDispatchStartProof::HookStateAdvanced),
+                Some(RoutedDispatchStartProof::PaneStateChanged),
             ),
             "acceptance_unobserved_dispatch_proven"
+        );
+    }
+
+    #[test]
+    fn routed_dispatch_start_timeout_uses_opencode_redraw_budget() {
+        assert_eq!(
+            routed_dispatch_start_timeout_for_binary(Some("opencode"), false),
+            Duration::from_secs(15)
+        );
+        assert_eq!(
+            routed_dispatch_start_timeout_for_binary(Some("codex"), false),
+            Duration::from_secs(10)
+        );
+        assert_eq!(
+            routed_dispatch_start_timeout_for_binary(Some("opencode"), true),
+            Duration::from_secs(2)
         );
     }
 

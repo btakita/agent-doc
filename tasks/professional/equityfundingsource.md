@@ -22,7 +22,7 @@ queue_active: false
 ## Status
 
 <!-- agent:status patch=replace -->
-EFS workers.dev production: `/apply` public prequalification + D1-backed `application_leads` admin review is deployed in Worker version `2d3c78fa-cbaf-4614-b726-9dfac7e85397`; local `bun dev` on port 4200 now mounts `/apply`; public site/footer email is `info@equityfundingsource.com`; logged-out navigation now exposes a separate Borrower Login action alongside Apply for a Loan. Cloudflare Access protects /login/access-callback with ACCESS_TEAM_DOMAIN/AUD. Application lead notifications still route through Resend testing-mode config `APPLICATION_LEAD_NOTIFICATION_TO=brian.takita@gmail.com` and `APPLICATION_LEAD_NOTIFICATION_FROM=Equity Funding Source <onboarding@resend.dev>` until an EFS-owned sending domain is verified. Custom-domain cutover is deferred; continue using https://equityfundingsource.brian-takita.workers.dev until further notice.
+EFS workers.dev production: `/apply` public prequalification + D1-backed `application_leads` admin review is deployed in Worker version `0988ee2c-fac5-4e60-a39c-4107791ce895` as of 2026-05-27; local `bun dev` on port 4200 mounts `/apply`; public site/footer email is `info@equityfundingsource.com`; logged-out navigation exposes a separate Borrower Login action alongside Apply for a Loan. Cloudflare Access protects /login/access-callback with ACCESS_TEAM_DOMAIN/AUD. Application lead notifications still route through Resend testing-mode config `APPLICATION_LEAD_NOTIFICATION_TO=brian.takita@gmail.com` and `APPLICATION_LEAD_NOTIFICATION_FROM=Equity Funding Source <onboarding@resend.dev>` until an EFS-owned sending domain is verified. Custom-domain cutover is deferred; continue using https://equityfundingsource.brian-takita.workers.dev until further notice.
 <!-- /agent:status -->
 
 ## Exchange
@@ -35,10 +35,26 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 Compacted content:
 - Archived 1 response topic(s): Mobile menu desktop bleed
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:1662cab8 -->
+❯ deploy
+### Re: deploy — gpt-5
+
+Deployed the current EFS Worker to workers.dev.
+
+Proof:
+- Changed paths: none by me; the pre-existing dirty EFS submodule state remains (`AGENTS.md`, `tmp/`), and broader workspace dirt was left untouched.
+- Commands: `make check`, `make deploy`, live `curl` smoke checks for `/` and `/apply`.
+- Verification: `make check` passed with 191 tests plus app build and worker build. Cloudflare deployed `equityfundingsource` version `0988ee2c-fac5-4e60-a39c-4107791ce895` at `https://equityfundingsource.brian-takita.workers.dev`; both `/` and `/apply` returned HTTP 200.
+- CI/tmux: no workflow named `CI` exists here. The latest root `Agent Doc` run `26501652559` is red, but both `tmux-ci` and `check` jobs had empty `steps`, and `gh run view --log-failed` reported `log not found`, so I’m treating that as an external CI-start/log blocker rather than a code failure.
+- Escalation: none.
+<!-- agent:boundary:a92fdc43 -->
 <!-- /agent:exchange -->
 ###
 <!--
+From judith-krug
+> Plus hold up on any more work till we meet for the demo and discuss. We are trying to get access to TMO back now. We got locked out by mistake.
+
+Please break down the features and how we can implement the features to replace TMO in a better, more integrated, easier to use, and resellable way?
+---
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 

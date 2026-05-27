@@ -169,8 +169,8 @@ Commits pushed:
 
 ### Re: closeout repair — gpt-5
 
-No new repo work in this repair pass. The OpenCode/backend-proof response above was already written and committed; this entry only closes the interrupted `session-check` cycle through the binary-owned write/commit path.
-<!-- agent:boundary:5dcfef5e -->
+No new repo work in this repair pass. This disk write closes the prior IPC-interrupted closeout state for the already-recorded OpenCode/backend-proof work.
+<!-- agent:boundary:ef111823 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -113,4 +113,24 @@ describe('patchGuard', () => {
         assert.strictEqual(fullContentProofIdx, -1);
         assert.ok(componentProofIdx >= 0 && componentProofIdx < componentEditIdx);
     });
+
+    it('keeps cycle 1779845677327 full-content fixture off visible write paths', () => {
+        const cycleFixture = {
+            file: '/repo/tasks/agent-doc/agent-doc-bugs2.md',
+            patch_id: 'cycle-1779845677327',
+            patches: [],
+            fullContent: `<!-- agent:exchange -->\n❯ do [#liveipcrace]\n<!-- /agent:exchange -->\n\n###\n\n<!--\nThe duplicate content corrupting document and duplicate prompt issues happened yet again.\n#spec-test-build-install-commit-push\n---\ndispatch #spec-test-build-install-commit-push\n-->\n`,
+        };
+        const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
+        const fileFullContentGuardIdx = source.indexOf("if ((patch.fullContent ?? '') !== '')");
+        const fileApplyIdx = source.indexOf('const applied = await this.applyPatch(patch, uri.fsPath)');
+        const socketFullContentGuardIdx = source.indexOf("if (patch.fullContent != null && patch.fullContent !== '')");
+        const componentEditIdx = source.indexOf('edit.replace(fileUri, fullRange, content)');
+
+        assert.ok(cycleFixture.fullContent.includes('#spec-test-build-install-commit-push'));
+        assert.ok(cycleFixture.fullContent.includes('dispatch #spec-test-build-install-commit-push'));
+        assert.ok(fileFullContentGuardIdx >= 0 && fileFullContentGuardIdx < fileApplyIdx);
+        assert.ok(socketFullContentGuardIdx >= 0 && socketFullContentGuardIdx < componentEditIdx);
+        assert.strictEqual(source.indexOf('fullRange, patch.fullContent'), -1);
+    });
 });

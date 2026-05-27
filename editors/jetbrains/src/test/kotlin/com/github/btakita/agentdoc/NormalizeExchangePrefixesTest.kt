@@ -236,6 +236,38 @@ One.
     }
 
     @Test
+    fun `cycle 1779845677327 full content fixture is rejected before visible writes`() {
+        val json = """
+            {
+              "file": "/repo/tasks/agent-doc/agent-doc-bugs2.md",
+              "patches": [],
+              "unmatched": "",
+              "patch_id": "cycle-1779845677327",
+              "fullContent": "<!-- agent:exchange -->\n❯ do [#liveipcrace]\n<!-- /agent:exchange -->\n\n###\n\n<!--\nThe duplicate content corrupting document and duplicate prompt issues happened yet again.\n#spec-test-build-install-commit-push\n---\ndispatch #spec-test-build-install-commit-push\n-->\n"
+            }
+        """.trimIndent()
+        val patch = requireNotNull(parsePatchJson(json))
+        val sourcePath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
+        ).first { Files.exists(it) }
+        val source = Files.readString(sourcePath)
+        val socketFullContentGuard = source.indexOf("if (!patch.fullContent.isNullOrEmpty())")
+        val socketTypingGuard = source.indexOf("awaitIdleBeforeDocumentMutation(patch.file, \"socket patch\")")
+        val fileFullContentGuard = source.indexOf("[patch-watcher] full-content IPC is disabled; deleting stale/foreign patch file")
+        val fileTypingGuard = source.indexOf("awaitIdleBeforeDocumentMutation(patch.file, \"file patch\")")
+        val fullContent = requireNotNull(patch.fullContent)
+
+        assertEquals("cycle-1779845677327", patch.patchId)
+        assertTrue(fullContent.contains("#spec-test-build-install-commit-push"))
+        assertTrue(fullContent.contains("dispatch #spec-test-build-install-commit-push"))
+        assertTrue(socketFullContentGuard >= 0 && socketFullContentGuard < socketTypingGuard)
+        assertTrue(fileFullContentGuard >= 0 && fileFullContentGuard < fileTypingGuard)
+        assertFalse(source.contains("document.setText(patch.fullContent)"))
+        assertFalse(source.contains("setBinaryContent(patch.fullContent"))
+    }
+
+    @Test
     fun `plugin defers file cache conflict writes before mutating document`() {
         val sourcePath = listOf(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),

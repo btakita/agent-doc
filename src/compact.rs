@@ -1714,6 +1714,93 @@ mod tests {
     }
 
     #[test]
+    fn component_compact_rejects_cycle_1779845677327_scratch_directive_race() {
+        let scratch_prompt = "The duplicate content corrupting document and duplicate prompt issues happened yet again. Reproduce bugs with tests first that fail and fix the implementation.";
+        let scratch_directive = "#spec-test-build-install-commit-push";
+        let scratch_dispatch = "dispatch #spec-test-build-install-commit-push";
+        let doc = concat!(
+            "---\nagent_doc_session: cycle-1779845677327\nagent_doc_format: template\n",
+            "prompt_presets:\n",
+            "  '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: topic one\n\nResponse one.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "###\n\n",
+            "<!--\n",
+            "-->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "dispatch #spec-test-build-install-commit-push\n",
+            "- do [#liveipcrace]\n",
+            "<!-- /agent:queue -->\n"
+        );
+        let live_scratch =
+            format!("<!--\n{scratch_prompt}\n{scratch_directive}\n---\n{scratch_dispatch}\n-->");
+        let live = doc.replace("<!--\n-->", &live_scratch);
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.md");
+        std::fs::write(&file, &live).unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        let patches_dir = agent_doc_dir.join("patches");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        std::fs::create_dir_all(&patches_dir).unwrap();
+        snapshot::save(&file, doc).unwrap();
+
+        let err = run_component_compact(&file, doc, "exchange", Some("Compacted summary."), false)
+            .unwrap_err();
+
+        assert!(
+            err.to_string().contains("document changed after"),
+            "compact fallback should fail with visible-current CAS error: {err}"
+        );
+        let file_after = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(
+            file_after, live,
+            "compact fallback must not overwrite cycle-1779845677327 scratch directives"
+        );
+        assert_eq!(
+            file_after.matches(scratch_prompt).count(),
+            1,
+            "scratch prompt text must not be duplicated or deleted:\n{file_after}"
+        );
+        assert_eq!(
+            file_after.matches(&live_scratch).count(),
+            1,
+            "prompt preset and dispatch directives in the scratch comment must remain intact:\n{file_after}"
+        );
+        assert_eq!(
+            snapshot::load(&file).unwrap().unwrap(),
+            doc,
+            "failed compact fallback must not advance the snapshot to the shorter or live buffer"
+        );
+        let patch_count = std::fs::read_dir(&patches_dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry.path().extension().and_then(|value| value.to_str()) == Some("json")
+            })
+            .count();
+        assert_eq!(
+            patch_count, 0,
+            "compact race handling must not emit file IPC or fullContent payloads"
+        );
+        let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("visible_write_deferred_current_changed")
+                && ops_log.contains("source=compact_exchange_direct_write"),
+            "compact CAS rejection should be logged:\n{ops_log}"
+        );
+        assert!(
+            !ops_log.contains("snapshot_absorb"),
+            "compact race handling must not silently absorb a shorter disk snapshot:\n{ops_log}"
+        );
+    }
+
+    #[test]
     fn exchange_compact_default_summary_includes_archived_content_digest() {
         let doc = concat!(
             "---\nagent_doc_session: test-summary\nagent_doc_format: template\n---\n\n",

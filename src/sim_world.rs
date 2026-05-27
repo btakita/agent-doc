@@ -2579,6 +2579,79 @@ fn finalize_with_typing_in_post_exchange_comment_and_already_applied_ack_does_no
 }
 
 #[test]
+fn cycle_1779845677327_scratch_directives_survive_already_applied_ipc_race() {
+    let prompt = "The duplicate content corrupting document and duplicate prompt issues happened yet again. Reproduce bugs with tests first that fail and fix the implementation.";
+    let scratch_directive = "#spec-test-build-install-commit-push";
+    let scratch_dispatch = "dispatch #spec-test-build-install-commit-push";
+    let scratch_comment =
+        format!("\n###\n\n<!--\n{prompt}\n{scratch_directive}\n---\n{scratch_dispatch}\n-->\n");
+    let file = Path::new("cycle-1779845677327.md");
+    let mut world = SimWorld::new(1_779_845_677_327);
+    world
+        .append_to_exchange(&format!("❯ do [#liveipcrace]\n❯ {scratch_directive}\n"))
+        .unwrap();
+    world.insert_after_exchange(&scratch_comment).unwrap();
+    world.snapshot = world.doc.clone();
+
+    let response_block = "\n### Re: cycle 1779845677327 IPC race — gpt-5\n\nImplemented.\n";
+    world
+        .append_to_exchange(response_block)
+        .expect("plugin already inserted the response patch into the live buffer");
+    let live_after_plugin_apply = world.doc.clone();
+
+    let already_applied_ack = r#"{"type":"ack","status":"error","reason":"already_applied"}"#;
+    assert_eq!(
+        crate::ipc_socket::classify_ack(already_applied_ack),
+        crate::ipc_socket::AckClassification::AlreadyApplied,
+        "editor plugins must use already_applied so the binary skips file IPC fallback"
+    );
+
+    assert_eq!(
+        world
+            .doc
+            .matches("### Re: cycle 1779845677327 IPC race — gpt-5")
+            .count(),
+        1,
+        "already_applied must leave one response heading"
+    );
+    assert_eq!(
+        world.doc.matches(prompt).count(),
+        1,
+        "scratch prompt text should remain visible exactly once"
+    );
+    assert!(
+        world.doc.contains(&scratch_comment),
+        "scratch prompt preset and dispatch directives must remain inside the ordinary comment:\n{}",
+        world.doc
+    );
+
+    let mut counterfactual = world.doc.clone();
+    counterfactual.push_str(response_block);
+    let (deduped, changed) = crate::write::dedupe_ipc_snapshot_content(
+        file,
+        Some(&live_after_plugin_apply),
+        &counterfactual,
+        "cycle_1779845677327_counterfactual",
+    )
+    .unwrap();
+    assert!(
+        changed,
+        "dedupe recovery must collapse the counterfactual duplicate response"
+    );
+    assert_eq!(
+        deduped
+            .matches("### Re: cycle 1779845677327 IPC race — gpt-5")
+            .count(),
+        1,
+        "dedupe recovery must collapse the duplicated response heading down to one"
+    );
+    assert!(
+        deduped.contains(&scratch_comment),
+        "dedupe recovery must not discard prompt preset/directive text in the scratch comment:\n{deduped}"
+    );
+}
+
+#[test]
 fn ipc_snapshot_guard_blocks_live_queue_drift_after_preflight() {
     let mut world = SimWorld::new(2_022);
     world

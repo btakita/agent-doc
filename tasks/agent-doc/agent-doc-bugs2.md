@@ -29,46 +29,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260527-190146.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260527-200623.md`*
 
 Compacted content:
-- Archived 12 response topic(s): #0ep7; Run Agent Doc busy actor block; active turn lifecycle; 9 more
+- Archived 3 response topic(s): JB Run Agent Doc and #rhdr-blank; src/agent-doc uncommitted files; closeout drift recovery
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-JB `Run Agent Doc` does not complete the agent-doc <file-name> run.
-#spec-test-build-install-commit-push
-### Re: JB Run Agent Doc and #rhdr-blank — gpt-5
-
-Implemented both requested fixes.
-
-- JetBrains `Run Agent Doc` now detects the busy-actor queued route outcome and shows a visible queued/still-running notification instead of silently completing. Submodule commit `d0a83540` is pushed on `20260422/codex-agent-backend`; the parent gitlink commit for that fix is `e930038c1`.
-- `#rhdr-blank` is fixed in the shared `agent:exchange` append path. Boundary replacement and fallback append now insert a blank line before a new `### Re:` heading when prior exchange content is non-empty, and the prompt-diff classifier now treats a following `### Re: ... (HEAD)` boundary artifact as an answering response so closeout guards stay consistent. Submodule commit `4d658120` is pushed on `20260422/codex-agent-backend`; parent gitlink commit `4407b8bd9` is ready for the post-closeout push.
-- I repaired the malformed auto-queue body through `agent-doc patch` before this finalize: the older JB prompt is preserved as completed queue residue and this `#rhdr-blank` item is being closed with `--done rhdr-blank`.
-
-Verification: `cargo test exchange_`; `cargo test blank_heading_gap`; `cargo test sim_world::jb_cache_conflict`; `cargo test jetbrains_clear_session_sim_keeps_starting_route_guard_and_repairs_prompt_duplicate`; `cargo test post_commit_follow_up_sim_keeps_prompt_out_of_snapshot`; `make check`; `cargo build`; `cargo install --path .`; `agent-doc --version`; latest GitHub Actions CI run `26532894161` succeeded, including `Run make check` and `Run make tmux-ci`.
-
-Local install: `/home/brian/.cargo/bin/agent-doc` now points at the updated `0.34.0` build. The JetBrains plugin was also built and installed earlier into IntelliJ IDEA 2026.1 for the queued-reroute fix; IntelliJ needs a restart to load that plugin update.
-❯ commit + push uncommitted files in src/agent-doc
-### Re: src/agent-doc uncommitted files — gpt-5
-
-Committed and pushed the remaining `src/agent-doc` change.
-
-- Changed path: `src/agent-doc/src/start.rs`.
-- Submodule commit: `419fb85216dd` (`fix: detect opencode permission highlight fallback`) pushed to `origin/20260422/codex-agent-backend`.
-- Parent gitlink commit: `ddcd09d63b7b` (`agent-doc: update opencode permission fallback`) created locally; the parent push happens after this session closeout per the session-document staging rule.
-- Verification: `cargo test opencode_permission_prompt_fallback`; `make check`; GitHub Actions CI run `26534636393` succeeded for `419fb85216dd`, including `Run make check` and `Run make tmux-ci`.
-
-The preflight warning about the post-exchange HTML comment remains non-executable note text; I did not move or execute it.
-
-### Re: closeout drift recovery — gpt-5
-
-Recovered the binary-owned closeout after the live-buffer drift: the remaining session-document queue cleanup and boundary marker changes are now part of this response cycle. No additional repo implementation work was requested by that drift.
-
-- Changed path for this recovery: `tasks/agent-doc/agent-doc-bugs2.md`.
-- Commands: `agent-doc preflight`; `agent-doc plan`; `agent-doc finalize --force-disk`.
-- Verification: this finalize path runs post-commit `session-check`.
-- Confidence: high.
-- Escalation: none.
-<!-- agent:boundary:1434bda1 -->
+<!-- agent:boundary:cdc253e5 -->
 <!-- /agent:exchange -->
 ###
 <!--

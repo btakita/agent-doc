@@ -19,6 +19,17 @@
 - **Actionable over informational.** Instruction files contain the minimum needed to generate correct code. Reference material belongs in `README.md`.
 - **Update with the code.** When a change affects patterns, conventions, or module boundaries, update instruction files as part of the same change.
 
+## Documentation maintenance
+
+- Generated diagrams, architecture notes, and workflow references belong under
+  `docs/`, not in session documents only.
+- Update affected docs in the same change when implementation, workflow, or
+  architecture behavior changes.
+- When adding, renaming, or removing docs pages, update `docs/README.md` and
+  `docs/SUMMARY.md` in the same change.
+- Keep specs normative. Reference docs may explain behavior and failure modes,
+  but must point back to specs or source when behavior is enforced there.
+
 ## Version management
 
 - Never bump versions automatically — the user will bump versions explicitly.

@@ -28,6 +28,7 @@
 
 - [Specification](reference/specs.md)
 - [Flow Map](reference/flow-map.md)
+- [Active Turn Lifecycle And Replay Paths](reference/active-turn-lifecycle-and-replay.md)
 - [IPC](reference/ipc.md)
 - [Full-Document IPC Corruption Chain](reference/full-document-ipc-corruption-chain.md)
 - [Prompt Duplicate Closeout Repair](reference/prompt-duplicate-closeout-repair.md)

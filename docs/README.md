@@ -35,6 +35,9 @@ material.
   specification.
 - [Flow Map](reference/flow-map.md) - FlowCore ownership map and typed event
   migration plan.
+- [Active Turn Lifecycle And Replay Paths](reference/active-turn-lifecycle-and-replay.md)
+  - generated diagrams for active turns, route readiness, prompt ownership,
+  stale cache/conflict replay, and late fallback replay.
 - [IPC](reference/ipc.md) - editor IPC architecture and fallback behavior.
 - [Full-Document IPC Corruption Chain](reference/full-document-ipc-corruption-chain.md)
   - separate Mermaid logic chain for repeated full-document IPC corruption and

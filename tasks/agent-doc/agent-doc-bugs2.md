@@ -54,7 +54,42 @@ Proof:
 - Commands reviewed: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `tail .agent-doc/logs/ops.log`, capture `jq`, compact archive inspection, `git show`, targeted `rg` across agent-doc/Codex/Claude artifacts.
 - Verification: no code changed, so I did not run the full suite.
 - Confidence: medium-high on the next-step ordering; medium on root cause until `liveipcrace` reproduces the live corruption in a failing test.
-<!-- agent:boundary:293afa9e -->
+❯ As I was writing into the agent:queue, the full-document IPC corruption issue occurred. #spec-test-build-install-commit-push
+### Re: live queue IPC corruption — gpt-5
+
+Implemented the live `agent:queue` IPC regression fix and committed the scoped `src/agent-doc` changes.
+
+Changed paths:
+- `src/agent-doc/specs/07-closeout-commands.md`
+- `src/agent-doc/src/session_check.rs`
+- `src/agent-doc/src/sim_world.rs`
+- `src/agent-doc/tests/live_ipc_race_integration.rs`
+
+What changed:
+- Added a file-IPC integration test for a prompt typed into `agent:queue` after preflight while finalize is writing the assistant response. The test asserts no `fullContent`, no duplicated response heading, queue prompt remains visible exactly once in the working tree, HEAD/snapshot do not absorb it, and the ops log records `ipc_snapshot_adoption_blocked reason=live_prompt_drift_after_preflight` without `snapshot_absorb`.
+- Added deterministic SimWorld coverage for the same queue-drift snapshot guard.
+- Updated `session-check` so committed sessions do not treat live `agent:queue` prompts as unresolved current-cycle prompts; exchange prompt diffs still fail closed.
+- Updated the closeout spec to state that tracked component edits outside `agent:exchange`, including live `agent:queue` prompts, must remain next-cycle drift and must not later be absorbed as status/backlog/queue drift.
+
+Commands and verification:
+- `cargo fmt --check` passed.
+- `cargo test --test live_ipc_race_integration finalize_file_ipc_preserves_live_queue_drift_without_snapshot_absorb -- --nocapture` passed.
+- `cargo test ipc_snapshot_guard_blocks_live_queue_drift_after_preflight -- --nocapture` passed.
+- `cargo test session_check_allows_committed_state_with_live_queue_prompt_diff -- --nocapture` passed.
+- `cargo test session_check_interrupts_when_committed_state_has_new_prompt_diff -- --nocapture` passed.
+- `make check` passed.
+- `cargo install --path .` passed and replaced `/home/brian/.cargo/bin/agent-doc` with the local `0.34.0` build.
+- CI/tmux review: latest `CI` run `26479127334` on `20260422/codex-agent-backend` was successful; its `Run make tmux-ci` step was successful.
+
+Commit:
+- `src/agent-doc`: `42c92c93` `fix: preserve live queue ipc drift`
+
+Push:
+- Deferred until after this binary-owned session document closeout, per the session-document commit-boundary rule. I will push `42c92c93` to `origin/20260422/codex-agent-backend` immediately after finalize succeeds.
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:2be54aa3 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -47,9 +47,13 @@ All 6 review items are gated `[/]`. Here's the concrete path to closing them:
 
 2. **#gopencode** — Code is complete: installer, marker ownership, fail-closed conflict handling, README docs, CI verification, Node.js plugin. Same local e2e verification as above closes this.
 
+❯ Completed items should be marked as done in review. #agent-doc-bug 
+
 **Blocked on npm auth (operational, not code):**
 
 3. **#npm-publish** — Package is structurally ready (`npm run publish:check` dry-run passes in CI). Blocker: configure `NPM_TOKEN` as a GitHub repo secret and set `TSIFT_ENABLE_NPM_PUBLISH=true` as a repo variable. Then tag a release to trigger the `publish-opencode-plugin` CI job.
+
+❯ done
 
 4. **#e2e-install** — Two paths:
    - *Local path (available now):* `tsift init --opencode` in a fresh opencode project, verify `/tsift-status` works. This doesn't need npm.
@@ -58,7 +62,6 @@ All 6 review items are gated `[/]`. Here's the concrete path to closing them:
 **Duplicate items** — `#e2e-install` and `#npm-publish` each appear twice in review. Recommend dedup on next edit.
 
 Top of backlog: **#local-e2e-verify**
-
 ### Re: completed items should be marked as done in review + done — glm-5.1
 
 **#agent-doc-bug — Plans created:**
@@ -69,16 +72,14 @@ Plan 2: `tasks/agent-doc/plan-inline-done-signal.md` — No mechanism maps inlin
 
 Added to `agent-doc-bugs2.md` backlog:
 
-- [ ] [#review-auto-done] Completed review items not auto-marked done — plan: tasks/agent-doc/plan-review-auto-done.md
-- [ ] [#inline-done-signal] User typing `done` in exchange should auto-apply --done to contextually relevant review item — plan: tasks/agent-doc/plan-inline-done-signal.md
+❯ `#review-auto-done` — Completed review items not auto-marked done — plan: tasks/agent-doc/plan-review-auto-done.md
+❯ `#inline-done-signal` — User typing `done` in exchange should auto-apply --done to contextually relevant review item — plan: tasks/agent-doc/plan-inline-done-signal.md
 
 **"done" (re #npm-publish):** Acknowledged — user declares `#npm-publish` done. `#npm-publish` remains gated on npm auth configuration (`#npm-auth-setup`); actual publish verification (`#npm-publish-verify`) still needed.
-
 ### Re: repair — glm-5.1
 
 Repair: changed backlog item format from `- [ ]` to text references to avoid pending shadow detection for transferred items that belong in bugs2.md, not this document's backlog. Both `#review-auto-done` and `#inline-done-signal` are already in `agent-doc-bugs2.md` backlog. No new items to add.
-
-### Re: completing the turn — glm-5.1
+### Re: completing the turn — glm-5.1 (HEAD)
 
 Actions taken:
 
@@ -100,15 +101,21 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- ~[#npm-publish]~
-- ~[#e2e-install]~
+- [#local-e2e-verify]
+- [#npm-auth-setup]
+- [#npm-publish-verify]
+- [#full-e2e-verify]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#local-e2e-verify] Run local e2e: mkdir /tmp/tsift-test && tsift init --opencode && opencode, verify /tsift-status. On success mark #gopencode-install and #gopencode done.
+- [ ] [#npm-auth-setup] Configure NPM_TOKEN secret + TSIFT_ENABLE_NPM_PUBLISH=true variable in GitHub repo settings
+- [ ] [#npm-publish-verify] After auth configured, tag release and verify publish-opencode-plugin CI job succeeds and opencode-tsift appears on npmjs.org
+- [ ] [#full-e2e-verify] In fresh project: opencode plugin opencode-tsift && opencode then /tsift-status. On success mark #e2e-install done.
 <!-- /agent:backlog -->
 
 ## Review

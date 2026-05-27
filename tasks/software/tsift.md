@@ -36,7 +36,26 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 2 response topic(s): gopencode-install; closeout repair
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:d31c24a1 -->
+❯ What are #next-steps to complete the review items?
+### Re: next-steps to complete the review items — glm-5.1
+
+Both review items are substantially code-complete. Remaining work in priority order:
+
+#### #gopencode-install (blocked → unblock)
+
+1. **npm publish `opencode-tsift`** — `npm publish --access public` from `packages/opencode-tsift/`. Requires npm registry auth. Only blocker for this review item.
+2. **Verify end-to-end install** — fresh opencode project, `opencode plugin opencode-tsift`, confirm `/tsift-status` and `/tsift-context-pack` resolve.
+
+#### #gopencode (first-class integration)
+
+3. **OpenCode transcript capture verification** — agent-doc session with plugin; confirm `tsift --envelope session-review` returns usable context.
+4. **Permission-prompt diagnostics** — exercise shortcuts without `--dangerously-skip-permissions`; document required opencode permissions.
+5. **Deterministic integration test** — `tsift init --opencode` then `npx opencode-tsift .` on same temp dir; assert identical `.opencode/commands/`.
+6. **Build + install + smoke session** — `make check && make install && make tmux-ci` + agent-doc OpenCode smoke session.
+7. **Installer/config docs** — expand README with Permissions + Troubleshooting sections.
+
+Top of backlog: **#npm-publish**.
+<!-- agent:boundary:4ef667e4 -->
 <!-- /agent:exchange -->
 ###
 <!--

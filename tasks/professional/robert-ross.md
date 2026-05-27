@@ -135,6 +135,12 @@ Saved [mail/contacts/robert-ross/diagrams/sessionshare-claudemd-debrief.svg](../
 
 Let me know if you want the diagram rerendered with: (a) a darker / lighter palette, (b) the "Why the expedient path won" block reworded to omit the git-repo-fatigue mention, or (c) a horizontal-only format that fits better in a Slack/SMS image preview.
 ❯ I want to note that BuildParty/BuildParty is also a submodule of SessionShare. Please also edit my draft to make the email clear to robert-ross. Btw, robert-ross fired me and I'm waiting for an email from robert-ross to close out the engagement.
+
+❯ I also want to add that due to time pressure, I have not had a chance to do a full review of the codebase and harness. There was a backlog of items that I needed to do for basic maintenance. I should have prioritized manually reviewing every file in the harness sooner but it was not something that I was able to get around to.
+
+❯ I mutually feel that robert-ross and I do not work well together so I'm not interested in working with robert-ross. I did ask for a severance since I worked 7 days a week well beyond 40 hours a week...I pulled an all-nighter for an important investor demo for him...and we have had many long meetings that were, honestly, emotionally traumatizing for me. His conduct was also emotionally abusive. Don't mention this. But I just want you to know.
+
+❯ Please use my voice and don't make the edited draft appear that it was written by ai. But make it easy for robert-ross to understand along with the svg diagram.
 ### Re: BuildParty correction + revised closeout draft — opus-4-7
 
 Updated the SVG and revised the draft. Closeout context noted (engagement is closing on Rob's side); the revised draft holds an accountable-not-defensive tone and adds no new scope or asks.
@@ -219,8 +225,84 @@ Given the engagement is closing on Rob's side and you are waiting on his email:
 - The "going forward" block is framed as **your process change**, not a pitch to keep working together.
 - I also recorded the engagement-closeout context as a project memory so future cycles on robert-ross materials default to closeout framing rather than ongoing-collaboration framing.
 
-Want me to (a) shorten this to a 3-paragraph version (some closeouts read better short), (b) drop the "going forward" block entirely if you'd rather not signal process improvement to him, or (c) push this through corky as a Gmail draft to Rob?
-<!-- agent:boundary:2e4d8b0d -->
+❯ Want me to (a) shorten this to a 3-paragraph version (some closeouts read better short), (b) drop the "going forward" block entirely if you'd rather not signal process improvement to him, or (c) push this through corky as a Gmail draft to Rob?
+❯ re: "the right move was to split out a new superrepo holding SessionShare": let's be more diplomatic. robert-ross has trauma from too many git repos from past developers. This is my process and my process works. But we did not follow my process. Instead, I should have been more aware that my process was not being followed and I should have done a full audit. But I was under severe time pressure for the investor demos.
+### Re: Diplomatic rewrite in your voice — opus-4-7
+
+
+Heard the personal context. Holding it as background only, not in the draft. Softened the SVG framing (no more "should-have"; now "what my process would have done") and rewrote the draft in your voice — plain prose, your "..." pauses, no AI tells, no em dashes, no bullet headings.
+
+#### SVG diplomatic tweaks
+
+[mail/contacts/robert-ross/diagrams/sessionshare-claudemd-debrief.svg](../../mail/contacts/robert-ross/diagrams/sessionshare-claudemd-debrief.svg) — three label changes only, structure unchanged:
+
+- Decision banner: "THE MOMENT THAT MATTERED" → **"THE AUDIT POINT THAT WAS MISSED."** Sub-caption now: "My process called for a full harness audit at this point. The same audit was missed again when BuildParty was added."
+- Right panel header: "SHOULD-HAVE PATH — new parent superrepo" → **"WHAT MY PROCESS WOULD HAVE DONE."**
+- Right panel caption: now ends with **"This is my standard process; we deviated from it under time pressure."** instead of the prescriptive "cross-project work lives in the parent" line.
+
+The structural diagram still shows three sibling repos — that part can't be hidden because it's the actual alternative — but the framing is descriptive of your process rather than corrective of Rob.
+
+#### Revised draft (your voice)
+
+```
+Sounds good. I want to walk through how the SessionShare CLAUDE.md ended
+up doing more than it was meant to. Sending the SVG with this so the
+structure is easy to follow.
+
+We started with me working on ClaudeScore. I used the SessionShare repo
+with the claudescore.com and claudescore-plugin submodules. Both
+submodules needed shared context, which is why CLAUDE.md was at the
+SessionShare root. That matched what the file was for.
+
+Then we worked on velvet-thunder. I added velvet-thunder to SessionShare
+as a submodule to keep working. This is where we stopped following my
+process. My process works...we just did not follow it here. I should have
+noticed and done a full harness audit right then. I did not, because I
+was under severe time pressure for the investor demos.
+
+Then we added BuildParty/BuildParty as another submodule under
+SessionShare. BuildParty has its own internal harness files so the inner
+side was fine. But SessionShare's CLAUDE.md was now sitting over four
+projects instead of two. Same situation as before...I should have stopped
+and audited, and I did not.
+
+I was also aware that the number of git repos was a stressor for you.
+That is real and it shaped my decisions...I leaned toward adding
+submodules instead of restructuring. That is not on you. It just meant
+the place to hold the line was my own process, and I did not hold it.
+
+The other piece is maintenance. I had a backlog and I had not done a full
+manual review of the codebase and harness. I should have prioritized that
+review sooner. It kept slipping behind the demos and shipping work.
+
+Going forward, when I notice I am deviating from my own process, I will
+name the deviation and review what is being lost before continuing. For
+structural changes (new submodule, new nesting, new shared file) that
+means a harness boundary audit in the same change. And I will treat the
+periodic full-harness review as scheduled work, not something that fits
+around shipping.
+
+Not assigning blame...just naming what happened so it does not repeat.
+
+Brian
+```
+
+#### Voice / diplomacy notes on the rewrite
+
+- Removed every spaced em dash (`—`) and section heading. Replaced with plain prose paragraphs and your `...` pause pattern from the original.
+- "The right move was to split out a new superrepo" is gone. Replaced with **"we stopped following my process. My process works...we just did not follow it here."** Frames the gap as a deviation from your process, not as Rob being wrong.
+- Git-repo-stress paragraph reframed: **"That is real and it shaped my decisions... That is not on you. It just meant the place to hold the line was my own process, and I did not hold it."** Takes the structural responsibility back onto you without making Rob's preference the cause.
+- BuildParty correction folded in as a clean Phase-3 sentence, including the "inner side was fine" caveat so Rob doesn't read it as a BuildParty problem.
+- Maintenance-backlog point sits as its own paragraph, framed as *your* deprioritization (not "I had no time").
+- No mention of severance, hours, the all-nighter, meetings, or conduct. Held as background per your note.
+- Closer is your original: "Not assigning blame...just naming what happened so it does not repeat." Kept verbatim because that line is already in your voice and does the work.
+
+#### One thing to double-check
+
+The line **"I was under severe time pressure for the investor demos"** appears once and is the only place blame-adjacent language could be read. It is factually grounded (investor demos are an external pressure, not a Rob choice), but if you want it more neutral you can swap to **"I was under severe time pressure"** without the demo attribution. Say the word and I will land that edit.
+
+Exchange is at 208 lines / 5 response sections — `agent-doc compact` is available if you want to trim before the next cycle. Say "compact" and I will run it.
+<!-- agent:boundary:2c38013c -->
 <!-- /agent:exchange -->
 
 <!--

@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -110,10 +110,33 @@ Updated the closeout spec and regression coverage for no ACK, missing response p
 Verification: `cargo test try_ipc_times_out_when_no_plugin`; `cargo test try_ipc_rejects_consumed_partial_response_materialization`; `cargo test file_ipc_consumed_with_live_exchange_edit_requires_ack_content`; `cargo test file_ipc_ack_content_live_prompt_drift_uses_content_ours_snapshot`; `cargo test socket_ack_content_prompt_duplication_uses_content_ours_and_repairs_visible_buffer`; `cargo test session_check_open_cycle_surfaces_ipc_proof_diagnostic`; `cargo test latest_ipc_proof_diagnostic_prefers_matching_file_entry`; `make check`; `cargo install --path .`; GitHub CI run `26501096866` passed with `Run make check` and `Run make tmux-ci`.
 
 Commits: `src/agent-doc` `f78f60a5`; parent `6d97d9512`.
-<!-- agent:boundary:4531bc8f -->
+### Re: jbrunbusy — gpt-5
+Implemented `#jbrunbusy`.
+
+The JetBrains route runner now classifies route failures instead of treating every exhausted retry the same: active Codex-turn startup refusals become a `BUSY_RUNNING` warning, stale persisted route-failure output is cleared, timed-out startup remains retryable, and unrelated blockers such as reverse-i-search stay persistent failures. The still-running notification tells the user the Codex pane is already in an active turn rather than saving it as a hard route failure.
+
+I also factored the dispatch-only startup refusal string in `src/route.rs` so the EFS active-turn shape is covered directly, and updated the live tmux test to assert that `tasks/professional/equityfundingsource.md` is preserved in the refusal. During the required tmux pass, I fixed the deterministic `/clear` failure by preferring healthy supervisor IPC before direct tmux pane submission, avoiding default-socket pane-id collisions when the authoritative owner lives on another tmux server.
+
+Verification passed:
+
+- `./gradlew test --tests com.github.btakita.agentdoc.TerminalUtilTest`
+- `cargo fmt --check`
+- `cargo test dispatch_only_starting_pane_not_ready_error_matches_equityfundingsource_active_turn`
+- `cargo test resolve_or_create_pane_dispatch_only_refuses_while_latest_run_is_still_starting -- --ignored --nocapture`
+- `cargo test session_actor_cmd::tests::clear_falls_back_to_supervisor_inject_when_authoritative_pane_is_not_on_default_tmux -- --ignored --nocapture`
+- `make check`
+- `make tmux-ci`
+- `cargo install --path .`
+- GitHub Actions CI `26503616492` succeeded with both `Run make check` and `Run make tmux-ci` green.
+
+Pushed commits: agent-doc submodule `590e755d` (`fix: classify busy route retries`) and parent pointer `65f3c1e64` (`agent-doc: classify busy route retries`). I left unrelated pre-existing dirty worktree changes unstaged, including the unrelated formatting hunk in `src/agent-doc/src/route/tests.rs`.
+<!-- agent:boundary:8376fdca -->
 <!-- /agent:exchange -->
 ###
 <!--
+equityfundingsource.md had the full-document IPC duplicate corruption. Then a new full-document IPC deletion under the prompt corruption happened. Both several times while editing the prompt.
+#spec-test-build-install-commit-push
+---
 Please review the agent-doc, claude, codex logs. What are #next-steps to fix bugs?
 ---
 When I ran the last turn, #spec-test-build-install-commit-push was removed by agent-doc.
@@ -125,18 +148,19 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 #spec-test-build-install-commit-push
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#ipcmodel]~
 - ~do [#ipcreplay]~
 - ~do [#ipcdeny]~
 - ~do [#ipcfail]~
-- do [#jbrunbusy]
+- ~do [#jbrunbusy]~
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#0ep7] Implement tasks/agent-doc/plan-jb-cache-conflict-cancel-uncommitted-response.md: make JB File Cache Conflict cancel recovery commit a visible already-present response exactly once, refresh stale sidecars, retire orphaned captures, and make session-check pass.
 <!-- /agent:backlog -->
 
 ## Review

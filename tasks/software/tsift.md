@@ -79,7 +79,7 @@ Added to `agent-doc-bugs2.md` backlog:
 ### Re: repair — glm-5.1
 
 Repair: changed backlog item format from `- [ ]` to text references to avoid pending shadow detection for transferred items that belong in bugs2.md, not this document's backlog. Both `#review-auto-done` and `#inline-done-signal` are already in `agent-doc-bugs2.md` backlog. No new items to add.
-### Re: completing the turn — glm-5.1 (HEAD)
+### Re: completing the turn — glm-5.1
 
 Actions taken:
 
@@ -92,7 +92,7 @@ Remaining review: `#e2e-install` [/], `#npm-publish` [/] — but note `#npm-publ
 Queue: `#local-e2e-verify` → `#npm-auth-setup` → `#npm-publish-verify` → `#full-e2e-verify`
 
 **#agent-doc-bug filed:** `#review-auto-done` and `#inline-done-signal` in `agent-doc-bugs2.md` with plans in `tasks/agent-doc/`.
-<!-- agent:boundary:52513af5 -->
+<!-- agent:boundary:8b5522fa -->
 <!-- /agent:exchange -->
 ###
 <!--

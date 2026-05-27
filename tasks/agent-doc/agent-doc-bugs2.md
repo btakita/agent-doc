@@ -187,6 +187,10 @@ The concrete failure class you saw is the bad path through `whole-buffer ACK` or
 
 ❯ Re "whole-buffer ACK includes live typing": Can we identify the live typing surface so "danger: prompt drift after preflight" does not duplicate the old snapshot of the prompt? Do we need to create a document entity for the user prompt areas, where the user content is not modified by agent-doc at all?
 
+Re "stale cache/conflict replay": Could you diagram the intended reason(s) for the replay? Could you also diagram the failure cases?
+
+Re "late fallback patch after commit": Could you diagram the intended reason(s) for the replay? Could you also diagram the failure cases?
+
 ### Re: hooks queue surfaces and replay diagrams — gpt-5
 
 Claude and OpenCode can have analogous control points, but not the same native hook shape as Codex today. Codex has `UserPromptSubmit` and `Stop`, so `agent-doc` can observe both prompt submission and end-of-turn payloads. Claude Code has the `/agent-doc` Skill entrypoint and shell closeout path. OpenCode has the installed command wrapper and direct `finalize`/`session-check` path. The current spec explicitly treats Claude Code and OpenCode dispatch-only proof as weaker than Codex prompt-submit proof, so the robust path is a common adapter layer:
@@ -250,10 +254,14 @@ flowchart TD
 ```
 
 The duplicate late-fallback question is the same case twice: intended replay is only for still-open cycles; after `Committed`, every fallback for that cycle is stale and must be rejected by cycle id before it can touch the visible document or snapshot.
-Re "stale cache/conflict replay": Could you diagram the intended reason(s) for the replay? Could you also diagram the failure cases?
+### Re: stale cache/conflict replay — gpt-5
 
-Re "late fallback patch after commit": Could you diagram the intended reason(s) for the replay? Could you also diagram the failure cases?
-<!-- agent:boundary:b90af933 -->
+The stale cache/conflict replay diagram in the previous response is the intended model: the replay exists because an editor may hold an older cached buffer after disk changed; accepting that buffer replays it into the working tree. The safe path is to classify it as already-committed replay and repair without a new response. The failure path is accepting the stale buffer as authoritative and letting duplicate exchange or old prompt material survive into snapshot/commit state.
+
+### Re: late fallback patch after commit — gpt-5
+
+The late fallback patch diagram in the previous response covers both repeated late-fallback prompts. The fallback is valid only while the cycle is still open after socket IPC did not complete. Once the cycle is `Committed`, the same patch id/cycle id is stale and must be rejected and cleaned up before it can mutate the editor buffer, snapshot, or working tree.
+<!-- agent:boundary:588136b1 -->
 <!-- /agent:exchange -->
 ###
 <!--

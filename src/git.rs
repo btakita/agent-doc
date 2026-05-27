@@ -1500,7 +1500,11 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             false
         };
 
-    let reintroduced_reaped_ids = crate::cycle_state::load(file)?
+    let cycle_state_for_commit = crate::cycle_state::load(file)?;
+    let ipc_snapshot_adoption_blocked = cycle_state_for_commit
+        .as_ref()
+        .is_some_and(|state| state.ipc_snapshot_adoption_blocked);
+    let reintroduced_reaped_ids = cycle_state_for_commit
         .map(|state| state.reaped_pending_ids.into_iter().collect::<HashSet<_>>())
         .map(|ids| detect_reintroduced_reaped_pending_ids(&file_content, &ids))
         .transpose()?
@@ -1559,23 +1563,41 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
                 .eq(head_doc.as_deref().unwrap_or_default()))
         && let Some(reason) = classify_safe_out_of_band_agent_doc_mutation(snapshot, &file_content)
     {
-        eprintln!(
-            "[commit] absorbing out-of-band {} mutation into snapshot for {}",
-            reason,
-            file.display()
-        );
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "snapshot_absorb file={} reason={} old_snap_len={} new_snap_len={}",
-                file.display(),
+        if ipc_snapshot_adoption_blocked {
+            eprintln!(
+                "[commit] refusing to absorb out-of-band {} mutation after IPC snapshot adoption was blocked for {}",
                 reason,
-                snap_len,
-                file_len
-            ),
-        );
-        crate::snapshot::save(file, &file_content)?;
-        snapshot_content = Some(file_content.clone());
+                file.display()
+            );
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "snapshot_absorb_blocked_after_ipc_snapshot_adoption file={} blocked_by={} old_snap_len={} new_snap_len={}",
+                    file.display(),
+                    reason,
+                    snap_len,
+                    file_len
+                ),
+            );
+        } else {
+            eprintln!(
+                "[commit] absorbing out-of-band {} mutation into snapshot for {}",
+                reason,
+                file.display()
+            );
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "snapshot_absorb file={} reason={} old_snap_len={} new_snap_len={}",
+                    file.display(),
+                    reason,
+                    snap_len,
+                    file_len
+                ),
+            );
+            crate::snapshot::save(file, &file_content)?;
+            snapshot_content = Some(file_content.clone());
+        }
     }
 
     dedupe_snapshot_and_worktree_before_commit(file, &mut snapshot_content, &mut file_content)?;
@@ -3439,6 +3461,86 @@ Implemented.
         assert_eq!(head.matches("### Re: #pbdupchurn — gpt-5").count(), 1);
         assert_eq!(snapshot.matches("### Re: #pbdupchurn — gpt-5").count(), 1);
         assert_eq!(working.matches("### Re: #pbdupchurn — gpt-5").count(), 1);
+    }
+
+    #[test]
+    fn commit_blocks_snapshot_absorb_after_ipc_snapshot_adoption_blocked() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        init_repo(root);
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/state/cycles")).unwrap();
+
+        let initial = "\
+---
+agent_doc_session: test
+agent_doc_format: template
+---
+
+<!-- agent:exchange patch=append -->
+❯ do #snapabsorb
+<!-- /agent:exchange -->
+";
+        commit_file(root, "session.md", initial, "add session");
+
+        let snapshot = "\
+---
+agent_doc_session: test
+agent_doc_format: template
+---
+
+<!-- agent:exchange patch=append -->
+❯ do #snapabsorb
+### Re: #snapabsorb — gpt-5
+
+Implemented.
+<!-- /agent:exchange -->
+";
+        let live = "\
+---
+agent_doc_session: test
+agent_doc_format: template
+---
+
+<!-- agent:exchange patch=append -->
+❯ do #snapabsorb
+### Re: #snapabsorb — gpt-5
+
+Implemented.
+### Re: late socket replay — gpt-5
+
+Duplicate replay should stay live.
+<!-- /agent:exchange -->
+";
+        let doc = root.join("session.md");
+        fs::write(&doc, live).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(initial), Some(initial)).unwrap();
+        crate::cycle_state::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
+
+        let did_commit = commit(&doc).expect("commit should stage content_ours snapshot");
+
+        assert!(did_commit);
+        let head = show_head(&doc).unwrap().unwrap();
+        let snapshot_after = crate::snapshot::load(&doc).unwrap().unwrap();
+        let working = fs::read_to_string(&doc).unwrap();
+        assert!(head.contains("### Re: #snapabsorb — gpt-5"));
+        assert!(!head.contains("late socket replay"));
+        assert!(!snapshot_after.contains("late socket replay"));
+        assert!(
+            working.contains("late socket replay"),
+            "live divergent body should stay in the working tree for the next cycle"
+        );
+        let ops_log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("snapshot_absorb_blocked_after_ipc_snapshot_adoption"),
+            "blocked absorb should be logged:\n{ops_log}"
+        );
+        assert!(
+            !ops_log.contains("snapshot_absorb file="),
+            "commit must not silently absorb the divergent disk body after IPC adoption was blocked:\n{ops_log}"
+        );
     }
 
     #[test]

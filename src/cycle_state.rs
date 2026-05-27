@@ -96,6 +96,8 @@ pub struct CycleState {
     pub pending_kept_open_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reaped_pending_ids: Vec<String>,
+    #[serde(default)]
+    pub ipc_snapshot_adoption_blocked: bool,
 }
 
 impl CycleState {
@@ -143,6 +145,7 @@ pub fn start_preflight(
         pending_done_ids: Vec::new(),
         pending_kept_open_ids: Vec::new(),
         reaped_pending_ids: Vec::new(),
+        ipc_snapshot_adoption_blocked: false,
     };
     save(file, &state)?;
     append_phase_event_to_session_log(file, &state);
@@ -397,6 +400,18 @@ pub fn record_open_cycle_progress(file: &Path, event: &str) -> Result<Option<Cyc
     Ok(Some(state))
 }
 
+pub fn record_ipc_snapshot_adoption_blocked(file: &Path) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+    if !state.ipc_snapshot_adoption_blocked {
+        state.ipc_snapshot_adoption_blocked = true;
+        state.updated_at = now_secs();
+        save(file, &state)?;
+    }
+    Ok(Some(state))
+}
+
 pub fn mark_committed(
     file: &Path,
     event: &str,
@@ -540,6 +555,7 @@ fn synthetic_state_with_id(
         pending_done_ids: Vec::new(),
         pending_kept_open_ids: Vec::new(),
         reaped_pending_ids: Vec::new(),
+        ipc_snapshot_adoption_blocked: false,
     }
 }
 
@@ -633,6 +649,26 @@ mod tests {
         assert_eq!(state.phase, CyclePhase::WriteApplied);
         assert_eq!(state.last_event, "write_template");
         assert!(state.snapshot_hash.is_some());
+    }
+
+    #[test]
+    fn record_ipc_snapshot_adoption_blocked_sets_cycle_flag() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+        start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+
+        let state = record_ipc_snapshot_adoption_blocked(&doc)
+            .unwrap()
+            .expect("state should exist");
+
+        assert!(state.ipc_snapshot_adoption_blocked);
+        assert!(
+            load(&doc)
+                .unwrap()
+                .expect("state should persist")
+                .ipc_snapshot_adoption_blocked
+        );
     }
 
     #[test]

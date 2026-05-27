@@ -7557,6 +7557,7 @@ fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
             crate::ops_log::content_hash(ours)
         ),
     );
+    let _ = crate::cycle_state::record_ipc_snapshot_adoption_blocked(file);
     decision.replace_snapshot_with_content_ours_for_live_prompt_drift(ours);
     true
 }

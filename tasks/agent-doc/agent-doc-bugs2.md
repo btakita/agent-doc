@@ -34,7 +34,42 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 6 response topic(s): do [#ignorebypass]; #liveipcrace; #snapabsorb; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:3d04cd1e -->
+❯ tsift.md had the full-document IPC corruption as I was typing in a prompt.
+❯ #spec-test-build-install-commit-push
+### Re: tsift.md full-document IPC corruption — gpt-5
+
+Fixed the `already_applied` socket IPC gap that matched the latest `tsift.md` evidence.
+
+Root cause: the socket path correctly skipped file-IPC fallback after an `already_applied` ACK, but it returned success without saving the agent-owned `content_ours` snapshot or marking the cycle as unsafe for later snapshot absorption. The later commit pass could then see a larger live editor buffer and convert it into the committed snapshot via `snapshot_absorb`.
+
+Changed paths:
+- `src/agent-doc/src/write.rs`
+- `src/agent-doc/SPEC.md`
+- `src/agent-doc/specs/07-closeout-commands.md`
+- `src/agent-doc` gitlink in the parent repo
+
+Changed behavior:
+- Socket `already_applied` ACKs are now treated as snapshot-bearing IPC success.
+- The write path persists `content_ours`/CRDT state when available.
+- If the live editor buffer differs from `content_ours`, the cycle records an IPC snapshot-adoption block so later commit closeout cannot absorb editor drift.
+- A regression test now proves `already_applied` saves `content_ours`, leaves live editor drift visible, and blocks later snapshot absorption.
+
+Commands and verification:
+- `cargo fmt`
+- `cargo test try_ipc_already_applied_socket_saves_content_ours_and_blocks_snapshot_absorb`
+- `cargo test commit_blocks_snapshot_absorb_after_ipc_snapshot_adoption_blocked`
+- `make check`
+- `cargo install --path .`
+- Latest GitHub `CI` run `26491258001` was green, including `Run make tmux-ci`.
+
+Commit and push:
+- `src/agent-doc`: `257bec1e` (`fix: snapshot already-applied socket ipc`) pushed to `origin/20260422/codex-agent-backend`.
+- parent `agent-loop`: `2845f9b81` (`agent-doc: update submodule for ipc snapshot fix`) pushed to `origin/main`.
+
+Escalation: none.
+
+Confidence: high. The regression covers the observed socket `already_applied` corruption path, and the full project check suite plus installed CLI completed successfully.
+<!-- agent:boundary:5f234ab0 -->
 <!-- /agent:exchange -->
 ###
 <!--

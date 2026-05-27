@@ -58,7 +58,22 @@ All 6 review items are gated `[/]`. Here's the concrete path to closing them:
 **Duplicate items** — `#e2e-install` and `#npm-publish` each appear twice in review. Recommend dedup on next edit.
 
 Top of backlog: **#local-e2e-verify**
-<!-- agent:boundary:865133f5 -->
+
+### Re: completed items should be marked as done in review + done — glm-5.1
+
+**#agent-doc-bug — Plans created:**
+
+Plan 1: `tasks/agent-doc/plan-review-auto-done.md` — `detect_missing_pending_done_ids` identifies completed items in prose but only reports warnings, never auto-applies `--done`. Three phases: add `auto_done` config, wire preflight pending mutations, add session-check repair path.
+
+Plan 2: `tasks/agent-doc/plan-inline-done-signal.md` — No mechanism maps inline `done` signals to `--done` mutations. Four phases: prompt signal classification, contextual target resolution, mutation emission, guard integration.
+
+Added to `agent-doc-bugs2.md` backlog:
+
+- [ ] [#review-auto-done] Completed review items not auto-marked done — plan: tasks/agent-doc/plan-review-auto-done.md
+- [ ] [#inline-done-signal] User typing `done` in exchange should auto-apply --done to contextually relevant review item — plan: tasks/agent-doc/plan-inline-done-signal.md
+
+**"done" (re #npm-publish):** Acknowledged — user declares `#npm-publish` done. `#npm-publish` remains gated on npm auth configuration (`#npm-auth-setup`); actual publish verification (`#npm-publish-verify`) still needed.
+<!-- agent:boundary:84c6d88a -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -123,7 +123,22 @@ Verification completed:
 Commit and push completed in the submodule: `ef2e592e fix: reject duplicated prompt ack content`, pushed to `origin/20260422/codex-agent-backend`.
 
 I left unrelated dirty files unstaged, including pre-existing submodule edits outside this fix and unrelated root worktree changes.
-<!-- agent:boundary:c0245044 -->
+❯ What are #next-steps to "disable full-document patch payloads, treat whole-buffer ACK data as observation only, require response materialization proof, block prompt multiplicity growth, fail closed before commit when proof is insufficient, and regression-test those invariants"?
+### Re: IPC hardening next steps — gpt-5
+
+Top backlog item: `#ipcmodel`.
+
+I expanded `#next-steps` into priority-ordered backlog items. The current implementation already covers the reproduced `equityfundingsource.md` ACK-sidecar duplicate-prompt path, and the remaining work should focus on proving the boundary more systematically instead of adding another narrow guard.
+
+Priority order added:
+
+1. `#ipcmodel` — formalize the closeout state model and turn the allowed snapshot-source transitions into property/table tests. This is the most direct path toward mathematically eliminating `agent-doc`-owned full-document corruption classes.
+2. `#ipcreplay` — create deterministic replay coverage from the equityfundingsource IPC race so socket, file, ACK sidecar, stale patch, and direct-disk paths are tested without requiring a live editor race.
+3. `#ipcdeny` — add repo-wide receiver/static guards so whole-document mutation APIs remain parser/diagnostic-only and cannot reappear as visible editor writes.
+4. `#ipcfail` — improve fail-closed diagnostics and tests for missing ACK, missing response probe, duplicate prompt ACK, and live prompt drift.
+
+No repo code changed in this cycle; this was a backlog/response update. Commands run: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, and targeted `rg` checks against the IPC/spec/editor surfaces. Escalation: none.
+<!-- agent:boundary:d28f1405 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -132,6 +147,9 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 When I ran the last turn, #spec-test-build-install-commit-push was removed by agent-doc.
 ---
 As I was typing into the comment below `/agent:exchange`, the full-document IPC corruption happened, then the duplicate line happened, then the full-document IPC corruption happened again.
+
+In addition to diagnosing and fixing the issue, please provide a mermaid showing how the issue occurred and where in the agent-doc lifecycle the full-document IPC corruption can occur. Can we mathematically eliminate all possibility of the full-document IPC corruption from occurring?
+
 #spec-test-build-install-commit-push
 -->
 

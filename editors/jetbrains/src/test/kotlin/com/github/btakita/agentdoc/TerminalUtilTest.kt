@@ -203,6 +203,21 @@ class TerminalUtilTest {
     }
 
     @Test
+    fun `queued route success is reported as queued not silent success`() {
+        val relativePath = "tasks/agent-doc/agent-doc-bugs2.md"
+        val output = """
+            [route] authoritative actor generation 199 for $relativePath is busy on pane %6; queued pending dispatch "JB `Run Agent Doc` does not complete the agent-doc <file-name> run." in agent:queue auto (appended=true, already_present=false) instead of injecting a duplicate trigger
+        """.trimIndent()
+        val message = TerminalUtil.buildRunAgentDocQueuedMessage(relativePath)
+
+        assertEquals(TerminalUtil.RunAgentDocRouteFailureKind.QUEUED_PENDING, TerminalUtil.classifyRunAgentDocRouteFailure(output))
+        assertFalse(TerminalUtil.isRetryableRunAgentDocRouteFailure(output))
+        assertTrue(message.contains("queued"))
+        assertTrue(message.contains(relativePath))
+        assertTrue(message.contains("when that turn drains"))
+    }
+
+    @Test
     fun `starting actor retry backoff uses bounded attempt delays`() {
         assertEquals(4, TerminalUtil.STARTING_ACTOR_ROUTE_MAX_ATTEMPTS)
         assertEquals(2_000L, TerminalUtil.startingActorRouteRetryDelayMillis(1))

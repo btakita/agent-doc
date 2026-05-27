@@ -6,6 +6,13 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **JetBrains Run Agent Doc now surfaces queued busy-actor reroutes.** When
+  `agent-doc route --dispatch-only` accepts a prompt by adding it to
+  `agent:queue auto` behind a busy authoritative actor, the IDE action now
+  treats that output as a queued/still-running outcome instead of silent
+  success. The notification keeps the route details copyable and tells the
+  user the request is waiting for the active turn to drain.
+
 - **Socket/file ACK-content sidecars can no longer commit duplicated user
   prompt text.** The write path now treats editor ACK content as a
   whole-buffer observation that still must pass response-aware prompt

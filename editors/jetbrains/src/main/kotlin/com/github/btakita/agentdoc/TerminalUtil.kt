@@ -169,6 +169,7 @@ object TerminalUtil {
         PERSISTENT,
         RETRYABLE_STARTING,
         BUSY_RUNNING,
+        QUEUED_PENDING,
     }
 
     internal val inFlightRouteRegistry = InFlightRouteRegistry()
@@ -305,6 +306,11 @@ object TerminalUtil {
                             LOG.warn("[route] busy/running after retry budget for $relativePath: $output")
                             clearPersistedRouteFailureOutput(cwd, relativePath)
                             notifyRunAgentDocStillRunning(project, relativePath, output)
+                            break
+                        } else if (failureKind == RunAgentDocRouteFailureKind.QUEUED_PENDING) {
+                            LOG.warn("[route] queued behind active turn for $relativePath: $output")
+                            clearPersistedRouteFailureOutput(cwd, relativePath)
+                            notifyRunAgentDocQueued(project, relativePath, output)
                             break
                         } else if (exitCode != 0) {
                             LOG.warn("[route] FAILED (exit $exitCode): $output")
@@ -976,6 +982,7 @@ object TerminalUtil {
 
     internal fun classifyRunAgentDocRouteFailure(output: String): RunAgentDocRouteFailureKind {
         return when {
+            isRunAgentDocRouteQueued(output) -> RunAgentDocRouteFailureKind.QUEUED_PENDING
             isLatestRunStillBootingBusy(output) -> RunAgentDocRouteFailureKind.BUSY_RUNNING
             isStartingActorRouteFailure(output) || isLatestRunStillBootingRetryable(output) ->
                 RunAgentDocRouteFailureKind.RETRYABLE_STARTING
@@ -998,6 +1005,12 @@ object TerminalUtil {
         return lower.contains("dispatch-only") &&
             lower.contains("latest run is still booting") &&
             lower.contains("never reached a dispatch-ready prompt")
+    }
+
+    private fun isRunAgentDocRouteQueued(output: String): Boolean {
+        val lower = output.lowercase()
+        return lower.contains("queued pending dispatch") &&
+            lower.contains("agent:queue auto")
     }
 
     internal fun startingActorRouteRetryDelayMillis(completedAttempts: Int): Long {
@@ -1213,6 +1226,11 @@ object TerminalUtil {
             "The Codex pane has an active turn and is not ready for another routed follow-up yet. Wait for the turn to finish, then run Agent Doc again."
     }
 
+    internal fun buildRunAgentDocQueuedMessage(relativePath: String): String {
+        return "Agent Doc is still running for $relativePath.\n" +
+            "This Run Agent Doc request was queued behind the active turn and should run when that turn drains."
+    }
+
     private fun notifyRunAgentDocStillRunning(project: Project, relativePath: String, routeOutput: String) {
         val summary = buildRunAgentDocStillRunningMessage(relativePath)
         try {
@@ -1223,6 +1241,23 @@ object TerminalUtil {
             notification.addAction(NotificationAction.createSimple("Copy details") {
                 CopyPasteManager.getInstance().setContents(StringSelection(routeOutput))
                 showHint(project, "Copied running route details for $relativePath")
+            })
+            notification.notify(project)
+        } catch (_: Exception) {
+            System.err.println("[agent-doc] $summary")
+        }
+    }
+
+    private fun notifyRunAgentDocQueued(project: Project, relativePath: String, routeOutput: String) {
+        val summary = buildRunAgentDocQueuedMessage(relativePath)
+        try {
+            val notification = NotificationGroupManager.getInstance()
+                .getNotificationGroup("Agent Doc")
+                .createNotification(summary, NotificationType.WARNING)
+            notification.isImportant = true
+            notification.addAction(NotificationAction.createSimple("Copy details") {
+                CopyPasteManager.getInstance().setContents(StringSelection(routeOutput))
+                showHint(project, "Copied queued route details for $relativePath")
             })
             notification.notify(project)
         } catch (_: Exception) {

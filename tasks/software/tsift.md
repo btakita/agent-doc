@@ -18,8 +18,7 @@ queue_active: false
 ## Status
 
 <!-- agent:status patch=replace -->
-
-Answered why the session-share tsift DB appeared stale. No source changes; refreshed indexes with tsift status --fix and confirmed session-share is now fresh while workspace remains stale only because the FDE-Project-Interview scope is missing.
+Added prioritized graph/neighborhood next steps to the tsift backlog, tagged for neighborhood effectiveness and performance. Top backlog item: #gneighqual.
 <!-- /agent:status -->
 
 ## Spec
@@ -36,8 +35,25 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 6 response topic(s): #gneighgate; closeout repair; #gsemrows; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-Please add #next-steps for graph and tag neighborhood effectiveness and performance.
-<!-- agent:boundary:10052b30 -->
+
+❯ Please add #next-steps for graph and tag neighborhood effectiveness and performance.
+### Re: graph + neighborhood next steps — gpt-5
+
+Added the requested `#next-steps` into the backlog in priority order, tagged across graph, neighborhood effectiveness, and performance.
+
+Top backlog item: `#gneighqual`.
+
+Priority shape:
+
+1. `#gneighqual` — prove ranked-neighborhood effectiveness before changing defaults.
+2. `#gcommqual` — improve tagpath/community context that feeds neighborhood ranking.
+3. `#gfullhot` — reduce full-projection graph hot-path costs before backend changes.
+4. `#gsqlstage` — reduce SQLite refresh staging/write costs.
+5. `#ghoppolicy` — keep higher hop caps behind useful-row and latency evidence.
+6. `#gbackendproof` — keep FalkorDB/Kuzu promotion behind native-adapter parity and performance proof.
+
+No source code changed this cycle.
+<!-- agent:boundary:d6f89b43 -->
 <!-- /agent:exchange -->
 ###
 <!--

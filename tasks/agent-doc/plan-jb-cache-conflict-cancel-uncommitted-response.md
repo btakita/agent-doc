@@ -23,6 +23,11 @@ Observed recovery symptoms:
 - A later `agent-doc preflight` detected `jb_cache_conflict_cancel`, auto-
   committed the visible response, then found an orphaned response and committed
   a second recovery commit.
+- A later live `tasks/software/tsift.md` incident duplicated already-committed
+  response sections back into `agent:exchange`, duplicated the
+  `<!-- agent:queue -->` opening tag, and repeated completed queue entries.
+  That malformed template structure blocked preflight repair until the duplicate
+  exchange span and queue residue were removed.
 
 ## Desired Behavior
 
@@ -35,7 +40,10 @@ path should converge in one explicit binary-owned repair operation:
 3. Commit the visible response exactly once.
 4. Clear or mark the orphaned response capture so preflight does not append or
    commit a duplicate recovery body.
-5. Make `session-check` pass after the repair.
+5. Validate template component balance after recovery, especially
+   `agent:exchange` and `agent:queue`, so stale replay cannot leave duplicate
+   component openings or repeated completed queue directives.
+6. Make `session-check` pass after the repair.
 
 ## Plan
 
@@ -67,6 +75,9 @@ path should converge in one explicit binary-owned repair operation:
 
 - Ensure `preflight` auto-commit for `jb_cache_conflict_cancel` cannot both
   commit the visible response and then replay the same orphaned response.
+- Add a regression where stale replay tries to append an already-committed
+  exchange tail plus a second `agent:queue` opening tag; recovery must preserve
+  one balanced queue component and only the current queue entries.
 - Add a session-check assertion after preflight repair.
 
 ## Verification

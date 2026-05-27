@@ -113,7 +113,7 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#gneighqual]~
-- ~do [#gcommqual]~
+- do [#gcommqual]
 - do [#gfullhot]
 - do [#gsqlstage]
 - do [#ghoppolicy]

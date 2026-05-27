@@ -12,13 +12,14 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
-Completed #gavatar; added semantic-seeded graph retrieval to tsift and committed it locally as 7a74ce9.
+
+Captured #gopencode as the top OpenCode integration follow-up.
 <!-- /agent:status -->
 
 ## Spec
@@ -82,8 +83,23 @@ What I would consider stealing for `tsift`, if we decide to expand scope:
 - Symbol-addressed edit primitives, but only if they preserve `tsift edit`'s current multi-file atomicity expectations.
 
 Caveats: I did not build or run `tokensave`; this was a docs-and-code inspection. No code changed, so I did not run the project verification suite. Worktree note: existing modified paths were present before response persistence (`src/tsift` submodule pointer state, `tasks/agent-doc-bugs2.done.md`, `tasks/software/tsift.done.md`, and this session document); I did not stage or change non-session files.
-<!-- agent:boundary:40c04cc6 -->
-What are #next-steps to broaden
+❯ What are #next-steps to integrate opencode?
+### Re: OpenCode integration next steps — gpt-5
+
+Top backlog item: #gopencode.
+
+The next step is to make OpenCode a first-class `tsift` consumer instead of treating it as a one-off harness edge case. I added #gopencode ahead of #gbackendproof because OpenCode integration affects daily agent workflow directly; optional graph backend promotion can stay behind it.
+
+Priority order:
+
+1. Define the OpenCode integration contract for `tsift`: which commands should be surfaced to OpenCode, which hooks/config files are installed, and what evidence proves the integration works.
+2. Add or document an OpenCode setup path, likely mirroring the existing Codex/Claude hook guidance: install config, preserve user config, and expose `tsift` envelope commands for session review, context packs, diff digests, test digests, and log digests.
+3. Verify transcript and permission-prompt capture under OpenCode. The related `tasks/agent-doc/open-code.md` notes point at HITL prompt input issues, so `tsift` integration should explicitly cover prompt/log capture and avoid depending on raw terminal replay.
+4. Add deterministic tests for generated OpenCode config and supported rewrite/envelope command routing.
+5. Build/install locally and run one end-to-end OpenCode smoke session through `agent-doc`, then close with `agent-doc session-check` evidence.
+
+No repo code changed in this response; this is backlog capture and prioritization only.
+<!-- agent:boundary:1bec1165 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -92,19 +108,14 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue -->
-preset #spec-test-build-install-commit-push
-- ~do [#gneighqual]~
-- ~do [#gcommqual]~
-- ~do [#gfullhot]~
-- ~do [#gsqlstage]~
-- ~do [#ghoppolicy]~
-- do [#gbackendproof]
+<!-- agent:queue auto -->
+- What are #next-steps to integrate opencode?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#gopencode] [tag: opencode] [tag: integration] Make OpenCode a first-class tsift integration: add installer/config docs, envelope shortcuts for session/log/test/diff digest use, verify OpenCode transcript capture and permission-prompt diagnostics, add deterministic tests, then build/install and run an end-to-end agent-doc OpenCode smoke session.
 - [ ] [#gbackendproof] [tag: graph] [tag: performance] Evaluate FalkorDB/Kuzu only as native optional GraphStore adapters: require provider-neutral projection writes/load, freshness/parity, lock behavior, install portability, and faster real/full-projection evidence/conflict/dispatch/path metrics than SQLite before promotion.
 <!-- /agent:backlog -->
 

@@ -35,7 +35,7 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 1 response topic(s): JB Run Agent Doc on tsift.md
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:889fe1f4 -->
+<!-- agent:boundary:8ae64173 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -57,23 +57,10 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 -->
 
 <!-- agent:queue auto -->
----
-JB `Run Agent Doc` on tsift.md error
-```
-[sync] recovered live pane %20 for session 7910a62f via supervisor pid 324491
-[sync] recovered live pane %6 for session b26b9957 via supervisor pid 270387
-[sync] recovered live pane %15 for session 6cb2a9bf via supervisor pid 1411216
-[sync] recovered live pane %21 for session tsift-v0 via supervisor pid 1465656
-[sync] recovered live pane %3 for session 4602f467 via supervisor pid 249731
-[sync] recovered live pane %4 for session 62fe1f41 via supervisor pid 249819
-[sync] recovered live pane %16 for session be20dd6e via supervisor pid 2722653
-resync: stash pane %16 is unregistered but still owns /home/brian/work/btakita/agent-loop/tasks/software/agent-loop.md — skipping kill
-[route] debounce OK — file idle for 3.1s and typing indicator idle
-[route] target tmux session: 0
-Error: dispatch-only opencode reopen refused to inject into pane %21 for tasks/software/tsift.md because the pane still shows opencode active turn; restore an idle prompt and retry
-```
-#spec-test-build-install-commit-push #mermaid
----
+dispatch #spec-test-build-install-commit-push
+- do [#h9g0]
+- do [#zeb5]
+- do [#already-applied-divergence]
 <!-- /agent:queue -->
 
 ## Backlog

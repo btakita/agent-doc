@@ -65,8 +65,87 @@ Compacted content:
 3. Benchmark through `perf_gate.rs` against SQLite
 
 This lets tsift query tokensave pre-built graph without re-indexing — highest-ROI integration with minimal new code.
-What are #next-steps to reverse-engineer tokensave to directly implement in tsift?
-<!-- agent:boundary:d34bc168 -->
+❯ What are #next-steps to reverse-engineer tokensave to directly implement in tsift?
+### Re: reverse-engineering tokensave next steps — glm-5.1
+
+Based on deep analysis of tokensave's architecture, here are concrete next steps ordered by ROI.
+
+#### Phase 1: Read tokensave's existing DB (low effort, high value)
+
+**Step 1.1 — tokensave DB reader adapter**
+- Implement `TokensaveGraphStore` in `src/tokensave_backend.rs` behind `backend-tokensave` feature
+- Read `.tokensave/tokensave.db` via `LibsqlGraphStore::open()` — already works since we share libSQL
+- Map tokensave's `nodes`/`edges` schema to tsift's `GraphNode`/`GraphEdge` types
+- tokensave schema: `nodes(id TEXT PK, kind, name, qualified_name, file_path, start_line, ...)` with `edges(source, target, kind, line)`
+- tsift schema: `graph_nodes(id, kind, label, file_path, ...)` with `graph_edges(from_id, to_id, kind, ...)`
+- Write a thin schema-mapping layer in the adapter
+
+**Step 1.2 — FTS5 search integration**
+- tokensave has `nodes_fts` virtual table for semantic search over name/qualified_name/docstring/signature
+- Add `search_fts()` method to tsift's `GraphStore` trait (or as extension trait)
+- Wrap in tsift's envelope system for budget-aware truncation
+
+#### Phase 2: Port graph algorithms (medium effort, high value)
+
+**Step 2.1 — Iterative Tarjan SCC** (`~200 LOC`)
+- Port from tokensave's `graph/scc.rs` — already iterative (no recursion), clean algorithm
+- Used for: cycle detection, acyclicity health score, dependency depth (Lakos levelization)
+- Add to tsift's `substrate.rs` as methods on `GraphStore` trait
+
+**Step 2.2 — Composite health score** (`~400 LOC`)
+- Port `graph/health.rs`: geometric mean of 5 dimensions (acyclicity, depth, equality, redundancy, modularity)
+- Each dimension is independent — port incrementally
+- Integrate with tsift's `conflict-matrix` gate: use health scores to gate dispatch risk
+
+**Step 2.3 — Dead code detection** (`~150 LOC`)
+- Port from `graph/queries.rs`: zero incoming edges of "real" kinds, exclude test/pub markers
+- Uses temp tables for efficient test-marker pre-join
+- Add as `detect_dead_code()` on `GraphStore`
+
+**Step 2.4 — Coupling / fan-in / fan-out** (`~100 LOC`)
+- File-level dependency adjacency from `calls`/`uses` edges
+- Add as `compute_coupling()` returning structured results
+
+#### Phase 3: Port extraction pipeline (high effort, medium value)
+
+**Step 3.1 — LanguageExtractor trait** (`~300 LOC framework`)
+- Port `extraction/mod.rs` trait + `LanguageRegistry`
+- tsift already has tree-sitter extraction in `graph.rs` for ~10 languages
+- Unify tsift's existing extractors under the new trait
+
+**Step 3.2 — Complexity counting** (`~200 LOC`)
+- Port `extraction/complexity.rs`: generic cyclomatic complexity framework
+- Maps tree-sitter node types to branches/loops/returns/nesting/unsafe/assertions
+- Per-language `ComplexityConfig` structs
+
+**Step 3.3 — Multi-strategy reference resolution** (`~500 LOC`)
+- Port `resolution/resolver.rs`: qualified name match → exact match → scored disambiguation
+- Scoring heuristics: same file (+100), directory proximity (+5/shared), same language (+50), pub (+10)
+- Blocklist for common names (Result, Option, new, from, etc.)
+- Uses rayon for parallel resolution
+
+#### Phase 4: Advanced features (optional, low priority)
+
+| Feature | LOC est. | Value for tsift |
+|---|---|---|
+| DSM (Design Structure Matrix) | ~300 | Low — nice visualization, not core |
+| Gini coefficient | ~100 | Low — part of health score |
+| Redundancy detection (AST/CFG/shingles) | ~600 | Medium — duplicate code detection |
+| Edit primitives (str_replace, etc.) | ~400 | Skip — tsift delegates to harness |
+| ONNX embeddings / vector search | ~500 | Skip — out of scope |
+| Multi-branch indexing | ~400 | Skip — tsift has projection versioning |
+
+#### Recommended order
+
+1. **Step 1.1** — tokensave DB reader (1-2 days)
+2. **Step 2.1** — Tarjan SCC (1 day)
+3. **Step 2.2** — Health score (2-3 days)
+4. **Step 2.3** — Dead code detection (1 day)
+5. **Step 2.4** — Coupling analysis (1 day)
+6. **Phase 3** — Extraction pipeline (5-7 days, if needed for language expansion)
+
+**Total Phase 1-2: ~1-2 weeks for core graph algorithms. Phase 3 adds another week.**
+<!-- agent:boundary:46ae12d8 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -1191,16 +1191,27 @@ fn current_child_prompt_visible(
 }
 
 fn opencode_permission_prompt_active(shared: &SupervisorShared) -> bool {
+    // Primary: parse terminal screen for the structured permission dialog
     let output = child_output_for_detection(shared);
     let prompt = crate::prompt::parse_prompt(&output);
-    if !prompt.active {
-        return false;
+    if prompt.active
+        && prompt.options.as_ref().is_some_and(|options| {
+            options.iter().any(|option| option.label == "Allow once")
+                && options.iter().any(|option| option.label == "Allow always")
+                && options.iter().any(|option| option.label == "Reject")
+        })
+    {
+        return true;
     }
-    prompt.options.as_ref().is_some_and(|options| {
-        options.iter().any(|option| option.label == "Allow once")
-            && options.iter().any(|option| option.label == "Allow always")
-            && options.iter().any(|option| option.label == "Reject")
-    })
+    // Fallback: detect via the orange selection highlight in raw output bytes.
+    // OpenCode uses ANSI 48;2;245;167;66 (amber) to mark the selected permission
+    // option. This fires even when the footer text changes across OpenCode versions.
+    let raw = shared.recent_output.lock().unwrap();
+    let raw_str = String::from_utf8_lossy(&raw);
+    raw_str.contains("\x1b[48;2;245;167;66m")
+        && (raw_str.contains("Allow once")
+            || raw_str.contains("Allow always")
+            || raw_str.contains("Reject"))
 }
 
 fn translate_opencode_permission_arrow_keys(data: &[u8]) -> Option<Vec<u8>> {
@@ -5095,6 +5106,38 @@ Done.
         assert!(
             normalize_stdin_for_harness_permission_prompt(&shared, &codex, b"\x1b[C").is_none(),
             "non-OpenCode harnesses must not receive OpenCode permission key translation"
+        );
+    }
+
+    #[test]
+    fn opencode_permission_prompt_fallback_detects_orange_highlight_without_footer() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = crate::harness::HarnessConfig::opencode();
+        // Simulate a newer OpenCode version where the footer text changed but the
+        // orange selection highlight (48;2;245;167;66) is still present.
+        record_recent_output(
+            &shared,
+            b"\x1b[48;2;245;167;66mAllow once\x1b[0m Allow always Reject\n",
+        );
+        let translated = normalize_stdin_for_harness_permission_prompt(
+            &shared, &harness, b"\x1b[C",
+        )
+        .expect("fallback detection must translate arrows even without the standard footer text");
+        assert_eq!(translated, b"\t");
+    }
+
+    #[test]
+    fn opencode_permission_prompt_fallback_requires_allow_or_reject_label() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = crate::harness::HarnessConfig::opencode();
+        // Orange highlight alone (no permission labels) must not trigger translation.
+        record_recent_output(
+            &shared,
+            b"\x1b[48;2;245;167;66msome other highlighted text\x1b[0m\n",
+        );
+        assert!(
+            normalize_stdin_for_harness_permission_prompt(&shared, &harness, b"\x1b[C").is_none(),
+            "orange highlight without permission labels must not trigger arrow translation"
         );
     }
 

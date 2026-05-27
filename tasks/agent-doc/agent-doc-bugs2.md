@@ -75,7 +75,42 @@ flowchart LR
 ```
 
 That guard is intentional: dispatch-only routing can reuse an authoritative actor only when the live pane proves it can consume input. Without that prompt-ready proof, injecting would risk mixing a new `agent-doc` trigger into an in-flight response.
-<!-- agent:boundary:e02c0834 -->
+❯ Please diagram the lifecycle of an active turn with agent-doc processes and with the Claude/Codex session.
+### Re: active turn lifecycle — gpt-5
+
+Here is the active-turn lifecycle with the ownership boundary between `agent-doc` and the live Claude/Codex session.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant User
+    participant Doc as session markdown document
+    participant AD as agent-doc CLI
+    participant Snap as snapshots and captures
+    participant Harness as Claude or Codex session
+    participant Tools as repo tools and shell
+    participant Git as git commit/session-check
+
+    User->>Doc: edit prompt or queue directive
+    User->>AD: invoke agent-doc <file>
+    AD->>Snap: preflight reads last snapshot/baseline
+    AD->>Doc: diff user edits against snapshot
+    AD->>AD: classify prompt, claims, queue, model tier
+    AD->>Harness: expose prompt targets and execution contract
+    Harness->>Doc: read current document context
+    Harness->>Tools: perform requested repo work when needed
+    Tools-->>Harness: command output and verification evidence
+    Harness->>AD: finalize response patch with baseline
+    AD->>Doc: merge response into exchange
+    AD->>Snap: update snapshot/capture state
+    AD->>Git: commit session document writeback
+    Git->>AD: post-commit session-check result
+    AD-->>Harness: closeout success or recovery interruption
+    Harness-->>User: console summary after committed closeout
+```
+
+The important boundary is that `agent-doc` owns the document lifecycle: preflight, baseline selection, diff classification, response merge, snapshot/capture state, commit, and `session-check`. Claude or Codex owns the live reasoning/tool turn between `plan` and `finalize`. A response that only appears in the console is not complete; it becomes part of the turn only when `finalize` writes it into the document and commits that state.
+<!-- agent:boundary:e28921a6 -->
 <!-- /agent:exchange -->
 ###
 <!--

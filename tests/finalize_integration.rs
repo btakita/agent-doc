@@ -2005,6 +2005,49 @@ fn finalize_skips_queue_consumption_when_unrelated_prompt_is_already_in_baseline
 }
 
 #[test]
+fn finalize_consumes_synthetic_queue_prompt_when_response_topic_targets_head_id() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let queue_head = "JB `Run Agent Doc` on tsift.md add the prompt into agent:queue but does not complete sending the `agent-doc .../tsift.md` in the Codex session. Please include a mermaid in the response explaining what happened.\n#spec-test-build-install-commit-push";
+    let content = format!(
+        "---\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n### Re: older\nOld response.\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue auto -->\n---\n{queue_head}\n---\n<!-- /agent:queue -->\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n"
+    );
+    fs::write(&doc, &content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    let baseline = write_baseline(tmp.path(), &content);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--baseline-file",
+            baseline.to_str().unwrap(),
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: #spec-test-build-install-commit-push — gpt-5\nImplemented and verified.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success()
+        .stderr(predicates::str::contains("[queue] consumed"));
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        !content.contains("JB `Run Agent Doc` on tsift.md add the prompt into agent:queue"),
+        "queue head should drain when the response topic targets its preset id:\n{content}"
+    );
+    assert!(
+        content.contains("queue_active: false"),
+        "drained queue should clear active state:\n{content}"
+    );
+    assert!(
+        content.contains("### Re: #spec-test-build-install-commit-push"),
+        "response should still be written:\n{content}"
+    );
+}
+
+#[test]
 fn finalize_skips_queue_consumption_when_user_prompt_diff_targets_other_work() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();

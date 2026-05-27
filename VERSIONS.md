@@ -6,6 +6,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Finalize now consumes answered queue-synthetic prompts.** When an active
+  `agent:queue auto` head is the only prompt diff, `finalize` can now consume
+  it after the response is written if the captured `### Re:` heading targets
+  the queue head's id (for example `#spec-test-build-install-commit-push`).
+  Unrelated baseline prompts still preserve the queue head.
+
 - **Queued JetBrains Run Agent Doc reroutes now survive live prompt edits.**
   When `route --dispatch-only` queues a busy-actor rerun by saving
   `agent:queue auto` to the snapshot but `HEAD` still lacks that handoff, the

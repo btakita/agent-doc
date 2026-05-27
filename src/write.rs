@@ -1168,7 +1168,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     let current_content =
         std::fs::read_to_string(file).context("failed to read document for pre-write guards")?;
     guard_no_exchange_compaction_request_between(file, baseline.as_deref(), &current_content)?;
-    let queue_consumption_allowed = should_consume_queue_prompt_for_write(
+    let mut queue_consumption_allowed = should_consume_queue_prompt_for_write(
         file,
         baseline.as_deref(),
         &current_content,
@@ -1228,6 +1228,17 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     // config.toml` `[lint] dialect` > default (`warn`).
     if write_result.is_ok() && commit_mode != CommitMode::None {
         crate::lint_gate::run(file, options.lint_override)?;
+    }
+
+    if write_result.is_ok()
+        && !queue_consumption_allowed
+        && let Some(capture) = crate::capture::load_active(file)?
+        && response_explicitly_targets_active_queue_head(file, &capture.response_body)?
+    {
+        eprintln!(
+            "[queue] response heading explicitly targets active queue head; allowing consumption"
+        );
+        queue_consumption_allowed = true;
     }
 
     // Phase 3c: consume queue prompt after all other strict closeout gates

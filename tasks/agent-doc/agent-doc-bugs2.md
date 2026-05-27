@@ -130,7 +130,7 @@ Verification: live session status and ops log agree that the pane is currently b
 Escalation: none.
 
 Confidence: medium-high. The active-turn diagnosis is directly supported by current session status and ops events; the remaining implementation work is the queued `#jbrunbusy` fix.
-<!-- agent:boundary:e50bec50 -->
+<!-- agent:boundary:bde7b904 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -204,6 +204,7 @@ As I was typing into the comment below `/agent:exchange`, the full-document IPC 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#jbrunbusy] Fix JB Run Agent Doc active-turn retry classification: dispatch-only `latest run still booting ... active codex turn` refusals should be typed as busy/running, coalesced or retryable in the JetBrains plugin, and covered by route + plugin regression tests using the equityfundingsource repro.
 <!-- /agent:backlog -->
 
 ## Review

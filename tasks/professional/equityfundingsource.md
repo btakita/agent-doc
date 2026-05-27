@@ -35,9 +35,21 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 Compacted content:
 - Archived 1 response topic(s): /apply email delivery
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-Where is the borrower portal/login link in the header?
-#spec-test-commit-push-deploy
-<!-- agent:boundary:b306621a -->
+
+❯ Where is the borrower portal/login link in the header?
+❯ #spec-test-commit-push-deploy
+### Re: Borrower portal/login link — gpt-5
+
+It is not in the current anonymous header.
+
+The deployed header currently shows these desktop actions: `Broker Portal` -> `/portal-broker`, `Apply for a Loan` -> `/apply`, and `Investor Portal` -> `/login?role=investor`. The mobile header shows the same three actions. I also checked the live workers.dev homepage and it matches the source.
+
+The borrower portal itself is present at `/portal-borrower`; unauthenticated visitors are redirected to `/login?role=borrower`. The footer also has `Borrower Portal` -> `/portal-borrower`.
+
+Best header target, if we add it, is `URLS.portal_borrower` (`/portal-borrower`) rather than a raw login URL, because it lets signed-in borrowers continue to the portal and lets anonymous users fall through to the borrower login redirect.
+
+Evidence: `lib/ui--server--efs/header/index.ts`, `lib/ui--server--efs/urls/index.ts`, `app/equityfundingsource/lib/portal/borrower/routes.ts`, and the live workers.dev HTML. No app files changed; no tests were run because this was an inspection/answer-only cycle.
+<!-- agent:boundary:a54a9ce4 -->
 <!-- /agent:exchange -->
 ###
 <!--

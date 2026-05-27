@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -65,7 +65,10 @@ Verification passed:
 - GitHub Actions CI run `26501875917`: `clippy + test` passed and live Convex graph acceptance passed
 
 I did not find a separate tmux-test workflow or tmux CI leg in this repo's active GitHub workflows/jobs, so there was no red tmux leg to reproduce locally. The preflight `#next-steps` warning still appears to refer to a post-exchange HTML comment only; I treated it as a non-executable note unless it is moved into the queue or exchange.
-<!-- agent:boundary:75382991 -->
+### Re: closeout repair — gpt-5
+
+Closeout repair only: the `#gfullhot` response above is already committed, and this write reopens the binary-owned write/commit path after the live IPC `HEAD` marker drift reported by `session-check`.
+<!-- agent:boundary:23181a1b -->
 <!-- /agent:exchange -->
 ###
 <!--

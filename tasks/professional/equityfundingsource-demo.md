@@ -2,6 +2,22 @@
 agent_doc_session: 25032905-09d1-468a-9ffd-387fd2ee6580
 agent_doc_format: template
 agent_doc_write: crdt
+agent: codex
+claude_model: opus
+codex_args: -s danger-full-access
+links:
+  - ./judith-krug.md
+  - ./robert-waldman.md
+  - ../personal/robert-ward.md
+  - ./bob-remeika.md
+prompt_presets:
+  '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md. DO NOT IMPLEMENT THE FIX.
+  '#commit-push': commit all uncommitted files + push in claudescore-plugin, claudescore.com, and session-share
+  '#commit-push-deploy': commit all uncommitted files + push in claudescore-plugin, claudescore.com, and session-share. deploy
+  '#mermaid': Include explanatory mermaid diagram(s).
+  '#spec-test-commit-push': update spec + tests. commit + push
+  '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
+queue_active: false
 ---
 
 ## Status
@@ -12,8 +28,57 @@ agent_doc_write: crdt
 ## Exchange
 
 <!-- agent:exchange patch=append -->
+❯ What are #next-steps for the demo with judith-krug?
 
-<!-- agent:boundary:4c89098c -->
+### Re: Judith demo next steps — gpt-5
+
+For the Judith demo, keep the agenda narrow: show the working EFS portal layer, then use the TMO LOS discussion to explain where the next integration/replacement work starts. Do not make this a broad TMO-servicing replacement pitch; EFS is using TMO LOS/API, so the near-term story is intake, status, documents, cache, and staff-reviewed writeback.
+
+#### Demo Objective
+
+The demo should answer three questions for Judith:
+
+1. **Can she see real progress?** Show the live-ish workers.dev site, `/apply`, admin lead review, and role-specific portal entry points.
+2. **Does the workflow match her business?** Borrower applies, broker submits/refers, admin reviews, investors see approved deals, and TMO remains the LOS back office while EFS owns the branded workflow.
+3. **What decisions unblock the next phase?** Domain/email/Google/TMO/Dropbox/legal approvals, then broker backend and TMO LOS inventory.
+
+#### Before The Demo
+
+- Use `https://equityfundingsource.brian-takita.workers.dev` as the demo URL unless custom-domain cutover is explicitly approved before the call.
+- Smoke-test the public path: home, funded deals, `/apply`, contact, and footer email.
+- Smoke-test the admin path: Cloudflare Access login, application lead list, lead detail/update, and staff notification state.
+- Prepare one clean sample lead and one or two portal examples. If any route still has fixture/static data, say that directly instead of letting Judith infer it is TMO-backed.
+- Have screenshots ready as fallback in case Cloudflare Access, network, or login interrupts the live demo.
+
+#### Demo Flow
+
+1. **Public site:** brand, current navigation, funded-deal/public trust surface, and `/apply`.
+2. **Application lead:** submit or show a sample prequalification lead and explain that it lands in D1 for admin review.
+3. **Admin review:** show how staff can review status, lead state, and next action without relying on live TMO during page load.
+4. **Portal overview:** show borrower, broker, and investor surfaces at a high level, with clear labels for what is production-backed versus planned/TMO-backed.
+5. **TMO LOS boundary:** explain that the next replacement layer is TMO Loan Origination: application reference, loan number, statuses, documents/attachments, conditions, funding, and sync cache.
+6. **Decision close:** ask for the approvals/access needed to finish the next build increment.
+
+#### Ask Judith / Robert For These Decisions
+
+- Confirm whether the workers.dev demo can remain the temporary production URL until domain cutover is intentionally scheduled.
+- Approve an EFS-owned sending domain for Resend so lead notifications stop using testing-mode sender/recipient values.
+- Provide Google Workspace admin credentials when they want real Google SSO/calendar/email integration.
+- Restore or provide TMO LOS access for inventory: products, custom fields, statuses, condition phases, document templates, screenshots/exports, and sample loans.
+- Confirm Dropbox folder structure, naming conventions, duplicate-file policy, and sanitized sample documents.
+- Review/approve funded-deal images, copy, lien-position wording, and legal/disclosure language.
+
+#### Recommended Next Build Order After Demo
+
+1. Finish demo hardening and capture Judith's corrections.
+2. Inventory actual TMO LOS usage (`#xt4d`) before implementing more TMO writeback assumptions.
+3. Finish broker backend so the existing broker UI does not overstate functionality.
+4. Build document checklist / upload-token / admin review around real EFS document workflows.
+5. Add staff-approved TMO LOS outbox writes and cache refreshes.
+6. Only then consider broader replacement pieces such as condition automation or document generation.
+
+Closeout evidence: changed path is this session document only. Commands used included `tsift status`, `tsift status --fix`, `agent-doc --version`, `agent-doc preflight/read/plan`, linked-doc `sed` reads, `tsift --envelope search`, and this `agent-doc finalize`. Verification is source-review only; no code changed and no tests were run. Confidence is high on the demo agenda and medium on exact route/data readiness until the pre-demo smoke-test backlog item is completed. No escalation was used.
+<!-- agent:boundary:e3badafb -->
 <!-- /agent:exchange -->
 
 ## Queue

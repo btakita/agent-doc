@@ -7562,6 +7562,86 @@ fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
     true
 }
 
+fn persist_already_applied_socket_content_ours_snapshot(
+    file: &Path,
+    patch_id: &str,
+    baseline: Option<&str>,
+    content_ours: Option<&str>,
+) -> Result<()> {
+    let Some(ours) = content_ours else {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "ipc_socket_already_applied_no_content_ours_snapshot file={} patch_id={}",
+                file.display(),
+                patch_id
+            ),
+        );
+        return Ok(());
+    };
+
+    if let Ok(current) = std::fs::read_to_string(file)
+        && strip_boundary_for_dedup(&current) != strip_boundary_for_dedup(ours)
+    {
+        crate::flow::proof::log_flow_event(
+            file,
+            crate::flow::types::FlowEvent::new(
+                crate::flow::types::FlowName::DocumentMutation,
+                crate::flow::types::FlowStage::IpcSnapshotAdoption,
+                crate::flow::types::FlowOutcome::Blocked,
+            )
+            .with_reason("already_applied_live_buffer_diverged"),
+        );
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "ipc_socket_already_applied_snapshot_absorb_blocked file={} patch_id={} current_len={} current_hash={} content_ours_len={} content_ours_hash={} prompt_drift={}",
+                file.display(),
+                patch_id,
+                current.len(),
+                crate::ops_log::content_hash(&current),
+                ours.len(),
+                crate::ops_log::content_hash(ours),
+                baseline.is_some_and(|base| {
+                    ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
+                        base, &current, ours,
+                    )
+                })
+            ),
+        );
+        if let Err(err) = crate::cycle_state::record_ipc_snapshot_adoption_blocked(file) {
+            eprintln!(
+                "[write] WARNING: failed to record already_applied IPC snapshot adoption block for {}: {}",
+                file.display(),
+                err
+            );
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "ipc_socket_already_applied_snapshot_absorb_block_record_failed file={} patch_id={} error={}",
+                    file.display(),
+                    patch_id,
+                    err
+                ),
+            );
+        }
+    }
+
+    snapshot::save(file, ours)?;
+    let crdt_doc = crate::crdt::CrdtDoc::from_text(ours);
+    snapshot::save_crdt(file, &crdt_doc.encode_state())?;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "ipc_socket_already_applied_content_ours_snapshot file={} patch_id={} snap_len={}",
+            file.display(),
+            patch_id,
+            ours.len()
+        ),
+    );
+    Ok(())
+}
+
 fn normalization_prefix_observation_counts(
     content: &str,
     normalize_prefix_lines: &[String],
@@ -8832,6 +8912,12 @@ pub fn try_ipc(
                         patch_id
                     ),
                 );
+                persist_already_applied_socket_content_ours_snapshot(
+                    file,
+                    &patch_id,
+                    baseline,
+                    content_ours,
+                )?;
                 cleanup_fallback_patch_files(file);
                 return Ok(IpcResult {
                     success: true,
@@ -16641,6 +16727,23 @@ mod submodule_patch_routing_tests {
         })
     }
 
+    fn start_already_applied_listener(project_root: &Path) -> std::thread::JoinHandle<()> {
+        let root = project_root.to_path_buf();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::thread::spawn(move || {
+            let _ = crate::ipc_socket::start_listener(&root, |_msg| {
+                Some(
+                    serde_json::json!({
+                        "type": "ack",
+                        "status": "error",
+                        "reason": "already_applied"
+                    })
+                    .to_string(),
+                )
+            });
+        })
+    }
+
     /// Helper: wait for the socket listener to become connectable (up to 1s).
     fn wait_for_listener(project_root: &Path) {
         for _ in 0..100 {
@@ -16755,6 +16858,110 @@ mod submodule_patch_routing_tests {
         assert!(
             result.success,
             "try_ipc should succeed via socket IPC routed to the git toplevel"
+        );
+    }
+
+    #[test]
+    fn try_ipc_already_applied_socket_saves_content_ours_and_blocks_snapshot_absorb() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        for subdir in [
+            "patches",
+            "snapshots",
+            "crdt",
+            "logs",
+            "state/cycles",
+            "claimed-patches",
+        ] {
+            fs::create_dir_all(root.join(".agent-doc").join(subdir)).unwrap();
+        }
+
+        let doc = root.join("session.md");
+        let baseline = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let content_ours = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "### Re: Please reply — gpt-5\n\n",
+            "Answered.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let live_already_applied_with_extra_exchange_growth = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "### Re: Please reply — gpt-5\n\n",
+            "Answered.\n",
+            "### Re: late replay — gpt-5\n\n",
+            "This live editor growth must not become the committed snapshot.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, baseline).unwrap();
+        crate::snapshot::save(&doc, baseline).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
+        fs::write(&doc, live_already_applied_with_extra_exchange_growth).unwrap();
+
+        let _listener = start_already_applied_listener(&root);
+        wait_for_listener(&root);
+
+        let patch = crate::template::PatchBlock::new(
+            "exchange",
+            "### Re: Please reply — gpt-5\n\nAnswered.",
+        );
+        let result = try_ipc(
+            &doc,
+            &[patch],
+            "",
+            None,
+            Some(baseline),
+            Some(content_ours),
+            None,
+            Some("already-applied-patch"),
+        )
+        .unwrap();
+
+        assert!(
+            result.success,
+            "already_applied socket ack is a consumed editor write"
+        );
+        assert_eq!(
+            crate::snapshot::load(&doc).unwrap().as_deref(),
+            Some(content_ours),
+            "already_applied must persist the agent-owned response image, not the larger live buffer"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            live_already_applied_with_extra_exchange_growth,
+            "live editor drift remains visible for the next cycle"
+        );
+        assert!(
+            crate::cycle_state::load(&doc)
+                .unwrap()
+                .unwrap()
+                .ipc_snapshot_adoption_blocked,
+            "commit must later refuse snapshot_absorb for the divergent live buffer"
+        );
+
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("ipc_socket_already_applied_skip_file_fallback")
+                && log.contains("ipc_socket_already_applied_content_ours_snapshot")
+                && log.contains("ipc_socket_already_applied_snapshot_absorb_blocked"),
+            "already_applied snapshot guard should be auditable:\n{log}"
         );
     }
 

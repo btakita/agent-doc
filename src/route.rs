@@ -297,6 +297,23 @@ fn starting_timeout_blocked_actor_can_recover(
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PendingPromptBearingRouteContext {
     marker: String,
+    prompt_text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum RouteCloseoutDrainOutcome {
+    NoOpenCycle,
+    Recovered(String),
+    Blocked(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RouteQueueEnqueueOutcome {
+    prompt_text: String,
+    appended: bool,
+    already_present: bool,
+    component_created: bool,
+    activated: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1570,6 +1587,254 @@ fn scrub_duplicate_prompt_comments_for_route(
     } else {
         Ok(None)
     }
+}
+
+fn drain_open_closeout_before_routed_dispatch(file: &Path) -> Result<RouteCloseoutDrainOutcome> {
+    let Some(state) = crate::cycle_state::load(file)? else {
+        return Ok(RouteCloseoutDrainOutcome::NoOpenCycle);
+    };
+    if !state.is_open() {
+        return Ok(RouteCloseoutDrainOutcome::NoOpenCycle);
+    }
+
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "route_dispatch_drain_closeout_started file={} cycle_id={} phase={:?}",
+            file.display(),
+            state.cycle_id,
+            state.phase
+        ),
+    );
+    match crate::repair::repair(file) {
+        Ok(outcome) => match crate::session_check::inspect(file)? {
+            crate::session_check::SessionCheckStatus::Ok(_) => {
+                let label = format!("{outcome:?}");
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "route_dispatch_drain_closeout_recovered file={} cycle_id={} outcome={}",
+                        file.display(),
+                        state.cycle_id,
+                        label
+                    ),
+                );
+                Ok(RouteCloseoutDrainOutcome::Recovered(label))
+            }
+            crate::session_check::SessionCheckStatus::Interrupted(reason) => {
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "route_dispatch_drain_closeout_blocked file={} cycle_id={} blocker={}",
+                        file.display(),
+                        state.cycle_id,
+                        crate::secret_redact::redact(&reason)
+                    ),
+                );
+                Ok(RouteCloseoutDrainOutcome::Blocked(reason))
+            }
+        },
+        Err(err) => {
+            let reason = err.to_string();
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_dispatch_drain_closeout_blocked file={} cycle_id={} blocker={}",
+                    file.display(),
+                    state.cycle_id,
+                    crate::secret_redact::redact(&reason)
+                ),
+            );
+            Ok(RouteCloseoutDrainOutcome::Blocked(reason))
+        }
+    }
+}
+
+fn queue_prompt_text_for_route_change(change_text: &str) -> Option<String> {
+    let mut lines = Vec::new();
+    for line in change_text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("<!-- agent:boundary:") {
+            continue;
+        }
+        let without_prompt_prefix = trimmed
+            .strip_prefix('❯')
+            .or_else(|| trimmed.strip_prefix('>'))
+            .map(str::trim)
+            .unwrap_or(trimmed);
+        if !without_prompt_prefix.is_empty() {
+            lines.push(without_prompt_prefix.to_string());
+        }
+    }
+    let text = lines.join("\n").trim().to_string();
+    if text.is_empty() { None } else { Some(text) }
+}
+
+fn enqueue_route_dispatch_prompt(
+    file: &Path,
+    prompt_text: &str,
+    source: &str,
+) -> Result<RouteQueueEnqueueOutcome> {
+    let prompt_text = queue_prompt_text_for_route_change(prompt_text)
+        .ok_or_else(|| anyhow::anyhow!("route queue prompt is empty"))?;
+    let _lock = acquire_route_queue_lock(file)?;
+    let original = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {}", file.display()))?;
+    let mut content = frontmatter::merge_fields(&original, "queue_active: true")?;
+    let components = crate::component::parse(&content)?;
+    let mut component_created = false;
+    let mut already_present = false;
+    let mut appended = false;
+
+    if let Some(queue_component) = components
+        .iter()
+        .find(|component| component.name == "queue")
+        .cloned()
+    {
+        let body = &content[queue_component.open_end..queue_component.close_start];
+        let mut entries = crate::queue::parse(body)
+            .context("route queue dispatch: failed to parse existing agent:queue")?;
+        already_present = crate::queue::prompts(&entries)
+            .iter()
+            .any(|prompt| prompt.text.trim() == prompt_text);
+        if !already_present {
+            entries.push(crate::queue::QueueEntry::Prompt(
+                crate::queue::QueuePrompt {
+                    multiline: prompt_text.contains('\n'),
+                    text: prompt_text.clone(),
+                },
+            ));
+            appended = true;
+        }
+        let rendered = crate::queue::render(&entries);
+        content = queue_component.replace_content(&content, &rendered);
+        content = ensure_queue_component_auto_attr(&content)?;
+    } else {
+        component_created = true;
+        appended = true;
+        content = insert_auto_queue_component(&content, &prompt_text)?;
+    }
+
+    let activated = content != original;
+    if activated {
+        crate::write::atomic_write_pub(file, &content)
+            .with_context(|| format!("failed to write queued dispatch to {}", file.display()))?;
+        crate::snapshot::save(file, &content).with_context(|| {
+            format!(
+                "failed to sync snapshot after queueing dispatch for {}",
+                file.display()
+            )
+        })?;
+    }
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "route_dispatch_queued file={} source={} appended={} already_present={} component_created={} activated={} prompt={:?}",
+            file.display(),
+            source,
+            appended,
+            already_present,
+            component_created,
+            activated,
+            prompt_text
+        ),
+    );
+    Ok(RouteQueueEnqueueOutcome {
+        prompt_text,
+        appended,
+        already_present,
+        component_created,
+        activated,
+    })
+}
+
+fn route_queue_lock_path(file: &Path) -> Result<PathBuf> {
+    let canonical = std::fs::canonicalize(file)
+        .with_context(|| format!("failed to canonicalize {}", file.display()))?;
+    let base = snapshot::find_project_root(&canonical)
+        .or_else(|| canonical.parent().map(Path::to_path_buf))
+        .ok_or_else(|| {
+            anyhow::anyhow!("failed to resolve queue lock root for {}", file.display())
+        })?;
+    let hash = crate::snapshot::doc_hash_from_str(&canonical.to_string_lossy());
+    Ok(base
+        .join(".agent-doc/route-queue")
+        .join(format!("{hash}.lock")))
+}
+
+fn acquire_route_queue_lock(file: &Path) -> Result<File> {
+    let lock_path = route_queue_lock_path(file)?;
+    if let Some(parent) = lock_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let lock = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)
+        .with_context(|| format!("failed to open route queue lock {}", lock_path.display()))?;
+    lock.lock_exclusive()
+        .with_context(|| format!("failed to acquire route queue lock {}", lock_path.display()))?;
+    Ok(lock)
+}
+
+fn ensure_queue_component_auto_attr(content: &str) -> Result<String> {
+    let components = crate::component::parse(content)?;
+    let Some(queue_component) = components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
+        return Ok(content.to_string());
+    };
+    if crate::queue::has_auto_attr(&queue_component.attrs) {
+        return Ok(content.to_string());
+    }
+    let open_tag = &content[queue_component.open_start..queue_component.open_end];
+    let newline = if open_tag.ends_with('\n') { "\n" } else { "" };
+    let trimmed = open_tag.trim_end_matches('\n');
+    let new_tag = trimmed.replacen("<!-- agent:queue", "<!-- agent:queue auto", 1);
+    let mut result = String::with_capacity(content.len() + " auto".len());
+    result.push_str(&content[..queue_component.open_start]);
+    result.push_str(&new_tag);
+    result.push_str(newline);
+    result.push_str(&content[queue_component.open_end..]);
+    Ok(result)
+}
+
+fn insert_auto_queue_component(content: &str, prompt_text: &str) -> Result<String> {
+    let body = crate::queue::render(&[crate::queue::QueueEntry::Prompt(
+        crate::queue::QueuePrompt {
+            multiline: prompt_text.contains('\n'),
+            text: prompt_text.to_string(),
+        },
+    )]);
+    let block = format!(
+        "<!-- agent:queue auto -->\n{}<!-- /agent:queue -->\n\n",
+        body
+    );
+    let components = crate::component::parse(content)?;
+    let insert_at = components
+        .iter()
+        .find(|component| crate::component::is_tracked_work_component(&component.name))
+        .map(|component| component.open_start)
+        .or_else(|| {
+            components
+                .iter()
+                .find(|component| component.name == "exchange")
+                .map(|component| component.close_end)
+        })
+        .unwrap_or(content.len());
+    let mut result = String::with_capacity(content.len() + block.len() + 2);
+    result.push_str(&content[..insert_at]);
+    if insert_at > 0 && !result.ends_with("\n\n") {
+        if !result.ends_with('\n') {
+            result.push('\n');
+        }
+        result.push('\n');
+    }
+    result.push_str(&block);
+    result.push_str(&content[insert_at..]);
+    Ok(result)
 }
 
 fn cleanup_failed_route_panes(
@@ -3104,13 +3369,55 @@ fn route_via_authoritative_actor(
     split_before: bool,
     harness: &HarnessConfig,
     baseline: Option<&crate::cycle_state::CycleState>,
-    prompt_bearing_marker: Option<&str>,
+    prompt_context: Option<&PendingPromptBearingRouteContext>,
     dispatch_only: bool,
     actor: AuthoritativeActorDispatchTarget,
 ) -> Result<String> {
     let mut actor = actor;
     let mut dispatch_pane = actor.record.pane_id.clone();
     let mut actor_state = actor.actor_state();
+    let prompt_bearing_marker = prompt_context.map(|context| context.marker.as_str());
+    match drain_open_closeout_before_routed_dispatch(file)? {
+        RouteCloseoutDrainOutcome::NoOpenCycle => {}
+        RouteCloseoutDrainOutcome::Recovered(outcome) => {
+            eprintln!(
+                "[route] drained open closeout for {} before reroute ({})",
+                file.display(),
+                outcome
+            );
+            if let Some(refreshed) = load_authoritative_actor_binding(
+                tmux, file, session_id, file_path, harness, false, false,
+            )? {
+                actor = refreshed;
+                dispatch_pane = actor.record.pane_id.clone();
+                actor_state = actor.actor_state();
+            }
+        }
+        RouteCloseoutDrainOutcome::Blocked(reason) => {
+            if let Some(context) = prompt_context {
+                let queued = enqueue_route_dispatch_prompt(
+                    file,
+                    &context.prompt_text,
+                    "open_closeout_blocked",
+                )?;
+                eprintln!(
+                    "[route] active closeout for {} could not be drained before reroute; queued pending dispatch {:?} in agent:queue auto (appended={}, already_present={})",
+                    file.display(),
+                    queued.prompt_text,
+                    queued.appended,
+                    queued.already_present
+                );
+                return Ok(dispatch_pane);
+            }
+            anyhow::bail!(
+                "authoritative actor generation {} for {} owns pane {} but route could not drain the active closeout before dispatch: {}",
+                actor.record.generation,
+                file.display(),
+                dispatch_pane,
+                reason
+            );
+        }
+    }
     if actor_state == crate::session_actor::ActorState::Starting
         && let Some(refreshed) =
             wait_for_authoritative_actor_ready(tmux, file, session_id, file_path, harness, &actor)?
@@ -3326,7 +3633,7 @@ fn route_via_authoritative_actor(
             );
             Ok(dispatch_pane)
         }
-        AuthoritativeActorDispatchAction::DispatchOnlyBusyFailClosed => {
+        AuthoritativeActorDispatchAction::DispatchOnlyBusyQueue => {
             let reason =
                 actor_dispatch_blocker_reason(actor_dispatch_state).unwrap_or("actor not ready");
             crate::ops_log::log_op(
@@ -3345,15 +3652,29 @@ fn route_via_authoritative_actor(
                 file,
                 RoutedReopenGuardReason::DispatchOnlyBusyActorNotReady,
             );
-            anyhow::bail!(
-                "authoritative actor generation {} for {} owns pane {} but dispatch-only route will not inject a new trigger because {} did not return to a dispatch-ready prompt in the current generation after waiting {}s. {}",
-                actor.record.generation,
-                file.display(),
-                dispatch_pane,
-                reason,
-                dispatch_only_starting_pane_recovery_timeout(Some(harness)).as_secs(),
-                authoritative_actor_dispatch_recovery_hint(actor_state, file)
-            );
+            if let Some(context) = prompt_context {
+                let queued = enqueue_route_dispatch_prompt(file, &context.prompt_text, reason)?;
+                eprintln!(
+                    "[route] authoritative actor generation {} for {} is busy on pane {}; queued pending dispatch {:?} in agent:queue auto (appended={}, already_present={}) instead of injecting a duplicate trigger",
+                    actor.record.generation,
+                    file.display(),
+                    dispatch_pane,
+                    queued.prompt_text,
+                    queued.appended,
+                    queued.already_present
+                );
+                Ok(dispatch_pane)
+            } else {
+                anyhow::bail!(
+                    "authoritative actor generation {} for {} owns pane {} but dispatch-only route will not inject a new trigger because {} did not return to a dispatch-ready prompt in the current generation after waiting {}s. {}",
+                    actor.record.generation,
+                    file.display(),
+                    dispatch_pane,
+                    reason,
+                    dispatch_only_starting_pane_recovery_timeout(Some(harness)).as_secs(),
+                    authoritative_actor_dispatch_recovery_hint(actor_state, file)
+                )
+            }
         }
         AuthoritativeActorDispatchAction::RecoverDispatchOnlyWaitingInput => {
             recover_dispatch_only_authoritative_waiting_input(
@@ -3631,9 +3952,7 @@ fn resolve_or_create_pane_dispatch_only(
             is_first_column(file, col_args),
             harness,
             cycle_baseline.as_ref(),
-            pending_prompt_context
-                .as_ref()
-                .map(|context| context.marker.as_str()),
+            pending_prompt_context.as_ref(),
             true,
             actor.clone(),
         );
@@ -3964,9 +4283,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
             is_first_column(file, col_args),
             harness,
             cycle_baseline.as_ref(),
-            pending_prompt_context
-                .as_ref()
-                .map(|context| context.marker.as_str()),
+            pending_prompt_context.as_ref(),
             false,
             actor,
         );
@@ -6270,8 +6587,11 @@ fn pending_prompt_bearing_context_for_route(
         .find(|line| !line.trim().is_empty())
         .unwrap_or(change.text.as_str())
         .trim();
+    let prompt_text = queue_prompt_text_for_route_change(&change.text)
+        .unwrap_or_else(|| preview.trim_start_matches('❯').trim().to_string());
     Ok(Some(PendingPromptBearingRouteContext {
         marker: format!("{marker}: {preview}"),
+        prompt_text,
     }))
 }
 

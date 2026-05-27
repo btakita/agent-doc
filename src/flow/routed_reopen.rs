@@ -459,7 +459,7 @@ pub(crate) fn decide_authoritative_reopen(facts: RoutedReopenFacts) -> RoutedReo
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AuthoritativeActorDispatchAction {
     FocusOnly,
-    DispatchOnlyBusyFailClosed,
+    DispatchOnlyBusyQueue,
     RecoverDispatchOnlyWaitingInput,
     ManagedSupervisorQueue,
     FailClosed,
@@ -486,7 +486,7 @@ pub(crate) fn classify_authoritative_actor_dispatch_action(
             && actor_can_queue_optimistically(facts.actor_state)
             && facts.reopen_decision == RouteDecision::FailClosed
         {
-            return AuthoritativeActorDispatchAction::DispatchOnlyBusyFailClosed;
+            return AuthoritativeActorDispatchAction::DispatchOnlyBusyQueue;
         }
         if facts.mode == ReopenMode::DispatchOnly
             && actor_waiting_input_recoverable(facts.actor_state)
@@ -922,7 +922,7 @@ mod tests {
                 has_prompt_bearing_work: true,
                 reopen_decision: RouteDecision::FailClosed,
             }),
-            AuthoritativeActorDispatchAction::DispatchOnlyBusyFailClosed
+            AuthoritativeActorDispatchAction::DispatchOnlyBusyQueue
         );
         assert_eq!(
             classify_authoritative_actor_dispatch_action(AuthoritativeActorDispatchActionFacts {

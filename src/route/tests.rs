@@ -449,6 +449,102 @@ fn route_debounce_allows_dispatch_after_typing_indicator_expires() {
         .expect("route should proceed after mtime and typing indicator are both idle");
 }
 
+#[test]
+fn route_enqueue_dispatch_prompt_creates_visible_auto_queue_and_snapshot() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_format: template\n",
+        "queue_active: false\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "❯ prior prompt\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#qipc] Fix queue dispatch.\n",
+        "<!-- /agent:backlog -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    crate::snapshot::save(&doc, content).unwrap();
+
+    let outcome = enqueue_route_dispatch_prompt(
+        &doc,
+        "❯ do [#qipc]. #spec-test-build-install-commit-push",
+        "test_busy_actor",
+    )
+    .expect("route should persist a queued dispatch prompt");
+
+    assert!(outcome.appended);
+    assert!(outcome.component_created);
+    assert!(outcome.activated);
+    assert_eq!(
+        outcome.prompt_text,
+        "do [#qipc]. #spec-test-build-install-commit-push"
+    );
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    assert!(updated.contains("queue_active: true"));
+    assert!(updated.contains("<!-- agent:queue auto -->"));
+    assert!(updated.contains("- do [#qipc]. #spec-test-build-install-commit-push"));
+    let queue_pos = updated.find("<!-- agent:queue auto -->").unwrap();
+    let backlog_pos = updated.find("<!-- agent:backlog -->").unwrap();
+    assert!(
+        queue_pos < backlog_pos,
+        "created queue component should be visible before tracked work components:\n{updated}"
+    );
+    let snapshot = crate::snapshot::load(&doc).unwrap().unwrap();
+    assert_eq!(
+        snapshot, updated,
+        "route queueing must sync the snapshot so auto-queue continuation is not treated as a modified head prompt"
+    );
+}
+
+#[test]
+fn route_enqueue_dispatch_prompt_activates_existing_queue_without_duplicate() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_format: template\n",
+        "queue_active: false\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue -->\n",
+        "- do [#qipc]. #spec-test-build-install-commit-push\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#qipc] Fix queue dispatch.\n",
+        "<!-- /agent:backlog -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    crate::snapshot::save(&doc, content).unwrap();
+
+    let outcome = enqueue_route_dispatch_prompt(
+        &doc,
+        "do [#qipc]. #spec-test-build-install-commit-push",
+        "test_busy_actor",
+    )
+    .expect("route should activate an existing queued dispatch prompt");
+
+    assert!(!outcome.appended);
+    assert!(outcome.already_present);
+    assert!(!outcome.component_created);
+    assert!(outcome.activated);
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    assert!(updated.contains("queue_active: true"));
+    assert!(updated.contains("<!-- agent:queue auto -->"));
+    assert_eq!(
+        updated
+            .matches("- do [#qipc]. #spec-test-build-install-commit-push")
+            .count(),
+        1,
+        "route must not duplicate an already visible queue prompt:\n{updated}"
+    );
+}
+
 fn test_registry_entry(pane: &str, file: &str, cwd: &std::path::Path) -> sessions::SessionEntry {
     sessions::SessionEntry {
         pane: pane.to_string(),

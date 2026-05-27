@@ -132,6 +132,17 @@ Later phases may refine caller values without changing the field names.
   dispatch stage: route must wait for it to report `ready`, then fail closed if
   it remains `starting` instead of sending tmux or supervisor input into the
   startup window.
+- Repeated dispatches are queue-first once a document actor is already busy.
+  Route must first try to drain an open binary-owned closeout (`repair` /
+  strict commit / `session-check`) so an idle console can accept the reroute
+  immediately after the prior cycle is closed. If that drain is blocked, or if a
+  dispatch-only reroute still cannot prove the authoritative actor is
+  dispatch-ready, route must not inject a duplicate trigger. It appends the
+  pending prompt-bearing request to `agent:queue`, creates the component when
+  missing, sets `queue_active: true`, adds the `auto` queue attribute, and syncs
+  the snapshot to that visible queue state. This makes the queued work
+  inspectable and lets the normal Stop-hook/auto-queue path continue it after
+  the current committed closeout, without hidden one-shot route state.
 - The phase-5 sync/focus path also consumes that authoritative actor binding
   through the controller when the actor pane is still alive: sync
   rescues/reconciles layout around the actor-owned pane and focus selects it

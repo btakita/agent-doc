@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -172,7 +172,29 @@ Commits:
 - Root gitlink commit prepared: `7b3923706 chore: advance agent-doc submodule`. The root push is intentionally after this session finalize boundary so the session commit is included in the same push.
 
 No new backlog item came out of this change.
-<!-- agent:boundary:cc856d42 -->
+### Re: #cyclediag — gpt-5
+Implemented `agent-doc ops diagnose` as a source-grouped cycle/patch diagnosis report.
+
+What landed:
+- Added `agent-doc ops diagnose` with `--cycle-id`, `--patch-id`, `--session-id`, `--file`, `--project-root`, `--limit`, and `--json` flags.
+- The report gathers matches from `.agent-doc/logs/ops.log`, cycle JSONL, harness session logs, editor/plugin debug logs, capture JSON, Codex hook records, hook payloads, patch files, actor/session state, and `.agent-doc/state` sidecars.
+- Text sources match by path or line and respect `--limit`; JSON sources are redacted and summarize large payload fields instead of dumping full response/plugin bodies.
+- Updated the built-in command list and `specs/07-core-commands.md` with the new diagnosis command contract.
+- Added CLI regression coverage that creates representative logs, captures, hook records, patch files, and state sidecars, then verifies the JSON diagnosis output includes the expected source groups and payload summarization.
+
+Verification:
+- `rustfmt --edition 2024 src/main.rs src/ops_report.rs src/commands.rs tests/test_cli.rs`
+- `cargo test test_cli_ops_diagnose_gathers_cycle_artifacts --test test_cli -- --test-threads=1`
+- `cargo test ops_summary -- --test-threads=1`
+- `make check`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.34.0`
+- Latest completed GitHub CI for `20260422/codex-agent-backend` was green: run `26490738959`, including `Run make tmux-ci`.
+
+Commits:
+- Submodule: `d7b5b4df` (`feat: add cycle diagnosis report`), pushed to `origin/20260422/codex-agent-backend`.
+- Root gitlink: `c00afcb12` (`chore: advance agent-doc submodule`), prepared for push after this session closeout.
+<!-- agent:boundary:49aff2d4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -184,20 +206,12 @@ As I was typing into the comment below `/agent:exchange`, the full-document IPC 
 #spec-test-build-install-commit-push
 -->
 
-<!-- agent:queue auto -->
-dispatch #spec-test-build-install-commit-push
-- ~do [#ignorebypass]~
-- ~do [#liveipcrace]~
-- ~do [#snapabsorb]~
-- ~do [#compactstuck]~
-- ~do [#commentpreset]~
-- do [#cyclediag]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#cyclediag] Add an agent-doc cycle diagnosis command/report that gathers ops.log, capture JSON, route/actor events, Codex session logs, Claude session logs, and editor plugin logs by cycle_id/patch_id to make future race reports reproducible without broad rg searches.
 <!-- /agent:backlog -->
 
 ## Review

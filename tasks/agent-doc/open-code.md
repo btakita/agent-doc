@@ -32,7 +32,6 @@ prompt_presets:
 Compacted content:
 - Archived 2 response topic(s): next-steps for OpenCode integration; continue
 - Prior summary/context: ❯ What are #next-steps to ensure agent-doc integration works with opencode? ❯ Can you drive a session to test opencod...
-
 ### Re: Clear Session Context error — GLM-5.1
 
 **Root cause:** The network probe constructs `opencode run --format json --model GLM-5.1 "probe..."` using the raw `opencode_model` frontmatter value. OpenCode expects `provider/model` format (e.g. `zai/GLM-5.1`); the bare `GLM-5.1` is parsed as a provider name, producing the malformed `GLM-5.1/.` internally.
@@ -56,7 +55,41 @@ The SPEC at `SPEC.md:71` confirms OpenCode has no prompt-submit hook equivalent.
 
 1. **Minimal** — change `dispatch_only_dispatch_start_proof_required` to return `false` for `"opencode"` (same as the `_` catch-all for Claude Code), since there is no proof mechanism available.
 2. **Future-proof** — implement an OpenCode-specific dispatch-start tracker (e.g. watching for pane state change or session log entry) so the proof gate can work.
-<!-- agent:boundary:2760ddcf -->
+❯ do option 2
+
+### Re: do option 2 — OpenCode dispatch-start tracker plan — GLM-5.1
+
+Plan created at `tasks/agent-doc/plan-opencode-dispatch-start-proof.md`.
+
+#### Approach: Pane State Transition Detection
+
+The only reliable observable for dispatch-only (non-managed) OpenCode sessions is tmux `capture-pane`. The tracker will:
+
+1. **Capture pre-dispatch baseline** — hash the pane's idle chrome content before sending the trigger
+2. **Poll for state change** — after `send_command_checked` confirms trigger acceptance, poll at 500ms intervals for the pane to depart from idle state
+3. **Yield proof** — `PaneStateChanged` when idle chrome is replaced by active output; `CommandAcceptedOnly` on timeout
+
+#### Key implementation points
+
+| Step | File | Description |
+|------|------|-------------|
+| 1 | `harness.rs` | Add OpenCode busy cue detection in `dispatch_blocker_reason` |
+| 2 | `route.rs` | Extend `RoutedDispatchStartTracker` with `OpenCodePane` variant (pane id + pre-dispatch content hash) |
+| 3 | `route.rs` | Modify `build_routed_dispatch_start_tracker` to build tracker for OpenCode (needs tmux/pane threaded through) |
+| 4 | `route.rs` | Add `wait_for_opencode_pane_state_change` polling function (500ms poll, 15s timeout matching OpenCode redraw budget) |
+| 5 | `routed_reopen.rs` | Add `PaneStateChanged` variant to `RoutedDispatchStartProof`, update classification to accept it |
+| 6 | `SPEC.md` | Document the new proof mechanism |
+
+#### Risks
+
+- OpenCode TUI redraw can take up to 15s — proof timeout should match this budget
+- Intermediate redraw states could cause false positives — mitigate with `is_idle_chrome_only_output` as the idle check
+- `capture-pane` at 200ms may be too aggressive — use 500ms (matches `wait_for_agent_ready_outcome`)
+
+#### Backlog transfer to agent-doc-bugs2.md
+
+- [ ] [#ocdsp] Implement OpenCode dispatch-start proof via pane state transition detection — plan at `tasks/agent-doc/plan-opencode-dispatch-start-proof.md` — extend `RoutedDispatchStartTracker`, add `PaneStateChanged` proof variant, poll `capture-pane` for idle→active transition
+<!-- agent:boundary:882768f9 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -68,6 +101,8 @@ The SPEC at `SPEC.md:71` confirms OpenCode has no prompt-submit hook equivalent.
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#n89s] #agent-doc-bug Fix `dispatch_only_dispatch_start_proof_required` to return `false` for opencode harness (routed_reopen.rs:319) — no proof mechanism exists, SPEC confirms it
+- [ ] [#xd6k] #agent-doc-bug Add model name validation in `canonical_model_name` or probe builder for opencode harness — reject bare names without provider prefix (model_tier.rs:256, codex.rs:534)
 <!-- /agent:backlog -->
 
 ## Icebox

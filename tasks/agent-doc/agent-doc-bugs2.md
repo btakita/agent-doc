@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -34,7 +34,48 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 1 response topic(s): closeout repair
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:8dedc9c8 -->
+### Re: IPC closeout state model — gpt-5
+
+Implemented `#ipcmodel` and marked it done.
+
+What changed:
+- Added an IPC closeout state model and regression suite in `src/agent-doc/tests/ipc_closeout_model.rs`.
+- Added a guarded rollback in `src/agent-doc/src/write.rs` so partial IPC response materialization is removed before the direct fallback path can merge and commit it.
+- Covered bad ACK content, prompt drift, partial response materialization, stale file-IPC replay cleanup, and post-block snapshot absorb across socket/file/direct fallback states.
+
+Lifecycle diagram:
+
+```mermaid
+flowchart LR
+    A[Preflight baseline] --> B[Response patch computed]
+    B --> C{IPC transport}
+    C -->|Socket ACK| D[ACK content sidecar]
+    C -->|File ACK| D
+    C -->|Timeout/no IPC| E[Direct guarded disk fallback]
+    D --> F{Materialization + drift guards}
+    F -->|valid response, no prompt drift| G[Snapshot from ACK]
+    F -->|prompt/post-block drift| H[Snapshot from content_ours]
+    F -->|bad ACK or partial response| I[Remove partial response artifact]
+    I --> E
+    E --> J[Commit only guarded snapshot]
+    G --> J
+    H --> J
+    J --> K[Session-check]
+```
+
+The unsafe full-document IPC corruption path is now eliminated inside the agent-doc closeout boundary: response fallback full-content IPC stays disabled, ACK/file-read snapshots must pass materialization guards, live prompt drift forces `content_ours`, and stale patch replay is claimed before commit. We cannot mathematically eliminate every external editor/OS failure mode, but the state model now makes those observed corruption packets unable to become the committed session snapshot.
+
+Verification:
+- `cargo test --test ipc_closeout_model` passed.
+- `cargo test try_ipc_rejects_consumed_partial_response_materialization --lib && cargo test --test ipc_closeout_model` passed; the lib filter had 0 matching tests, and the integration suite passed 6/6.
+- `make check` passed, including clippy, default tests, and the medium SimWorld closeout corpus.
+- `cargo install --path .` completed and replaced `/home/brian/.cargo/bin/agent-doc` with local `agent-doc 0.34.0`.
+- Latest GitHub Actions CI run `26497326907` is green; its `Run make tmux-ci` step also passed.
+
+Commits:
+- `src/agent-doc`: `ec328b3a` (`fix: guard partial IPC materialization`)
+- superproject pointer: `dfc6223b7` (`agent-doc: guard partial IPC materialization`)
+<!-- agent:boundary:1d54b315 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -51,7 +92,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#ipcmodel]
+- ~do [#ipcmodel]~
 - do [#ipcreplay]
 - do [#ipcdeny]
 - do [#ipcfail]
@@ -61,7 +102,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#ipcmodel] Formalize and test an IPC closeout state model: enumerate allowed snapshot sources and state transitions for socket/file/direct-disk paths, then add property/table tests proving bad ACK content, prompt drift, partial response materialization, stale patch replay, and post-block snapshot absorb cannot reach commit.
 - [ ] [#ipcreplay] Add a deterministic equityfundingsource IPC race replay harness that replays typing during finalize against socket IPC, file IPC, ACK sidecars, stale patch files, and direct-disk fallback so historical corruption packets stay covered outside live editor runs.
 - [ ] [#ipcdeny] Add repo-wide receiver/static guards for full-document mutation APIs across CLI, JetBrains, and VS Code, with allowlisted parser/diagnostic references only, so legacy or foreign `fullContent` payloads remain unrepresentable as visible writes.
 - [ ] [#ipcfail] Strengthen closeout diagnostics for insufficient IPC proof: surface the exact failed invariant and recovery path in preflight/session-check, and add tests for no ACK, missing response probe, duplicate prompt ACK, and live prompt drift.

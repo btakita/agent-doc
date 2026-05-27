@@ -40,8 +40,7 @@ Compacted content:
 … +73 lines (ctrl + t to view transcript)
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 66 filtered out; finished in 0.00s
 ```
-❯ #spec-test-build-install-commit-push
-
+❯ #spec-test-build-install-commit-push #mermaid
 ### Re: Fix module-harness missing lib target warning — glm-5.1
 
 **Root cause:** `module-harness` was a binary-only crate (no `lib.rs`, no `[lib]` section) but listed as a dev-dependency in `agent-doc`. Cargo warned because a binary-only crate cannot be used as a library dependency.
@@ -61,8 +60,7 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 66 filtered out; fin
 - `cargo check` on agent-doc — no more warning
 - `cargo install --path .` — installed v0.2.1 locally
 - Pushed to both submodules + parent repo
-
-<!-- agent:boundary:9fd63d5b -->
+<!-- agent:boundary:109db9dd -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->

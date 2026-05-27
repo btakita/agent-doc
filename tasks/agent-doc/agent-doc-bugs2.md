@@ -76,7 +76,11 @@ Commits pushed:
 Queue note: `agent-doc orchestrate --from-queue --plan` could not use the local queue because `agent:queue` contained raw prose (`JB \`Run Agent Doc\` on this file did not dispatch.`) before the preset entry. I handled the two explicit preset targets manually in this cycle and cleared the malformed queue content below.
 
 Confidence: high for the local implementation and tests. Escalation: none; no approvals were needed.
-<!-- agent:boundary:cbad3fe5 -->
+
+### Re: closeout repair — gpt-5
+
+Reopened the binary-owned write/commit path after the IPC closeout drift. The prior implementation response and pending mutations were already committed; this repair entry exists only to satisfy the post-commit session guard for the same turn.
+<!-- agent:boundary:a6fd567f -->
 <!-- /agent:exchange -->
 ###
 <!--

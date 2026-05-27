@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -58,7 +58,17 @@ Committed and pushed the remaining `src/agent-doc` change.
 - Verification: `cargo test opencode_permission_prompt_fallback`; `make check`; GitHub Actions CI run `26534636393` succeeded for `419fb85216dd`, including `Run make check` and `Run make tmux-ci`.
 
 The preflight warning about the post-exchange HTML comment remains non-executable note text; I did not move or execute it.
-<!-- agent:boundary:9b3c0e06 -->
+
+### Re: closeout drift recovery — gpt-5
+
+Recovered the binary-owned closeout after the live-buffer drift: the remaining session-document queue cleanup and boundary marker changes are now part of this response cycle. No additional repo implementation work was requested by that drift.
+
+- Changed path for this recovery: `tasks/agent-doc/agent-doc-bugs2.md`.
+- Commands: `agent-doc preflight`; `agent-doc plan`; `agent-doc finalize --force-disk`.
+- Verification: this finalize path runs post-commit `session-check`.
+- Confidence: high.
+- Escalation: none.
+<!-- agent:boundary:1434bda1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -76,12 +86,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 #spec-test-build-install-commit-push
 -->
 
-<!-- agent:queue auto -->
-~~~done
-JB `Run Agent Doc` does not complete the agent-doc <file-name> run.
-#spec-test-build-install-commit-push
-~~~
-- ~do [#rhdr-blank]. #spec-test-build-install-commit-push~
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

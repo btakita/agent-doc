@@ -30,59 +30,12 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260527-144355.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260527-155257.md`*
 
 Compacted content:
-- Archived 1 response topic(s): message count
+- Archived 2 response topic(s): Broker Portal header order; deploy
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-Place the header "Broker Portal" link between "Apply for a Loan" and "Investor Portal".
-#spec-test-commit-push
-### Re: Broker Portal header order — gpt-5
-
-Done. I moved the logged-out `Broker Portal` header action so it sits between `Apply for a Loan` and `Investor Portal` in both desktop and mobile header action groups.
-
-Changed paths:
-- `lib/ui--server--efs/header/index.ts`
-- `tests/public-header.test.ts`
-- `docs/UI_GUIDE.md`
-- `prds/equity-funding-source-lending-portal-prd.md`
-- `tests/prd.test.ts`
-
-Verification:
-- `bun test tests/public-header.test.ts tests/prd.test.ts` -> 14 pass, 0 fail
-- `make check` -> 194 pass, 0 fail; site build and Worker build completed
-- `gh run list --workflow CI --limit 1` could not find a workflow named `CI`; `gh workflow list` returned no workflows for this repo.
-
-Commit and push:
-- EFS header/spec/test patch is on `origin/main` at `bcb4c7d` (`wip: UI guide, header, prd, and test edits`).
-- The EFS branch is aligned with `origin/main`; explicit `git push origin main` returned `Everything up-to-date`.
-
-Escalation: none.
-Confidence: high.
-❯ deploy
-### Re: deploy — gpt-5
-
-Deployed the current EFS `main` Worker to workers.dev.
-
-Deploy command:
-- `bun run deploy:worker`
-
-Deployment result:
-- URL: `https://equityfundingsource.brian-takita.workers.dev`
-- Worker version ID: `dd2fa976-a72c-4661-8a2d-aee196c57eb3`
-- Cron trigger deployed: `9 19 * * *`
-- Wrangler reported no updated asset files to upload, then uploaded the Worker script and deployed triggers.
-
-Live smoke checks:
-- `GET /` -> 200
-- `GET /apply` -> 200
-- `GET /portal-broker` -> 303 to `/login?role=broker`
-- Live home HTML shows desktop and mobile header order as `Borrower Login`, `Apply for a Loan`, `Broker Portal`, `Investor Portal`.
-
-Changed paths: none in the EFS app repo from the deploy.
-Escalation: none.
-Confidence: high.
-<!-- agent:boundary:5978022e -->
+<!-- agent:boundary:85bf73dd -->
 <!-- /agent:exchange -->
 ###
 <!--

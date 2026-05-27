@@ -63,10 +63,30 @@ Commits pushed:
 
 OpenCode references used: custom commands are markdown files under `.opencode/commands` and run by slash command name in the TUI; npm plugins are listed in `plugin` config and installed by Bun at startup. Sources: https://opencode.ai/docs/commands/ and https://opencode.ai/docs/plugins/.
 
-### Re: closeout repair — gpt-5 (HEAD)
+### Re: closeout repair — gpt-5
 
 Closeout repair only: committed the already-written status, queue strike-through, and gated `#gopencode-install` transition through the binary-owned path. No additional repo work was started after the prior response.
-<!-- agent:boundary:e7d0224a -->
+Implemented and pushed the tsift OpenCode npm package path.
+
+Key commits:
+- `btakita/tsift`: `ac1ca49` (`feat: add opencode npm package`)
+- `btakita/agent-loop`: `1fed363e9` (`chore: install tsift opencode shortcuts`)
+- The agent-doc response and gated backlog state were committed and pushed afterward.
+
+Verification passed:
+- `make check`
+- `cargo build --release`
+- `cargo install --path . --force`
+- `npm publish --access public --dry-run`
+- Fresh OpenCode smoke using `opencode plugin /home/brian/work/btakita/agent-loop/src/tsift/packages/opencode-tsift`
+- GitHub Actions CI for `btakita/tsift` passed.
+
+Blocked/gated:
+- Actual `npm publish --access public` failed with registry permission/auth (`E404 ... not found or you do not have permission`), so `#gopencode-install` is gated in the doc, not marked done.
+- `agent-doc session-check` still reports an active-harness metadata interruption even after the response/document state was committed and pushed. The file itself is clean; the remaining failure is the session-check invariant.
+
+OpenCode docs used: https://opencode.ai/docs/commands/ and https://opencode.ai/docs/plugins/.
+<!-- agent:boundary:076fb0a9 -->
 <!-- /agent:exchange -->
 ###
 <!--

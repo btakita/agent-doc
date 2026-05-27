@@ -15,7 +15,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -35,7 +35,9 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 3 response topic(s): JetBrains Run Agent Doc queued reroute; JB Run Agent Doc on tsift.md queue stall; #spec-test-build-install-commit-push
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:24d55728 -->
+JB `Run Agent Doc` on this document did not run agent-doc in the Codex console.
+#spec-test-build-install-commit-push #mermaid
+<!-- agent:boundary:46dc9217 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -60,6 +62,10 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 preset #spec-test-build-install-commit-push #mermaid
 - do [#odsp2]
 - do [#ocdsp]
+---
+JB `Run Agent Doc` on this document did not run agent-doc in the Codex console.
+#spec-test-build-install-commit-push #mermaid
+---
 <!-- /agent:queue -->
 
 ## Backlog

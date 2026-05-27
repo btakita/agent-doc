@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -34,7 +34,37 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 4 response topic(s): tsift.md full-document IPC corruption; do [#wkbs]; JB Plugin active-turn route refusal; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:b603795e -->
+### Re: #snrun — gpt-5
+
+Implemented and pushed the code side of `#snrun`; I am gating the item rather than marking it done because the requested live JetBrains replay still needs an IDE restart and an actual `Run Agent Doc` action after loading the newly installed local plugin.
+
+Changed paths in `src/agent-doc`:
+- `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt`
+- `editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/TerminalUtilTest.kt`
+- `src/harness.rs`
+- `editors/jetbrains/SPEC.md`
+- `specs/07-session-tmux-commands.md`
+- `editors/jetbrains/gradle.properties`
+- `VERSIONS.md`
+
+Behavior changed:
+- JetBrains `Run Agent Doc` now retries the route command for transient dispatch-only Codex `latest run is still booting` failures when the route probe ended on `active codex turn` or `timed_out`.
+- Shell-history/search blockers remain terminal failures, so protected input is not hidden behind editor retries.
+- The plugin version was bumped to `0.2.134`; the local build was installed to the running `IntelliJIdea2026.1` profile and requires an IDE restart.
+
+Verification:
+- `cargo test dispatch_blocker_reason_detects_codex_interactive_history_search` passed.
+- `./gradlew test --tests com.github.btakita.agentdoc.TerminalUtilTest` passed.
+- `make check` passed.
+- `./gradlew buildPlugin` passed.
+- `make install` passed.
+- `agent-doc plugin install --local jetbrains` installed `agent-doc-jetbrains-0.2.134.zip` to `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`.
+- Latest GitHub Actions `CI` run `26494572231` was green; its `check` job ran both `make check` and `make tmux-ci` successfully.
+
+Commit/push: `src/agent-doc` commit `e691220d` (`fix: retry transient Run Agent Doc booting routes`) was pushed to `origin/20260422/codex-agent-backend`.
+
+Confidence: high for the classifier and regression coverage; medium for the full live IDE path until the restarted plugin is replayed from the IDE. Escalation: none. Pre-existing unrelated dirty files in `src/agent-doc` were left unstaged.
+<!-- agent:boundary:4484f6e5 -->
 <!-- /agent:exchange -->
 ###
 <!--

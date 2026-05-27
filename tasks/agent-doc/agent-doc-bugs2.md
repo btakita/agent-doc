@@ -15,7 +15,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -36,9 +36,10 @@ Compacted content:
 - Archived 1 response topic(s): #ocdsp
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
 When I restarted agent-doc on tsift.md, then ran JB `Run Agent Doc`, the dispatch had an error.
+❯ When I ran JB `Run Agent Doc` on this file, dispatch did not occur but the prompt was added to the queue.
+❯ If I update the prompt then rerun JB `Run Agent Doc`, the queue prompt should also be update.
 #spec-test-build-install-commit-push #mermaid
-
-### Re: queued Run Agent Doc prompt update — gpt-5
+### Re: queued Run Agent Doc prompt update — gpt-5 (HEAD)
 
 Fixed the queued JB `Run Agent Doc` rerun case.
 
@@ -102,16 +103,14 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 #spec-test-build-install-commit-push
 -->
 
-<!-- agent:queue auto -->
----
-When I restarted agent-doc on tsift.md, then ran JB `Run Agent Doc`, the dispatch had an error.
-#spec-test-build-install-commit-push #mermaid
----
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#inline-done-signal] User typing done in exchange should auto-apply --done to contextually relevant review item — plan: tasks/agent-doc/plan-inline-done-signal.md
+- [ ] [#review-auto-done] Completed review items not auto-marked done — plan: tasks/agent-doc/plan-review-auto-done.md
 <!-- /agent:backlog -->
 
 ## Review

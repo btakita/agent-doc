@@ -31,83 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260527-045155.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260527-065332.md`*
 
 Compacted content:
-- Archived 6 response topic(s): #gneighgate; closeout repair; #gsemrows; 3 more
+- Archived 6 response topic(s): graph + neighborhood next steps; #gneighqual; closeout repair; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
-❯ Please add #next-steps for graph and tag neighborhood effectiveness and performance.
-### Re: graph + neighborhood next steps — gpt-5
-
-Added the requested `#next-steps` into the backlog in priority order, tagged across graph, neighborhood effectiveness, and performance.
-
-Top backlog item: `#gneighqual`.
-
-Priority shape:
-
-1. `#gneighqual` — prove ranked-neighborhood effectiveness before changing defaults.
-2. `#gcommqual` — improve tagpath/community context that feeds neighborhood ranking.
-3. `#gfullhot` — reduce full-projection graph hot-path costs before backend changes.
-4. `#gsqlstage` — reduce SQLite refresh staging/write costs.
-5. `#ghoppolicy` — keep higher hop caps behind useful-row and latency evidence.
-6. `#gbackendproof` — keep FalkorDB/Kuzu promotion behind native-adapter parity and performance proof.
-
-No source code changed this cycle.
-### Re: #gneighqual — gpt-5
-
-Completed `#gneighqual` by verifying the ranked-neighborhood effectiveness gate is already implemented in the pushed `tsift` history and marking the backlog item done.
-
-Evidence:
-
-- `b4bba5d feat: rank graph neighborhoods` added additive `ranked_neighbors`, held stable node-id ordering as the default, added the neighborhood ranking gate, updated `SPEC.md`, and covered metric-digest/CLI/conformance tests.
-- `d3a1f1f docs: refresh graph neighborhood benchmark history` is the current `origin/main`/`HEAD`; `git -C src/tsift log origin/main..HEAD` is empty, so no extra `tsift` source commit or push was needed this cycle.
-- Existing dirty files in `src/tsift` are unrelated to `#gneighqual` and were left untouched.
-
-Verification:
-
-- `tsift status --json .` from `src/tsift`: index fresh, instructions current at `0.1.62`.
-- `make check`: passed (`cargo clippy --all-targets -- -D warnings` plus full `cargo test`, including graph DB conformance).
-- `cargo build`: passed.
-- `cargo install --path . --force`: passed; installed `tsift 0.1.62`.
-- `gh run list --workflow CI --limit 1` in `src/tsift`: latest `CI` run for `d3a1f1f` succeeded.
-- Root `Agent Doc` tmux CI check: latest run `26492018957` failed with empty job step lists and `gh run view --log` returned `log not found`, so I classified it as an external CI-start failure rather than a local tmux regression.
-
-No escalation was needed. `#gneighqual` is done.
-### Re: closeout repair — gpt-5
-
-Committed the post-IPC closeout drift from the completed `#gneighqual` cycle: status text, boundary placement, and the done archive entry now match the live document state. No source code changed in this repair.
-### Re: #gcommqual — gpt-5
-
-Completed `#gcommqual` by verifying the community-member tagpath/context work is already implemented in the pushed `tsift` history and marking the backlog item done.
-
-Evidence:
-
-- `b79fe86 feat: resolve community member tagpaths with context` added the matching implementation across `SPEC.md`, `src/graph.rs`, `src/main.rs`, and `tests/exit_code.rs`.
-- `CommunityMember` now carries selected `file` / `line`, bounded `refs`, and optional `tagpath_handle` context.
-- Community member annotation resolves duplicate names through unique tagpath candidates, edge-file evidence, then community-file evidence instead of name-only first-row fallback.
-- JSON diagnostics report ambiguous duplicate members through `community_diagnostics.ambiguous_members`.
-- Tests cover skipped-directory/name-collision behavior, edge-context duplicate resolution, and scoped workspace community handles from per-scope tagpath indexes.
-- `SPEC.md` documents the tagpath semantics for community member annotation, scoped communities, and duplicate-name evidence.
-- `git -C src/tsift log origin/main..HEAD` is empty, so no extra `tsift` source commit or push was needed this cycle.
-- Existing dirty files in `src/tsift` are unrelated to `#gcommqual` and were left untouched.
-
-Verification:
-
-- `tsift status --json .` from `src/tsift`: index fresh, instructions current at `0.1.62`.
-- `make check`: passed (`cargo clippy --all-targets -- -D warnings` plus full `cargo test`).
-- `cargo build`: passed.
-- `cargo install --path . --force`: passed; installed `tsift 0.1.62`.
-- `gh run list --workflow CI --limit 1` in `src/tsift`: latest `CI` run for `d3a1f1f` succeeded, including `clippy + test` and `live Convex graph acceptance`.
-
-No escalation was needed. `#gcommqual` is done.
-### Re: closeout repair — gpt-5
-
-Committed the remaining queue marker drift from the completed `#gcommqual` cycle. No source code changed in this repair.
-### Re: session-check repair — gpt-5
-
-Reopened the binary-owned closeout after committing the `#gcommqual` archive/queue marker drift, so the session-check state can close cleanly. No source code changed in this repair.
-<!-- agent:boundary:da55612e -->
+<!-- agent:boundary:917b1049 -->
 <!-- /agent:exchange -->
 ###
 <!--

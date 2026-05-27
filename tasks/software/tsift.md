@@ -37,8 +37,35 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 3 response topic(s): local-e2e-verify; tsift + tokensave integration; libsql backend implementation
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-Can algorithms and pipelines from tokensave be used in tsift? Would it be beneficial?
-<!-- agent:boundary:64a6aab3 -->
+❯ Can algorithms and pipelines from tokensave be used in tsift? Would it be beneficial?
+### Re: tokensave algorithms in tsift — glm-5.1
+
+**Yes, selectively — but not wholesale.**
+
+#### High-value integration paths
+
+| tokensave capability | tsift benefit | Integration approach |
+|---|---|---|
+| **34-language tree-sitter extraction** | tsift covers ~10 languages; tokensave covers 34 | Delegate extraction to tokensave for uncovered languages via GraphStore adapter |
+| **Code-health analytics** (health scores, god class, dead code, circular deps, coupling, DSM, Lakos levelization) | tsift has no equivalent; high-value for conflict-matrix and dispatch-trace | Wrap tokensave tools inside tsift digest pipeline with budget-aware envelopes |
+| **Call-graph impact analysis** (`impact`, `affected`, `hotspots`) | tsift has BFS path/neighborhood but lacks topological impact scoring | Pipe into tsift `conflict-matrix` gate for smarter parallel dispatch |
+| **Shared libSQL storage** | `LibsqlGraphStore` already uses same libSQL backend | Shared `.db` schema could reduce re-indexing between both tools |
+
+#### What NOT to absorb
+
+- **48 MCP tools + edit primitives** — months of work for marginal gain; tsift delegates edits to the harness
+- **Multi-branch indexing** — tsift projection/versioning model is architecturally different
+- **Cost tracking + TUI monitor** — no tsift equivalent needed; tokensave owns this
+- **FTS5 semantic search** — tsift uses graph queries, not full-text search
+
+#### Concrete next step
+
+1. Implement a `tokensave` backend adapter in `substrate.rs` behind `backend-eval` feature flag
+2. Read tokensave `.tokensave/tokensave.db` directly via `LibsqlGraphStore::open()`
+3. Benchmark through `perf_gate.rs` against SQLite
+
+This lets tsift query tokensave pre-built graph without re-indexing — highest-ROI integration with minimal new code.
+<!-- agent:boundary:f19ad0e8 -->
 <!-- /agent:exchange -->
 ###
 <!--

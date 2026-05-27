@@ -1796,6 +1796,20 @@ fn dispatch_only_requires_ready_probe(
         })
 }
 
+fn dispatch_only_starting_pane_not_ready_error(
+    harness: &HarnessConfig,
+    pane: &str,
+    file: &Path,
+    detail: &str,
+) -> String {
+    format!(
+        "dispatch-only {} reopen refused to inject into pane {} for {} because the latest run is still booting and never reached a dispatch-ready prompt ({detail}); wait for the pane to become ready and reroute again",
+        harness.binary,
+        pane,
+        file.display()
+    )
+}
+
 fn dispatch_only_send_reopen(
     tmux: &Tmux,
     file: &Path,
@@ -1885,12 +1899,12 @@ fn dispatch_only_send_reopen(
                     detail
                 ),
             );
-            anyhow::bail!(
-                "dispatch-only {} reopen refused to inject into pane {} for {} because the latest run is still booting and never reached a dispatch-ready prompt ({detail}); wait for the pane to become ready and reroute again",
-                harness.binary,
-                dispatch_pane,
-                file.display()
-            );
+            anyhow::bail!(dispatch_only_starting_pane_not_ready_error(
+                harness,
+                &dispatch_pane,
+                file,
+                detail
+            ));
         }
     }
 

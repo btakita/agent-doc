@@ -76,6 +76,23 @@ fn authoritative_actor_starting_hint_names_reroute_and_restart() {
 }
 
 #[test]
+fn dispatch_only_starting_pane_not_ready_error_matches_equityfundingsource_active_turn() {
+    let file = std::path::Path::new("tasks/professional/equityfundingsource.md");
+    let message = dispatch_only_starting_pane_not_ready_error(
+        &HarnessConfig::codex(),
+        "%42",
+        file,
+        "active codex turn",
+    );
+
+    assert!(message.contains("dispatch-only codex reopen refused"));
+    assert!(message.contains("tasks/professional/equityfundingsource.md"));
+    assert!(message.contains("latest run is still booting"));
+    assert!(message.contains("never reached a dispatch-ready prompt"));
+    assert!(message.contains("(active codex turn)"));
+}
+
+#[test]
 fn authoritative_actor_start_wait_terminal_state_only_for_terminal_states() {
     assert!(authoritative_actor_start_wait_terminal_state(
         crate::session_actor::ActorState::Closed
@@ -1131,6 +1148,23 @@ fn write_mock_busy_registered_agent_doc(base: &Path) -> std::path::PathBuf {
             "#!/bin/sh\nprintf 'Working...\\n'\nwhile IFS= read -r CMD; do\n  printf 'EARLY:%s\\n' \"$CMD\"\ndone\n",
         )
         .unwrap();
+    let mut perms = std::fs::metadata(&script).unwrap().permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&script, perms).unwrap();
+    script
+}
+
+fn write_mock_active_codex_turn_registered_agent_doc(base: &Path) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let bin_dir = base.join("bin");
+    std::fs::create_dir_all(&bin_dir).unwrap();
+    let script = bin_dir.join("agent-doc-active-codex-turn");
+    std::fs::write(
+        &script,
+        "#!/bin/sh\nprintf 'Working...\\n'\ni=0\nwhile [ \"$i\" -lt 20 ]; do\n  printf 'Working (1m 34s - esc to interrupt)\\n'\n  i=$((i + 1))\ndone\nprintf '\\n> Write tests for @filename\\ngpt-5 high - ~/work/btakita/agent-loop - Context 41%% used\\n'\nwhile IFS= read -r CMD; do\n  printf 'EARLY:%s\\n' \"$CMD\"\ndone\n",
+    )
+    .unwrap();
     let mut perms = std::fs::metadata(&script).unwrap().permissions();
     perms.set_mode(0o755);
     std::fs::set_permissions(&script, perms).unwrap();
@@ -3291,7 +3325,8 @@ fn resolve_or_create_pane_dispatch_only_refuses_while_latest_run_is_still_starti
     let cwd = test_cwd();
     let pane = iso.auto_start(session, &cwd).unwrap();
 
-    let doc = dir.path().join("route-dispatch-only-starting-pane.md");
+    let doc = dir.path().join("tasks/professional/equityfundingsource.md");
+    std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
     let snapshot =
         "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
     let current = format!("{snapshot}❯ follow-up question\n");
@@ -3322,17 +3357,28 @@ fn resolve_or_create_pane_dispatch_only_refuses_while_latest_run_is_still_starti
     )
     .unwrap();
 
-    let busy_agent = write_mock_busy_registered_agent_doc(dir.path());
+    let busy_agent = write_mock_active_codex_turn_registered_agent_doc(dir.path());
     send_keys_with_retry(
         &iso,
         &pane,
         &format!("exec {} {}", busy_agent.display(), doc.display()),
     );
-    let content =
-        wait_for_pane_contains(&iso, &pane, "Working...", std::time::Duration::from_secs(5));
+    let content = wait_for_pane_contains(
+        &iso,
+        &pane,
+        "esc to interrupt",
+        std::time::Duration::from_secs(5),
+    );
     assert!(
-        content.contains("Working..."),
+        content.contains("esc to interrupt"),
         "busy mock session should be active in pane: {content}"
+    );
+    assert_eq!(
+        HarnessConfig::codex()
+            .dispatch_blocker_reason(&content)
+            .as_deref(),
+        Some("active codex turn"),
+        "busy mock session should expose the Codex active-turn blocker: {content}"
     );
 
     let err = resolve_or_create_pane_dispatch_only(
@@ -3351,6 +3397,11 @@ fn resolve_or_create_pane_dispatch_only_refuses_while_latest_run_is_still_starti
         err.to_string()
             .contains("never reached a dispatch-ready prompt"),
         "unexpected startup-window refusal: {err:#}"
+    );
+    assert!(
+        err.to_string()
+            .contains("tasks/professional/equityfundingsource.md"),
+        "startup-window refusal should preserve the EFS document path: {err:#}"
     );
     let after = sessions::capture_pane(&iso, &pane).unwrap_or_default();
     assert!(

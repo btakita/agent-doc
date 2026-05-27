@@ -169,19 +169,37 @@ class TerminalUtilTest {
     @Test
     fun `latest run booting route failures are retryable only for transient busy shapes`() {
         val activeTurn = """
-            Error: dispatch-only codex reopen refused to inject into pane %42 for tasks/root.md because the latest run is still booting and never reached a dispatch-ready prompt (active codex turn); wait for the pane to become ready and reroute again
+            Error: dispatch-only codex reopen refused to inject into pane %42 for tasks/professional/equityfundingsource.md because the latest run is still booting and never reached a dispatch-ready prompt (active codex turn); wait for the pane to become ready and reroute again
         """.trimIndent()
         val timedOut = """
-            Error: dispatch-only codex reopen refused to inject into pane %42 for tasks/root.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again
+            Error: dispatch-only codex reopen refused to inject into pane %42 for tasks/professional/equityfundingsource.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again
         """.trimIndent()
         val shellSearch = """
-            Error: dispatch-only codex reopen refused to inject into pane %42 for tasks/root.md because the latest run is still booting and never reached a dispatch-ready prompt (interactive shell reverse-i-search); wait for the pane to become ready and reroute again
+            Error: dispatch-only codex reopen refused to inject into pane %42 for tasks/professional/equityfundingsource.md because the latest run is still booting and never reached a dispatch-ready prompt (interactive shell reverse-i-search); wait for the pane to become ready and reroute again
         """.trimIndent()
 
+        assertEquals(TerminalUtil.RunAgentDocRouteFailureKind.BUSY_RUNNING, TerminalUtil.classifyRunAgentDocRouteFailure(activeTurn))
+        assertEquals(TerminalUtil.RunAgentDocRouteFailureKind.RETRYABLE_STARTING, TerminalUtil.classifyRunAgentDocRouteFailure(timedOut))
+        assertEquals(TerminalUtil.RunAgentDocRouteFailureKind.PERSISTENT, TerminalUtil.classifyRunAgentDocRouteFailure(shellSearch))
         assertTrue(TerminalUtil.isRetryableRunAgentDocRouteFailure(activeTurn))
         assertTrue(TerminalUtil.isRetryableRunAgentDocRouteFailure(timedOut))
         assertFalse(TerminalUtil.isRetryableRunAgentDocRouteFailure(shellSearch))
         assertFalse(TerminalUtil.isRetryableRunAgentDocRouteFailure("[agent-doc] proof-timeout: accepted but unproven"))
+    }
+
+    @Test
+    fun `active codex turn route refusal is reported as still running not persistent failure`() {
+        val relativePath = "tasks/professional/equityfundingsource.md"
+        val output = """
+            Error: dispatch-only codex reopen refused to inject into pane %42 for $relativePath because the latest run is still booting and never reached a dispatch-ready prompt (active codex turn); wait for the pane to become ready and reroute again
+        """.trimIndent()
+        val message = TerminalUtil.buildRunAgentDocStillRunningMessage(relativePath)
+
+        assertEquals(TerminalUtil.RunAgentDocRouteFailureKind.BUSY_RUNNING, TerminalUtil.classifyRunAgentDocRouteFailure(output))
+        assertTrue(message.contains("still running"))
+        assertTrue(message.contains(relativePath))
+        assertFalse(message.contains("route failed"))
+        assertFalse(message.contains("Saved exact route output"))
     }
 
     @Test

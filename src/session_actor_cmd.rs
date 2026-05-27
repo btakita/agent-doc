@@ -353,7 +353,17 @@ pub fn clear(file: &Path) -> Result<()> {
     let tmux = Tmux::default_server();
     guard_starting_actor_operator_command(&ctx, &tmux, OperatorAction::Clear)?;
     reconcile_idle_projection_before_clear(&ctx, &tmux)?;
-    if let Some((pane, pane_source)) = resolve_direct_submit_pane(&ctx, &tmux) {
+    if supervisor_clear_inject_available(&ctx) {
+        send_clear_via_supervisor(&ctx)?;
+        crate::ops_log::log_op(
+            &ctx.canonical_file,
+            &format!(
+                "session_clear_sent file={} delivery=supervisor_ipc submit_mode={} pane_source=supervisor_runtime",
+                ctx.canonical_file.display(),
+                SUPERVISOR_INJECT_SUBMIT_MODE
+            ),
+        );
+    } else if let Some((pane, pane_source)) = resolve_direct_submit_pane(&ctx, &tmux) {
         send_clear_to_pane(&tmux, &pane, &ctx.canonical_file, &ctx.harness)?;
         crate::ops_log::log_op(
             &ctx.canonical_file,
@@ -366,27 +376,7 @@ pub fn clear(file: &Path) -> Result<()> {
             ),
         );
     } else {
-        ensure_supervisor_socket(&ctx)?;
-        let response = crate::supervisor::ipc::send_command(
-            &ctx.supervisor_socket,
-            &IpcMethod::Inject {
-                bytes: crate::supervisor::ipc::normalize_submit_text("/clear"),
-            },
-        )
-        .with_context(|| {
-            format!(
-                "failed to contact supervisor for {}",
-                ctx.canonical_file.display()
-            )
-        })?;
-        if !response.ok {
-            anyhow::bail!(
-                "{}",
-                response
-                    .error
-                    .unwrap_or_else(|| "supervisor inject request failed".to_string())
-            );
-        }
+        send_clear_via_supervisor(&ctx)?;
         crate::ops_log::log_op(
             &ctx.canonical_file,
             &format!(
@@ -408,6 +398,36 @@ pub fn clear(file: &Path) -> Result<()> {
         ctx.canonical_file.display(),
         authorization.accepted_stage
     );
+    Ok(())
+}
+
+fn supervisor_clear_inject_available(ctx: &SessionContext) -> bool {
+    matches!(ctx.supervisor_runtime.health, SupervisorHealth::Healthy)
+        && ctx.supervisor_socket.exists()
+}
+
+fn send_clear_via_supervisor(ctx: &SessionContext) -> Result<()> {
+    ensure_supervisor_socket(ctx)?;
+    let response = crate::supervisor::ipc::send_command(
+        &ctx.supervisor_socket,
+        &IpcMethod::Inject {
+            bytes: crate::supervisor::ipc::normalize_submit_text("/clear"),
+        },
+    )
+    .with_context(|| {
+        format!(
+            "failed to contact supervisor for {}",
+            ctx.canonical_file.display()
+        )
+    })?;
+    if !response.ok {
+        anyhow::bail!(
+            "{}",
+            response
+                .error
+                .unwrap_or_else(|| "supervisor inject request failed".to_string())
+        );
+    }
     Ok(())
 }
 

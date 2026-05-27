@@ -165,6 +165,12 @@ object TerminalUtil {
         val eventNames: List<String>,
     )
 
+    internal enum class RunAgentDocRouteFailureKind {
+        PERSISTENT,
+        RETRYABLE_STARTING,
+        BUSY_RUNNING,
+    }
+
     internal val inFlightRouteRegistry = InFlightRouteRegistry()
 
     fun relativePath(project: Project, file: VirtualFile): String {
@@ -276,12 +282,13 @@ object TerminalUtil {
                         val output = process.inputStream.bufferedReader().readText()
                         val exitCode = process.waitFor()
                         val elapsed = formatElapsedMillis(System.currentTimeMillis() - startedAt)
+                        val failureKind = classifyRunAgentDocRouteFailure(output)
                         if (handle.wasCanceled()) {
                             LOG.warn("[route] superseded route exited after replacement for $relativePath")
                             break
                         } else if (
                             exitCode != 0 &&
-                            isRetryableRunAgentDocRouteFailure(output) &&
+                            isRetryableRunAgentDocRouteFailure(failureKind) &&
                             attempt < STARTING_ACTOR_ROUTE_MAX_ATTEMPTS
                         ) {
                             val delayMillis = startingActorRouteRetryDelayMillis(attempt)
@@ -294,6 +301,11 @@ object TerminalUtil {
                             }
                             attempt += 1
                             continue
+                        } else if (exitCode != 0 && failureKind == RunAgentDocRouteFailureKind.BUSY_RUNNING) {
+                            LOG.warn("[route] busy/running after retry budget for $relativePath: $output")
+                            clearPersistedRouteFailureOutput(cwd, relativePath)
+                            notifyRunAgentDocStillRunning(project, relativePath, output)
+                            break
                         } else if (exitCode != 0) {
                             LOG.warn("[route] FAILED (exit $exitCode): $output")
                             notifyPersistentRouteFailure(
@@ -954,19 +966,38 @@ object TerminalUtil {
     }
 
     internal fun isRetryableRunAgentDocRouteFailure(output: String): Boolean {
-        return isStartingActorRouteFailure(output) || isLatestRunStillBootingRetryable(output)
+        return isRetryableRunAgentDocRouteFailure(classifyRunAgentDocRouteFailure(output))
+    }
+
+    private fun isRetryableRunAgentDocRouteFailure(kind: RunAgentDocRouteFailureKind): Boolean {
+        return kind == RunAgentDocRouteFailureKind.RETRYABLE_STARTING ||
+            kind == RunAgentDocRouteFailureKind.BUSY_RUNNING
+    }
+
+    internal fun classifyRunAgentDocRouteFailure(output: String): RunAgentDocRouteFailureKind {
+        return when {
+            isLatestRunStillBootingBusy(output) -> RunAgentDocRouteFailureKind.BUSY_RUNNING
+            isStartingActorRouteFailure(output) || isLatestRunStillBootingRetryable(output) ->
+                RunAgentDocRouteFailureKind.RETRYABLE_STARTING
+            else -> RunAgentDocRouteFailureKind.PERSISTENT
+        }
     }
 
     private fun isLatestRunStillBootingRetryable(output: String): Boolean {
         val lower = output.lowercase()
-        if (!lower.contains("dispatch-only") ||
-            !lower.contains("latest run is still booting") ||
-            !lower.contains("never reached a dispatch-ready prompt")
-        ) {
-            return false
-        }
+        return isLatestRunStillBootingShape(lower) &&
+            (lower.contains("(active codex turn)") || lower.contains("(timed_out)"))
+    }
 
-        return lower.contains("(active codex turn)") || lower.contains("(timed_out)")
+    private fun isLatestRunStillBootingBusy(output: String): Boolean {
+        val lower = output.lowercase()
+        return isLatestRunStillBootingShape(lower) && lower.contains("(active codex turn)")
+    }
+
+    private fun isLatestRunStillBootingShape(lower: String): Boolean {
+        return lower.contains("dispatch-only") &&
+            lower.contains("latest run is still booting") &&
+            lower.contains("never reached a dispatch-ready prompt")
     }
 
     internal fun startingActorRouteRetryDelayMillis(completedAttempts: Int): Long {
@@ -1174,6 +1205,28 @@ object TerminalUtil {
                 .notify(project)
         } catch (_: Exception) {
             System.err.println("[agent-doc] $content")
+        }
+    }
+
+    internal fun buildRunAgentDocStillRunningMessage(relativePath: String): String {
+        return "Agent Doc is still running for $relativePath.\n" +
+            "The Codex pane has an active turn and is not ready for another routed follow-up yet. Wait for the turn to finish, then run Agent Doc again."
+    }
+
+    private fun notifyRunAgentDocStillRunning(project: Project, relativePath: String, routeOutput: String) {
+        val summary = buildRunAgentDocStillRunningMessage(relativePath)
+        try {
+            val notification = NotificationGroupManager.getInstance()
+                .getNotificationGroup("Agent Doc")
+                .createNotification(summary, NotificationType.WARNING)
+            notification.isImportant = true
+            notification.addAction(NotificationAction.createSimple("Copy details") {
+                CopyPasteManager.getInstance().setContents(StringSelection(routeOutput))
+                showHint(project, "Copied running route details for $relativePath")
+            })
+            notification.notify(project)
+        } catch (_: Exception) {
+            System.err.println("[agent-doc] $summary")
         }
     }
 

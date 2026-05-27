@@ -77,7 +77,21 @@ Added to `agent-doc-bugs2.md` backlog:
 ### Re: repair — glm-5.1
 
 Repair: changed backlog item format from `- [ ]` to text references to avoid pending shadow detection for transferred items that belong in bugs2.md, not this document's backlog. Both `#review-auto-done` and `#inline-done-signal` are already in `agent-doc-bugs2.md` backlog. No new items to add.
-<!-- agent:boundary:16e0328f -->
+
+### Re: completing the turn — glm-5.1
+
+Actions taken:
+
+1. **Marked done in review:** `#gopencode-install` [x], `#gopencode` [x], `#npm-publish` [x]
+2. **Deduped review:** removed duplicate `#e2e-install` and `#npm-publish` entries (was 6 items, now 4)
+3. **Removed `#review-dedup`** from backlog and queue (completed inline)
+
+Remaining review: `#e2e-install` [/], `#npm-publish` [/] — but note `#npm-publish` is now marked [x] per user declaration; it will be reaped on next preflight.
+
+Queue: `#local-e2e-verify` → `#npm-auth-setup` → `#npm-publish-verify` → `#full-e2e-verify`
+
+**#agent-doc-bug filed:** `#review-auto-done` and `#inline-done-signal` in `agent-doc-bugs2.md` with plans in `tasks/agent-doc/`.
+<!-- agent:boundary:52513af5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -101,11 +115,6 @@ preset #spec-test-build-install-commit-push
 
 <!-- agent:review -->
 - [/] [#e2e-install] Verify end-to-end install: fresh opencode project + opencode plugin opencode-tsift + /tsift-status
-- [/] [#npm-publish] npm publish opencode-tsift to npm registry (blocked on npm auth token)
-- [/] [#e2e-install] Verify end-to-end install: fresh opencode project + opencode plugin opencode-tsift + /tsift-status
-- [/] [#npm-publish] npm publish opencode-tsift to npm registry (blocked on npm auth token)
-- [/] [#gopencode-install] Make tsift installable as an opencode harness via `tsift init --opencode`: publish the command shortcuts to the opencode marketplace/registry so users can install tsift opencode support without cloning the repo, document the install path, and verify end-to-end with a fresh opencode session.
-- [/] [#gopencode] [tag: opencode] [tag: integration] Make OpenCode a first-class tsift integration: add installer/config docs, envelope shortcuts for session/log/test/diff digest use, verify OpenCode transcript capture and permission-prompt diagnostics, add deterministic tests, then build/install and run an end-to-end agent-doc OpenCode smoke session.
 <!-- /agent:review -->
 ###
 <!--

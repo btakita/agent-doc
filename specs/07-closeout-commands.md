@@ -44,6 +44,7 @@ or prove capabilities, but it may not change the closeout semantics.
 - Rewrites exchange or another component into a compacted summary/archive-pointer state.
 - After writing the archive markdown, compact best-effort upserts that archive into `.agent-doc/archive-index.db`; indexing failure warns but must not roll back archive creation.
 - For exchange compaction without an explicit message, the default summary must include an archive pointer plus a digest of the compacted exchange content. It must not duplicate live `agent:backlog`, `agent:queue`, or `agent:icebox` component content into `agent:exchange`.
+- A committed response capture whose body is no longer in `HEAD` because exchange compaction archived it is still materialized when `HEAD` references a compact archive under `.agent-doc/archives/` and that archive contains the captured body; `stuck_captured_cycle` must not warn in that case.
 - `--commit` proves only that the compacted document state itself crossed the commit boundary; it does not also persist any later human explanation.
 
 ## patch

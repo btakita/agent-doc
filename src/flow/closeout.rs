@@ -166,7 +166,8 @@ pub(crate) fn cycle_already_committed(file: &Path) -> Option<String> {
 
 /// Diagnostic information about a "stuck captured cycle" — a cycle whose
 /// `cycle_state` advanced to `Committed` but whose captured response body is
-/// not present in HEAD for the document.
+/// not present in HEAD or in a compact archive referenced by HEAD for the
+/// document.
 ///
 /// Preflight surfaces this as a non-blocking warning so harnesses can drive
 /// recovery via `agent-doc write --commit <FILE>` instead of silently retrying
@@ -184,7 +185,8 @@ pub(crate) struct StuckCapturedCycleInfo {
 
 /// Detect a "stuck captured cycle" wedge for `file`. Returns `None` when the
 /// document is healthy or when there is not enough durable state to prove the
-/// captured response body is absent from `HEAD`.
+/// captured response body is absent from both `HEAD` and HEAD-referenced
+/// compact archives.
 pub(crate) fn stuck_captured_cycle(file: &Path) -> Option<StuckCapturedCycleInfo> {
     let state = match crate::cycle_state::load(file) {
         Ok(Some(state)) => state,
@@ -239,6 +241,9 @@ pub(crate) fn stuck_captured_cycle(file: &Path) -> Option<StuckCapturedCycleInfo
     if crate::write::response_materialized_in_content(&capture.response_body, &head) {
         return None;
     }
+    if response_materialized_in_head_compact_archive(file, &capture.response_body, &head) {
+        return None;
+    }
 
     Some(StuckCapturedCycleInfo {
         cycle_id: state.cycle_id,
@@ -246,6 +251,47 @@ pub(crate) fn stuck_captured_cycle(file: &Path) -> Option<StuckCapturedCycleInfo
         capture_id: capture.capture_id,
         capture_state: capture_state_label(capture.state).to_string(),
     })
+}
+
+fn response_materialized_in_head_compact_archive(
+    file: &Path,
+    response_body: &str,
+    head: &str,
+) -> bool {
+    compact_archive_pointers(head).into_iter().any(|pointer| {
+        read_head_compact_archive(file, pointer)
+            .map(|archive| crate::write::response_materialized_in_content(response_body, &archive))
+            .unwrap_or(false)
+    })
+}
+
+fn compact_archive_pointers(content: &str) -> Vec<&str> {
+    content
+        .split("archived to `")
+        .skip(1)
+        .filter_map(|tail| tail.split_once('`').map(|(path, _)| path.trim()))
+        .filter(|path| !path.is_empty())
+        .collect()
+}
+
+fn read_head_compact_archive(file: &Path, pointer: &str) -> Option<String> {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let project_root = crate::snapshot::find_project_root(&canonical)?;
+    let archive_root = project_root
+        .join(".agent-doc/archives")
+        .canonicalize()
+        .ok()?;
+    let pointer_path = Path::new(pointer);
+    let archive_path = if pointer_path.is_absolute() {
+        pointer_path.to_path_buf()
+    } else {
+        project_root.join(pointer_path)
+    };
+    let archive_path = archive_path.canonicalize().ok()?;
+    if !archive_path.starts_with(&archive_root) {
+        return None;
+    }
+    std::fs::read_to_string(archive_path).ok()
 }
 
 fn capture_state_label(state: crate::capture::CaptureState) -> &'static str {
@@ -534,5 +580,56 @@ mod tests {
         .unwrap();
 
         assert!(stuck_captured_cycle(&doc).is_none());
+    }
+
+    #[test]
+    fn stuck_captured_cycle_ignores_committed_cycle_when_response_is_in_compact_archive() {
+        let base = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Older response.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let response = "### Re: compacted — gpt-5\n\nArchived response body.\n";
+        let (dir, doc) = setup_git_project_with_doc(base);
+        let archive_dir = dir.path().join(".agent-doc/archives");
+        std::fs::create_dir_all(&archive_dir).unwrap();
+        let archive_path = archive_dir.join("doc-20260527-000000.md");
+        std::fs::write(
+            &archive_path,
+            format!(
+                "---\narchived_from: compact\ncomponent: exchange\ndocument: doc.md\n---\n\n{base}\n{response}"
+            ),
+        )
+        .unwrap();
+        let compacted = format!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n*Compacted. Content archived to `{}`*\n<!-- /agent:exchange -->\n",
+            archive_path.display()
+        );
+
+        let state = crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        crate::capture::capture_response(&doc, response).unwrap();
+        std::fs::write(&doc, &compacted).unwrap();
+        crate::snapshot::save(&doc, &compacted).unwrap();
+        run_git(dir.path(), &["add", "doc.md"]);
+        run_git(dir.path(), &["commit", "-m", "compact", "--no-verify"]);
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(&compacted),
+            Some(&compacted),
+        )
+        .unwrap();
+
+        assert!(
+            stuck_captured_cycle(&doc).is_none(),
+            "cycle {} should not warn when the captured response is materialized in the compact archive",
+            state.cycle_id
+        );
     }
 }

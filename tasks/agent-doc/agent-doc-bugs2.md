@@ -151,7 +151,28 @@ Commits pushed:
 - `btakita/agent-loop` `6012141d3` (`chore: advance agent-doc submodule`)
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:edf9b5cc -->
+### Re: #commentpreset — gpt-5
+
+Implemented `#commentpreset`.
+
+What changed:
+- `src/agent-doc/src/preflight.rs` now scans ordinary HTML comments after `agent:exchange` for known prompt-preset references and dispatch-looking text such as `dispatch ...`, `preset ...`, and slash commands. These comments stay non-executable scratch content, but preflight emits a visible `post_exchange_comment_prompt_preset` warning telling the user to move the text into `agent:exchange` or `agent:queue` if it should run.
+- `src/agent-doc/specs/07-closeout-commands.md` now records that contract: post-exchange scratch comments are preserved outside exchange, must not populate `prompt_presets_requested`, and must warn when they contain preset/directive-looking text.
+
+Verification:
+- `cargo test prompt_preset -- --test-threads=1`
+- `cargo test preflight_warns_on_dispatch_text_inside_post_exchange_html_comment_without_presets -- --test-threads=1`
+- `make check`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.34.0`
+- CI/tmux: latest completed CI run `26490215440` passed, including `Run make tmux-ci`; the new run for the pushed submodule commit, `26490738959`, is currently in progress.
+
+Commits:
+- `src/agent-doc`: `594a5391 fix: warn on scratch comment directives` pushed to `origin/20260422/codex-agent-backend`.
+- Root gitlink commit prepared: `7b3923706 chore: advance agent-doc submodule`. The root push is intentionally after this session finalize boundary so the session commit is included in the same push.
+
+No new backlog item came out of this change.
+<!-- agent:boundary:cc856d42 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -169,14 +190,13 @@ dispatch #spec-test-build-install-commit-push
 - ~do [#liveipcrace]~
 - ~do [#snapabsorb]~
 - ~do [#compactstuck]~
-- do [#commentpreset]
+- ~do [#commentpreset]~
 - do [#cyclediag]
 <!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#commentpreset] Define the contract for prompt-preset/directive text inside ordinary post-exchange HTML comments: either keep it non-executable but emit a visible diagnostic, or introduce a draft-prompt component so #spec-test-build-install-commit-push cannot look silently removed.
 - [ ] [#cyclediag] Add an agent-doc cycle diagnosis command/report that gathers ops.log, capture JSON, route/actor events, Codex session logs, Claude session logs, and editor plugin logs by cycle_id/patch_id to make future race reports reproducible without broad rg searches.
 <!-- /agent:backlog -->
 

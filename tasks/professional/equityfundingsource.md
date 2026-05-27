@@ -49,7 +49,10 @@ The borrower portal itself is present at `/portal-borrower`; unauthenticated vis
 Best header target, if we add it, is `URLS.portal_borrower` (`/portal-borrower`) rather than a raw login URL, because it lets signed-in borrowers continue to the portal and lets anonymous users fall through to the borrower login redirect.
 
 Evidence: `lib/ui--server--efs/header/index.ts`, `lib/ui--server--efs/urls/index.ts`, `app/equityfundingsource/lib/portal/borrower/routes.ts`, and the live workers.dev HTML. No app files changed; no tests were run because this was an inspection/answer-only cycle.
-<!-- agent:boundary:a54a9ce4 -->
+Answered and committed to the session doc: `968dd8ea6`.
+
+Short version: the borrower portal/login link is not currently in the header. The borrower portal exists at `/portal-borrower`, which redirects anonymous users to `/login?role=borrower`; it is linked from the footer, not the header. No app files changed, so I did not run tests.
+<!-- agent:boundary:b9fe5656 -->
 <!-- /agent:exchange -->
 ###
 <!--

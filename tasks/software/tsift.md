@@ -65,7 +65,8 @@ Compacted content:
 3. Benchmark through `perf_gate.rs` against SQLite
 
 This lets tsift query tokensave pre-built graph without re-indexing — highest-ROI integration with minimal new code.
-<!-- agent:boundary:d30ae35f -->
+What are #next-steps to reverse-engineer tokensave to directly implement in tsift?
+<!-- agent:boundary:d34bc168 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -80,7 +81,7 @@ preset #spec-test-build-install-commit-push
 - ~[#npm-auth-setup]~
 - ~[#npm-publish-verify]~
 - ~[#full-e2e-verify]~
-- Can algorithms and pipelines from tokensave be used in tsift? Would it be beneficial?
+- What are #next-steps to reverse-engineer tokensave to directly implement in tsift?
 <!-- /agent:queue -->
 
 ## Backlog

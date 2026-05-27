@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -53,7 +53,7 @@ Priority shape:
 6. `#gbackendproof` — keep FalkorDB/Kuzu promotion behind native-adapter parity and performance proof.
 
 No source code changed this cycle.
-<!-- agent:boundary:d6f89b43 -->
+<!-- agent:boundary:63319e96 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -63,11 +63,18 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
 <!-- agent:queue -->
+stop
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#gneighqual] [tag: graph] [tag: neighborhood-effectiveness] [tag: performance] Build a ranked-neighborhood effectiveness gate before making ranked output default: seed real backlog/code queries plus synthetic_multi_module duplicate-name fixtures, compare stable node-id output vs ranked_neighbors top-k, and require handle coverage, duplicate precision, semantic/tagpath readiness, top-community stability, and latency metrics to pass through metric-digest.
+- [ ] [#gcommqual] [tag: graph] [tag: neighborhood-effectiveness] Improve tagpath/community context feeding neighborhoods: carry file/ref handles into CommunityMember, resolve tagpath matches through community or edge evidence instead of name-only fallback, and add scoped/federated/skipped-directory diagnostics for ambiguous members.
+- [ ] [#gfullhot] [tag: graph] [tag: performance] Reduce the full-projection graph hot path before backend changes: stabilize cache-hit source watermarks, skip provider-neutral row rebuilds on unchanged symbol/summary inputs, and prove full_projection.source_graph_build/projection_rows/cache metrics with three backend-eval --full-projection samples.
+- [ ] [#gsqlstage] [tag: graph] [tag: performance] Reduce SQLite graph refresh staging/write cost: bulk merge nodes, edges, and materialized property rows through prepared chunks or temp tables, avoid unchanged property rewrites, and gate on sqlite_delta_write, sqlite_edge_staging, post_write_reads, and duration_micros_per_1k_graph_rows.
+- [ ] [#ghoppolicy] [tag: graph] [tag: performance] Keep max-hop increases opt-in until useful-row evidence passes: compare 64/128/256/512 tiers on real, full-projection, and synthetic deep-chain workloads, require useful deeper rows and flat latency, then consider adaptive caps rather than raising the default blindly.
+- [ ] [#gbackendproof] [tag: graph] [tag: performance] Evaluate FalkorDB/Kuzu only as native optional GraphStore adapters: require provider-neutral projection writes/load, freshness/parity, lock behavior, install portability, and faster real/full-projection evidence/conflict/dispatch/path metrics than SQLite before promotion.
 <!-- /agent:backlog -->
 
 ## Review

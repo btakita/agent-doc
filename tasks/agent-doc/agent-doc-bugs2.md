@@ -296,7 +296,8 @@ Commits:
 
 Escalation: none. No push was requested in the active prompt.
 Confidence: high.
-re [#qipc]
+
+❯ re [#qipc]
 Note I'm coming across JB Plugin errors. I need to ensure a task is not "stuck" in the queue to be run at an unexpected time. I need a way of force wrapping up the active finalize steps and immediately running the dispatch if the console is idle.
 [sync] recovered live pane %15 for session 6cb2a9bf via supervisor pid 1411216
 [sync] recovered live pane %6 for session b26b9957 via supervisor pid 270387
@@ -308,7 +309,10 @@ resync: stash pane %16 is unregistered but still owns /home/brian/work/btakita/a
 [route] target tmux session: 0
 Error: authoritative actor generation 87 for tasks/software/tsift.md owns pane %7 but dispatch-only route will not inject a new trigger because the authoritative actor is busy did not return to a dispatch-ready prompt in the current generation after waiting 8s. Wait for the active turn to finish before rerouting this document.
 #next-steps
-<!-- agent:boundary:d1218cbc -->
+Preflight reports `no_changes: true` for `tasks/software/agent-loop.md`, so agent-doc says there is no new document diff to answer or persist.
+
+Warning surfaced: the document declares `agent: claude`, but the active harness is Codex. I also refreshed tsift; it still reports one missing workspace scope for `FDE-Project-Interview`, but no stale tracked files.
+<!-- agent:boundary:33e254f7 -->
 <!-- /agent:exchange -->
 ###
 <!--

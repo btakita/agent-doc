@@ -18,8 +18,7 @@ queue_active: false
 ## Status
 
 <!-- agent:status patch=replace -->
-
-Completed #gcommqual; verified community member tagpath context is already implemented and pushed in tsift. Local make check, cargo build, and cargo install pass.
+Completed #gavatar; added semantic-seeded graph retrieval to tsift and committed it locally as 7a74ce9.
 <!-- /agent:status -->
 
 ## Spec
@@ -174,7 +173,44 @@ The missing proof is not whether tsift can store markdown. It can. The missing p
 - retrieval evals for avatar turns: answer relevance, recency, source grounding, and p95 latency
 
 I added backlog item `#gavatar` to make that an explicit evaluation slice. The decision gate should be: if tsift can satisfy the avatar retrieval API with stable latency and clean privacy/freshness semantics, keep it as the common knowledge layer. If the realtime service needs domain-specific session state or persona policy, build that as a separate app layer on top, not as a competing database.
-<!-- agent:boundary:79a9d952 -->
+❯ do [#gavatar]. Could neighborhoods be repurposed for general knowledge retrieval...word phrases with similarity instead of camelCase, snake_case, etc. tags?
+### Re: #gavatar — gpt-5
+
+Completed `#gavatar`.
+
+Yes: neighborhoods can be repurposed for general knowledge retrieval, but they should be the graph expansion phase, not the raw phrase matcher. The implemented flow is natural-language phrase -> semantic concept/entity seed nodes -> incident plus outgoing GraphStore neighborhood. That lets a query use word phrases such as "realtime avatar memory" instead of camelCase, snake_case, or tagpath-style identifiers, while preserving the existing stable-id `graph-db neighborhood` pagination contract.
+
+Changed paths in the tsift repo:
+
+- `src/main.rs`
+- `tests/graph_db_conformance.rs`
+- `SPEC.md`
+- `README.md`
+- `plans/gavatar-evidence.md`
+
+What changed:
+
+- Added `tsift graph-db related <phrase> --kind concept|entity|all --depth N --seed-limit N --limit N`.
+- Added `semantic_related` seed rows and a `knowledge_retrieval` JSON block to graph-db reports for this query.
+- Seed expansion uses both incident and outgoing GraphStore edges so future markdown, conversation-memory, LiveKit-doc, or avatar memory adapters can link into semantic rows naturally.
+- Added backend-eval coverage for the new `related` operation so GraphStore candidates have a benchmark fixture for phrase-seeded retrieval.
+- Documented the boundary: tsift owns substrate records, freshness, retrieval, and backend parity; realtime session state, persona policy, consent/delete semantics, and response orchestration stay in an avatar/agent adapter above tsift.
+
+Committed the tsift repo change locally as `7a74ce9 feat: add semantic related graph retrieval` on `main`. I did not push because this cycle did not have an active push directive. The superproject still shows `src/tsift` modified because the submodule HEAD advanced; I left unrelated pre-existing root changes alone.
+
+Verification passed:
+
+- `cargo test -q graph_db_related_query_uses_semantic_seeds_and_incident_neighborhoods`
+- `cargo test -q cli_parses_graph_db_related_query`
+- `cargo test -q graph_db_api_queries_sqlite_neighborhood_and_schema`
+- `cargo test -q semantic_related_query_uses_persisted_graph_embeddings`
+- `cargo test -q graph_db_backend_eval_benchmarks_candidate_stores_against_sqlite`
+- `make check`
+- `cargo build`
+- `cargo install --path .`
+
+Latest existing GitHub Actions CI run checked before closeout: `26518765816`, success. Active workflows are `CI` and `Release`; I did not find a separate tmux-test workflow for this repo.
+<!-- agent:boundary:54ebc473 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -196,7 +232,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gavatar] [tag: knowledge-layer] [tag: realtime] Evaluate tsift as a realtime avatar/agent knowledge layer: define GraphStore adapters for markdown/conversation memory, a low-latency retrieval API, freshness/privacy rules, and benchmark fixtures before deciding whether to split an application-specific service.
 - [ ] [#gbackendproof] [tag: graph] [tag: performance] Evaluate FalkorDB/Kuzu only as native optional GraphStore adapters: require provider-neutral projection writes/load, freshness/parity, lock behavior, install portability, and faster real/full-projection evidence/conflict/dispatch/path metrics than SQLite before promotion.
 <!-- /agent:backlog -->
 

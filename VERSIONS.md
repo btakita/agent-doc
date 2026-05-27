@@ -6,6 +6,19 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Socket/file ACK-content sidecars can no longer commit duplicated user
+  prompt text.** The write path now treats editor ACK content as a
+  whole-buffer observation that still must pass response-aware prompt
+  multiplicity checks before snapshot adoption. If the sidecar has extra
+  user-prompt copies relative to the agent-owned `content_ours` response image,
+  `agent-doc` logs `ipc_snapshot_adoption_blocked
+  reason=prompt_duplication_in_ack_content`, saves `content_ours`, marks the
+  cycle so commit staging cannot absorb the bad buffer, and repairs the visible
+  duplicate through the guarded disk repair path. This closes the
+  `tasks/professional/equityfundingsource.md` corruption shape where a narrow
+  editor patch succeeded but the full-document ACK sidecar carried duplicated
+  prompt text while the user was typing.
+
 - **JetBrains Run Agent Doc retries transient dispatch-only Codex boot/busy
   refusals without masking protected input.** The IDE retry loop now recognizes
   the binary's `latest run is still booting` route refusal when the ready probe

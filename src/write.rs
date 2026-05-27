@@ -5027,6 +5027,33 @@ fn normalized_prompt_counts(exchange: &str) -> HashMap<String, usize> {
     counts
 }
 
+fn response_aware_user_prompt_counts(exchange: &str) -> HashMap<String, usize> {
+    let mut counts = HashMap::new();
+    for info in exchange_prompt_reconciliation_infos(exchange, None) {
+        if let Some(text) = info.normalized {
+            *counts.entry(text).or_default() += 1;
+        }
+    }
+    counts
+}
+
+fn user_prompt_count_growth(reference: &str, candidate: &str) -> usize {
+    let (Some(reference_exchange), Some(candidate_exchange)) =
+        (exchange_content(reference), exchange_content(candidate))
+    else {
+        return 0;
+    };
+    let reference_counts = response_aware_user_prompt_counts(reference_exchange);
+    let candidate_counts = response_aware_user_prompt_counts(candidate_exchange);
+    candidate_counts
+        .iter()
+        .map(|(line, candidate_count)| {
+            let reference_count = reference_counts.get(line).copied().unwrap_or(0);
+            candidate_count.saturating_sub(reference_count)
+        })
+        .sum()
+}
+
 fn exchange_has_live_user_edit(baseline: Option<&str>, before: &str) -> bool {
     let Some(base) = baseline else {
         return false;
@@ -7509,6 +7536,19 @@ impl IpcRepairDecision {
         self.normalize_prefix_lines.clear();
         self.redeliver_editor = false;
     }
+
+    fn replace_snapshot_with_content_ours_for_prompt_duplication(
+        &mut self,
+        content_ours: &str,
+        bad_state: String,
+    ) {
+        self.snapshot_content = content_ours.to_string();
+        self.snap_source = IpcSnapshotSource::ContentOurs;
+        self.disk_repair_reason = Some(IpcDiskRepairReason::IpcDedupe);
+        self.editor_bad_state = Some(EditorBadStateFingerprint::new(bad_state));
+        self.normalize_prefix_lines.clear();
+        self.redeliver_editor = true;
+    }
 }
 
 fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
@@ -7559,6 +7599,55 @@ fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
     );
     let _ = crate::cycle_state::record_ipc_snapshot_adoption_blocked(file);
     decision.replace_snapshot_with_content_ours_for_live_prompt_drift(ours);
+    true
+}
+
+fn guard_ipc_snapshot_adoption_against_prompt_duplication(
+    file: &Path,
+    source: &str,
+    patch_id: Option<&str>,
+    content_ours: Option<&str>,
+    decision: &mut IpcRepairDecision,
+) -> bool {
+    if decision.snap_source == IpcSnapshotSource::ContentOurs {
+        return false;
+    }
+    let Some(ours) = content_ours else {
+        return false;
+    };
+    let duplicate_count = user_prompt_count_growth(ours, &decision.snapshot_content);
+    if duplicate_count == 0 {
+        return false;
+    }
+
+    let prior_source = decision.snap_source.label();
+    let bad_state = decision.snapshot_content.clone();
+    crate::flow::proof::log_flow_event(
+        file,
+        crate::flow::types::FlowEvent::new(
+            crate::flow::types::FlowName::DocumentMutation,
+            crate::flow::types::FlowStage::IpcSnapshotAdoption,
+            crate::flow::types::FlowOutcome::Blocked,
+        )
+        .with_reason("prompt_duplication_in_ack_content"),
+    );
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "ipc_snapshot_adoption_blocked file={} source={} patch_id={} snap_source={} reason=prompt_duplication_in_ack_content duplicate_prompt_count={} candidate_len={} candidate_hash={} content_ours_len={} content_ours_hash={}",
+            file.display(),
+            source,
+            patch_id.unwrap_or("-"),
+            prior_source,
+            duplicate_count,
+            decision.snapshot_content.len(),
+            crate::ops_log::content_hash(&decision.snapshot_content),
+            ours.len(),
+            crate::ops_log::content_hash(ours)
+        ),
+    );
+    let _ = crate::cycle_state::record_ipc_snapshot_adoption_blocked(file);
+    decision.replace_snapshot_with_content_ours_for_prompt_duplication(ours, bad_state);
     true
 }
 
@@ -8750,6 +8839,13 @@ pub fn try_ipc(
                         content_ours,
                         &mut repair_decision,
                     );
+                    guard_ipc_snapshot_adoption_against_prompt_duplication(
+                        file,
+                        "socket_ack_content",
+                        Some(&patch_id),
+                        content_ours,
+                        &mut repair_decision,
+                    );
 
                     let expected_response = response_materialization_probe(patches, unmatched);
                     if !ipc_response_materialized_or_fallback(
@@ -9719,6 +9815,13 @@ fn write_ipc_and_poll(
                     .get("baseline")
                     .and_then(|value| value.as_str())
                     .filter(|value| !value.is_empty()),
+                options.content_ours,
+                &mut repair_decision,
+            );
+            guard_ipc_snapshot_adoption_against_prompt_duplication(
+                doc_file,
+                "file_ipc",
+                Some(patch_id),
                 options.content_ours,
                 &mut repair_decision,
             );
@@ -16744,6 +16847,31 @@ mod submodule_patch_routing_tests {
         })
     }
 
+    fn start_fixed_ack_content_listener(
+        project_root: &Path,
+        ack_content: String,
+    ) -> std::thread::JoinHandle<()> {
+        let root = project_root.to_path_buf();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::thread::spawn(move || {
+            let root_clone = root.clone();
+            let _ = crate::ipc_socket::start_listener(&root, move |msg| {
+                let v: serde_json::Value = serde_json::from_str(msg).ok()?;
+                let patch_id = v
+                    .get("patch_id")
+                    .and_then(|p| p.as_str())
+                    .unwrap_or("unknown");
+                let ack_dir = root_clone.join(".agent-doc/ack-content");
+                let _ = std::fs::create_dir_all(&ack_dir);
+                if let Some(file_path) = v.get("file").and_then(|f| f.as_str()) {
+                    let _ = std::fs::write(file_path, &ack_content);
+                }
+                let _ = std::fs::write(ack_dir.join(format!("{patch_id}.md")), &ack_content);
+                Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
+            });
+        })
+    }
+
     /// Helper: wait for the socket listener to become connectable (up to 1s).
     fn wait_for_listener(project_root: &Path) {
         for _ in 0..100 {
@@ -16962,6 +17090,103 @@ mod submodule_patch_routing_tests {
                 && log.contains("ipc_socket_already_applied_content_ours_snapshot")
                 && log.contains("ipc_socket_already_applied_snapshot_absorb_blocked"),
             "already_applied snapshot guard should be auditable:\n{log}"
+        );
+    }
+
+    #[test]
+    fn socket_ack_content_prompt_duplication_uses_content_ours_and_repairs_visible_buffer() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        let agent_doc_dir = root.join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("state").join("cycles")).unwrap();
+
+        let doc = root.join("doc.md");
+        let baseline = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- agent:boundary:before -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let content_ours = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please set the production RESEND_API_KEY\n",
+            "### Re: Production key — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:ours -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let duplicated_ack_content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please set the production RESEND_API_KEY\n",
+            "❯ Please set the production RESEND_API_KEY\n",
+            "### Re: Production key — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:bad -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, baseline).unwrap();
+        crate::snapshot::save(&doc, baseline).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
+
+        let _listener = start_fixed_ack_content_listener(&root, duplicated_ack_content.to_string());
+        wait_for_listener(&root);
+
+        let patch =
+            crate::template::PatchBlock::new("exchange", "### Re: Production key — gpt-5\n\nDone.");
+        let result = try_ipc(
+            &doc,
+            &[patch],
+            "",
+            None,
+            Some(baseline),
+            Some(content_ours),
+            None,
+            Some("duplicated-ack-content"),
+        )
+        .unwrap();
+
+        assert!(
+            result.success,
+            "IPC delivery should remain successful while snapshot adoption falls back"
+        );
+        assert_eq!(
+            snapshot::load(&doc).unwrap().as_deref(),
+            Some(content_ours),
+            "duplicated ack-content must not become the committed snapshot"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            content_ours,
+            "visible duplicated ack-content should be repaired from the guarded response image"
+        );
+        assert!(
+            crate::cycle_state::load(&doc)
+                .unwrap()
+                .unwrap()
+                .ipc_snapshot_adoption_blocked,
+            "later commit stages must not absorb the rejected duplicate sidecar"
+        );
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("reason=prompt_duplication_in_ack_content")
+                && log.contains("duplicate_prompt_count=1")
+                && log.contains("ipc_dedupe_repaired_working_tree"),
+            "duplicate sidecar rejection and visible repair should be logged:\n{log}"
         );
     }
 

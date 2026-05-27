@@ -60,7 +60,15 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 66 filtered out; fin
 - `cargo check` on agent-doc — no more warning
 - `cargo install --path .` — installed v0.2.1 locally
 - Pushed to both submodules + parent repo
-<!-- agent:boundary:109db9dd -->
+❯ publish + release
+
+### Re: publish + release — glm-5.1
+
+- **crates.io:** Published `module-harness` v0.2.1
+- **GitHub Release:** https://github.com/btakita/module-harness/releases/tag/v0.2.1
+- **agent-doc:** Removed `[patch.crates-io]` override, now resolves v0.2.1 from registry — clean build, no warnings
+- **Parent repo:** Submodule pointer updated and pushed
+<!-- agent:boundary:69f53eea -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->

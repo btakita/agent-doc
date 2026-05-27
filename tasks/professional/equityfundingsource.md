@@ -119,7 +119,18 @@ Decision worksheet for the meeting:
 Post-meeting outputs should be concrete: a confirmed MVP scope, a TMO inventory checklist owner, a budget/retainer decision, and permission to start exactly one next implementation slice. If those are not decided, the correct next step is still planning/inventory, not feature work.
 
 Closeout evidence: changed paths should be only the session document via `agent-doc finalize`; no product code, spec, tests, or deployment files were intentionally edited. Commands run: `agent-doc --version`, `tsift status`, `tsift status --fix`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, targeted `tsift` search/source-read commands, live `curl` checks for `/`, `/apply`, and `/login?role=borrower`, and this `agent-doc finalize --done y17k`. Verification is document-only plus the live HTTP `200` checks; no test suite was run because no code changed. Confidence: medium-high on the agenda and current demo surface, with TMO-specific details still pending restored TMO access. Escalation: none.
-<!-- agent:boundary:77fa174b -->
+The `agent-doc` cycle is blocked by the visible-buffer guard.
+
+What completed: `#y17k` was marked done and committed in `f20a81984`.
+
+What did not complete: the assistant response body with the demo agenda is still not present in `tasks/professional/equityfundingsource.md`. `agent-doc finalize`, `agent-doc write --commit`, and `agent-doc repair` all failed with:
+
+`visible editor buffer ... differs from the expected disk state; save or discard the editor buffer, then retry`
+
+I did not bypass that guard because it exists to avoid overwriting unsaved editor changes. Please save or discard the open editor buffer for `tasks/professional/equityfundingsource.md`, then rerun:
+
+`agent-doc /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+<!-- agent:boundary:1c5e5b86 -->
 <!-- /agent:exchange -->
 ###
 <!--

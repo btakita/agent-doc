@@ -15,7 +15,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -35,7 +35,9 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 1 response topic(s): #ocdsp
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:a002a8f6 -->
+When I restarted agent-doc on tsift.md, then ran JB `Run Agent Doc`, the dispatch had an error.
+#spec-test-build-install-commit-push #mermaid
+<!-- agent:boundary:255e9fca -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -57,6 +59,10 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 -->
 
 <!-- agent:queue auto -->
+---
+When I restarted agent-doc on tsift.md, then ran JB `Run Agent Doc`, the dispatch had an error.
+#spec-test-build-install-commit-push #mermaid
+---
 <!-- /agent:queue -->
 
 ## Backlog

@@ -37,7 +37,54 @@ Compacted content:
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
 JB `Run Agent Doc` on this document did not run agent-doc in the Codex console.
 #spec-test-build-install-commit-push #mermaid
-<!-- agent:boundary:46dc9217 -->
+
+### Re: #spec-test-build-install-commit-push — gpt-5
+
+Implemented and pushed the second queue-closeout fix. I also picked up the new `#mermaid` preset definition and included the requested diagram below.
+
+The original JB `Run Agent Doc` failure had two separate closeout breaks:
+
+1. `route --dispatch-only` could save a busy-actor reroute into `agent:queue auto` and snapshot it, while `HEAD` still lacked that queued handoff. A later live prompt edit made preflight see `snapshot != HEAD` and `working tree != snapshot`, so it stopped before it could drain the queue.
+2. After that was fixed, this live queued cycle exposed a second bug: a synthetic queue prompt has no document diff between the baseline and current file, so `finalize` wrote the response but skipped queue consumption. The new fix lets `finalize` re-check the captured response after writing and consume the active queue head when the `### Re:` topic explicitly targets the queue head id.
+
+```mermaid
+flowchart TD
+  A["JB Run Agent Doc"] --> B["Actor busy"]
+  B --> C["route saves prompt in agent:queue auto"]
+  C --> D["Snapshot includes queued prompt"]
+  D --> E["User edits document before next preflight"]
+  E --> F["Old preflight sees snapshot and HEAD drift"]
+  F --> G["Queue prompt is not sent"]
+  G --> H["Fix 1: preflight commits route-owned queued snapshot first"]
+  H --> I["Queued prompt becomes active synthetic prompt"]
+  I --> J["Old finalize writes response but sees no user diff"]
+  J --> K["Queue head remains active"]
+  K --> L["Fix 2: finalize checks captured response heading"]
+  L --> M["Heading targets queue id"]
+  M --> N["Queue head consumed"]
+```
+
+Changed paths:
+- `src/agent-doc/src/preflight.rs`
+- `src/agent-doc/src/write.rs`
+- `src/agent-doc/tests/finalize_integration.rs`
+- `src/agent-doc/SPEC.md`
+- `src/agent-doc/specs/07-closeout-commands.md`
+- `src/agent-doc/VERSIONS.md`
+
+Commits pushed:
+- `btakita/agent-doc` branch `20260422/codex-agent-backend`: `62cdbbe1` and `ab8ac7a2`
+- `btakita/agent-loop` `main`: `18786a6e7` and `bcd6394af`
+
+Verification:
+- `cargo test preflight_commits_route_queue_snapshot_before_live_prompt_edit` passed.
+- `cargo test finalize_consumes_synthetic_queue_prompt_when_response_topic_targets_head_id` passed.
+- `make check` passed locally through `tsift` artifact `tart-d5dcb48ae3`.
+- `make install` passed locally through `tsift` artifact `tart-e39bc65ae4`.
+- GitHub Actions CI run `26537671598` passed, including both `make check` and `make tmux-ci`. The only annotation was the existing Node.js 20 deprecation notice for `actions/checkout@v4`.
+
+Escalation: none. Confidence: high; this cycle reproduced the remaining queue-consumption failure live and the installed binary is now using the fix.
+<!-- agent:boundary:2881a0f1 -->
 <!-- /agent:exchange -->
 ###
 <!--

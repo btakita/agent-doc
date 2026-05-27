@@ -35,7 +35,48 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 2 response topic(s): queued Run Agent Doc prompt update; queued Run Agent Doc prompt update follow-up
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:458ccd36 -->
+
+### Re: auto-done signal work — gpt-5
+
+Implemented the two requested agent-doc fixes and landed them in `src/agent-doc`.
+
+Changed paths:
+- `SPEC.md`
+- `src/frontmatter.rs`
+- `src/project_config.rs`
+- `src/session_check.rs`
+- `src/plan.rs`
+- `src/write.rs`
+- `src/tsift_graph.rs`
+- `src/jobs.rs`
+
+What changed:
+- Added `auto_done: true` frontmatter support and `[guards] auto_done = true` project config support.
+- Added inline done signal detection so prompts like `#id done`, `done #id`, `complete #id`, `resolved #id`, and `mark #id done` emit `ResolveExisting` / `--done <id>` plan mutations.
+- Added opt-in bare `done` handling when `auto_done` is enabled and exactly one open review item is the contextual target.
+- Added response-completion auto resolution in finalize/write closeout. When `auto_done` is enabled and the response clearly completes an open tracked item, the binary now applies the missing done mutation, records cycle-state pending-done ids, and gates backlog items through review before marking them done.
+- Updated pending-done repair guidance to use `agent-doc write <file> --done <id> --pending-only --commit`.
+- Fixed hyphen/underscore hash id extraction for do-target parsing.
+- Fixed a full-suite test race by sharing the process-global test environment lock in `jobs.rs`.
+
+Verification:
+- `cargo test` in `src/agent-doc`: passed.
+- `make check` from repo root: passed.
+- `cargo build` in `src/agent-doc`: passed.
+- `cargo install --path .` in `src/agent-doc`: passed; `agent-doc --version` reports `agent-doc 0.34.0`.
+- `cargo fmt --check`: passed.
+- `git diff --check`: passed.
+- `gh run list --workflow CI --limit 1`: no workflow named `CI` exists in this repo.
+- Latest `Agent Doc` post-push run `26543921559`: failed in 3s with both `check` and `tmux-ci` jobs reporting empty step lists and no logs. I classified this as an external CI-start failure, not a local code or tmux regression.
+
+Commits pushed:
+- `src/agent-doc`: `e69ddaed` (`feat: auto-resolve done signals`) pushed to `origin/20260422/codex-agent-backend`.
+- superproject: `dd4fba13c` (`chore: update agent-doc submodule`) pushed to `origin/main`.
+
+Queue note: `agent-doc orchestrate --from-queue --plan` could not use the local queue because `agent:queue` contained raw prose (`JB \`Run Agent Doc\` on this file did not dispatch.`) before the preset entry. I handled the two explicit preset targets manually in this cycle and cleared the malformed queue content below.
+
+Confidence: high for the local implementation and tests. Escalation: none; no approvals were needed.
+<!-- agent:boundary:cbad3fe5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -56,14 +97,12 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 #spec-test-build-install-commit-push
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#inline-done-signal] User typing done in exchange should auto-apply --done to contextually relevant review item — plan: tasks/agent-doc/plan-inline-done-signal.md
-- [ ] [#review-auto-done] Completed review items not auto-marked done — plan: tasks/agent-doc/plan-review-auto-done.md
 <!-- /agent:backlog -->
 
 ## Review

@@ -598,6 +598,21 @@ fn update_active_state(file: &Path, state: CaptureState) -> Result<()> {
                 record.committed_at = Some(now);
                 changed = true;
             }
+            let current_file = std::fs::read_to_string(file)
+                .with_context(|| format!("failed to read {} for capture commit", file.display()))?;
+            let current_file_hash = crate::ops_log::content_hash(&current_file);
+            if record.file_hash.as_deref() != Some(current_file_hash.as_str()) {
+                record.file_hash = Some(current_file_hash);
+                changed = true;
+            }
+            let current_snapshot = crate::snapshot::load(file)?;
+            let current_snapshot_hash = current_snapshot
+                .as_deref()
+                .map(crate::ops_log::content_hash);
+            if record.snapshot_hash != current_snapshot_hash {
+                record.snapshot_hash = current_snapshot_hash;
+                changed = true;
+            }
         }
         CaptureState::Discarded => {
             if record.discarded_at.is_none() {

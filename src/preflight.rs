@@ -4598,6 +4598,121 @@ mod tests {
     }
 
     #[test]
+    fn preflight_recovers_jb_cache_conflict_cancel_orphaned_capture_once() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+
+        let original = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ do #0ep7\n",
+            "<!-- agent:boundary:test -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, original).unwrap();
+        snapshot::save(&doc, original).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: #0ep7 — gpt-5\n\n",
+            "Recovered once.\n",
+            "<!-- /patch:exchange -->\n"
+        );
+        crate::repair::save_pending(&doc, response).unwrap();
+        let capture = crate::capture::load_active(&doc).unwrap().unwrap();
+        let pending_path = snapshot::pending_path_for(&doc).unwrap();
+        assert!(
+            pending_path.exists(),
+            "precondition: orphaned pending response"
+        );
+
+        let materialized = original.replace(
+            "<!-- agent:boundary:test -->",
+            concat!(
+                "### Re: #0ep7 — gpt-5\n\n",
+                "Recovered once.\n",
+                "<!-- agent:boundary:test -->"
+            ),
+        );
+        std::fs::write(&doc, &materialized).unwrap();
+        snapshot::save(&doc, &materialized).unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(&materialized),
+            Some(&materialized),
+        )
+        .unwrap();
+
+        assert!(
+            crate::session_check::detect_jb_cache_conflict_cancel_recoverable(&doc).unwrap(),
+            "preconditions: committed cancel pattern should be recoverable before preflight"
+        );
+
+        run(&doc).unwrap();
+
+        let count = Command::new("git")
+            .current_dir(root)
+            .args(["rev-list", "--count", "HEAD"])
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&count.stdout).trim(), "2");
+        assert!(
+            !pending_path.exists(),
+            "orphaned pending response should be retired"
+        );
+
+        let content = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            content.matches("### Re: #0ep7 — gpt-5").count(),
+            1,
+            "visible response must not be replayed a second time:\n{content}"
+        );
+        assert_eq!(
+            content.matches("<!-- agent:queue -->").count(),
+            1,
+            "template queue scaffold should stay balanced:\n{content}"
+        );
+        assert!(matches!(
+            crate::session_check::inspect(&doc).unwrap(),
+            crate::session_check::SessionCheckStatus::Ok(_)
+        ));
+
+        let refreshed = crate::capture::load_by_id(&doc, &capture.capture_id)
+            .unwrap()
+            .unwrap();
+        let snapshot_content = snapshot::load(&doc).unwrap().unwrap();
+        assert_eq!(refreshed.state, crate::capture::CaptureState::Committed);
+        assert_eq!(
+            refreshed.file_hash.as_deref(),
+            Some(crate::ops_log::content_hash(&content).as_str()),
+            "capture file hash should refresh to the recovered visible file"
+        );
+        assert_eq!(
+            refreshed.snapshot_hash.as_deref(),
+            Some(crate::ops_log::content_hash(&snapshot_content).as_str()),
+            "capture snapshot hash should refresh to the recovered snapshot"
+        );
+    }
+
+    #[test]
     fn preflight_repairs_jb_cache_conflict_accept_duplicate_replay() {
         let dir = setup_project();
         let root = dir.path();

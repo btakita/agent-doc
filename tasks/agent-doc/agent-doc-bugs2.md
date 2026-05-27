@@ -54,26 +54,7 @@ Proof:
 - Commands reviewed: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `tail .agent-doc/logs/ops.log`, capture `jq`, compact archive inspection, `git show`, targeted `rg` across agent-doc/Codex/Claude artifacts.
 - Verification: no code changed, so I did not run the full suite.
 - Confidence: medium-high on the next-step ordering; medium on root cause until `liveipcrace` reproduces the live corruption in a failing test.
-### Re: log review and next steps — gpt-5
-
-I reviewed the current document, the agent-doc ops/capture trail, the compact archive, Codex session artifacts, and the installed Claude/Codex runbook surfaces. I do not see a separate Claude or Codex harness error for this cycle; the useful failure signals are in agent-doc's own ops/capture logs.
-
-Findings:
-
-- `#spec-test-build-install-commit-push` is still present in frontmatter. The line in the ordinary HTML comment below `agent:exchange` was preserved, but prompt detection strips ordinary comments, so it was not treated as an executable directive. That explains why this cycle only saw `#next-steps`.
-- The recent response capture `cycle-1779845677327` is committed and its body is present in the compact archive, not in HEAD. Preflight's `stuck_captured_cycle` warning is therefore a compact-accounting bug: it checks HEAD only and does not treat compact archives as valid materialization.
-- The log window around `1779846178` is the important race evidence: `ipc_snapshot_adoption_blocked reason=live_prompt_drift_after_preflight`, then `snap_source=content_ours`, then a later `snapshot_absorb reason=status` during commit staging. That sequence needs a regression because it can explain why live editor state and durable closeout state diverge.
-- There is already nearby coverage for post-exchange comment drift and disabled full-content IPC, but the live report says the full-document corruption/duplicate-line path still happened. The next fix should start by making that exact live sequence fail in SimWorld plus editor-facing IPC tests.
-
-I added the follow-up backlog in priority order. Top backlog item id: `liveipcrace`.
-
-Proof:
-
-- Changed paths: session document/backlog only.
-- Commands reviewed: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `tail .agent-doc/logs/ops.log`, capture `jq`, compact archive inspection, `git show`, targeted `rg` across agent-doc/Codex/Claude artifacts.
-- Verification: no code changed, so I did not run the full suite.
-- Confidence: medium-high on the next-step ordering; medium on root cause until `liveipcrace` reproduces the live corruption in a failing test.
-<!-- agent:boundary:729126db -->
+<!-- agent:boundary:293afa9e -->
 <!-- /agent:exchange -->
 ###
 <!--

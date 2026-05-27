@@ -30,68 +30,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260527-222330.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260527-224056.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #ocdsp
+- Archived 2 response topic(s): queued Run Agent Doc prompt update; queued Run Agent Doc prompt update follow-up
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-When I restarted agent-doc on tsift.md, then ran JB `Run Agent Doc`, the dispatch had an error.
-❯ When I ran JB `Run Agent Doc` on this file, dispatch did not occur but the prompt was added to the queue.
-❯ If I update the prompt then rerun JB `Run Agent Doc`, the queue prompt should also be update.
-#spec-test-build-install-commit-push #mermaid
-### Re: queued Run Agent Doc prompt update — gpt-5
-
-Fixed the queued JB `Run Agent Doc` rerun case.
-
-Root cause: `route --dispatch-only` already knew how to avoid exact duplicate queued prompts, but if the prompt text changed while an active turn was still busy, the route queue code did not treat the existing single `agent:queue auto` item as a supersedable editor rerun. The stale queue prompt could remain behind the active turn instead of tracking the edited prompt.
-
-Change made: `enqueue_route_dispatch_prompt` now replaces the sole live prompt in an `agent:queue auto` component when a later rerun supplies edited text. It still appends to multi-prompt queues, so explicit user-authored batches are preserved. Route diagnostics now include `superseded=true/false` for this branch.
-
-```mermaid
-flowchart LR
-  A["JB Run Agent Doc"] --> B["route --dispatch-only"]
-  B --> C{"actor busy?"}
-  C -->|"no"| D["dispatch reopen to pane"]
-  C -->|"yes"| E["write agent:queue auto"]
-  E --> F["user edits prompt"]
-  F --> G["Run Agent Doc again"]
-  G --> H{"single live auto queue prompt?"}
-  H -->|"yes"| I["replace stale queued prompt"]
-  H -->|"no, multi-prompt queue"| J["append new prompt"]
-  I --> K["snapshot synced for later drain"]
-  J --> K
-```
-
-Changed paths:
-- `src/agent-doc/src/route.rs`
-- `src/agent-doc/src/route/tests.rs`
-- `src/agent-doc/README.md`
-- `src/agent-doc/SPEC.md`
-- `src/agent-doc/specs/08-session-routing.md`
-- `src/agent-doc/editors/jetbrains/SPEC.md`
-- `src/agent-doc/VERSIONS.md`
-
-Verification:
-- `cargo test route_enqueue_dispatch_prompt` passed.
-- `make check` passed, including the default suite and deterministic SimWorld budget.
-- `cargo install --path .` completed and replaced the local `agent-doc` binary.
-- Latest GitHub Actions `CI` run `26540718037` is green, including the `Run make tmux-ci` step.
-
-Commits:
-- `src/agent-doc`: `e76919c1 fix: supersede queued run agent doc prompt`
-- superproject: `4d59ff074 agent-doc: update queued rerun prompt handling`
-
-The push is intentionally after this binary-owned session closeout, so the session document stays out of the manual implementation commits.
-### Re: queued Run Agent Doc prompt update follow-up — gpt-5
-
-The recovery preflight found that the two edited prompt lines were visible locally but had not crossed the prior commit boundary. This response is the binary-owned closeout repair for those same prompts.
-
-The implementation fix above covers both reported behaviors: the first JB `Run Agent Doc` can queue behind a busy actor, and a later rerun with edited prompt text now supersedes the single live route-owned `agent:queue auto` prompt instead of leaving stale wording queued.
-
-Verification remains unchanged and passing: focused route tests, full `make check`, local `cargo install --path .`, and the latest GitHub Actions `CI` run `26540718037` including `Run make tmux-ci` all passed.
-
-No additional follow-up item is created by this closeout repair; the existing backlog entries already present in the document are left intact.
-<!-- agent:boundary:98e8072f -->
+<!-- agent:boundary:458ccd36 -->
 <!-- /agent:exchange -->
 ###
 <!--

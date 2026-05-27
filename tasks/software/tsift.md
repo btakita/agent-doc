@@ -36,7 +36,6 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 4 response topic(s): next-steps to complete the review items; completed items should be marked as done in review + done; repair; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
 ### Re: local-e2e-verify — opus-4-6
 
 `tsift init --opencode /tmp/tsift-test` passed. Created:
@@ -44,14 +43,8 @@ Compacted content:
 - 6 opencode commands: tsift-status, tsift-session-review, tsift-context-pack, tsift-diff-digest, tsift-test-digest, tsift-log-digest
 - `.gitignore` with `.tsift/`
 
-Marking #local-e2e-verify done. Cannot automate #gopencode-install and #gopencode (gated on npm auth). #npm-auth-setup gated — requires manual GitHub NPM_TOKEN + TSIFT_ENABLE_NPM_PUBLISH configuration in repo settings. Remaining backlog items (#npm-publish-verify, #full-e2e-verify) are blocked on npm auth.
-
-Also fixed `agent:backlog auto` → `auto=true` to satisfy lint gate.
-
-### Re: repair — opus-4-6
-
-Removed duplicate response from stuck cycle. Restored gated backlog items. Fixed `agent:backlog` attribute.
-<!-- agent:boundary:5f5eb6cf -->
+#local-e2e-verify done. #gopencode-install and #gopencode gated on npm auth. #npm-auth-setup requires manual GitHub NPM_TOKEN + TSIFT_ENABLE_NPM_PUBLISH. Remaining items (#npm-publish-verify, #full-e2e-verify) blocked on npm auth.
+<!-- agent:boundary:53e87bde -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -70,8 +63,7 @@ preset #spec-test-build-install-commit-push
 
 ## Backlog
 
-<!-- agent:backlog auto -->
-- [ ] [#local-e2e-verify] Run local e2e: mkdir /tmp/tsift-test && tsift init --opencode && opencode, verify /tsift-status. On success mark #gopencode-install and #gopencode done.
+<!-- agent:backlog -->
 - [ ] [#npm-auth-setup] Configure NPM_TOKEN secret + TSIFT_ENABLE_NPM_PUBLISH=true variable in GitHub repo settings
 - [ ] [#npm-publish-verify] After auth configured, tag release and verify publish-opencode-plugin CI job succeeds and opencode-tsift appears on npmjs.org
 - [ ] [#full-e2e-verify] In fresh project: opencode plugin opencode-tsift && opencode then /tsift-status. On success mark #e2e-install done.
@@ -80,6 +72,9 @@ preset #spec-test-build-install-commit-push
 ## Review
 
 <!-- agent:review -->
+- [/] [#full-e2e-verify] In fresh project: opencode plugin opencode-tsift && opencode then /tsift-status. On success mark #e2e-install done.
+- [/] [#npm-publish-verify] After auth configured, tag release and verify publish-opencode-plugin CI job succeeds and opencode-tsift appears on npmjs.org
+- [/] [#npm-auth-setup] Configure NPM_TOKEN secret + TSIFT_ENABLE_NPM_PUBLISH=true variable in GitHub repo settings
 - [/] [#e2e-install] Verify end-to-end install: fresh opencode project + opencode plugin opencode-tsift + /tsift-status
 <!-- /agent:review -->
 ###

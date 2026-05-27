@@ -175,6 +175,63 @@ fn finalize_requires_git_repo_before_mutating_document() {
 }
 
 #[test]
+fn finalize_skips_ignored_untracked_session_doc() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("scratch")).unwrap();
+    fs::write(tmp.path().join(".gitignore"), "scratch/\n.agent-doc/\n").unwrap();
+    let doc = tmp.path().join("scratch/session.md");
+    fs::write(&doc, session_template_doc_content()).unwrap();
+
+    ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["init"])
+        .status()
+        .unwrap();
+    ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["config", "user.email", "test@example.com"])
+        .status()
+        .unwrap();
+    ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["config", "user.name", "Test User"])
+        .status()
+        .unwrap();
+    ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["add", ".gitignore"])
+        .status()
+        .unwrap();
+    ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["commit", "-m", "initial", "--no-verify"])
+        .status()
+        .unwrap();
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["finalize", doc.to_str().unwrap()])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: ignored doc — gpt-5\nbody\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains(
+            "skipped ignored untracked path scratch/session.md",
+        ));
+
+    let show = ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["show", "HEAD:scratch/session.md"])
+        .output()
+        .unwrap();
+    assert!(
+        !show.status.success(),
+        "ignored untracked session doc must not be committed"
+    );
+}
+
+#[test]
 fn write_commit_requires_git_repo_before_mutating_session_document() {
     let (_tmp, doc) = setup_session_template_doc();
     let before = fs::read_to_string(&doc).unwrap();

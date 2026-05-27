@@ -12,13 +12,15 @@
 //!   agent-doc-style status mutation and/or exchange append and/or pending mutation, `commit`
 //!   first absorbs that live document state into the snapshot, then stages it. Plain user prompts
 //!   are not absorbed.
-//!   Falls back to `git add -f` when hash-object fails.  If the staged snapshot already matches
-//!   `HEAD`, `commit` closes the cycle as an already-committed no-op instead of logging a false
-//!   `commit_failed`. After a successful commit, post-commit cleanup collapses boundary churn in
-//!   the snapshot and fires an IPC reposition signal (`try_ipc_reposition_boundary`) so the IDE
-//!   plugin can normalize the working tree to the same clean shape as the committed blob. Without
-//!   a live listener, the file is rewritten locally to that same clean shape. Returns `true` when
-//!   a git commit was created and `false` when there was nothing new to commit.
+//!   Refuses untracked paths matched by `.gitignore` before using plumbing that would otherwise
+//!   bypass porcelain ignore checks. Falls back to `git add -f` when hash-object fails for
+//!   non-ignored paths. If the staged snapshot already matches `HEAD`, `commit` closes the cycle
+//!   as an already-committed no-op instead of logging a false `commit_failed`. After a successful
+//!   commit, post-commit cleanup collapses boundary churn in the snapshot and fires an IPC
+//!   reposition signal (`try_ipc_reposition_boundary`) so the IDE plugin can normalize the working
+//!   tree to the same clean shape as the committed blob. Without a live listener, the file is
+//!   rewritten locally to that same clean shape. Returns `true` when a git commit was created and
+//!   `false` when there was nothing new to commit.
 //! - `show_head(file)`: returns the file content from `HEAD` as `Some(String)`, or `None` if not
 //!   tracked.
 //! - `commit_with_outcome(file)`: same as `commit`, but also reports whether the
@@ -68,6 +70,7 @@
 //! - strip_guard_markers_strips_inline_content: guard markers embedded in content lines → marker text removed, trailing whitespace trimmed
 //! - strip_guard_markers_strips_trailing_on_content_line: guard marker appended to end of content line → marker removed, content preserved
 //! - commit_staged_blob_has_no_head_markers: regression for #dsng — commit staging strips `(HEAD)` from the blob and post-commit cleanup leaves the working tree/snapshot clean
+//! - commit_skips_ignored_untracked_path: untracked session docs matched by `.gitignore` are not staged via hash-object/update-index or `git add -f`
 //! - commit_retries_full_transaction_when_stage_hits_index_lock: `update-index` index.lock contention retries the full stage+commit transaction until the lock clears
 //! - commit_serializes_closeout_per_git_root: two different docs in the same repo contend on one repo-scoped lock and both close out cleanly
 //! - reposition_boundary_to_end_basic: stale boundary before user prompt → boundary repositioned after prompt
@@ -1862,6 +1865,24 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
                     detail
                 ));
             }
+            Err(CommitTransactionError::IgnoredPath { path }) => {
+                eprintln!(
+                    "[commit] skipped ignored untracked path {} (matched .gitignore); not staging",
+                    path
+                );
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "commit_skipped_ignored_path file={} rel_path={}",
+                        file.display(),
+                        path
+                    ),
+                );
+                break Err(anyhow::anyhow!(
+                    "refusing to commit ignored untracked path {} (matched .gitignore)",
+                    path
+                ));
+            }
             Err(CommitTransactionError::Fatal(err)) => break Err(err),
         }
     };
@@ -2501,6 +2522,7 @@ fn hash_object(git_root: &Path, content: &str) -> Result<String> {
 
 enum CommitTransactionError {
     RetryableIndexLock { phase: &'static str, detail: String },
+    IgnoredPath { path: String },
     Fatal(anyhow::Error),
 }
 
@@ -2521,6 +2543,50 @@ fn render_git_output(output: &std::process::Output) -> String {
         (false, false) => format!("{} | {}", stderr, stdout),
         (true, true) => "no git output".to_string(),
     }
+}
+
+fn git_path_is_tracked(
+    git_root: &Path,
+    rel_path: &Path,
+) -> std::result::Result<bool, CommitTransactionError> {
+    let output = Command::new("git")
+        .current_dir(git_root)
+        .args(["ls-files", "--error-unmatch", "--"])
+        .arg(rel_path)
+        .output()
+        .map_err(|e| CommitTransactionError::Fatal(e.into()))?;
+    Ok(output.status.success())
+}
+
+fn git_path_is_ignored(
+    git_root: &Path,
+    rel_path: &Path,
+) -> std::result::Result<bool, CommitTransactionError> {
+    let output = Command::new("git")
+        .current_dir(git_root)
+        .args(["check-ignore", "--quiet", "--no-index", "--"])
+        .arg(rel_path)
+        .output()
+        .map_err(|e| CommitTransactionError::Fatal(e.into()))?;
+    match output.status.code() {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        _ => Err(CommitTransactionError::Fatal(anyhow::anyhow!(
+            "git check-ignore failed for {}: {}",
+            rel_path.display(),
+            render_git_output(&output)
+        ))),
+    }
+}
+
+fn git_path_is_ignored_untracked(
+    git_root: &Path,
+    rel_path: &Path,
+) -> std::result::Result<bool, CommitTransactionError> {
+    if git_path_is_tracked(git_root, rel_path)? {
+        return Ok(false);
+    }
+    git_path_is_ignored(git_root, rel_path)
 }
 
 fn output_has_index_lock_contention(output: &std::process::Output) -> bool {
@@ -2559,6 +2625,13 @@ fn stage_snapshot_for_commit(
     resolved: &Path,
     snapshot_content: Option<&str>,
 ) -> std::result::Result<(), CommitTransactionError> {
+    let rel_path = relative_to(resolved, git_root);
+    if git_path_is_ignored_untracked(git_root, &rel_path)? {
+        return Err(CommitTransactionError::IgnoredPath {
+            path: rel_path.to_string_lossy().into_owned(),
+        });
+    }
+
     if let Some(snap) = snapshot_content {
         // Stage a CLEAN copy of the snapshot — `(HEAD)` is transient metadata
         // and must never appear in the committed blob. Post-commit cleanup also
@@ -2568,8 +2641,6 @@ fn stage_snapshot_for_commit(
         let staged_content = strip_guard_markers(&strip_head_markers(
             &canonicalize_answered_prompt_prefixes(snap),
         ));
-        let rel_path = relative_to(resolved, git_root);
-
         if let Ok(hash) = hash_object(git_root, &staged_content) {
             let cacheinfo = format!("100644,{},{}", hash, rel_path.to_string_lossy());
             let output = Command::new("git")
@@ -4142,6 +4213,54 @@ Implemented.
         assert!(
             snap.matches("(HEAD)").count() == 0,
             "snapshot should not retain transient head markers; got:\n{snap}"
+        );
+    }
+
+    #[test]
+    fn commit_skips_ignored_untracked_path() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        init_repo(root);
+        commit_file(
+            root,
+            ".gitignore",
+            "scratch/\n.agent-doc/\n",
+            "ignore scratch",
+        );
+
+        let doc = root.join("scratch/session.md");
+        let content = "---\nagent_doc_session: test\n---\n\n<!-- agent:exchange -->\n### Re: ignored\nbody\n<!-- /agent:exchange -->\n";
+        fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        fs::write(&doc, content).unwrap();
+        let snap_path = crate::snapshot::path_for(&doc).unwrap();
+        let snap_abs = root.join(&snap_path);
+        fs::create_dir_all(snap_abs.parent().unwrap()).unwrap();
+        fs::write(&snap_abs, content).unwrap();
+
+        let did_commit = commit(&doc).expect("ignored path should be skipped without panicking");
+        assert!(
+            !did_commit,
+            "ignored untracked document must not create an agent-doc commit"
+        );
+
+        let show = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:scratch/session.md"])
+            .output()
+            .unwrap();
+        assert!(
+            !show.status.success(),
+            "ignored untracked document must not be present in HEAD"
+        );
+
+        let listed = Command::new("git")
+            .current_dir(root)
+            .args(["ls-files", "--", "scratch/session.md"])
+            .output()
+            .unwrap();
+        assert!(
+            listed.stdout.is_empty(),
+            "ignored untracked document must not be staged/tracked"
         );
     }
 

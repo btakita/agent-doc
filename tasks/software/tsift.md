@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -35,7 +35,8 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 7 response topic(s): tokensave vs tsift; OpenCode integration next steps; OpenCode integration next steps; 4 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:20445197 -->
+do [#gopencode-install]. #spec-test-build-install-commit-push
+<!-- agent:boundary:ca565911 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,7 +45,8 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+- do [#gopencode-install]. #spec-test-build-install-commit-push
 <!-- /agent:queue -->
 
 ## Backlog

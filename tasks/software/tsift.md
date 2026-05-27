@@ -167,10 +167,10 @@ Commits pushed:
 - `btakita/tsift`: `9ba9094 feat: add opencode tsift init shortcuts`
 - `btakita/agent-loop`: `fce172c80 chore: update tsift submodule`
 
-### Re: closeout repair — gpt-5 (HEAD)
+### Re: closeout repair — gpt-5
 
 No new repo work in this repair pass. This disk write closes the prior IPC-interrupted closeout state for the already-recorded OpenCode/backend-proof work.
-<!-- agent:boundary:ef111823 -->
+<!-- agent:boundary:ab06e2ce -->
 <!-- /agent:exchange -->
 ###
 <!--

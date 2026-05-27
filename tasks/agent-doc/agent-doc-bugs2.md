@@ -47,7 +47,18 @@ Implemented both requested fixes.
 Verification: `cargo test exchange_`; `cargo test blank_heading_gap`; `cargo test sim_world::jb_cache_conflict`; `cargo test jetbrains_clear_session_sim_keeps_starting_route_guard_and_repairs_prompt_duplicate`; `cargo test post_commit_follow_up_sim_keeps_prompt_out_of_snapshot`; `make check`; `cargo build`; `cargo install --path .`; `agent-doc --version`; latest GitHub Actions CI run `26532894161` succeeded, including `Run make check` and `Run make tmux-ci`.
 
 Local install: `/home/brian/.cargo/bin/agent-doc` now points at the updated `0.34.0` build. The JetBrains plugin was also built and installed earlier into IntelliJ IDEA 2026.1 for the queued-reroute fix; IntelliJ needs a restart to load that plugin update.
-<!-- agent:boundary:13bb55a3 -->
+❯ commit + push uncommitted files in src/agent-doc
+### Re: src/agent-doc uncommitted files — gpt-5
+
+Committed and pushed the remaining `src/agent-doc` change.
+
+- Changed path: `src/agent-doc/src/start.rs`.
+- Submodule commit: `419fb85216dd` (`fix: detect opencode permission highlight fallback`) pushed to `origin/20260422/codex-agent-backend`.
+- Parent gitlink commit: `ddcd09d63b7b` (`agent-doc: update opencode permission fallback`) created locally; the parent push happens after this session closeout per the session-document staging rule.
+- Verification: `cargo test opencode_permission_prompt_fallback`; `make check`; GitHub Actions CI run `26534636393` succeeded for `419fb85216dd`, including `Run make check` and `Run make tmux-ci`.
+
+The preflight warning about the post-exchange HTML comment remains non-executable note text; I did not move or execute it.
+<!-- agent:boundary:9b3c0e06 -->
 <!-- /agent:exchange -->
 ###
 <!--

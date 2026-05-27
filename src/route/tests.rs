@@ -2098,6 +2098,28 @@ fn dispatch_blocker_recovery_hint_names_codex_hook_review_action() {
 }
 
 #[test]
+fn dispatch_active_turn_blockers_are_queueable_for_prompt_bearing_reroutes() {
+    assert_eq!(
+        dispatch_active_turn_queue_source(&HarnessConfig::codex(), "active codex turn"),
+        Some("dispatch_only_codex_active_turn")
+    );
+    assert_eq!(
+        dispatch_active_turn_queue_source(&HarnessConfig::opencode(), "opencode active turn"),
+        Some("dispatch_only_opencode_active_turn")
+    );
+    assert_eq!(
+        dispatch_active_turn_queue_source(&HarnessConfig::codex(), "codex hook review prompt"),
+        None,
+        "hook review requires an explicit operator decision, not auto-queueing"
+    );
+    assert_eq!(
+        dispatch_active_turn_queue_source(&HarnessConfig::codex(), "queued draft in composer"),
+        None,
+        "drafted prompt input must not be overwritten by route queueing"
+    );
+}
+
+#[test]
 fn dispatch_only_submit_proof_gate_allows_non_codex_and_hook_proven_codex() {
     let dir = tempfile::tempdir().unwrap();
     let doc = dir.path().join("tasks/agent-doc/agent-doc-bugs2.md");
@@ -3718,7 +3740,10 @@ fn dispatch_only_send_reopen_direct_pane_submit_avoids_extra_enter_retries() {
         &pane,
         &file_path,
         &HarnessConfig::codex(),
-        DispatchOnlyReopenDelivery::DirectPaneSubmit,
+        DispatchOnlySendReopenOptions {
+            delivery: DispatchOnlyReopenDelivery::DirectPaneSubmit,
+            queue_prompt_text: None,
+        },
     )
     .expect("dispatch-only reopen should still send once when no explicit blocker is visible");
     assert!(

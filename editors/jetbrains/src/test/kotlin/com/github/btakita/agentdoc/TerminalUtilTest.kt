@@ -203,6 +203,21 @@ class TerminalUtilTest {
     }
 
     @Test
+    fun `opencode active turn direct blocker is reported as still running not persistent failure`() {
+        val relativePath = "tasks/software/tsift.md"
+        val output = """
+            Error: dispatch-only opencode reopen refused to inject into pane %21 for $relativePath because the pane still shows opencode active turn; restore an idle prompt and retry
+        """.trimIndent()
+        val message = TerminalUtil.buildRunAgentDocStillRunningMessage(relativePath)
+
+        assertEquals(TerminalUtil.RunAgentDocRouteFailureKind.BUSY_RUNNING, TerminalUtil.classifyRunAgentDocRouteFailure(output))
+        assertTrue(message.contains("still running"))
+        assertTrue(message.contains(relativePath))
+        assertFalse(message.contains("route failed"))
+        assertFalse(message.contains("Saved exact route output"))
+    }
+
+    @Test
     fun `queued route success is reported as queued not silent success`() {
         val relativePath = "tasks/agent-doc/agent-doc-bugs2.md"
         val output = """

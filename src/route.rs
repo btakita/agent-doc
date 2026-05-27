@@ -2196,6 +2196,12 @@ fn dispatch_only_starting_pane_not_ready_error(
     )
 }
 
+#[derive(Debug, Clone, Copy)]
+struct DispatchOnlySendReopenOptions<'a> {
+    delivery: DispatchOnlyReopenDelivery,
+    queue_prompt_text: Option<&'a str>,
+}
+
 fn dispatch_only_send_reopen(
     tmux: &Tmux,
     file: &Path,
@@ -2203,8 +2209,9 @@ fn dispatch_only_send_reopen(
     pane: &str,
     file_path: &str,
     harness: &HarnessConfig,
-    delivery: DispatchOnlyReopenDelivery,
+    options: DispatchOnlySendReopenOptions<'_>,
 ) -> Result<String> {
+    let delivery = options.delivery;
     let mut dispatch_pane = pane.to_string();
     let mut log_status = crate::startup_miss::session_log_status(file, session_id)
         .ok()
@@ -2307,6 +2314,23 @@ fn dispatch_only_send_reopen(
                 reason
             ),
         );
+        if let Some(source) = dispatch_active_turn_queue_source(harness, &reason)
+            && let Some(prompt_text) = options.queue_prompt_text
+        {
+            let queued = enqueue_route_dispatch_prompt(file, prompt_text, source)?;
+            eprintln!(
+                "[route] dispatch-only {} reopen for {} found {} on pane {}; queued pending dispatch {:?} in agent:queue auto (appended={}, already_present={}, superseded={}) instead of injecting a duplicate trigger",
+                harness.binary,
+                file.display(),
+                reason,
+                dispatch_pane,
+                queued.prompt_text,
+                queued.appended,
+                queued.already_present,
+                queued.superseded
+            );
+            return Ok(dispatch_pane);
+        }
         let recovery = dispatch_blocker_recovery_hint(harness, &reason, file);
         anyhow::bail!(
             "dispatch-only {} reopen refused to inject into pane {} for {} because the pane still shows {}; {}",
@@ -2469,6 +2493,7 @@ fn dispatch_only_reopen_existing_pane(
     harness: &HarnessConfig,
     created_panes: &mut Vec<String>,
     prompt_bearing_marker: Option<&str>,
+    queue_prompt_text: Option<&str>,
     allow_auto_fix_retry: bool,
     allow_busy_interrupt_retry: bool,
     auto_fix_attempted: bool,
@@ -2529,7 +2554,10 @@ fn dispatch_only_reopen_existing_pane(
             &dispatch_pane,
             file_path,
             harness,
-            delivery,
+            DispatchOnlySendReopenOptions {
+                delivery,
+                queue_prompt_text,
+            },
         );
     }
     if harness.binary == "codex"
@@ -2554,7 +2582,10 @@ fn dispatch_only_reopen_existing_pane(
             &dispatch_pane,
             file_path,
             harness,
-            delivery,
+            DispatchOnlySendReopenOptions {
+                delivery,
+                queue_prompt_text,
+            },
         );
     }
     register_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
@@ -2572,7 +2603,10 @@ fn dispatch_only_reopen_existing_pane(
             &dispatch_pane,
             file_path,
             harness,
-            delivery,
+            DispatchOnlySendReopenOptions {
+                delivery,
+                queue_prompt_text,
+            },
         ),
         ExistingPaneDispatchReadiness::BusyAlreadyRunning => Ok(dispatch_pane),
         ExistingPaneDispatchReadiness::BusyNeedsAutoFix {
@@ -2589,6 +2623,7 @@ fn dispatch_only_reopen_existing_pane(
             harness,
             created_panes,
             prompt_bearing_marker,
+            queue_prompt_text,
             allow_auto_fix_retry,
             allow_busy_interrupt_retry,
             auto_fix_attempted,
@@ -2612,6 +2647,7 @@ fn retry_dispatch_only_after_busy_pane(
     harness: &HarnessConfig,
     created_panes: &mut Vec<String>,
     prompt_bearing_marker: Option<&str>,
+    queue_prompt_text: Option<&str>,
     allow_auto_fix_retry: bool,
     allow_busy_interrupt_retry: bool,
     auto_fix_attempted: bool,
@@ -2635,6 +2671,7 @@ fn retry_dispatch_only_after_busy_pane(
                     harness,
                     created_panes,
                     prompt_bearing_marker,
+                    queue_prompt_text,
                     false,
                     allow_busy_interrupt_retry,
                     true,
@@ -2656,6 +2693,7 @@ fn retry_dispatch_only_after_busy_pane(
                     harness,
                     created_panes,
                     prompt_bearing_marker,
+                    queue_prompt_text,
                     false,
                     allow_busy_interrupt_retry,
                     true,
@@ -2703,6 +2741,7 @@ fn retry_dispatch_only_after_busy_pane(
                     harness,
                     created_panes,
                     prompt_bearing_marker,
+                    queue_prompt_text,
                     false,
                     allow_busy_interrupt_retry,
                     true,
@@ -2734,6 +2773,7 @@ fn retry_dispatch_only_after_busy_pane(
                     harness,
                     created_panes,
                     prompt_bearing_marker,
+                    queue_prompt_text,
                     false,
                     false,
                     true,
@@ -2809,6 +2849,17 @@ fn dispatch_blocker_recovery_hint(harness: &HarnessConfig, reason: &str, file: &
     }
 
     "restore an idle prompt and retry".to_string()
+}
+
+fn dispatch_active_turn_queue_source(
+    harness: &HarnessConfig,
+    reason: &str,
+) -> Option<&'static str> {
+    match (harness.binary.as_str(), reason) {
+        ("codex", "active codex turn") => Some("dispatch_only_codex_active_turn"),
+        ("opencode", "opencode active turn") => Some("dispatch_only_opencode_active_turn"),
+        _ => None,
+    }
 }
 
 fn load_authoritative_actor_binding(
@@ -3907,7 +3958,10 @@ fn route_via_authoritative_actor(
                 &dispatch_pane,
                 file_path,
                 harness,
-                DispatchOnlyReopenDelivery::DirectPaneSubmit,
+                DispatchOnlySendReopenOptions {
+                    delivery: DispatchOnlyReopenDelivery::DirectPaneSubmit,
+                    queue_prompt_text: prompt_context.map(|context| context.prompt_text.as_str()),
+                },
             )?;
             crate::ops_log::log_op(
                 file,
@@ -4033,7 +4087,10 @@ fn recover_dispatch_only_authoritative_waiting_input(
         &dispatch_pane,
         file_path,
         harness,
-        DispatchOnlyReopenDelivery::DirectPaneSubmit,
+        DispatchOnlySendReopenOptions {
+            delivery: DispatchOnlyReopenDelivery::DirectPaneSubmit,
+            queue_prompt_text: None,
+        },
     )
 }
 
@@ -4157,6 +4214,9 @@ fn resolve_or_create_pane_dispatch_only(
                 pending_prompt_context
                     .as_ref()
                     .map(|context| context.marker.as_str()),
+                pending_prompt_context
+                    .as_ref()
+                    .map(|context| context.prompt_text.as_str()),
                 true,
                 true,
                 false,
@@ -4236,6 +4296,9 @@ fn resolve_or_create_pane_dispatch_only(
             pending_prompt_context
                 .as_ref()
                 .map(|context| context.marker.as_str()),
+            pending_prompt_context
+                .as_ref()
+                .map(|context| context.prompt_text.as_str()),
             true,
             true,
             false,
@@ -4303,6 +4366,9 @@ fn resolve_or_create_pane_dispatch_only(
             pending_prompt_context
                 .as_ref()
                 .map(|context| context.marker.as_str()),
+            pending_prompt_context
+                .as_ref()
+                .map(|context| context.prompt_text.as_str()),
             true,
             true,
             false,
@@ -7609,7 +7675,10 @@ fn auto_start_in_session(
                     &dispatch_pane,
                     file_path,
                     harness,
-                    DispatchOnlyReopenDelivery::SupervisorIpcOnce,
+                    DispatchOnlySendReopenOptions {
+                        delivery: DispatchOnlyReopenDelivery::SupervisorIpcOnce,
+                        queue_prompt_text: None,
+                    },
                 )?;
                 RoutedDispatchStartProof::CommandAcceptedOnly
             } else {
@@ -7628,7 +7697,10 @@ fn auto_start_in_session(
                     &dispatch_pane,
                     file_path,
                     harness,
-                    DispatchOnlyReopenDelivery::SupervisorIpcOnce,
+                    DispatchOnlySendReopenOptions {
+                        delivery: DispatchOnlyReopenDelivery::SupervisorIpcOnce,
+                        queue_prompt_text: None,
+                    },
                 )
                 .map(|_| RoutedDispatchStartProof::CommandAcceptedOnly)
             } else {

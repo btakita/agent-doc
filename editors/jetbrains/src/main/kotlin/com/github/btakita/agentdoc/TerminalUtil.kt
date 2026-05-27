@@ -983,6 +983,7 @@ object TerminalUtil {
     internal fun classifyRunAgentDocRouteFailure(output: String): RunAgentDocRouteFailureKind {
         return when {
             isRunAgentDocRouteQueued(output) -> RunAgentDocRouteFailureKind.QUEUED_PENDING
+            isDispatchOnlyActiveTurnBlocked(output) -> RunAgentDocRouteFailureKind.BUSY_RUNNING
             isLatestRunStillBootingBusy(output) -> RunAgentDocRouteFailureKind.BUSY_RUNNING
             isStartingActorRouteFailure(output) || isLatestRunStillBootingRetryable(output) ->
                 RunAgentDocRouteFailureKind.RETRYABLE_STARTING
@@ -999,6 +1000,13 @@ object TerminalUtil {
     private fun isLatestRunStillBootingBusy(output: String): Boolean {
         val lower = output.lowercase()
         return isLatestRunStillBootingShape(lower) && lower.contains("(active codex turn)")
+    }
+
+    private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
+        val lower = output.lowercase()
+        return lower.contains("dispatch-only") &&
+            lower.contains("pane still shows") &&
+            (lower.contains("opencode active turn") || lower.contains("active codex turn"))
     }
 
     private fun isLatestRunStillBootingShape(lower: String): Boolean {

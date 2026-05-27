@@ -587,7 +587,9 @@ fn extract_hash_ids(text: &str) -> Vec<String> {
         }
         idx += 1;
         let start = idx;
-        while idx < chars.len() && chars[idx].is_ascii_alphanumeric() {
+        while idx < chars.len()
+            && (chars[idx].is_ascii_alphanumeric() || chars[idx] == '-' || chars[idx] == '_')
+        {
             idx += 1;
         }
         if start == idx {
@@ -1843,6 +1845,10 @@ esac
         assert_eq!(
             extract_do_targets("do [#x63e] [#v4v0]. spec-test"),
             vec!["x63e".to_string(), "v4v0".to_string()]
+        );
+        assert_eq!(
+            extract_do_target("do #inline-done-signal. spec-test"),
+            Some("inline-done-signal".to_string())
         );
     }
 

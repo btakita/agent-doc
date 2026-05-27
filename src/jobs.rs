@@ -1514,20 +1514,17 @@ mod tests {
     use crate::snapshot;
     use std::io::Write;
     use std::os::unix::fs::PermissionsExt;
-    use std::sync::{Mutex, MutexGuard};
     use tempfile::TempDir;
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     struct EnvGuard {
         key: &'static str,
         prev: Option<String>,
-        _lock: MutexGuard<'static, ()>,
+        _lock: std::sync::MutexGuard<'static, ()>,
     }
 
     impl EnvGuard {
         fn set(key: &'static str, value: &str) -> Self {
-            let lock = ENV_LOCK.lock().unwrap();
+            let lock = crate::harness_prompt::TEST_ENV_LOCK.lock().unwrap();
             let prev = std::env::var(key).ok();
             unsafe { std::env::set_var(key, value) };
             Self {

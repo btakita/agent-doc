@@ -30,6 +30,8 @@ pub struct GuardConfig {
     pub pending_done: Option<crate::frontmatter::PendingCaptureGuardMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review_done: Option<crate::frontmatter::PendingCaptureGuardMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_done: Option<bool>,
 }
 
 /// Workspace-level lint configuration (`[lint]` section in
@@ -358,7 +360,7 @@ mod tests {
         let config_path = setup_project(dir.path());
         std::fs::write(
             &config_path,
-            "[guards]\npending_capture = \"strict\"\npending_done = \"strict\"\n",
+            "[guards]\npending_capture = \"strict\"\npending_done = \"strict\"\nauto_done = true\n",
         )
         .unwrap();
         let cfg = load_project_from(&config_path);
@@ -370,6 +372,7 @@ mod tests {
             cfg.guards.pending_done,
             Some(crate::frontmatter::PendingCaptureGuardMode::Strict)
         );
+        assert_eq!(cfg.guards.auto_done, Some(true));
     }
 
     #[test]

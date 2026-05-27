@@ -654,24 +654,13 @@ fn pending_mutations_for_doc(
 
     for action in repo_actions {
         for id in extract_do_pending_ids(action) {
-            let Some(item) = items.iter().find(|item| {
-                item.id.eq_ignore_ascii_case(&id) && item.state != pending::PendingState::Done
-            }) else {
-                continue;
-            };
-            if pending_mutations
-                .iter()
-                .any(|mutation| mutation.id == item.id)
-            {
-                continue;
-            }
-            pending_mutations.push(PendingMutationPlan {
-                kind: PendingMutationKind::ResolveExisting,
-                id: item.id.clone(),
-                text: item.text.clone(),
-                target_files: Vec::new(),
-            });
+            push_resolve_existing_mutation(&mut pending_mutations, &items, &id);
         }
+    }
+
+    let auto_done = crate::session_check::resolve_auto_done(file).unwrap_or(false);
+    for id in crate::session_check::inline_done_signal_ids(file, prompt_targets, auto_done)? {
+        push_resolve_existing_mutation(&mut pending_mutations, &items, &id);
     }
 
     if crate::prompt_contract::prompt_requests_backlog_work(
@@ -731,6 +720,31 @@ fn pending_mutations_for_doc(
     }
 
     Ok(pending_mutations)
+}
+
+fn push_resolve_existing_mutation(
+    pending_mutations: &mut Vec<PendingMutationPlan>,
+    items: &[pending::PendingItem],
+    id: &str,
+) {
+    let Some(item) = items
+        .iter()
+        .find(|item| item.id.eq_ignore_ascii_case(id) && item.state != pending::PendingState::Done)
+    else {
+        return;
+    };
+    if pending_mutations
+        .iter()
+        .any(|mutation| mutation.id == item.id)
+    {
+        return;
+    }
+    pending_mutations.push(PendingMutationPlan {
+        kind: PendingMutationKind::ResolveExisting,
+        id: item.id.clone(),
+        text: item.text.clone(),
+        target_files: Vec::new(),
+    });
 }
 
 fn truncate_for_plan_log(text: &str) -> String {
@@ -2146,6 +2160,153 @@ Done.
                 .iter()
                 .any(|m| { m.kind == PendingMutationKind::ResolveExisting && m.id == "1g42" }),
             "expected ResolveExisting for harness prompt do-directive, got {:?}",
+            plan.pending_mutations
+        );
+    }
+
+    #[test]
+    fn build_plan_resolves_explicit_inline_done_signal() {
+        let dir = setup_project();
+        let doc = dir.path().join("plan.md");
+
+        let baseline = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — opus-4-6
+
+Done.
+<!-- /agent:exchange -->
+
+## Backlog
+
+<!-- agent:backlog -->
+- [ ] [#inline-done-signal] Inline done signal
+<!-- /agent:backlog -->
+"#;
+
+        let current = baseline.replace(
+            "Done.\n<!-- /agent:exchange -->",
+            "Done.\n\nmark #inline-done-signal done\n<!-- /agent:exchange -->",
+        );
+
+        std::fs::write(&doc, current).unwrap();
+        snapshot::save(&doc, baseline).unwrap();
+
+        let plan = build(&doc).unwrap();
+
+        assert!(
+            plan.pending_mutations.iter().any(|m| {
+                m.kind == PendingMutationKind::ResolveExisting && m.id == "inline-done-signal"
+            }),
+            "expected ResolveExisting for explicit inline done signal, got {:?}",
+            plan.pending_mutations
+        );
+    }
+
+    #[test]
+    fn build_plan_resolves_plain_done_to_single_review_item_when_auto_done_enabled() {
+        let dir = setup_project();
+        let doc = dir.path().join("plan.md");
+
+        let baseline = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+auto_done: true
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — opus-4-6
+
+Waiting.
+<!-- /agent:exchange -->
+
+## Backlog
+
+<!-- agent:backlog -->
+<!-- /agent:backlog -->
+
+## Review
+
+<!-- agent:review -->
+- [/] [#rev1] Await user acceptance
+<!-- /agent:review -->
+"#;
+
+        let current = baseline.replace(
+            "Waiting.\n<!-- /agent:exchange -->",
+            "Waiting.\n\ndone\n<!-- /agent:exchange -->",
+        );
+
+        std::fs::write(&doc, current).unwrap();
+        snapshot::save(&doc, baseline).unwrap();
+
+        let plan = build(&doc).unwrap();
+
+        assert!(
+            plan.pending_mutations
+                .iter()
+                .any(|m| m.kind == PendingMutationKind::ResolveExisting && m.id == "rev1"),
+            "expected ResolveExisting for the single review item, got {:?}",
+            plan.pending_mutations
+        );
+    }
+
+    #[test]
+    fn build_plan_does_not_resolve_plain_done_without_auto_done() {
+        let dir = setup_project();
+        let doc = dir.path().join("plan.md");
+
+        let baseline = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — opus-4-6
+
+Waiting.
+<!-- /agent:exchange -->
+
+## Backlog
+
+<!-- agent:backlog -->
+<!-- /agent:backlog -->
+
+## Review
+
+<!-- agent:review -->
+- [/] [#rev1] Await user acceptance
+<!-- /agent:review -->
+"#;
+
+        let current = baseline.replace(
+            "Waiting.\n<!-- /agent:exchange -->",
+            "Waiting.\n\ndone\n<!-- /agent:exchange -->",
+        );
+
+        std::fs::write(&doc, current).unwrap();
+        snapshot::save(&doc, baseline).unwrap();
+
+        let plan = build(&doc).unwrap();
+
+        assert!(
+            !plan
+                .pending_mutations
+                .iter()
+                .any(|m| m.kind == PendingMutationKind::ResolveExisting && m.id == "rev1"),
+            "plain done should require auto_done, got {:?}",
             plan.pending_mutations
         );
     }

@@ -414,6 +414,11 @@ pub struct Frontmatter {
     /// Values: `off` (default when absent), `warn`, `strict`/`error`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review_done_guard: Option<PendingCaptureGuardMode>,
+    /// When true, closeout may auto-apply `--done` for clear completion signals.
+    /// Default is absent/false; explicit `--done` and explicit `#id done`
+    /// directives still work without this opt-in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_done: Option<bool>,
     /// Lint dialect mode for the agent-doc finalize lint gate. Values:
     /// `warn` (default), `strict`, `off`. See `lint_gate` module for the
     /// full precedence chain.
@@ -735,6 +740,11 @@ pub fn merge_fields(content: &str, yaml_fields: &str) -> Result<String> {
                         serde_yaml::from_str::<PendingCaptureGuardMode>(&format!("\"{}\"", s))
                 {
                     fm.review_done_guard = Some(mode);
+                }
+            }
+            "auto_done" => {
+                if let Some(enabled) = value.as_bool() {
+                    fm.auto_done = Some(enabled);
                 }
             }
             "prompt_presets" => {
@@ -1201,6 +1211,7 @@ mod tests {
             pending_capture_guard: None,
             pending_done_guard: None,
             review_done_guard: None,
+            auto_done: None,
             agent_doc_lint_dialect: None,
             hooks: std::collections::HashMap::new(),
             env: indexmap::IndexMap::new(),
@@ -1433,6 +1444,25 @@ mod tests {
             parsed.review_done_guard,
             Some(PendingCaptureGuardMode::Strict)
         );
+    }
+
+    #[test]
+    fn parse_auto_done_bool() {
+        let content = "---\nauto_done: true\n---\nBody\n";
+        let (fm, _) = parse(content).unwrap();
+        assert_eq!(fm.auto_done, Some(true));
+    }
+
+    #[test]
+    fn write_auto_done_roundtrip() {
+        let fm = Frontmatter {
+            auto_done: Some(true),
+            ..Default::default()
+        };
+        let written = write(&fm, "Body\n").unwrap();
+        assert!(written.contains("auto_done: true"));
+        let (parsed, _) = parse(&written).unwrap();
+        assert_eq!(parsed.auto_done, Some(true));
     }
 
     #[test]

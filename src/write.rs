@@ -2052,6 +2052,23 @@ fn precommit_pending_done_check(file: &Path) -> Result<()> {
         return Ok(());
     }
 
+    if crate::session_check::resolve_auto_done(file)? {
+        for id in &missing {
+            auto_apply_pending_done_id(file, id)?;
+        }
+        crate::cycle_state::record_pending_done_ids(file, &missing)?;
+        crate::cycle_state::mark_pending_mutations(file)?;
+        eprintln!(
+            "[finalize] auto_done: recorded {}",
+            missing
+                .iter()
+                .map(|id| format!("--done {}", id))
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+        return Ok(());
+    }
+
     let ids = missing
         .iter()
         .map(|id| format!("#{}", id))
@@ -2166,6 +2183,70 @@ fn prewrite_pending_done_check(file: &Path, response_body: &str, flags: &WriteFl
         hint,
         recovery
     );
+}
+
+fn auto_apply_pending_done_if_enabled(
+    file: &Path,
+    response_body: &str,
+    flags: &WriteFlags,
+    current_content: &mut String,
+) -> Result<()> {
+    if !flags.strict_closeout || !crate::session_check::resolve_auto_done(file)? {
+        return Ok(());
+    }
+    if response_body.contains("<!-- no-pending-done-guard -->") {
+        return Ok(());
+    }
+
+    let state = crate::cycle_state::load(file)?;
+    let mut recorded_done_ids = state
+        .as_ref()
+        .map(|state| state.pending_done_ids.clone())
+        .unwrap_or_default();
+    recorded_done_ids.extend(flags.pending_done_ids.clone());
+    let mut kept_open_ids = state
+        .as_ref()
+        .map(|state| state.pending_kept_open_ids.clone())
+        .unwrap_or_default();
+    kept_open_ids.extend(flags.pending_kept_open_ids.clone());
+
+    let response_text = crate::session_check::response_text_for_guards(response_body);
+    let missing = crate::session_check::detect_missing_pending_done_ids(
+        file,
+        &response_text,
+        &recorded_done_ids,
+        &kept_open_ids,
+    )?;
+    if missing.is_empty() {
+        return Ok(());
+    }
+
+    for id in &missing {
+        auto_apply_pending_done_id(file, id)?;
+    }
+    crate::cycle_state::record_pending_done_ids(file, &missing)?;
+    crate::cycle_state::mark_pending_mutations(file)?;
+    *current_content = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to re-read {} after auto_done", file.display()))?;
+    eprintln!(
+        "[finalize] auto_done: recorded {}",
+        missing
+            .iter()
+            .map(|id| format!("--done {}", id))
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
+    Ok(())
+}
+
+fn auto_apply_pending_done_id(file: &Path, id: &str) -> Result<()> {
+    if let Some(component) = crate::pending_cmd::open_item_component_name(file, id)?
+        && crate::component::is_backlog_component(&component)
+    {
+        crate::pending_cmd::gate(file, id)?;
+    }
+    enforce_review_done_guard(file, id)?;
+    crate::pending_cmd::done(file, id)
 }
 
 fn run_closeout_pending_maintenance(file: &Path, commit_mode: CommitMode) -> Result<()> {
@@ -5919,13 +6000,14 @@ pub fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()>
         anyhow::bail!("empty response — nothing to write");
     }
 
-    let current_content = std::fs::read_to_string(file)
+    let mut current_content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     enforce_imperative_response_contract(file, baseline, &current_content, &response)?;
 
     // Strip leading "## Assistant" heading if present — the write command adds its own
     let response = strip_assistant_heading(&response);
     prewrite_pending_capture_check(file, &response, &flags)?;
+    auto_apply_pending_done_if_enabled(file, &response, &flags, &mut current_content)?;
     prewrite_pending_done_check(file, &response, &flags)?;
 
     // Save response to pending store (survives context compaction)
@@ -6066,7 +6148,7 @@ pub fn run_template(
         anyhow::bail!("empty response — nothing to write");
     }
 
-    let current_content = std::fs::read_to_string(file)
+    let mut current_content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     let snapshot_doc = snapshot::load(file).ok().flatten();
     guard_no_stale_snapshot_reset_drift(
@@ -6115,6 +6197,7 @@ pub fn run_template(
         ensure_template_response_write_proof(&patches, &unmatched)?;
     }
     prewrite_pending_capture_check(file, &response, &flags)?;
+    auto_apply_pending_done_if_enabled(file, &response, &flags, &mut current_content)?;
     prewrite_pending_done_check(file, &response, &flags)?;
 
     // Save response to pending store (survives context compaction)
@@ -6312,7 +6395,7 @@ pub fn run_stream(
         anyhow::bail!("empty response — nothing to write");
     }
 
-    let current_content = std::fs::read_to_string(file)
+    let mut current_content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     let snapshot_doc = snapshot::load(file).ok().flatten();
     guard_no_stale_snapshot_reset_drift(
@@ -6364,6 +6447,7 @@ pub fn run_stream(
         ensure_template_response_write_proof(&patches, &unmatched)?;
     }
     prewrite_pending_capture_check(file, &response, &flags)?;
+    auto_apply_pending_done_if_enabled(file, &response, &flags, &mut current_content)?;
     prewrite_pending_done_check(file, &response, &flags)?;
 
     if patches.is_empty() {
@@ -7045,7 +7129,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
         anyhow::bail!("empty response — nothing to write");
     }
 
-    let current_content = std::fs::read_to_string(file)
+    let mut current_content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     let snapshot_doc = snapshot::load(file).ok().flatten();
     guard_no_stale_snapshot_reset_drift(
@@ -7095,6 +7179,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
         ensure_template_response_write_proof(&patches, &unmatched)?;
     }
     prewrite_pending_capture_check(file, &response, &flags)?;
+    auto_apply_pending_done_if_enabled(file, &response, &flags, &mut current_content)?;
     prewrite_pending_done_check(file, &response, &flags)?;
 
     let (doc_lock, content_at_start) = capture_locked_pre_response(file)?;
@@ -19460,6 +19545,26 @@ mod precommit_pending_capture_tests {
 
         super::precommit_pending_done_check(&doc)
             .expect("should pass when matching pending-done was recorded");
+    }
+
+    #[test]
+    fn precommit_pending_done_auto_done_marks_item_done() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_precommit_with_pending(
+            tmp.path(),
+            "---\nagent_doc_session: test\nauto_done: true\n---\n\n",
+            "### Re: #4qja streaming orchestrate patchback — gpt-5\n\nImplemented the sequential orchestration streaming path for CRDT docs.\nVerification:\n- cargo test\n",
+            "- [ ] [#4qja] Stream orchestrate patchback\n",
+            &[],
+        );
+
+        super::precommit_pending_done_check(&doc)
+            .expect("auto_done should record and apply missing --done mutations");
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(content.contains("- [x] [#4qja] Stream orchestrate patchback"));
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert!(state.pending_done_ids.contains(&"4qja".to_string()));
+        assert!(state.had_pending_mutations);
     }
 
     #[test]

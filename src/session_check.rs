@@ -1144,6 +1144,18 @@ pub(crate) fn resolve_review_done_guard_mode(
     Ok(crate::frontmatter::PendingCaptureGuardMode::Off)
 }
 
+pub(crate) fn resolve_auto_done(file: &Path) -> Result<bool> {
+    let content = std::fs::read_to_string(file)?;
+    let (fm, _) = crate::frontmatter::parse(&content)?;
+    if let Some(enabled) = fm.auto_done {
+        return Ok(enabled);
+    }
+    Ok(crate::project_config::load_project_for_doc(file)
+        .guards
+        .auto_done
+        .unwrap_or(false))
+}
+
 fn check_pending_done_guard(file: &Path) -> Result<GuardResult> {
     let mode = resolve_pending_done_guard_mode(file)?;
     if mode == crate::frontmatter::PendingCaptureGuardMode::Off {
@@ -1194,6 +1206,11 @@ fn check_pending_done_guard(file: &Path) -> Result<GuardResult> {
         .map(|id| format!("--done {}", id))
         .collect::<Vec<_>>()
         .join(" ");
+    let repair = format!(
+        "agent-doc write {} {} --pending-only --commit",
+        file.display(),
+        hint
+    );
     let warn_line = format!(
         "[session-check] warn: response appears to complete existing pending {} but no matching `--done` was recorded this cycle",
         ids
@@ -1203,14 +1220,14 @@ fn check_pending_done_guard(file: &Path) -> Result<GuardResult> {
         crate::frontmatter::PendingCaptureGuardMode::Warn => GuardResult::Warn(vec![
             warn_line,
             format!(
-                "[session-check] hint: re-run with {} or add `pending_done_guard: off` for this document when the item should stay open",
-                hint
+                "[session-check] hint: repair with `{}` or add `pending_done_guard: off` for this document when the item should stay open",
+                repair
             ),
         ]),
         crate::frontmatter::PendingCaptureGuardMode::Strict => GuardResult::Error(format!(
-            "{}\n[session-check] hint: re-run with {} or set pending_done_guard = \"warn\" to downgrade",
+            "{}\n[session-check] hint: repair with `{}` or set pending_done_guard = \"warn\" to downgrade",
             warn_line.replacen("[session-check] warn:", "[session-check] error:", 1),
-            hint
+            repair
         )),
         crate::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
     })
@@ -1364,6 +1381,159 @@ fn contains_completion_marker(text: &str) -> bool {
     ]
     .iter()
     .any(|marker| text.contains(marker))
+}
+
+pub(crate) fn inline_done_signal_ids(
+    file: &Path,
+    prompt_texts: &[String],
+    auto_done: bool,
+) -> Result<Vec<String>> {
+    if prompt_texts.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let open_ids = open_tracked_work_ids(file)?
+        .into_iter()
+        .collect::<std::collections::HashSet<_>>();
+    if open_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let single_review_id = if auto_done {
+        single_open_review_item_id(file)?
+    } else {
+        None
+    };
+    let mut ids = Vec::new();
+
+    for prompt in prompt_texts {
+        for id in explicit_done_signal_ids(prompt) {
+            if open_ids.contains(&id) && !ids.iter().any(|existing| existing == &id) {
+                ids.push(id);
+            }
+        }
+
+        if auto_done
+            && plain_done_signal(prompt)
+            && let Some(id) = single_review_id.as_deref()
+            && open_ids.contains(id)
+            && !ids.iter().any(|existing| existing == id)
+        {
+            ids.push(id.to_string());
+        }
+    }
+
+    Ok(ids)
+}
+
+fn explicit_done_signal_ids(text: &str) -> Vec<String> {
+    let normalized = normalize_done_signal_text(text);
+    if normalized.is_empty() {
+        return Vec::new();
+    }
+
+    let lower = normalized.to_ascii_lowercase();
+    let is_done_signal = lower.contains(" done")
+        || lower.ends_with(" done")
+        || lower.starts_with("done ")
+        || lower.contains(" complete")
+        || lower.ends_with(" complete")
+        || lower.starts_with("complete ")
+        || lower.contains(" completed")
+        || lower.ends_with(" completed")
+        || lower.starts_with("completed ")
+        || lower.contains(" resolved")
+        || lower.ends_with(" resolved")
+        || lower.starts_with("resolved ");
+    if !is_done_signal {
+        return Vec::new();
+    }
+
+    extract_pending_hash_ids(&normalized)
+}
+
+fn plain_done_signal(text: &str) -> bool {
+    let normalized = normalize_done_signal_text(text);
+    let lower = normalized.to_ascii_lowercase();
+    matches!(
+        lower.as_str(),
+        "done"
+            | "done."
+            | "complete"
+            | "complete."
+            | "completed"
+            | "completed."
+            | "resolved"
+            | "resolved."
+    )
+}
+
+fn normalize_done_signal_text(text: &str) -> String {
+    text.trim()
+        .trim_start_matches('❯')
+        .trim()
+        .trim_start_matches("- ")
+        .trim()
+        .to_string()
+}
+
+fn extract_pending_hash_ids(text: &str) -> Vec<String> {
+    let mut ids = Vec::new();
+    let chars = text.char_indices().collect::<Vec<_>>();
+    let mut idx = 0usize;
+
+    while idx < chars.len() {
+        let (byte_idx, ch) = chars[idx];
+        if ch != '#' {
+            idx += 1;
+            continue;
+        }
+
+        let start = byte_idx + ch.len_utf8();
+        let mut end = start;
+        let mut cursor = idx + 1;
+        while cursor < chars.len() {
+            let (next_byte, next_ch) = chars[cursor];
+            if next_ch.is_ascii_alphanumeric() || next_ch == '-' || next_ch == '_' {
+                end = next_byte + next_ch.len_utf8();
+                cursor += 1;
+                continue;
+            }
+            break;
+        }
+
+        if end > start {
+            let id = crate::pending::normalize_pending_id(&text[start..end]);
+            if !ids.iter().any(|existing| existing == &id) {
+                ids.push(id);
+            }
+        }
+        idx = cursor.max(idx + 1);
+    }
+
+    ids
+}
+
+fn single_open_review_item_id(file: &Path) -> Result<Option<String>> {
+    let content = std::fs::read_to_string(file)?;
+    let Ok(components) = crate::component::parse(&content) else {
+        return Ok(None);
+    };
+    let ids = components
+        .into_iter()
+        .filter(|component| crate::component::is_review_component(&component.name))
+        .flat_map(|component| {
+            let (_, items, _) = crate::pending::parse_items(component.content(&content));
+            items
+        })
+        .filter(|item| !item.is_done())
+        .map(|item| item.id)
+        .collect::<Vec<_>>();
+    if ids.len() == 1 {
+        Ok(ids.into_iter().next())
+    } else {
+        Ok(None)
+    }
 }
 
 fn phase_name(phase: crate::cycle_state::CyclePhase) -> &'static str {

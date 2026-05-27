@@ -148,7 +148,39 @@ The message is sent from `Equity Funding Source <info@equityfundingsource.com>`,
 `[EFS application] <borrower name> - <requested loan amount>`
 
 Verification: inspected `application_leads/routes.ts`, `config/site.ts`, `wrangler.toml`, and ran the deployed Worker secret-list command. No code changes made.
-<!-- agent:boundary:c53f7899 -->
+❯ Please set the site.email to btak.dev+efs-test@gmail.com for production testing
+
+❯ Please set the production `RESEND_API_KEY` to the value of passage:equityfundingsource/RESEND_API_KEY
+### Re: Production Resend test routing — gpt-5
+
+Done.
+
+Changed `site.email` in `src/equityfundingsource-dev/app/equityfundingsource/config/site.ts` from `info@equityfundingsource.com` to:
+
+`btak.dev+efs-test@gmail.com`
+
+Set the production Worker secret `RESEND_API_KEY` from `passage equityfundingsource/RESEND_API_KEY`. The deployed secret list now includes `RESEND_API_KEY`.
+
+Deployed the Worker to production:
+
+`https://equityfundingsource.brian-takita.workers.dev`
+
+Current deployed Worker version:
+
+`5365e65c-1219-4aa8-bef3-a29db5961892`
+
+Verification:
+- `make check` passed in `src/equityfundingsource-dev`: 183 tests, app build, and Worker build.
+- Post-deploy `/apply` HTML shows `btak.dev+efs-test@gmail.com` in the `site.email` JSON-LD and footer output.
+- `gh run list --workflow CI --limit 1` could not run because this repo has no workflow named `CI`; `gh workflow list` returned no workflows.
+- I did not submit a live test application, so no test lead was inserted into production D1 and no test email was sent by me.
+
+Commits:
+- EFS submodule: `99fee0b` (`chore: route EFS apply emails to test inbox`)
+- Parent repo submodule pointer: `958779d92` (`chore: update EFS apply email recipient`)
+
+Note: there is still a hard-coded top utility `mailto:info@equityfundingsource.com` on `/apply`; I left it alone because the requested `site.email` value and the `/apply` notification recipient now use the test inbox.
+<!-- agent:boundary:d2ab60fe -->
 <!-- /agent:exchange -->
 ###
 <!--

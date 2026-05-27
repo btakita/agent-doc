@@ -114,7 +114,41 @@ Commits pushed:
 
 - `btakita/tsift` `b4bba5d` (`feat: rank graph neighborhoods`)
 - `btakita/agent-loop` `67d8d612d` (`chore: update tsift neighborhood ranking`)
-<!-- agent:boundary:bb1d6a27 -->
+### Re: #gtombops — gpt-5
+
+Completed the graph tombstone cleanup workflow against `src/tsift/.tsift/graph.db` and recorded the evidence in `src/tsift/plans/gdbvacproof-evidence.md`.
+
+What ran:
+
+- Captured baseline `graph-db status`, `doctor`, compact dry-run, file size, page/freelist, and tombstone counts under `/tmp/gtombops/`.
+- Started a temporary self-hosted Convex backend, deployed the graph app, and ran `tsift convex-sync . --remote-snapshot --apply --chunk-size 50 --json`.
+- Verified the remote snapshot as current before pruning; after `graph-db refresh`, verified again that `local_hash == snapshot_hash` with zero missing/stale rows.
+- Ran `tsift graph-db --path . --json compact --apply --prune-tombstones --confirmed-convex-reconciled`.
+- Captured post-prune status/doctor/file-size/page/tombstone evidence, then removed the generated `.env.local`, stopped the temporary container, and removed the temporary Docker volume.
+
+Key results:
+
+| Metric | Queue baseline | Reconciled pre-prune | Post-prune |
+| --- | ---: | ---: | ---: |
+| Live rows | 27,375 | 27,562 | 27,562 |
+| Tombstone rows | 184,722 | 198,840 | 0 |
+| Tombstone scan rows | 184,722 | 198,840 | 0 |
+| File size | 73,248,768 bytes | 76,115,968 bytes | 37,093,376 bytes |
+| Doctor | ok, retention warning | ok, retention warning | ok, no retention warning |
+| Compaction policy | recommended | recommended | not_needed |
+
+The compact report pruned 198,840 tombstones and reclaimed 39,022,592 bytes from the reconciled pre-prune state. From the queue-prompt baseline, the graph DB ended 36,155,392 bytes smaller with the tombstone scan cost cleared.
+
+Commits pushed:
+
+- `src/tsift`: `0d19076` (`docs: record graph tombstone cleanup evidence`)
+- root: `60ed884c0` (`chore: update tsift tombstone evidence`)
+
+Verification:
+
+- `git diff --check -- plans/gdbvacproof-evidence.md` passed.
+- GitHub Actions `CI` run `26488560277` passed: `clippy + test` in 3m02s and `live Convex graph acceptance` in 1m00s. The run only showed the existing Node.js 20 deprecation/configuration annotations.
+<!-- agent:boundary:385abc00 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -128,14 +162,13 @@ preset #spec-test-build-install-commit-push
 - ~do [#gneighgate]~
 - ~do [#gsemrows]~
 - ~do [#gnbrank]~
-- do [#gtombops]
+- ~do [#gtombops]~
 - do [#gbenchneigh]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gtombops] Run and document the graph tombstone cleanup workflow on the tsift graph DB: Convex reconcile, refresh, compact, then record status/doctor/file-size/tombstone-scan deltas from the current 184,722 tombstone / 27,375 live-row state.
 - [ ] [#gbenchneigh] Refresh the graph performance history with dedicated neighborhood rows so future graph-backend or hop-cap decisions compare `neighborhood`, `path_max_hops`, evidence, conflict-matrix, and dispatch-trace together instead of optimizing one surface blind.
 <!-- /agent:backlog -->
 

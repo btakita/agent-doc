@@ -563,6 +563,109 @@ fn harness_mismatch_warning(
     })
 }
 
+fn post_exchange_comment_prompt_preset_warning(
+    file: &Path,
+    content: &str,
+    prompt_presets: &indexmap::IndexMap<String, String>,
+) -> Option<PreflightWarning> {
+    let mut referenced = Vec::new();
+    for comment in post_exchange_ordinary_html_comments(content) {
+        if !prompt_presets.is_empty() {
+            push_unique_strings(
+                &mut referenced,
+                crate::prompt_contract::requested_prompt_presets(
+                    std::slice::from_ref(&comment),
+                    &[],
+                    prompt_presets,
+                ),
+            );
+        }
+        push_unique_strings(
+            &mut referenced,
+            post_exchange_comment_directive_signals(&comment),
+        );
+    }
+    if referenced.is_empty() {
+        return None;
+    }
+
+    Some(PreflightWarning {
+        code: "post_exchange_comment_prompt_preset".to_string(),
+        message: format!(
+            "Post-exchange HTML comment in {} references prompt preset/directive text ({}) that is preserved as a non-executable user note. Move it into `agent:exchange` or `agent:queue` if it should run.",
+            file.display(),
+            referenced.join(", ")
+        ),
+        document_agent: None,
+        active_harness: None,
+    })
+}
+
+fn post_exchange_ordinary_html_comments(content: &str) -> Vec<String> {
+    let Ok(components) = crate::component::parse(content) else {
+        return Vec::new();
+    };
+    let Some(exchange_close_end) = components
+        .iter()
+        .filter(|component| component.name == "exchange")
+        .map(|component| component.close_end)
+        .max()
+    else {
+        return Vec::new();
+    };
+
+    let mut comments = Vec::new();
+    let mut tail_start = exchange_close_end;
+    let mut tail = &content[tail_start..];
+    while let Some(open) = tail.find("<!--") {
+        let after_open = &tail[open + "<!--".len()..];
+        let Some(close) = after_open.find("-->") else {
+            break;
+        };
+        let absolute_open = tail_start + open;
+        let inner = after_open[..close].trim();
+        if !crate::component::is_agent_marker(inner)
+            && !components.iter().any(|component| {
+                absolute_open >= component.open_start && absolute_open < component.close_end
+            })
+        {
+            comments.push(inner.to_string());
+        }
+        let consumed = open + "<!--".len() + close + "-->".len();
+        tail_start += consumed;
+        tail = &content[tail_start..];
+    }
+    comments
+}
+
+fn post_exchange_comment_directive_signals(comment: &str) -> Vec<String> {
+    let mut signals = Vec::new();
+    for line in comment.lines() {
+        let trimmed = line.trim().trim_start_matches('❯').trim();
+        if let Some(rest) = trimmed.strip_prefix("dispatch ") {
+            push_unique_strings(&mut signals, vec![format!("dispatch {}", first_word(rest))]);
+        } else if let Some(rest) = trimmed.strip_prefix("preset ") {
+            push_unique_strings(&mut signals, vec![format!("preset {}", first_word(rest))]);
+        } else if looks_like_slash_command(trimmed) {
+            push_unique_strings(&mut signals, vec![first_word(trimmed).to_string()]);
+        }
+    }
+    signals
+}
+
+fn first_word(text: &str) -> &str {
+    text.split_whitespace().next().unwrap_or(text)
+}
+
+fn looks_like_slash_command(text: &str) -> bool {
+    let Some(rest) = text.strip_prefix('/') else {
+        return false;
+    };
+    rest.chars()
+        .next()
+        .is_some_and(|ch| ch.is_ascii_lowercase())
+}
+
 /// Trigger an automatic `resync --fix` when session-drift has been detected
 /// on two consecutive preflights.
 ///
@@ -1812,6 +1915,13 @@ pub fn run(file: &Path) -> Result<()> {
             "document references missing prompt preset(s): {}",
             missing_prompt_presets.join(", ")
         );
+    }
+    if let Ok(content) = std::fs::read_to_string(file)
+        && let Some(warning) =
+            post_exchange_comment_prompt_preset_warning(file, &content, &frontmatter_prompt_presets)
+    {
+        eprintln!("[preflight] warning: {}", warning.message);
+        warnings.push(warning);
     }
     let backlog_capture_required = crate::prompt_contract::prompt_requests_backlog_work(
         &prompt_targets,
@@ -5795,6 +5905,105 @@ mod tests {
             ),
             "preflight must not move scratch-comment text into exchange:\n{file_after}"
         );
+    }
+
+    #[test]
+    fn preflight_warns_on_prompt_preset_text_inside_post_exchange_html_comment() {
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "prompt_presets:\n",
+            "  '#spec-test-build-install-commit-push': update spec + tests\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!--\n",
+            "Scratch note while testing.\n",
+            "dispatch #spec-test-build-install-commit-push\n",
+            "-->\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let (fm, _) = crate::frontmatter::parse(content).unwrap();
+        let warning = post_exchange_comment_prompt_preset_warning(
+            Path::new("session.md"),
+            content,
+            &fm.prompt_presets,
+        )
+        .expect("known prompt preset in ordinary post-exchange comment should warn");
+
+        assert_eq!(warning.code, "post_exchange_comment_prompt_preset");
+        assert!(
+            warning
+                .message
+                .contains("#spec-test-build-install-commit-push")
+        );
+        assert!(warning.message.contains("non-executable user note"));
+    }
+
+    #[test]
+    fn preflight_comment_prompt_preset_warning_ignores_agent_components() {
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "prompt_presets:\n",
+            "  '#spec-test-build-install-commit-push': update spec + tests\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "dispatch #spec-test-build-install-commit-push\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:done -->\n",
+            "<!-- archived #spec-test-build-install-commit-push -->\n",
+            "<!-- /agent:done -->\n",
+        );
+        let (fm, _) = crate::frontmatter::parse(content).unwrap();
+
+        assert!(
+            post_exchange_comment_prompt_preset_warning(
+                Path::new("session.md"),
+                content,
+                &fm.prompt_presets,
+            )
+            .is_none(),
+            "agent-owned queue directives remain executable state, not ordinary scratch comments"
+        );
+    }
+
+    #[test]
+    fn preflight_warns_on_dispatch_text_inside_post_exchange_html_comment_without_presets() {
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!--\n",
+            "dispatch #manual-review\n",
+            "/clear\n",
+            "-->\n",
+        );
+        let (fm, _) = crate::frontmatter::parse(content).unwrap();
+        let warning = post_exchange_comment_prompt_preset_warning(
+            Path::new("session.md"),
+            content,
+            &fm.prompt_presets,
+        )
+        .expect("dispatch-looking text in ordinary post-exchange comment should warn");
+
+        assert_eq!(warning.code, "post_exchange_comment_prompt_preset");
+        assert!(warning.message.contains("dispatch #manual-review"));
+        assert!(warning.message.contains("/clear"));
     }
 
     #[test]

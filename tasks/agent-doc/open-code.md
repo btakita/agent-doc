@@ -174,7 +174,43 @@ Tell me to do all three in one cycle and I'll start with `#bjrv`, then `#0c4e`, 
 Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
 
 **Not invoking `/loop`** — operator decides whether the next queue turn picks up `#bjrv` (the recommended sub-task entry point) or whether the queue should plow through all three sub-tasks in one big cycle.
-<!-- agent:boundary:0809bf22 -->
+### Re: do #k9e1 — halt for triage — opus-4-7
+
+Stopping the auto-queue execution here for an operator triage call. `#k9e1` and the three queue items behind it (`#5yqz`, `#77v6`, `#ysv9`) are not wave-sized tidies — they each carry an architectural decision the queue's per-item `do` semantics can't make in isolation.
+
+#### Why I'm halting instead of decomposing or plowing through
+
+`src/ffi.rs` is 2,128 LOC with 39 `extern "C"` functions. Of those, ~15 are pure (parse_components, visual_tokens_json, three apply_patch variants, crdt_merge/merge_crdt, merge_frontmatter, four reposition_boundary variants, normalize_template_structure, free_string, free_state, version) and could move to `agent-doc-core::ffi`. The other ~24 are orchestration (document_changed*, is_tracked/tracked_count, is_idle/await_idle/is_typing_via_file, set_status/get_status/is_busy, sync_*, ipc_listener_v1/v2/stop, write_ack_content, is_claimed_by_force_disk, patch_content_already_committed, commit, resolve_project_path) and stay in main.
+
+The mechanical move is straightforward (`pub use agent_doc_core::ffi::*` in main shim). The decision that's not straightforward:
+
+**Symbol export from the main cdylib must keep working** — editor plugins (JetBrains, VS Code) currently link against the main `libagent_doc.so` / `libagent_doc.dylib` and call `agent_doc_parse_components` etc. by their unmangled C names. Moving the function bodies to `agent-doc-core` is a static-link reorganization; the symbols must still appear in the main cdylib's export table or every editor plugin breaks.
+
+Two ways to keep export working:
+1. `pub use agent_doc_core::ffi::*;` in main + a `force_link_ffi_symbols()` function that takes a function-pointer reference to each FFI function to prevent linker strip. Works in practice; needs the unused-pointer ref hack.
+2. Convert `agent-doc-core` into its own cdylib and have editor plugins switch their link target. Cleaner long-term but breaks every plugin build until they bump their JNA `library_name` from `agent_doc` to `agent_doc_core`. JB plugin + VS Code extension + Python bindings + every downstream FFI consumer all need a coordinated bump.
+
+The `#k5s7` baseline (`9.87s vs 129s` cold build, 192-crate dep prune) only delivers the editor-plugin payoff if option **2** lands — option 1 keeps everything depending on the main 129s build.
+
+#### Triage call needed
+
+Same scope question applies to:
+- `#5yqz` (`#adcr-eval-runner-switch`) — small mechanical task BUT depends on which symbols are visible from where after `#k9e1` lands. Doing it before `#k9e1` is wasted churn if option 2 changes the link target.
+- `#77v6` (`#adcr-publish`) — operator decision (publish core to crates.io? requires SemVer commitment, ownership transfer-readiness, etc.). Not work I can just execute.
+- `#ysv9` (`#adoc-orchestration-crate`) — by far the biggest piece. Splitting orchestration (route/git/sessions/ipc_socket/supervisor/capture/cycle_state/repair/sync/start) into its own crate is a multi-cycle wave-sized refactor like the original Wave 4. Substantial sequencing across cycle_state ↔ supervisor ↔ route mutual deps.
+
+#### What I propose
+
+Pick one of:
+
+- **A**: I decompose each of `#k9e1` / `#5yqz` / `#77v6` / `#ysv9` into sub-tasks (same pattern as `#0ejf` → `#bjrv`/`#0c4e`/`#ckv3`), file them, then halt. Operator drives the actual execution after a separate decision on option 1 vs option 2 for cdylib strategy.
+- **B**: Operator answers the cdylib question (option 1 = preserve current export from main, or option 2 = move to a new core cdylib) and I plow through `#k9e1` accordingly in a focused cycle. Then queue the remaining three on their own merits.
+- **C**: Drop the auto-queue execution; treat the seven items added after `#k5s7` as a planning backlog only. Operator picks them up individually with `/agent-doc <FILE>` + a fresh prompt each, so each gets its own full attention window without the queue's "next item, go" cadence pushing through architectural decisions.
+
+Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
+
+**Not invoking `/loop`** — explicitly waiting on triage input. The queue stays paused at `do [#k9e1]`; no work landed this cycle.
+<!-- agent:boundary:77f236e6 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -184,6 +220,9 @@ preset #spec-test-build-install-commit-push
 - ~do [#k5s7]~
 - ~do [#n7dd]~
 - ~do [#0ejf]~
+- do [#ckv3]
+- do [#0c4e]
+- do [#bjrv]
 - do [#k9e1]
 - do [#5yqz]
 - do [#77v6]

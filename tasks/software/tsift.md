@@ -68,7 +68,7 @@ Extracted `tsift-resolution` crate with multi-strategy resolution, scoring heuri
 - 56 unit tests in tsift-resolution (all passing); 883 total workspace tests pass
 
 Next in queue: **#step-7-cli** — Extract `tsift-cli` crate.
-<!-- agent:boundary:2ec32759 -->
+<!-- agent:boundary:8ca26dcd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -85,7 +85,7 @@ preset #spec-test-build-install-commit-push
 - ~[#step-4-graph]~
 - ~[#step-5-algorithms]~
 - ~[#step-6-resolution]~
-- [#step-7-cli]
+- ~[#step-7-cli]~
 - [#npm-auth-setup]
 - [#npm-publish-verify]
 - [#full-e2e-verify]
@@ -94,7 +94,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#step-7-cli] Extract `tsift-cli` crate — move main.rs (39K LOC), wire new crates into CLI commands (tsift health, tsift dead-code, tsift coupling)
 - [ ] [#npm-auth-setup] Configure NPM_TOKEN secret + TSIFT_ENABLE_NPM_PUBLISH=true variable in GitHub repo settings
 - [ ] [#npm-publish-verify] After auth configured, tag release and verify publish-opencode-plugin CI job succeeds and opencode-tsift appears on npmjs.org
 - [ ] [#full-e2e-verify] In fresh project: opencode plugin opencode-tsift && opencode then /tsift-status. On success mark #e2e-install done.

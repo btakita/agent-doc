@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -466,7 +466,34 @@ Each should keep the `nm -D libagent_doc.so` symbol-export check from the POC as
 Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
 
 **Not invoking `/loop`** — queue is paused (`queue_active: false`).
-<!-- agent:boundary:2839b2b7 -->
+❯ reorder the backlog and queue by priority
+
+### Re: reorder the backlog and queue by priority — opus-4-7
+
+Reordered both the backlog (via `--pending-reorder`) and the queue tail (via a `patch:queue` replace, preserving struck history) to the same priority sequence. No code work — managed-component edits only.
+
+#### Priority order (highest first)
+
+1. **`#epv5`** (`#k9e1-ffi-simple`) — 4 simple pure FFI fns. Lowest-risk mechanical relocation and the natural entry point for the FFI batch; starts cashing the dep-prune win the extraction was built for.
+2. **`#vb8h`** (`#k9e1-ffi-boundary`) — 4 reposition_boundary variants + 2 CRDT FFI fns. Mechanical, independent of `#epv5`.
+3. **`#e130`** (`#k9e1-ffi-apply-patch`) — 3 apply_patch variants. Largest FFI piece, but its only dependency (`#ckv3` pure signature) is already satisfied, so it's unblocked.
+4. **`#77v6`** (`#adcr-publish`) — operator decision (publish `agent-doc-core` to crates.io). Quick unblocker for third-party consumers + editor slim-link, but should land *after* the FFI relocation so the published core exposes the complete pure-FFI surface rather than forcing a version bump mid-batch.
+5. **`#ysv9`** (`#adoc-orchestration-crate`) — the biggest remaining architectural win (push the CLI shell toward ~10s cold), but a large multi-cycle refactor. Sequenced after the cheap, bankable FFI wins; its gating dependency (`#adcr-baseline-measure` = `#k5s7`) is already done.
+6. **`#yybc`** (`#k9e1-ffi-mem`) — the POC tracker. The `#k9e1` POC already landed and verified the `pub use agent_doc_core::ffi::* + force_link_core_ffi_symbols` pattern, so this has **no remaining implementation work**. Demoted to near-bottom; **recommend closing it** (`--done yybc`) — it reads as open work but is effectively complete.
+7. **`#adcr`** (umbrella) — materially complete (all 4 acceptance criteria met as of `#bjrv`). Stays at the bottom as a parent placeholder.
+
+#### Ordering principle
+
+Concrete, low-risk, immediately bankable work first (`#epv5`/`#vb8h`/`#e130`), then the quick publish gate, then the large refactor, then the two effectively-complete/placeholder items. Dependencies respected: `#e130` after `#ckv3` (done), `#77v6` after the FFI surface is complete, `#ysv9` after baseline (done).
+
+#### Queue activation note
+
+Preflight armed the queue (`queue_active: true`) when it picked up this prompt — but the auto-loop is **not** firing this turn because a real user instruction takes precedence over queue execution. The queue stays armed for the next invocation. If you want it to stay paused (as you set it last turn), flip `queue_active: false`; otherwise the next `/agent-doc` will start at `do [#epv5]`.
+
+Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
+
+**Not invoking `/loop`** — user maintenance prompt, not a queue-execution request.
+<!-- agent:boundary:57989b03 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -481,24 +508,24 @@ preset #spec-test-build-install-commit-push
 - ~do [#bjrv]~
 - ~do [#k9e1]~
 - ~do [#5yqz]~
-- do [#yybc]
 - do [#epv5]
 - do [#vb8h]
 - do [#e130]
 - do [#77v6]
 - do [#ysv9]
+- do [#yybc]
 - do [#adcr]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#yybc] #k9e1-ffi-mem POC follow-up: track the proven pattern (pub use agent_doc_core::ffi::* + force_link_core_ffi_symbols reference function in main) for future pure FFI relocations. POC moved agent_doc_free_string + agent_doc_free_state; nm verification confirmed symbols still in libagent_doc.so export table.
 - [ ] [#epv5] #k9e1-ffi-simple Move the 4 simplest dependency-free pure FFI functions to agent-doc-core::ffi: agent_doc_parse_components (+ FfiComponentList), agent_doc_visual_tokens_json, agent_doc_merge_frontmatter, agent_doc_normalize_template_structure. Each touches only component::parse, agent_doc_core::frontmatter::merge_fields, or agent_doc_core::template::normalize_editor_visible_template_structure. Pattern is the POC + ~50 LOC per function. Update force_link_core_ffi_symbols to reference each.
 - [ ] [#vb8h] #k9e1-ffi-boundary Move the 4 reposition_boundary_to_end variants (+ _with_id, _preserve_head, _preserve_head_with_id) plus agent_doc_crdt_merge + agent_doc_merge_crdt + their FfiMergeResult helper struct to agent-doc-core::ffi. All pure; depend on agent_doc_core::template and agent_doc_core::crdt.
 - [ ] [#e130] #k9e1-ffi-apply-patch Move the 3 apply_patch variants (agent_doc_apply_patch, agent_doc_apply_patch_with_caret, agent_doc_apply_patch_with_boundary) plus FfiPatchResult and helpers (ffi_patch_ok/err/from_result, normalize_editor_visible_result). Each needs the template::apply_patches_with_overrides call switched to apply_patches_with_overrides_pure (preloaded empty configs, no dummy_path). Largest sub-piece — touches the recently-refactored patch surface from #ckv3.
 - [ ] [#77v6] #adcr-publish Decide on publishing agent-doc-core to crates.io (currently publish = false). Allows third-party FFI consumers and unblocks the editor-plugin slim-link target.
 - [ ] [#ysv9] #adoc-orchestration-crate Plan agent-doc-orchestration extraction — split route/git/sessions/ipc_socket/supervisor/capture/cycle_state/repair/sync/start out of the main crate into a sibling workspace member, leaving only the CLI entrypoint + command dispatch in agent-doc. Would create a 3-layer architecture (CLI → orchestration → core) and substantially cut the editor-plugin-only build target. Substantial refactor; depends on #adcr-baseline-measure to quantify the win first.
+- [ ] [#yybc] #k9e1-ffi-mem POC follow-up: track the proven pattern (pub use agent_doc_core::ffi::* + force_link_core_ffi_symbols reference function in main) for future pure FFI relocations. POC moved agent_doc_free_string + agent_doc_free_state; nm verification confirmed symbols still in libagent_doc.so export table.
 - [ ] [#adcr] Extract agent-doc-core crate (~17K lines) — enables fast-compiling FFI/editor-plugin target independent of orchestration layer
 <!-- /agent:backlog -->
 

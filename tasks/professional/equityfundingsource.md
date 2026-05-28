@@ -84,7 +84,8 @@ For `/admin/login`, that means these accounts can authenticate only with the con
 To give either account its own password, sign in as an existing admin and update the user through `/portal-admin/users`, or rotate/set a temporary password through the production admin-password path and share it out-of-band.
 
 Closeout evidence: no repo files changed in this cycle. Commands run: `tsift status`, `agent-doc --version`, `agent-doc preflight`, `agent-doc plan`, and this `agent-doc finalize`. Verification is source/session knowledge from the prior D1 insert and auth behavior; no tests were needed. Confidence is high. Escalation: none.
-<!-- agent:boundary:21ae9cdf -->
+Is the global password the same as my machine?
+<!-- agent:boundary:309e31aa -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -92,6 +93,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue auto -->
+- Is the global password the same as my machine?
 <!-- /agent:queue -->
 
 ## Backlog

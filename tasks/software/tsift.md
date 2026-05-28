@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -301,7 +301,7 @@ Took #2: lint's only deps (`config`, `index::IndexDb`) already live in `tsift-in
 **Confidence:** high — 990 tests green, install verified.
 
 **Escalation:** none.
-<!-- agent:boundary:b9136822 -->
+<!-- agent:boundary:20ccf529 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -317,8 +317,8 @@ preset #spec-test-build-install-commit-push
 - ~do [#split-tsift-quality]~
 - ~do [#split-tsift-index]~
 - ~do [#split-tsift-session]~
-- do [#split-tsift-quality]
-- do [#split-tsift-search]
+- ~do [#split-tsift-quality]~
+- ~do [#split-tsift-search]~
 - do [#demote-root-tsift]
 - do [#split-tsift-cli-subcommands]
 <!-- /agent:queue -->

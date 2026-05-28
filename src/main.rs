@@ -61,6 +61,7 @@ mod dedupe;
 mod diff;
 mod diff_io;
 mod frontmatter_io;
+mod project_config_io;
 mod template_io;
 mod editor_route_errors;
 mod env;

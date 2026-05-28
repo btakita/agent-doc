@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -441,7 +441,32 @@ Building eval-runner in isolation now warns that the superproject `.cargo/config
 Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
 
 **Not invoking `/loop`** — queue head advances to `do [#77v6]` (`#adcr-publish`), an operator decision (publish `agent-doc-core` to crates.io? SemVer commitment, ownership readiness). That's not work I can execute unilaterally — it needs a triage call.
-<!-- agent:boundary:3ef6f6c2 -->
+
+### Re: queue reconciled — FFI relocation batch staged + paused — opus-4-7
+
+Committing the queue-management edits and reconciling a leftover snapshot↔HEAD drift (4 bytes, from last turn's mid-turn cycle rotation during the two-attempt `#5yqz` finalize). No code work this cycle — these are managed-component edits only.
+
+#### What you changed (now committed)
+
+- `queue_active: true` → `false` — queue paused.
+- `~do [#5yqz]~` struck — resolves the queue/backlog anomaly I flagged last turn (backlog item was already `[x]` done; the queue line is now consistent).
+- Four `#k9e1-*` FFI relocation sub-tasks staged ahead of `#77v6`: `do [#yybc]`, `do [#epv5]`, `do [#vb8h]`, `do [#e130]`.
+
+#### Not executing — queue is paused
+
+`queue_active: false` is an explicit stop, so I'm not auto-running the staged items. When you want the FFI relocation batch to run, set `queue_active: true` (or drive each item with a fresh `/agent-doc` invocation). The natural order matches the dependency clustering from the `#k9e1` POC:
+
+- `#yybc` (`#k9e1-ffi-mem`) — tracking item; the POC already proved the `pub use agent_doc_core::ffi::* + force_link_core_ffi_symbols` pattern, so this is effectively a no-op marker.
+- `#epv5` (`#k9e1-ffi-simple`) — 4 simple pure FFI fns (`parse_components`, `visual_tokens_json`, `merge_frontmatter`, `normalize_template_structure`).
+- `#vb8h` (`#k9e1-ffi-boundary`) — 4 reposition_boundary variants + 2 CRDT FFI fns + `FfiMergeResult`.
+- `#e130` (`#k9e1-ffi-apply-patch`) — 3 apply_patch variants; needs the `apply_patches_with_overrides_pure` signature from `#ckv3`. Largest piece.
+
+Each should keep the `nm -D libagent_doc.so` symbol-export check from the POC as its acceptance gate.
+
+Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
+
+**Not invoking `/loop`** — queue is paused (`queue_active: false`).
+<!-- agent:boundary:2839b2b7 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -455,7 +480,11 @@ preset #spec-test-build-install-commit-push
 - ~do [#0c4e]~
 - ~do [#bjrv]~
 - ~do [#k9e1]~
-- do [#5yqz]
+- ~do [#5yqz]~
+- do [#yybc]
+- do [#epv5]
+- do [#vb8h]
+- do [#e130]
 - do [#77v6]
 - do [#ysv9]
 - do [#adcr]

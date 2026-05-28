@@ -219,7 +219,45 @@ Backlog reordered. Top is now `#split-tsift-quality`.
 **Confidence:** high — full build + 277 tests pass; install verified; no API surface widened (all moved symbols stay reachable through root tsift re-exports).
 
 **Escalation:** none.
-<!-- agent:boundary:8c01d25c -->
+
+### Re: do [#split-tsift-index] — opus-4-7
+
+
+**Done.** Extracted `config`, `walk`, `init`, and `index` from root `tsift` into the new `tsift-index` workspace crate.
+
+**Changed paths (tsift submodule):**
+
+- `packages/tsift-index/Cargo.toml` (new — version `0.1.62` to keep `TSIFT_VERSION = env!("CARGO_PKG_VERSION")` aligned with the binary; deps: anyhow, serde, serde_json, toml, rusqlite, fs4, ignore, tagpath, tsift-graph, tsift-sqlite; dev: tempfile)
+- `packages/tsift-index/src/lib.rs` (new — declares 4 modules)
+- `packages/tsift-index/src/config.rs` (moved from `src/config.rs`, 100% rename)
+- `packages/tsift-index/src/walk.rs` (moved + import fix: `crate::lang::Lang` → `tsift_graph::lang::Lang`)
+- `packages/tsift-index/src/init.rs` (moved; test path fix: `manifest_dir.join("packages/opencode-tsift")` → `manifest_dir.join("../opencode-tsift")` since `CARGO_MANIFEST_DIR` now points at the crate, not root)
+- `packages/tsift-index/src/index.rs` (moved + import fixes: `use crate::graph` → `use tsift_graph as graph`, `use crate::lang::Lang` → `use tsift_graph::lang::Lang`; test block: `crate::substrate::*` → `tsift_sqlite::*`; promoted `WriterLockProbe` enum and `probe_writer_lock` fn from `pub(crate)` to `pub` so `status` in root tsift can keep importing them)
+- `Cargo.toml` — added `tsift-index` to `[workspace.members]` and as root path dep
+- `packages/tsift-cli/Cargo.toml` — added `tsift-index = { path = "../tsift-index" }`
+- `packages/tsift-cli/tests/perf_gate.rs` — replaced `#[path = "../../../src/perf_gate.rs"] mod perf_gate;` (now-broken include) with `use tsift_quality::perf_gate;` (proper crate dep)
+- `packages/tsift-quality/Cargo.toml` — added `[dev-dependencies] tempfile = "3"` so audit tests build under `--workspace`
+- `src/lib.rs` — removed `pub mod config; / index; / init; / walk;`; added `pub use tsift_index::{config, index, init, walk};`
+- `SPEC.md` — added `tsift-index crate (packages/tsift-index — config + project walk + init + AST symbol index)` to Architecture
+- `VERSIONS.md` — `Unreleased` entry added
+- `Cargo.lock` — regenerated
+
+**Commands run:**
+- `cargo build --release` — 0 errors after iteration (first pass surfaced missing `serde_json` + `tsift-sqlite` deps in `tsift-index`; added; clean after).
+- `cargo test --release --no-fail-fast --workspace` — **990 passed across 27 suites**. First pass surfaced two failures, both fixed before commit: `tempfile` missing dev-dep on tsift-quality, and `TSIFT_VERSION` falling out of sync because tsift-index had `version = "0.1.0"`.
+- `cargo install --path packages/tsift-cli` — installed `tsift 0.1.62` to `~/.cargo/bin/`.
+- `tsift --version` → `tsift 0.1.62`.
+
+**Repo state:**
+- tsift submodule commit: `Extract tsift-index crate — move config, walk, init, index` (pushed).
+- Superproject commit: `216a5f1a4 tsift: extract tsift-index crate (submodule pointer bump)` (pushed).
+
+**Visibility widened:** `WriterLockProbe` + `probe_writer_lock`. Both are now `pub` in `tsift-index`. Only one caller (`status` in root) needed the access; the surface widens by exactly two symbols. Acceptable, given lint/status will both move in the same direction once tsift-search/quality round trips finish.
+
+**Confidence:** high — full workspace test sweep green, install verified, no caller breakage.
+
+**Escalation:** none.
+<!-- agent:boundary:b2499bf2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -233,7 +271,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#split-sim-world]~
 - ~do [#split-tsift-digest]~
 - ~do [#split-tsift-quality]~
-- do [#split-tsift-index]
+- ~do [#split-tsift-index]~
 - do [#split-tsift-session]
 - do [#split-tsift-quality]
 - do [#split-tsift-search]
@@ -244,7 +282,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#split-tsift-index] Extract index + walk + config + init (~4.7k LOC) into tsift-index crate — foundation that tsift-session, tsift-quality, tsift-search will depend on; pulls in fs4, ignore, blake3, flate2 deps; carries SQLite schema bootstrap
 - [ ] [#split-tsift-session] Extract session_cost + session_digest + session_review (~7.1k LOC, largest pool) into tsift-session crate — depends on tsift-digest + tsift-index; biggest single LOC reduction in root tsift
 - [ ] [#demote-root-tsift] After all module splits land, demote root tsift crate to a thin re-export shim (or remove lib.rs entirely) — leave only the workspace root + binary metadata; verify external consumers (cargo install tsift) keep working
 - [ ] [#split-tsift-cli-subcommands] [recommended] tsift-cli is ~39k LOC in a single lib.rs — propose per-command module split (cmd_search, cmd_index, cmd_graph, cmd_explain, etc.) once root tsift is drained, to make command surface independently testable

@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -37,18 +37,26 @@ Transferred this document's exchange content into `tasks/professional/equityfund
 The transfer created commit `ea44de165` for the demo document. The binary also transferred the source backlog and icebox along with the exchange, so the main EFS document now keeps the current status/review surface while the demo document owns the transferred exchange/backlog/icebox context.
 
 Closeout evidence: changed documents are `tasks/professional/equityfundingsource-demo.md`, `tasks/professional/equityfundingsource.md`, and the source done archive `tasks/professional/equityfundingsource.done.md`. Commands used included `tsift status`, `tsift status --fix`, `agent-doc --version`, `agent-doc preflight/read/plan/template-info`, `git diff/status/log`, `agent-doc transfer`, and this `agent-doc finalize`. Verification is document/source review only; no code changed and no tests were run. Confidence is high that the full source exchange was moved into the demo document because `agent-doc template-info` shows the transfer block in the target exchange and an empty source exchange before this closeout. No escalation was used.
-<!-- agent:boundary:691add26 -->
+Are there ways for an existing admin to create new admins in the admin dashboard? If not, please create an account management section in the admin portal.
+Please add brian.takita+admin@gmail.com and btak.dev+admin@gmail.com as admins to https://equityfundingsource.brian-takita.workers.dev/
+#spec-test-commit-push-deploy
+<!-- agent:boundary:6bae221d -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-commit-push
 - ~do [#y17k]~
 - do [#xt4d]
 - do [#0e1p]
+---
+Are there ways for an existing admin to create new admins in the admin dashboard? If not, please create an account management section in the admin portal.
+Please add brian.takita+admin@gmail.com and btak.dev+admin@gmail.com as admins to https://equityfundingsource.brian-takita.workers.dev/
+#spec-test-commit-push-deploy
+---
 <!-- /agent:queue -->
 
 ## Backlog

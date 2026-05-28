@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -437,14 +437,20 @@ Verification:
 - Tmux CI inspection: `make -n tmux-ci` has no `tmux-ci` target in the EFS repo.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:61c1c9e3 -->
+In the input, use `pl-10` instead of `pl-7`.
+#spec-test-commit-push
+<!-- agent:boundary:b86ee83d -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+---
+In the input, use `pl-10` instead of `pl-7`.
+#spec-test-commit-push
+---
 <!-- /agent:queue -->
 
 ## Backlog

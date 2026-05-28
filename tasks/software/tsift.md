@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -74,7 +74,41 @@ Compacted content:
 - bump root `tsift` version on each landing (per release conventions) and update `VERSIONS.md`
 
 **Top of backlog after this update:** `#split-sim-world`.
-<!-- agent:boundary:c0ce4b9e -->
+
+### Re: do [#split-sim-world] — blocker, gating for direction — opus-4-7
+
+**Halting the queue.** I scoped #split-sim-world and the original backlog framing was wrong — the module is not a clean leaf. Gating this item and stopping the auto-loop before touching the remaining 7 split directives, because the same coupling concern probably re-surfaces for #split-tsift-digest / #split-tsift-session and the right architectural call should be a conversation.
+
+**What I found:**
+
+1. **`src/sim_world.rs` is currently orphaned.** It is NOT declared in `src/lib.rs` (root `tsift`). Root lib.rs lists every other module (`audit`, `config`, …, `walk`) but omits `sim_world`. So as it stands the file does not compile against any build target — it is dead code.
+
+2. **It went stale during the tsift-cli extraction.** Commit `1786d0d Extract tsift-cli crate` moved `rewrite_command` into `tsift-cli` (where it is `pub(crate)`). `src/sim_world.rs:1` still imports `use crate::{init, rewrite_command, session_digest, status};` — `crate::rewrite_command` no longer exists at that path. The recent commit `580f5f1 test: run all default tests` only nudged a single line; the orphaning was never repaired.
+
+3. **It is tightly coupled to private/test-only symbols in two crates:**
+   - `tsift-cli::rewrite_command` — `pub(crate)`, lives in `packages/tsift-cli/src/lib.rs:37769`
+   - `tsift::session_digest::extract_prompt_targets_from_text_block` — `#[cfg(test)] pub(crate)` in `src/session_digest.rs:899`
+   - `tsift::init::{InstructionStatus, TSIFT_VERSION}` and `tsift::status::check_status` — already `pub`
+
+   Two of those four targets are deliberately not part of either crate's public API. Promoting them to `pub` solely to support an external `tsift-sim-world` test crate inverts the usual rule (don't widen visibility for tests).
+
+**Three options:**
+
+| Option | What | Trade-off |
+|---|---|---|
+| **A.** Delete `src/sim_world.rs` | Acknowledge it has been broken/dead since the tsift-cli extraction and drop it. | Lose the deterministic sim coverage. Smallest change. Honest about current state. |
+| **B.** Re-home tests adjacent to their targets | Move session/status sim-cases into `tsift` (under `#[cfg(test)] mod sim_world;` re-added to `src/lib.rs`) and the `rewrite_command` sim-cases into `packages/tsift-cli/tests/sim_world_rewrite.rs`. Keep `pub(crate)` boundaries; expose only what crate-internal tests already see. | Restores coverage. No new crate, but no public API widening either. Closes #split-sim-world by relocating, not extracting. |
+| **C.** Force a `tsift-sim-world` crate per original backlog item | Promote `rewrite_command` and `extract_prompt_targets_from_text_block` to `pub`, add `packages/tsift-sim-world` depending on both, wire workspace member. | Widens public API for test-only callers. Adds one more workspace member. Matches the queue directive literally. |
+
+**Recommendation: B.** It restores coverage that the tsift-cli extraction silently broke, keeps API surface narrow, and avoids re-using `tsift-sim-world` as a new crate name when the actual code is just test-relocation. After B lands, the backlog item closes as "done by relocation" and the remaining 7 splits (digest/index/session/quality/search/demote/cli-subcommands) — which DO look like genuine module-extraction targets — proceed unchanged.
+
+**What I need from you:**
+
+- Confirm A / B / C (or a hybrid).
+- Decide whether to keep the rest of the queue active. If you pick **B**, I can run it next turn and the remaining 7 directives stay valid. If you pick **C**, I should re-scope each of the other 7 items for the same coupling concern before letting the auto-loop drive them.
+
+**Why I am gating instead of pushing through:** the existing CLAUDE.md guidance for tsift says "All public logic tested: `classify_task`, `apply_edit_op`, `rewrite_command`, SQL helpers all have unit tests." That convention covers the rewrite_command tests, but it does not mandate cross-crate public exposure. Picking C without you signing off would silently widen the tsift-cli public API.
+<!-- agent:boundary:00656bef -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -83,13 +117,21 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+preset #spec-test-build-install-commit-push
+- ~do [#split-sim-world]~
+- do [#split-tsift-digest]
+- do [#split-tsift-index]
+- do [#split-tsift-session]
+- do [#split-tsift-quality]
+- do [#split-tsift-search]
+- do [#demote-root-tsift]
+- do [#split-tsift-cli-subcommands]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#split-sim-world] Extract sim_world (~390 LOC) into tsift-sim-world crate — smallest, most isolated module; low-risk pattern validation for the remaining splits; keeps sim/test helpers out of the prod-path tree
 - [ ] [#split-tsift-digest] Extract diff_digest + log_digest + metric_digest + test_digest (~3.7k LOC) into tsift-digest crate — high-cohesion emitter group with shared serialization, schema versioning, and pruning patterns; minimal cross-deps
 - [ ] [#split-tsift-index] Extract index + walk + config + init (~4.7k LOC) into tsift-index crate — foundation that tsift-session, tsift-quality, tsift-search will depend on; pulls in fs4, ignore, blake3, flate2 deps; carries SQLite schema bootstrap
 - [ ] [#split-tsift-session] Extract session_cost + session_digest + session_review (~7.1k LOC, largest pool) into tsift-session crate — depends on tsift-digest + tsift-index; biggest single LOC reduction in root tsift
@@ -105,6 +147,7 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 ## Review
 
 <!-- agent:review -->
+- [/] [#split-sim-world] Extract sim_world (~390 LOC) into tsift-sim-world crate — smallest, most isolated module; low-risk pattern validation for the remaining splits; keeps sim/test helpers out of the prod-path tree
 - [/] [#full-e2e-verify] In fresh project: opencode plugin opencode-tsift && opencode then /tsift-status. On success mark #e2e-install done.
 - [/] [#npm-publish-verify] After auth configured, tag release and verify publish-opencode-plugin CI job succeeds and opencode-tsift appears on npmjs.org
 - [/] [#npm-auth-setup] Configure NPM_TOKEN secret + TSIFT_ENABLE_NPM_PUBLISH=true variable in GitHub repo settings

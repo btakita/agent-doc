@@ -477,7 +477,7 @@ I did not duplicate backlog items because the demo document already has the conc
 
 Closeout evidence: updated `tasks/professional/equityfundingsource-demo.md` via `agent-doc write --commit` and closed this source document via `agent-doc write --commit`. Commands used included `tsift status`, `tsift status --fix`, `agent-doc --version`, `agent-doc preflight`, `agent-doc session-check`, `git diff`, `rg`, `sed`, `agent-doc transfer --help`, `agent-doc extract --help`, and the two `agent-doc write --commit` calls. Verification is document/source review only; no code changed and no tests were run. Confidence is high that the demo-specific summary landed in the demo document. No escalation was used.
 Please also transfer the content in this document's exchange to equityfundingsource-demo.md
-<!-- agent:boundary:dd62e37a -->
+<!-- agent:boundary:322f0a73 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -492,39 +492,10 @@ Please also transfer the content in this document's exchange to equityfundingsou
 - [ ] [#m83y] Prepare a short Judith demo script: public site -> Apply lead -> admin lead review -> portal role overview -> TMO LOS cache/replacement boundary -> decisions needed.
 - [ ] [#t447] Create or verify demo-safe credentials/data for Judith: Cloudflare Access admin path, borrower/broker/investor examples, realistic application lead, and screenshots as fallback.
 - [ ] [#hz0m] Ask Judith/Robert for demo decisions: custom-domain timing, EFS Resend sending domain, Google Workspace admin credentials, TMO LOS access/screenshots, Dropbox folder/sample docs, and funded-deal/legal approval.
-- [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
-- [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document intelligence/search, borrower/broker/investor/admin portals, and tenant-ready resale packaging.
-- [ ] [#f4rq] Verify an EFS-owned sending domain in Resend, then switch APPLICATION_LEAD_NOTIFICATION_FROM and APPLICATION_LEAD_NOTIFICATION_TO from testing-mode values to EFS production addresses.
-- [ ] [#k2xg] Send Robert the six-question TMO outbound webhook prompt in src/equityfundingsource-dev/docs/tmo-webhooks-question.md for him to forward to Mortgage Office, then record the response and decide push vs. tightened polling.
-- [ ] [#qr72] [recommended] By May 27, 2026, send Lucas a written bridge plan: $500 now from personal funds if available, ask for the remaining $500 to be paid after EFS payment clears or by an agreed near-term date, and invoice EFS immediately for $5,000 with a smaller immediate continuation retainer accepted if Judith pushes back.
-- [ ] [#s62t] [recommended] Prepare EFS invoice with truthful hours/value; Lucas cost is $4,150 (83h @ $50), so floor is 42h/$4,200 and recommended ask is 50-60h/$5,000-$6,000 with any concession as an explicit courtesy credit.
-- [ ] [#m6ch] Get Google Suite admin credentials from Robert (SMTP + Google Calendar integration)
-- [ ] [#p40t] [recommended] Google Calendar/G Suite notification integration after Google admin credentials are available
-- [ ] [#q2x2] HTML email templates: lighter navy + gold, 2-3 drip for PBM orphan investor outreach
-- [ ] [#x5rn] Convert EFS logo JPEG → transparent PNG/SVG (Robert sent JPEG)
-- [ ] [#kzt6] Collect testimonials for carousel (6–12 min: investors, brokers, borrowers) — push Judith + Robert helping
-- [ ] [#kxsx] Form submission pipeline
-- [ ] [#4vb5] Online presence cleanup (after Judith approves)
-- [ ] [#a3gc] Consolidate domains under equityfundingsource.com
-- [ ] [#zhyg] Take down/redirect Weebly and WordPress sites
-- [ ] [#vd6p] Update directory listings (Yelp, Manta, hard money directories)
-- [ ] [#tfee] Consolidate Facebook pages
-- [ ] [#1w4n] Optimize LinkedIn profile
-- [ ] [#7fx4] OCR ingestion schema/state machine: add provider-neutral document_processing tables for documents, versions, OCR runs, pages/chunks, extracted fields, entity mentions/edges, review decisions, provider cost, and retry/error state.
-- [ ] [#d1h2] OCR provider adapter: process private R2 documents through pluggable parsers starting with Ragie Parse or Workers AI/Claude where appropriate; keep original R2 object as source of truth and persist source page/bounding-box evidence.
-- [ ] [#f5kq] OCR admin review workflow: show extracted fields with source evidence, confidence, and diffable approval/rejection before any TMO borrower, loan, lender, or loan-application writeback.
-- [ ] [#ntcr] Search/index spike: keep D1/R2 canonical and evaluate Ragie index plus Cloudflare Vectorize/SQL edge tables before adopting Neo4j, FalkorDB, Convex, or another separate graph database.
-- [ ] [#7a4d] [recommended] OCR/TMO field extraction: custom/fillable docs -> reviewed extracted fields -> TMO update/create flow
-- [ ] [#k9zj] Graph/vector database for Judith's document search dashboard (cross-doc search, any doc type)
-- [ ] [#x0px] Tier 1: Workers AI pre-screening
-- [ ] [#xgqg] Tier 2: Claude API document review
-- [ ] [#kf1p] Tier 3: Ragie Parse + Index for approved docs
-- [ ] [#4ktv] Discuss Ragie content validation with Bob Remeika (scheduled call)
-- [ ] [#dvmr] [recommended] Corky: add long mono-call mixed-speaker recovery (separate diarization confidence, tighter bad-span detection, forced re-diarize on flagged windows)
 <!-- /agent:backlog -->
 
 ## Icebox
 
 <!-- agent:icebox -->
-- [ ] [#e1kb] Point equityfundingsource.com and www.equityfundingsource.com at the Cloudflare Pages project equityfundingsource, then verify / and /funded-deals on the custom domain; if admin routes are expected on the custom domain too, decide whether to route those paths to the Worker or move the dynamic app fully behind the same hostname.
+
 <!-- /agent:icebox -->

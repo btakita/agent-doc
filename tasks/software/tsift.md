@@ -257,7 +257,51 @@ Backlog reordered. Top is now `#split-tsift-quality`.
 **Confidence:** high — full workspace test sweep green, install verified, no caller breakage.
 
 **Escalation:** none.
-<!-- agent:boundary:b2499bf2 -->
+
+### Re: do [#split-tsift-session] — opus-4-7
+
+
+**Done.** Extracted `session_cost`, `session_digest`, `session_review` (~7.1k LOC, largest single root pool) into the new `tsift-session` crate. Required a prereq move of `lint` into `tsift-quality`, folded into the same cycle.
+
+**Why the lint ride-along:** the moved session files call `crate::lint::resolve_harness_root_or_canonical_path` inline. After move, `crate::lint` wouldn't exist in `tsift-session`. Two paths to fix:
+
+1. Make `tsift-session` depend on root `tsift`. But root re-exports `session_*` from `tsift-session` → cycle.
+2. Move `lint` to a crate `tsift-session` can depend on cleanly.
+
+Took #2: lint's only deps (`config`, `index::IndexDb`) already live in `tsift-index`. `tsift-quality` now depends on `tsift-index` for that purpose. No cycle. tsift-session → tsift-quality → tsift-index → tsift-graph.
+
+**Changed paths (tsift submodule):**
+
+- `packages/tsift-session/Cargo.toml` (new — version `0.1.62`; deps: anyhow, serde, serde_json, tsift-quality; dev: tempfile)
+- `packages/tsift-session/src/lib.rs` (new — declares 3 modules)
+- `packages/tsift-session/src/session_cost.rs` (moved + `crate::runtime_churn::*` → `tsift_quality::runtime_churn::*`)
+- `packages/tsift-session/src/session_digest.rs` (moved + `crate::runtime_churn::*` → `tsift_quality::runtime_churn::*`, `crate::lint::resolve_harness_root_or_canonical_path` → `tsift_quality::lint::resolve_harness_root_or_canonical_path`)
+- `packages/tsift-session/src/session_review.rs` (moved + same lint/runtime_churn rewrites)
+- `packages/tsift-quality/src/lint.rs` (moved from root `src/lint.rs`; `crate::{config, index::IndexDb}` → `tsift_index::{config, index::IndexDb}`)
+- `packages/tsift-quality/Cargo.toml` — added `tsift-index` path dep + `rusqlite` dev-dep (lint tests need it)
+- `packages/tsift-quality/src/lib.rs` — added `pub mod lint;`
+- `Cargo.toml` — added `tsift-session` workspace member and root path dep
+- `packages/tsift-cli/Cargo.toml` — added `tsift-session = { path = "../tsift-session" }`
+- `src/lib.rs` — removed `pub mod log_digest;` block stayed, removed `pub mod session_cost; / session_digest; / session_review;` and `pub mod lint;`; added `pub use tsift_quality::{..., lint, ...};` and `pub use tsift_session::{session_cost, session_digest, session_review};`
+- `SPEC.md` — added `tsift-session crate` block; updated `tsift-quality` block to mention `lint` + tsift-index dep
+- `VERSIONS.md` — `Unreleased` entry added
+- `Cargo.lock` — regenerated
+
+**Commands run:**
+- `cargo build --release` — 0 errors after one round (first pass missed `rusqlite` dev-dep on `tsift-quality`; added).
+- `cargo test --release --no-fail-fast --workspace` — **990 passed across 29 suites**.
+- `cargo install --path packages/tsift-cli` — installed `tsift 0.1.62`.
+
+**Repo state:**
+- tsift submodule: `Extract tsift-session crate + fold lint into tsift-quality` (pushed, HEAD `55f1525`).
+- Superproject: `7900d6972 tsift: extract tsift-session crate + fold lint into tsift-quality` (pushed).
+
+**Visibility:** no new public symbols. `crate::lint::resolve_harness_root_or_canonical_path` was already `pub` before the move; it just relocated.
+
+**Confidence:** high — 990 tests green, install verified.
+
+**Escalation:** none.
+<!-- agent:boundary:b9136822 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -272,7 +316,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#split-tsift-digest]~
 - ~do [#split-tsift-quality]~
 - ~do [#split-tsift-index]~
-- do [#split-tsift-session]
+- ~do [#split-tsift-session]~
 - do [#split-tsift-quality]
 - do [#split-tsift-search]
 - do [#demote-root-tsift]
@@ -282,7 +326,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#split-tsift-session] Extract session_cost + session_digest + session_review (~7.1k LOC, largest pool) into tsift-session crate — depends on tsift-digest + tsift-index; biggest single LOC reduction in root tsift
 - [ ] [#demote-root-tsift] After all module splits land, demote root tsift crate to a thin re-export shim (or remove lib.rs entirely) — leave only the workspace root + binary metadata; verify external consumers (cargo install tsift) keep working
 - [ ] [#split-tsift-cli-subcommands] [recommended] tsift-cli is ~39k LOC in a single lib.rs — propose per-command module split (cmd_search, cmd_index, cmd_graph, cmd_explain, etc.) once root tsift is drained, to make command surface independently testable
 - [ ] [#npm-auth-setup] Configure NPM_TOKEN secret + TSIFT_ENABLE_NPM_PUBLISH=true variable in GitHub repo settings

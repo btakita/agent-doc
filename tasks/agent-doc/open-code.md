@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -159,12 +159,12 @@ Moving `sessions`/`supervisor` now would create a **circular `agent-doc` ↔ `ag
 Plan: tasks/agent-doc/plan-agent-doc-orchestration-extraction.md
 
 **Not invoking `/loop`** — `#bz6s` is a multi-wave effort; wave 1b needs the `sessions`/`supervisor` dependency-closure decision (move the 7 cascade modules vs. break the refs), which deserves its own scoping. `do [#bz6s]` stays queued for the next wave.
-<!-- agent:boundary:e91c7595 -->
+<!-- agent:boundary:c7718435 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#k5s7]~
 - ~do [#n7dd]~

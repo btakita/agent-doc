@@ -7893,6 +7893,17 @@ impl IpcRepairDecision {
         }
     }
 
+    fn content_ours(snapshot_content: String) -> Self {
+        Self {
+            snapshot_content,
+            snap_source: IpcSnapshotSource::ContentOurs,
+            disk_repair_reason: None,
+            editor_bad_state: None,
+            normalize_prefix_lines: Vec::new(),
+            redeliver_editor: false,
+        }
+    }
+
     fn content_ours_prefix_fallback(
         snapshot_content: String,
         bad_state: String,
@@ -7961,6 +7972,12 @@ impl IpcRepairDecision {
         self.normalize_prefix_lines.clear();
         self.redeliver_editor = true;
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AlreadyAppliedSnapshotOutcome {
+    Persisted,
+    NeedsFileFallback,
 }
 
 fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
@@ -8099,7 +8116,9 @@ fn persist_already_applied_socket_content_ours_snapshot(
     patch_id: &str,
     baseline: Option<&str>,
     content_ours: Option<&str>,
-) -> Result<()> {
+    normalize_prefix_lines: Option<&[String]>,
+    expected_response: &str,
+) -> Result<AlreadyAppliedSnapshotOutcome> {
     let Some(ours) = content_ours else {
         crate::ops_log::log_op(
             file,
@@ -8109,69 +8128,103 @@ fn persist_already_applied_socket_content_ours_snapshot(
                 patch_id
             ),
         );
-        return Ok(());
+        return Ok(AlreadyAppliedSnapshotOutcome::Persisted);
     };
 
-    if let Ok(current) = std::fs::read_to_string(file)
-        && strip_boundary_for_dedup(&current) != strip_boundary_for_dedup(ours)
+    let current = std::fs::read_to_string(file).ok();
+    let mut repair_decision = IpcRepairDecision::content_ours(ours.to_string());
+    if let Some(current) = current.as_deref()
+        && strip_boundary_for_dedup(current) != strip_boundary_for_dedup(ours)
     {
-        crate::flow::proof::log_flow_event(
-            file,
-            crate::flow::types::FlowEvent::new(
-                crate::flow::types::FlowName::DocumentMutation,
-                crate::flow::types::FlowStage::IpcSnapshotAdoption,
-                crate::flow::types::FlowOutcome::Blocked,
-            )
-            .with_reason("already_applied_live_buffer_diverged"),
-        );
+        let response_present = response_materialized_in_content(expected_response, current)
+            || baseline.is_some_and(|base| response_already_in_current(base, ours, current));
         crate::ops_log::log_op(
             file,
             &format!(
-                "ipc_socket_already_applied_snapshot_absorb_blocked file={} patch_id={} current_len={} current_hash={} content_ours_len={} content_ours_hash={} prompt_drift={}",
+                "ipc_socket_already_applied_live_buffer_diverged file={} patch_id={} response_present={} current_len={} current_hash={} content_ours_len={} content_ours_hash={} prompt_drift={}",
                 file.display(),
                 patch_id,
+                response_present,
                 current.len(),
-                crate::ops_log::content_hash(&current),
+                crate::ops_log::content_hash(current),
                 ours.len(),
                 crate::ops_log::content_hash(ours),
                 baseline.is_some_and(|base| {
-                    ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
-                        base, &current, ours,
-                    )
+                    ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(base, current, ours)
                 })
             ),
         );
-        if let Err(err) = crate::cycle_state::record_ipc_snapshot_adoption_blocked(file) {
-            eprintln!(
-                "[write] WARNING: failed to record already_applied IPC snapshot adoption block for {}: {}",
-                file.display(),
-                err
-            );
-            crate::ops_log::log_op(
+
+        if !response_present {
+            log_ipc_proof_failure(
                 file,
+                "socket_already_applied",
+                Some(patch_id),
+                "disk_missing_response_probe",
+                "file_ipc_fallback",
                 &format!(
-                    "ipc_socket_already_applied_snapshot_absorb_block_record_failed file={} patch_id={} error={}",
-                    file.display(),
-                    patch_id,
-                    err
+                    "response_sha256={} current_len={} current_hash={}",
+                    crate::ops_log::content_hash(expected_response),
+                    current.len(),
+                    crate::ops_log::content_hash(current)
                 ),
             );
+            return Ok(AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
+        }
+
+        repair_decision = IpcRepairDecision::file_read(current.to_string());
+        if let Some(lines) = normalize_prefix_lines
+            && !lines.is_empty()
+        {
+            let normalized =
+                normalize_exchange_prefixes_for_targets(&repair_decision.snapshot_content, lines);
+            if normalized != repair_decision.snapshot_content {
+                repair_decision = IpcRepairDecision::content_ours_prefix_fallback(
+                    normalized,
+                    current.to_string(),
+                    lines,
+                );
+            }
+        }
+
+        let before_response_dedupe = repair_decision.snapshot_content.clone();
+        let response_deduped =
+            dedupe_consecutive_response_blocks(&repair_decision.snapshot_content, file);
+        if response_deduped != repair_decision.snapshot_content {
+            repair_decision =
+                repair_decision.apply_ipc_dedupe(response_deduped, before_response_dedupe);
+        }
+
+        let pre_dedupe_snap = repair_decision.snapshot_content.clone();
+        let (effective_snap, dedupe_repair) = dedupe_ipc_snapshot_content(
+            file,
+            baseline,
+            &repair_decision.snapshot_content,
+            "socket_already_applied_disk",
+        )?;
+        if dedupe_repair {
+            repair_decision = repair_decision.apply_ipc_dedupe(effective_snap, pre_dedupe_snap);
+        } else {
+            repair_decision.snapshot_content = effective_snap;
         }
     }
 
-    snapshot::save(file, ours)?;
-    let crdt_doc = crate::crdt::CrdtDoc::from_text(ours);
+    repair_ipc_decision_visible_state(file, &repair_decision, Some(patch_id))?;
+    snapshot::save(file, &repair_decision.snapshot_content)?;
+    let crdt_doc = crate::crdt::CrdtDoc::from_text(&repair_decision.snapshot_content);
     snapshot::save_crdt(file, &crdt_doc.encode_state())?;
     crate::ops_log::log_op(
         file,
         &format!(
-            "ipc_socket_already_applied_content_ours_snapshot file={} patch_id={} snap_len={}",
+            "ipc_socket_already_applied_snapshot file={} patch_id={} snap_source={} snap_len={} snap_hash={}",
             file.display(),
             patch_id,
-            ours.len()
+            repair_decision.snap_source.label(),
+            repair_decision.snapshot_content.len(),
+            crate::ops_log::content_hash(&repair_decision.snapshot_content)
         ),
     );
-    Ok(())
+    Ok(AlreadyAppliedSnapshotOutcome::Persisted)
 }
 
 fn normalization_prefix_observation_counts(
@@ -9464,18 +9517,34 @@ pub fn try_ipc(
                         patch_id
                     ),
                 );
-                persist_already_applied_socket_content_ours_snapshot(
+                let expected_response = response_materialization_probe(patches, unmatched);
+                if persist_already_applied_socket_content_ours_snapshot(
                     file,
                     &patch_id,
                     baseline,
                     content_ours,
-                )?;
-                cleanup_fallback_patch_files(file);
-                return Ok(IpcResult {
-                    success: true,
-                    patch_id,
-                    skipped_committed_cycle: false,
-                });
+                    normalize_prefix_lines,
+                    &expected_response,
+                )? == AlreadyAppliedSnapshotOutcome::Persisted
+                {
+                    cleanup_fallback_patch_files(file);
+                    return Ok(IpcResult {
+                        success: true,
+                        patch_id,
+                        skipped_committed_cycle: false,
+                    });
+                }
+                eprintln!(
+                    "[write] socket already_applied could not prove the response on disk — falling back to file IPC"
+                );
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "ipc_socket_already_applied_fallback_to_file_ipc file={} patch_id={}",
+                        file.display(),
+                        patch_id
+                    ),
+                );
             }
             Err(e) => {
                 eprintln!(
@@ -17537,7 +17606,7 @@ mod submodule_patch_routing_tests {
     }
 
     #[test]
-    fn try_ipc_already_applied_socket_saves_content_ours_and_blocks_snapshot_absorb() {
+    fn try_ipc_already_applied_socket_adopts_disk_when_response_is_present() {
         let dir = TempDir::new().unwrap();
         let root = dir.path().canonicalize().unwrap();
         for subdir in [
@@ -17572,7 +17641,7 @@ mod submodule_patch_routing_tests {
             "Answered.\n",
             "<!-- /agent:exchange -->\n"
         );
-        let live_already_applied_with_extra_exchange_growth = concat!(
+        let live_already_applied_with_user_edit = concat!(
             "---\n",
             "agent_doc_session: test\n",
             "agent_doc_format: template\n",
@@ -17581,14 +17650,13 @@ mod submodule_patch_routing_tests {
             "❯ Please reply\n",
             "### Re: Please reply — gpt-5\n\n",
             "Answered.\n",
-            "### Re: late replay — gpt-5\n\n",
-            "This live editor growth must not become the committed snapshot.\n",
+            "User typed the next prompt while finalize was running.\n",
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, baseline).unwrap();
         crate::snapshot::save(&doc, baseline).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
-        fs::write(&doc, live_already_applied_with_extra_exchange_growth).unwrap();
+        fs::write(&doc, live_already_applied_with_user_edit).unwrap();
 
         let _listener = start_already_applied_listener(&root);
         wait_for_listener(&root);
@@ -17615,28 +17683,164 @@ mod submodule_patch_routing_tests {
         );
         assert_eq!(
             crate::snapshot::load(&doc).unwrap().as_deref(),
-            Some(content_ours),
-            "already_applied must persist the agent-owned response image, not the larger live buffer"
+            Some(live_already_applied_with_user_edit),
+            "already_applied must adopt disk content when it contains the response plus live user edits"
         );
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
-            live_already_applied_with_extra_exchange_growth,
-            "live editor drift remains visible for the next cycle"
+            live_already_applied_with_user_edit,
+            "live editor content should remain the committed snapshot candidate"
         );
         assert!(
-            crate::cycle_state::load(&doc)
+            !crate::cycle_state::load(&doc)
                 .unwrap()
                 .unwrap()
                 .ipc_snapshot_adoption_blocked,
-            "commit must later refuse snapshot_absorb for the divergent live buffer"
+            "safe disk adoption must not leave a later snapshot-absorb block"
         );
 
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             log.contains("ipc_socket_already_applied_skip_file_fallback")
-                && log.contains("ipc_socket_already_applied_content_ours_snapshot")
-                && log.contains("ipc_socket_already_applied_snapshot_absorb_blocked"),
-            "already_applied snapshot guard should be auditable:\n{log}"
+                && log.contains("ipc_socket_already_applied_live_buffer_diverged")
+                && log.contains("ipc_socket_already_applied_snapshot")
+                && log.contains("snap_source=file_read"),
+            "already_applied disk adoption should be auditable:\n{log}"
+        );
+    }
+
+    #[test]
+    fn try_ipc_already_applied_socket_dedupes_duplicate_response_before_snapshot() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        for subdir in [
+            "patches",
+            "snapshots",
+            "crdt",
+            "logs",
+            "state/cycles",
+            "claimed-patches",
+        ] {
+            fs::create_dir_all(root.join(".agent-doc").join(subdir)).unwrap();
+        }
+
+        let doc = root.join("session.md");
+        let baseline = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let content_ours = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "### Re: Please reply — gpt-5\n\n",
+            "Answered.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let duplicated_live_buffer = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "### Re: Please reply — gpt-5\n\n",
+            "Answered.\n",
+            "### Re: Please reply — gpt-5\n\n",
+            "Answered.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, baseline).unwrap();
+        crate::snapshot::save(&doc, baseline).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
+        fs::write(&doc, duplicated_live_buffer).unwrap();
+
+        let _listener = start_already_applied_listener(&root);
+        wait_for_listener(&root);
+
+        let patch = crate::template::PatchBlock::new(
+            "exchange",
+            "### Re: Please reply — gpt-5\n\nAnswered.",
+        );
+        let result = try_ipc(
+            &doc,
+            &[patch],
+            "",
+            None,
+            Some(baseline),
+            Some(content_ours),
+            None,
+            Some("already-applied-duplicate"),
+        )
+        .unwrap();
+
+        assert!(result.success);
+        let snap = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            snap.matches("### Re: Please reply — gpt-5").count(),
+            1,
+            "already_applied snapshot must dedupe duplicate response headings: {snap}"
+        );
+        let disk = fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            disk.matches("### Re: Please reply — gpt-5").count(),
+            1,
+            "already_applied disk repair must converge with deduped snapshot: {disk}"
+        );
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("ipc_dedupe_repaired_working_tree")
+                && log.contains("ipc_socket_already_applied_snapshot"),
+            "dedupe repair should be logged:\n{log}"
+        );
+    }
+
+    #[test]
+    fn already_applied_socket_missing_disk_response_requests_file_fallback() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        for subdir in ["snapshots", "crdt", "logs", "state/cycles"] {
+            fs::create_dir_all(root.join(".agent-doc").join(subdir)).unwrap();
+        }
+        let doc = root.join("session.md");
+        let baseline = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let content_ours = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "### Re: Please reply — gpt-5\n\n",
+            "Answered.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, baseline).unwrap();
+        crate::snapshot::save(&doc, baseline).unwrap();
+
+        let outcome = persist_already_applied_socket_content_ours_snapshot(
+            &doc,
+            "already-applied-missing",
+            Some(baseline),
+            Some(content_ours),
+            None,
+            "### Re: Please reply — gpt-5\n\nAnswered.\n",
+        )
+        .unwrap();
+
+        assert_eq!(outcome, AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
+        assert_eq!(
+            crate::snapshot::load(&doc).unwrap().as_deref(),
+            Some(baseline),
+            "missing disk response must not save stale content_ours as the snapshot"
         );
     }
 

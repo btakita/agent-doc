@@ -24,7 +24,7 @@ queue_active: false
 
 <!-- agent:status patch=replace -->
 
-Demo prep focus: use the workers.dev production URL for Judith, keep custom-domain/email/Google/TMO-live access as explicit asks, and frame the next build around TMO LOS intake/status/docs/cache rather than broad servicing replacement.
+Transferred EFS demo context: demo from workers.dev, show /apply + admin application-leads + role portal entry points, and frame next build around TMO LOS intake/status/docs/cache with custom domain, Resend, Google Workspace, TMO access, Dropbox, and legal approvals as demo asks.
 <!-- /agent:status -->
 
 ## Exchange
@@ -84,7 +84,37 @@ Closeout evidence: changed path is this session document only. Commands used inc
 
 The substantive demo next-steps answer is captured above, and the concrete pre-demo follow-ups are already in the backlog. This note only reopens the binary-owned closeout after the live document buffer normalized status/backlog content after the first commit.
 
-<!-- agent:boundary:858448de -->
+### Re: transferred EFS demo material — gpt-5
+
+Transferred the demo-relevant material from the main EFS document into this demo document as working demo context.
+
+#### Current Demo State
+
+- Demo URL remains `https://equityfundingsource.brian-takita.workers.dev` until custom-domain cutover is intentionally approved.
+- `/apply` public prequalification is deployed and writes D1-backed `application_leads` for admin review.
+- Admin review is available behind Cloudflare Access on `/login/access-callback` using `ACCESS_TEAM_DOMAIN` / `ACCESS_AUD`.
+- Logged-out navigation currently exposes Borrower Login, Apply for a Loan, Broker Portal, and Investor Portal, with Broker Portal placed between Apply and Investor.
+- Public site/footer email is `info@equityfundingsource.com`.
+- Application lead notifications still use Resend testing-mode values until an EFS-owned sending domain is verified.
+- Custom-domain cutover is deferred; do not demo `equityfundingsource.com` as the live app URL unless that changes before the call.
+
+#### Demo Framing To Carry Forward
+
+The TMO story should stay focused on Loan Origination, not loan servicing replacement. The relevant next build surface is: application intake, normalized statuses, borrower/broker documents, condition/checklist workflow, local D1/R2 cache, and staff-reviewed TMO LOS writeback. The broad servicing/fund-accounting parts of TMO should be treated as out of scope unless Judith explicitly expands the project.
+
+#### Demo Asks
+
+- Confirm workers.dev is acceptable as the temporary demo/production URL.
+- Approve custom-domain timing separately from the demo.
+- Verify an EFS-owned Resend sending domain.
+- Provide Google Workspace admin credentials for real Google SSO/calendar/email integration.
+- Restore or provide TMO LOS access/screenshots/exports for products, custom fields, statuses, conditions, templates, and sample loans.
+- Confirm Dropbox folder structure and sanitized sample document flow.
+- Review funded-deal images, copy, lien-position wording, and legal/disclosure language.
+
+Existing demo backlog items already cover the concrete pre-demo work, so I did not add duplicates here.
+
+<!-- agent:boundary:769e351a -->
 <!-- /agent:exchange -->
 
 ## Queue

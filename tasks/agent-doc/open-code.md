@@ -56,14 +56,72 @@ The #adcr umbrella stays at top of backlog. Concrete next steps, added in priori
 After those three land, extraction proceeds module-by-module starting with leaves (likely `model_tier` and `frontmatter` based on file size and naming; confirmed by step 1's audit). The existing `plan-agent-doc-flowcore-refactor.md` is complementary, not duplicate — that plan targets orchestration use-case flows, this one targets the data/orchestration crate seam.
 
 **Top of backlog:** #adcr
-<!-- agent:boundary:e35406cb -->
+
+### Re: #stqc #adcr-dep-audit results — opus-4-7
+
+**Method:** outbound `crate::` references (top-level `use` + body refs) within each target module, plus inbound reference counts from the orchestration set (preflight, plan, cycle_state, queue_dispatch, route, ipc_socket, git, harness, session_check, write, capture). Excludes test/comment matches.
+
+**Outbound (target → other crate modules):**
+
+| Module | LOC | Internal deps | External deps | Class |
+|---|---:|---|---|---|
+| `crdt.rs` | 1,255 | — | `anyhow`, `yrs` | **leaf** |
+| `model_tier.rs` | 1,088 | `component` | `anyhow`, `serde` | **leaf** |
+| `pending.rs` | 3,565 | `component` | `anyhow` | **leaf** |
+| `component.rs` | 1,706 | `new_boundary_id`, `format_boundary_marker` (free fns in `lib.rs`) | `anyhow`, `pulldown_cmark` | **near-leaf** |
+| `frontmatter.rs` | 2,105 | `model_tier`, `project_config` | `anyhow`, `serde`, `uuid` | **near-leaf** |
+| `template.rs` | 5,749 | `component`, `frontmatter`, `project_config`, lib boundary helpers | `anyhow`, `serde` | **near-leaf** |
+| `diff.rs` | 4,456 | `component`, `pending`, `snapshot` | `anyhow`, `serde`, `similar` | **coupled** ⚠️ |
+
+Helper: `project_config.rs` (474 LOC) — only depends on `frontmatter`. Forms a two-way ref pair with `frontmatter` (mutual `crate::` body references); both must move together.
+
+**Inbound (orchestration → target, ref counts):**
+
+```
+              tmpl  diff  comp  fmtr  crdt  pend  mtier
+preflight       3    25   50     4    —    39    —
+session_check   1    27   14    24    —    15    —
+write          66    45   22    10   20    31    —
+git             4     9   13    11    5     3    —
+route           3     4    4    —    —    —    —
+cycle_state    —    —    —     1    —    —    —
+queue_dispatch —    —    —     1    —    —    —
+harness        —    —    —     1    —    —    —
+capture        —    —    —     1    —    —    —
+```
+
+Heavy consumers — `write`, `preflight`, `session_check`, `git` — are exactly the orchestration modules. Target modules barely call back into orchestration. The seam is real.
+
+**Classification:**
+
+- **Pure / near-pure leaves** (safe to extract first, no seam decisions): `crdt`, `pending`, `model_tier`, `component`. Combined ~7.6k LOC. Only friction is the two free functions `new_boundary_id` and `format_boundary_marker` in `lib.rs` — relocate them into `agent-doc-core::id` or duplicate as a tiny inline.
+- **Near-leaves with intra-target deps** (extract in same wave as their deps): `frontmatter` + `project_config` (must move together; mutual refs), `template` (needs `component`, `frontmatter`, `project_config`, lib boundary helpers). Combined ~8.3k LOC.
+- **Coupled** ⚠️: `diff.rs`. Calls `snapshot::{load, save, path_for, resolve}` — these are file/git I/O, not pure data. `snapshot.rs` itself imports `git`, `claim`, `sessions`, `ops_log`, `secret_redact`, `fs_util`. Pulling `diff` into `agent-doc-core` as-is would drag the entire orchestration layer with it.
+
+**diff.rs seam options** (see new backlog item `#adcr-snapshot-seam`):
+
+1. Extract just the `Snapshot` data type (struct + serde) into `agent-doc-core`; keep `snapshot::{load, save, resolve, path_for}` in the orchestration crate; rewrite `diff.rs` to take a `&Snapshot` rather than calling loader functions. Lowest blast radius.
+2. Define a `SnapshotPort` trait in `agent-doc-core`, implement it in orchestration. More flexible, more ceremony.
+3. Split `diff.rs` into `diff_data.rs` (pure compare) + `diff_io.rs` (snapshot-backed) and only move the pure half. Probably cleanest given `diff.rs` is 4.5k LOC.
+
+**Extraction order recommendation (informs #5x1r and #d97v):**
+
+Wave 1 (no seam decisions): `crdt`, `model_tier`, `pending`, `component` + relocate boundary helpers.
+Wave 2 (after Wave 1): `frontmatter` + `project_config` together.
+Wave 3 (after Wave 2): `template`.
+Wave 4 (after `#adcr-snapshot-seam` resolves): `diff` (or its pure half).
+
+This makes Wave 1 the lowest-risk validation of the workspace structure proposed by `#d97v` before any seam work is required.
+
+**Top of backlog after this cycle:** #adcr-snapshot-seam (new precondition for #adcr blocking diff extraction), then #5x1r.
+<!-- agent:boundary:fcab0362 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- [#stqc]
+- ~[#stqc]~
 - [#5x1r]
 - [#d97v]
 - [#adcr]
@@ -72,7 +130,7 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#stqc] #adcr-dep-audit Survey inbound deps from orchestration code (preflight/plan/cycle_state/dispatch/route/ipc/git/harness) into {template, diff, component, frontmatter, crdt, pending, model_tier}; identify leaf vs coupled modules — precondition for #adcr
+- [ ] [#rtx6] [recommended] #adcr-snapshot-seam Decide diff.rs ↔ snapshot.rs seam — either extract Snapshot data type into agent-doc-core and keep load/save/resolve/path_for in orchestration, or inject snapshot through a trait. Required before extracting diff.
 - [ ] [#5x1r] #adcr-api-surface Define agent-doc-core export surface (pure types: DocumentTemplate, Component, Frontmatter, Diff patches, Crdt ops, Pending model, ModelTier resolution) — keep orchestration types out
 - [ ] [#d97v] #adcr-workspace Convert src/agent-doc into Cargo workspace root; add agent-doc-core member crate; gate behind a compile-time benchmark baseline
 - [ ] [#adcr] Extract agent-doc-core crate (~17K lines) — enables fast-compiling FFI/editor-plugin target independent of orchestration layer
@@ -90,4 +148,5 @@ preset #spec-test-build-install-commit-push
 - 2026-05-27 [#n89s] #agent-doc-bug Fix `dispatch_only_dispatch_start_proof_required` to return `false` for opencode harness (routed_reopen.rs:319) — interim fix until tracker is built
 - 2026-05-27 [#xd6k] #agent-doc-bug Add model name validation in `canonical_model_name` or probe builder for opencode harness — reject bare names without provider prefix (model_tier.rs:256, codex.rs:534)
 - 2026-05-27 [#adcr] Extract agent-doc-core crate (~17K lines: template, diff, component, frontmatter, crdt, pending, model_tier + leaf modules) — enables fast-compiling FFI/editor-plugin target independent of orchestration layer
+- 2026-05-28 [#stqc] #adcr-dep-audit Survey inbound deps from orchestration code (preflight/plan/cycle_state/dispatch/route/ipc/git/harness) into {template, diff, component, frontmatter, crdt, pending, model_tier}; identify leaf vs coupled modules — precondition for #adcr
 <!-- /agent:done -->

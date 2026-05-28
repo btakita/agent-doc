@@ -140,7 +140,7 @@ Verification:
 Commit/push:
 - `btakita/agent-doc@2409025bdca63fc62a7ee3836f32e9898ee35a93` pushed to `20260422/codex-agent-backend`.
 - Root submodule pointer commit `adbf1a3aa` is ready in `btakita/agent-loop`; this closeout will be pushed with the session-document commit.
-<!-- agent:boundary:910cb145 -->
+<!-- agent:boundary:e1655cc3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -172,6 +172,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#queue-auto-no-continue] Queue auto trigger does not continue after finalize session-check warning about pending shadow items. Steps to reproduce: (1) Session document with queue_active=true, queue_trigger=auto, and multiple queued items. (2) finalize --stream completes cycle but session-check issues pending shadow warning for items outside live agent:backlog. (3) Queue consumes head item but auto trigger does not fire for next item. (4) agent-doc write --commit with --done reaps the item, queue reports 9 remaining but auto continues stop. Expected: queue auto should continue to next item after successful closeout. Actual: queue stops after first item. Session: tasks/software/tsift.md. agent-doc version: 0.34.0. The pending shadow warnings about items appearing both inside and outside agent:backlog may be blocking the auto-continue path.
 - [ ] [#next-steps-backlog-capture] Agent responses containing #next-steps recommendations do not auto-add items to backlog when prompt preset is present. Agent must manually call `--pending-add` but the planning output `pending_mutations: expect_add` is not enforced by session-check `pending_done_guard`.
 <!-- /agent:backlog -->
 

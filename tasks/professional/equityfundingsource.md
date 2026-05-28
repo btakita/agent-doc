@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -220,14 +220,16 @@ Confidence: high. Escalation: none.
 ### Re: local admin detail pages closeout repair — gpt-5
 
 Closeout repair: the local admin detail page fix is recorded in the response immediately above. No additional repo changes were made in this repair write.
-<!-- agent:boundary:0c727c8e -->
+deploy
+<!-- agent:boundary:7674e37d -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+- deploy
 <!-- /agent:queue -->
 
 ## Backlog

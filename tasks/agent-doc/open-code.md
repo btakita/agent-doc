@@ -72,7 +72,7 @@ The umbrella execute item remains the queue head after this consume. It splits i
 
 This response was initially rejected by `pending_done_guard` because the body mentions the umbrella item ID while no `--done` for it was passed. Same heuristic class as `#queue-strike-on-halt` filed earlier. Suppressed with `` so this report can land.
 Please split out the waves as #next-steps.
-### Re: #next-steps wave split — opus-4-7
+### Re: #next-steps wave split — opus-4-7 (HEAD)
 
 Split `#adcr` umbrella into four discrete backlog items, one per wave. Each is now an actionable cycle with the plan reference inlined for context.
 
@@ -87,7 +87,7 @@ Backlog after this cycle (top → bottom):
 **Top of backlog: `#adcr-wave-1`**.
 
 Each wave item carries its plan reference (`tasks/agent-doc/plan-agent-doc-core-extraction.md`), the exact modules + public types it covers, dependencies on prior waves, and the I/O wrappers that stay in the main crate. So an operator can pick any wave and start without re-deriving the contract.
-<!-- agent:boundary:e8a3689c -->
+<!-- agent:boundary:bbe02614 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -98,6 +98,10 @@ Each wave item carries its plan reference (`tasks/agent-doc/plan-agent-doc-core-
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#mzzd] #adcr-wave-4 Extract diff.rs into agent-doc-core per #rtx6 Option 1 — rename current src/agent-doc/src/diff.rs to diff_io.rs (strip to compute/compute_with_current/wait_for_stable_content/is_stale_snapshot/run, keep snapshot::{load,save,resolve,path_for} calls); move pure half (DiffType, DiffClassification, PromptBearingChange, ParsedSlashCommands, OrchestrationRequest, strip_comments, annotate_diff, classify_diff, slash command + orchestration detection, prompt-prefix normalization, prompt-bearing-change classification, unified_diff_from_contents) to agent_doc_core::diff; re-export at agent_doc::diff so the 6 production call sites compile unchanged. Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
+- [ ] [#yxvq] #adcr-wave-3 Extract template.rs (~5.7k LOC) into agent-doc-core::template — PatchBlock, TemplateInfo, ComponentInfo, parse_patches, apply_patches, apply_patches_with_overrides, all repair_* functions, normalize_editor_visible_template_structure, all reposition_boundary_* helpers, is_template_mode, exchange_baseline_headings. Keep template_info(&Path) wrapper in main crate. Depends on Wave 2 (frontmatter/project_config) + Wave 1 (component). Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
+- [ ] [#yhsr] #adcr-wave-2 Extract frontmatter.rs + project_config.rs together (mutual refs) into agent-doc-core — Frontmatter, AgentDocFormat, AgentDocWrite, CollaborationMode, CodexNetworkAccess, ResolvedMode, StreamConfig, PendingCaptureGuardMode, LintDialectMode, ProjectConfig, GuardConfig, LintConfig, SshConfig/SshDocConfig/SshProfileConfig, ComponentConfig + pure parse/write/merge_fields/set_*. Keep ensure_session_for_file/set_format_and_write/read_session_id/load_project*/save_project/*_tmux_session wrappers in main crate. Depends on Wave 1 (model_tier). Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
+- [ ] [#pjb4] #adcr-wave-1 Extract leaf modules into agent-doc-core (no seam decisions, ~7.6k LOC) — relocate new_boundary_id/new_boundary_id_with_summary/format_boundary_marker/BOUNDARY_ID_LEN from lib.rs to agent_doc_core::id; move crdt.rs (CrdtDoc, merge, dedup_adjacent_blocks, compact); move model_tier.rs (Tier, TierMap, ModelConfig, ModelSwitchScan + pure resolvers; keep detect_harness wrapper in main crate); move pending.rs (PendingItem, PendingState, PendingOp + all op_* functions); move component.rs (Component, parse, strip_comments, find_*ranges, parse_attrs, BACKLOG_COMPONENT and friends). Capture cold-from-scratch baselines via cargo clean + cargo build -p agent-doc-core --release --timings before extraction; update agent-doc-core/COMPILE_BASELINE.md with the Wave 1 row. Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
 - [ ] [#adcr] Extract agent-doc-core crate (~17K lines) — enables fast-compiling FFI/editor-plugin target independent of orchestration layer
 <!-- /agent:backlog -->
 

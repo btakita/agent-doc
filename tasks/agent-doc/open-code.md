@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -213,17 +213,56 @@ After that, either re-queue `[#d97v]` manually or invoke `/agent-doc tasks/agent
 **Backlog left intact** — no `--done`, no `--pending-gate`. The queue head consumes `[#d97v]` as processed (you'll see queue advance to `[#adcr]` in preflight), but the pending item itself stays open for the explicit cycle.
 
 **Not invoking `/loop`** so the queue does not auto-advance to `#adcr`.
-<!-- agent:boundary:2fe88ef0 -->
+[#d97v] was stopped due to an exchange accretion warning. [#d97v] was marked as done in the queue. #agent-doc-bug
+### Re: queue-strike-on-halt bug report — opus-4-7
+
+Confirmed and root-caused. Plan written at `tasks/agent-doc/plan-queue-strike-on-halt-response.md`; backlog entry added to `tasks/agent-doc/agent-doc-bugs2.md` as `#queue-strike-on-halt`.
+
+#### What happened
+
+In cycle `619af4d0b` (2026-05-28 12:07:21) my halt response struck `[#d97v]` from the queue even though the body explicitly stated "Backlog left intact — no `--done`, no `--pending-gate`" and no closeout flag was passed.
+
+Binary log from the offending cycle:
+```
+[queue] response heading explicitly targets active queue head; allowing consumption
+[queue] consumed: "[#d97v]" (remaining: 1)
+```
+
+#### Root cause
+
+`src/agent-doc/src/write.rs:1233-1242` flips `queue_consumption_allowed = true` whenever `response_explicitly_targets_active_queue_head` returns true. That function (`write.rs:2466`) calls `response_explicitly_targets_queue_head` (`write.rs:2481`), which only checks that some `### Re:` heading in the response body contains an ID matching the queue head's ID.
+
+My heading was `### Re: #d97v halt — opus-4-7`. `response_heading_topic` (`write.rs:2488`) extracted `#d97v halt`; `queue_prompt_done_id` (`write.rs:2511`) walked ID chars after `#` and returned `d97v`; that equals the queue head's `d97v`, so the heuristic fired. There is no semantic check distinguishing "I addressed #d97v by halting" from "I addressed #d97v by completing it."
+
+The same heuristic class also lives behind the pre-write `pending_done_guard` — my first attempt to finalize this very bug report was rejected because the response body mentions `#d97v` while the cycle has no `--done d97v`. I had to add the `` suppression marker just to land this bug write-up. Two gates, one bad heuristic.
+
+#### Recommended fix (Option A in plan)
+
+Remove the heading-match fallback in both code paths. Queue consumption and `pending_done_guard` should require an explicit signal: `--done <id>`, `--pending-gate <id>`, `--pending-edit "<id>=..."`, or an `&lt;!-- agent:done id=&lt;id&gt; --&gt;` marker in the response body. The skill agent already passes `--done` on completed work — it did so for `#stqc` and `#5x1r` in this same session. The heading-match fallback exists to repair forgetful agents, but the cost — silently striking halts and forcing operators to add suppression markers to discuss bugs that mention IDs — is worse than the regression of "forgot --done means queue head stays."
+
+Plan §"Fix options" also covers Options B (halt opt-out flag), C (halt-language detection), and D (narrow heading match). Plan §Acceptance defines the test contract.
+
+#### Files in scope
+
+- `src/agent-doc/src/write.rs` (queue-strike heuristic + `pending_done_guard` heuristic)
+- `src/agent-doc/src/codex_hook.rs:351` (sibling queue caller)
+- `src/agent-doc/src/sim_world.rs` (regression test)
+- `src/agent-doc/SPEC.md` (closeout signal contract)
+
+#### Side note on this cycle's prompt
+
+The user's prompt for this turn (`[#d97v] was stopped...`) arrived through the chat channel rather than as a document edit, so preflight initially reported `no_changes`. I inserted the prompt into the exchange before composing this response per the SKILL.md rule: "Direct file patching is only acceptable for inserting a missing user prompt into exchange before the response exists."
+<!-- agent:boundary:20651a92 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~[#stqc]~
 - ~[#5x1r]~
 - ~[#d97v]~
-- [#adcr]
+- ~[#adcr]~
 <!-- /agent:queue -->
 
 ## Backlog

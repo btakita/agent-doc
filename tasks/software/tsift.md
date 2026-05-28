@@ -51,7 +51,23 @@ Extracted `tsift-sqlite` + `tsift-libsql` crates from substrate.rs + libsql_back
 - Updated imports in index.rs, status.rs, summarize.rs, main.rs.
 - SPEC.md updated with new crate structure.
 - Workspace Cargo.toml updated: `backend-libsql` feature now gates `dep:tsift-libsql`.
-<!-- agent:boundary:a3b62e0d -->
+
+### Re: #step-3-tokensave-reader — gpt-5
+
+Added `tsift-tokensave` crate — DB reader adapter for `.tokensave/tokensave.db`. All 7 unit tests pass. Full test suite passes. Built, installed, committed (`b2cf59b`), and pushed.
+
+**What changed:**
+- `packages/tsift-tokensave/` — new crate (~700 LOC) with:
+  - `TokensaveDb` — read-only adapter opening tokensave's SQLite DB
+  - Schema mapping: tokensave `nodes(id, kind, name, ...)` → tsift `GraphNode(id, kind, label, properties)`, `edges(source, target, kind)` → `GraphEdge(from_id, to_id, kind)`
+  - FTS5 search via `nodes_fts` virtual table (`search_fts()` method)
+  - `GraphStore` trait impl (read-only, writes bail with clear error)
+  - `TokensaveNode`, `TokensaveEdge`, `TokensaveFile`, `FtsSearchResult` structs
+  - `TokensaveDb::discover(project_dir)` to find `.tokensave/tokensave.db`
+  - `nodes_for_file()`, `edges_from()`, `edges_to()`, `kinds()`, `edge_kinds()` queries
+  - 7 unit tests: read nodes/edges, FTS search, GraphStore adapter, discover, write rejection, file nodes
+- Workspace Cargo.toml + SPEC.md updated
+<!-- agent:boundary:b455236a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -64,7 +80,7 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 preset #spec-test-build-install-commit-push
 - ~[#step-1-core]~
 - ~[#step-2-backends]~
-- [#step-3-tokensave-reader]
+- ~[#step-3-tokensave-reader]~
 - [#step-4-graph]
 - [#step-5-algorithms]
 - [#step-6-resolution]
@@ -77,7 +93,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#step-3-tokensave-reader] Add `tsift-tokensave` crate — DB reader adapter for .tokensave/tokensave.db with schema mapping + FTS5 search (~800 LOC)
 - [ ] [#step-4-graph] Extract `tsift-graph` crate + port LanguageExtractor trait, Language Registry, complexity counting from tokensave (~600 new + ~1.4K moved)
 - [ ] [#step-5-algorithms] Add `tsift-algorithms` crate — port iterative Tarjan SCC, composite health score, dead code detection, coupling analysis from tokensave (~850 LOC)
 - [ ] [#step-6-resolution] Add `tsift-resolution` crate — port multi-strategy reference resolver, scoring heuristics, blocklist from tokensave (~450 LOC)

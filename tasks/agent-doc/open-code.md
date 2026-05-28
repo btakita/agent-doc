@@ -71,7 +71,8 @@ The umbrella execute item remains the queue head after this consume. It splits i
 #### Note on `pending_done_guard` interaction
 
 This response was initially rejected by `pending_done_guard` because the body mentions the umbrella item ID while no `--done` for it was passed. Same heuristic class as `#queue-strike-on-halt` filed earlier. Suppressed with `` so this report can land.
-<!-- agent:boundary:11ab4b32 -->
+Please split out the waves as #next-steps.
+<!-- agent:boundary:5f409cbc -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -84,7 +85,8 @@ preset #spec-test-build-install-commit-push
 - ~[#adcr]~
 - ~[#rtx6]~
 - ~[#d97v]~
-- [#adcr]
+- ~[#adcr]~
+- Please split out the waves as #next-steps.
 <!-- /agent:queue -->
 
 ## Backlog

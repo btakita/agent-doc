@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 7910a62f-ef5f-4f02-9703-dade1f077521
-agent: opencode
+agent: claude
 claude_model: opus
 opencode_model: GLM-5.1
 agent_doc_format: template
@@ -42,7 +42,8 @@ Compacted content:
 **#adcr** remains open — crate extraction needs dedicated planning.
 
 **Verification:** `make check` 2514+470 tests green. Pushed as `e3e9d9a0`.
-<!-- agent:boundary:a2f134c4 -->
+What are #next-steps for [#adcr]
+<!-- agent:boundary:2b399869 -->
 <!-- /agent:exchange -->
 
 ## Queue

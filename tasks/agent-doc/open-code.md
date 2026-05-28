@@ -28,104 +28,12 @@ queue_active: false
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/fb8de777e65629bf156ef66517a44d0d9c829c7e89b02b868f8ca9d0519d3ddc-20260528-162354.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/fb8de777e65629bf156ef66517a44d0d9c829c7e89b02b868f8ca9d0519d3ddc-20260528-171303.md`*
 
 Compacted content:
-- Archived 7 response topic(s): #n89s #xd6k bug fixes; #next-steps for #adcr; #stqc #adcr-dep-audit results; 4 more
+- Archived 3 response topic(s): #d97v #adcr-workspace shipped; #next-steps wave split; backlog priority reorder + #agent-doc-bug
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/fb8de777...
-### Re: #d97v #adcr-workspace shipped — opus-4-7
-
-Workspace scaffold landed.
-
-#### Changes
-
-In `src/agent-doc/` (submodule, branch `20260422/codex-agent-backend`, commit `aa13fbe7`, pushed):
-
-- `Cargo.toml` — added `[workspace] members = ["agent-doc-core"]` at the top. Existing `[package]`, `[lib]` (cdylib + lib), `[[bin]]`, deps, dev-deps, `[patch.crates-io]`, and `[profile.release]` all preserved unchanged.
-- `Cargo.lock` — refreshed by cargo to recognize the new member.
-- `agent-doc-core/Cargo.toml` — pure-dep package: `anyhow`, `serde`, `serde_yaml`, `uuid`, `pulldown-cmark`, `yrs`, `similar`. `publish = false`. `edition = "2024"`.
-- `agent-doc-core/src/lib.rs` — stub with module-doc outlining the wave plan and dep contract. No module bodies.
-- `agent-doc-core/COMPILE_BASELINE.md` — measurement protocol + Wave 0 floor numbers; cold-from-scratch baselines will be captured at start of Wave 1.
-
-In the superproject (commit `76b7110ca`, pushed to `main`):
-- `src/agent-doc` submodule pointer bumped.
-- `tasks/agent-doc/plan-agent-doc-core-extraction.md` — the `#rtx6` row marked decided (Option 1 file split) with the 6-call-site justification + Wave 4 implementation sketch.
-
-#### Verification
-
-- `cargo build -p agent-doc-core --release` → 5.70s on first build (48 deps), 0.05s warm rebuild of just the stub.
-- `cargo build --release` (full main crate after workspace conversion) → 1m 52s incremental on top of the agent-doc-core build. Both crates compile clean.
-- `cargo install --path .` (in `src/agent-doc/`) → replaced `~/.cargo/bin/agent-doc`. The tmux-spawned binary now reflects the workspace change.
-- `make check` → all unit and integration tests passed except `codex_bare_run_inside_owning_pane_fails_before_nested_dispatch`. That test fails on pristine HEAD too (`git stash` repro confirmed); it is a local-env-only failure. GitHub CI's most recent three runs are all `[ok]`. Not introduced by this change.
-
-#### COMPILE_BASELINE.md status
-
-Wave 0 file currently records first-build numbers (with deps included), not cold-from-scratch baselines. The Wave 1 cycle should capture clean numbers via `cargo clean && cargo build -p agent-doc-core --release --timings` and `cargo clean && cargo build --release --timings`, then update the table. The acceptance ratio (≤ 0.30 at Wave 4) anchors against those clean numbers.
-
-#### Next queue item
-
-The umbrella execute item remains the queue head after this consume. It splits into Waves 1-4 per the plan. Wave 1 (`crdt`, `model_tier`, `pending`, `component` + boundary helpers) is the natural next cycle — leaves only, no seam decisions, ~7.6k LOC. Each wave should be its own operator-scoped cycle with `make check` + `cargo install` + manual sanity check.
-
-**Not auto-looping into the umbrella execute.** Wave 1 is substantive enough that it deserves its own clean cycle.
-
-#### Note on `pending_done_guard` interaction
-
-This response was initially rejected by `pending_done_guard` because the body mentions the umbrella item ID while no `--done` for it was passed. Same heuristic class as `#queue-strike-on-halt` filed earlier. Suppressed with `` so this report can land.
-❯ Please split out the waves as #next-steps.
-### Re: #next-steps wave split — opus-4-7
-
-Split `#adcr` umbrella into four discrete backlog items, one per wave. Each is now an actionable cycle with the plan reference inlined for context.
-
-Backlog after this cycle (top → bottom):
-
-1. **`#adcr-wave-1`** — leaves: `id` + `crdt` + `model_tier` + `pending` + `component` (~7.6k LOC, no seam decisions). Includes cold-baseline capture.
-2. **`#adcr-wave-2`** — `frontmatter` + `project_config` together (mutual refs).
-3. **`#adcr-wave-3`** — `template` (depends on Wave 1 + Wave 2).
-4. **`#adcr-wave-4`** — `diff` per `#rtx6` Option 1 (file split).
-5. **`#adcr`** — umbrella execute item (stays open until all four waves close; acts as the rollup tracker).
-
-**Top of backlog: `#adcr-wave-1`**.
-
-Each wave item carries its plan reference (`tasks/agent-doc/plan-agent-doc-core-extraction.md`), the exact modules + public types it covers, dependencies on prior waves, and the I/O wrappers that stay in the main crate. So an operator can pick any wave and start without re-deriving the contract.
-❯ The backlog is not ordered by priority. #agent-doc-bug. Please order by priority.
-### Re: backlog priority reorder + #agent-doc-bug — opus-4-7
-
-Reordered via `--pending-reorder` and filed the bug.
-
-Plan: tasks/agent-doc/plan-pending-add-prepend-semantics.md
-
-#### Backlog (new order)
-
-1. `#pjb4` — `#adcr-wave-1` (leaves)
-2. `#yhsr` — `#adcr-wave-2` (frontmatter + project_config)
-3. `#yxvq` — `#adcr-wave-3` (template)
-4. `#mzzd` — `#adcr-wave-4` (diff per `#rtx6` Option 1)
-5. `#adcr` — umbrella rollup
-
-**Top: `#pjb4` (`#adcr-wave-1`).**
-
-#### Bug captured in `tasks/agent-doc/agent-doc-bugs2.md`
-
-- [ ] [#pending-add-append-not-prepend] `--pending-add` appends new items below the previous CLI arg within the same finalize cycle, contradicting SKILL.md "Pending capture rule" ("Put new items at the beginning of agent:backlog"). Repro: tasks/agent-doc/open-code.md commit f94e7851c — agent added wave-4, wave-3, wave-2, wave-1 expecting wave-1 on top per SKILL.md; actual backlog was wave-4 on top (pure CLI-arg order). User flagged it as bug; agent had to issue `--pending-reorder`. Plan: tasks/agent-doc/plan-pending-add-prepend-semantics.md (recommend Option A — strict prepend, drop the implicit adjacency heuristic).
-
-#### Root cause analysis
-
-Last cycle's CLI-arg order was wave-4, wave-3, wave-2, wave-1. SKILL.md "Pending capture rule" says new items go to the beginning of the backlog, so I added in reverse priority expecting wave-1 to end up on top.
-
-Actual behavior: each `--pending-add` appended below the previously-added item in the same cycle. Final order matched argv order, not the documented prepend semantics. Either `op_add` defaults to append, or the "adjacent to predecessor" branch (second clause of the SKILL.md rule) fires on every consecutive same-cycle add and inserts below the predecessor.
-
-#### Recommended fix (Option A in plan)
-
-Make `--pending-add` strictly prepend regardless of batch context. Each add inserts at the top; multiple `--pending-add` args in one CLI invocation stack newest-on-top. Adjacency-to-predecessor becomes opt-in via an explicit flag, not an implicit heuristic. Matches SKILL.md as written.
-
-Files: `src/agent-doc/src/pending.rs` (op_add behavior), `src/agent-doc/src/write.rs` (--pending-add consumer), `SKILL.md` (wording confirmation), `SPEC.md` (pending operations contract).
-
-#### Notable session quirk
-
-Before this cycle the session document had snapshot drift (snapshot 8061 bytes, HEAD 10787 bytes) because the prior cycle's `--pending-add` mutations committed via a manual `git commit` (commit `f94e7851c`) rather than through `finalize`. Recovery: copied HEAD into the snapshot file so preflight could diff cleanly. Worth flagging if it recurs.
-
-This response was also rejected initially by `pending_done_guard` (mention of `#adcr`) and again by `pending_capture_guard` (the plan-path citation in backticks and inside a bullet did not satisfy the detector — only a plain-text `Plan: path` outside a list passes). Both are sibling heuristics in the same family as `#queue-strike-on-halt` — guards firing on agent-doc's own legitimate output.
-<!-- agent:boundary:29b7d58b -->
+<!-- agent:boundary:e09684a2 -->
 <!-- /agent:exchange -->
 
 ## Queue

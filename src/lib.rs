@@ -34,7 +34,9 @@ pub mod crdt;
 pub mod debounce;
 pub mod ffi;
 pub mod frontmatter;
-pub mod ipc_socket;
+// Moved to `agent-doc-orchestration` (Wave 1a of `#adoc-orchestration-crate`).
+// Re-exported so `crate::ipc_socket::*` call sites resolve unchanged.
+pub use agent_doc_orchestration::ipc_socket;
 pub mod merge;
 pub mod model_tier;
 pub mod project_config;

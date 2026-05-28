@@ -1,5 +1,5 @@
 [workspace]
-members = ["agent-doc-core"]
+members = ["agent-doc-core", "agent-doc-orchestration"]
 
 [package]
 name = "agent-doc"
@@ -29,6 +29,7 @@ path = "src/main.rs"
 
 [dependencies]
 agent-doc-core = { path = "agent-doc-core" }
+agent-doc-orchestration = { path = "agent-doc-orchestration" }
 anyhow = "1"
 fs2 = "0.4"
 clap = { version = "4", features = ["derive"] }

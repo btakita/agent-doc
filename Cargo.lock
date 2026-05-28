@@ -24,6 +24,7 @@ name = "agent-doc"
 version = "0.34.0"
 dependencies = [
  "agent-doc-core",
+ "agent-doc-orchestration",
  "agent-kit",
  "alacritty_terminal",
  "anyhow",
@@ -83,6 +84,17 @@ dependencies = [
  "toml",
  "uuid",
  "yrs",
+]
+
+[[package]]
+name = "agent-doc-orchestration"
+version = "0.1.0"
+dependencies = [
+ "agent-doc-core",
+ "anyhow",
+ "interprocess",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

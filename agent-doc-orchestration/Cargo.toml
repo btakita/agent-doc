@@ -1,0 +1,20 @@
+[package]
+name = "agent-doc-orchestration"
+version = "0.1.0"
+edition = "2024"
+description = "Orchestration layer for agent-doc (routing, git, sessions, IPC, supervision, sync) — sits between the CLI and agent-doc-core"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+publish = false
+
+[lib]
+name = "agent_doc_orchestration"
+
+[dependencies]
+agent-doc-core = { path = "../agent-doc-core" }
+anyhow = "1"
+interprocess = { version = "2", default-features = false }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"

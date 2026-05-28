@@ -1,0 +1,20 @@
+[package]
+name = "agent-doc-core"
+version = "0.1.0"
+edition = "2024"
+description = "Pure document data layer for agent-doc (component parsing, frontmatter, template, CRDT, pending, diff classification, model tier)"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+publish = false
+
+[lib]
+name = "agent_doc_core"
+
+[dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+uuid = { version = "1", features = ["v4"] }
+pulldown-cmark = "0.12"
+yrs = "0.21"
+similar = "2"

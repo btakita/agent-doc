@@ -1,3 +1,6 @@
+[workspace]
+members = ["agent-doc-core"]
+
 [package]
 name = "agent-doc"
 version = "0.34.0"

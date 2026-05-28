@@ -66,6 +66,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-doc-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "pulldown-cmark",
+ "serde",
+ "serde_yaml",
+ "similar",
+ "uuid",
+ "yrs",
+]
+
+[[package]]
 name = "agent-kit"
 version = "0.4.0"
 dependencies = [

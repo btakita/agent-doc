@@ -67,6 +67,55 @@ Unlike `#adcr` (which split a *layer* with a clean dependency direction), the or
 - The 10 cluster modules above + their orchestration-adjacent neighbors (confirm the exact set in Wave 1 by following the import graph from `route`/`sync`/`start`).
 - Heavy deps move with them: `tokio`, `reqwest`/`ureq`/`hyper`/`rustls`, `interprocess`, `notify`, `rusqlite`, git, `zstd`, `tmux-router`.
 
+## REVISION after Wave 0+1a (dependency closure findings)
+
+Wave 0 (scaffold) + Wave 1a (`ipc_socket`) landed cleanly. But analyzing the
+`sessions`/`supervisor` closure for Wave 1b **invalidated the bottom-up "move
+leaves first" sequencing** below:
+
+- `sessions`/`supervisor` are leaves only by *intra-cluster* deps. Their full
+  `crate::` closure pulls in `input_diag`, `env`, `harness`, `project_controller`,
+  `session_actor`, `startup_miss`, `test_support`, then transitively
+  `ops_log`, `config`, `prompt`, `fs_util`, `snapshot`, `harness_prompt`.
+- **`snapshot` → `git`.** `snapshot` (a shared I/O utility) depends on `git`,
+  a cluster module. So the closure transitively reaches `git` and, through it,
+  the rest of the cluster. There is no small self-contained leaf set beyond
+  `ipc_socket`.
+- **Shared-util breadth:** `snapshot` is used by **35** files, `ops_log` by
+  **27**, `config` by **11** — across *both* CLI commands and orchestration.
+  They cannot move to pure `core` (they do `std::fs`), and orchestration cannot
+  depend back on `agent-doc` (circular).
+
+### Consequence — revised strategy (operator decision needed)
+
+A clean bottom-up extraction is not available. The realistic options:
+
+- **Option A — one large orchestration crate.** Move the entire entangled graph
+  (cluster + shared I/O utils `snapshot`/`config`/`fs_util`/`ops_log`/
+  `secret_redact` + `sessions`/`supervisor`/`session_actor`/`project_controller`/
+  `startup_miss`/`input_diag`/`env`/`harness`/`prompt`) into
+  `agent-doc-orchestration` in essentially one migration, leaving `agent-doc`
+  as `main.rs` + only the command modules that touch none of it. Largest single
+  move; most modules reach orchestration via `pub use` shims.
+- **Option B — 4th "base" layer.** A new `agent-doc-base` crate below
+  orchestration for the shared I/O utilities. **Blocked by `snapshot → git`:**
+  `snapshot` would have to drop its `git` dependency (invert it — pass a
+  commit/hash interface in) before it can sit below the orchestration layer.
+  Adds a layer and a refactor of `snapshot`'s git coupling.
+- **Option C — defer.** `ipc_socket` (Wave 1a) already proved the crate +
+  cross-crate shim + cdylib mechanism. Leave the rest until there is a concrete
+  build-time payoff that justifies the large migration; the editor slim-link
+  target is already served by `agent-doc-core` for the pure surface.
+
+**Recommendation:** Option A is the only one that delivers the CLI-shell build
+win without a `snapshot`/`git` refactor, but it is a multi-cycle, large-diff
+migration that should be scheduled deliberately (not auto-queued). Option B is
+cleaner long-term but front-loads a `snapshot` decoupling. Option C is the
+low-effort hold.
+
+The bottom-up wave sequencing below is **superseded** by this finding; it is
+retained only as the original reasoning.
+
 ## Migration waves (compilable increments)
 
 Because the cluster moves as one crate, "waves" are about migrating in **shim-preserving, always-green increments** (each ends with `make check` + `nm -D` FFI verification), not separate crates:

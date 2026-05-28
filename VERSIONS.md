@@ -6,6 +6,15 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **`agent-doc-core` v0.1.0 published to crates.io.** The pure document data
+  layer (`#adcr` extraction: component parsing, frontmatter, template, CRDT,
+  pending, diff classification, model tier, syntax, and the full pure C-ABI FFI
+  surface) is now a standalone published crate. `publish = false` removed; all
+  dependencies are crates.io crates (no path/git deps). Enables third-party FFI
+  consumers and the editor-plugin slim-link target (link `agent-doc-core` —
+  ~9.87s cold / 74 crates — instead of the full `agent-doc` orchestration crate
+  — 129s / 266 crates). The `#k9e1`/`#epv5`/`#vb8h`/`#e130` FFI relocations
+  moved all 15 pure FFI functions into `agent_doc_core::ffi` ahead of this.
 - **Strict finalize appends no longer overwrite prior exchange responses when
   the explicit baseline is stale.** For template/CRDT append-mode exchange
   writes under `finalize` or strict `write --commit`, if the supplied

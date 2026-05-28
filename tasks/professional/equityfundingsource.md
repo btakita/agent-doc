@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -37,16 +37,29 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 Compacted content:
 - Archived 6 response topic(s): Broker submit-deal LTV field; In /portal-broker/submit-a-deal, use `LTV (%)` and validate the field is a number.; Switch agent to claude; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-re [#2z8r]: How can we allow custom addresses?
-<!-- agent:boundary:4d56e2f7 -->
+❯ re [#2z8r]: How can we allow custom addresses?
+### Re: [#2z8r] custom addresses — opus-4-7
+
+
+Today's `/portal-broker/submit-a-deal` is already a free-text `property_address` input (`src/equityfundingsource-dev/lib/ui--browser--efs/portal/broker/submit_deal.tsx:114`), so "custom addresses" are already accepted there. The real question is how to keep that escape hatch once we wire #2z8r's autocomplete into the same field. The borrower side already shows the failure mode: `PropertyAddressSearch` (`src/equityfundingsource-dev/lib/ui--browser--efs/portal/borrower/new_application.tsx:425`) zeroes every structured field on input and only re-populates them when the user clicks a Census suggestion — type a rural parcel or new-construction address and you cannot advance.
+
+Recommended pattern when we land the spike (design only; #2z8r stays open):
+
+1. **"Use what I typed" affordance.** When the suggestion list is empty (or shows "No standardized matches"), surface a secondary button that accepts the raw string as `subject_property_address` / `property_address`, leaves the parsed `street/city/state/zip/county` empty, and stamps `address_verified=false` (plus `address_source='manual'`) on the row.
+2. **Manual entry toggle.** A "Enter address manually" link reveals the four/five split inputs so off-grid parcels, APNs, or unmapped new construction can still capture structured fields without depending on the provider. Same `address_verified=false` flag.
+3. **Persist provider metadata when verified.** When a suggestion is selected, keep `address_source='census'` (or whichever provider wins the spike) plus the `place_id`/`smarty_id`/`mapbox_id` and `lat/lng` so the admin pipeline can render a map preview and re-verify later.
+4. **Admin pipeline badge.** `/portal-admin` pipeline rows render an "Unverified address" pill for `address_verified=false` so reviewers know to confirm with the broker (parcel ID, county records, attached docs) before underwriting.
+5. **Provider choice doesn't change the contract.** Google Places, Mapbox, Smarty, and Census all answer the same way: structured + verified when matched, raw + unverified when not. The spike picks the provider on cost/coverage/free-text fallback quality; the UX/data contract above stays the same.
+
+This keeps autocomplete as the happy path, lets brokers submit anything that has no clean USPS/Census match, and gives admin a clear flag to chase verification rather than silently accepting unparsed strings.
+<!-- agent:boundary:b1785251 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue auto -->
-- re [#2z8r]: How can we allow custom addresses?
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

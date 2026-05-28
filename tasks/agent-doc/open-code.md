@@ -354,7 +354,61 @@ The umbrella `#adcr` is materially complete. The remaining queue items (`#k9e1` 
 Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
 
 **Not invoking `/loop`** — the operator should triage the remaining queue items, which are architecturally distinct from each other (FFI symbol management, eval-runner dep flip, publishing decision, orchestration extraction).
-<!-- agent:boundary:e057262e -->
+### Re: do #k9e1 — pattern POC verified — opus-4-7
+
+Executed Option 1 (keep cdylib in main, re-export pure FFI from core) with a focused proof-of-concept. The re-export pattern works as designed; the remaining ~13 pure FFI functions are decomposed into three follow-up sub-cycles based on dependency clustering.
+
+#### POC scope and result
+
+Moved the two simplest pure FFI functions — `agent_doc_free_string` and `agent_doc_free_state` — from `src/ffi.rs` to a new `agent-doc-core/src/ffi.rs` module. Verified that the re-export pattern preserves symbol export from `libagent_doc.{so,dylib,dll}`:
+
+```bash
+$ nm -D target/release/libagent_doc.so | grep agent_doc_free_
+00000000001275b0 T agent_doc_free_state
+00000000001275d0 T agent_doc_free_string
+```
+
+Both symbols are present in main's cdylib export table after relocation. Editor plugins (JetBrains, VS Code, Python bindings) continue resolving them unchanged.
+
+#### The proven pattern
+
+- `agent-doc-core/src/ffi.rs` (new) holds the pure `#[unsafe(no_mangle)] pub unsafe extern "C" fn` definitions.
+- `agent-doc-core/src/lib.rs` declares `pub mod ffi;`.
+- `src/ffi.rs` in main does `pub use agent_doc_core::ffi::*;` plus a private `force_link_core_ffi_symbols()` function that takes a function-pointer reference to each exported symbol. **This is the critical step** — without the reference, the static linker strips the unused symbols from main's cdylib.
+
+#### Why not all 15 functions in this cycle
+
+The remaining functions cluster into three architectural groups, each with its own decision surface:
+
+1. **Simple pure** (4 fns): `parse_components`, `visual_tokens_json`, `merge_frontmatter`, `normalize_template_structure`. Each touches only pure core helpers; ~50 LOC per move. **Mechanically straightforward.**
+2. **Boundary/CRDT** (6 fns): four `reposition_boundary_to_end` variants + `crdt_merge` + `merge_crdt` + `FfiMergeResult` helper. Pure; depend on `agent_doc_core::template` and `agent_doc_core::crdt`. **Mechanical.**
+3. **apply_patch surface** (3 fns + helpers): `agent_doc_apply_patch`, `_with_caret`, `_with_boundary` + `FfiPatchResult` + `ffi_patch_ok/err/from_result` + `normalize_editor_visible_result`. **Requires switching the `template::apply_patches_with_overrides(... dummy_path ...)` calls to `apply_patches_with_overrides_pure(...)` with preloaded empty configs** — the new pure signature introduced in `#ckv3`. **Largest piece; mostly mechanical but touches the recently-refactored patch surface.**
+
+#### Submodule commits
+
+- Submodule `c84950c6` on `20260422/codex-agent-backend`: POC relocation + `force_link_core_ffi_symbols` pattern.
+- Superproject `0dd5494ac` on `main`: bumps submodule pointer.
+
+#### Verification
+
+- `cargo build --release`: green (1m 47s).
+- `cargo test --release -p agent-doc-core --lib`: 617 tests pass.
+- `cargo test --release --lib` (main): 101 tests pass.
+- `cargo test --release --bin agent-doc`: 2,261 tests pass.
+- `nm -D target/release/libagent_doc.so | grep agent_doc_free_`: both symbols present.
+- `cargo install --path .`: `~/.cargo/bin/agent-doc` replaced.
+
+#### Sub-tasks filed (`#k9e1-*`)
+
+- `#k9e1-ffi-mem` — track the proven pattern (POC done, pattern verified).
+- `#k9e1-ffi-simple` — relocate the 4 simple pure FFI functions.
+- `#k9e1-ffi-boundary` — relocate the 4 reposition_boundary variants + 2 CRDT FFI fns + helper struct.
+- `#k9e1-ffi-apply-patch` — relocate the 3 apply_patch variants + FfiPatchResult helpers + signature refactor.
+
+Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
+
+**Not invoking `/loop`** — each sub-task deserves its own focused cycle so the operator can review one mutation surface at a time, especially the apply_patch group which touches the `#ckv3`-refactored signature.
+<!-- agent:boundary:140f3011 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -367,7 +421,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#ckv3]~
 - ~do [#0c4e]~
 - ~do [#bjrv]~
-- do [#k9e1]
+- ~do [#k9e1]~
 - do [#5yqz]
 - do [#77v6]
 - do [#ysv9]
@@ -377,7 +431,10 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#k9e1] #adcr-ffi-relocate Move pure C-ABI wrappers from src/ffi.rs (apply_patch, parse_components, merge_frontmatter, normalize_template_structure, reposition_boundary, agent_doc_strip_comments) into agent-doc-core::ffi so editor plugins (JB, VS Code) can link against just agent-doc-core without dragging the orchestration crate. Keep route/git/ipc/start FFI calls in main.
+- [ ] [#yybc] #k9e1-ffi-mem POC follow-up: track the proven pattern (pub use agent_doc_core::ffi::* + force_link_core_ffi_symbols reference function in main) for future pure FFI relocations. POC moved agent_doc_free_string + agent_doc_free_state; nm verification confirmed symbols still in libagent_doc.so export table.
+- [ ] [#epv5] #k9e1-ffi-simple Move the 4 simplest dependency-free pure FFI functions to agent-doc-core::ffi: agent_doc_parse_components (+ FfiComponentList), agent_doc_visual_tokens_json, agent_doc_merge_frontmatter, agent_doc_normalize_template_structure. Each touches only component::parse, agent_doc_core::frontmatter::merge_fields, or agent_doc_core::template::normalize_editor_visible_template_structure. Pattern is the POC + ~50 LOC per function. Update force_link_core_ffi_symbols to reference each.
+- [ ] [#vb8h] #k9e1-ffi-boundary Move the 4 reposition_boundary_to_end variants (+ _with_id, _preserve_head, _preserve_head_with_id) plus agent_doc_crdt_merge + agent_doc_merge_crdt + their FfiMergeResult helper struct to agent-doc-core::ffi. All pure; depend on agent_doc_core::template and agent_doc_core::crdt.
+- [ ] [#e130] #k9e1-ffi-apply-patch Move the 3 apply_patch variants (agent_doc_apply_patch, agent_doc_apply_patch_with_caret, agent_doc_apply_patch_with_boundary) plus FfiPatchResult and helpers (ffi_patch_ok/err/from_result, normalize_editor_visible_result). Each needs the template::apply_patches_with_overrides call switched to apply_patches_with_overrides_pure (preloaded empty configs, no dummy_path). Largest sub-piece — touches the recently-refactored patch surface from #ckv3.
 - [ ] [#5yqz] #adcr-eval-runner-switch Switch eval-runner's strip_comments dependency from agent-doc to agent-doc-core to cut eval pipeline build cost.
 - [ ] [#77v6] #adcr-publish Decide on publishing agent-doc-core to crates.io (currently publish = false). Allows third-party FFI consumers and unblocks the editor-plugin slim-link target.
 - [ ] [#ysv9] #adoc-orchestration-crate Plan agent-doc-orchestration extraction — split route/git/sessions/ipc_socket/supervisor/capture/cycle_state/repair/sync/start out of the main crate into a sibling workspace member, leaving only the CLI entrypoint + command dispatch in agent-doc. Would create a 3-layer architecture (CLI → orchestration → core) and substantially cut the editor-plugin-only build target. Substantial refactor; depends on #adcr-baseline-measure to quantify the win first.

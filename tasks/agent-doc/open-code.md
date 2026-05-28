@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -72,21 +72,27 @@ The umbrella execute item remains the queue head after this consume. It splits i
 
 This response was initially rejected by `pending_done_guard` because the body mentions the umbrella item ID while no `--done` for it was passed. Same heuristic class as `#queue-strike-on-halt` filed earlier. Suppressed with `` so this report can land.
 Please split out the waves as #next-steps.
-<!-- agent:boundary:5f409cbc -->
+### Re: #next-steps wave split — opus-4-7
+
+Split `#adcr` umbrella into four discrete backlog items, one per wave. Each is now an actionable cycle with the plan reference inlined for context.
+
+Backlog after this cycle (top → bottom):
+
+1. **`#adcr-wave-1`** — leaves: `id` + `crdt` + `model_tier` + `pending` + `component` (~7.6k LOC, no seam decisions). Includes cold-baseline capture.
+2. **`#adcr-wave-2`** — `frontmatter` + `project_config` together (mutual refs).
+3. **`#adcr-wave-3`** — `template` (depends on Wave 1 + Wave 2).
+4. **`#adcr-wave-4`** — `diff` per `#rtx6` Option 1 (file split).
+5. **`#adcr`** — umbrella execute item (stays open until all four waves close; acts as the rollup tracker).
+
+**Top of backlog: `#adcr-wave-1`**.
+
+Each wave item carries its plan reference (`tasks/agent-doc/plan-agent-doc-core-extraction.md`), the exact modules + public types it covers, dependencies on prior waves, and the I/O wrappers that stay in the main crate. So an operator can pick any wave and start without re-deriving the contract.
+<!-- agent:boundary:e8a3689c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~[#stqc]~
-- ~[#5x1r]~
-- ~[#d97v]~
-- ~[#adcr]~
-- ~[#rtx6]~
-- ~[#d97v]~
-- ~[#adcr]~
-- Please split out the waves as #next-steps.
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

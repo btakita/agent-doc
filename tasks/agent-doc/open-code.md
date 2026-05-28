@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -122,14 +122,14 @@ Seven previously `pub(crate)` helpers became `pub`. These are internal-shaped AP
 Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
 
 **Not invoking `/loop`** — Wave 2 is another ~2.6k LOC move with its own test surface and the mutual `frontmatter ↔ project_config` reference pair, and should be its own operator cycle.
-<!-- agent:boundary:0ff481d5 -->
+<!-- agent:boundary:9129ba3c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#pjb4]
+- ~do [#pjb4]~
 - do [#yhsr]
 - do [#yxvq]
 - do [#mzzd]

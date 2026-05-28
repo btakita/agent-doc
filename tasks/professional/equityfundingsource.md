@@ -32,72 +32,12 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260528-211312.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260528-215443.md`*
 
 Compacted content:
-- Archived 23 response topic(s): transfer full exchange; admin account management; admin account passwords; 20 more
-In /portal-broker/submit-a-deal, use `LTV (%)` and validate the field is a number.
-
-❯ Should `Property / deal type` be a dropdown? Would you know the comprehensive set of values?
-❯ #spec-test-commit-push
-### Re: Broker submit-deal LTV field — gpt-5
-
-Implemented the `/portal-broker/submit-a-deal` LTV change locally.
-
-Changed paths:
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/broker/submit_deal.tsx`: label is now `LTV (%)`, the input is `type="number"` with decimal step/min handling, and pre-qual URL values are normalized into a numeric field value.
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/broker/pre_qual_tool.tsx`: pre-qual handoff now passes bare numeric `ltv_pct` instead of a formatted percent string.
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/broker/routes.ts`: deal submission rejects non-empty non-numeric `ltv_pct` with `ltv_pct must be a number`.
-- `src/equityfundingsource-dev/tests/broker-portal.test.ts`: broker portal contract coverage now checks the numeric LTV field, numeric prefill handoff, and API validation message.
-
-Commands and verification:
-- `tsift status --fix` at the workspace root, then `tsift index .` / `tsift status` in `src/equityfundingsource-dev`.
-- `make check` in `src/equityfundingsource-dev` passed: 212 Bun tests, app build, and Worker build.
-- `git diff --check` passed.
-- `gh run list --workflow CI --limit 1` found no `CI` workflow in either the EFS submodule or root repo. The root `Agent Doc` workflow's latest run failed before jobs started because GitHub reported an account billing/spending-limit startup blocker, including the `tmux-ci` job, so there is no code/tmux regression log to fix from CI.
-
-Confidence: high. Escalation: no deploy, code commit, or push was requested by the active queued prompt.
-### Re: In /portal-broker/submit-a-deal, use `LTV (%)` and validate the field is a number. — gpt-5
-
-Done. The implementation and verification details are in the preceding response; this exact-topic closeout is to advance the active queue head after the binary preserved it on the first write.
-### Re: Switch agent to claude — opus-4-7
-
-Acknowledged. The session is now running under Claude (opus-4-7); the `agent: claude` frontmatter edit takes effect on this cycle. No other prompts queued — ready for the next directive.
-
-### Re: Should `Property / deal type` be a dropdown? — opus-4-7
-
-Yes — and the comprehensive set already lives in the broker Pre-Qual Tool, so we should reuse it rather than invent a new vocabulary. The cleanest shape is **two dropdowns**, not one, because the Pre-Qual already collects these as separate fields and the submit-deal page just joins them with `" - "` to compose `deal_type`. A single dropdown of 30 (6×5) combinations would be noisier than the field deserves.
-
-**Enumerations (verbatim from `pre_qual_tool.tsx`):**
-
-- **Property type:** Single-family residential, Multi-family residential, Condo, Commercial, Land, Ground-up construction
-- **Loan purpose:** Purchase bridge, Cash-out refinance, Business purpose, Construction, Other
-
-### Re: #spec-test-commit-push — opus-4-7
-
-Implemented, tested, and shipped to `main` in both the EFS submodule and the agent-loop root.
-
-Changed paths:
-- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/broker/submit_deal.tsx`: extracted `PROPERTY_TYPES` / `LOAN_PURPOSES` constants, replaced the free-text "Property / deal type" `<Field>` with two `<SelectField>`s (`broker-submit-property-type`, `broker-submit-loan-purpose`), added a local `SelectField` component with a "Select…" placeholder option, and reshaped form state into `SubmitDealForm` (extends `BrokerDealSubmitInput` with `property_type` + `loan_purpose`). On submit, `compose_deal_type_(property_type, loan_purpose)` rebuilds the canonical `"{property} - {purpose}"` string so the backend `deal_type` contract stays unchanged. `deal_prefill_from_url_` now uses `match_option_` to coerce URL values into the enumerated set so the prefilled dropdowns render with valid selections.
-- `src/equityfundingsource-dev/tests/broker-portal.test.ts`: contract coverage now asserts the new dropdown ids/labels, the `PROPERTY_TYPES` / `LOAN_PURPOSES` symbols, a sample value from each list, the `compose_deal_type_` helper, removal of the old `Property / deal type` label, and that prefill goes through `match_option_` with `property_type` / `loan_purpose` URL keys.
-- `src/equityfundingsource-dev/docs/current_progress.md`: pre-qual handoff bullet now reads "property type, loan purpose" and a new bullet documents the dropdown split + unchanged `deal_type` API contract.
-- Bundled the previously uncommitted broker-portal LTV work that the status header already advertised as deployed: `app/equityfundingsource/lib/broker/routes.ts` (`has_value_` guard + `'ltv_pct must be a number'` rejection only when non-empty) and `lib/ui--browser--efs/portal/broker/pre_qual_tool.tsx` (`String(result.ltv_pct)` instead of `pct_(...)` for the submit-deal handoff URL).
-
-Commands and verification:
-- `make check` in `src/equityfundingsource-dev`: **212 Bun tests pass**, app build OK, Worker build OK (`dist/worker/index.js` 479.4kb).
-- `git diff --check` clean.
-- EFS submodule: committed `24a109d` (`feat(broker): split submit-deal Property/deal type into Property type + Loan purpose dropdowns`), pushed to `origin/main`.
-- Root agent-loop: committed `69be35403` (`chore(efs): bump submodule to 24a109d`), pushed to `origin/main`.
-- `gh run list --workflow CI --limit 1`: no `CI` workflow defined in either repo; root `Agent Doc` workflow latest run remains gated by the GitHub billing/spending-limit startup blocker, classified as an external CI-start blocker, not a code/tmux regression.
-
-Confidence: high. Escalation: none — workers.dev cutover is deferred per the status header, so no Worker redeploy is requested by this change; next deploy will pick up the dropdown on its normal cycle.
-❯ The `Property address` is a free text field. What do you recommend to enter in the address?
-### Re: Property address recommendation — opus-4-7
-
-Recommend keeping it free-text but adding a one-line USPS-style placeholder (`123 Main St, Springfield, IL 62701`) so brokers consistently enter `street, city, state ZIP` on one line. Addresses are genuinely unstructured (units, lot/parcel descriptors, rural routes, multi-parcel deals), so splitting into street/city/state/ZIP fields tends to fight the broker workflow and lose data — TMO and the appraisal package both want the full string anyway.
-
-If we want stronger data quality later, the high-value upgrade is **Google Places Autocomplete** (or Mapbox/Smarty) wired to the same input: it preserves free-text fallback for off-grid parcels, returns a normalized address + lat/lng we can persist alongside the raw string, and unlocks map previews in the admin pipeline. Tradeoff: per-request API cost, an extra script tag, and a key in `wrangler.toml`. Added a `[recommended]` backlog item to spike Google Places vs. Mapbox vs. Smarty — say the word and I'll pull it off the backlog.
-<!-- agent:boundary:8815502e -->
+- Archived 6 response topic(s): Broker submit-deal LTV field; In /portal-broker/submit-a-deal, use `LTV (%)` and validate the field is a number.; Switch agent to claude; 3 more
+- Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
+<!-- agent:boundary:bbfa6911 -->
 <!-- /agent:exchange -->
 ###
 <!--

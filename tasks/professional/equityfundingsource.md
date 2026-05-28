@@ -63,7 +63,35 @@ Done. The implementation and verification details are in the preceding response;
 ### Re: Switch agent to claude — opus-4-7
 
 Acknowledged. The session is now running under Claude (opus-4-7); the `agent: claude` frontmatter edit takes effect on this cycle. No other prompts queued — ready for the next directive.
-<!-- agent:boundary:f0733891 -->
+
+### Re: Should `Property / deal type` be a dropdown? — opus-4-7
+
+Yes — and the comprehensive set already lives in the broker Pre-Qual Tool, so we should reuse it rather than invent a new vocabulary. The cleanest shape is **two dropdowns**, not one, because the Pre-Qual already collects these as separate fields and the submit-deal page just joins them with `" - "` to compose `deal_type`. A single dropdown of 30 (6×5) combinations would be noisier than the field deserves.
+
+**Enumerations (verbatim from `pre_qual_tool.tsx`):**
+
+- **Property type:** Single-family residential, Multi-family residential, Condo, Commercial, Land, Ground-up construction
+- **Loan purpose:** Purchase bridge, Cash-out refinance, Business purpose, Construction, Other
+
+### Re: #spec-test-commit-push — opus-4-7
+
+Implemented, tested, and shipped to `main` in both the EFS submodule and the agent-loop root.
+
+Changed paths:
+- `src/equityfundingsource-dev/lib/ui--browser--efs/portal/broker/submit_deal.tsx`: extracted `PROPERTY_TYPES` / `LOAN_PURPOSES` constants, replaced the free-text "Property / deal type" `<Field>` with two `<SelectField>`s (`broker-submit-property-type`, `broker-submit-loan-purpose`), added a local `SelectField` component with a "Select…" placeholder option, and reshaped form state into `SubmitDealForm` (extends `BrokerDealSubmitInput` with `property_type` + `loan_purpose`). On submit, `compose_deal_type_(property_type, loan_purpose)` rebuilds the canonical `"{property} - {purpose}"` string so the backend `deal_type` contract stays unchanged. `deal_prefill_from_url_` now uses `match_option_` to coerce URL values into the enumerated set so the prefilled dropdowns render with valid selections.
+- `src/equityfundingsource-dev/tests/broker-portal.test.ts`: contract coverage now asserts the new dropdown ids/labels, the `PROPERTY_TYPES` / `LOAN_PURPOSES` symbols, a sample value from each list, the `compose_deal_type_` helper, removal of the old `Property / deal type` label, and that prefill goes through `match_option_` with `property_type` / `loan_purpose` URL keys.
+- `src/equityfundingsource-dev/docs/current_progress.md`: pre-qual handoff bullet now reads "property type, loan purpose" and a new bullet documents the dropdown split + unchanged `deal_type` API contract.
+- Bundled the previously uncommitted broker-portal LTV work that the status header already advertised as deployed: `app/equityfundingsource/lib/broker/routes.ts` (`has_value_` guard + `'ltv_pct must be a number'` rejection only when non-empty) and `lib/ui--browser--efs/portal/broker/pre_qual_tool.tsx` (`String(result.ltv_pct)` instead of `pct_(...)` for the submit-deal handoff URL).
+
+Commands and verification:
+- `make check` in `src/equityfundingsource-dev`: **212 Bun tests pass**, app build OK, Worker build OK (`dist/worker/index.js` 479.4kb).
+- `git diff --check` clean.
+- EFS submodule: committed `24a109d` (`feat(broker): split submit-deal Property/deal type into Property type + Loan purpose dropdowns`), pushed to `origin/main`.
+- Root agent-loop: committed `69be35403` (`chore(efs): bump submodule to 24a109d`), pushed to `origin/main`.
+- `gh run list --workflow CI --limit 1`: no `CI` workflow defined in either repo; root `Agent Doc` workflow latest run remains gated by the GitHub billing/spending-limit startup blocker, classified as an external CI-start blocker, not a code/tmux regression.
+
+Confidence: high. Escalation: none — workers.dev cutover is deferred per the status header, so no Worker redeploy is requested by this change; next deploy will pick up the dropdown on its normal cycle.
+<!-- agent:boundary:fb444994 -->
 <!-- /agent:exchange -->
 ###
 <!--

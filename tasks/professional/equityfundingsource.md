@@ -260,7 +260,6 @@ No new document changes were detected in `/home/brian/work/btakita/agent-loop/ta
 
 Preflight did auto-commit a queued dispatch snapshot first, then returned `no_changes: true`. The document is also large enough that `agent-doc` recommends compacting only with explicit approval.
 Add items to the top of the backlog.
-
 ### Re: Add items to the top of the backlog. — gpt-5
 
 Added the broker pre-qual completion work to the top of the backlog in priority order.
@@ -270,7 +269,7 @@ Top backlog item: `#bpq-api`.
 The current `/portal-broker/pre-qual-tool` page is static, so the first item is the backend calculation/API contract; UI wiring, submission handoff, and test/docs coverage follow it. No product code changed in this cycle.
 
 Closeout evidence: changed path is `tasks/professional/equityfundingsource.md` only. Commands run: `tsift status`, `tsift status --fix`, `agent-doc --version`, `agent-doc preflight`, `agent-doc plan`, `git status --short`, `git diff`, and this `agent-doc finalize`. Verification is the binary-owned finalize/session-check plus document review; no tests were run because this cycle only mutates the session backlog. Confidence is high. Escalation: none.
-<!-- agent:boundary:27eb339f -->
+<!-- agent:boundary:5d8f27d7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -283,7 +282,10 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog -->
-
+- [ ] [#bpq-api] Broker pre-qual API: define EFS prequalification rules and add broker-authenticated POST /api/broker/pre-qual returning LTV, indicative rate, eligibility status, commission estimate, reasons, and rate-sheet reference.
+- [ ] [#bpq-ui] Broker pre-qual UI: replace static read-only fields in /portal-broker/pre-qual-tool with editable inputs, loading/error/retry states, and live API results.
+- [ ] [#bpq-prefill] Broker pre-qual to submission handoff: carry an eligible scenario into /portal-broker/submit-a-deal as prefilled deal fields or a saved draft.
+- [ ] [#bpq-tests] Broker pre-qual coverage: add tests for rule boundaries, validation errors, authenticated endpoint behavior, UI API wiring, and docs/current-progress updates.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
 - [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document intelligence/search, borrower/broker/investor/admin portals, and tenant-ready resale packaging.
 - [ ] [#f4rq] Verify an EFS-owned sending domain in Resend, then switch APPLICATION_LEAD_NOTIFICATION_FROM and APPLICATION_LEAD_NOTIFICATION_TO from testing-mode values to EFS production addresses.

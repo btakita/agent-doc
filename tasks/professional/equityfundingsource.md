@@ -473,8 +473,32 @@ Verification for the implemented item remains: `bun test tests/public-header.tes
 `.pl-7` has the same styling as `.pl-10`.
 Try `.pl-7` or `.pl-8` and ensure the tailwind style is loaded.
 ![img_10.png](img_10.png)
-#spec-test-commit-push
-<!-- agent:boundary:e5e70f91 -->
+### Re: rate estimator input padding — gpt-5
+
+I changed the public homepage rate-estimator amount inputs from `pl-10` to `pl-8` and added the matching critical CSS utility so the Tailwind-style class is actually loaded during first paint:
+
+- `class="efs-input pl-8"` is now used for both amount inputs.
+- Inline critical CSS now includes `.pl-8{padding-left:2rem}`.
+- The prior `.pl-10` utility is no longer the homepage contract, and the test now guards against accidentally keeping `pl-7` or `pl-10` on those inputs.
+
+Changed EFS paths:
+
+- `lib/ui--server--efs/home/index.ts`
+- `lib/ui--server--efs/styles/index.ts`
+- `tests/public-header.test.ts`
+- `prds/equity-funding-source-lending-portal-prd.md`
+
+Verification:
+
+- `bun test tests/public-header.test.ts` passed: 7 pass, 0 fail.
+- `git diff --check` passed.
+- `make check` passed: 212 pass, 0 fail; app build and worker build completed.
+- Built output inspection found both `efs-input pl-8` inputs and `.pl-8{padding-left:2rem}` in `app/equityfundingsource/dist/worker/index.js`.
+- GitHub Actions inspection: `gh workflow list` returned no workflows; `gh run list --workflow CI --limit 1` and `gh run list --workflow tmux-test --limit 1` both reported no matching workflow.
+- Tmux CI inspection: `make -n tmux-ci` has no `tmux-ci` target in the EFS repo.
+
+I did not commit, push, or deploy the EFS source repo because the current document edit removed `#spec-test-commit-push`. The source changes remain in the working tree for review. Escalation: none. Confidence: high.
+<!-- agent:boundary:b64341dc -->
 <!-- /agent:exchange -->
 ###
 <!--

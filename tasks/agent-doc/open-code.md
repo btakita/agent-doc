@@ -186,7 +186,34 @@ Wave 4 (after #rtx6): `diff` (or just its pure half).
 Plan-backed pending: I edited `#d97v` to cite the plan file path so the workspace scaffold work picks up the baseline contract.
 
 **Top of backlog after this cycle:** #rtx6, then #d97v.
-<!-- agent:boundary:4544aa93 -->
+### Re: #d97v halt — opus-4-7
+
+Stopping the auto-loop here. Two reasons:
+
+1. **Session accretion escalated to `block`** — 161 exchange lines, 4 response sections, 11 cycles in 30 min (8 no-op closeouts). The binary's guidance is "Restart cleanly from the current committed boundary before continuing." That's a stronger signal than the `warn` level we've been working through.
+2. **`#d97v` is not a low-tier preset-driven cycle.** The preset is `#spec-test-build-install-commit-push`. The scope from `plan-agent-doc-core-extraction.md` §workspace-scaffold is:
+   - Convert `src/agent-doc/Cargo.toml` (which currently declares a `cdylib + lib + bin` package with a `[patch.crates-io]` for `tmux-router`) into a workspace root.
+   - Create `src/agent-doc/agent-doc-core/` with its own `Cargo.toml` + stub `src/lib.rs`.
+   - Capture `cargo build --release --timings` baselines for both crates — meaningful numbers require `cargo clean` first, which costs the next dev build several minutes of wall time.
+   - `make check` (full suite, full clippy).
+   - `cargo install --path .` (per release convention — both `.bin/agent-doc` symlink target and `~/.cargo/bin/agent-doc` need to refresh).
+   - Manual testing gate in a live session per the release convention.
+   - Commit + push.
+
+   That's reasonable scoped work for an explicit operator-driven cycle, not for an auto-drained queue item where I can't pause for the manual testing gate.
+
+**Recommendation:** compact this session first, then engage `#d97v` explicitly.
+
+```
+agent-doc compact /home/brian/work/btakita/agent-loop/tasks/agent-doc/open-code.md --commit
+```
+
+After that, either re-queue `[#d97v]` manually or invoke `/agent-doc tasks/agent-doc/open-code.md` with `do #d97v` to scope the next cycle deliberately. `#rtx6` (diff seam decision) is a pure design item and can drain through the queue at any tier; `#adcr` is the umbrella execute item and should not auto-loop until at least Wave 1 lands.
+
+**Backlog left intact** — no `--done`, no `--pending-gate`. The queue head consumes `[#d97v]` as processed (you'll see queue advance to `[#adcr]` in preflight), but the pending item itself stays open for the explicit cycle.
+
+**Not invoking `/loop`** so the queue does not auto-advance to `#adcr`.
+<!-- agent:boundary:2fe88ef0 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -195,7 +222,7 @@ Plan-backed pending: I edited `#d97v` to cite the plan file path so the workspac
 preset #spec-test-build-install-commit-push
 - ~[#stqc]~
 - ~[#5x1r]~
-- [#d97v]
+- ~[#d97v]~
 - [#adcr]
 <!-- /agent:queue -->
 

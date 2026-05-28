@@ -37,7 +37,21 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 6 response topic(s): tokensave algorithms in tsift; reverse-engineering tokensave next steps; separate crates architecture; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:82a409ef -->
+
+### Re: #step-2-backends — gpt-5
+
+Extracted `tsift-sqlite` + `tsift-libsql` crates from substrate.rs + libsql_backend.rs. All tests pass (13 tsift-sqlite unit tests + full test suite). Built and installed locally. Committed and pushed as `129f6d1`.
+
+**What changed:**
+- `packages/tsift-sqlite/` — new crate with SqliteGraphStore + snapshot utilities (ReadOnlyRecovery, copy_read_only_snapshot, etc.) + re-exports tsift-core types. 3700+ LOC.
+- `packages/tsift-libsql/` — new crate with LibsqlGraphStore implementing GraphStore trait from tsift-core. 630+ LOC.
+- `SQLITE_GRAPH_SCHEMA_VERSION` moved to tsift-core (shared by both backends).
+- Snapshot utilities moved from index.rs to tsift-sqlite (were pub(crate), now pub).
+- `src/substrate.rs` and `src/libsql_backend.rs` are now thin re-export shims (`pub use tsift_sqlite::*;` / `pub use tsift_libsql::*;`).
+- Updated imports in index.rs, status.rs, summarize.rs, main.rs.
+- SPEC.md updated with new crate structure.
+- Workspace Cargo.toml updated: `backend-libsql` feature now gates `dep:tsift-libsql`.
+<!-- agent:boundary:a3b62e0d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -49,7 +63,7 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~[#step-1-core]~
-- [#step-2-backends]
+- ~[#step-2-backends]~
 - [#step-3-tokensave-reader]
 - [#step-4-graph]
 - [#step-5-algorithms]
@@ -63,7 +77,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#step-2-backends] Extract `tsift-sqlite` + `tsift-libsql` crates from substrate.rs + libsql_backend.rs (~3.7K LOC)
 - [ ] [#step-3-tokensave-reader] Add `tsift-tokensave` crate — DB reader adapter for .tokensave/tokensave.db with schema mapping + FTS5 search (~800 LOC)
 - [ ] [#step-4-graph] Extract `tsift-graph` crate + port LanguageExtractor trait, Language Registry, complexity counting from tokensave (~600 new + ~1.4K moved)
 - [ ] [#step-5-algorithms] Add `tsift-algorithms` crate — port iterative Tarjan SCC, composite health score, dead code detection, coupling analysis from tokensave (~850 LOC)

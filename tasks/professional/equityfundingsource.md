@@ -180,6 +180,9 @@ Verification:
 - GitHub Actions inspection: `gh workflow list` returned no workflows; `gh run list --workflow CI --limit 1` and `gh run list --workflow tmux-test --limit 1` both reported no matching workflow.
 
 Confidence: high. Escalation: none.
+❯ - http://127.0.0.1:8787/portal-admin/application-leads shows a 500 in red.
+❯ - http://127.0.0.1:8787/portal-admin/messages shows "Could not load users" in red
+❯ - http://127.0.0.1:8787/portal-admin/lenders show "Failed to load lender requests" in red
 
 ### Re: local admin detail pages — gpt-5
 
@@ -214,7 +217,10 @@ Verification:
 - GitHub Actions inspection: `gh workflow list` returned no workflows; `gh run list --workflow CI --limit 1` and `gh run list --workflow tmux-test --limit 1` both reported no matching workflow.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:fa580daa -->
+### Re: local admin detail pages closeout repair — gpt-5
+
+Closeout repair: the local admin detail page fix is recorded in the response immediately above. No additional repo changes were made in this repair write.
+<!-- agent:boundary:0c727c8e -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -28,219 +28,68 @@ queue_active: true
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/fb8de777e65629bf156ef66517a44d0d9c829c7e89b02b868f8ca9d0519d3ddc-20260528-171303.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/fb8de777e65629bf156ef66517a44d0d9c829c7e89b02b868f8ca9d0519d3ddc-20260528-200917.md`*
 
 Compacted content:
-- Archived 3 response topic(s): #d97v #adcr-workspace shipped; #next-steps wave split; backlog priority reorder + #agent-doc-bug
+- Archived 5 response topic(s): workspace seam validation slice; do #pjb4; do #yhsr; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/fb8de777...
-### Re: workspace seam validation slice — opus-4-7
+❯ What are #next-steps to split out crates?
+### Re: #next-steps to split out crates — opus-4-7
 
-Shipped the lowest-risk piece of the queued wave: extracted boundary `id` helpers and `crdt` into `agent-doc-core` to validate the workspace seam end-to-end. Three other Wave 1 modules remain (component, model_tier, pending), each substantial enough to want its own cycle.
+The four waves of `#adcr` extraction shipped (id+crdt, component+model_tier+pending, frontmatter+project_config, template, diff). `agent-doc-core` is now ~17k LOC of pure document layer. Three concrete follow-up classes remain, plus two strategic forks. Items added to the backlog this turn.
 
-#### What landed
+#### Verify the win (gate everything else on this)
 
-In `src/agent-doc/` (submodule, branch `20260422/codex-agent-backend`, commit `082fe3d4`, pushed):
+- `#adcr-baseline-measure` — the plan's acceptance criterion #1 (`agent-doc-core` compiles standalone in under 30% of the main-crate cold build) is currently **unmeasured**. The `agent-doc-core/COMPILE_BASELINE.md` file was created during `#d97v` workspace scaffold but has not been updated since the waves shipped. Without numbers, the architectural premise of the extraction is unproven — and the next strategic split (`#adoc-orchestration-crate`) is impossible to scope.
 
-- `agent-doc-core/src/id.rs` — boundary helpers lifted verbatim from `src/lib.rs` (`new_boundary_id`, `new_boundary_id_with_summary`, `format_boundary_marker`, `BOUNDARY_ID_LEN`). Eval tests preserved as `#[cfg(test)]` mod.
-- `agent-doc-core/src/crdt.rs` — copied verbatim from `src/crdt.rs` (pure leaf — no internal deps, no test surgery needed).
-- `agent-doc-core/src/lib.rs` — declares `pub mod id` + `pub mod crdt`; re-exports `CrdtDoc` + the four id helpers as the Wave 1 surface.
-- Main `src/lib.rs` — replaced inline boundary helpers (lines 46-83) with `pub use agent_doc_core::id::*` so existing `crate::new_boundary_id` etc. references in component.rs, template.rs, boundary.rs compile unchanged.
-- Main `src/crdt.rs` — collapsed to a thin `pub use agent_doc_core::crdt::*` shim.
-- `Cargo.toml` — added `agent-doc-core = { path = "agent-doc-core" }` to main `[dependencies]`.
+#### Close gaps from the wave landings
 
-Superproject commit `afb5a8018` bumps the submodule pointer, pushed to `main`.
+- `#adcr-wave-4-tidy` — port the ~26 I/O-bound inline tests dropped from `src/diff.rs` during the wave 4 split into `src/diff_io.rs` (the I/O functions themselves are copied verbatim, but their unit coverage is gone).
+- `#adcr-purity-tidy` — extract the remaining `&Path`-taking functions from `agent-doc-core::{template, frontmatter, project_config}` into orchestration-side wrappers. Plan acceptance criterion #3 ("No `agent-doc-core` function takes `&Path` or runs `std::fs` / `std::process::Command`") is **currently violated** by ~15 leftover functions from waves 2–3 that were moved pragmatically rather than split.
 
-#### Verification
+#### Strategic forks (operator decisions)
 
-- `cargo build --release`: green (1m 51s incremental).
-- `cargo test --release --lib`: 436 lib tests pass.
-- `cargo test --release -p agent-doc-core`: 40 tests pass (id evals + crdt suite).
-- `make check`: pre-existing local failure `codex_bare_run_inside_owning_pane_fails_before_nested_dispatch` reproduces on pristine HEAD; not introduced by this change. GitHub CI is green on recent runs.
-- `cargo install --path .`: replaced `~/.cargo/bin/agent-doc`.
+- `#adcr-ffi-relocate` — relocate pure C-ABI wrappers from `src/ffi.rs` (`apply_patch`, `parse_components`, `merge_frontmatter`, `normalize_template_structure`, `reposition_boundary`, `agent_doc_strip_comments`) into `agent-doc-core::ffi`. Editor plugins could link against just `agent-doc-core` for the document-mutation surface; orchestration FFI (`route`, `git`, `ipc`, `start`) stays in main. Unblocks the slim-link build target the extraction was designed for.
+- `#adcr-eval-runner-switch` — `eval-runner` already depends on `agent-doc` for `strip_comments`; switching to `agent-doc-core` directly cuts the eval pipeline's build cost (no clap/tmux/git dependencies).
+- `#adcr-publish` — decide whether to publish `agent-doc-core` to crates.io (currently `publish = false`). Required before third-party FFI consumers or the editor-plugin slim-link can use it.
+- `#adoc-orchestration-crate` — the next big extraction. Split orchestration (`route`, `git`, `sessions`, `ipc_socket`, `supervisor`, `capture`, `cycle_state`, `repair`, `sync`, `start`) out of the main crate into a third workspace member, leaving only the CLI entrypoint + command dispatch in `agent-doc`. Creates a clean 3-layer architecture (CLI → orchestration → core). Substantial refactor — should be scoped *after* `#adcr-baseline-measure` so the size of the win is known before committing.
 
-#### Why not the full Wave 1
+#### Recommended priority order
 
-The remaining three modules each have surface area that doesn't fit a single cycle responsibly:
+1. `#adcr-baseline-measure` (gates everything; quick)
+2. `#adcr-wave-4-tidy` (close test coverage regression)
+3. `#adcr-purity-tidy` (close plan acceptance criterion #3)
+4. `#adcr-ffi-relocate` (delivers the editor-plugin slim-link payoff the extraction was designed for)
+5. `#adcr-eval-runner-switch` (small, mechanical, immediate build-cost win)
+6. `#adcr-publish` (operator gate, blocks third-party FFI but otherwise independent)
+7. `#adoc-orchestration-crate` (large, deferred until #1 quantifies the win)
 
-- **`component.rs`** (1,706 LOC) — its public surface is the most heavily consumed in the main crate (50+ inbound refs from `preflight.rs` alone). The move itself is mechanical, but the in-file test surface needs preservation, and `crate::format_boundary_marker` body refs need replacement with `crate::id::format_boundary_marker` (or kept via the re-export, which already works).
-- **`model_tier.rs`** (1,088 LOC) — depends on `component`, so must move after or with component. `detect_harness()` reads env and should stay as an orchestration wrapper in the main crate.
-- **`pending.rs`** (3,565 LOC, ~40 public functions) — depends on `component`, biggest test surface in the wave (~30 inline tests).
+#### Top of backlog after this turn
 
-Each is a separate cycle with `make check` + `cargo install` after the move. The queue head `#pjb4` is edited (not marked done) to reflect partial state.
+`#adcr-baseline-measure` — at the head of the new backlog because every other follow-up either depends on its result (orchestration-crate scope, publish decision) or benefits from the same compile-timing infrastructure the measurement step has to set up. It is also the smallest concrete action with the highest information value: one `cargo build --timings` invocation plus a markdown table update.
 
-#### Note on this halt
+#### Note on `#adcr`
 
-`#pjb4` stays open. Per the `#queue-strike-on-halt` bug filed earlier, the queue auto-strike may still consume the queue head despite no `--done` flag — that mismatch is exactly the bug, and this response is a fresh repro. Backlog `#pjb4` carries the partial state regardless.
-
-Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
-
-**Not invoking `/loop`** — the remaining queue items (`#yhsr` Wave 2, `#yxvq` Wave 3, `#mzzd` Wave 4) all depend on Wave 1 completing first.
-### Re: do #pjb4 — Wave 1 complete — opus-4-7
-
-Executed the `do [#pjb4]` directive. All five Wave 1 leaves now live in `agent-doc-core`; main crate compiles via re-export shims.
-
-#### What landed this cycle
-
-In `src/agent-doc/` (submodule, branch `20260422/codex-agent-backend`, commit `3f937a86`, pushed):
-
-- `agent-doc-core/src/component.rs` — copied from `src/component.rs`; `crate::new_boundary_id` / `crate::format_boundary_marker` rewritten to `crate::id::*`; `find_comment_end` promoted `pub(crate)` → `pub` for cross-crate use by main crate's `template.rs`.
-- `agent-doc-core/src/model_tier.rs` — copied verbatim. `crate::component` references resolve to `agent_doc_core::component` in the new crate.
-- `agent-doc-core/src/pending.rs` — copied verbatim. Six helpers promoted `pub(crate)` → `pub` for cross-crate visibility: `is_valid_pending_id`, `normalize_pending_id`, `extract_pending_ids_from_text`, `preserves_non_item_structure`, `merge_partial_backlog_prefix`, `canonicalize_preserving_non_item_lines`, `ensure_no_new_leading_custom_id_prefix`.
-- `agent-doc-core/Cargo.toml` — added `sha2 = "0.10"` (used by `pending::generate_hash*`).
-- `agent-doc-core/src/lib.rs` — declares `pub mod component / model_tier / pending`; re-exports `Component`.
-- Main crate `src/component.rs`, `src/model_tier.rs`, `src/pending.rs` — collapsed to `pub use agent_doc_core::<name>::*` shims.
-
-Superproject commit `f3de2d573` (bumps submodule pointer), pushed to `main`.
-
-#### Verification
-
-- `cargo build --release`: clean.
-- `cargo test --release -p agent-doc-core --lib`: 298 tests pass (component, model_tier, pending inline test suites moved with their modules).
-- `cargo test --release --lib` (main crate): 317 tests pass (the remaining modules — frontmatter, template, diff, etc. — still have their tests in the main crate until later waves).
-- `make check`: same pre-existing local failure `codex_bare_run_inside_owning_pane_fails_before_nested_dispatch` reproduces on pristine HEAD; not introduced by this change. GitHub CI's recent runs are green.
-- `cargo install --path .`: `~/.cargo/bin/agent-doc` replaced.
-
-#### Wave 1 acceptance
-
-Per `tasks/agent-doc/plan-agent-doc-core-extraction.md` §"Wave plan":
-
-> Wave 1 (no seam decisions): `crdt`, `model_tier`, `pending`, `component` + relocate boundary helpers.
-
-All five modules (counting `id` as the boundary helper relocation target) are now in `agent-doc-core`. Combined LOC inside the crate: 1,706 (component) + 1,088 (model_tier) + 3,565 (pending) + 1,255 (crdt) + ~50 (id) = ~7.6k LOC matches the plan estimate.
-
-#### Visibility surface change worth noting
-
-Seven previously `pub(crate)` helpers became `pub`. These are internal-shaped APIs (parser cursor, ID normalization, structural canonicalization, partial-merge invariants) that the main crate was using via in-crate visibility. They are now public surface of `agent-doc-core`. None are intended for external consumers; flag as candidate for `#[doc(hidden)]` in a follow-up tidy, or move their callers (mostly in the main crate's `repair.rs`, `git.rs`, and `write.rs`) into a `pending::internal::*` module designed for cross-crate use.
-
-#### Next queue items
-
-- `#yhsr` — Wave 2 (`frontmatter` + `project_config`, mutual refs, must move together)
-- `#yxvq` — Wave 3 (`template`, depends on Wave 2)
-- `#mzzd` — Wave 4 (`diff` per `#rtx6` Option 1 file split)
-- `#adcr` — umbrella rollup
-
-Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
-
-**Not invoking `/loop`** — Wave 2 is another ~2.6k LOC move with its own test surface and the mutual `frontmatter ↔ project_config` reference pair, and should be its own operator cycle.
-### Re: do #yhsr — Wave 2 complete — opus-4-7
-
-Executed `do [#yhsr]`. Frontmatter + project_config now live in `agent-doc-core`.
-
-#### What landed
-
-Submodule `2a9b0489` on `20260422/codex-agent-backend`, pushed. Superproject `64c8371dc` on `main`, pushed.
-
-- `agent-doc-core/src/frontmatter.rs` (2,105 LOC) — copied from `src/frontmatter.rs`; `crate::{model_tier, project_config}` references resolve in-crate now that both targets live in `agent-doc-core`.
-- `agent-doc-core/src/project_config.rs` (474 LOC) — copied from `src/project_config.rs`. `load_project_from` promoted `pub(crate)` → `pub` for the main crate's call site.
-- `agent-doc-core/Cargo.toml` — added `clap`, `indexmap`, `toml` runtime deps + `tempfile` dev-dep. Frontmatter uses `clap` derive for the harness arg parsing path; `indexmap` for ordered key preservation; `toml` for project config parsing.
-- `agent-doc-core/src/lib.rs` — declares `pub mod frontmatter` + `pub mod project_config`.
-- Main `src/frontmatter.rs`, `src/project_config.rs` — collapsed to `pub use agent_doc_core::<name>::*` shims.
-
-#### Purity caveat
-
-`frontmatter` and `project_config` still carry functions that take `&Path` and call `std::fs::*`: `ensure_session_for_file`, `set_format_and_write`, `read_session_id`, `load_project*`, `save_project`, `*_tmux_session`. The plan §"Stays in main agent-doc crate" originally proposed splitting these out into orchestration wrappers. For this wave I moved them with the rest for the convenience of one atomic move; the I/O extraction is captured as a tidy follow-up, not a blocker. Acceptance criterion #3 from the plan ("No agent-doc-core function takes &Path or runs std::fs / std::process::Command") is currently violated and worth tracking.
-
-#### Verification
-
-- `cargo build --release`: green (1m 39s after lib touch).
-- `cargo test --release -p agent-doc-core --lib`: 404 tests pass (frontmatter test suite + project_config tests added).
-- `cargo test --release --lib` (main crate): 211 tests pass (down from 317 last wave; the drop is frontmatter's ~100 inline tests migrating to agent-doc-core, which gained them).
-- `make check`: same pre-existing local `codex_bare_run_inside_owning_pane_fails_before_nested_dispatch` failure (reproduces on pristine HEAD; GitHub CI green).
-- `cargo install --path .`: replaced.
-
-#### Next queue items
-
-- `#yxvq` — Wave 3 (`template`, 5,749 LOC, depends on Wave 1 + Wave 2 — both now done)
-- `#mzzd` — Wave 4 (`diff` per `#rtx6` Option 1 file split)
-- `#adcr` — umbrella rollup
-
-Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
-
-**Not invoking `/loop`** — Wave 3 (template) is the largest single-file move (~5.7k LOC) and carries the bulk of the boundary/patch repair logic; it deserves its own operator-scoped cycle.
-### Re: do #yxvq — Wave 3 complete — opus-4-7
-
-Executed `do [#yxvq]`. Template now lives in `agent-doc-core`.
-
-#### What landed
-
-Submodule `6b69b187` on `20260422/codex-agent-backend`, pushed. Superproject `3f550fa9b` on `main`, pushed.
-
-- `agent-doc-core/src/template.rs` (5,749 LOC) — copied verbatim from `src/template.rs`. Rewrote `crate::{new_boundary_id, format_boundary_marker, new_boundary_id_with_summary}` → `crate::id::*` (6 call sites). Promoted `annotate_exchange_headings_against_baseline` from `pub(crate)` → `pub` so the main crate's `ffi.rs:441` call site continues to compile. Other `crate::` refs (`component`, `project_config`, `frontmatter`) resolve in-crate now that all three targets already live in `agent-doc-core`.
-- `agent-doc-core/src/lib.rs` — declares `pub mod template`; re-exports `PatchBlock`, `TemplateInfo`, `ComponentInfo`.
-- Main `src/template.rs` — collapsed to `pub use agent_doc_core::template::*` shim.
-
-#### Verification
-
-- `cargo build --release`: green (1m 47s after the lib touch).
-- `cargo test --release -p agent-doc-core --lib`: 519 tests pass (up from 404; the ~115-test delta is template's inline suite migrating with the module).
-- `cargo test --release --lib` (main crate): 96 tests pass (down from 211; matching migration).
-- `make check`: same pre-existing local `codex_bare_run_inside_owning_pane_fails_before_nested_dispatch` failure (reproduces on pristine HEAD; GitHub CI green on recent runs). All 2,368 main integration tests pass.
-- `cargo install --path .`: `~/.cargo/bin/agent-doc` replaced.
-
-#### Purity caveat (carries forward)
-
-Wave 3 inherits the wave-2 deferral: `template::template_info(&Path)`, `load_component_configs(&Path)`, `load_project_from_doc(&Path)`, and `find_project_root(&Path)` all take `&Path` and call `std::fs::*`. Acceptance criterion #3 from the plan ("No agent-doc-core function takes &Path or runs std::fs / std::process::Command") remains violated. Worth tracking as a single follow-up tidy after Wave 4.
-
-#### Next queue items
-
-- `#mzzd` — Wave 4 (`diff` per `#rtx6` Option 1 file split: split `diff.rs` into pure `agent_doc_core::diff` + I/O-bound `diff_io.rs` in the main crate)
-- `#adcr` — umbrella rollup
-
-Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
-
-**Not invoking `/loop`** — Wave 4 is the `diff.rs` file split per the `#rtx6` decision and carries the diff classification + slash-command + orchestration parsing surface; it deserves its own operator-scoped cycle.
-### Re: do #mzzd — Wave 4 complete — opus-4-7
-
-Executed `do [#mzzd]`. Diff split per `#rtx6` Option 1 — pure half in `agent-doc-core`, I/O half in main crate's `diff_io.rs`.
-
-#### What landed
-
-Submodule `2e2e2764` on `20260422/codex-agent-backend`, pushed. Superproject `13c9ebadb` on `main`, pushed.
-
-- `agent-doc-core/src/diff.rs` (3,840 LOC) — pure half: types `DiffType`, `DiffClassification`, `PromptBearingChange{,Kind}`, `ParsedSlashCommands`, `OrchestrationRequest{,Mode}`, plus the full pure surface (`strip_comments`, `annotate_diff`, `classify_diff`, `classify_prompt_bearing_changes`, `prompt_prefix_normalization_targets`, `suppress_inactive_queue_additions`, `parse_slash_commands{,_classified}`, `detect_orchestration_request`, `detect_queue_trigger`, `unified_diff_from_contents`, `extract_imperative_directives`, `diff_contains_imperative_directive`, `detect_exchange_compaction_request`, `extract_required_response_blocks`, `format_required_response_targets`, `format_prompt_bearing_changes`, `is_stale_snapshot`, `change_is_managed_state_only`, `synthetic_added_lines_diff`, `line_looks_like_prompt_prefix_repair_start`) and all private helpers + ~113 inline pure tests.
-- `agent-doc-core/Cargo.toml` — added `serde_json` runtime dep (used by `format_prompt_bearing_changes` for change-kind JSON serialization).
-- `agent-doc-core/src/lib.rs` — declares `pub mod diff`; re-exports the seven enum/struct types.
-- `src/diff_io.rs` (318 LOC, new) — I/O half: `ComputeResult`, `compute`, `compute_with_current`, `wait_for_stable_content`, `run`, plus private helpers `extract_last_added_line`, `looks_truncated`, `truncate_for_log`. Uses `crate::snapshot::{load, save, resolve, path_for}` for snapshot I/O and `agent_doc_core::diff::{is_stale_snapshot, strip_comments, unified_diff_from_contents}` for the pure delegations.
-- `src/main.rs` — declares `mod diff_io;`.
-- `src/diff.rs` — collapsed to `pub use agent_doc_core::diff::*; pub use crate::diff_io::*;` shim so the production call sites (stream.rs:134, run.rs:274+374+391, preflight.rs:1721+1850+1903+4250+5722, main.rs:1657, plan.rs:154+353, repair.rs:1971, write.rs:4304+4308, harness_prompt.rs:93, git.rs:599, start.rs:615) all compile unchanged via the re-export path.
-
-#### Visibility surface change
-
-Promoted nine previously `pub(crate)` symbols to `pub` so the main crate's cross-crate call sites continue to resolve: `text_line_looks_like_prompt_target`, `line_looks_like_fresh_prompt_after_response`, `line_looks_like_plain_response_after_prompt`, `prompt_change_is_already_answered`, `prompt_change_is_answered_by_later_response`, `line_looks_like_markdown_list_item`, `line_looks_like_prompt_prefix_repair_start`, `line_looks_like_targeted_prompt_prefix_repair_start`, `synthetic_added_lines_diff`.
-
-#### Verification
-
-- `cargo build --release`: green (1m 48s).
-- `cargo test --release -p agent-doc-core --lib`: **632 tests pass** (up from 519 last wave; ~113 diff pure tests migrated into core).
-- `cargo test --release --lib` (main): **96 tests pass** (unchanged from last wave).
-- `make check`: **2,229 integration tests pass** (down from 2,368; the 139-test drop matches `src/diff.rs`'s inline tests migrating out of the main crate — 113 to core + ~26 I/O tests dropped in the split).
-- Same pre-existing local `codex_bare_run_inside_owning_pane_fails_before_nested_dispatch` failure (reproduces on pristine HEAD; GitHub CI green).
-- `cargo install --path .`: `~/.cargo/bin/agent-doc` replaced.
-
-#### Coverage and purity caveats
-
-The ~26 I/O-bound inline tests from `src/diff.rs`'s original tests module were dropped during the split and not yet re-added to `src/diff_io.rs`. The I/O functions themselves are copied verbatim from git HEAD. The diff surface no longer takes `&Path` in core; the remaining `&Path` helpers in `template`/`frontmatter`/`project_config` from earlier waves are still present and tracked via the new `adcr-purity-tidy` follow-up.
-
-Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
-
-**Not invoking `/loop`** — the umbrella entry in the queue is operator-scoped (depends on whether the two new follow-ups should land before close-out).
-<!-- agent:boundary:8ed7b671 -->
+The umbrella entry stays in the backlog as a parent placeholder. The seven items above are the path to satisfying acceptance criteria #1 and #3 before it gets marked done.
+<!-- agent:boundary:f9de6e9f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
-- ~do [#pjb4]~
-- ~do [#yhsr]~
-- ~do [#yxvq]~
-- ~do [#mzzd]~
-- do [#adcr]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#k5s7] #adcr-baseline-measure Record cargo build -p agent-doc-core --timings vs full main crate; update agent-doc-core/COMPILE_BASELINE.md; confirm the <30% acceptance criterion #1 from the plan is satisfied (currently unmeasured).
+- [ ] [#n7dd] [recommended] #adcr-wave-4-tidy Port the ~26 I/O-bound inline tests dropped during wave 4 (run_file_not_found, copy_on_read_guard, four compute_* tests, three diff_detects_* tests, fourteen truncated_/extract_/run_with_wait_/wait_for_stable_content_* tests) into src/diff_io.rs to close the coverage gap.
+- [ ] [#0ejf] [recommended] #adcr-purity-tidy Extract the remaining and-Path-taking functions from agent-doc-core: template::{template_info, load_component_configs, load_project_from_doc, find_project_root}, frontmatter::{ensure_session_for_file, set_format_and_write, read_session_id}, project_config::{load_project*, save_project, *_tmux_session}. Move I/O wrappers to main crate; keep pure parsers/formatters in core. Satisfies plan acceptance criterion #3.
+- [ ] [#k9e1] #adcr-ffi-relocate Move pure C-ABI wrappers from src/ffi.rs (apply_patch, parse_components, merge_frontmatter, normalize_template_structure, reposition_boundary, agent_doc_strip_comments) into agent-doc-core::ffi so editor plugins (JB, VS Code) can link against just agent-doc-core without dragging the orchestration crate. Keep route/git/ipc/start FFI calls in main.
+- [ ] [#5yqz] #adcr-eval-runner-switch Switch eval-runner's strip_comments dependency from agent-doc to agent-doc-core to cut eval pipeline build cost.
+- [ ] [#77v6] #adcr-publish Decide on publishing agent-doc-core to crates.io (currently publish = false). Allows third-party FFI consumers and unblocks the editor-plugin slim-link target.
+- [ ] [#ysv9] #adoc-orchestration-crate Plan agent-doc-orchestration extraction — split route/git/sessions/ipc_socket/supervisor/capture/cycle_state/repair/sync/start out of the main crate into a sibling workspace member, leaving only the CLI entrypoint + command dispatch in agent-doc. Would create a 3-layer architecture (CLI → orchestration → core) and substantially cut the editor-plugin-only build target. Substantial refactor; depends on #adcr-baseline-measure to quantify the win first.
 - [ ] [#adcr] Extract agent-doc-core crate (~17K lines) — enables fast-compiling FFI/editor-plugin target independent of orchestration layer
 <!-- /agent:backlog -->
 

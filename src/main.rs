@@ -59,6 +59,7 @@ mod convert;
 mod cycle_state;
 mod dedupe;
 mod diff;
+mod diff_io;
 mod editor_route_errors;
 mod env;
 mod extract;

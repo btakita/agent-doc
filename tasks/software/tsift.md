@@ -37,7 +37,7 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 6 response topic(s): tokensave algorithms in tsift; reverse-engineering tokensave next steps; separate crates architecture; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:7ba61d98 -->
+<!-- agent:boundary:ad31394f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -63,10 +63,9 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#step-1-core] Extract `tsift-core` crate — GraphStore trait, GraphNode, GraphEdge, GraphProjection types (~1.5K LOC from substrate.rs)
 - [ ] [#step-2-backends] Extract `tsift-sqlite` + `tsift-libsql` crates from substrate.rs + libsql_backend.rs (~3.7K LOC)
 - [ ] [#step-3-tokensave-reader] Add `tsift-tokensave` crate — DB reader adapter for .tokensave/tokensave.db with schema mapping + FTS5 search (~800 LOC)
-- [ ] [#step-4-graph] Extract `tsift-graph` crate + port LanguageExtractor trait, LanguageRegistry, complexity counting from tokensave (~600 new + ~1.4K moved)
+- [ ] [#step-4-graph] Extract `tsift-graph` crate + port LanguageExtractor trait, Language Registry, complexity counting from tokensave (~600 new + ~1.4K moved)
 - [ ] [#step-5-algorithms] Add `tsift-algorithms` crate — port iterative Tarjan SCC, composite health score, dead code detection, coupling analysis from tokensave (~850 LOC)
 - [ ] [#step-6-resolution] Add `tsift-resolution` crate — port multi-strategy reference resolver, scoring heuristics, blocklist from tokensave (~450 LOC)
 - [ ] [#step-7-cli] Extract `tsift-cli` crate — move main.rs (39K LOC), wire new crates into CLI commands (tsift health, tsift dead-code, tsift coupling)

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -252,23 +252,71 @@ Plan §"Fix options" also covers Options B (halt opt-out flag), C (halt-language
 #### Side note on this cycle's prompt
 
 The user's prompt for this turn (`[#d97v] was stopped...`) arrived through the chat channel rather than as a document edit, so preflight initially reported `no_changes`. I inserted the prompt into the exchange before composing this response per the SKILL.md rule: "Direct file patching is only acceptable for inserting a missing user prompt into exchange before the response exists."
-<!-- agent:boundary:20651a92 -->
+### Re: #rtx6 #adcr-snapshot-seam decision — opus-4-7
+
+**Decision: Option 1 — split `diff.rs` into `diff_data.rs` (pure, moves to `agent-doc-core`) + `diff_io.rs` (snapshot-backed, stays in main crate).**
+
+#### Justification
+
+`diff::compute` and siblings (`compute_with_current`, `wait_for_stable_content`, `is_stale_snapshot`, `run`) have 6 production call sites in the workspace:
+
+| Caller | Line | Function called |
+|---|---|---|
+| `stream.rs` | 134 | `diff::compute` |
+| `run.rs` | 274, 374 | `diff::compute` |
+| `preflight.rs` | 1721, 1850 | `diff::is_stale_snapshot`, `diff::compute_with_current` |
+| `main.rs` | 1657 | `diff::run` |
+| `plan.rs` | 154 | `diff::compute` |
+| `repair.rs` | 1971 | (test only) |
+
+Counts via `rg -n 'diff::(compute|compute_with_current|wait_for_stable_content|is_stale_snapshot|run\b)' --type rust` from `src/agent-doc/src`.
+
+**Option 1 (split file):** zero call-site changes. Each caller keeps `diff::compute(file)` etc.; internally `diff_io.rs` delegates pure work to `agent_doc_core::diff`. Moves the bulk of `diff.rs` (classification, slash-command parsing, prompt-bearing-change detection, annotation, comment stripping — ~3.5k of the 4.5k LOC) into core.
+
+**Option 2 (extract Snapshot type, inject):** all 6 call sites need updating to pre-load `Snapshot` then pass `&Snapshot` to `diff::compute`. Reasonable change, but adds a new pattern (caller-loads-snapshot) that doesn't exist elsewhere in the codebase. No clear benefit over Option 1.
+
+**Option 3 (SnapshotPort trait):** rejected. One implementer, dyn-dispatch ceremony for no flexibility win.
+
+#### Wave 4 contract
+
+When `#adcr` reaches Wave 4 (after `#d97v` workspace + Waves 1–3 of leaf modules land), the diff extraction proceeds as:
+
+1. In `agent-doc-core`, create `src/diff.rs` (pure functions + `DiffType`, `DiffClassification`, `PromptBearingChange`, `ParsedSlashCommands`, `OrchestrationRequest`, etc.).
+2. In `src/agent-doc/src/`, rename current `diff.rs` to `diff_io.rs`. Strip it to just `compute`, `compute_with_current`, `wait_for_stable_content`, `is_stale_snapshot`, `run` — these stay calling `snapshot::{load, save, resolve, path_for}`.
+3. Each function in `diff_io.rs` delegates to `agent_doc_core::diff::*` for the pure work. `diff_io::compute(file)` reads file + snapshot, calls `agent_doc_core::diff::unified_diff_from_contents` + `classify_diff` + downstream pure helpers.
+4. Re-export at `agent_doc::diff` so existing call sites compile unchanged: `pub use crate::diff_io::*; pub use agent_doc_core::diff::{DiffType, DiffClassification, ...};`.
+5. Update `tasks/agent-doc/plan-agent-doc-core-extraction.md` §Wave 4 with this decision marker.
+
+#### Updated plan
+
+I will not mutate `plan-agent-doc-core-extraction.md` in this cycle — that file is a follow-up to commit separately. The plan §"Diff seam decision" already lists Option 1 as the recommendation; the only addition needed is the call-site count and the formal "decided" status. Captured as `#rtx6-plan-update` in backlog for the next cycle.
+
+#### Halting after this cycle
+
+Session accretion is at `block` level (227 lines, 6 response sections, 18 cycles / 30 min, 13 no-op closeouts). The next queue item is `#d97v` — the workspace conversion I halted on previously. That decision still stands: `#d97v` is a substantive code change with `--release --timings` baselines + `make check` + `cargo install --path .` + manual testing gate, and it should not auto-loop on top of this exchange.
+
+**Recommended next step:** `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/agent-doc/open-code.md --commit`, then re-engage the queue. `#d97v` becomes a deliberate operator cycle with a clean baseline.
+
+**Not invoking `/loop`** — the auto-loop should not drain into a `block`-level exchange.
+<!-- agent:boundary:5b8f002e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~[#stqc]~
 - ~[#5x1r]~
 - ~[#d97v]~
 - ~[#adcr]~
+- ~[#rtx6]~
+- [#d97v]
+- [#adcr]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#rtx6] [recommended] #adcr-snapshot-seam Decide diff.rs ↔ snapshot.rs seam — either extract Snapshot data type into agent-doc-core and keep load/save/resolve/path_for in orchestration, or inject snapshot through a trait. Required before extracting diff.
 - [ ] [#d97v] #adcr-workspace Convert src/agent-doc into Cargo workspace root; add agent-doc-core stub crate; record cargo build --timings baselines per tasks/agent-doc/plan-agent-doc-core-extraction.md
 - [ ] [#adcr] Extract agent-doc-core crate (~17K lines) — enables fast-compiling FFI/editor-plugin target independent of orchestration layer
 <!-- /agent:backlog -->
@@ -287,4 +335,5 @@ preset #spec-test-build-install-commit-push
 - 2026-05-27 [#adcr] Extract agent-doc-core crate (~17K lines: template, diff, component, frontmatter, crdt, pending, model_tier + leaf modules) — enables fast-compiling FFI/editor-plugin target independent of orchestration layer
 - 2026-05-28 [#stqc] #adcr-dep-audit Survey inbound deps from orchestration code (preflight/plan/cycle_state/dispatch/route/ipc/git/harness) into {template, diff, component, frontmatter, crdt, pending, model_tier}; identify leaf vs coupled modules — precondition for #adcr
 - 2026-05-28 [#5x1r] #adcr-api-surface Define agent-doc-core export surface (pure types: DocumentTemplate, Component, Frontmatter, Diff patches, Crdt ops, Pending model, ModelTier resolution) — keep orchestration types out
+- 2026-05-28 [#rtx6] [recommended] #adcr-snapshot-seam Decide diff.rs ↔ snapshot.rs seam — either extract Snapshot data type into agent-doc-core and keep load/save/resolve/path_for in orchestration, or inject snapshot through a trait. Required before extracting diff.
 <!-- /agent:done -->

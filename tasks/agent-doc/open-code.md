@@ -87,7 +87,45 @@ Backlog after this cycle (top → bottom):
 **Top of backlog: `#adcr-wave-1`**.
 
 Each wave item carries its plan reference (`tasks/agent-doc/plan-agent-doc-core-extraction.md`), the exact modules + public types it covers, dependencies on prior waves, and the I/O wrappers that stay in the main crate. So an operator can pick any wave and start without re-deriving the contract.
-<!-- agent:boundary:5f2ebae9 -->
+❯ The backlog is not ordered by priority. #agent-doc-bug. Please order by priority.
+### Re: backlog priority reorder + #agent-doc-bug — opus-4-7
+
+Reordered via `--pending-reorder` and filed the bug.
+
+Plan: tasks/agent-doc/plan-pending-add-prepend-semantics.md
+
+#### Backlog (new order)
+
+1. `#pjb4` — `#adcr-wave-1` (leaves)
+2. `#yhsr` — `#adcr-wave-2` (frontmatter + project_config)
+3. `#yxvq` — `#adcr-wave-3` (template)
+4. `#mzzd` — `#adcr-wave-4` (diff per `#rtx6` Option 1)
+5. `#adcr` — umbrella rollup
+
+**Top: `#pjb4` (`#adcr-wave-1`).**
+
+#### Bug captured in `tasks/agent-doc/agent-doc-bugs2.md`
+
+- [ ] [#pending-add-append-not-prepend] `--pending-add` appends new items below the previous CLI arg within the same finalize cycle, contradicting SKILL.md "Pending capture rule" ("Put new items at the beginning of agent:backlog"). Repro: tasks/agent-doc/open-code.md commit f94e7851c — agent added wave-4, wave-3, wave-2, wave-1 expecting wave-1 on top per SKILL.md; actual backlog was wave-4 on top (pure CLI-arg order). User flagged it as bug; agent had to issue `--pending-reorder`. Plan: tasks/agent-doc/plan-pending-add-prepend-semantics.md (recommend Option A — strict prepend, drop the implicit adjacency heuristic).
+
+#### Root cause analysis
+
+Last cycle's CLI-arg order was wave-4, wave-3, wave-2, wave-1. SKILL.md "Pending capture rule" says new items go to the beginning of the backlog, so I added in reverse priority expecting wave-1 to end up on top.
+
+Actual behavior: each `--pending-add` appended below the previously-added item in the same cycle. Final order matched argv order, not the documented prepend semantics. Either `op_add` defaults to append, or the "adjacent to predecessor" branch (second clause of the SKILL.md rule) fires on every consecutive same-cycle add and inserts below the predecessor.
+
+#### Recommended fix (Option A in plan)
+
+Make `--pending-add` strictly prepend regardless of batch context. Each add inserts at the top; multiple `--pending-add` args in one CLI invocation stack newest-on-top. Adjacency-to-predecessor becomes opt-in via an explicit flag, not an implicit heuristic. Matches SKILL.md as written.
+
+Files: `src/agent-doc/src/pending.rs` (op_add behavior), `src/agent-doc/src/write.rs` (--pending-add consumer), `SKILL.md` (wording confirmation), `SPEC.md` (pending operations contract).
+
+#### Notable session quirk
+
+Before this cycle the session document had snapshot drift (snapshot 8061 bytes, HEAD 10787 bytes) because the prior cycle's `--pending-add` mutations committed via a manual `git commit` (commit `f94e7851c`) rather than through `finalize`. Recovery: copied HEAD into the snapshot file so preflight could diff cleanly. Worth flagging if it recurs.
+
+This response was also rejected initially by `pending_done_guard` (mention of `#adcr`) and again by `pending_capture_guard` (the plan-path citation in backticks and inside a bullet did not satisfy the detector — only a plain-text `Plan: path` outside a list passes). Both are sibling heuristics in the same family as `#queue-strike-on-halt` — guards firing on agent-doc's own legitimate output.
+<!-- agent:boundary:29b7d58b -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -98,10 +136,10 @@ Each wave item carries its plan reference (`tasks/agent-doc/plan-agent-doc-core-
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#mzzd] #adcr-wave-4 Extract diff.rs into agent-doc-core per #rtx6 Option 1 — rename current src/agent-doc/src/diff.rs to diff_io.rs (strip to compute/compute_with_current/wait_for_stable_content/is_stale_snapshot/run, keep snapshot::{load,save,resolve,path_for} calls); move pure half (DiffType, DiffClassification, PromptBearingChange, ParsedSlashCommands, OrchestrationRequest, strip_comments, annotate_diff, classify_diff, slash command + orchestration detection, prompt-prefix normalization, prompt-bearing-change classification, unified_diff_from_contents) to agent_doc_core::diff; re-export at agent_doc::diff so the 6 production call sites compile unchanged. Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
-- [ ] [#yxvq] #adcr-wave-3 Extract template.rs (~5.7k LOC) into agent-doc-core::template — PatchBlock, TemplateInfo, ComponentInfo, parse_patches, apply_patches, apply_patches_with_overrides, all repair_* functions, normalize_editor_visible_template_structure, all reposition_boundary_* helpers, is_template_mode, exchange_baseline_headings. Keep template_info(&Path) wrapper in main crate. Depends on Wave 2 (frontmatter/project_config) + Wave 1 (component). Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
-- [ ] [#yhsr] #adcr-wave-2 Extract frontmatter.rs + project_config.rs together (mutual refs) into agent-doc-core — Frontmatter, AgentDocFormat, AgentDocWrite, CollaborationMode, CodexNetworkAccess, ResolvedMode, StreamConfig, PendingCaptureGuardMode, LintDialectMode, ProjectConfig, GuardConfig, LintConfig, SshConfig/SshDocConfig/SshProfileConfig, ComponentConfig + pure parse/write/merge_fields/set_*. Keep ensure_session_for_file/set_format_and_write/read_session_id/load_project*/save_project/*_tmux_session wrappers in main crate. Depends on Wave 1 (model_tier). Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
 - [ ] [#pjb4] #adcr-wave-1 Extract leaf modules into agent-doc-core (no seam decisions, ~7.6k LOC) — relocate new_boundary_id/new_boundary_id_with_summary/format_boundary_marker/BOUNDARY_ID_LEN from lib.rs to agent_doc_core::id; move crdt.rs (CrdtDoc, merge, dedup_adjacent_blocks, compact); move model_tier.rs (Tier, TierMap, ModelConfig, ModelSwitchScan + pure resolvers; keep detect_harness wrapper in main crate); move pending.rs (PendingItem, PendingState, PendingOp + all op_* functions); move component.rs (Component, parse, strip_comments, find_*ranges, parse_attrs, BACKLOG_COMPONENT and friends). Capture cold-from-scratch baselines via cargo clean + cargo build -p agent-doc-core --release --timings before extraction; update agent-doc-core/COMPILE_BASELINE.md with the Wave 1 row. Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
+- [ ] [#yhsr] #adcr-wave-2 Extract frontmatter.rs + project_config.rs together (mutual refs) into agent-doc-core — Frontmatter, AgentDocFormat, AgentDocWrite, CollaborationMode, CodexNetworkAccess, ResolvedMode, StreamConfig, PendingCaptureGuardMode, LintDialectMode, ProjectConfig, GuardConfig, LintConfig, SshConfig/SshDocConfig/SshProfileConfig, ComponentConfig + pure parse/write/merge_fields/set_*. Keep ensure_session_for_file/set_format_and_write/read_session_id/load_project*/save_project/*_tmux_session wrappers in main crate. Depends on Wave 1 (model_tier). Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
+- [ ] [#yxvq] #adcr-wave-3 Extract template.rs (~5.7k LOC) into agent-doc-core::template — PatchBlock, TemplateInfo, ComponentInfo, parse_patches, apply_patches, apply_patches_with_overrides, all repair_* functions, normalize_editor_visible_template_structure, all reposition_boundary_* helpers, is_template_mode, exchange_baseline_headings. Keep template_info(&Path) wrapper in main crate. Depends on Wave 2 (frontmatter/project_config) + Wave 1 (component). Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
+- [ ] [#mzzd] #adcr-wave-4 Extract diff.rs into agent-doc-core per #rtx6 Option 1 — rename current src/agent-doc/src/diff.rs to diff_io.rs (strip to compute/compute_with_current/wait_for_stable_content/is_stale_snapshot/run, keep snapshot::{load,save,resolve,path_for} calls); move pure half (DiffType, DiffClassification, PromptBearingChange, ParsedSlashCommands, OrchestrationRequest, strip_comments, annotate_diff, classify_diff, slash command + orchestration detection, prompt-prefix normalization, prompt-bearing-change classification, unified_diff_from_contents) to agent_doc_core::diff; re-export at agent_doc::diff so the 6 production call sites compile unchanged. Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
 - [ ] [#adcr] Extract agent-doc-core crate (~17K lines) — enables fast-compiling FFI/editor-plugin target independent of orchestration layer
 <!-- /agent:backlog -->
 

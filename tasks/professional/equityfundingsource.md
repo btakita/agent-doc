@@ -91,7 +91,13 @@ Commands and verification:
 - `gh run list --workflow CI --limit 1`: no `CI` workflow defined in either repo; root `Agent Doc` workflow latest run remains gated by the GitHub billing/spending-limit startup blocker, classified as an external CI-start blocker, not a code/tmux regression.
 
 Confidence: high. Escalation: none — workers.dev cutover is deferred per the status header, so no Worker redeploy is requested by this change; next deploy will pick up the dropdown on its normal cycle.
-<!-- agent:boundary:fb444994 -->
+❯ The `Property address` is a free text field. What do you recommend to enter in the address?
+### Re: Property address recommendation — opus-4-7
+
+Recommend keeping it free-text but adding a one-line USPS-style placeholder (`123 Main St, Springfield, IL 62701`) so brokers consistently enter `street, city, state ZIP` on one line. Addresses are genuinely unstructured (units, lot/parcel descriptors, rural routes, multi-parcel deals), so splitting into street/city/state/ZIP fields tends to fight the broker workflow and lose data — TMO and the appraisal package both want the full string anyway.
+
+If we want stronger data quality later, the high-value upgrade is **Google Places Autocomplete** (or Mapbox/Smarty) wired to the same input: it preserves free-text fallback for off-grid parcels, returns a normalized address + lat/lng we can persist alongside the raw string, and unlocks map previews in the admin pipeline. Tradeoff: per-request API cost, an extra script tag, and a key in `wrangler.toml`. Added a `[recommended]` backlog item to spike Google Places vs. Mapbox vs. Smarty — say the word and I'll pull it off the backlog.
+<!-- agent:boundary:8815502e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -104,6 +110,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#2z8r] [recommended] Address autocomplete spike for /portal-broker/submit-a-deal Property address: compare Google Places vs. Mapbox vs. Smarty (per-request cost, accuracy, free-text fallback for off-grid parcels, lat/lng persistence, map previews in admin pipeline). Pick one, wire it to the existing free-text input with normalized address + lat/lng captured alongside the raw string.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
 - [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document intelligence/search, borrower/broker/investor/admin portals, and tenant-ready resale packaging.
 - [ ] [#f4rq] Verify an EFS-owned sending domain in Resend, then switch APPLICATION_LEAD_NOTIFICATION_FROM and APPLICATION_LEAD_NOTIFICATION_TO from testing-mode values to EFS production addresses.

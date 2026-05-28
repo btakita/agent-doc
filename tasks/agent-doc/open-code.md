@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -33,21 +33,30 @@ queue_active: true
 Compacted content:
 - Archived 5 response topic(s): Clear Session Context error; Run Agent Doc dispatch proof timeout; do option 2; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/fb8de777...
-<!-- agent:boundary:bc7c9d44 -->
+### Re: #n89s #xd6k bug fixes — glm-5.1
+
+**#n89s** Fixed `dispatch_only_dispatch_start_proof_required` to return `false` for opencode harness. Updated test and downstream route assertion.
+
+**#xd6k** Added `is_bare_model_name()` validator and opencode model name validation. `canonical_model_name` warns on bare names; `parse_model_arg` rejects them. Four new tests.
+
+**#adcr** remains open — crate extraction needs dedicated planning.
+
+**Verification:** `make check` 2514+470 tests green. Pushed as `e3e9d9a0`.
+<!-- agent:boundary:a2f134c4 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto -->
-
+<!-- agent:queue -->
+preset #spec-test-build-install-commit-push
+- [#adcr]
+- [#n89s]
+- [#xd6k]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#adcr] Extract `agent-doc-core` crate (~17K lines: template, diff, component, frontmatter, crdt, pending, model_tier + leaf modules) — enables fast-compiling FFI/editor-plugin target independent of orchestration layer
-- [ ] [#n89s] #agent-doc-bug Fix `dispatch_only_dispatch_start_proof_required` to return `false` for opencode harness (routed_reopen.rs:319) — interim fix until tracker is built
-- [ ] [#xd6k] #agent-doc-bug Add model name validation in `canonical_model_name` or probe builder for opencode harness — reject bare names without provider prefix (model_tier.rs:256, codex.rs:534)
 <!-- /agent:backlog -->
 
 ## Icebox
@@ -59,4 +68,7 @@ Compacted content:
 
 <!-- agent:done -->
 - 2026-05-27 [#fr8q] [recommended] Compact this session (116 exchange lines, block-level accretion) before next implementation turn
+- 2026-05-27 [#adcr] Extract `agent-doc-core` crate (~17K lines: template, diff, component, frontmatter, crdt, pending, model_tier + leaf modules) — enables fast-compiling FFI/editor-plugin target independent of orchestration layer
+- 2026-05-27 [#n89s] #agent-doc-bug Fix `dispatch_only_dispatch_start_proof_required` to return `false` for opencode harness (routed_reopen.rs:319) — interim fix until tracker is built
+- 2026-05-27 [#xd6k] #agent-doc-bug Add model name validation in `canonical_model_name` or probe builder for opencode harness — reject bare names without provider prefix (model_tier.rs:256, codex.rs:534)
 <!-- /agent:done -->

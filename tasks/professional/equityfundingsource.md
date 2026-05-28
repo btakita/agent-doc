@@ -52,7 +52,42 @@ Recommended pattern when we land the spike (design only; #2z8r stays open):
 5. **Provider choice doesn't change the contract.** Google Places, Mapbox, Smarty, and Census all answer the same way: structured + verified when matched, raw + unverified when not. The spike picks the provider on cost/coverage/free-text fallback quality; the UX/data contract above stays the same.
 
 This keeps autocomplete as the happy path, lets brokers submit anything that has no clean USPS/Census match, and gives admin a clear flag to chase verification rather than silently accepting unparsed strings.
-<!-- agent:boundary:b1785251 -->
+
+### Re: use recommendation [#2z8r] — opus-4-7
+
+
+Implemented the borrower-side slice of the recommendation. #2z8r stays open (autocomplete spike — provider eval for broker submit-deal — is the remaining work).
+
+Submodule commit `875038f` (parent bump `56c8228`):
+
+- `lib/ui--browser--efs/portal/borrower/new_application.tsx`
+  - `borrower_form_T` gains `address_verified: boolean` and `address_source: '' | 'census' | 'manual'`.
+  - `PropertyAddressSearch` now tracks whether the user has searched; when the suggestion list comes back empty (or the lookup fails), shows a "Use what I typed" button alongside an "Enter address manually" toggle. The toggle reveals split inputs for street/city/state/zip/county.
+  - Selecting a Census suggestion stamps `address_source='census'`, `address_verified=true`. Both fallback paths stamp `address_source='manual'`, `address_verified=false`. Typing in the search box resets back to unverified blank.
+  - A pill renders under the field: green "Verified" for census selections, yellow "Unverified — admin will confirm" for manual entries.
+  - `validate_property_` relaxes to accept either full structured parts OR a manual entry with a non-empty `subject_property_address`.
+  - Review step adds an "Address Verification" detail row.
+
+- `app/equityfundingsource/lib/loan_applications/routes.ts`
+  - `onboarding_data_T` gains the two new fields; both are persisted into `onboarding_data_json` (no D1 migration needed — the column is JSON).
+  - Form parser narrows `address_source` to the allowed union; `address_verified` is only honored as `true` when `address_source === 'census'`, so a manipulated client cannot self-attest verification.
+  - Submit validation accepts manual entries with a non-empty `subject_property_address` even when structured parts are blank.
+
+- `lib/ui--browser--efs/portal/admin/loan_detail.tsx`
+  - Parses `onboarding_data_json` once via `parse_address_summary_` and renders a new "Subject Property" row in the Borrower Info card with the verification pill. Existing borrower mailing address row is relabeled "Mailing" to disambiguate. The full onboarding JSON dump below still shows the raw fields.
+
+Verification:
+- `make check` → 212 pass / 0 fail; build (browser + worker bundle) green.
+- `bun test tests/fixtures.test.ts` → 2 pass.
+- Existing fixture intentionally untouched — represents legacy data, defaults to `address_source=''` / `address_verified=false`, and still satisfies the relaxed validator because it carries full structured parts.
+
+What this does NOT include (full #2z8r):
+- Provider spike (Google Places vs. Mapbox vs. Smarty vs. Census) for `/portal-broker/submit-a-deal`.
+- Wiring autocomplete into broker `submit_deal.tsx` (still plain free-text there — broker addresses already flow as "manual" by behavior, just without the explicit flag in this slice).
+- Provider metadata persistence (`place_id`, `lat/lng`, map previews).
+
+When #2z8r picks a provider, the UI contract above carries over: provider-matched → `address_verified=true`; everything else → manual + unverified, badge in admin.
+<!-- agent:boundary:8f6a1b96 -->
 <!-- /agent:exchange -->
 ###
 <!--

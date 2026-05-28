@@ -82,10 +82,8 @@
 use anyhow::{Context, Result};
 use serde::Serialize;
 use std::collections::HashSet;
-use std::path::Path;
 
 use crate::component::{self, Component, find_comment_end, is_backlog_component};
-use crate::project_config;
 
 /// A parsed patch directive from an agent response.
 #[derive(Debug, Clone)]
@@ -311,17 +309,21 @@ pub fn parse_patches(response: &str) -> Result<(Vec<PatchBlock>, String)> {
 ///
 /// Returns the modified document. Unmatched content (outside patch blocks)
 /// is appended to `<!-- agent:output -->` if it exists, or creates one at the end.
-pub fn apply_patches(
+pub fn apply_patches_pure(
     doc: &str,
     patches: &[PatchBlock],
     unmatched: &str,
-    file: &Path,
+    summary: Option<&str>,
+    component_configs: &std::collections::HashMap<String, String>,
+    max_lines_configs: &std::collections::HashMap<String, usize>,
 ) -> Result<String> {
-    apply_patches_with_overrides(
+    apply_patches_with_overrides_pure(
         doc,
         patches,
         unmatched,
-        file,
+        summary,
+        component_configs,
+        max_lines_configs,
         &std::collections::HashMap::new(),
     )
 }
@@ -2148,18 +2150,23 @@ fn append_exchange_patch_after_prompt_anchor(
 
 /// Apply patches with per-component mode overrides (e.g., stream mode forces "replace"
 /// for cumulative buffers even on append-mode components like exchange).
-pub fn apply_patches_with_overrides(
+///
+/// Pure: callers pre-load `component_configs` and `max_lines_configs` from
+/// `.agent-doc/config.toml` (see `agent_doc::template_io` in the main crate
+/// for the file-based wrapper).
+pub fn apply_patches_with_overrides_pure(
     doc: &str,
     patches: &[PatchBlock],
     unmatched: &str,
-    file: &Path,
+    summary: Option<&str>,
+    component_configs: &std::collections::HashMap<String, String>,
+    max_lines_configs: &std::collections::HashMap<String, usize>,
     mode_overrides: &std::collections::HashMap<String, String>,
 ) -> Result<String> {
     // Pre-patch: ensure a fresh boundary exists in the exchange component.
     // Remove any stale boundaries from previous cycles, then insert a new one
     // at the end of the exchange. This is deterministic — belongs in the binary,
     // not the SKILL workflow.
-    let summary = file.file_stem().and_then(|s| s.to_str());
     let mut result = remove_all_boundaries(doc);
     if let Ok(components) = component::parse(&result)
         && let Some(exchange) = components.iter().find(|c| c.name == "exchange")
@@ -2178,8 +2185,8 @@ pub fn apply_patches_with_overrides(
     // Apply patches in reverse order (by position) to preserve byte offsets
     let components = component::parse(&result).context("failed to parse components")?;
 
-    // Load component configs
-    let configs = load_component_configs(file);
+    // Component configs were preloaded by the caller.
+    let configs = component_configs;
 
     // Build a list of (component_index, patch) pairs, sorted by component position descending.
     // Patches targeting missing components are collected as overflow and routed to
@@ -2329,7 +2336,6 @@ pub fn apply_patches_with_overrides(
     // until stable — trimming one component cannot grow another, so 2 passes suffice
     // in practice; the third is a safety bound.
     {
-        let max_lines_configs = load_max_lines_configs(file);
         'stability: for _ in 0..3 {
             let Ok(components) = component::parse(&result) else {
                 break;
@@ -2793,93 +2799,6 @@ fn find_boundary_in_component(doc: &str, comp: &Component) -> Option<String> {
     None
 }
 
-/// Get template info for a document (for plugin rendering).
-pub fn template_info(file: &Path) -> Result<TemplateInfo> {
-    let doc = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
-
-    let (fm, _body) = crate::frontmatter::parse(&doc)?;
-    let template_mode = fm.resolve_mode().is_template();
-
-    let components = component::parse(&doc)
-        .with_context(|| format!("failed to parse components in {}", file.display()))?;
-
-    let configs = load_component_configs(file);
-
-    let component_infos: Vec<ComponentInfo> = components
-        .iter()
-        .map(|comp| {
-            let content = comp.content(&doc).to_string();
-            // Inline attr > config.toml ([components] section) > built-in default
-            let mode = comp
-                .patch_mode()
-                .map(|s| s.to_string())
-                .or_else(|| configs.get(&comp.name).cloned())
-                .unwrap_or_else(|| default_mode(&comp.name).to_string());
-            // Compute line number from byte offset
-            let line = doc[..comp.open_start].matches('\n').count() + 1;
-            ComponentInfo {
-                name: comp.name.clone(),
-                mode,
-                content,
-                line,
-                max_entries: None, // TODO: read from config.toml ([components] section)
-            }
-        })
-        .collect();
-
-    Ok(TemplateInfo {
-        template_mode,
-        components: component_infos,
-    })
-}
-
-/// Load component mode configs from `.agent-doc/config.toml` (under [components] section).
-/// Returns a map of component_name → mode string.
-/// Resolves the project root by walking up from the document's parent directory.
-fn load_component_configs(file: &Path) -> std::collections::HashMap<String, String> {
-    let proj_cfg = load_project_from_doc(file);
-    proj_cfg
-        .components
-        .iter()
-        .map(|(name, cfg): (&String, &project_config::ComponentConfig)| {
-            (name.clone(), cfg.patch.clone())
-        })
-        .collect()
-}
-
-/// Load max_lines settings from `.agent-doc/config.toml` (under [components] section).
-/// Resolves the project root by walking up from the document's parent directory.
-fn load_max_lines_configs(file: &Path) -> std::collections::HashMap<String, usize> {
-    let proj_cfg = load_project_from_doc(file);
-    proj_cfg
-        .components
-        .iter()
-        .filter(|(_, cfg)| cfg.max_lines > 0)
-        .map(|(name, cfg): (&String, &project_config::ComponentConfig)| {
-            (name.clone(), cfg.max_lines)
-        })
-        .collect()
-}
-
-/// Resolve project config by walking up from a document path to find `.agent-doc/config.toml`.
-fn load_project_from_doc(file: &Path) -> project_config::ProjectConfig {
-    let start = file.parent().unwrap_or(file);
-    let mut current = start;
-    loop {
-        let candidate = current.join(".agent-doc").join("config.toml");
-        if candidate.exists() {
-            return project_config::load_project_from(&candidate);
-        }
-        match current.parent() {
-            Some(p) if p != current => current = p,
-            _ => break,
-        }
-    }
-    // Fall back to CWD-based resolution
-    project_config::load_project()
-}
-
 /// Default mode for a component by name.
 /// `exchange` and `findings` default to `append`; all others default to `replace`.
 fn default_mode(name: &str) -> &'static str {
@@ -2975,17 +2894,6 @@ fn strip_leading_overlap<'a>(existing: &str, new_content: &'a str) -> &'a str {
     }
 }
 
-#[allow(dead_code)]
-fn find_project_root(file: &Path) -> Option<std::path::PathBuf> {
-    let canonical = file.canonicalize().ok()?;
-    let mut dir = canonical.parent()?;
-    loop {
-        if dir.join(".agent-doc").is_dir() {
-            return Some(dir.to_path_buf());
-        }
-        dir = dir.parent()?;
-    }
-}
 
 /// Find `needle` in `haystack` starting at `from`, skipping occurrences inside code ranges.
 /// Returns the byte offset of the match within `haystack` (absolute, not relative to `from`).
@@ -3014,12 +2922,51 @@ fn find_outside_code(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
     use tempfile::TempDir;
 
     fn setup_project() -> TempDir {
         let dir = TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
         dir
+    }
+
+    /// Test helper: legacy `&Path` signature for `apply_patches`. Loads no
+    /// configs (tests don't need them), derives summary from file stem.
+    #[allow(dead_code)]
+    fn apply_patches_via_path(
+        doc: &str,
+        patches: &[PatchBlock],
+        unmatched: &str,
+        file: &Path,
+    ) -> Result<String> {
+        let summary = file.file_stem().and_then(|s| s.to_str());
+        let empty_str = std::collections::HashMap::new();
+        let empty_usize = std::collections::HashMap::new();
+        apply_patches_pure(doc, patches, unmatched, summary, &empty_str, &empty_usize)
+    }
+
+    /// Test helper: legacy `&Path` signature for `apply_patches_with_overrides`.
+    #[allow(dead_code)]
+    fn apply_patches_with_overrides_via_path(
+        doc: &str,
+        patches: &[PatchBlock],
+        unmatched: &str,
+        file: &Path,
+        mode_overrides: &std::collections::HashMap<String, String>,
+    ) -> Result<String> {
+        let summary = file.file_stem().and_then(|s| s.to_str());
+        let empty_str = std::collections::HashMap::new();
+        let empty_usize = std::collections::HashMap::new();
+        apply_patches_with_overrides_pure(
+            doc,
+            patches,
+            unmatched,
+            summary,
+            &empty_str,
+            &empty_usize,
+            mode_overrides,
+        )
     }
 
     #[test]
@@ -3089,7 +3036,7 @@ All green.
             content: "new\n".to_string(),
             attrs: Default::default(),
         }];
-        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
+        let result = apply_patches_via_path(doc, &patches, "", &doc_path).unwrap();
         assert!(result.contains("new\n"));
         assert!(!result.contains("\nold\n"));
         assert!(result.contains("<!-- agent:status -->"));
@@ -3102,7 +3049,7 @@ All green.
         let doc = "# Dashboard\n\n<!-- agent:status -->\nok\n<!-- /agent:status -->\n";
         std::fs::write(&doc_path, doc).unwrap();
 
-        let result = apply_patches(doc, &[], "Extra info here", &doc_path).unwrap();
+        let result = apply_patches_via_path(doc, &[], "Extra info here", &doc_path).unwrap();
         assert!(result.contains("<!-- agent:exchange -->"));
         assert!(result.contains("Extra info here"));
         assert!(result.contains("<!-- /agent:exchange -->"));
@@ -3115,7 +3062,7 @@ All green.
         let doc = "<!-- agent:status -->\nok\n<!-- /agent:status -->\n\n<!-- agent:exchange -->\nprevious\n<!-- /agent:exchange -->\n";
         std::fs::write(&doc_path, doc).unwrap();
 
-        let result = apply_patches(doc, &[], "new stuff", &doc_path).unwrap();
+        let result = apply_patches_via_path(doc, &[], "new stuff", &doc_path).unwrap();
         assert!(result.contains("previous"));
         assert!(result.contains("new stuff"));
         // Should not create a second exchange component
@@ -3134,7 +3081,7 @@ All green.
             content: "overflow data\n".to_string(),
             attrs: Default::default(),
         }];
-        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
+        let result = apply_patches_via_path(doc, &patches, "", &doc_path).unwrap();
         // Missing component content should be routed to exchange
         assert!(
             result.contains("overflow data"),
@@ -3158,7 +3105,7 @@ All green.
             content: "overflow data\n".to_string(),
             attrs: Default::default(),
         }];
-        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
+        let result = apply_patches_via_path(doc, &patches, "", &doc_path).unwrap();
         // Should auto-create exchange component
         assert!(
             result.contains("<!-- agent:exchange -->"),
@@ -3177,42 +3124,6 @@ All green.
         assert!(!is_template_mode(None));
     }
 
-    #[test]
-    fn template_info_works() {
-        let dir = setup_project();
-        let doc_path = dir.path().join("test.md");
-        let doc = "---\nagent_doc_format: template\n---\n\n<!-- agent:status -->\ncontent\n<!-- /agent:status -->\n";
-        std::fs::write(&doc_path, doc).unwrap();
-
-        let info = template_info(&doc_path).unwrap();
-        assert!(info.template_mode);
-        assert_eq!(info.components.len(), 1);
-        assert_eq!(info.components[0].name, "status");
-        assert_eq!(info.components[0].content, "content\n");
-    }
-
-    #[test]
-    fn template_info_legacy_mode_works() {
-        let dir = setup_project();
-        let doc_path = dir.path().join("test.md");
-        let doc = "---\nresponse_mode: template\n---\n\n<!-- agent:status -->\ncontent\n<!-- /agent:status -->\n";
-        std::fs::write(&doc_path, doc).unwrap();
-
-        let info = template_info(&doc_path).unwrap();
-        assert!(info.template_mode);
-    }
-
-    #[test]
-    fn template_info_append_mode() {
-        let dir = setup_project();
-        let doc_path = dir.path().join("test.md");
-        let doc = "---\nagent_doc_format: append\n---\n\n# Doc\n";
-        std::fs::write(&doc_path, doc).unwrap();
-
-        let info = template_info(&doc_path).unwrap();
-        assert!(!info.template_mode);
-        assert!(info.components.is_empty());
-    }
 
     #[test]
     fn parse_patches_ignores_markers_in_fenced_code_block() {
@@ -3398,7 +3309,7 @@ Interstitial text.
             content: "new\n".to_string(),
             attrs: Default::default(),
         }];
-        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
+        let result = apply_patches_via_path(doc, &patches, "", &doc_path).unwrap();
         // Inline replace should win over config append
         assert!(result.contains("new\n"));
         assert!(!result.contains("old\n"));
@@ -3417,34 +3328,11 @@ Interstitial text.
             content: "new\n".to_string(),
             attrs: Default::default(),
         }];
-        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
+        let result = apply_patches_via_path(doc, &patches, "", &doc_path).unwrap();
         assert!(result.contains("new\n"));
         assert!(!result.contains("old\n"));
     }
 
-    #[test]
-    fn no_inline_attr_falls_back_to_config() {
-        // No inline attr → falls back to config.toml ([components] section)
-        let dir = setup_project();
-        let doc_path = dir.path().join("test.md");
-        std::fs::write(
-            dir.path().join(".agent-doc/config.toml"),
-            "[components.status]\npatch = \"append\"\n",
-        )
-        .unwrap();
-        let doc = "<!-- agent:status -->\nold\n<!-- /agent:status -->\n";
-        std::fs::write(&doc_path, doc).unwrap();
-
-        let patches = vec![PatchBlock {
-            name: "status".to_string(),
-            content: "new\n".to_string(),
-            attrs: Default::default(),
-        }];
-        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
-        // Config says append, so both old and new should be present
-        assert!(result.contains("old\n"));
-        assert!(result.contains("new\n"));
-    }
 
     #[test]
     fn no_inline_attr_no_config_falls_back_to_default() {
@@ -3459,7 +3347,7 @@ Interstitial text.
             content: "new\n".to_string(),
             attrs: Default::default(),
         }];
-        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
+        let result = apply_patches_via_path(doc, &patches, "", &doc_path).unwrap();
         // exchange defaults to append
         assert!(result.contains("old\n"));
         assert!(result.contains("new\n"));
@@ -3483,7 +3371,7 @@ Interstitial text.
             content: "new\n".to_string(),
             attrs: Default::default(),
         }];
-        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
+        let result = apply_patches_via_path(doc, &patches, "", &doc_path).unwrap();
         assert!(result.contains("new\n"));
         assert!(!result.contains("old\n"));
     }
@@ -3502,33 +3390,12 @@ Interstitial text.
             content: "new\n".to_string(),
             attrs: Default::default(),
         }];
-        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
+        let result = apply_patches_via_path(doc, &patches, "", &doc_path).unwrap();
         assert!(result.contains("new\n"));
         assert!(!result.contains("old\n"));
     }
 
     #[test]
-    fn toml_patch_key_works() {
-        // config.toml uses `[components.status]` with `patch = "append"`
-        let dir = setup_project();
-        let doc_path = dir.path().join("test.md");
-        std::fs::write(
-            dir.path().join(".agent-doc/config.toml"),
-            "[components.status]\npatch = \"append\"\n",
-        )
-        .unwrap();
-        let doc = "<!-- agent:status -->\nold\n<!-- /agent:status -->\n";
-        std::fs::write(&doc_path, doc).unwrap();
-
-        let patches = vec![PatchBlock {
-            name: "status".to_string(),
-            content: "new\n".to_string(),
-            attrs: Default::default(),
-        }];
-        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
-        assert!(result.contains("old\n"));
-        assert!(result.contains("new\n"));
-    }
 
     #[test]
     fn stream_override_beats_inline_attr() {
@@ -3546,7 +3413,7 @@ Interstitial text.
         let mut overrides = std::collections::HashMap::new();
         overrides.insert("exchange".to_string(), "replace".to_string());
         let result =
-            apply_patches_with_overrides(doc, &patches, "", &doc_path, &overrides).unwrap();
+            apply_patches_with_overrides_via_path(doc, &patches, "", &doc_path, &overrides).unwrap();
         // Stream override (replace) should win over inline attr (append)
         assert!(result.contains("new\n"));
         assert!(!result.contains("old\n"));
@@ -3562,7 +3429,7 @@ Interstitial text.
         let mut overrides = std::collections::HashMap::new();
         overrides.insert("exchange".to_string(), "replace".to_string());
         let result =
-            apply_patches_with_overrides(doc, &[], "Compacted summary.\n", &doc_path, &overrides)
+            apply_patches_with_overrides_via_path(doc, &[], "Compacted summary.\n", &doc_path, &overrides)
                 .unwrap();
 
         assert!(result.contains("Compacted summary.\n"));
@@ -3584,7 +3451,7 @@ Interstitial text.
         let mut overrides = std::collections::HashMap::new();
         overrides.insert("exchange".to_string(), "replace".to_string());
         let result =
-            apply_patches_with_overrides(doc, &patches, "trailing note", &doc_path, &overrides)
+            apply_patches_with_overrides_via_path(doc, &patches, "trailing note", &doc_path, &overrides)
                 .unwrap();
 
         assert!(result.contains("Compacted summary.\n"));
@@ -3620,7 +3487,7 @@ real status content
             content: "patched status\n".to_string(),
             attrs: Default::default(),
         }];
-        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
+        let result = apply_patches_via_path(doc, &patches, "", &doc_path).unwrap();
 
         // The real component should be patched
         assert!(
@@ -3656,7 +3523,7 @@ real status content
         let patches = vec![];
         let unmatched = "### Re: Response\n\nResponse content here.\n";
 
-        let result = apply_patches(doc, &patches, unmatched, &file).unwrap();
+        let result = apply_patches_via_path(doc, &patches, unmatched, &file).unwrap();
 
         // Response should be inserted at the boundary marker position (after prompt)
         let prompt_pos = result.find("User prompt here.").unwrap();
@@ -3693,7 +3560,7 @@ real status content
             attrs: Default::default(),
         }];
 
-        let result = apply_patches(doc, &patches, "", &file).unwrap();
+        let result = apply_patches_via_path(doc, &patches, "", &file).unwrap();
 
         // Response should be after prompt (boundary consumed)
         let prompt_pos = result.find("User prompt here.").unwrap();
@@ -3723,7 +3590,7 @@ real status content
 
         let response = "<!-- patch:exchange -->\nAgent response.\n<!-- /patch:exchange -->\n";
         let (patches, unmatched) = parse_patches(response).unwrap();
-        let result = apply_patches(doc, &patches, &unmatched, &file).unwrap();
+        let result = apply_patches_via_path(doc, &patches, &unmatched, &file).unwrap();
 
         // Must have a boundary at end of exchange, even though original had none
         assert!(
@@ -3743,7 +3610,7 @@ real status content
         // Cycle 1
         let response1 = "<!-- patch:exchange -->\nResponse 1.\n<!-- /patch:exchange -->\n";
         let (patches1, unmatched1) = parse_patches(response1).unwrap();
-        let result1 = apply_patches(doc, &patches1, &unmatched1, &file).unwrap();
+        let result1 = apply_patches_via_path(doc, &patches1, &unmatched1, &file).unwrap();
         assert!(
             result1.contains("<!-- agent:boundary:"),
             "cycle 1 must have boundary"
@@ -3752,7 +3619,7 @@ real status content
         // Cycle 2 — use cycle 1's output as the new doc (simulates next write)
         let response2 = "<!-- patch:exchange -->\nResponse 2.\n<!-- /patch:exchange -->\n";
         let (patches2, unmatched2) = parse_patches(response2).unwrap();
-        let result2 = apply_patches(&result1, &patches2, &unmatched2, &file).unwrap();
+        let result2 = apply_patches_via_path(&result1, &patches2, &unmatched2, &file).unwrap();
         assert!(
             result2.contains("<!-- agent:boundary:"),
             "cycle 2 must have boundary"
@@ -3774,7 +3641,7 @@ real status content
 
         let response = "<!-- patch:exchange -->\n### Re: Follow-up -- gpt-5\n\nDone.\n<!-- /patch:exchange -->\n";
         let (patches, unmatched) = parse_patches(response).unwrap();
-        let result = apply_patches(doc, &patches, &unmatched, &file).unwrap();
+        let result = apply_patches_via_path(doc, &patches, &unmatched, &file).unwrap();
 
         assert!(
             result.contains("future regression.\n\n### Re: Follow-up"),
@@ -3800,7 +3667,7 @@ real status content
 
         let response = "<!-- patch:exchange -->\n### Re: Follow-up -- gpt-5\n\nDone.\n<!-- /patch:exchange -->\n";
         let (patches, unmatched) = parse_patches(response).unwrap();
-        let result = apply_patches(doc, &patches, &unmatched, &file).unwrap();
+        let result = apply_patches_via_path(doc, &patches, &unmatched, &file).unwrap();
 
         assert!(
             result.contains("future regression.\n\n### Re: Follow-up"),
@@ -4261,7 +4128,7 @@ body b
             content: "line1\nline2\nline3\nline4\nline5\n".to_string(),
             attrs: Default::default(),
         }];
-        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
+        let result = apply_patches_via_path(doc, &patches, "", &doc_path).unwrap();
         assert!(!result.contains("line1"));
         assert!(!result.contains("line2"));
         assert!(result.contains("line3"));
@@ -4281,34 +4148,12 @@ body b
             content: "line1\nline2\n".to_string(),
             attrs: Default::default(),
         }];
-        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
+        let result = apply_patches_via_path(doc, &patches, "", &doc_path).unwrap();
         assert!(result.contains("line1"));
         assert!(result.contains("line2"));
     }
 
     #[test]
-    fn max_lines_from_components_toml() {
-        let dir = setup_project();
-        let doc_path = dir.path().join("test.md");
-        std::fs::write(
-            dir.path().join(".agent-doc/config.toml"),
-            "[components.log]\npatch = \"replace\"\nmax_lines = 2\n",
-        )
-        .unwrap();
-        let doc = "<!-- agent:log -->\nold\n<!-- /agent:log -->\n";
-        std::fs::write(&doc_path, doc).unwrap();
-
-        let patches = vec![PatchBlock {
-            name: "log".to_string(),
-            content: "a\nb\nc\nd\n".to_string(),
-            attrs: Default::default(),
-        }];
-        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
-        assert!(!result.contains("\na\n"));
-        assert!(!result.contains("\nb\n"));
-        assert!(result.contains("c"));
-        assert!(result.contains("d"));
-    }
 
     #[test]
     fn max_lines_inline_beats_toml() {
@@ -4327,7 +4172,7 @@ body b
             content: "a\nb\nc\nd\n".to_string(),
             attrs: Default::default(),
         }];
-        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
+        let result = apply_patches_via_path(doc, &patches, "", &doc_path).unwrap();
         // Inline max_lines=3 should win over toml max_lines=1
         assert!(result.contains("b"));
         assert!(result.contains("c"));
@@ -4387,7 +4232,7 @@ body b
             content: "❯ How do I configure .mise.toml?\n\n### Re: configure .mise.toml\n\nUse `[env]` section.\n".to_string(),
             attrs: Default::default(),
         }];
-        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
+        let result = apply_patches_via_path(doc, &patches, "", &doc_path).unwrap();
 
         let count = result.matches("❯ How do I configure .mise.toml?").count();
         assert_eq!(
@@ -4421,7 +4266,7 @@ Previous response.
             content: "\n\n### Re: something\n\nAnswer here.\n".to_string(),
             attrs: Default::default(),
         }];
-        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
+        let result = apply_patches_via_path(doc, &patches, "", &doc_path).unwrap();
         assert!(
             result.contains("Previous response."),
             "existing content preserved"
@@ -4456,7 +4301,7 @@ code block 2
             content: "### Re: test — opus-4-6\n\nResponse.\n".to_string(),
             attrs: Default::default(),
         }];
-        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
+        let result = apply_patches_via_path(doc, &patches, "", &doc_path).unwrap();
         let fence_count = result.matches("```").count();
         assert_eq!(
             fence_count, 4,
@@ -4487,7 +4332,7 @@ Existing answer.
             attrs: Default::default(),
         }];
         let result =
-            apply_patches_with_overrides(doc, &patches, "", &doc_path, &Default::default())
+            apply_patches_with_overrides_via_path(doc, &patches, "", &doc_path, &Default::default())
                 .unwrap();
 
         assert!(
@@ -4526,7 +4371,7 @@ Existing answer.
             attrs: Default::default(),
         }];
         let result =
-            apply_patches_with_overrides(doc, &patches, "", &doc_path, &Default::default())
+            apply_patches_with_overrides_via_path(doc, &patches, "", &doc_path, &Default::default())
                 .unwrap();
 
         let wcup1_prompt = result.find("❯ do #wcup1. spec-test-commit-push").unwrap();
@@ -4568,7 +4413,7 @@ Existing answer.
             content: "### Re: #wcx1 — gpt-5\n\nNot done yet.\n".to_string(),
             attrs: Default::default(),
         }];
-        let err = apply_patches_with_overrides(doc, &patches, "", &doc_path, &Default::default())
+        let err = apply_patches_with_overrides_via_path(doc, &patches, "", &doc_path, &Default::default())
             .expect_err("later-matching response should fail closed");
         assert!(
             err.to_string().contains("skip older unresolved prompt"),
@@ -4635,7 +4480,7 @@ Existing answer.
             attrs: Default::default(),
         }];
         let doc_path = std::path::PathBuf::from("/tmp/test.md");
-        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
+        let result = apply_patches_via_path(doc, &patches, "", &doc_path).unwrap();
         // Extract just the exchange component content
         let components = component::parse(&result).unwrap();
         let exchange = components.iter().find(|c| c.name == "exchange").unwrap();
@@ -4664,7 +4509,7 @@ Existing answer.
             attrs: Default::default(),
         }];
         let doc_path = std::path::PathBuf::from("/tmp/test.md");
-        let result = apply_patches(doc, &patches, "", &doc_path).unwrap();
+        let result = apply_patches_via_path(doc, &patches, "", &doc_path).unwrap();
         let components = component::parse(&result).unwrap();
         let notes = components.iter().find(|c| c.name == "notes").unwrap();
         assert!(

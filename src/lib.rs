@@ -42,6 +42,7 @@ pub mod secret_redact;
 pub mod security;
 pub mod syntax;
 pub mod template;
+pub mod template_io;
 
 // Boundary ID helpers moved to `agent_doc_core::id` (Wave 1 of #adcr extraction).
 // Re-exported here so existing `crate::new_boundary_id` etc. call sites in

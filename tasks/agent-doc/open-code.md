@@ -408,7 +408,40 @@ The remaining functions cluster into three architectural groups, each with its o
 Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
 
 **Not invoking `/loop`** — each sub-task deserves its own focused cycle so the operator can review one mutation surface at a time, especially the apply_patch group which touches the `#ckv3`-refactored signature.
-<!-- agent:boundary:140f3011 -->
+
+### Re: do #5yqz — eval-runner switched to agent-doc-core — opus-4-7
+
+Executed `do [#5yqz]`. `eval-runner` now links `agent-doc-core` directly for `strip_comments` instead of the full `agent-doc` orchestration crate. The `#k9e1` POC unblocked this: Option 1 (cdylib stays in main) means eval-runner consumes the Rust crate directly, so the earlier churn concern from the triage halt no longer applies.
+
+#### What landed
+
+Submodule `58cf4c2` on `main`, pushed. Superproject `0c0eedf11` on `main`, pushed.
+
+- `Cargo.toml` — `agent-doc = { path = "../agent-doc" }` → `agent-doc-core = { path = "../agent-doc/agent-doc-core" }`.
+- `src/main.rs` — `agent_doc::component::strip_comments` → `agent_doc_core::component::strip_comments` (both call sites in `strip_diff_comments`).
+- `Cargo.lock` — **1,799 net deletions**; the dep-prune materialized in the lockfile.
+
+#### The build-cost win
+
+- Debug build: **26 crates** (was ~266 via `agent-doc`). The entire orchestration tree drops: tokio runtime, hyper/reqwest/rustls (agent-doc's copies), interprocess, notify, rusqlite, tmux-router, git2, clap, tagpath.
+- Release build: 71 crates, green.
+
+#### Verification
+
+- `cargo build`: green (26 crates).
+- `cargo build --release`: green (71 crates, fat-LTO distribution profile).
+- `cargo test`: green (eval-runner has no test functions — 0 tests, 1 suite).
+- `cargo check`: 0 errors.
+- `grep agent_doc src/`: only the two `agent_doc_core::component::strip_comments` call sites remain.
+
+#### Expected warning (not a regression)
+
+Building eval-runner in isolation now warns that the superproject `.cargo/config.toml` `[patch.crates-io]` entries for `tmux-router` / `agent-kit` / `tagpath` are "unused" — because eval-runner no longer pulls them in transitively. Those patches still serve the main `agent-doc` build, so they stay. The warning *is* the prune working as designed.
+
+Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
+
+**Not invoking `/loop`** — queue head advances to `do [#77v6]` (`#adcr-publish`), an operator decision (publish `agent-doc-core` to crates.io? SemVer commitment, ownership readiness). That's not work I can execute unilaterally — it needs a triage call.
+<!-- agent:boundary:3ef6f6c2 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -435,7 +468,6 @@ preset #spec-test-build-install-commit-push
 - [ ] [#epv5] #k9e1-ffi-simple Move the 4 simplest dependency-free pure FFI functions to agent-doc-core::ffi: agent_doc_parse_components (+ FfiComponentList), agent_doc_visual_tokens_json, agent_doc_merge_frontmatter, agent_doc_normalize_template_structure. Each touches only component::parse, agent_doc_core::frontmatter::merge_fields, or agent_doc_core::template::normalize_editor_visible_template_structure. Pattern is the POC + ~50 LOC per function. Update force_link_core_ffi_symbols to reference each.
 - [ ] [#vb8h] #k9e1-ffi-boundary Move the 4 reposition_boundary_to_end variants (+ _with_id, _preserve_head, _preserve_head_with_id) plus agent_doc_crdt_merge + agent_doc_merge_crdt + their FfiMergeResult helper struct to agent-doc-core::ffi. All pure; depend on agent_doc_core::template and agent_doc_core::crdt.
 - [ ] [#e130] #k9e1-ffi-apply-patch Move the 3 apply_patch variants (agent_doc_apply_patch, agent_doc_apply_patch_with_caret, agent_doc_apply_patch_with_boundary) plus FfiPatchResult and helpers (ffi_patch_ok/err/from_result, normalize_editor_visible_result). Each needs the template::apply_patches_with_overrides call switched to apply_patches_with_overrides_pure (preloaded empty configs, no dummy_path). Largest sub-piece — touches the recently-refactored patch surface from #ckv3.
-- [ ] [#5yqz] #adcr-eval-runner-switch Switch eval-runner's strip_comments dependency from agent-doc to agent-doc-core to cut eval pipeline build cost.
 - [ ] [#77v6] #adcr-publish Decide on publishing agent-doc-core to crates.io (currently publish = false). Allows third-party FFI consumers and unblocks the editor-plugin slim-link target.
 - [ ] [#ysv9] #adoc-orchestration-crate Plan agent-doc-orchestration extraction — split route/git/sessions/ipc_socket/supervisor/capture/cycle_state/repair/sync/start out of the main crate into a sibling workspace member, leaving only the CLI entrypoint + command dispatch in agent-doc. Would create a 3-layer architecture (CLI → orchestration → core) and substantially cut the editor-plugin-only build target. Substantial refactor; depends on #adcr-baseline-measure to quantify the win first.
 - [ ] [#adcr] Extract agent-doc-core crate (~17K lines) — enables fast-compiling FFI/editor-plugin target independent of orchestration layer

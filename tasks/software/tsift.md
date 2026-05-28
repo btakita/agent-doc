@@ -356,6 +356,8 @@ For prereq 1, what is your suggestion and why?
 
 **Tradeoff worth naming:** Y has the marginal upside that `summarize` becomes a shared foundation explicitly named as such (both digest and search depend on it). If you anticipate future consumers besides digest/search — e.g., a hypothetical `tsift-mcp` or `tsift-agent` that also needs cached summaries without pulling in the rest of search — Y pays off later. But that future hasn't materialized; X is the right call for the current shape.
 
+❯ Do summarize. I expect tsift-mcp and tsift-agent.
+
 **If you confirm X, the rest of the plan is:**
 - `#split-tsift-digest` lands first (4 emitter modules — diff/log/metric/test — plus impact).
 - `#split-tsift-search` lands second (sift + summarize + tagpath_adapter only). No cycle.
@@ -411,7 +413,14 @@ Added `#split-tsift-summarize [done]` to backlog as a record of this cycle's res
 **Reminder:** session document is now well past the comfortable size (the 312-line / 10-no-op warning from last cycle still stands; this cycle adds another response). `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/software/tsift.md --commit` is recommended before the next split runs.
 
 **Confidence:** high. **Escalation:** none.
-<!-- agent:boundary:caf36317 -->
+
+### Re: queue state cleanup — opus-4-7
+
+
+Marking `#split-tsift-summarize` done in the backlog (it landed last cycle as `8f2dee3`; I added it as a `[ ]` record by mistake instead of using `--done` directly). Queue should now reconcile: the `do [#split-tsift-summarize]` directive in the queue resolves to a done item and auto-strikes.
+
+No new user directive in this cycle's prompt changes — just the boundary artifact from the prior response. Remaining queue: `do [#split-tsift-cli-subcommands]` (`[recommended]` only, orthogonal to the rest). Not auto-looping; please direct next.
+<!-- agent:boundary:870f9936 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -430,6 +439,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#split-tsift-quality]~
 - ~do [#split-tsift-search]~
 - ~do [#demote-root-tsift]~
+- do [#split-tsift-summarize]
 - do [#split-tsift-cli-subcommands]
 <!-- /agent:queue -->
 

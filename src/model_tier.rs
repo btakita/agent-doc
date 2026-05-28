@@ -249,10 +249,23 @@ fn claude_code_model_alias(model_name: &str) -> Option<&'static str> {
     }
 }
 
+/// Returns `true` when `model_name` lacks a provider prefix required by the
+/// opencode harness. OpenCode expects `provider/model` syntax (e.g.
+/// `zai-coding-plan/glm-5.1`); bare names like `glm-5.1` are ambiguous.
+pub fn is_bare_model_name(model_name: &str) -> bool {
+    let trimmed = model_name.trim();
+    !trimmed.contains('/') || trimmed.starts_with('/')
+}
+
 /// Resolve harness-owned model aliases to the concrete model id agent-doc should
 /// launch and stamp in attribution. The Claude Code `opus` alias is intentionally
 /// versioned here so `claude_model: opus`, `/model opus`, and high-tier fallback
 /// all follow the same current Claude Code definition.
+///
+/// For the opencode harness, bare model names (without a `provider/` prefix)
+/// are rejected with a warning to stderr and returned unchanged so the caller
+/// can still proceed — but probe builders and callers should check
+/// `is_bare_model_name` before relying on the result for dispatch.
 pub fn canonical_model_name(
     model_name: &str,
     harness: &str,
@@ -262,6 +275,14 @@ pub fn canonical_model_name(
         && let Some(canonical) = claude_code_model_alias(model_name)
     {
         return canonical.to_string();
+    }
+    if harness == "opencode" && is_bare_model_name(model_name) {
+        eprintln!(
+            "[model_tier] WARNING: opencode model name {:?} lacks a provider prefix \
+             (expected \"provider/model\", e.g. \"zai-coding-plan/glm-5.1\"). \
+             Dispatch may fail or use a wrong provider.",
+            model_name.trim()
+        );
     }
     model_name.to_string()
 }
@@ -544,6 +565,10 @@ pub fn parse_model_arg(
     if let Some(tier) = tier_from_model_name(trimmed, harness, model_config) {
         return Some((tier, canonical_model_name(trimmed, harness, model_config)));
     }
+    // For opencode, reject bare model names (no provider prefix).
+    if harness == "opencode" && !is_bare_model_name(trimmed) {
+        return Some((Tier::Auto, canonical_model_name(trimmed, harness, model_config)));
+    }
     // Unknown — accept the name but leave tier as Auto so it doesn't gate.
     None
 }
@@ -786,6 +811,43 @@ mod tests {
             "claude-opus-4-7"
         );
         assert_eq!(canonical_model_name("opus", "codex", &cfg), "opus");
+    }
+
+    #[test]
+    fn is_bare_model_name_detects_missing_provider_prefix() {
+        assert!(is_bare_model_name("glm-5.1"));
+        assert!(is_bare_model_name("opus"));
+        assert!(is_bare_model_name("haiku"));
+        assert!(!is_bare_model_name("zai-coding-plan/glm-5.1"));
+        assert!(!is_bare_model_name("anthropic/claude-opus-4-7"));
+        assert!(is_bare_model_name("/leading-slash-only"));
+    }
+
+    #[test]
+    fn canonical_model_name_warns_on_bare_opencode_name() {
+        let cfg = ModelConfig::default();
+        assert_eq!(
+            canonical_model_name("glm-5.1", "opencode", &cfg),
+            "glm-5.1"
+        );
+        assert_eq!(
+            canonical_model_name("zai-coding-plan/glm-5.1", "opencode", &cfg),
+            "zai-coding-plan/glm-5.1"
+        );
+    }
+
+    #[test]
+    fn parse_model_arg_opencode_rejects_bare_name() {
+        let cfg = ModelConfig::default();
+        assert!(parse_model_arg("glm-5.1", "opencode", &cfg).is_none());
+    }
+
+    #[test]
+    fn parse_model_arg_opencode_accepts_provider_prefixed_name() {
+        let cfg = ModelConfig::default();
+        let (tier, name) = parse_model_arg("zai-coding-plan/glm-5.1", "opencode", &cfg).unwrap();
+        assert_eq!(tier, Tier::Auto);
+        assert_eq!(name, "zai-coding-plan/glm-5.1");
     }
 
     #[test]

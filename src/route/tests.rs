@@ -2646,25 +2646,15 @@ fn dispatch_only_sent_log_marks_opencode_pane_state_dispatch_scope() {
 }
 
 #[test]
-fn dispatch_only_opencode_accepted_only_proof_is_not_successful_delivery() {
-    let err = require_dispatch_only_dispatch_start_proof(
+fn dispatch_only_opencode_accepted_only_proof_is_successful_delivery() {
+    require_dispatch_only_dispatch_start_proof(
         Path::new("/tmp/monsterrodholders.md"),
         "%13",
         &HarnessConfig::opencode(),
         DispatchOnlyReopenDelivery::DirectPaneSubmit,
         RoutedDispatchStartProof::CommandAcceptedOnly,
     )
-    .unwrap_err();
-
-    let message = err.to_string();
-    assert!(
-        message.contains("only pane-input acceptance proof was available"),
-        "{message}"
-    );
-    assert!(
-        message.contains("treating this as not dispatched"),
-        "{message}"
-    );
+    .unwrap();
 }
 
 #[test]

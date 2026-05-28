@@ -335,7 +335,7 @@ pub(crate) fn dispatch_only_dispatch_start_proof_required(
 ) -> bool {
     match facts.harness_binary {
         "codex" => facts.codex_dispatch_start_tracking_enabled,
-        "opencode" => true,
+        "opencode" => false,
         _ => false,
     }
 }
@@ -1223,7 +1223,7 @@ mod tests {
                 codex_dispatch_start_tracking_enabled: false,
             }
         ));
-        assert!(dispatch_only_dispatch_start_proof_required(
+        assert!(!dispatch_only_dispatch_start_proof_required(
             DispatchOnlyProofPolicyFacts {
                 harness_binary: "opencode",
                 codex_dispatch_start_tracking_enabled: false,

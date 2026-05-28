@@ -244,7 +244,78 @@ tsift/
 
 **The split pays off when you start the tokensave Phase 2 ports.** The new algorithms crate gives agents a clean 2K LOC target instead of editing the 4.8K LOC `substrate.rs`. Recommend splitting as the first step of Phase 2, not before.
 Add #next-steps for extracting crates interleaved with #next-steps of tokensave reverse engineer port.
-<!-- agent:boundary:49124cd0 -->
+### Re: interleaved crate extraction + tokensave port — glm-5.1
+
+Combined roadmap where each crate extraction enables the next tokensave port.
+
+#### Step 1: Extract `tsift-core` crate
+- **Crate work**: Pull `GraphStore` trait, `GraphNode`, `GraphEdge`, `GraphProjection`, `GraphTombstone` types out of `substrate.rs` into `crates/tsift-core/src/lib.rs`
+- **~1.5K LOC** — pure types + trait, zero heavy deps
+- **tsift port progress**: None yet — this is foundation
+- **Verification**: `cargo test -p tsift-core` compiles and passes
+
+#### Step 2: Extract `tsift-sqlite` + `tsift-libsql` crates
+- **Crate work**: Move `SqliteGraphStore` into `crates/tsift-sqlite/`, move `libsql_backend.rs` into `crates/tsift-libsql/`
+- Both depend on `tsift-core` for the trait
+- **tsift port progress**: None — but now backends are pluggable crates
+- **Verification**: `cargo test -p tsift-sqlite && cargo test -p tsift-libsql --features backend-libsql`
+
+#### Step 3: tokensave DB reader adapter (Phase 1)
+- **Crate work**: Add `crates/tsift-tokensave/` — new crate, depends on `tsift-core` + `tsift-libsql`
+- **tsift port**: Implement `TokensaveGraphStore` that reads `.tokensave/tokensave.db`
+  - Schema mapping: tokensave `nodes(id, kind, name, qualified_name, file_path, ...)` → tsift `GraphNode`
+  - Schema mapping: tokensave `edges(source, target, kind, line)` → tsift `GraphEdge`
+  - FTS5 search: expose `nodes_fts` virtual table through tsift's envelope system
+- **~800 LOC** — thin adapter over libsql
+- **Verification**: Read a real tokensave DB, query nodes/edges, run FTS5 search
+
+#### Step 4: Extract `tsift-graph` crate + port extraction pipeline
+- **Crate work**: Move `graph.rs` + `lang/` into `crates/tsift-graph/`
+- **tsift port**: Port from tokensave:
+  - `LanguageExtractor` trait (~300 LOC) — unify tsift's existing extractors
+  - `LanguageRegistry` (~100 LOC) — extension-based dispatch
+  - `ComplexityConfig` + generic `count_complexity()` (~200 LOC) — cyclomatic framework
+- **Verification**: Existing tree-sitter tests pass under new trait
+
+#### Step 5: Add `tsift-algorithms` crate + port graph algorithms
+- **Crate work**: New `crates/tsift-algorithms/`, depends on `tsift-core`
+- **tsift port**: Port from tokensave:
+  - Iterative Tarjan SCC (~200 LOC) from `graph/scc.rs`
+  - Composite health score (~400 LOC) from `graph/health.rs` — geometric mean of 5 dimensions
+  - Dead code detection (~150 LOC) from `graph/queries.rs`
+  - Coupling / fan-in / fan-out (~100 LOC)
+- **Verification**: Run against tokensave DB via `tsift-tokensave` adapter
+
+#### Step 6: Add `tsift-resolution` crate + port reference resolution
+- **Crate work**: New `crates/tsift-resolution/`, depends on `tsift-core` + `tsift-graph`
+- **tsift port**: Port from tokensave:
+  - Multi-strategy resolver (~300 LOC) — qualified → exact → scored
+  - Scoring heuristics (~100 LOC) — file proximity, language, visibility
+  - Blocklist (~50 LOC) — common names (Result, Option, new, from)
+- **Verification**: Resolve references in a real project, compare hit rate
+
+#### Step 7: Collapse CLI into `tsift-cli` crate
+- **Crate work**: Move `main.rs` (39K LOC) into `crates/tsift-cli/`, depends on all other crates
+- **tsift port**: Wire new crates into CLI commands (`tsift health`, `tsift dead-code`, `tsift coupling`)
+- **Verification**: Full `cargo test` across workspace, `make check` passes
+
+#### Summary
+
+| Step | Crate work | tokensave port | LOC estimate |
+|---|---|---|---|
+| 1 | Extract `tsift-core` | — | ~1.5K moved |
+| 2 | Extract `tsift-sqlite` + `tsift-libsql` | — | ~3.7K moved |
+| 3 | Add `tsift-tokensave` | DB reader adapter | ~800 new |
+| 4 | Extract `tsift-graph` | LanguageExtractor + complexity | ~600 new + ~1.4K moved |
+| 5 | Add `tsift-algorithms` | Tarjan SCC, health, dead code, coupling | ~850 new |
+| 6 | Add `tsift-resolution` | Multi-strategy resolver | ~450 new |
+| 7 | Extract `tsift-cli` | Wire new commands | ~39K moved |
+
+**Steps 1-2**: 2-3 days (pure refactoring, no new code)
+**Steps 3-6**: 1-2 weeks (new tokensave ports, interleaved with crate creation)
+**Step 7**: 1 day (final CLI wiring)
+**Total**: ~3 weeks
+<!-- agent:boundary:4457f1e1 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -230,7 +230,24 @@ Submodule `d568e6bb` on `20260422/codex-agent-backend`, pushed. Superproject `01
 Plan: tasks/agent-doc/plan-agent-doc-orchestration-extraction.md
 
 **Not invoking `/loop`** — Direction A is a long multi-cycle migration; I'll advance one safe increment per invocation. Note the queue head is `do [#yybc]` (the obsolete tracker, struck-then-superseded); to continue the extraction next time, re-queue `#bz6s` or just say "continue". `#yybc`/`#adcr` remain strike candidates.
-<!-- agent:boundary:a0d30b05 -->
+
+### Re: queue reconciled — #bz6s staged, queue paused — opus-4-7
+
+Committing your queue edits and clearing the recurring snapshot/boundary drift. Managed-component edits only — no code this cycle.
+
+#### What you changed (now committed)
+
+- `queue_active: true` → `false` — queue paused.
+- Moved the re-added `do [#bz6s]` above `do [#yybc]` — the orchestration extraction is staged as the next active item.
+
+#### Not executing — queue is paused
+
+`queue_active: false` is an explicit stop, so I'm not auto-running the next Direction-A increment. When you're ready to continue the extraction, set `queue_active: true` (or just say `continue`) and I'll pick up the next increment: `project_config_io` + `config`, then the `sessions`/`supervisor` closure, then the cluster (`cycle_state`/`capture`/`repair`/`git`/`route`/`sync`/`start`).
+
+Current orchestration crate: 4 modules (`ipc_socket`, `env`, `fs_util`, `secret_redact`). `#yybc`/`#adcr` behind `#bz6s` remain strike candidates (both effectively closed).
+
+Plan: tasks/agent-doc/plan-agent-doc-orchestration-extraction.md
+<!-- agent:boundary:bbd38963 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -251,8 +268,8 @@ preset #spec-test-build-install-commit-push
 - ~do [#77v6]~
 - ~do [#ysv9]~
 - ~do [#bz6s]~
-- do [#yybc]
 - do [#bz6s]
+- do [#yybc]
 - do [#adcr]
 <!-- /agent:queue -->
 

@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -358,25 +358,43 @@ Verification:
 - `gh run list --workflow tmux-test --limit 1` reported no workflow named `tmux-test`.
 
 Closeout evidence: EFS repo is clean after push; changed files were staged exactly before commit. Confidence is high. Escalation: none.
-<!-- agent:boundary:948f24e9 -->
+
+### Re: broker pre-qual coverage — gpt-5
+
+Done. `#bpq-tests` is implemented and pushed in `src/equityfundingsource-dev` commit `bcd9db5` (`test: cover broker prequal workflow`).
+
+What changed:
+
+- Added explicit broker pre-qual coverage for authenticated endpoint behavior: the `POST /api/broker/pre-qual` route must call `require_broker_` before parsing or calculating.
+- Added docs/progress drift coverage for the pre-qual rules, outside-guidelines status, UI API wiring, and submit-deal handoff documentation.
+- The cumulative broker pre-qual coverage now includes rule boundaries, validation errors, auth gate behavior, UI API wiring, handoff wiring, and PRD/current-progress/formula documentation.
+
+Changed EFS path:
+
+- `tests/broker-portal.test.ts`
+
+Verification:
+
+- `bun test tests/broker-portal.test.ts` passed: 27 pass, 0 fail.
+- `make check` passed: Bun reported 210 pass, 0 fail; app build and worker build completed. The suite still prints the expected upload limiter and local missing-D1 log lines while passing.
+- `gh workflow list` returned no workflows.
+- `gh run list --workflow CI --limit 1` reported no workflow named `CI`.
+- `gh run list --workflow tmux-test --limit 1` reported no workflow named `tmux-test`.
+
+Closeout evidence: EFS repo is clean after push; changed file was staged exactly before commit. Confidence is high. Escalation: none.
+<!-- agent:boundary:141ffedd -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue auto -->
-preset #spec-test-commit-push
-- ~do [#bpq-api]~
-- ~do [#bpq-ui]~
-- ~do [#bpq-prefill]~
-- do [#bpq-tests]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#bpq-tests] Broker pre-qual coverage: add tests for rule boundaries, validation errors, authenticated endpoint behavior, UI API wiring, and docs/current-progress updates.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
 - [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document intelligence/search, borrower/broker/investor/admin portals, and tenant-ready resale packaging.
 - [ ] [#f4rq] Verify an EFS-owned sending domain in Resend, then switch APPLICATION_LEAD_NOTIFICATION_FROM and APPLICATION_LEAD_NOTIFICATION_TO from testing-mode values to EFS production addresses.

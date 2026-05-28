@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -71,14 +71,57 @@ The four waves of `#adcr` extraction shipped (id+crdt, component+model_tier+pend
 #### Note on `#adcr`
 
 The umbrella entry stays in the backlog as a parent placeholder. The seven items above are the path to satisfying acceptance criteria #1 and #3 before it gets marked done.
-<!-- agent:boundary:cbbffe80 -->
+
+### Re: do #k5s7 — baseline measured — opus-4-7
+
+Executed `do [#k5s7]`. Cold-build numbers captured; plan acceptance criterion #1 satisfied with substantial headroom.
+
+#### Numbers
+
+Measured with `CARGO_TARGET_DIR=/tmp/adoc-baseline-target` on a clean target dir (the host's `~/work/btakita/agent-loop/src/agent-doc/target/` has root-owned icu build artifacts from earlier sudo runs that block normal `cargo clean`).
+
+| Crate | Cold wall time | Transitive crates (.rlib in deps/) |
+|---|---|---|
+| `agent-doc-core` | **9.87s** | 74 |
+| `agent-doc` (main) | **129s** (2m 09s) | 266 |
+
+**Ratio: 0.0765 (7.65%)** — well under the 30% acceptance threshold. The core layer cold-builds **~13× faster** than the orchestration crate.
+
+#### Why the win is so much larger than ratio alone suggests
+
+The 192-crate dep-prune (266 → 74) is the bulk of the value, not LOC compile cost. Editor plugins / FFI consumers / eval-runner that link only against `agent-doc-core` drop the entire orchestration tree:
+
+- async runtime: `tokio`, `tokio-util`, `tokio-stream`
+- HTTP / TLS: `reqwest`, `hyper`, `hyper-tls`, `rustls`, `ureq`
+- IPC: `interprocess` (Unix domain sockets)
+- fs watching: `notify`, `notify-debouncer`
+- subprocess: `which`, `shell-words`, `shell-escape`
+- storage: `rusqlite`, `zstd`
+- workspace siblings: `tagpath`, eval-runner companion crate
+
+#### What landed
+
+Submodule `bce1496f` on `20260422/codex-agent-backend`, pushed. Superproject `23b723e9d` on `main`, pushed.
+
+- `agent-doc-core/COMPILE_BASELINE.md` — Wave 1–4 row added to the wave log; full measurement protocol + next-step interpretation appended.
+
+#### Interpretation per remaining `#adcr` follow-ups
+
+- `#k9e1` (`#adcr-ffi-relocate`) — the 192-crate gap is exactly what unlocks the editor-plugin slim-link target. Relocating pure C-ABI wrappers into `agent-doc-core::ffi` cashes in the gap. **Strongly justified** by these numbers.
+- `#ysv9` (`#adoc-orchestration-crate`) — the 129s main build is bounded above by orchestration deps (tokio, hyper, rustls, interprocess, notify), not core data-layer work. A further split into `agent-doc-orchestration` would let the CLI shell stay near ~10s cold and push heavy deps behind a clean boundary. **Worth scoping**; the win is in dep-tree depth, not LOC count.
+- `#5yqz` (`#adcr-eval-runner-switch`) — eval-runner currently links `agent-doc` for `strip_comments`; switching to `agent-doc-core` directly drops it from a 129s build into a 9.87s build. **Mechanical, immediate, large** payoff.
+
+Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
+
+**Not invoking `/loop`** — the queue head advances to `do [#n7dd]` (wave-4 test tidy), which is a separate operator-scoped cycle (porting ~26 inline tests is mechanical but worth its own review).
+<!-- agent:boundary:13457321 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#k5s7]
+- ~do [#k5s7]~
 - do [#n7dd]
 - do [#0ejf]
 - do [#k9e1]
@@ -91,7 +134,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#k5s7] #adcr-baseline-measure Record cargo build -p agent-doc-core --timings vs full main crate; update agent-doc-core/COMPILE_BASELINE.md; confirm the <30% acceptance criterion #1 from the plan is satisfied (currently unmeasured).
 - [ ] [#n7dd] [recommended] #adcr-wave-4-tidy Port the ~26 I/O-bound inline tests dropped during wave 4 (run_file_not_found, copy_on_read_guard, four compute_* tests, three diff_detects_* tests, fourteen truncated_/extract_/run_with_wait_/wait_for_stable_content_* tests) into src/diff_io.rs to close the coverage gap.
 - [ ] [#0ejf] [recommended] #adcr-purity-tidy Extract the remaining and-Path-taking functions from agent-doc-core: template::{template_info, load_component_configs, load_project_from_doc, find_project_root}, frontmatter::{ensure_session_for_file, set_format_and_write, read_session_id}, project_config::{load_project*, save_project, *_tmux_session}. Move I/O wrappers to main crate; keep pure parsers/formatters in core. Satisfies plan acceptance criterion #3.
 - [ ] [#k9e1] #adcr-ffi-relocate Move pure C-ABI wrappers from src/ffi.rs (apply_patch, parse_components, merge_frontmatter, normalize_template_structure, reposition_boundary, agent_doc_strip_comments) into agent-doc-core::ffi so editor plugins (JB, VS Code) can link against just agent-doc-core without dragging the orchestration crate. Keep route/git/ipc/start FFI calls in main.

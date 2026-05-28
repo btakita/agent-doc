@@ -97,7 +97,35 @@ The published API is now a SemVer commitment and cannot be unpublished (only yan
 Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
 
 **Not invoking `/loop`** — the queue advances to `do [#ysv9]` (`#adoc-orchestration-crate`), a large multi-cycle refactor that warrants its own scoping cycle. (`#yybc` remains a no-op tracker behind it — still recommend striking it.)
-<!-- agent:boundary:4113e8f4 -->
+
+### Re: do #ysv9 — orchestration-crate extraction plan scoped — opus-4-7
+
+Executed `do [#ysv9]` (`#adoc-orchestration-crate`). This is a **planning** task ("Plan agent-doc-orchestration extraction"), so the deliverable is the scoping document, not code. Plan written, committed, pushed; implementation captured as a follow-up backlog item.
+
+#### What landed
+
+Superproject `bbc418c8c` on `main`, pushed: `tasks/agent-doc/plan-agent-doc-orchestration-extraction.md`.
+
+#### Key findings from the analysis
+
+- **Cluster size:** the named orchestration modules total **~44,516 LOC (~29% of the 154K main crate)** — `sync` 11.4K, `git` 8.4K, `route` 8.1K, `start` 5.6K, `supervisor/` 3.5K, `repair` 3.3K, `sessions` 1.7K, `capture` 1.1K, `cycle_state` 1.0K, `ipc_socket` 0.4K.
+- **Dependency shape** (drives sequencing): `sessions`/`ipc_socket`/`supervisor/` are leaves; `git ↔ cycle_state` is a near-one-way knot (git→cycle_state 35 refs, cycle_state→git **1**); `capture ↔ repair` are mutual; `route`/`sync`/`start` are top orchestrators depending on nearly everything.
+- **Strategy:** because the cluster has internal cycles, it can't split into multiple crates — **move it as ONE `agent-doc-orchestration` crate** (mutual deps become intra-crate). The real work is the boundary to the CLI shell (~100 command modules + `main.rs` reference the cluster; shims absorb this during waves, like the `#adcr` wave pattern).
+- **FFI:** keep a single cdylib in the CLI crate — the 11 orchestration FFI fns move to `agent_doc_orchestration::ffi` and re-export via `pub use` + the proven `force_link` pattern. No editor-plugin changes.
+- **Heavy deps that leave the CLI shell:** `tokio`, `reqwest`/`ureq`/`hyper`/`rustls`, `interprocess`, `notify`, `rusqlite`, git, `zstd`, `tmux-router` — confirmed all present in main today.
+
+#### Plan contents
+
+Goal/3-layer target, module inventory + LOC, intra-cluster dependency graph, move-as-one-crate rationale, 5-wave migration sequencing (scaffold → leaves → state/capture → git → orchestrators → prune), CLI/orchestration boundary, single-cdylib FFI re-export, risks, acceptance criteria, and a `#adoc-orch-*` per-wave decomposition.
+
+#### Follow-up captured
+
+Added `#adoc-orchestration-impl` to the backlog (references the plan path). It's the multi-cycle implementation — a large refactor the operator should consciously schedule; each wave is its own green-to-green cycle.
+
+Plan: tasks/agent-doc/plan-agent-doc-orchestration-extraction.md
+
+**Not invoking `/loop`** — queue head advances to `do [#yybc]`, which is the obsolete no-op tracker (the FFI relocation pattern it tracked is fully done). Recommend striking it rather than spending a cycle; `#adcr` (umbrella, materially complete) sits behind it.
+<!-- agent:boundary:db196dc7 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -116,7 +144,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#vb8h]~
 - ~do [#e130]~
 - ~do [#77v6]~
-- do [#ysv9]
+- ~do [#ysv9]~
 - do [#yybc]
 - do [#adcr]
 <!-- /agent:queue -->
@@ -124,7 +152,7 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#ysv9] #adoc-orchestration-crate Plan agent-doc-orchestration extraction — split route/git/sessions/ipc_socket/supervisor/capture/cycle_state/repair/sync/start out of the main crate into a sibling workspace member, leaving only the CLI entrypoint + command dispatch in agent-doc. Would create a 3-layer architecture (CLI → orchestration → core) and substantially cut the editor-plugin-only build target. Substantial refactor; depends on #adcr-baseline-measure to quantify the win first.
+- [ ] [#bz6s] #adoc-orchestration-impl Implement the agent-doc-orchestration crate extraction per tasks/agent-doc/plan-agent-doc-orchestration-extraction.md — 5 waves (scaffold → leaves → state/capture → git → orchestrators → prune CLI deps), each a green-to-green cycle with make check + nm -D FFI symbol gate. ~44.5K LOC, multi-cycle.
 - [ ] [#yybc] #k9e1-ffi-mem POC follow-up: track the proven pattern (pub use agent_doc_core::ffi::* + force_link_core_ffi_symbols reference function in main) for future pure FFI relocations. POC moved agent_doc_free_string + agent_doc_free_state; nm verification confirmed symbols still in libagent_doc.so export table.
 - [ ] [#adcr] Extract agent-doc-core crate (~17K lines) — enables fast-compiling FFI/editor-plugin target independent of orchestration layer
 <!-- /agent:backlog -->

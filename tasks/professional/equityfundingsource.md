@@ -23,7 +23,7 @@ queue_active: false
 ## Status
 
 <!-- agent:status patch=replace -->
-EFS workers.dev production: `/apply` public prequalification + D1-backed `application_leads` admin review is deployed in Worker version `9a289db0-4793-4004-a234-757aa27acdfe` as of 2026-05-28; local `bun dev` on port 4200 mounts `/apply`; public site/footer email is `info@equityfundingsource.com`; logged-out navigation exposes Borrower Login, Apply for a Loan, Broker Portal, and Investor Portal with Broker Portal placed between Apply and Investor. Cloudflare Access protects /login/access-callback with ACCESS_TEAM_DOMAIN/AUD. `/portal-admin/users` lets existing admins create admin/borrower/broker/investor accounts without reopening public `/admin/signup`; production D1 has active admin rows for `brian.takita+admin@gmail.com` and `btak.dev+admin@gmail.com`. Application lead notifications still route through Resend testing-mode config `APPLICATION_LEAD_NOTIFICATION_TO=brian.takita@gmail.com` and `APPLICATION_LEAD_NOTIFICATION_FROM=Equity Funding Source <onboarding@resend.dev>` until an EFS-owned sending domain is verified. Custom-domain cutover is deferred; continue using https://equityfundingsource.brian-takita.workers.dev until further notice.
+EFS workers.dev production: `/apply` public prequalification + D1-backed `application_leads` admin review is deployed in Worker version `b937e33b-8992-4801-bca6-b1897569fe77` as of 2026-05-28; investor commitment/funding amount fields now use shared grid-aligned dollar-prefix styling from EFS commit `a9b0405`. Local `bun dev` on port 4200 mounts `/apply`; public site/footer email is `info@equityfundingsource.com`; logged-out navigation exposes Borrower Login, Apply for a Loan, Broker Portal, and Investor Portal with Broker Portal placed between Apply and Investor. Cloudflare Access protects /login/access-callback with ACCESS_TEAM_DOMAIN/AUD. `/portal-admin/users` lets existing admins create admin/borrower/broker/investor accounts without reopening public `/admin/signup`; production D1 has active admin rows for `brian.takita+admin@gmail.com` and `btak.dev+admin@gmail.com`. Application lead notifications still route through Resend testing-mode config `APPLICATION_LEAD_NOTIFICATION_TO=brian.takita@gmail.com` and `APPLICATION_LEAD_NOTIFICATION_FROM=Equity Funding Source <onboarding@resend.dev>` until an EFS-owned sending domain is verified. Custom-domain cutover is deferred; continue using https://equityfundingsource.brian-takita.workers.dev until further notice.
 <!-- /agent:status -->
 
 ## Exchange
@@ -382,7 +382,33 @@ Verification:
 - `gh run list --workflow tmux-test --limit 1` reported no workflow named `tmux-test`.
 
 Closeout evidence: EFS repo is clean after push; changed file was staged exactly before commit. Confidence is high. Escalation: none.
-<!-- agent:boundary:141ffedd -->
+### Re: investor currency prefix alignment — gpt-5
+
+Fixed, committed, pushed, and deployed. The shared investor `CurrencyAmountInput` now uses a two-column grid with a fixed `$` prefix track, a 12px column gap, and matching 32px text boxes/line heights for the prefix and amount. That keeps the dollar sign vertically centered on the same row as the amount and adds visible spacing between them in both investor places that reuse the component.
+
+Changed EFS paths:
+
+- `lib/ui--browser--efs/portal/investor/available_deals.tsx`
+- `tests/investor-portal-e2e.test.ts`
+
+Commit / push / deploy:
+
+- EFS repo commit: `a9b0405 fix: align investor currency prefix`
+- Pushed `a9b0405` to `origin/main`
+- Deployed Worker version `b937e33b-8992-4801-bca6-b1897569fe77` at `https://equityfundingsource.brian-takita.workers.dev`
+
+Verification:
+
+- `bun test tests/investor-portal-e2e.test.ts` passed: 9 pass, 0 fail.
+- `git diff --check` passed.
+- `make check` passed: 211 pass, 0 fail, then app build and worker build completed.
+- Headless Chromium screenshot of the isolated control showed the `$` and `250,000` on the same row with spacing.
+- Live smoke checks: `/` returned 200, `/portal-investor` returned 303 to `/login?role=investor`, and the deployed `/index.browser-4VKUCFZ6.js` asset contains the new `grid-template-columns:max-content minmax(0,1fr)` currency field styling.
+- GitHub Actions inspection: `gh workflow list` returned no workflows; `gh run list --workflow CI --limit 1` and `gh run list --workflow tmux-test --limit 1` both reported no matching workflow.
+- Tmux CI inspection: `make -n tmux-ci` has no `tmux-ci` target in the EFS repo.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:69effc8f -->
 <!-- /agent:exchange -->
 ###
 <!--

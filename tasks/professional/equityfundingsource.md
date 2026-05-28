@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -37,14 +37,16 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 Compacted content:
 - Archived 6 response topic(s): Broker submit-deal LTV field; In /portal-broker/submit-a-deal, use `LTV (%)` and validate the field is a number.; Switch agent to claude; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:bbfa6911 -->
+re [#2z8r]: How can we allow custom addresses?
+<!-- agent:boundary:4d56e2f7 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+- re [#2z8r]: How can we allow custom addresses?
 <!-- /agent:queue -->
 
 ## Backlog

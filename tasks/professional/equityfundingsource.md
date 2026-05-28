@@ -94,7 +94,25 @@ I would not recommend reusing a machine password for this. If you do not know th
 
 Closeout evidence: no repo files changed in this cycle. Commands run: `tsift status`, `agent-doc --version`, `agent-doc preflight`, `agent-doc plan`, and this `agent-doc finalize`. Verification is based on the deployed auth configuration: `ADMIN_GLOBAL_PASSWORD` is a Worker secret, not a machine-login integration. Confidence is high. Escalation: none.
 How can I see ADMIN_GLOBAL_PASSWORD?
-<!-- agent:boundary:780ae386 -->
+
+
+### Re: store admin global password — gpt-5
+
+Done. I stored the production admin global password in passage at:
+
+`btak/equityfundingsource/admin_global_password`
+
+I did not print the secret value into the terminal or this committed session document.
+
+Verification:
+
+- `passage find admin_global_password` shows the new entry.
+- The passage value matches the local `.dev.vars` `ADMIN_GLOBAL_PASSWORD` source used by the project secret-push flow.
+- Cloudflare lists `ADMIN_GLOBAL_PASSWORD` as a production Worker secret.
+- A live `/admin/login` POST for `brian.takita+admin@gmail.com` using that value returned `303` to `/portal-admin`, confirming the stored value works against production.
+
+Closeout evidence: no EFS source repo files changed; `src/equityfundingsource-dev` stayed clean. Commands run included `tsift status`, `tsift status --fix`, `agent-doc --version`, `agent-doc preflight`, `agent-doc plan`, `passage find`, `passage insert`, `bun run cf:secrets:list`, a live login verification script, and this `agent-doc finalize`. Confidence is high. Escalation: none.
+<!-- agent:boundary:0012929e -->
 <!-- /agent:exchange -->
 ###
 <!--

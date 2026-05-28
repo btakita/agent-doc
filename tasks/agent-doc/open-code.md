@@ -67,7 +67,37 @@ All 15 pure FFI functions now live in `agent-doc-core::ffi` across the four sub-
 Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
 
 **Not invoking `/loop`** — the next queue item is an operator decision (publish `agent-doc-core` to crates.io — SemVer commitment, ownership readiness) that I can't execute unilaterally.
-<!-- agent:boundary:96d4ca76 -->
+
+### Re: do #77v6 — agent-doc-core v0.1.0 published to crates.io — opus-4-7
+
+Executed `do [#77v6]` (`#adcr-publish`). You answered the readiness question with "Defer," then explicitly typed **`publish`** — I took that as overriding the modal and authorizing the irreversible action, and published.
+
+**`agent-doc-core v0.1.0` is now live on crates.io** (verified via `cargo search agent-doc-core` → `agent-doc-core = "0.1.0"`).
+
+#### What landed
+
+Submodule commits on `20260422/codex-agent-backend` (pushed): `53fb239a` (remove `publish = false`), `1a86397b` (VERSIONS.md). Tag `agent-doc-core-v0.1.0` pushed. Superproject `3f6769280` on `main`, pushed.
+
+- **`agent-doc-core/Cargo.toml`**: removed `publish = false`.
+- **`cargo publish --dry-run`**: clean — packaged 17 files (153.8 KiB compressed), compiled standalone from the tarball.
+- **`cargo publish -p agent-doc-core`**: `Uploaded` + `Published agent-doc-core v0.1.0 at registry crates-io`.
+- **VERSIONS.md**: Unreleased entry recording the publish + slim-link rationale.
+- **Tag**: `agent-doc-core-v0.1.0` (the existing `v0.9.x` tags are the main `agent-doc` line; cratesub-crate gets its own tag prefix).
+
+No GitHub Release — `agent-doc-core` is a library (no binary artifact); the GitHub-Release-with-binary convention applies to the main `agent-doc` CLI.
+
+#### What this unblocks
+
+Third-party FFI consumers and the editor-plugin slim-link target can now depend on the published `agent-doc-core` (~9.87s cold, 74 crates) instead of the full `agent-doc` orchestration crate (129s, 266 crates) for the document-mutation + pure-FFI surface. The 15 relocated FFI functions (`#k9e1`/`#epv5`/`#vb8h`/`#e130`) are all in this published crate.
+
+#### Caveat — 0.1.0 SemVer
+
+The published API is now a SemVer commitment and cannot be unpublished (only yanked). It reflects the freshly-stabilized post-extraction surface. Future breaking changes need a minor bump (alpha software — VERSIONS.md already flags this).
+
+Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
+
+**Not invoking `/loop`** — the queue advances to `do [#ysv9]` (`#adoc-orchestration-crate`), a large multi-cycle refactor that warrants its own scoping cycle. (`#yybc` remains a no-op tracker behind it — still recommend striking it.)
+<!-- agent:boundary:4113e8f4 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -85,7 +115,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#epv5]~
 - ~do [#vb8h]~
 - ~do [#e130]~
-- do [#77v6]
+- ~do [#77v6]~
 - do [#ysv9]
 - do [#yybc]
 - do [#adcr]
@@ -94,7 +124,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#77v6] #adcr-publish Decide on publishing agent-doc-core to crates.io (currently publish = false). Allows third-party FFI consumers and unblocks the editor-plugin slim-link target.
 - [ ] [#ysv9] #adoc-orchestration-crate Plan agent-doc-orchestration extraction — split route/git/sessions/ipc_socket/supervisor/capture/cycle_state/repair/sync/start out of the main crate into a sibling workspace member, leaving only the CLI entrypoint + command dispatch in agent-doc. Would create a 3-layer architecture (CLI → orchestration → core) and substantially cut the editor-plugin-only build target. Substantial refactor; depends on #adcr-baseline-measure to quantify the win first.
 - [ ] [#yybc] #k9e1-ffi-mem POC follow-up: track the proven pattern (pub use agent_doc_core::ffi::* + force_link_core_ffi_symbols reference function in main) for future pure FFI relocations. POC moved agent_doc_free_string + agent_doc_free_state; nm verification confirmed symbols still in libagent_doc.so export table.
 - [ ] [#adcr] Extract agent-doc-core crate (~17K lines) — enables fast-compiling FFI/editor-plugin target independent of orchestration layer

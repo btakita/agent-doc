@@ -199,8 +199,51 @@ tsift/
 - Splitting adds workspace overhead, version coordination, dependency management
 - The tokensave ports haven't started yet — crate boundaries should reflect the final architecture, not the current one
 - **Recommendation**: start the tokensave Phase 1 (DB reader adapter), then split as part of Phase 2 when you have concrete code to organize
-Would splitting separate crates improve agentic maintenance?
-<!-- agent:boundary:0432adc5 -->
+❯ Would splitting separate crates improve agentic maintenance?
+### Re: crates and agentic maintenance — glm-5.1
+
+**Yes — specifically for context window management and parallel agent work.**
+
+#### How crates help agents
+
+**1. Smaller context windows per task**
+- An agent working on `tsift-algorithms` (Tarjan SCC, health scores) reads ~2K LOC, not the full 71K
+- Fewer tokens consumed = more room for reasoning and tests
+- `tsift-core` (~1.5K LOC) becomes the stable API surface agents can reference without loading backends
+
+**2. Parallel agent dispatch**
+- With workspace crates, two agents can safely work on `tsift-libsql` and `tsift-algorithms` simultaneously without merge conflicts
+- Each crate has its own `Cargo.toml`, test scope, and build boundary
+- tsift's own `conflict-matrix` gate would work better with crate-level isolation
+
+**3. Targeted test runs**
+- `cargo test -p tsift-algorithms` instead of rebuilding the entire monolith
+- Faster feedback loops for agents — test cycle goes from ~30s to ~5s per crate
+
+**4. Dependency isolation**
+- `tsift-libsql` depends on `libsql` + `tokio` — only compiled when needed
+- `tsift-graph` depends on `tree-sitter` grammars — heavy, but isolated
+- `tsift-core` has zero heavy deps — fast to compile, stable API
+
+#### How crates hurt agents
+
+- **Cross-crate refactors** require touching multiple `Cargo.toml` files — more tool calls
+- **Version coordination** — workspace helps, but pub API changes ripple
+- **Build complexity** — agent needs to understand workspace structure
+- **Smaller pain at current scale** — 71K LOC is large but still one cognitive unit
+
+#### Net assessment
+
+| Factor | Monolith | Workspace crates |
+|---|---|---|
+| Agent context per task | 71K LOC (wasteful) | 1-5K LOC (focused) |
+| Parallel agent safety | Low (shared files) | High (crate isolation) |
+| Test cycle time | ~30s full | ~5s per crate |
+| Refactor overhead | Low | Medium |
+| Onboarding complexity | Low | Medium |
+
+**The split pays off when you start the tokensave Phase 2 ports.** The new algorithms crate gives agents a clean 2K LOC target instead of editing the 4.8K LOC `substrate.rs`. Recommend splitting as the first step of Phase 2, not before.
+<!-- agent:boundary:7bb4e694 -->
 <!-- /agent:exchange -->
 ###
 <!--

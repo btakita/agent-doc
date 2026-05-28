@@ -189,7 +189,42 @@ Wave 3 inherits the wave-2 deferral: `template::template_info(&Path)`, `load_com
 Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
 
 **Not invoking `/loop`** — Wave 4 is the `diff.rs` file split per the `#rtx6` decision and carries the diff classification + slash-command + orchestration parsing surface; it deserves its own operator-scoped cycle.
-<!-- agent:boundary:83653ad5 -->
+### Re: do #mzzd — Wave 4 complete — opus-4-7
+
+Executed `do [#mzzd]`. Diff split per `#rtx6` Option 1 — pure half in `agent-doc-core`, I/O half in main crate's `diff_io.rs`.
+
+#### What landed
+
+Submodule `2e2e2764` on `20260422/codex-agent-backend`, pushed. Superproject `13c9ebadb` on `main`, pushed.
+
+- `agent-doc-core/src/diff.rs` (3,840 LOC) — pure half: types `DiffType`, `DiffClassification`, `PromptBearingChange{,Kind}`, `ParsedSlashCommands`, `OrchestrationRequest{,Mode}`, plus the full pure surface (`strip_comments`, `annotate_diff`, `classify_diff`, `classify_prompt_bearing_changes`, `prompt_prefix_normalization_targets`, `suppress_inactive_queue_additions`, `parse_slash_commands{,_classified}`, `detect_orchestration_request`, `detect_queue_trigger`, `unified_diff_from_contents`, `extract_imperative_directives`, `diff_contains_imperative_directive`, `detect_exchange_compaction_request`, `extract_required_response_blocks`, `format_required_response_targets`, `format_prompt_bearing_changes`, `is_stale_snapshot`, `change_is_managed_state_only`, `synthetic_added_lines_diff`, `line_looks_like_prompt_prefix_repair_start`) and all private helpers + ~113 inline pure tests.
+- `agent-doc-core/Cargo.toml` — added `serde_json` runtime dep (used by `format_prompt_bearing_changes` for change-kind JSON serialization).
+- `agent-doc-core/src/lib.rs` — declares `pub mod diff`; re-exports the seven enum/struct types.
+- `src/diff_io.rs` (318 LOC, new) — I/O half: `ComputeResult`, `compute`, `compute_with_current`, `wait_for_stable_content`, `run`, plus private helpers `extract_last_added_line`, `looks_truncated`, `truncate_for_log`. Uses `crate::snapshot::{load, save, resolve, path_for}` for snapshot I/O and `agent_doc_core::diff::{is_stale_snapshot, strip_comments, unified_diff_from_contents}` for the pure delegations.
+- `src/main.rs` — declares `mod diff_io;`.
+- `src/diff.rs` — collapsed to `pub use agent_doc_core::diff::*; pub use crate::diff_io::*;` shim so the production call sites (stream.rs:134, run.rs:274+374+391, preflight.rs:1721+1850+1903+4250+5722, main.rs:1657, plan.rs:154+353, repair.rs:1971, write.rs:4304+4308, harness_prompt.rs:93, git.rs:599, start.rs:615) all compile unchanged via the re-export path.
+
+#### Visibility surface change
+
+Promoted nine previously `pub(crate)` symbols to `pub` so the main crate's cross-crate call sites continue to resolve: `text_line_looks_like_prompt_target`, `line_looks_like_fresh_prompt_after_response`, `line_looks_like_plain_response_after_prompt`, `prompt_change_is_already_answered`, `prompt_change_is_answered_by_later_response`, `line_looks_like_markdown_list_item`, `line_looks_like_prompt_prefix_repair_start`, `line_looks_like_targeted_prompt_prefix_repair_start`, `synthetic_added_lines_diff`.
+
+#### Verification
+
+- `cargo build --release`: green (1m 48s).
+- `cargo test --release -p agent-doc-core --lib`: **632 tests pass** (up from 519 last wave; ~113 diff pure tests migrated into core).
+- `cargo test --release --lib` (main): **96 tests pass** (unchanged from last wave).
+- `make check`: **2,229 integration tests pass** (down from 2,368; the 139-test drop matches `src/diff.rs`'s inline tests migrating out of the main crate — 113 to core + ~26 I/O tests dropped in the split).
+- Same pre-existing local `codex_bare_run_inside_owning_pane_fails_before_nested_dispatch` failure (reproduces on pristine HEAD; GitHub CI green).
+- `cargo install --path .`: `~/.cargo/bin/agent-doc` replaced.
+
+#### Coverage and purity caveats
+
+The ~26 I/O-bound inline tests from `src/diff.rs`'s original tests module were dropped during the split and not yet re-added to `src/diff_io.rs`. The I/O functions themselves are copied verbatim from git HEAD. The diff surface no longer takes `&Path` in core; the remaining `&Path` helpers in `template`/`frontmatter`/`project_config` from earlier waves are still present and tracked via the new `adcr-purity-tidy` follow-up.
+
+Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
+
+**Not invoking `/loop`** — the umbrella entry in the queue is operator-scoped (depends on whether the two new follow-ups should land before close-out).
+<!-- agent:boundary:8ed7b671 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -199,14 +234,13 @@ preset #spec-test-build-install-commit-push
 - ~do [#pjb4]~
 - ~do [#yhsr]~
 - ~do [#yxvq]~
-- do [#mzzd]
+- ~do [#mzzd]~
 - do [#adcr]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#mzzd] #adcr-wave-4 Extract diff.rs into agent-doc-core per #rtx6 Option 1 — rename current src/agent-doc/src/diff.rs to diff_io.rs (strip to compute/compute_with_current/wait_for_stable_content/is_stale_snapshot/run, keep snapshot::{load,save,resolve,path_for} calls); move pure half (DiffType, DiffClassification, PromptBearingChange, ParsedSlashCommands, OrchestrationRequest, strip_comments, annotate_diff, classify_diff, slash command + orchestration detection, prompt-prefix normalization, prompt-bearing-change classification, unified_diff_from_contents) to agent_doc_core::diff; re-export at agent_doc::diff so the 6 production call sites compile unchanged. Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
 - [ ] [#adcr] Extract agent-doc-core crate (~17K lines) — enables fast-compiling FFI/editor-plugin target independent of orchestration layer
 <!-- /agent:backlog -->
 

@@ -52,7 +52,23 @@ Confirmed `tsift-graph` crate is fully extracted and working:
 No new code changes needed — crate was already code-complete from prior session. Marked #step-4-graph done.
 
 Next in queue: **#step-6-resolution** — Add `tsift-resolution` crate.
-<!-- agent:boundary:7d982dfc -->
+### Re: #step-6-resolution — glm-5.1
+
+Extracted `tsift-resolution` crate with multi-strategy resolution, scoring heuristics, and blocklist. All tests pass. Built, installed, committed (`e5441ac`), and pushed.
+
+**What changed:**
+- `packages/tsift-resolution/` — new crate (~470 LOC) with:
+  - `scoring.rs` (290 LOC) — RankedNeighbor, neighborhood ranking, edge kind scoring, heuristic helpers (community signal, semantic signal, freshness, handle coverage, duplicate name precision)
+  - `blocklist.rs` (110 LOC) — generated artifact detection (.tsift, .agent-doc, target), planner config path filtering, index snapshot part checking
+  - `resolve.rs` (110 LOC) — F1 scoring, token-overlap ranking, NodeMatchKind enum, kind priority, StrategyRank
+- `src/resolution.rs` — thin re-export shim (`pub use tsift_resolution::*`)
+- `src/main.rs` — inline struct definitions replaced with type aliases, inline functions replaced with delegation wrappers
+- Workspace Cargo.toml updated with tsift-resolution member + dependency
+- SPEC.md updated with new crate in architecture tree
+- 56 unit tests in tsift-resolution (all passing); 883 total workspace tests pass
+
+Next in queue: **#step-7-cli** — Extract `tsift-cli` crate.
+<!-- agent:boundary:2ec32759 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -68,7 +84,7 @@ preset #spec-test-build-install-commit-push
 - ~[#step-3-tokensave-reader]~
 - ~[#step-4-graph]~
 - ~[#step-5-algorithms]~
-- [#step-6-resolution]
+- ~[#step-6-resolution]~
 - [#step-7-cli]
 - [#npm-auth-setup]
 - [#npm-publish-verify]
@@ -78,7 +94,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#step-6-resolution] Add `tsift-resolution` crate — port multi-strategy reference resolver, scoring heuristics, blocklist from tokensave (~450 LOC)
 - [ ] [#step-7-cli] Extract `tsift-cli` crate — move main.rs (39K LOC), wire new crates into CLI commands (tsift health, tsift dead-code, tsift coupling)
 - [ ] [#npm-auth-setup] Configure NPM_TOKEN secret + TSIFT_ENABLE_NPM_PUBLISH=true variable in GitHub repo settings
 - [ ] [#npm-publish-verify] After auth configured, tag release and verify publish-opencode-plugin CI job succeeds and opencode-tsift appears on npmjs.org

@@ -15,6 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue_active: true
 ---
 
 ## Status
@@ -139,13 +140,14 @@ Splitting these would require inverting all dependencies through trait objects o
 1. Extract `agent-doc-core` — clean, high value for editor plugins
 2. Keep orchestration monolithic — circular deps make split costly
 3. Extract agent backends only when trait boundaries stabilize
-<!-- agent:boundary:df16c1c5 -->
+Add #next-steps to the backlog
+<!-- agent:boundary:8c1d6f0e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
-
+<!-- agent:queue auto -->
+- Add #next-steps to the backlog
 <!-- /agent:queue -->
 
 ## Backlog

@@ -145,7 +145,36 @@ The wave 4 commit message noted: "**Coverage caveat:** ~26 I/O-bound inline test
 Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
 
 **Not invoking `/loop`** — queue head advances to `do [#0ejf]` (purity tidy — extract remaining `&Path`-taking functions from `agent-doc-core`); that's a larger, operator-scoped cycle requiring decisions about where each I/O wrapper lands.
-<!-- agent:boundary:9035c973 -->
+### Re: do #0ejf — scope decomposition (superseded) — opus-4-7
+
+Stopped before plowing into a wave-sized refactor disguised as a tidy. The purity tidy task is genuinely larger than the queue presumes — bigger than `#k5s7` (measure compile time) and `#n7dd` (paste 27 tests). Decomposed into three sub-cycles added in the prior turn as `#ckv3`, `#0c4e`, `#bjrv`. The original umbrella slot is marked done because the work it represents is now tracked under those three IDs (none yet started).
+
+#### Why this isn't a single-cycle tidy
+
+Plan acceptance criterion #3 ("no `&Path` or `std::fs` in core") is violated by 12+ functions across three modules with coupled dependencies:
+
+**`agent-doc-core::template`** — 5 functions taking `&Path` plus `apply_patches_with_overrides(doc, patches, unmatched, file: &Path, overrides)` itself takes `&Path` for boundary-summary derivation + two internal `load_*_configs` calls. The heavyweight: 6+ production call sites in main (run.rs, stream.rs, write.rs, ffi.rs) plus 3 dummy-path call sites in ffi.rs plus ~12 inline core tests. Refactoring requires a new signature like `apply_patches_with_overrides(doc, patches, unmatched, summary: Option<&str>, component_configs, max_lines_configs, mode_overrides)` — touches every caller.
+
+**`agent-doc-core::frontmatter`** — `read_session_id` does `fs::read_to_string`; `apply_required_ssh_defaults_for_file` does `fs::canonicalize` + recursive project-config walk; `parse_for_file` and `ensure_session_for_file` are transitively impure. The required-ssh-defaults flow is the hard part: either accept a pre-loaded `ProjectConfig` argument (signature change) or define a `ProjectConfigResolver` trait the orchestration layer implements.
+
+**`agent-doc-core::project_config`** — 6 functions doing fs (load_project_from, save_project_to, load_project_for_doc, project_root_for_doc, load_project, save_project). ~25 call sites in main (session_check.rs, session_accretion.rs, mode.rs, claim.rs, patch.rs, lint_gate.rs, etc.).
+
+#### Sub-task split (already on backlog)
+
+- `#bjrv` — `#0ejf-project-config-io` — extract project_config wrappers + shim re-exports. **Start here** — mostly mechanical, fewest blast-radius decisions.
+- `#0c4e` — `#0ejf-frontmatter-io` — extract frontmatter wrappers + required-ssh-defaults coupling decision (preload vs. trait). Depends on `#bjrv`.
+- `#ckv3` — `#0ejf-template-io` — template wrappers + `apply_patches_with_overrides` signature refactor. Largest piece; depends on `#bjrv` and `#0c4e`.
+
+Each is a 1–2 hour focused cycle with its own `make check` and `cargo install` boundary. Doing them sequentially preserves the queue's per-item dispatch model and lets the operator review one mutation surface at a time.
+
+#### What I'd do differently if the operator wants to plow through anyway
+
+Tell me to do all three in one cycle and I'll start with `#bjrv`, then `#0c4e`, then `#ckv3`. Expect ~2–3 hours and a larger-than-usual session-document commit.
+
+Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
+
+**Not invoking `/loop`** — operator decides whether the next queue turn picks up `#bjrv` (the recommended sub-task entry point) or whether the queue should plow through all three sub-tasks in one big cycle.
+<!-- agent:boundary:0809bf22 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -154,7 +183,7 @@ Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
 preset #spec-test-build-install-commit-push
 - ~do [#k5s7]~
 - ~do [#n7dd]~
-- do [#0ejf]
+- ~do [#0ejf]~
 - do [#k9e1]
 - do [#5yqz]
 - do [#77v6]
@@ -165,7 +194,9 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#0ejf] [recommended] #adcr-purity-tidy Extract the remaining and-Path-taking functions from agent-doc-core: template::{template_info, load_component_configs, load_project_from_doc, find_project_root}, frontmatter::{ensure_session_for_file, set_format_and_write, read_session_id}, project_config::{load_project*, save_project, *_tmux_session}. Move I/O wrappers to main crate; keep pure parsers/formatters in core. Satisfies plan acceptance criterion #3.
+- [ ] [#ckv3] #0ejf-template-io Extract template I/O wrappers (template_info, load_component_configs, load_max_lines_configs, load_project_from_doc, find_project_root) from agent-doc-core::template into src/template_io.rs in main crate. Requires refactoring apply_patches_with_overrides to accept preloaded configs + summary string instead of &Path (touches 6+ call sites in main + 3 ffi.rs + 12 inline tests in core). Standalone cycle.
+- [ ] [#0c4e] #0ejf-frontmatter-io Extract frontmatter I/O wrappers (read_session_id, apply_required_ssh_defaults_for_file, transitively parse_for_file, ensure_session_for_file) from agent-doc-core::frontmatter into src/frontmatter_io.rs. Core retains pure parse/write/set_session_id/set_format_and_write/merge_fields. Required-ssh defaults need a project-config-resolver trait or pre-loaded config arg. Standalone cycle.
+- [ ] [#bjrv] #0ejf-project-config-io Extract project_config I/O wrappers (load_project_from, save_project_to, load_project_for_doc, project_root_for_doc, load_project, save_project) from agent-doc-core::project_config into src/project_config_io.rs. Core retains pure ProjectConfig + Default + serde deserialize. ~25 call sites in main crate; main shim re-exports. Standalone cycle.
 - [ ] [#k9e1] #adcr-ffi-relocate Move pure C-ABI wrappers from src/ffi.rs (apply_patch, parse_components, merge_frontmatter, normalize_template_structure, reposition_boundary, agent_doc_strip_comments) into agent-doc-core::ffi so editor plugins (JB, VS Code) can link against just agent-doc-core without dragging the orchestration crate. Keep route/git/ipc/start FFI calls in main.
 - [ ] [#5yqz] #adcr-eval-runner-switch Switch eval-runner's strip_comments dependency from agent-doc to agent-doc-core to cut eval pipeline build cost.
 - [ ] [#77v6] #adcr-publish Decide on publishing agent-doc-core to crates.io (currently publish = false). Allows third-party FFI consumers and unblocks the editor-plugin slim-link target.

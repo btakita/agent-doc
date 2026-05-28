@@ -315,7 +315,8 @@ Combined roadmap where each crate extraction enables the next tokensave port.
 **Steps 3-6**: 1-2 weeks (new tokensave ports, interleaved with crate creation)
 **Step 7**: 1 day (final CLI wiring)
 **Total**: ~3 weeks
-<!-- agent:boundary:4457f1e1 -->
+#next-steps were not added to the backlog. #agent-doc-bug. Add #next-steps to the backlog.
+<!-- agent:boundary:13157d12 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -330,7 +331,7 @@ preset #spec-test-build-install-commit-push
 - ~[#npm-auth-setup]~
 - ~[#npm-publish-verify]~
 - ~[#full-e2e-verify]~
-- Add #next-steps for extracting crates interleaved with #next-steps of tokensave reverse engineer port.
+- #next-steps were not added to the backlog. #agent-doc-bug. Add #next-steps to the backlog.
 <!-- /agent:queue -->
 
 ## Backlog

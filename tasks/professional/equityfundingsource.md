@@ -300,7 +300,36 @@ Verification:
 - `gh run list --workflow tmux-test --limit 1` reported no workflow named `tmux-test`.
 
 Closeout evidence: changed EFS paths are `app/equityfundingsource/lib/broker/prequal.ts`, `app/equityfundingsource/lib/broker/routes.ts`, `lib/ui--browser--efs/portal/broker/api.ts`, `tests/broker-portal.test.ts`, `prds/equity-funding-source-lending-portal-prd.md`, `docs/formula.md`, and `docs/current_progress.md`. EFS repo is clean after push. Confidence is high. Escalation: none.
-<!-- agent:boundary:ad906e79 -->
+### Re: broker pre-qual UI — gpt-5
+
+Done. `#bpq-ui` is implemented and pushed in `src/equityfundingsource-dev` commit `14b900f` (`feat: wire broker prequal UI`).
+
+What changed:
+
+- Replaced the static read-only `/portal-broker/pre-qual-tool` fields with editable scenario inputs.
+- The page now auto-runs the default scenario against `POST /api/broker/pre-qual` and reruns on the broker's form submit.
+- Added loading, error, retry, reset, and result states using the existing broker portal UI patterns.
+- Result rows now render from the API payload: LTV, indicative rate, eligibility status, commission estimate, rate sheet, loan request, and reasons.
+- Kept the follow-on submit-deal handoff out of this UI-only item; that remains separate queued work.
+- Updated PRD/current-progress docs and broker portal tests for the live UI contract.
+
+Changed EFS paths:
+
+- `lib/ui--browser--efs/portal/broker/pre_qual_tool.tsx`
+- `tests/broker-portal.test.ts`
+- `prds/equity-funding-source-lending-portal-prd.md`
+- `docs/current_progress.md`
+
+Verification:
+
+- `bun test tests/broker-portal.test.ts` passed: 24 pass, 0 fail.
+- `make check` passed: Bun reported 207 pass, 0 fail; app build and worker build completed. The suite still prints the expected upload limiter and local missing-D1 log lines while passing.
+- `gh workflow list` returned no workflows.
+- `gh run list --workflow CI --limit 1` reported no workflow named `CI`.
+- `gh run list --workflow tmux-test --limit 1` reported no workflow named `tmux-test`.
+
+Closeout evidence: EFS repo is clean after push; changed files were staged exactly before commit. Confidence is high. Escalation: none.
+<!-- agent:boundary:e637d4a6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -310,7 +339,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 <!-- agent:queue auto -->
 preset #spec-test-commit-push
 - ~do [#bpq-api]~
-- do [#bpq-ui]
+- ~do [#bpq-ui]~
 - do [#bpq-prefill]
 - do [#bpq-tests]
 <!-- /agent:queue -->
@@ -318,7 +347,6 @@ preset #spec-test-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#bpq-ui] Broker pre-qual UI: replace static read-only fields in /portal-broker/pre-qual-tool with editable inputs, loading/error/retry states, and live API results.
 - [ ] [#bpq-prefill] Broker pre-qual to submission handoff: carry an eligible scenario into /portal-broker/submit-a-deal as prefilled deal fields or a saved draft.
 - [ ] [#bpq-tests] Broker pre-qual coverage: add tests for rule boundaries, validation errors, authenticated endpoint behavior, UI API wiring, and docs/current-progress updates.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.

@@ -329,7 +329,36 @@ Verification:
 - `gh run list --workflow tmux-test --limit 1` reported no workflow named `tmux-test`.
 
 Closeout evidence: EFS repo is clean after push; changed files were staged exactly before commit. Confidence is high. Escalation: none.
-<!-- agent:boundary:e637d4a6 -->
+### Re: broker pre-qual handoff — gpt-5
+
+Done. `#bpq-prefill` is implemented and pushed in `src/equityfundingsource-dev` commit `ffdcd33` (`feat: prefill broker deal from prequal`).
+
+What changed:
+
+- Added a `Continue to submission` action on `/portal-broker/pre-qual-tool` for in-guidelines pre-qual results.
+- The handoff URL carries the live estimate payload into `/portal-broker/submit-a-deal` with `source=prequal` query params.
+- Submit Deal now initializes from those query params, pre-filling loan amount, LTV, combined property/purpose deal type, and underwriter notes with rate/status/commission/rate-sheet context.
+- Outside-guideline scenarios still link to Submit Deal without prefill params.
+- Updated PRD/current-progress docs and broker portal tests for the handoff contract.
+
+Changed EFS paths:
+
+- `lib/ui--browser--efs/portal/broker/pre_qual_tool.tsx`
+- `lib/ui--browser--efs/portal/broker/submit_deal.tsx`
+- `tests/broker-portal.test.ts`
+- `prds/equity-funding-source-lending-portal-prd.md`
+- `docs/current_progress.md`
+
+Verification:
+
+- `bun test tests/broker-portal.test.ts` passed: 25 pass, 0 fail.
+- `make check` passed: Bun reported 208 pass, 0 fail; app build and worker build completed. The suite still prints the expected upload limiter and local missing-D1 log lines while passing.
+- `gh workflow list` returned no workflows.
+- `gh run list --workflow CI --limit 1` reported no workflow named `CI`.
+- `gh run list --workflow tmux-test --limit 1` reported no workflow named `tmux-test`.
+
+Closeout evidence: EFS repo is clean after push; changed files were staged exactly before commit. Confidence is high. Escalation: none.
+<!-- agent:boundary:948f24e9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -340,14 +369,13 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 preset #spec-test-commit-push
 - ~do [#bpq-api]~
 - ~do [#bpq-ui]~
-- do [#bpq-prefill]
+- ~do [#bpq-prefill]~
 - do [#bpq-tests]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#bpq-prefill] Broker pre-qual to submission handoff: carry an eligible scenario into /portal-broker/submit-a-deal as prefilled deal fields or a saved draft.
 - [ ] [#bpq-tests] Broker pre-qual coverage: add tests for rule boundaries, validation errors, authenticated endpoint behavior, UI API wiring, and docs/current-progress updates.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
 - [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document intelligence/search, borrower/broker/investor/admin portals, and tenant-ready resale packaging.

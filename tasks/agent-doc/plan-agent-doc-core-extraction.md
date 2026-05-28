@@ -9,7 +9,7 @@ Umbrella plan for backlog item `#adcr`. Tracks the work to split `src/agent-doc/
 | `#stqc` | Dep audit (this plan §Audit) | done 2026-05-28 |
 | `#5x1r` | API surface (this plan §API surface) | done 2026-05-28 |
 | `#d97v` | Workspace scaffold + compile-time baseline | open |
-| `#rtx6` | `diff.rs` ↔ `snapshot.rs` seam decision | open (precondition for diff extraction) |
+| `#rtx6` | `diff.rs` ↔ `snapshot.rs` seam decision | **decided 2026-05-28 — Option 1** (file split) |
 | `#adcr` | Per-wave extraction | open (executes after the three above) |
 
 ## Audit summary (#stqc result)
@@ -123,7 +123,7 @@ These two numbers, recorded in `agent-doc-core/COMPILE_BASELINE.md`, gate the wo
 2. **Snapshot data type extraction** — move only the `Snapshot` struct (and pure serde paths) into core; keep `load`/`save`/`resolve`/`path_for` in orchestration. Rewrite `diff.rs` to accept `&Snapshot` rather than calling loader functions. Requires touching every call site of `diff::compute*` to thread the snapshot through.
 3. **Trait port** — define `trait SnapshotPort` in core, implement in orchestration. Maximum flexibility, but adds dyn-dispatch ceremony for one consumer; over-engineered for a single-implementer port.
 
-Decide option 1 vs 2 once Waves 1–3 are in. Wave 4 (diff) does not start until this is resolved.
+**Decision (2026-05-28, `#rtx6`):** Option 1. Call-site survey from `src/agent-doc/src/` showed 6 production callers of `diff::compute*` / `diff::is_stale_snapshot` / `diff::run` (stream.rs:134, run.rs:274+374, preflight.rs:1721+1850, main.rs:1657, plan.rs:154). Option 1 preserves every one of those call sites unchanged; Options 2 and 3 require updates to all 6. Wave 4 implementation: keep the pure half in `agent_doc_core::diff`; rename current `diff.rs` to `diff_io.rs` and strip it to the snapshot-backed functions; re-export from `agent_doc::diff` so callers compile unchanged.
 
 ## Wave plan (#adcr execution)
 

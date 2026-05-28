@@ -498,10 +498,46 @@ Verification:
 - Tmux CI inspection: `make -n tmux-ci` has no `tmux-ci` target in the EFS repo.
 
 I did not commit, push, or deploy the EFS source repo because the current document edit removed `#spec-test-commit-push`. The source changes remain in the working tree for review. Escalation: none. Confidence: high.
-<!-- agent:boundary:b64341dc -->
+### Re: rate estimator input padding commit — gpt-5
+
+Done. I completed the queued `#spec-test-commit-push` closeout for the rate-estimator padding fix.
+
+What changed:
+
+- The two public homepage rate-estimator amount inputs now use `class="efs-input pl-8"` instead of `pl-10`.
+- Inline critical CSS now includes `.pl-8{padding-left:2rem}`, so the class is loaded during first paint.
+- Test coverage now rejects stale `pl-7` and `pl-10` usage for those inputs and verifies the loaded `pl-8` critical CSS utility.
+- The PRD now records the `pl-8` homepage estimator padding contract.
+
+Changed EFS paths:
+
+- `lib/ui--server--efs/home/index.ts`
+- `lib/ui--server--efs/styles/index.ts`
+- `tests/public-header.test.ts`
+- `prds/equity-funding-source-lending-portal-prd.md`
+
+Commit / push:
+
+- EFS repo commit: `a72d622 fix: load estimator input padding`
+- Pushed `a72d622` to `origin/main`
+- Not deployed; this queue item requested spec/test/commit/push, not deploy.
+
+Verification:
+
+- `bun test tests/public-header.test.ts` passed: 7 pass, 0 fail.
+- `git diff --check` passed.
+- `make check` passed: 212 pass, 0 fail; app build and worker build completed.
+- Built output inspection found both `efs-input pl-8` inputs and `.pl-8{padding-left:2rem}` in `app/equityfundingsource/dist/worker/index.js`.
+- GitHub Actions inspection: `gh workflow list` returned no workflows; `gh run list --workflow CI --limit 1` and `gh run list --workflow tmux-test --limit 1` both reported no matching workflow.
+- Tmux CI inspection: `make -n tmux-ci` has no `tmux-ci` target in the EFS repo.
+
+Closeout evidence: EFS repo is clean after push; changed files were staged exactly before commit. Escalation: none. Confidence: high.
+<!-- agent:boundary:41da0e43 -->
 <!-- /agent:exchange -->
 ###
 <!--
+Please make the padding-left equivalent to 24px. .pl-8 had no effect.
+---
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 

@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -470,14 +470,14 @@ Escalation: none. Confidence: high.
 Queue closeout repair: the `pl-10` rate-estimator input padding item was completed, tested, committed, and pushed in EFS commit `aabf6f6` as recorded in the response immediately above. No additional EFS source changes were made in this repair cycle.
 
 Verification for the implemented item remains: `bun test tests/public-header.test.ts`, `git diff --check`, and `make check` all passed before commit. Escalation: none. Confidence: high.
-<!-- agent:boundary:50e0325d -->
+<!-- agent:boundary:785ec1e6 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

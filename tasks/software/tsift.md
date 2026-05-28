@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -340,7 +340,29 @@ After those land, root reduces to ~4 thin shims and a `pub use` block, and demot
 **Also: please compact the session document.** The exchange has grown to 272 lines across 6 response sections with 9 no-op closeouts. Run `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/software/tsift.md --commit` when you have a moment — it archives prior closed responses without changing backlog state.
 
 **Halting the auto-loop.** Next queue item is `#split-tsift-cli-subcommands` which is `[recommended]` only and orthogonal to the rest; safe to defer. I'm gating this item rather than guessing through it.
-<!-- agent:boundary:ce060c23 -->
+For prereq 1, what is your suggestion and why?
+
+### Re: For prereq 1, what is your suggestion and why? — opus-4-7
+
+**Recommendation: X.** Move `impact` into `tsift-digest`.
+
+**Why X over Y or Z:**
+
+1. **The dependency is already one-directional in X's favor.** `impact` calls `diff_digest::{self, DiffDigestOptions}` internally — it consumes the diff_digest API to roll up symbol-level "what changed" across a diff. The flow is impact → diff_digest, never the reverse. Co-locating them with impact downstream is the natural dataflow direction.
+
+2. **Naming holds up.** `impact` reads cleanly as "the (symbol-level) impact digest of a change" — semantically a higher-resolution sibling of diff_digest, not a retrieval primitive. tsift-search becomes the cleaner "find and summarize" surface (sift + summarize + tagpath_adapter); tsift-digest becomes the cleaner "derived rollups" surface (diff/log/metric/test/impact).
+
+3. **Smallest surface.** One module reclassification, no new crate. Y adds a `tsift-summarize` crate that's essentially a 1.8k-LOC relocation with marginal value; Z merges two would-be-focused crates back into a 6.7k-LOC `tsift-derive` and loses the retrieval-vs-emission separation the split was supposed to introduce.
+
+**Tradeoff worth naming:** Y has the marginal upside that `summarize` becomes a shared foundation explicitly named as such (both digest and search depend on it). If you anticipate future consumers besides digest/search — e.g., a hypothetical `tsift-mcp` or `tsift-agent` that also needs cached summaries without pulling in the rest of search — Y pays off later. But that future hasn't materialized; X is the right call for the current shape.
+
+**If you confirm X, the rest of the plan is:**
+- `#split-tsift-digest` lands first (4 emitter modules — diff/log/metric/test — plus impact).
+- `#split-tsift-search` lands second (sift + summarize + tagpath_adapter only). No cycle.
+- Then status placement → tsift-cli, sim-world resolution, and `#demote-root-tsift` is one-line.
+
+Reminder: session document is at 312 lines / 10 no-op closeouts — `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/software/tsift.md --commit` will archive prior responses without disturbing backlog/review state.
+<!-- agent:boundary:ba1c5f2e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -365,7 +387,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#demote-root-tsift] After all module splits land, demote root tsift crate to a thin re-export shim (or remove lib.rs entirely) — leave only the workspace root + binary metadata; verify external consumers (cargo install tsift) keep working
 - [ ] [#split-tsift-cli-subcommands] [recommended] tsift-cli is ~39k LOC in a single lib.rs — propose per-command module split (cmd_search, cmd_index, cmd_graph, cmd_explain, etc.) once root tsift is drained, to make command surface independently testable
 - [ ] [#npm-auth-setup] Configure NPM_TOKEN secret + TSIFT_ENABLE_NPM_PUBLISH=true variable in GitHub repo settings
 - [ ] [#npm-publish-verify] After auth configured, tag release and verify publish-opencode-plugin CI job succeeds and opencode-tsift appears on npmjs.org
@@ -375,6 +396,7 @@ preset #spec-test-build-install-commit-push
 ## Review
 
 <!-- agent:review -->
+- [/] [#demote-root-tsift] After all module splits land, demote root tsift crate to a thin re-export shim (or remove lib.rs entirely) — leave only the workspace root + binary metadata; verify external consumers (cargo install tsift) keep working
 - [/] [#split-tsift-search] Extract sift + summarize + impact + tagpath_adapter (~3.2k LOC) into tsift-search crate — depends on tsift-index + tsift-graph; covers search ranking, AST-aware summaries, impact analysis, and tagpath annotation surface
 - [/] [#split-tsift-digest] Extract diff_digest + log_digest + metric_digest + test_digest (~3.7k LOC) into tsift-digest crate — high-cohesion emitter group with shared serialization, schema versioning, and pruning patterns; minimal cross-deps
 - [/] [#split-sim-world] Extract sim_world (~390 LOC) into tsift-sim-world crate — smallest, most isolated module; low-risk pattern validation for the remaining splits; keeps sim/test helpers out of the prod-path tree

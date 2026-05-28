@@ -184,7 +184,20 @@ So moving `sessions`/`supervisor` now would either create a circular `agent-doc 
 Plan (REVISION section): tasks/agent-doc/plan-agent-doc-orchestration-extraction.md (superproject `6d2c4485e`).
 
 **Not invoking `/loop`** — `#bz6s` is blocked on the A/B/C decision; auto-looping would re-hit a blocked wave. I'd suggest pausing the queue (`queue_active: false`) until you pick a direction. `#yybc`/`#adcr` behind it remain effectively closed (recommend striking).
-<!-- agent:boundary:89f970a0 -->
+
+### Re: queue blocked at #bz6s — reconciling drift — opus-4-7
+
+No new prompt this cycle — the diff was leftover working-tree drift from the wave-1b halt: the `(HEAD)` heading marker (a boundary artifact, by design) plus the `#bz6s` backlog one-liner refinement that the live-editor IPC guard wouldn't absorb last cycle. This cycle commits that refinement and settles the working tree. No new follow-up items.
+
+**Nothing new to execute.** `#bz6s` is blocked on the A/B/C architectural decision (one large orchestration crate / 4th `agent-doc-base` layer / defer) documented in the plan REVISION and last response. The queue head `do [#bz6s]` will keep re-surfacing a blocked wave on every invocation until you either:
+
+- pick a direction (reply A, B, or C), or
+- set `queue_active: false` to pause, and/or strike `~do [#yybc]~` / `~do [#adcr]~` (both effectively closed — the FFI pattern they reference is fully relocated, and `#adcr`'s four acceptance criteria are all met).
+
+I'm not striking them or picking the direction for you — those are your calls. Standing by for A/B/C.
+
+Plan: tasks/agent-doc/plan-agent-doc-orchestration-extraction.md
+<!-- agent:boundary:4f7ab7a7 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -204,7 +217,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#e130]~
 - ~do [#77v6]~
 - ~do [#ysv9]~
-- do [#bz6s]
+- ~do [#bz6s]~
 - do [#yybc]
 - do [#adcr]
 <!-- /agent:queue -->

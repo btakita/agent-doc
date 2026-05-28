@@ -301,7 +301,46 @@ Took #2: lint's only deps (`config`, `index::IndexDb`) already live in `tsift-in
 **Confidence:** high — 990 tests green, install verified.
 
 **Escalation:** none.
-<!-- agent:boundary:20ccf529 -->
+
+### Re: do [#demote-root-tsift] — blocker: root still has ~10k LOC of business modules — opus-4-7
+
+**Halting the queue and gating this item.** `#demote-root-tsift` presupposes that all business modules left root and only shims/re-exports remain. That isn't the state yet.
+
+**Current `src/` (root `tsift`):**
+
+```
+diff_digest.rs       ~1.1k LOC   (queued: #split-tsift-digest, gated)
+impact.rs            ~0.6k LOC   (queued: #split-tsift-search, gated — has the digest↔search cycle)
+log_digest.rs        ~1.1k LOC   (queued: #split-tsift-digest, gated)
+metric_digest.rs     ~1.0k LOC   (queued: #split-tsift-digest, gated)
+sift.rs              ~0.4k LOC   (queued: #split-tsift-search, gated)
+status.rs            ~2.1k LOC   (no backlog item — proposed tsift-cli last cycle)
+summarize.rs         ~1.8k LOC   (queued: #split-tsift-search, gated)
+tagpath_adapter.rs   ~0.4k LOC   (queued: #split-tsift-search, gated)
+test_digest.rs       ~0.8k LOC   (queued: #split-tsift-digest, gated)
+sim_world.rs         ~0.4k LOC   (orphaned/stale, gated — #split-sim-world)
+graph.rs / lang/     thin shims to tsift-graph (fine as-is for demotion)
+resolution.rs        thin shim to tsift-resolution (fine as-is)
+substrate.rs         thin shim to tsift-sqlite (fine as-is)
+libsql_backend.rs    thin shim, feature-gated (fine as-is)
+```
+
+That's ~9.7k LOC of substantive code plus one orphan. Demoting now would either delete that code (regression) or leave root as a partial shim — neither matches the item's intent.
+
+**Prerequisites for `#demote-root-tsift` to land cleanly:**
+
+1. Decide the digest↔search cycle: pick **X** (move `impact` into `tsift-digest`), **Y** (split `summarize` into its own crate), or **Z** (merge into `tsift-derive`). Both gated items unblock from that decision.
+2. Land `#split-tsift-search` (or whatever shape replaces it post-decision).
+3. Land `#split-tsift-digest` (same).
+4. Place `status.rs` — last cycle's recommendation was `tsift-cli` since it implements the `tsift status` command. Needs your confirmation.
+5. Resolve `#split-sim-world` (delete orphan, or move tests adjacent to symbols they test — last cycle's recommendation was option **B** "re-home tests adjacent to targets").
+
+After those land, root reduces to ~4 thin shims and a `pub use` block, and demotion is a one-line PR.
+
+**Also: please compact the session document.** The exchange has grown to 272 lines across 6 response sections with 9 no-op closeouts. Run `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/software/tsift.md --commit` when you have a moment — it archives prior closed responses without changing backlog state.
+
+**Halting the auto-loop.** Next queue item is `#split-tsift-cli-subcommands` which is `[recommended]` only and orthogonal to the rest; safe to defer. I'm gating this item rather than guessing through it.
+<!-- agent:boundary:ce060c23 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -319,7 +358,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#split-tsift-session]~
 - ~do [#split-tsift-quality]~
 - ~do [#split-tsift-search]~
-- do [#demote-root-tsift]
+- ~do [#demote-root-tsift]~
 - do [#split-tsift-cli-subcommands]
 <!-- /agent:queue -->
 

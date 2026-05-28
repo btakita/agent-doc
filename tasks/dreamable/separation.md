@@ -84,7 +84,37 @@ Drafted at [`tasks/dreamable/addendum-engagement-period-projects.md`](addendum-e
 2. **Keep on file** as your own contemporaneous record if you'd rather not re-open the document with Rob. The Addendum's §2(b) carve-out already protects the public OSS projects categorically; this just removes ambiguity if it's ever questioned.
 
 I'd lean toward option 1 — five minutes of friction now prevents an IP-claim gray area later, and it's consistent with how the original Addendum framed Prior Inventions.
-<!-- agent:boundary:0c2c947b -->
+
+### Re: Uploadable document + post-signing protection — opus-4-7
+
+**PDF for SignRequest upload**
+
+Generated `tasks/dreamable/addendum-engagement-period-projects.pdf` (via pandoc + weasyprint) from the existing markdown addendum. Upload it as an attachment in SignRequest via the *Attachments* (paperclip) button next to *Finalize*. SignRequest stores attachments alongside the signed PDF in the completed-document bundle.
+
+If you'd prefer a tighter, signature-page-style format (single block of text, no markdown table), say so and I'll re-render. The current version mirrors the language from the original Addendum so it reads as a continuation, not a separate instrument.
+
+**Are projects created after signing protected?**
+
+Yes — fully. New work you create after May 26, 2026 (the close of the Engagement Period defined in Settlement §1) is outside the scope of every IP clause in the Settlement Agreement and the Consulting Agreement:
+
+- **Settlement §3 (Intellectual Property)** only assigns inventions "developed for Company or in connection with the Services *during the engagement*." Post-engagement work is not covered.
+- **Settlement §6 (Company Property)** only reaches materials "created or received in connection with the Services" — same engagement-scope.
+- **Settlement §4 (Prior Inventions)** is preserved; doesn't apply to new work either way.
+- **Addendum §2(b)** (general-purpose OSS carve-out) is preserved by Settlement §11 — though it's largely moot post-engagement since you're no longer assigning *anything*.
+
+What does survive past signing:
+
+| Clause | What it constrains | Practical limit |
+|---|---|---|
+| Settlement §5 — Confidentiality | Use/disclosure of Dreamable non-public info (trade secrets, product plans, customers, financials, personnel) | Don't reuse Dreamable internals in new work. Independently developed code/ideas are unaffected. |
+| Settlement §8 — Non-disparagement | Disparaging statements about Dreamable to third parties | Doesn't restrict your work, only your speech about Dreamable. Truthful legal testimony is preserved. |
+| Settlement §9 — Patent/Copyright Assistance | Reasonable cooperation to secure Company rights in §3 Inventions | Limited to the *past* engagement's work product — not new projects. |
+| Consulting Agreement non-compete (if any) | Worth re-checking the original Consulting Agreement | Settlement §11 keeps it alive. If there's a post-termination non-compete window, it still runs from May 26 for the stated duration. |
+
+**One thing to check before signing.** Re-read the original Consulting Agreement (§6, §7, and any "Restrictive Covenants" / "Non-Solicitation" section) for any post-termination restrictions on competing work or soliciting Dreamable's customers/employees. The Settlement preserves the Consulting Agreement by reference in §11, so any post-termination clauses there still apply. The Settlement itself doesn't add new post-signing restrictions on your work — just confidentiality and non-disparagement.
+
+**Bottom line.** Once signed, you're free to build whatever you want — open-source, private, commercial, competing tools — provided you (a) don't reuse Dreamable confidential information and (b) don't make disparaging statements about Dreamable. Existing carve-outs from the Addendum continue to apply, and §3's broad assignment language is contained to the April 6 – May 26 window.
+<!-- agent:boundary:d9fae84f -->
 <!-- /agent:exchange -->
 
 ## Queue

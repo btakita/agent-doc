@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -93,8 +93,6 @@ No, it is not automatically the same as your machine password. `ADMIN_GLOBAL_PAS
 I would not recommend reusing a machine password for this. If you do not know the current value, check the private secret store or rotate the Worker secret and then share the new temporary credential out-of-band, not in this committed markdown session.
 
 Closeout evidence: no repo files changed in this cycle. Commands run: `tsift status`, `agent-doc --version`, `agent-doc preflight`, `agent-doc plan`, and this `agent-doc finalize`. Verification is based on the deployed auth configuration: `ADMIN_GLOBAL_PASSWORD` is a Worker secret, not a machine-login integration. Confidence is high. Escalation: none.
-How can I see ADMIN_GLOBAL_PASSWORD?
-
 
 ### Re: store admin global password — gpt-5
 
@@ -112,15 +110,14 @@ Verification:
 - A live `/admin/login` POST for `brian.takita+admin@gmail.com` using that value returned `303` to `/portal-admin`, confirming the stored value works against production.
 
 Closeout evidence: no EFS source repo files changed; `src/equityfundingsource-dev` stayed clean. Commands run included `tsift status`, `tsift status --fix`, `agent-doc --version`, `agent-doc preflight`, `agent-doc plan`, `passage find`, `passage insert`, `bun run cf:secrets:list`, a live login verification script, and this `agent-doc finalize`. Confidence is high. Escalation: none.
-<!-- agent:boundary:0012929e -->
+<!-- agent:boundary:88ad39ef -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue auto -->
-- How can I see ADMIN_GLOBAL_PASSWORD?
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

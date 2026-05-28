@@ -256,7 +256,52 @@ Remaining violations:
 Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
 
 **Not invoking `/loop`** — queue advances to `do [#0c4e]` (frontmatter I/O). The required-ssh-defaults coupling decision (preload vs. trait) is still pending and deserves its own focused cycle.
-<!-- agent:boundary:9a950b18 -->
+### Re: do #0c4e — frontmatter I/O extracted from core — opus-4-7
+
+Executed `do [#0c4e]`. `agent-doc-core::frontmatter` production surface no longer takes `&Path` or runs `std::fs`. Sub-task `#0c4e` of `#0ejf` purity-tidy decomposition lands.
+
+#### What landed
+
+Submodule `8fda9e50` on `20260422/codex-agent-backend`, pushed. Superproject `f4b6d8613` on `main`, pushed.
+
+**`agent-doc-core/src/frontmatter.rs`** — production surface refactor:
+- Removed `parse_for_file(&Path)`, `ensure_session_for_file(&Path)`, `read_session_id(&Path)`, and private `apply_required_ssh_defaults_for_file(&Path)`.
+- Refactored `contextualize_parse_error`, `contextualize_yaml_parse_error`, `resolve_required_ssh_profile_targets` to take `file_display: &str` (used only for error message rendering).
+- **Resolved the SSH-defaults coupling decision with a pre-loaded context.** New `SshResolverContext<'_>` struct exposes `{project: &ProjectConfig, doc_relative: &str, file_display: &str}`. The orchestration layer pre-computes the canonical relative path + project config (the fs-touching part) and passes the context into the pure parser. No trait — just a plain struct.
+- Added pure `parse_with_ssh_resolver(content, ctx)`, `ensure_session_with_ssh_resolver(content, ctx)`, `apply_required_ssh_defaults(fm, ctx)`. These are the seam.
+- Dropped `use std::path::Path` from production code; only test imports remain.
+- Deleted four inline tests (`parse_for_file_includes_path_and_fix_hint`, three `parse_for_file_*_ssh_*` tests) — they exercise the file-based wrapper behavior; integration suite under `tests/` continues to cover them end-to-end.
+
+**`src/frontmatter_io.rs`** (new, 73 LOC):
+- `parse_for_file(content, &Path)` — file-based wrapper. Builds `SshResolverContext` (canonicalize + `load_project_for_doc` + `project_root_for_doc`) and delegates to the pure `parse_with_ssh_resolver`. Wraps errors through `contextualize_parse_error`.
+- `ensure_session_for_file(content, &Path)` — same shape.
+- `read_session_id(&Path)` — fs read + pure parse.
+- Private `resolve_ssh_context_inputs(&Path)` helper returns `(ProjectConfig, doc_relative)` for the context.
+
+**`src/frontmatter.rs`** (shim) — re-exports `{ensure_session_for_file, parse_for_file, read_session_id}` from `crate::frontmatter_io` on top of the glob re-export from core. The 16+ existing call sites (start.rs, run.rs, route.rs, session_actor.rs, hook_cmd.rs, write.rs, sync.rs, resync.rs, git.rs, codex_hook.rs, plan.rs, preflight.rs, session_actor_cmd.rs, extract.rs, prompt_context.rs, session_accretion.rs) keep resolving through the original import path.
+
+**`src/lib.rs`** + **`src/main.rs`** — declare `frontmatter_io` module.
+
+#### Verification
+
+- `cargo build` / `cargo build --release`: green.
+- `cargo test --release -p agent-doc-core --lib`: **624 tests pass** (down from 628 — four file-based tests dropped from core's surface, integration coverage unchanged).
+- `cargo test --release --lib` (main): **96 tests pass** (unchanged).
+- `cargo test --release --bin agent-doc`: **2,256 tests pass** (unchanged from prior baseline).
+- `make check`: same pre-existing local `codex_bare_run_inside_owning_pane_fails_before_nested_dispatch` failure (reproduces on pristine HEAD; GitHub CI green).
+- `cargo install --path .`: `~/.cargo/bin/agent-doc` replaced.
+
+#### Acceptance criterion #3 progress
+
+`agent-doc-core::frontmatter` production surface: **no `&Path`, no `std::fs`** in non-test code. The three remaining "PROD" matches for `&Path` / `std::fs` in `grep` output are all inside doc comments.
+
+Remaining violation:
+- `agent-doc-core::project_config` (`#bjrv` — next queue head)
+
+Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
+
+**Not invoking `/loop`** — queue advances to `do [#bjrv]` (project_config I/O). That's the last `&Path`/`std::fs` violation in core; ~25 main call sites need to keep resolving through the shim.
+<!-- agent:boundary:96efb88d -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -267,7 +312,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#n7dd]~
 - ~do [#0ejf]~
 - ~do [#ckv3]~
-- do [#0c4e]
+- ~do [#0c4e]~
 - do [#bjrv]
 - do [#k9e1]
 - do [#5yqz]
@@ -279,7 +324,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#0c4e] #0ejf-frontmatter-io Extract frontmatter I/O wrappers (read_session_id, apply_required_ssh_defaults_for_file, transitively parse_for_file, ensure_session_for_file) from agent-doc-core::frontmatter into src/frontmatter_io.rs. Core retains pure parse/write/set_session_id/set_format_and_write/merge_fields. Required-ssh defaults need a project-config-resolver trait or pre-loaded config arg. Standalone cycle.
 - [ ] [#bjrv] #0ejf-project-config-io Extract project_config I/O wrappers (load_project_from, save_project_to, load_project_for_doc, project_root_for_doc, load_project, save_project) from agent-doc-core::project_config into src/project_config_io.rs. Core retains pure ProjectConfig + Default + serde deserialize. ~25 call sites in main crate; main shim re-exports. Standalone cycle.
 - [ ] [#k9e1] #adcr-ffi-relocate Move pure C-ABI wrappers from src/ffi.rs (apply_patch, parse_components, merge_frontmatter, normalize_template_structure, reposition_boundary, agent_doc_strip_comments) into agent-doc-core::ffi so editor plugins (JB, VS Code) can link against just agent-doc-core without dragging the orchestration crate. Keep route/git/ipc/start FFI calls in main.
 - [ ] [#5yqz] #adcr-eval-runner-switch Switch eval-runner's strip_comments dependency from agent-doc to agent-doc-core to cut eval pipeline build cost.

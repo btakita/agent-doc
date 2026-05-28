@@ -439,7 +439,33 @@ Verification:
 Escalation: none. Confidence: high.
 In the input, use `pl-10` instead of `pl-7`.
 #spec-test-commit-push
-<!-- agent:boundary:b86ee83d -->
+### Re: rate estimator input padding — gpt-5
+
+Done. I changed both public homepage rate-estimator amount inputs from `pl-7` to `pl-10`, updated the critical CSS utility from `.pl-7` to `.pl-10`, and added the PRD/test coverage requested by `#spec-test-commit-push`.
+
+Changed EFS paths:
+
+- `lib/ui--server--efs/home/index.ts`
+- `lib/ui--server--efs/styles/index.ts`
+- `prds/equity-funding-source-lending-portal-prd.md`
+- `tests/public-header.test.ts`
+
+Commit / push:
+
+- EFS repo commit: `aabf6f6 fix: widen estimator currency input padding`
+- Pushed `aabf6f6` to `origin/main`
+- Not deployed; this queue item requested spec/test/commit/push, not deploy. Production remains on Worker version `2819a1cf-3091-495f-b9ab-72434d5cafdd` until the next deploy.
+
+Verification:
+
+- `bun test tests/public-header.test.ts` passed: 7 pass, 0 fail.
+- `git diff --check` passed.
+- `make check` passed: 212 pass, 0 fail, then app build and worker build completed.
+- GitHub Actions inspection: `gh workflow list` returned no workflows; `gh run list --workflow CI --limit 1` and `gh run list --workflow tmux-test --limit 1` both reported no matching workflow.
+- Tmux CI inspection: `make -n tmux-ci` has no `tmux-ci` target in the EFS repo.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:2b7dc41c -->
 <!-- /agent:exchange -->
 ###
 <!--

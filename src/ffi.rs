@@ -63,7 +63,6 @@ use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::component;
-use crate::crdt;
 use crate::template;
 
 /// Cross-editor sync lock — prevents concurrent layout syncs.
@@ -81,19 +80,6 @@ pub struct FfiProjectPath {
     /// Path to the input file, relative to `project_root`. Null when `project_root`
     /// is null. Free with [`agent_doc_free_string`].
     pub relative_path: *mut c_char,
-}
-
-/// Result of [`agent_doc_crdt_merge`].
-#[repr(C)]
-pub struct FfiMergeResult {
-    /// Merged document text, or null on error. Free with [`agent_doc_free_string`].
-    pub text: *mut c_char,
-    /// Updated CRDT state bytes (caller must copy). Null on error.
-    pub state: *mut u8,
-    /// Length of `state` in bytes.
-    pub state_len: usize,
-    /// Error message if `text` is null. Free with [`agent_doc_free_string`].
-    pub error: *mut c_char,
 }
 
 /// Apply a patch to a document component.
@@ -270,204 +256,6 @@ pub unsafe extern "C" fn agent_doc_apply_patch_with_boundary(
         template::apply_patches_with_overrides(doc_str, &[patch], "", dummy_path, &overrides)
             .and_then(normalize_editor_visible_result),
     )
-}
-
-/// CRDT merge (3-way conflict-free).
-///
-/// `base_state` may be null (first merge). `base_state_len` is ignored when null.
-///
-/// # Safety
-///
-/// - `ours` and `theirs` must be valid, NUL-terminated UTF-8.
-/// - If `base_state` is non-null, `base_state_len` bytes must be readable from it.
-/// - The caller must free `text` and `error` with [`agent_doc_free_string`].
-/// - The caller must free `state` with [`agent_doc_free_state`].
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_crdt_merge(
-    base_state: *const u8,
-    base_state_len: usize,
-    ours: *const c_char,
-    theirs: *const c_char,
-) -> FfiMergeResult {
-    let make_err = |msg: &str| FfiMergeResult {
-        text: ptr::null_mut(),
-        state: ptr::null_mut(),
-        state_len: 0,
-        error: CString::new(msg).unwrap_or_default().into_raw(),
-    };
-
-    let ours_str = match unsafe { CStr::from_ptr(ours) }.to_str() {
-        Ok(s) => s,
-        Err(e) => return make_err(&format!("invalid ours UTF-8: {e}")),
-    };
-    let theirs_str = match unsafe { CStr::from_ptr(theirs) }.to_str() {
-        Ok(s) => s,
-        Err(e) => return make_err(&format!("invalid theirs UTF-8: {e}")),
-    };
-
-    let base = if base_state.is_null() {
-        None
-    } else {
-        Some(unsafe { std::slice::from_raw_parts(base_state, base_state_len) })
-    };
-
-    match crdt::merge(base, ours_str, theirs_str) {
-        Ok(merged_text) => {
-            // Encode the merged state for persistence
-            let doc = crdt::CrdtDoc::from_text(&merged_text);
-            let state_bytes = doc.encode_state();
-            let state_len = state_bytes.len();
-            let state_ptr = {
-                let mut boxed = state_bytes.into_boxed_slice();
-                let ptr = boxed.as_mut_ptr();
-                std::mem::forget(boxed);
-                ptr
-            };
-
-            FfiMergeResult {
-                text: CString::new(merged_text).unwrap_or_default().into_raw(),
-                state: state_ptr,
-                state_len,
-                error: ptr::null_mut(),
-            }
-        }
-        Err(e) => make_err(&format!("{e}")),
-    }
-}
-
-/// Text-based CRDT 3-way merge. Simpler interface than [`agent_doc_crdt_merge`].
-///
-/// All three parameters are plain UTF-8 text (not CRDT state bytes).
-/// Returns the conflict-free merged text. On any error, falls back to `ours`.
-///
-/// Intended for editor plugin use (replaces `git merge-file` in `PromptPoller`).
-///
-/// # Safety
-///
-/// `base`, `ours`, and `theirs` must be valid, NUL-terminated UTF-8.
-/// The caller must free the returned pointer with [`agent_doc_free_string`].
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_merge_crdt(
-    base: *const c_char,
-    ours: *const c_char,
-    theirs: *const c_char,
-) -> *mut c_char {
-    let base_str = match unsafe { CStr::from_ptr(base) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return CString::new("").unwrap_or_default().into_raw(),
-    };
-    let ours_str = match unsafe { CStr::from_ptr(ours) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return CString::new("").unwrap_or_default().into_raw(),
-    };
-    let theirs_str = match unsafe { CStr::from_ptr(theirs) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return CString::new("").unwrap_or_default().into_raw(),
-    };
-
-    // Encode base text as CRDT state for proper 3-way merge
-    let base_doc = crdt::CrdtDoc::from_text(base_str);
-    let base_state = base_doc.encode_state();
-
-    let merged = crdt::merge(Some(&base_state), ours_str, theirs_str)
-        .unwrap_or_else(|_| ours_str.to_string());
-    CString::new(merged).unwrap_or_default().into_raw()
-}
-
-/// Reposition boundary marker to end of exchange component.
-///
-/// Removes all existing boundary markers from the document, strips transient
-/// heading-level ` (HEAD)` suffixes, and inserts a single fresh boundary at the
-/// end of the exchange component. Returns the document unchanged if no exchange
-/// component exists.
-///
-/// # Safety
-///
-/// `doc` must be a valid, NUL-terminated UTF-8 string.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_reposition_boundary_to_end(
-    doc: *const c_char,
-) -> FfiPatchResult {
-    let doc_str = match unsafe { CStr::from_ptr(doc) }.to_str() {
-        Ok(s) => s,
-        Err(e) => return ffi_patch_err(&format!("invalid doc UTF-8: {e}")),
-    };
-
-    let result = template::reposition_boundary_to_end_clean(doc_str);
-    ffi_patch_from_result(normalize_editor_visible_result(result))
-}
-
-/// Reposition boundary marker to end of exchange component using an explicit ID.
-///
-/// This is used by post-commit editor refresh so the live buffer can be
-/// normalized back to the exact boundary marker already committed in `HEAD`
-/// rather than generating a fresh boundary-only local diff.
-///
-/// # Safety
-///
-/// `doc` and `boundary_id` must be valid, NUL-terminated UTF-8 strings.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_reposition_boundary_to_end_with_id(
-    doc: *const c_char,
-    boundary_id: *const c_char,
-) -> FfiPatchResult {
-    let doc_str = match unsafe { CStr::from_ptr(doc) }.to_str() {
-        Ok(s) => s,
-        Err(e) => return ffi_patch_err(&format!("invalid doc UTF-8: {e}")),
-    };
-    let boundary_id_str = match unsafe { CStr::from_ptr(boundary_id) }.to_str() {
-        Ok(s) => s,
-        Err(e) => return ffi_patch_err(&format!("invalid boundary_id UTF-8: {e}")),
-    };
-
-    let result = template::reposition_boundary_to_end_clean_with_id(doc_str, Some(boundary_id_str));
-    ffi_patch_from_result(normalize_editor_visible_result(result))
-}
-
-/// Reposition boundary marker to end of exchange, preserving `(HEAD)` markers.
-///
-/// Used for post-commit working-tree cleanup where `(HEAD)` annotations should
-/// remain visible to the user. The committed blob and snapshot use the `_clean`
-/// variant; the working tree and editor buffer use this variant.
-///
-/// # Safety
-///
-/// `doc` must be a valid, NUL-terminated UTF-8 string.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_reposition_boundary_to_end_preserve_head(
-    doc: *const c_char,
-) -> FfiPatchResult {
-    let doc_str = match unsafe { CStr::from_ptr(doc) }.to_str() {
-        Ok(s) => s,
-        Err(e) => return ffi_patch_err(&format!("invalid doc UTF-8: {e}")),
-    };
-
-    let result = template::reposition_boundary_to_end_preserve_head(doc_str);
-    ffi_patch_from_result(normalize_editor_visible_result(result))
-}
-
-/// Reposition boundary using an explicit ID, preserving `(HEAD)` markers.
-///
-/// # Safety
-///
-/// `doc` and `boundary_id` must be valid, NUL-terminated UTF-8 strings.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_reposition_boundary_to_end_preserve_head_with_id(
-    doc: *const c_char,
-    boundary_id: *const c_char,
-) -> FfiPatchResult {
-    let doc_str = match unsafe { CStr::from_ptr(doc) }.to_str() {
-        Ok(s) => s,
-        Err(e) => return ffi_patch_err(&format!("invalid doc UTF-8: {e}")),
-    };
-    let boundary_id_str = match unsafe { CStr::from_ptr(boundary_id) }.to_str() {
-        Ok(s) => s,
-        Err(e) => return ffi_patch_err(&format!("invalid boundary_id UTF-8: {e}")),
-    };
-
-    let result =
-        template::reposition_boundary_to_end_preserve_head_with_id(doc_str, Some(boundary_id_str));
-    ffi_patch_from_result(normalize_editor_visible_result(result))
 }
 
 /// Record a document change event for debounce tracking.
@@ -1276,9 +1064,13 @@ pub use agent_doc_core::ffi::*;
 #[allow(dead_code)]
 fn force_link_core_ffi_symbols() {
     use agent_doc_core::ffi::{
-        FfiComponentList, FfiPatchResult, agent_doc_free_state, agent_doc_free_string,
+        FfiComponentList, FfiMergeResult, FfiPatchResult, agent_doc_crdt_merge,
+        agent_doc_free_state, agent_doc_free_string, agent_doc_merge_crdt,
         agent_doc_merge_frontmatter, agent_doc_normalize_template_structure,
-        agent_doc_parse_components, agent_doc_visual_tokens_json,
+        agent_doc_parse_components, agent_doc_reposition_boundary_to_end,
+        agent_doc_reposition_boundary_to_end_preserve_head,
+        agent_doc_reposition_boundary_to_end_preserve_head_with_id,
+        agent_doc_reposition_boundary_to_end_with_id, agent_doc_visual_tokens_json,
     };
     let _: unsafe extern "C" fn(*mut c_char) = agent_doc_free_string;
     let _: unsafe extern "C" fn(*mut u8, usize) = agent_doc_free_state;
@@ -1288,6 +1080,18 @@ fn force_link_core_ffi_symbols() {
         agent_doc_merge_frontmatter;
     let _: unsafe extern "C" fn(*const c_char) -> FfiPatchResult =
         agent_doc_normalize_template_structure;
+    let _: unsafe extern "C" fn(*const u8, usize, *const c_char, *const c_char) -> FfiMergeResult =
+        agent_doc_crdt_merge;
+    let _: unsafe extern "C" fn(*const c_char, *const c_char, *const c_char) -> *mut c_char =
+        agent_doc_merge_crdt;
+    let _: unsafe extern "C" fn(*const c_char) -> FfiPatchResult =
+        agent_doc_reposition_boundary_to_end;
+    let _: unsafe extern "C" fn(*const c_char, *const c_char) -> FfiPatchResult =
+        agent_doc_reposition_boundary_to_end_with_id;
+    let _: unsafe extern "C" fn(*const c_char) -> FfiPatchResult =
+        agent_doc_reposition_boundary_to_end_preserve_head;
+    let _: unsafe extern "C" fn(*const c_char, *const c_char) -> FfiPatchResult =
+        agent_doc_reposition_boundary_to_end_preserve_head_with_id;
 }
 
 #[cfg(test)]

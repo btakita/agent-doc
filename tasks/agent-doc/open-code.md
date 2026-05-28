@@ -28,82 +28,12 @@ queue_active: true
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/fb8de777e65629bf156ef66517a44d0d9c829c7e89b02b868f8ca9d0519d3ddc-20260528-221143.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/fb8de777e65629bf156ef66517a44d0d9c829c7e89b02b868f8ca9d0519d3ddc-20260528-224507.md`*
 
 Compacted content:
-- Archived 12 response topic(s): #next-steps to split out crates; do #k5s7; do #n7dd; 9 more
+- Archived 2 response topic(s): do #epv5; do #vb8h
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/fb8de777...
-
-### Re: do #epv5 — 4 simple pure FFI functions relocated to core — opus-4-7
-
-Executed `do [#epv5]` (`#k9e1-ffi-simple`). The four simplest pure FFI functions now live in `agent-doc-core::ffi`, following the `#k9e1` POC pattern. Symbols verified still exported from the main cdylib.
-
-#### What landed
-
-Submodule `d74212ae` on `20260422/codex-agent-backend`, pushed. Superproject `8c5aead65` on `main`, pushed.
-
-**Relocated to `agent-doc-core/src/ffi.rs`:**
-- `agent_doc_parse_components` (+ `FfiComponentList`)
-- `agent_doc_visual_tokens_json`
-- `agent_doc_merge_frontmatter`
-- `agent_doc_normalize_template_structure`
-
-**Foundational enabling moves (necessary — not scope creep):**
-- **`FfiPatchResult` + `ffi_patch_ok`/`ffi_patch_err`/`ffi_patch_from_result` + `normalize_editor_visible_result` moved to core.** Two of the four functions return the shared `FfiPatchResult`, so the type had to relocate before they could. The apply_patch and `reposition_boundary_*` families still in main now resolve it via the existing `pub use agent_doc_core::ffi::*` re-export. This also **front-loads the shared-type move that `#e130` was scheduled to do** — I edited `#e130`'s backlog text to reflect that only the 3 apply_patch bodies remain.
-- **`utf8_offsets_to_utf16_offsets`** helper moved to core (`visual_tokens_json` needs it).
-- **`syntax` module relocated** `src/syntax.rs` → `agent-doc-core/src/syntax.rs`. It's pure (`serde` + `component::find_code_ranges`, both in core) and its only consumer was the relocated `visual_tokens_json`. Removed from main's `lib.rs`.
-
-`force_link_core_ffi_symbols` extended to reference all 4 new `extern "C"` fns so the static linker keeps them in the cdylib export table.
-
-#### Verification
-
-- `cargo build` / `cargo build --release`: green.
-- **`nm -D target/release/libagent_doc.so`**: all 6 symbols present (`agent_doc_free_string`, `agent_doc_free_state` from the POC + the 4 relocated). Editor plugins (JetBrains/VS Code/Python) resolve them unchanged.
-- `cargo test -p agent-doc-core --lib`: syntax module 7 pass.
-- `cargo test --lib` (main): 96 pass. `cargo test --bin agent-doc`: **2,261 pass** (unchanged — main's ffi test module exercises the re-exported symbols end-to-end, confirming the relocation is transparent).
-- `cargo clippy -- -D warnings`: clean.
-- `make check`: only the pre-existing `codex_bare_run_inside_owning_pane_fails_before_nested_dispatch` failure (environmental — needs live tmux/codex; reproduces on pristine HEAD; GitHub CI green). Unrelated to FFI relocation.
-- `cargo install --path .` + `cargo build --release`: both binaries refreshed.
-
-#### Remaining FFI relocation (queue order)
-
-- `#vb8h` (`#k9e1-ffi-boundary`) — 4 reposition_boundary variants + 2 CRDT FFI fns + `FfiMergeResult`. `FfiPatchResult` already in core, so these are now pure body moves.
-- `#e130` (`#k9e1-ffi-apply-patch`) — reduced to the 3 apply_patch bodies (shared type + helpers already moved this cycle).
-
-Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
-
-**Not invoking `/loop`** — queue head advances to `do [#vb8h]`. Each FFI sub-task warrants its own review/symbol-verification cycle; leaving the queue advance to the operator.
-
-### Re: do #vb8h — boundary + CRDT FFI relocated to core — opus-4-7
-
-Executed `do [#vb8h]` (`#k9e1-ffi-boundary`). The CRDT and reposition-boundary FFI functions now live in `agent-doc-core::ffi`. Pure body moves — the shared `FfiPatchResult` + helpers were already relocated in `#epv5`, so this cycle was clean lifting.
-
-#### What landed
-
-Submodule `ae48c394` on `20260422/codex-agent-backend`, pushed. Superproject `fb9f7ccdc` on `main`, pushed.
-
-**Relocated to `agent-doc-core/src/ffi.rs`:**
-- `agent_doc_crdt_merge` + `agent_doc_merge_crdt` (+ `FfiMergeResult` struct)
-- `agent_doc_reposition_boundary_to_end` (+ `_with_id`, `_preserve_head`, `_preserve_head_with_id`)
-
-All depend only on `agent_doc_core::{crdt, template}` plus the already-in-core `FfiPatchResult`/helpers. Removed the now-unused `use crate::crdt;` from main's `ffi.rs`. `force_link_core_ffi_symbols` extended to reference all 6 new `extern "C"` fns.
-
-#### Verification
-
-- `cargo build` / `cargo build --release`: green.
-- **`nm -D libagent_doc.so`**: all **12** relocated symbols present in the export table (6 this cycle + 4 from `#epv5` + 2 POC). Editor plugins resolve them unchanged.
-- `cargo test --bin agent-doc`: **2,261 pass**; `--lib`: 96 pass (both unchanged — main's ffi test module exercises the re-exported symbols).
-- `cargo clippy -- -D warnings`: clean.
-- Both binaries refreshed (`cargo install --path .` + `cargo build --release`).
-
-#### FFI relocation status
-
-Only `#e130` (`#k9e1-ffi-apply-patch`) remains — and it's now reduced to the 3 `apply_patch` bodies (the shared type + helpers moved in `#epv5`). Each still needs `template::apply_patches_with_overrides` switched to `apply_patches_with_overrides_pure` (preloaded empty configs, dropping the `dummy_path`). After `#e130`, the full pure-FFI surface lives in core and the editor-plugin slim-link target is unblocked.
-
-Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
-
-**Not invoking `/loop`** — queue head advances to `do [#e130]`; the apply_patch group touches the `#ckv3`-refactored signature and warrants its own review + symbol-verification cycle.
-<!-- agent:boundary:94e44c5b -->
+<!-- agent:boundary:fd6d31fe -->
 <!-- /agent:exchange -->
 
 ## Queue

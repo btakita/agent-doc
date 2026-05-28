@@ -62,9 +62,6 @@ use std::ffi::{CStr, CString, c_char};
 use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::component;
-use crate::template;
-
 /// Cross-editor sync lock — prevents concurrent layout syncs.
 static SYNC_LOCKED: AtomicBool = AtomicBool::new(false);
 
@@ -80,182 +77,6 @@ pub struct FfiProjectPath {
     /// Path to the input file, relative to `project_root`. Null when `project_root`
     /// is null. Free with [`agent_doc_free_string`].
     pub relative_path: *mut c_char,
-}
-
-/// Apply a patch to a document component.
-///
-/// `mode` must be one of: `"replace"`, `"append"`, `"prepend"`.
-///
-/// # Safety
-///
-/// All string pointers must be valid, NUL-terminated UTF-8.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_apply_patch(
-    doc: *const c_char,
-    component_name: *const c_char,
-    content: *const c_char,
-    mode: *const c_char,
-) -> FfiPatchResult {
-    let doc_str = match unsafe { CStr::from_ptr(doc) }.to_str() {
-        Ok(s) => s,
-        Err(e) => return ffi_patch_err(&format!("invalid doc UTF-8: {e}")),
-    };
-    let name = match unsafe { CStr::from_ptr(component_name) }.to_str() {
-        Ok(s) => s,
-        Err(e) => return ffi_patch_err(&format!("invalid component name UTF-8: {e}")),
-    };
-    let patch_content = match unsafe { CStr::from_ptr(content) }.to_str() {
-        Ok(s) => s,
-        Err(e) => return ffi_patch_err(&format!("invalid content UTF-8: {e}")),
-    };
-    let mode_str = match unsafe { CStr::from_ptr(mode) }.to_str() {
-        Ok(s) => s,
-        Err(e) => return ffi_patch_err(&format!("invalid mode UTF-8: {e}")),
-    };
-
-    // Build a patch block and apply it
-    let patch = template::PatchBlock::new(name, patch_content);
-
-    // Use mode overrides to force the specified mode
-    let mut overrides = std::collections::HashMap::new();
-    overrides.insert(name.to_string(), mode_str.to_string());
-
-    // apply_patches_with_overrides needs a file path for config lookup — use a dummy
-    // since we're providing explicit overrides
-    let dummy_path = std::path::Path::new("/dev/null");
-    ffi_patch_from_result(
-        template::apply_patches_with_overrides(doc_str, &[patch], "", dummy_path, &overrides)
-            .and_then(normalize_editor_visible_result),
-    )
-}
-
-/// Apply a component patch with cursor-aware ordering for append mode.
-///
-/// When `mode` is `"append"` and `caret_offset >= 0`, the content is inserted
-/// at the line boundary before the caret position (if the caret is inside the
-/// component). This ensures agent responses appear above where the user is typing.
-///
-/// Pass `caret_offset = -1` for normal behavior (identical to `agent_doc_apply_patch`).
-///
-/// # Safety
-///
-/// All pointers must be valid, non-null, NUL-terminated UTF-8.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_apply_patch_with_caret(
-    doc: *const c_char,
-    component_name: *const c_char,
-    content: *const c_char,
-    mode: *const c_char,
-    caret_offset: i32,
-) -> FfiPatchResult {
-    let doc_str = match unsafe { CStr::from_ptr(doc) }.to_str() {
-        Ok(s) => s,
-        Err(e) => return ffi_patch_err(&format!("invalid doc UTF-8: {e}")),
-    };
-    let name = match unsafe { CStr::from_ptr(component_name) }.to_str() {
-        Ok(s) => s,
-        Err(e) => return ffi_patch_err(&format!("invalid component name UTF-8: {e}")),
-    };
-    let patch_content = match unsafe { CStr::from_ptr(content) }.to_str() {
-        Ok(s) => s,
-        Err(e) => return ffi_patch_err(&format!("invalid content UTF-8: {e}")),
-    };
-    let mode_str = match unsafe { CStr::from_ptr(mode) }.to_str() {
-        Ok(s) => s,
-        Err(e) => return ffi_patch_err(&format!("invalid mode UTF-8: {e}")),
-    };
-
-    // If append mode with a valid caret, use cursor-aware insertion
-    if mode_str == "append" && caret_offset >= 0 {
-        let components = match component::parse(doc_str) {
-            Ok(c) => c,
-            Err(e) => return ffi_patch_err(&format!("{e}")),
-        };
-        if let Some(comp) = components.iter().find(|c| c.name == name) {
-            let result =
-                comp.append_with_caret(doc_str, patch_content, Some(caret_offset as usize));
-            return ffi_patch_from_result(normalize_editor_visible_result(result));
-        }
-    }
-
-    // Fall back to normal apply_patch behavior
-    let patch = template::PatchBlock::new(name, patch_content);
-    let mut overrides = std::collections::HashMap::new();
-    overrides.insert(name.to_string(), mode_str.to_string());
-    let dummy_path = std::path::Path::new("/dev/null");
-    ffi_patch_from_result(
-        template::apply_patches_with_overrides(doc_str, &[patch], "", dummy_path, &overrides)
-            .and_then(normalize_editor_visible_result),
-    )
-}
-
-/// Apply a component patch using a boundary marker for insertion point.
-///
-/// When `mode` is `"append"` and `boundary_id` is provided, the content is
-/// inserted at the boundary marker position (replacing the marker). This ensures
-/// agent responses appear after the prompt that triggered them, even if the user
-/// has typed new text below.
-///
-/// Falls back to normal patch application if the boundary is not found.
-///
-/// # Safety
-///
-/// All pointers must be valid, non-null, NUL-terminated UTF-8.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_apply_patch_with_boundary(
-    doc: *const c_char,
-    component_name: *const c_char,
-    content: *const c_char,
-    mode: *const c_char,
-    boundary_id: *const c_char,
-) -> FfiPatchResult {
-    let doc_str = match unsafe { CStr::from_ptr(doc) }.to_str() {
-        Ok(s) => s,
-        Err(e) => return ffi_patch_err(&format!("invalid doc UTF-8: {e}")),
-    };
-    let name = match unsafe { CStr::from_ptr(component_name) }.to_str() {
-        Ok(s) => s,
-        Err(e) => return ffi_patch_err(&format!("invalid component name UTF-8: {e}")),
-    };
-    let patch_content = match unsafe { CStr::from_ptr(content) }.to_str() {
-        Ok(s) => s,
-        Err(e) => return ffi_patch_err(&format!("invalid content UTF-8: {e}")),
-    };
-    let mode_str = match unsafe { CStr::from_ptr(mode) }.to_str() {
-        Ok(s) => s,
-        Err(e) => return ffi_patch_err(&format!("invalid mode UTF-8: {e}")),
-    };
-    let bid = match unsafe { CStr::from_ptr(boundary_id) }.to_str() {
-        Ok(s) => s,
-        Err(e) => return ffi_patch_err(&format!("invalid boundary_id UTF-8: {e}")),
-    };
-
-    // Use boundary-aware insertion for append mode
-    if mode_str == "append" && !bid.is_empty() {
-        let components = match component::parse(doc_str) {
-            Ok(c) => c,
-            Err(e) => return ffi_patch_err(&format!("{e}")),
-        };
-        if let Some(comp) = components.iter().find(|c| c.name == name) {
-            let result = comp.append_with_boundary(doc_str, patch_content, bid);
-            let result = if name == "exchange" {
-                template::annotate_exchange_headings_against_baseline(&result, doc_str)
-            } else {
-                result
-            };
-            return ffi_patch_from_result(normalize_editor_visible_result(result));
-        }
-    }
-
-    // Fall back to normal apply_patch behavior
-    let patch = template::PatchBlock::new(name, patch_content);
-    let mut overrides = std::collections::HashMap::new();
-    overrides.insert(name.to_string(), mode_str.to_string());
-    let dummy_path = std::path::Path::new("/dev/null");
-    ffi_patch_from_result(
-        template::apply_patches_with_overrides(doc_str, &[patch], "", dummy_path, &overrides)
-            .and_then(normalize_editor_visible_result),
-    )
 }
 
 /// Record a document change event for debounce tracking.
@@ -1064,14 +885,35 @@ pub use agent_doc_core::ffi::*;
 #[allow(dead_code)]
 fn force_link_core_ffi_symbols() {
     use agent_doc_core::ffi::{
-        FfiComponentList, FfiMergeResult, FfiPatchResult, agent_doc_crdt_merge,
-        agent_doc_free_state, agent_doc_free_string, agent_doc_merge_crdt,
+        FfiComponentList, FfiMergeResult, FfiPatchResult, agent_doc_apply_patch,
+        agent_doc_apply_patch_with_boundary, agent_doc_apply_patch_with_caret,
+        agent_doc_crdt_merge, agent_doc_free_state, agent_doc_free_string, agent_doc_merge_crdt,
         agent_doc_merge_frontmatter, agent_doc_normalize_template_structure,
         agent_doc_parse_components, agent_doc_reposition_boundary_to_end,
         agent_doc_reposition_boundary_to_end_preserve_head,
         agent_doc_reposition_boundary_to_end_preserve_head_with_id,
         agent_doc_reposition_boundary_to_end_with_id, agent_doc_visual_tokens_json,
     };
+    let _: unsafe extern "C" fn(
+        *const c_char,
+        *const c_char,
+        *const c_char,
+        *const c_char,
+    ) -> FfiPatchResult = agent_doc_apply_patch;
+    let _: unsafe extern "C" fn(
+        *const c_char,
+        *const c_char,
+        *const c_char,
+        *const c_char,
+        i32,
+    ) -> FfiPatchResult = agent_doc_apply_patch_with_caret;
+    let _: unsafe extern "C" fn(
+        *const c_char,
+        *const c_char,
+        *const c_char,
+        *const c_char,
+        *const c_char,
+    ) -> FfiPatchResult = agent_doc_apply_patch_with_boundary;
     let _: unsafe extern "C" fn(*mut c_char) = agent_doc_free_string;
     let _: unsafe extern "C" fn(*mut u8, usize) = agent_doc_free_state;
     let _: unsafe extern "C" fn(*const c_char) -> FfiComponentList = agent_doc_parse_components;

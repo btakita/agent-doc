@@ -1,6 +1,6 @@
 ---
 agent_doc_session: tsift-v0.1
-agent: opencode
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -32,43 +32,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260528-212357.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260528-222321.md`*
 
 Compacted content:
-- Archived 3 response topic(s): #step-2-backends; #step-3-tokensave-reader; #step-5-algorithms
+- Archived 2 response topic(s): #step-4-graph; #step-6-resolution
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-### Re: #step-4-graph — glm-5.1
-
-Confirmed `tsift-graph` crate is fully extracted and working:
-
-- `packages/tsift-graph/` — ~2473 LOC across 3 modules:
-  - `lib.rs` (1289 LOC) — CallSite, CallEdge, RouteSite extraction, community detection, path finding
-  - `lang.rs` (832 LOC) — Lang enum, Symbol struct, language detection, tree-sitter queries
-  - `complexity.rs` (352 LOC) — ComplexityMetrics, LanguageExtractor trait, LanguageRegistry
-- `src/graph.rs` is a thin re-export shim (`pub use tsift_graph::*`)
-- 67 unit tests pass in tsift-graph; 827 total workspace tests pass
-- Build succeeds. Crate properly wired in workspace Cargo.toml with language feature forwarding
-
-No new code changes needed — crate was already code-complete from prior session. Marked #step-4-graph done.
-
-Next in queue: **#step-6-resolution** — Add `tsift-resolution` crate.
-### Re: #step-6-resolution — glm-5.1
-
-Extracted `tsift-resolution` crate with multi-strategy resolution, scoring heuristics, and blocklist. All tests pass. Built, installed, committed (`e5441ac`), and pushed.
-
-**What changed:**
-- `packages/tsift-resolution/` — new crate (~470 LOC) with:
-  - `scoring.rs` (290 LOC) — RankedNeighbor, neighborhood ranking, edge kind scoring, heuristic helpers (community signal, semantic signal, freshness, handle coverage, duplicate name precision)
-  - `blocklist.rs` (110 LOC) — generated artifact detection (.tsift, .agent-doc, target), planner config path filtering, index snapshot part checking
-  - `resolve.rs` (110 LOC) — F1 scoring, token-overlap ranking, NodeMatchKind enum, kind priority, StrategyRank
-- `src/resolution.rs` — thin re-export shim (`pub use tsift_resolution::*`)
-- `src/main.rs` — inline struct definitions replaced with type aliases, inline functions replaced with delegation wrappers
-- Workspace Cargo.toml updated with tsift-resolution member + dependency
-- SPEC.md updated with new crate in architecture tree
-- 56 unit tests in tsift-resolution (all passing); 883 total workspace tests pass
-
-Next in queue: **#step-7-cli** — Extract `tsift-cli` crate.
-<!-- agent:boundary:8ca26dcd -->
+<!-- agent:boundary:7ea8e193 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -79,16 +48,6 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- ~[#step-1-core]~
-- ~[#step-2-backends]~
-- ~[#step-3-tokensave-reader]~
-- ~[#step-4-graph]~
-- ~[#step-5-algorithms]~
-- ~[#step-6-resolution]~
-- ~[#step-7-cli]~
-- [#npm-auth-setup]
-- [#npm-publish-verify]
-- [#full-e2e-verify]
 <!-- /agent:queue -->
 
 ## Backlog

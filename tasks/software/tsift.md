@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -182,7 +182,7 @@ Backlog reordered. Top is now `#split-tsift-quality`.
 2. Pick X / Y / Z for the digest↔search cycle.
 3. Decide where `status` lives after the splits (root-shim vs tsift-cli vs new crate).
 4. Re-author the queue with whichever splits you want me to drive. The auto-loop will not advance until you confirm direction. Once you queue `do [#split-tsift-quality]`, it should land cleanly.
-<!-- agent:boundary:7f06c702 -->
+<!-- agent:boundary:7d7e74a1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -194,7 +194,8 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#split-sim-world]~
-- do [#split-tsift-digest]
+- ~do [#split-tsift-digest]~
+- do [#split-tsift-quality]
 - do [#split-tsift-index]
 - do [#split-tsift-session]
 - do [#split-tsift-quality]

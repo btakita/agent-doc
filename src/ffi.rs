@@ -1502,24 +1502,25 @@ pub unsafe extern "C" fn agent_doc_resolve_project_path(
 ///
 /// # Safety
 ///
-/// `ptr` must have been returned by an `agent_doc_*` function, or be null.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_free_string(ptr: *mut c_char) {
-    if !ptr.is_null() {
-        drop(unsafe { CString::from_raw(ptr) });
-    }
-}
+// `agent_doc_free_string` and `agent_doc_free_state` moved to
+// `agent_doc_core::ffi` (Wave 5 / `#k9e1` proof-of-concept). They are
+// re-exported below via `pub use agent_doc_core::ffi::*;`. The
+// `force_link_core_ffi_symbols` function below references them to
+// prevent the static linker from stripping them out of the main cdylib.
+pub use agent_doc_core::ffi::*;
 
-/// Free a state buffer returned by [`agent_doc_crdt_merge`].
+/// Prevent the static linker from stripping the `agent_doc_core::ffi`
+/// symbols out of `libagent_doc.{so,dylib,dll}`. Called from `lib.rs`
+/// via a constructor-style reference path so editor plugins
+/// (JetBrains, VS Code) continue to find the symbols at runtime.
 ///
-/// # Safety
-///
-/// `ptr` and `len` must match a state buffer returned by `agent_doc_crdt_merge`, or `ptr` must be null.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_free_state(ptr: *mut u8, len: usize) {
-    if !ptr.is_null() {
-        drop(unsafe { Vec::from_raw_parts(ptr, len, len) });
-    }
+/// The function itself is never called — we just need the symbol
+/// references to exist in the main crate's compilation unit so the
+/// linker keeps them in the cdylib export table.
+#[allow(dead_code)]
+fn force_link_core_ffi_symbols() {
+    let _: unsafe extern "C" fn(*mut c_char) = agent_doc_core::ffi::agent_doc_free_string;
+    let _: unsafe extern "C" fn(*mut u8, usize) = agent_doc_core::ffi::agent_doc_free_state;
 }
 
 #[cfg(test)]

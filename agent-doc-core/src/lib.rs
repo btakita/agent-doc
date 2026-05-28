@@ -14,6 +14,7 @@
 pub mod component;
 pub mod crdt;
 pub mod diff;
+pub mod ffi;
 pub mod frontmatter;
 pub mod id;
 pub mod model_tier;

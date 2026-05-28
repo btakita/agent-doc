@@ -32,54 +32,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260528-001314.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260528-212357.md`*
 
 Compacted content:
-- Archived 6 response topic(s): tokensave algorithms in tsift; reverse-engineering tokensave next steps; separate crates architecture; 3 more
+- Archived 3 response topic(s): #step-2-backends; #step-3-tokensave-reader; #step-5-algorithms
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
-### Re: #step-2-backends — gpt-5
-
-Extracted `tsift-sqlite` + `tsift-libsql` crates from substrate.rs + libsql_backend.rs. All tests pass (13 tsift-sqlite unit tests + full test suite). Built and installed locally. Committed and pushed as `129f6d1`.
-
-**What changed:**
-- `packages/tsift-sqlite/` — new crate with SqliteGraphStore + snapshot utilities (ReadOnlyRecovery, copy_read_only_snapshot, etc.) + re-exports tsift-core types. 3700+ LOC.
-- `packages/tsift-libsql/` — new crate with LibsqlGraphStore implementing GraphStore trait from tsift-core. 630+ LOC.
-- `SQLITE_GRAPH_SCHEMA_VERSION` moved to tsift-core (shared by both backends).
-- Snapshot utilities moved from index.rs to tsift-sqlite (were pub(crate), now pub).
-- `src/substrate.rs` and `src/libsql_backend.rs` are now thin re-export shims (`pub use tsift_sqlite::*;` / `pub use tsift_libsql::*;`).
-- Updated imports in index.rs, status.rs, summarize.rs, main.rs.
-- SPEC.md updated with new crate structure.
-- Workspace Cargo.toml updated: `backend-libsql` feature now gates `dep:tsift-libsql`.
-
-### Re: #step-3-tokensave-reader — gpt-5
-
-Added `tsift-tokensave` crate — DB reader adapter for `.tokensave/tokensave.db`. All 7 unit tests pass. Full test suite passes. Built, installed, committed (`b2cf59b`), and pushed.
-
-**What changed:**
-- `packages/tsift-tokensave/` — new crate (~700 LOC) with:
-  - `TokensaveDb` — read-only adapter opening tokensave's SQLite DB
-  - Schema mapping: tokensave `nodes(id, kind, name, ...)` → tsift `GraphNode(id, kind, label, properties)`, `edges(source, target, kind)` → `GraphEdge(from_id, to_id, kind)`
-  - FTS5 search via `nodes_fts` virtual table (`search_fts()` method)
-  - `GraphStore` trait impl (read-only, writes bail with clear error)
-  - `TokensaveNode`, `TokensaveEdge`, `TokensaveFile`, `FtsSearchResult` structs
-  - `TokensaveDb::discover(project_dir)` to find `.tokensave/tokensave.db`
-  - `nodes_for_file()`, `edges_from()`, `edges_to()`, `kinds()`, `edge_kinds()` queries
-  - 7 unit tests: read nodes/edges, FTS search, GraphStore adapter, discover, write rejection, file nodes
-- Workspace Cargo.toml + SPEC.md updated
-### Re: #step-5-algorithms — gpt-5
-
-Added `tsift-algorithms` crate with iterative Tarjan SCC, composite health score, dead code detection, and coupling analysis. 30 unit tests pass. Full workspace: 954 tests passing. Built, installed, committed (`1c2b479`), and pushed.
-
-**What changed:**
-- `packages/tsift-algorithms/` — new crate (~850 LOC) with:
-  - `scc` module — iterative Tarjan SCC on directed graphs
-  - `health` module — composite health score per node (connectivity, reachability, centrality, cycle risk)
-  - `dead_code` module — dead code detection from entry points
-  - `coupling` module — inter-module coupling analysis (fan-in, fan-out, instability)
-- Workspace Cargo.toml updated with `tsift-algorithms`
-- SPEC.md updated with new crate structure
-<!-- agent:boundary:871a3e3e -->
+<!-- agent:boundary:69d2fca8 -->
 <!-- /agent:exchange -->
 ###
 <!--

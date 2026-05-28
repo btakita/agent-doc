@@ -71,11 +71,15 @@ name = "agent-doc-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "clap",
+ "indexmap",
  "pulldown-cmark",
  "serde",
  "serde_yaml",
  "sha2",
  "similar",
+ "tempfile",
+ "toml",
  "uuid",
  "yrs",
 ]

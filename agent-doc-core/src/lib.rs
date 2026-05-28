@@ -1,23 +1,19 @@
-//! agent-doc-core — pure document data layer for agent-doc.
+//! agent-doc-core — document data layer for agent-doc.
 //!
-//! No filesystem, git, tmux, IPC, or harness probing. Consumers pass
-//! parsed content in and receive parsed/mutated content back.
-//!
-//! Wave plan (see `tasks/agent-doc/plan-agent-doc-core-extraction.md`):
-//!
-//! - Wave 1 (done): `id`, `crdt`, `component`, `model_tier`, `pending`.
-//! - Wave 2: `frontmatter`, `project_config`
-//! - Wave 3: `template`
-//! - Wave 4: `diff` (pure half only, per `#rtx6` Option 1)
-//!
-//! Pure deps only: `anyhow`, `serde`, `serde_yaml`, `uuid`,
-//! `pulldown-cmark`, `yrs`, `similar`. No git/tmux/tokio/IPC.
+//! See `tasks/agent-doc/plan-agent-doc-core-extraction.md` for the wave plan.
+//! Currently extracted: Wave 1 (id, crdt, component, model_tier, pending),
+//! Wave 2 (frontmatter, project_config). Some functions in
+//! `frontmatter` and `project_config` take `&Path` and touch the
+//! filesystem — they live here for the convenience of a single move and may
+//! be split into orchestration wrappers in a follow-up tidy.
 
 pub mod component;
 pub mod crdt;
+pub mod frontmatter;
 pub mod id;
 pub mod model_tier;
 pub mod pending;
+pub mod project_config;
 
 pub use component::Component;
 pub use crdt::CrdtDoc;

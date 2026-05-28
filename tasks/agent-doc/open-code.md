@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -71,7 +71,6 @@ The four waves of `#adcr` extraction shipped (id+crdt, component+model_tier+pend
 #### Note on `#adcr`
 
 The umbrella entry stays in the backlog as a parent placeholder. The seven items above are the path to satisfying acceptance criteria #1 and #3 before it gets marked done.
-
 ### Re: do #k5s7 — baseline measured — opus-4-7
 
 Executed `do [#k5s7]`. Cold-build numbers captured; plan acceptance criterion #1 satisfied with substantial headroom.
@@ -114,7 +113,39 @@ Submodule `bce1496f` on `20260422/codex-agent-backend`, pushed. Superproject `23
 Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
 
 **Not invoking `/loop`** — the queue head advances to `do [#n7dd]` (wave-4 test tidy), which is a separate operator-scoped cycle (porting ~26 inline tests is mechanical but worth its own review).
-<!-- agent:boundary:13457321 -->
+### Re: do #n7dd — wave-4 test tidy complete — opus-4-7
+
+Executed `do [#n7dd]`. The 27 I/O-bound inline tests dropped during the wave 4 diff split are back, restoring coverage to the level it held before the extraction landed.
+
+#### What landed
+
+Submodule `c2e6e282` on `20260422/codex-agent-backend`, pushed. Superproject `279bf6715` on `main`, pushed.
+
+- `src/diff_io.rs` — appended a `#[cfg(test)] mod tests` block with 27 ported tests + 1 helper, all extracted verbatim from `src/diff.rs` at the pre-wave-4 parent commit (`2e2e2764^`):
+  - 1 `run_file_not_found` (bare error path through `run`)
+  - 1 `copy_on_read_guard_skips_recovery_when_snapshot_modified` (mtime guard semantics)
+  - 4 `compute_*` (stale snapshot recovery returns None, recovery syncs snapshot to document, returns diff for user adds, returns None when no changes) + `setup_compute_env` helper
+  - 3 `diff_detects_*` (user edits after stream write, no change when document matches snapshot, change after cumulative stream flushes)
+  - 14 `truncated_*`/`not_truncated_*`/`extract_last_added_*` (looks_truncated semantics across sentences, questions, commands, short words, single chars, headings, empty, terminal punctuation, mid-word truncation, periods, plus the two extract_last_added_line edge cases)
+  - 1 `wait_for_stable_content_returns_immediately_when_complete` (latency contract for already-complete content)
+  - 2 `run_with_wait_*` (stable content + no changes)
+
+#### Verification
+
+- `cargo build`: green.
+- `cargo test --release --bin agent-doc`: **2,256 tests pass** (up from 2,229; **+27** matches the ported test count exactly, no skew).
+- `cargo test --release --lib`: 96 tests pass (unchanged — library target doesn't include the binary's `diff_io` module).
+- `make check`: same pre-existing local `codex_bare_run_inside_owning_pane_fails_before_nested_dispatch` failure (reproduces on pristine HEAD; GitHub CI green).
+- `cargo install --path .`: `~/.cargo/bin/agent-doc` replaced.
+
+#### Coverage gap closed
+
+The wave 4 commit message noted: "**Coverage caveat:** ~26 I/O-bound inline tests from the original `src/diff.rs` tests module... were dropped during the split and not yet re-added to `src/diff_io.rs`." That gap is now closed. The migration is purely additive — no test behavior changed, just the file location.
+
+Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
+
+**Not invoking `/loop`** — queue head advances to `do [#0ejf]` (purity tidy — extract remaining `&Path`-taking functions from `agent-doc-core`); that's a larger, operator-scoped cycle requiring decisions about where each I/O wrapper lands.
+<!-- agent:boundary:9035c973 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -122,7 +153,7 @@ Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#k5s7]~
-- do [#n7dd]
+- ~do [#n7dd]~
 - do [#0ejf]
 - do [#k9e1]
 - do [#5yqz]
@@ -134,7 +165,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#n7dd] [recommended] #adcr-wave-4-tidy Port the ~26 I/O-bound inline tests dropped during wave 4 (run_file_not_found, copy_on_read_guard, four compute_* tests, three diff_detects_* tests, fourteen truncated_/extract_/run_with_wait_/wait_for_stable_content_* tests) into src/diff_io.rs to close the coverage gap.
 - [ ] [#0ejf] [recommended] #adcr-purity-tidy Extract the remaining and-Path-taking functions from agent-doc-core: template::{template_info, load_component_configs, load_project_from_doc, find_project_root}, frontmatter::{ensure_session_for_file, set_format_and_write, read_session_id}, project_config::{load_project*, save_project, *_tmux_session}. Move I/O wrappers to main crate; keep pure parsers/formatters in core. Satisfies plan acceptance criterion #3.
 - [ ] [#k9e1] #adcr-ffi-relocate Move pure C-ABI wrappers from src/ffi.rs (apply_patch, parse_components, merge_frontmatter, normalize_template_structure, reposition_boundary, agent_doc_strip_comments) into agent-doc-core::ffi so editor plugins (JB, VS Code) can link against just agent-doc-core without dragging the orchestration crate. Keep route/git/ipc/start FFI calls in main.
 - [ ] [#5yqz] #adcr-eval-runner-switch Switch eval-runner's strip_comments dependency from agent-doc to agent-doc-core to cut eval pipeline build cost.

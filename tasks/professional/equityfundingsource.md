@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -123,14 +123,16 @@ What this does NOT include (full #2z8r):
 - Provider metadata persistence (`place_id`, `lat/lng`, map previews).
 
 When #2z8r picks a provider, the UI contract above carries over: provider-matched → `address_verified=true`; everything else → manual + unverified, badge in admin.
-<!-- agent:boundary:b30cdea9 -->
+do [#2z8r]. #spec-test-commit-push-deploy
+<!-- agent:boundary:a7f7248b -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+- do [#2z8r]. #spec-test-commit-push-deploy
 <!-- /agent:queue -->
 
 ## Backlog

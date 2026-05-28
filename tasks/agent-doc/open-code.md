@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -71,13 +71,21 @@ The four waves of `#adcr` extraction shipped (id+crdt, component+model_tier+pend
 #### Note on `#adcr`
 
 The umbrella entry stays in the backlog as a parent placeholder. The seven items above are the path to satisfying acceptance criteria #1 and #3 before it gets marked done.
-<!-- agent:boundary:f9de6e9f -->
+<!-- agent:boundary:cbbffe80 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
+- do [#k5s7]
+- do [#n7dd]
+- do [#0ejf]
+- do [#k9e1]
+- do [#5yqz]
+- do [#77v6]
+- do [#ysv9]
+- do [#adcr]
 <!-- /agent:queue -->
 
 ## Backlog

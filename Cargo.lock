@@ -23,6 +23,7 @@ dependencies = [
 name = "agent-doc"
 version = "0.34.0"
 dependencies = [
+ "agent-doc-core",
  "agent-kit",
  "alacritty_terminal",
  "anyhow",

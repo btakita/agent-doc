@@ -28,6 +28,7 @@ name = "agent-doc"
 path = "src/main.rs"
 
 [dependencies]
+agent-doc-core = { path = "agent-doc-core" }
 anyhow = "1"
 fs2 = "0.4"
 clap = { version = "4", features = ["derive"] }

@@ -67,7 +67,19 @@ Added `tsift-tokensave` crate — DB reader adapter for `.tokensave/tokensave.db
   - `nodes_for_file()`, `edges_from()`, `edges_to()`, `kinds()`, `edge_kinds()` queries
   - 7 unit tests: read nodes/edges, FTS search, GraphStore adapter, discover, write rejection, file nodes
 - Workspace Cargo.toml + SPEC.md updated
-<!-- agent:boundary:b455236a -->
+### Re: #step-5-algorithms — gpt-5
+
+Added `tsift-algorithms` crate with iterative Tarjan SCC, composite health score, dead code detection, and coupling analysis. 30 unit tests pass. Full workspace: 954 tests passing. Built, installed, committed (`1c2b479`), and pushed.
+
+**What changed:**
+- `packages/tsift-algorithms/` — new crate (~850 LOC) with:
+  - `scc` module — iterative Tarjan SCC on directed graphs
+  - `health` module — composite health score per node (connectivity, reachability, centrality, cycle risk)
+  - `dead_code` module — dead code detection from entry points
+  - `coupling` module — inter-module coupling analysis (fan-in, fan-out, instability)
+- Workspace Cargo.toml updated with `tsift-algorithms`
+- SPEC.md updated with new crate structure
+<!-- agent:boundary:871a3e3e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -94,7 +106,6 @@ preset #spec-test-build-install-commit-push
 
 <!-- agent:backlog -->
 - [ ] [#step-4-graph] Extract `tsift-graph` crate + port LanguageExtractor trait, Language Registry, complexity counting from tokensave (~600 new + ~1.4K moved)
-- [ ] [#step-5-algorithms] Add `tsift-algorithms` crate — port iterative Tarjan SCC, composite health score, dead code detection, coupling analysis from tokensave (~850 LOC)
 - [ ] [#step-6-resolution] Add `tsift-resolution` crate — port multi-strategy reference resolver, scoring heuristics, blocklist from tokensave (~450 LOC)
 - [ ] [#step-7-cli] Extract `tsift-cli` crate — move main.rs (39K LOC), wire new crates into CLI commands (tsift health, tsift dead-code, tsift coupling)
 - [ ] [#npm-auth-setup] Configure NPM_TOKEN secret + TSIFT_ENABLE_NPM_PUBLISH=true variable in GitHub repo settings

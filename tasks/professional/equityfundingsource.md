@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -255,15 +255,17 @@ What are #next-steps to complete /portal-broker/pre-qual-tool?
 No document changes were detected in `/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`, so I stopped after `agent-doc preflight` as required.
 
 Preflight did auto-commit a queued dispatch snapshot first, then reported `no_changes: true`. It also warned that the exchange is getting large and suggested compacting only with explicit approval.
-<!-- agent:boundary:c604a460 -->
+What are #next-steps to complete /portal-broker/pre-qual-tool?
+<!-- agent:boundary:7523c9c4 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 - ~What are #next-steps to complete /portal-broker/pre-qual-tool?~
+- What are #next-steps to complete /portal-broker/pre-qual-tool?
 <!-- /agent:queue -->
 
 ## Backlog

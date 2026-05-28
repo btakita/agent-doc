@@ -199,7 +199,8 @@ tsift/
 - Splitting adds workspace overhead, version coordination, dependency management
 - The tokensave ports haven't started yet — crate boundaries should reflect the final architecture, not the current one
 - **Recommendation**: start the tokensave Phase 1 (DB reader adapter), then split as part of Phase 2 when you have concrete code to organize
-<!-- agent:boundary:4f37ddf3 -->
+Would splitting separate crates improve agentic maintenance?
+<!-- agent:boundary:0432adc5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -214,7 +215,7 @@ preset #spec-test-build-install-commit-push
 - ~[#npm-auth-setup]~
 - ~[#npm-publish-verify]~
 - ~[#full-e2e-verify]~
-- Should we architect separate rust crates in tsift?
+- Would splitting separate crates improve agentic maintenance?
 <!-- /agent:queue -->
 
 ## Backlog

@@ -362,7 +362,56 @@ For prereq 1, what is your suggestion and why?
 - Then status placement → tsift-cli, sim-world resolution, and `#demote-root-tsift` is one-line.
 
 Reminder: session document is at 312 lines / 10 no-op closeouts — `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/software/tsift.md --commit` will archive prior responses without disturbing backlog/review state.
-<!-- agent:boundary:ba1c5f2e -->
+
+### Re: Do summarize. I expect tsift-mcp and tsift-agent. — opus-4-7
+
+
+**Done.** Extracted `summarize` (~1.8k LOC) into the new `tsift-summarize` crate as the **Y** resolution to the digest↔search cycle.
+
+**Changed paths (tsift submodule, HEAD `8f2dee3`):**
+
+- `packages/tsift-summarize/Cargo.toml` (new — version `0.1.62`; deps: anyhow, blake3, fs4, rusqlite, serde, serde_json, ureq, tsift-index, tsift-sqlite; dev: tempfile)
+- `packages/tsift-summarize/src/lib.rs` (new — `pub mod summarize; pub use summarize::*;`)
+- `packages/tsift-summarize/src/summarize.rs` (moved from `src/summarize.rs`; `crate::index::IndexDb` → `tsift_index::index::IndexDb`; `crate::substrate::*` → `tsift_sqlite::*` at 3 sites — 1 `use` stmt + 2 inline `crate::substrate::ReadOnlyRecovery::*` references + 1 test-block `use crate::substrate::{rollback_journal_path, wal_sidecar_path}`)
+- `Cargo.toml` — added `tsift-summarize` to workspace members and root path dep
+- `packages/tsift-cli/Cargo.toml` — added `tsift-summarize = { path = "../tsift-summarize" }`
+- `src/lib.rs` — removed `pub mod summarize;`; added `pub use tsift_summarize::summarize;`
+- `SPEC.md` — added `tsift-summarize crate` block under Architecture (noting it's shared by tsift-digest + future tsift-search)
+- `VERSIONS.md` — `Unreleased` entry added
+- `Cargo.lock` — regenerated
+
+**Commands run:**
+- `cargo build --release` — clean after one fix (missed `blake3` dep on first pass; added).
+- `cargo test --release --no-fail-fast --workspace` — **990 passed across 31 suites**.
+- `cargo install --path packages/tsift-cli` — installed `tsift 0.1.62`.
+
+**Repo state:**
+- tsift submodule HEAD: `8f2dee3` (pushed).
+- Superproject HEAD: `aec49f9a9 tsift: extract tsift-summarize crate (Y resolution to digest<->search cycle)` (pushed).
+
+**Cycle now broken.** With summarize as a shared foundation crate:
+- `tsift-digest` (future) — depends on `tsift-summarize`, `tsift-quality` (lint), `tsift-graph` (lang)
+- `tsift-search` (future) — depends on `tsift-summarize`, `tsift-index`, `tsift-resolution`
+- Neither depends on the other.
+
+**Updated remaining-splits plan:**
+
+| Order | Item | Modules | Deps |
+|---|---|---|---|
+| 1 | `#split-tsift-digest` | diff_digest, log_digest, metric_digest, test_digest | tsift-summarize, tsift-quality, tsift-graph |
+| 2 | `#split-tsift-search` | sift, impact, tagpath_adapter | tsift-summarize, tsift-index, tsift-resolution, tsift-digest (impact uses diff_digest) |
+| 3 | status placement | status.rs | recommend tsift-cli (still pending your confirm) |
+| 4 | `#split-sim-world` | sim_world | recommend delete-or-rehome (B from earlier) |
+| 5 | `#demote-root-tsift` | — | one-line PR |
+
+Note: with **Y**, `impact` stays in `tsift-search` (not moved into `tsift-digest`). `tsift-search` then has a one-way dep on `tsift-digest` for `impact`'s use of `diff_digest`, which is fine — search becomes the higher layer.
+
+Added `#split-tsift-summarize [done]` to backlog as a record of this cycle's resolution.
+
+**Reminder:** session document is now well past the comfortable size (the 312-line / 10-no-op warning from last cycle still stands; this cycle adds another response). `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/software/tsift.md --commit` is recommended before the next split runs.
+
+**Confidence:** high. **Escalation:** none.
+<!-- agent:boundary:ee07b1dc -->
 <!-- /agent:exchange -->
 ###
 <!--

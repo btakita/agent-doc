@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -75,12 +75,12 @@ Each is a separate cycle with `make check` + `cargo install` after the move. The
 Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
 
 **Not invoking `/loop`** — the remaining queue items (`#yhsr` Wave 2, `#yxvq` Wave 3, `#mzzd` Wave 4) all depend on Wave 1 completing first.
-<!-- agent:boundary:b4abf7e7 -->
+<!-- agent:boundary:d95624ed -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - [#pjb4]
 - [#yhsr]

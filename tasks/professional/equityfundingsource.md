@@ -23,7 +23,8 @@ queue_active: false
 ## Status
 
 <!-- agent:status patch=replace -->
-EFS workers.dev production: `/apply` public prequalification + D1-backed `application_leads` admin review is deployed in Worker version `2819a1cf-3091-495f-b9ab-72434d5cafdd` as of 2026-05-28; public homepage rate-estimator dollar prefixes now use `-translate-y-1/4` from EFS commit `2e18870`, and investor commitment/funding amount fields use shared grid-aligned dollar-prefix styling from EFS commit `a9b0405`. Local `bun dev` on port 4200 mounts `/apply`; public site/footer email is `info@equityfundingsource.com`; logged-out navigation exposes Borrower Login, Apply for a Loan, Broker Portal, and Investor Portal with Broker Portal placed between Apply and Investor. Cloudflare Access protects /login/access-callback with ACCESS_TEAM_DOMAIN/AUD. `/portal-admin/users` lets existing admins create admin/borrower/broker/investor accounts without reopening public `/admin/signup`; production D1 has active admin rows for `brian.takita+admin@gmail.com` and `btak.dev+admin@gmail.com`. Application lead notifications still route through Resend testing-mode config `APPLICATION_LEAD_NOTIFICATION_TO=brian.takita@gmail.com` and `APPLICATION_LEAD_NOTIFICATION_FROM=Equity Funding Source <onboarding@resend.dev>` until an EFS-owned sending domain is verified. Custom-domain cutover is deferred; continue using https://equityfundingsource.brian-takita.workers.dev until further notice.
+
+EFS workers.dev production: `/apply` public prequalification + D1-backed `application_leads` admin review is deployed in Worker version `734df89a-8af6-401e-83e4-fd5215a48e3f` as of 2026-05-28 from EFS commit `0afd62b`; public homepage rate-estimator dollar prefixes use `-translate-y-1/4`, and amount inputs use `pl-6`/24px left padding loaded after the base input rule. Local `bun dev` on port 4200 mounts `/apply`; public site/footer email is `info@equityfundingsource.com`; logged-out navigation exposes Borrower Login, Apply for a Loan, Broker Portal, and Investor Portal with Broker Portal placed between Apply and Investor. Cloudflare Access protects /login/access-callback with ACCESS_TEAM_DOMAIN/AUD. `/portal-admin/users` lets existing admins create admin/borrower/broker/investor accounts without reopening public `/admin/signup`; production D1 has active admin rows for `brian.takita+admin@gmail.com` and `btak.dev+admin@gmail.com`. Application lead notifications still route through Resend testing-mode config `APPLICATION_LEAD_NOTIFICATION_TO=brian.takita@gmail.com` and `APPLICATION_LEAD_NOTIFICATION_FROM=Equity Funding Source <onboarding@resend.dev>` until an EFS-owned sending domain is verified. Custom-domain cutover is deferred; continue using https://equityfundingsource.brian-takita.workers.dev until further notice.
 <!-- /agent:status -->
 
 ## Exchange
@@ -562,7 +563,31 @@ Verification:
 - Tmux CI inspection: `make -n tmux-ci` has no `tmux-ci` target in the EFS repo.
 
 Closeout evidence: EFS repo is clean after push; changed files were staged exactly before commit. Escalation: none. Confidence: high.
-<!-- agent:boundary:0b0a6b05 -->
+❯ deploy
+
+### Re: deploy — gpt-5
+
+Deployed the current EFS Worker from `src/equityfundingsource-dev` commit `0afd62b` to workers.dev.
+
+Deploy result:
+
+- Worker URL: `https://equityfundingsource.brian-takita.workers.dev`
+- Current Version ID: `734df89a-8af6-401e-83e4-fd5215a48e3f`
+- Trigger deployed: scheduled cron `9 19 * * *`
+- Uploaded asset: `/index.server-EGLIFSVJ_U7TU5COX.css`
+
+Verification:
+
+- Deploy command completed successfully after building the app and worker bundle.
+- Live `/` returned 200.
+- Live `/admin/login` returned 200.
+- Live `/apply` returned 200.
+- Live homepage HTML links `/index.server-EGLIFSVJ_U7TU5COX.css` and contains both `efs-input pl-6` rate-estimator amount inputs.
+- Live homepage critical CSS contains `.pl-6{padding-left:1.5rem}` after the base `.efs-input,.efs-select` rule, so the 24px left padding wins in the cascade.
+- EFS source repo remained clean after deploy.
+
+Changed source paths: none in this deploy cycle. Session status was updated with the new Worker version. Escalation: none. Confidence: high.
+<!-- agent:boundary:99144dd2 -->
 <!-- /agent:exchange -->
 ###
 <!--

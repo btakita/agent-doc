@@ -35,7 +35,6 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 1 response topic(s): JB Run Agent Doc on tsift.md
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
 ### Re: do [#h9g0] — gpt-5
 
 Implemented `#h9g0`.
@@ -74,8 +73,7 @@ Verification:
 Commit/push:
 - `btakita/agent-doc@0410445b30a58667837a3bcab7facb14ef67357a` pushed to `20260422/codex-agent-backend`.
 - Root submodule pointer commit `cecf6e98d` is ready in `btakita/agent-loop`; this closeout will be pushed with the session-document commit.
-
-### Re: do [#zeb5] — gpt-5
+### Re: do [#zeb5] — gpt-5 (HEAD)
 
 Closed `#zeb5` with the `#h9g0` implementation.
 
@@ -106,6 +104,11 @@ Verification already completed for that commit:
 <!-- /agent:exchange -->
 ###
 <!--
+JB `Run Agent Doc` on tsift.md error:
+```
+Session is still running for tasks/software/tsift.md. Pane %21 is busy (agent-doc). Wait for the turn to finish, then retry Clear Session Context. Use Refresh and retry if the pane has returned to an idle prompt, or Interrupt and clear to discard the running turn. Latest pane output: 22.4K (11%) ctrl+p commands
+```
+---
 The completed queue item was not removed from the queue. #mermaid
 #spec-test-build-install-commit-push
 ---
@@ -133,11 +136,12 @@ dispatch #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#next-steps-backlog-capture] Agent responses containing #next-steps recommendations do not auto-add items to backlog when prompt preset is present. Agent must manually call `--pending-add` but the planning output `pending_mutations: expect_add` is not enforced by session-check `pending_done_guard`.
 - [ ] [#already-applied-divergence] already_applied IPC path saves stale content_ours as snapshot, diverging HEAD from working tree — plan: tasks/agent-doc/plan-already-applied-snapshot-divergence.md
 <!-- /agent:backlog -->
 
 ## Review
-
+ 
 <!-- agent:review -->
 - [/] [#snrun] [recommended] Implement tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md: make JB Run Agent Doc distinguish rescued-stash accepted-only proof misses, active-turn busy collisions, and stale starting projections; add route/plugin regressions plus live replay evidence.
 <!-- /agent:review -->

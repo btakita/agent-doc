@@ -157,7 +157,39 @@ Submodule `2a9b0489` on `20260422/codex-agent-backend`, pushed. Superproject `64
 Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
 
 **Not invoking `/loop`** — Wave 3 (template) is the largest single-file move (~5.7k LOC) and carries the bulk of the boundary/patch repair logic; it deserves its own operator-scoped cycle.
-<!-- agent:boundary:1efb80f2 -->
+### Re: do #yxvq — Wave 3 complete — opus-4-7
+
+Executed `do [#yxvq]`. Template now lives in `agent-doc-core`.
+
+#### What landed
+
+Submodule `6b69b187` on `20260422/codex-agent-backend`, pushed. Superproject `3f550fa9b` on `main`, pushed.
+
+- `agent-doc-core/src/template.rs` (5,749 LOC) — copied verbatim from `src/template.rs`. Rewrote `crate::{new_boundary_id, format_boundary_marker, new_boundary_id_with_summary}` → `crate::id::*` (6 call sites). Promoted `annotate_exchange_headings_against_baseline` from `pub(crate)` → `pub` so the main crate's `ffi.rs:441` call site continues to compile. Other `crate::` refs (`component`, `project_config`, `frontmatter`) resolve in-crate now that all three targets already live in `agent-doc-core`.
+- `agent-doc-core/src/lib.rs` — declares `pub mod template`; re-exports `PatchBlock`, `TemplateInfo`, `ComponentInfo`.
+- Main `src/template.rs` — collapsed to `pub use agent_doc_core::template::*` shim.
+
+#### Verification
+
+- `cargo build --release`: green (1m 47s after the lib touch).
+- `cargo test --release -p agent-doc-core --lib`: 519 tests pass (up from 404; the ~115-test delta is template's inline suite migrating with the module).
+- `cargo test --release --lib` (main crate): 96 tests pass (down from 211; matching migration).
+- `make check`: same pre-existing local `codex_bare_run_inside_owning_pane_fails_before_nested_dispatch` failure (reproduces on pristine HEAD; GitHub CI green on recent runs). All 2,368 main integration tests pass.
+- `cargo install --path .`: `~/.cargo/bin/agent-doc` replaced.
+
+#### Purity caveat (carries forward)
+
+Wave 3 inherits the wave-2 deferral: `template::template_info(&Path)`, `load_component_configs(&Path)`, `load_project_from_doc(&Path)`, and `find_project_root(&Path)` all take `&Path` and call `std::fs::*`. Acceptance criterion #3 from the plan ("No agent-doc-core function takes &Path or runs std::fs / std::process::Command") remains violated. Worth tracking as a single follow-up tidy after Wave 4.
+
+#### Next queue items
+
+- `#mzzd` — Wave 4 (`diff` per `#rtx6` Option 1 file split: split `diff.rs` into pure `agent_doc_core::diff` + I/O-bound `diff_io.rs` in the main crate)
+- `#adcr` — umbrella rollup
+
+Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
+
+**Not invoking `/loop`** — Wave 4 is the `diff.rs` file split per the `#rtx6` decision and carries the diff classification + slash-command + orchestration parsing surface; it deserves its own operator-scoped cycle.
+<!-- agent:boundary:83653ad5 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -166,7 +198,7 @@ Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
 preset #spec-test-build-install-commit-push
 - ~do [#pjb4]~
 - ~do [#yhsr]~
-- do [#yxvq]
+- ~do [#yxvq]~
 - do [#mzzd]
 - do [#adcr]
 <!-- /agent:queue -->
@@ -174,7 +206,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#yxvq] #adcr-wave-3 Extract template.rs (~5.7k LOC) into agent-doc-core::template — PatchBlock, TemplateInfo, ComponentInfo, parse_patches, apply_patches, apply_patches_with_overrides, all repair_* functions, normalize_editor_visible_template_structure, all reposition_boundary_* helpers, is_template_mode, exchange_baseline_headings. Keep template_info(&Path) wrapper in main crate. Depends on Wave 2 (frontmatter/project_config) + Wave 1 (component). Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
 - [ ] [#mzzd] #adcr-wave-4 Extract diff.rs into agent-doc-core per #rtx6 Option 1 — rename current src/agent-doc/src/diff.rs to diff_io.rs (strip to compute/compute_with_current/wait_for_stable_content/is_stale_snapshot/run, keep snapshot::{load,save,resolve,path_for} calls); move pure half (DiffType, DiffClassification, PromptBearingChange, ParsedSlashCommands, OrchestrationRequest, strip_comments, annotate_diff, classify_diff, slash command + orchestration detection, prompt-prefix normalization, prompt-bearing-change classification, unified_diff_from_contents) to agent_doc_core::diff; re-export at agent_doc::diff so the 6 production call sites compile unchanged. Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
 - [ ] [#adcr] Extract agent-doc-core crate (~17K lines) — enables fast-compiling FFI/editor-plugin target independent of orchestration layer
 <!-- /agent:backlog -->

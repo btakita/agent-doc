@@ -128,7 +128,7 @@ Done. `/portal-admin/dashboard` now keeps the dashboard numbers D1-backed and ma
 - Active users -> `/portal-admin/users?status=active`
 - Open applications -> `/portal-admin/loans?application_status=Application%20Received`
 - New application leads -> `/portal-admin/application-leads?status=new`
-- Pending lender requests -> `/portal-admin/lenders?status=pending`
+- Pending len4der requests -> `/portal-admin/lenders?status=pending`
 - Pending funding commits -> `/portal-admin/funding?status=pending`
 - Uploads, last 7 days -> `/portal-admin/documents?kind=uploads&window=7d`
 - Open document requests -> `/portal-admin/documents?kind=requests&status=open`
@@ -148,7 +148,39 @@ Verification:
 - GitHub Actions inspection: `gh workflow list` returned no workflows; `gh run list --workflow CI --limit 1` and `gh run list --workflow tmux-test --limit 1` both reported no matching workflow.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:ff01168e -->
+On development, the localhost:4200/admin/login goes to localhost:4200/admin/login with an error "Database not configured". #spec-test-commit-push
+### Re: local admin login preview — gpt-5
+
+Fixed. In the lightweight `bun dev` server on port 4200, `/admin/login` now behaves like the regular login pages:
+
+- GET `/admin/login` renders the admin form with `action="http://127.0.0.1:8787/admin/login"` when `auth_action_origin` is configured, so local preview submissions go to the Worker dev server with D1 bindings instead of posting back to port 4200.
+- A direct POST to `localhost:4200/admin/login` now re-renders the admin login page with the local-preview setup message instead of returning the raw `Database is not configured.` 500.
+- Admin signup direct POSTs get the same friendly local-preview fallback when bootstrap is enabled but D1 is unavailable.
+- `admin_signup_enabled_` now tolerates a missing local `c.env`, which prevented a pure local Hono preview from 500ing on admin login rendering.
+
+I also saw the earlier exchange text edit from `lender` to `len4der`; that looks like a prior-response typo edit, so I did not treat it as a product-code requirement.
+
+Changed paths in `src/equityfundingsource-dev`:
+
+- `app/equityfundingsource/lib/auth/routes.ts`
+- `lib/ui--server--efs/auth/admin_login.ts`
+- `app/equityfundingsource/dev-routes.test.ts`
+- `prds/equity-funding-source-lending-portal-prd.md`
+- `docs/deploy.md`
+- `docs/current_progress.md`
+
+Commit/push:
+
+- EFS repo commit `ee616e6` (`fix: route admin login to worker dev auth`) pushed to `origin/main`.
+
+Verification:
+
+- `bun test app/equityfundingsource/dev-routes.test.ts` passed: 11 pass, 0 fail.
+- `make check` passed: Bun reported 201 pass, 0 fail; app build and worker build completed.
+- GitHub Actions inspection: `gh workflow list` returned no workflows; `gh run list --workflow CI --limit 1` and `gh run list --workflow tmux-test --limit 1` both reported no matching workflow.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:ebe33d5d -->
 <!-- /agent:exchange -->
 ###
 <!--

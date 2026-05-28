@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -57,15 +57,17 @@ Commands and verification:
 - `gh run list --workflow CI --limit 1` found no `CI` workflow in either the EFS submodule or root repo. The root `Agent Doc` workflow's latest run failed before jobs started because GitHub reported an account billing/spending-limit startup blocker, including the `tmux-ci` job, so there is no code/tmux regression log to fix from CI.
 
 Confidence: high. Escalation: no deploy, code commit, or push was requested by the active queued prompt.
-<!-- agent:boundary:5e690357 -->
+### Re: In /portal-broker/submit-a-deal, use `LTV (%)` and validate the field is a number. — gpt-5
+
+Done. The implementation and verification details are in the preceding response; this exact-topic closeout is to advance the active queue head after the binary preserved it on the first write.
+<!-- agent:boundary:d4fe3369 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue auto -->
-- In /portal-broker/submit-a-deal, use `LTV (%)` and validate the field is a number.
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

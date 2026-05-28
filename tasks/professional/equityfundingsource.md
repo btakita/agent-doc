@@ -23,7 +23,7 @@ queue_active: false
 ## Status
 
 <!-- agent:status patch=replace -->
-EFS workers.dev production: `/apply` public prequalification + D1-backed `application_leads` admin review is deployed in Worker version `b937e33b-8992-4801-bca6-b1897569fe77` as of 2026-05-28; investor commitment/funding amount fields now use shared grid-aligned dollar-prefix styling from EFS commit `a9b0405`. Local `bun dev` on port 4200 mounts `/apply`; public site/footer email is `info@equityfundingsource.com`; logged-out navigation exposes Borrower Login, Apply for a Loan, Broker Portal, and Investor Portal with Broker Portal placed between Apply and Investor. Cloudflare Access protects /login/access-callback with ACCESS_TEAM_DOMAIN/AUD. `/portal-admin/users` lets existing admins create admin/borrower/broker/investor accounts without reopening public `/admin/signup`; production D1 has active admin rows for `brian.takita+admin@gmail.com` and `btak.dev+admin@gmail.com`. Application lead notifications still route through Resend testing-mode config `APPLICATION_LEAD_NOTIFICATION_TO=brian.takita@gmail.com` and `APPLICATION_LEAD_NOTIFICATION_FROM=Equity Funding Source <onboarding@resend.dev>` until an EFS-owned sending domain is verified. Custom-domain cutover is deferred; continue using https://equityfundingsource.brian-takita.workers.dev until further notice.
+EFS workers.dev production: `/apply` public prequalification + D1-backed `application_leads` admin review is deployed in Worker version `2819a1cf-3091-495f-b9ab-72434d5cafdd` as of 2026-05-28; public homepage rate-estimator dollar prefixes now use `-translate-y-1/4` from EFS commit `2e18870`, and investor commitment/funding amount fields use shared grid-aligned dollar-prefix styling from EFS commit `a9b0405`. Local `bun dev` on port 4200 mounts `/apply`; public site/footer email is `info@equityfundingsource.com`; logged-out navigation exposes Borrower Login, Apply for a Loan, Broker Portal, and Investor Portal with Broker Portal placed between Apply and Investor. Cloudflare Access protects /login/access-callback with ACCESS_TEAM_DOMAIN/AUD. `/portal-admin/users` lets existing admins create admin/borrower/broker/investor accounts without reopening public `/admin/signup`; production D1 has active admin rows for `brian.takita+admin@gmail.com` and `btak.dev+admin@gmail.com`. Application lead notifications still route through Resend testing-mode config `APPLICATION_LEAD_NOTIFICATION_TO=brian.takita@gmail.com` and `APPLICATION_LEAD_NOTIFICATION_FROM=Equity Funding Source <onboarding@resend.dev>` until an EFS-owned sending domain is verified. Custom-domain cutover is deferred; continue using https://equityfundingsource.brian-takita.workers.dev until further notice.
 <!-- /agent:status -->
 
 ## Exchange
@@ -408,7 +408,36 @@ Verification:
 - Tmux CI inspection: `make -n tmux-ci` has no `tmux-ci` target in the EFS repo.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:69effc8f -->
+❯ For the $ span, use `-translate-y-1/4` instead of `-translate-y-1/2`
+### Re: rate estimator dollar prefix translate — gpt-5
+
+Done. I changed the two public homepage rate-estimator dollar-prefix spans from `-translate-y-1/2` to `-translate-y-1/4`, and added the matching critical CSS utility for `translateY(-25%)` so the class works during first paint.
+
+Changed EFS paths:
+
+- `lib/ui--server--efs/home/index.ts`
+- `lib/ui--server--efs/styles/index.ts`
+- `tests/public-header.test.ts`
+
+Commit / push / deploy:
+
+- EFS repo commit: `2e18870 fix: adjust estimator currency prefix`
+- Pushed `2e18870` to `origin/main`
+- Deployed Worker version `2819a1cf-3091-495f-b9ab-72434d5cafdd` at `https://equityfundingsource.brian-takita.workers.dev`
+
+Verification:
+
+- `bun test tests/public-header.test.ts` passed: 7 pass, 0 fail.
+- `git diff --check` passed.
+- `make check` passed: 212 pass, 0 fail, then app build and worker build completed.
+- Live `/` returned 200.
+- Live homepage HTML contains both `-translate-y-1/4` dollar-prefix spans and links `/index.server-EGLIFSVJ_TTQJXFP6.css`.
+- The deployed CSS asset contains the `translateY(-25%)` utility for the new class.
+- GitHub Actions inspection: `gh workflow list` returned no workflows; `gh run list --workflow CI --limit 1` and `gh run list --workflow tmux-test --limit 1` both reported no matching workflow.
+- Tmux CI inspection: `make -n tmux-ci` has no `tmux-ci` target in the EFS repo.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:61c1c9e3 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -260,15 +260,24 @@ No new document changes were detected in `/home/brian/work/btakita/agent-loop/ta
 
 Preflight did auto-commit a queued dispatch snapshot first, then returned `no_changes: true`. The document is also large enough that `agent-doc` recommends compacting only with explicit approval.
 Add items to the top of the backlog.
-<!-- agent:boundary:b5803774 -->
+
+### Re: Add items to the top of the backlog. — gpt-5
+
+Added the broker pre-qual completion work to the top of the backlog in priority order.
+
+Top backlog item: `#bpq-api`.
+
+The current `/portal-broker/pre-qual-tool` page is static, so the first item is the backend calculation/API contract; UI wiring, submission handoff, and test/docs coverage follow it. No product code changed in this cycle.
+
+Closeout evidence: changed path is `tasks/professional/equityfundingsource.md` only. Commands run: `tsift status`, `tsift status --fix`, `agent-doc --version`, `agent-doc preflight`, `agent-doc plan`, `git status --short`, `git diff`, and this `agent-doc finalize`. Verification is the binary-owned finalize/session-check plus document review; no tests were run because this cycle only mutates the session backlog. Confidence is high. Escalation: none.
+<!-- agent:boundary:27eb339f -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue auto -->
-- Add items to the top of the backlog.
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

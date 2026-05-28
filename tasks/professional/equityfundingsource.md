@@ -85,7 +85,15 @@ To give either account its own password, sign in as an existing admin and update
 
 Closeout evidence: no repo files changed in this cycle. Commands run: `tsift status`, `agent-doc --version`, `agent-doc preflight`, `agent-doc plan`, and this `agent-doc finalize`. Verification is source/session knowledge from the prior D1 insert and auth behavior; no tests were needed. Confidence is high. Escalation: none.
 Is the global password the same as my machine?
-<!-- agent:boundary:309e31aa -->
+
+### Re: global admin password — gpt-5
+
+No, it is not automatically the same as your machine password. `ADMIN_GLOBAL_PASSWORD` is a Cloudflare Worker secret used by `/admin/login`; it is independent of your local OS or machine login password unless you intentionally set the secret to that same value.
+
+I would not recommend reusing a machine password for this. If you do not know the current value, check the private secret store or rotate the Worker secret and then share the new temporary credential out-of-band, not in this committed markdown session.
+
+Closeout evidence: no repo files changed in this cycle. Commands run: `tsift status`, `agent-doc --version`, `agent-doc preflight`, `agent-doc plan`, and this `agent-doc finalize`. Verification is based on the deployed auth configuration: `ADMIN_GLOBAL_PASSWORD` is a Worker secret, not a machine-login integration. Confidence is high. Escalation: none.
+<!-- agent:boundary:8a5bf345 -->
 <!-- /agent:exchange -->
 ###
 <!--

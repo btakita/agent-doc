@@ -182,7 +182,44 @@ Backlog reordered. Top is now `#split-tsift-quality`.
 2. Pick X / Y / Z for the digest↔search cycle.
 3. Decide where `status` lives after the splits (root-shim vs tsift-cli vs new crate).
 4. Re-author the queue with whichever splits you want me to drive. The auto-loop will not advance until you confirm direction. Once you queue `do [#split-tsift-quality]`, it should land cleanly.
-<!-- agent:boundary:049af334 -->
+
+### Re: do [#split-tsift-quality] — opus-4-7
+
+
+**Done.** Extracted the four true-leaf modules into `packages/tsift-quality`. `lint` deferred — see below.
+
+**Changed paths (tsift submodule, commit `43c1697`):**
+
+- `packages/tsift-quality/Cargo.toml` (new)
+- `packages/tsift-quality/src/lib.rs` (new — declares 4 modules)
+- `packages/tsift-quality/src/audit.rs` (moved from `src/audit.rs`, 100% rename)
+- `packages/tsift-quality/src/perf_gate.rs` (moved from `src/perf_gate.rs`, 100% rename)
+- `packages/tsift-quality/src/dci_benchmark.rs` (moved from `src/dci_benchmark.rs`, 100% rename)
+- `packages/tsift-quality/src/runtime_churn.rs` (moved from `src/runtime_churn.rs`, 100% rename)
+- `Cargo.toml` — added `tsift-quality` to `[workspace.members]` and as root path dep
+- `packages/tsift-cli/Cargo.toml` — added `tsift-quality = { path = "../tsift-quality" }`
+- `src/lib.rs` — removed `pub mod audit; / dci_benchmark; / perf_gate; / runtime_churn;`; added `pub use tsift_quality::{audit, dci_benchmark, perf_gate, runtime_churn};` so `tsift::audit::*` / `tsift::runtime_churn::*` paths used by `tsift-cli` (~10 callers) and the remaining root modules (`log_digest`, `session_*`) keep resolving without source edits.
+- `SPEC.md` — Architecture diagram updated with `tsift-quality crate (packages/tsift-quality — quality-gate surfaces)`.
+- `VERSIONS.md` — `Unreleased` entry added.
+- `.gitignore`, `Cargo.lock` — incidental.
+
+**Commands run:**
+- `cargo build --release` — 0 errors, 3 warnings (all pre-existing).
+- `cargo test --release --no-fail-fast` — **277 passed** across two suites.
+- `cargo install --path packages/tsift-cli` — installed `tsift 0.1.62` to `~/.cargo/bin/`.
+- `tsift --version` → `tsift 0.1.62`.
+- `tsift status` → ran cleanly; flagged routine stale-index (35m old).
+
+**Repo state:**
+- tsift submodule HEAD: `43c1697 Extract tsift-quality crate — move audit, perf_gate, dci_benchmark, runtime_churn` (pushed)
+- Superproject HEAD: pointer bump pushed.
+
+**Lint deferred.** During scoping I found `lint` is not a true leaf — it imports `crate::{config, index::IndexDb}` and is called from 6 root modules (`diff_digest`, `impact`, `log_digest`, `session_digest`, `session_review`, `test_digest`) plus ~10 sites in `tsift-cli` (via `tsift::lint::resolve_project_root_or_canonical_path`). Moving it into `tsift-quality` would require it to depend on the next crate in the queue, so I left it in root for this cycle. It joins `tsift-quality` after that next crate lands.
+
+**Confidence:** high — full build + 277 tests pass; install verified; no API surface widened (all moved symbols stay reachable through root tsift re-exports).
+
+**Escalation:** none.
+<!-- agent:boundary:8c01d25c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -195,7 +232,7 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 preset #spec-test-build-install-commit-push
 - ~do [#split-sim-world]~
 - ~do [#split-tsift-digest]~
-- do [#split-tsift-quality]
+- ~do [#split-tsift-quality]~
 - do [#split-tsift-index]
 - do [#split-tsift-session]
 - do [#split-tsift-quality]
@@ -207,7 +244,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#split-tsift-quality] Extract audit + lint + perf_gate + dci_benchmark + runtime_churn (~3.7k LOC) into tsift-quality crate — quality-gate surfaces depend on tsift-graph + tsift-index; isolates gate evaluation from emitter and session crates
 - [ ] [#split-tsift-index] Extract index + walk + config + init (~4.7k LOC) into tsift-index crate — foundation that tsift-session, tsift-quality, tsift-search will depend on; pulls in fs4, ignore, blake3, flate2 deps; carries SQLite schema bootstrap
 - [ ] [#split-tsift-session] Extract session_cost + session_digest + session_review (~7.1k LOC, largest pool) into tsift-session crate — depends on tsift-digest + tsift-index; biggest single LOC reduction in root tsift
 - [ ] [#demote-root-tsift] After all module splits land, demote root tsift crate to a thin re-export shim (or remove lib.rs entirely) — leave only the workspace root + binary metadata; verify external consumers (cargo install tsift) keep working

@@ -17,13 +17,13 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: true
+queue_active: false
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
-EFS workers.dev production: `/apply` public prequalification + D1-backed `application_leads` admin review is deployed in Worker version `00778168-53b8-4aca-9daa-b54db9f980b9` as of 2026-05-28; local `bun dev` on port 4200 mounts `/apply`; public site/footer email is `info@equityfundingsource.com`; logged-out navigation exposes Borrower Login, Apply for a Loan, Broker Portal, and Investor Portal with Broker Portal placed between Apply and Investor. Cloudflare Access protects /login/access-callback with ACCESS_TEAM_DOMAIN/AUD. `/portal-admin/users` lets existing admins create admin/borrower/broker/investor accounts without reopening public `/admin/signup`; production D1 has active admin rows for `brian.takita+admin@gmail.com` and `btak.dev+admin@gmail.com`. Application lead notifications still route through Resend testing-mode config `APPLICATION_LEAD_NOTIFICATION_TO=brian.takita@gmail.com` and `APPLICATION_LEAD_NOTIFICATION_FROM=Equity Funding Source <onboarding@resend.dev>` until an EFS-owned sending domain is verified. Custom-domain cutover is deferred; continue using https://equityfundingsource.brian-takita.workers.dev until further notice.
+EFS workers.dev production: `/apply` public prequalification + D1-backed `application_leads` admin review is deployed in Worker version `9a289db0-4793-4004-a234-757aa27acdfe` as of 2026-05-28; local `bun dev` on port 4200 mounts `/apply`; public site/footer email is `info@equityfundingsource.com`; logged-out navigation exposes Borrower Login, Apply for a Loan, Broker Portal, and Investor Portal with Broker Portal placed between Apply and Investor. Cloudflare Access protects /login/access-callback with ACCESS_TEAM_DOMAIN/AUD. `/portal-admin/users` lets existing admins create admin/borrower/broker/investor accounts without reopening public `/admin/signup`; production D1 has active admin rows for `brian.takita+admin@gmail.com` and `btak.dev+admin@gmail.com`. Application lead notifications still route through Resend testing-mode config `APPLICATION_LEAD_NOTIFICATION_TO=brian.takita@gmail.com` and `APPLICATION_LEAD_NOTIFICATION_FROM=Equity Funding Source <onboarding@resend.dev>` until an EFS-owned sending domain is verified. Custom-domain cutover is deferred; continue using https://equityfundingsource.brian-takita.workers.dev until further notice.
 <!-- /agent:status -->
 
 ## Exchange
@@ -221,15 +221,44 @@ Confidence: high. Escalation: none.
 
 Closeout repair: the local admin detail page fix is recorded in the response immediately above. No additional repo changes were made in this repair write.
 deploy
-<!-- agent:boundary:7674e37d -->
+### Re: deploy — gpt-5
+
+Deployed the current EFS Worker from `src/equityfundingsource-dev` commit `6a06b44` to workers.dev.
+
+Deploy result:
+
+- Worker URL: `https://equityfundingsource.brian-takita.workers.dev`
+- Current Version ID: `9a289db0-4793-4004-a234-757aa27acdfe`
+- Trigger deployed: scheduled cron `9 19 * * *`
+
+Changed paths: none in the EFS source repo for this deploy cycle; the repo was clean before and after deployment. The session status was updated with the new Worker version.
+
+Commands run:
+
+- `tsift status`, `tsift status --fix`
+- `agent-doc --version`, `agent-doc preflight`, `agent-doc plan`
+- `git status --short`, `git log -1 --oneline`
+- `bun run deploy:worker`
+- live smoke checks with `curl`
+- this `agent-doc finalize`
+
+Verification:
+
+- Deploy command completed successfully after building the app and worker bundle.
+- Live `/` returned 200.
+- Live `/admin/login` returned 200.
+- Live `/apply` returned 200.
+- EFS source repo remained clean after deploy.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:e5175937 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue auto -->
-- deploy
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

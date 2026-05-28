@@ -210,7 +210,53 @@ Pick one of:
 Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
 
 **Not invoking `/loop`** — explicitly waiting on triage input. The queue stays paused at `do [#k9e1]`; no work landed this cycle.
-<!-- agent:boundary:77f236e6 -->
+### Re: do #ckv3 — template I/O extracted from core — opus-4-7
+
+Executed `do [#ckv3]`. `agent-doc-core::template` production surface no longer takes `&Path` or runs `std::fs`. Sub-task `#ckv3` of the `#0ejf` purity-tidy decomposition lands.
+
+#### What landed
+
+Submodule `5f903172` on `20260422/codex-agent-backend`, pushed. Superproject `deeb242e8` on `main`, pushed.
+
+**`agent-doc-core/src/template.rs`** — production surface refactor:
+- `apply_patches` / `apply_patches_with_overrides` renamed to `apply_patches_pure` / `apply_patches_with_overrides_pure`. New signature accepts `summary: Option<&str>` plus pre-loaded `component_configs: &HashMap<String, String>` and `max_lines_configs: &HashMap<String, usize>` instead of `file: &Path`. The internal `file.file_stem()`, `load_component_configs(file)`, and `load_max_lines_configs(file)` calls are gone.
+- Removed `template_info(&Path)`, `load_component_configs(&Path)`, `load_max_lines_configs(&Path)`, `load_project_from_doc(&Path)`, `find_project_root(&Path)`.
+- Dropped `use std::path::Path` and `use crate::project_config` from production code.
+- Deleted three config.toml-loading inline tests (`no_inline_attr_falls_back_to_config`, `toml_patch_key_works`, `max_lines_from_components_toml`) and three `template_info_*` tests — they exercise I/O wrapper behavior that now lives in main.
+- Two test helpers added (`apply_patches_via_path`, `apply_patches_with_overrides_via_path`) so the remaining 30+ inline tests preserve their `&Path`-style call shape without reintroducing fs I/O into the production surface.
+
+**`src/template_io.rs`** (new, 157 LOC):
+- `apply_patches(doc, patches, unmatched, &Path)` — file-based wrapper. Loads `component_configs` + `max_lines_configs` from `.agent-doc/config.toml`, derives boundary summary from file stem, delegates to `apply_patches_pure`.
+- `apply_patches_with_overrides(...)` — same shape, with `mode_overrides`.
+- `template_info(&Path)` — reads doc from disk, parses, returns `TemplateInfo` (was in core::template before this commit).
+- Private helpers `load_component_configs`, `load_max_lines_configs`, `load_project_from_doc`, `default_mode`.
+
+**`src/template.rs`** (shim) — re-exports `apply_patches`, `apply_patches_with_overrides`, `template_info` from `crate::template_io` on top of the glob re-export from `agent_doc_core::template`. The 14+ existing call sites in run.rs, stream.rs, write.rs, ffi.rs, sim_world.rs continue resolving to the file-based signature unchanged.
+
+**`src/lib.rs`** + **`src/main.rs`** — declare `template_io` module.
+
+#### Verification
+
+- `cargo build`: green.
+- `cargo build --release`: green.
+- `cargo test --release -p agent-doc-core --lib`: **628 tests pass** (down from 632; the four removed tests covered behavior that is now in template_io or covered by integration tests).
+- `cargo test --release --lib` (main): **96 tests pass** (unchanged).
+- `cargo test --release --bin agent-doc`: **2,256 tests pass** (unchanged from prior `#n7dd` baseline).
+- `make check`: same pre-existing local `codex_bare_run_inside_owning_pane_fails_before_nested_dispatch` failure (reproduces on pristine HEAD; GitHub CI green).
+- `cargo install --path .`: `~/.cargo/bin/agent-doc` replaced.
+
+#### Acceptance criterion #3 progress
+
+`agent-doc-core::template` production surface: **no `&Path`, no `std::fs`** in non-test code (`grep -nE "&Path|std::fs|std::path::Path" agent-doc-core/src/template.rs` matches only `#[cfg(test)]` blocks).
+
+Remaining violations:
+- `agent-doc-core::frontmatter` (`#0c4e` — next queue head)
+- `agent-doc-core::project_config` (`#bjrv`)
+
+Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
+
+**Not invoking `/loop`** — queue advances to `do [#0c4e]` (frontmatter I/O). The required-ssh-defaults coupling decision (preload vs. trait) is still pending and deserves its own focused cycle.
+<!-- agent:boundary:9a950b18 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -220,7 +266,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#k5s7]~
 - ~do [#n7dd]~
 - ~do [#0ejf]~
-- do [#ckv3]
+- ~do [#ckv3]~
 - do [#0c4e]
 - do [#bjrv]
 - do [#k9e1]
@@ -233,7 +279,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#ckv3] #0ejf-template-io Extract template I/O wrappers (template_info, load_component_configs, load_max_lines_configs, load_project_from_doc, find_project_root) from agent-doc-core::template into src/template_io.rs in main crate. Requires refactoring apply_patches_with_overrides to accept preloaded configs + summary string instead of &Path (touches 6+ call sites in main + 3 ffi.rs + 12 inline tests in core). Standalone cycle.
 - [ ] [#0c4e] #0ejf-frontmatter-io Extract frontmatter I/O wrappers (read_session_id, apply_required_ssh_defaults_for_file, transitively parse_for_file, ensure_session_for_file) from agent-doc-core::frontmatter into src/frontmatter_io.rs. Core retains pure parse/write/set_session_id/set_format_and_write/merge_fields. Required-ssh defaults need a project-config-resolver trait or pre-loaded config arg. Standalone cycle.
 - [ ] [#bjrv] #0ejf-project-config-io Extract project_config I/O wrappers (load_project_from, save_project_to, load_project_for_doc, project_root_for_doc, load_project, save_project) from agent-doc-core::project_config into src/project_config_io.rs. Core retains pure ProjectConfig + Default + serde deserialize. ~25 call sites in main crate; main shim re-exports. Standalone cycle.
 - [ ] [#k9e1] #adcr-ffi-relocate Move pure C-ABI wrappers from src/ffi.rs (apply_patch, parse_components, merge_frontmatter, normalize_template_structure, reposition_boundary, agent_doc_strip_comments) into agent-doc-core::ffi so editor plugins (JB, VS Code) can link against just agent-doc-core without dragging the orchestration crate. Keep route/git/ipc/start FFI calls in main.

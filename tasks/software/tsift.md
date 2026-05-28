@@ -37,7 +37,7 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 6 response topic(s): tokensave algorithms in tsift; reverse-engineering tokensave next steps; separate crates architecture; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:ad31394f -->
+<!-- agent:boundary:82a409ef -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -48,7 +48,7 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- [#step-1-core]
+- ~[#step-1-core]~
 - [#step-2-backends]
 - [#step-3-tokensave-reader]
 - [#step-4-graph]

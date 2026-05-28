@@ -40,7 +40,7 @@ Closeout evidence: changed documents are `tasks/professional/equityfundingsource
 Are there ways for an existing admin to create new admins in the admin dashboard? If not, please create an account management section in the admin portal.
 Please add brian.takita+admin@gmail.com and btak.dev+admin@gmail.com as admins to https://equityfundingsource.brian-takita.workers.dev/
 #spec-test-commit-push-deploy
-<!-- agent:boundary:6bae221d -->
+<!-- agent:boundary:b6291d87 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -48,15 +48,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue auto -->
-preset #spec-test-commit-push
-- ~do [#y17k]~
-- do [#xt4d]
-- do [#0e1p]
----
-Are there ways for an existing admin to create new admins in the admin dashboard? If not, please create an account management section in the admin portal.
-Please add brian.takita+admin@gmail.com and btak.dev+admin@gmail.com as admins to https://equityfundingsource.brian-takita.workers.dev/
-#spec-test-commit-push-deploy
----
 <!-- /agent:queue -->
 
 ## Backlog

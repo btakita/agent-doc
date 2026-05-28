@@ -43,7 +43,21 @@ Compacted content:
 
 **Verification:** `make check` 2514+470 tests green. Pushed as `e3e9d9a0`.
 What are #next-steps for [#adcr]
-<!-- agent:boundary:2b399869 -->
+
+### Re: #next-steps for #adcr — opus-4-7
+
+The #adcr umbrella stays at top of backlog. Concrete next steps, added in priority order below it:
+
+1. **#adcr-dep-audit** — survey which of the 7 listed modules ({template, diff, component, frontmatter, crdt, pending, model_tier}) import from orchestration code (preflight, plan, cycle_state, dispatch, route, ipc, git, harness). Tools: `cargo modules` or `tsift graph <module>::* --callers`. Output: dependency table separating leaves from coupled modules. This is a precondition — extracting a module that pulls in `git.rs` or `route.rs` defeats the fast-compile goal.
+
+2. **#adcr-api-surface** — define what `agent-doc-core` exports. Pure data types only: `DocumentTemplate`, `Component`, `Frontmatter`, `Diff` patches, `Crdt` ops, `Pending` model, `ModelTier` resolution. Anything that touches IPC, git, tmux, or harness probing stays in the main crate. Document the surface as a `pub use` block in a draft `agent-doc-core/src/lib.rs`.
+
+3. **#adcr-workspace** — convert `src/agent-doc/` into a Cargo workspace root with `agent-doc-core` as a member. Capture compile-time baseline (`cargo build -p agent-doc-core --timings`) before extraction so the FFI/editor-plugin win is measurable.
+
+After those three land, extraction proceeds module-by-module starting with leaves (likely `model_tier` and `frontmatter` based on file size and naming; confirmed by step 1's audit). The existing `plan-agent-doc-flowcore-refactor.md` is complementary, not duplicate — that plan targets orchestration use-case flows, this one targets the data/orchestration crate seam.
+
+**Top of backlog:** #adcr
+<!-- agent:boundary:3664c6f4 -->
 <!-- /agent:exchange -->
 
 ## Queue

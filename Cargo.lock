@@ -74,6 +74,7 @@ dependencies = [
  "pulldown-cmark",
  "serde",
  "serde_yaml",
+ "sha2",
  "similar",
  "uuid",
  "yrs",

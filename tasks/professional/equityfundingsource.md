@@ -110,7 +110,45 @@ Verification:
 - A live `/admin/login` POST for `brian.takita+admin@gmail.com` using that value returned `303` to `/portal-admin`, confirming the stored value works against production.
 
 Closeout evidence: no EFS source repo files changed; `src/equityfundingsource-dev` stayed clean. Commands run included `tsift status`, `tsift status --fix`, `agent-doc --version`, `agent-doc preflight`, `agent-doc plan`, `passage find`, `passage insert`, `bun run cf:secrets:list`, a live login verification script, and this `agent-doc finalize`. Confidence is high. Escalation: none.
-<!-- agent:boundary:88ad39ef -->
+❯ In /portal-admin/dashboard, please ensure the numbers are data driven. Please provide links to the admin pages for the following to see the detail data:
+❯ - Active users
+❯ - Open applications
+❯ - New application leads
+❯ - Pending lender requests
+❯ - Pending funding commits
+❯ - Uploads (last 7 days)
+❯ - Open document requests
+
+❯ #spec-test-commit-push
+
+### Re: admin dashboard metric drilldowns — gpt-5
+
+Done. `/portal-admin/dashboard` now keeps the dashboard numbers D1-backed and makes the requested metrics clickable into filtered admin detail pages:
+
+- Active users -> `/portal-admin/users?status=active`
+- Open applications -> `/portal-admin/loans?application_status=Application%20Received`
+- New application leads -> `/portal-admin/application-leads?status=new`
+- Pending lender requests -> `/portal-admin/lenders?status=pending`
+- Pending funding commits -> `/portal-admin/funding?status=pending`
+- Uploads, last 7 days -> `/portal-admin/documents?kind=uploads&window=7d`
+- Open document requests -> `/portal-admin/documents?kind=requests&status=open`
+
+I added two admin detail pages that were missing for exact aggregate drilldowns: `/portal-admin/funding` for global investor funding commitments and `/portal-admin/documents` for global borrower uploads plus investor document requests. Existing admin pages now honor the query-string filters from the dashboard links.
+
+Changed paths in `src/equityfundingsource-dev` include the admin dashboard UI, admin portal routing/layout, admin API/repo helpers, new `documents.tsx` and `funding_commits.tsx` admin pages, query-filter support in users/loans/leads/lenders, PRD/current-progress docs, and `tests/admin-dashboard.test.ts`.
+
+Commit/push:
+
+- EFS repo commit `928ecdc` (`feat: link admin dashboard metrics`) pushed to `origin/main`.
+
+Verification:
+
+- `bun test tests/admin-dashboard.test.ts` passed: 17 pass, 0 fail.
+- `make check` passed: Bun reported 198 pass, 0 fail; app build and worker build completed.
+- GitHub Actions inspection: `gh workflow list` returned no workflows; `gh run list --workflow CI --limit 1` and `gh run list --workflow tmux-test --limit 1` both reported no matching workflow.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:ff01168e -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -73,7 +73,37 @@ Submodule `d74212ae` on `20260422/codex-agent-backend`, pushed. Superproject `8c
 Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
 
 **Not invoking `/loop`** — queue head advances to `do [#vb8h]`. Each FFI sub-task warrants its own review/symbol-verification cycle; leaving the queue advance to the operator.
-<!-- agent:boundary:814ec5db -->
+
+### Re: do #vb8h — boundary + CRDT FFI relocated to core — opus-4-7
+
+Executed `do [#vb8h]` (`#k9e1-ffi-boundary`). The CRDT and reposition-boundary FFI functions now live in `agent-doc-core::ffi`. Pure body moves — the shared `FfiPatchResult` + helpers were already relocated in `#epv5`, so this cycle was clean lifting.
+
+#### What landed
+
+Submodule `ae48c394` on `20260422/codex-agent-backend`, pushed. Superproject `fb9f7ccdc` on `main`, pushed.
+
+**Relocated to `agent-doc-core/src/ffi.rs`:**
+- `agent_doc_crdt_merge` + `agent_doc_merge_crdt` (+ `FfiMergeResult` struct)
+- `agent_doc_reposition_boundary_to_end` (+ `_with_id`, `_preserve_head`, `_preserve_head_with_id`)
+
+All depend only on `agent_doc_core::{crdt, template}` plus the already-in-core `FfiPatchResult`/helpers. Removed the now-unused `use crate::crdt;` from main's `ffi.rs`. `force_link_core_ffi_symbols` extended to reference all 6 new `extern "C"` fns.
+
+#### Verification
+
+- `cargo build` / `cargo build --release`: green.
+- **`nm -D libagent_doc.so`**: all **12** relocated symbols present in the export table (6 this cycle + 4 from `#epv5` + 2 POC). Editor plugins resolve them unchanged.
+- `cargo test --bin agent-doc`: **2,261 pass**; `--lib`: 96 pass (both unchanged — main's ffi test module exercises the re-exported symbols).
+- `cargo clippy -- -D warnings`: clean.
+- Both binaries refreshed (`cargo install --path .` + `cargo build --release`).
+
+#### FFI relocation status
+
+Only `#e130` (`#k9e1-ffi-apply-patch`) remains — and it's now reduced to the 3 `apply_patch` bodies (the shared type + helpers moved in `#epv5`). Each still needs `template::apply_patches_with_overrides` switched to `apply_patches_with_overrides_pure` (preloaded empty configs, dropping the `dummy_path`). After `#e130`, the full pure-FFI surface lives in core and the editor-plugin slim-link target is unblocked.
+
+Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
+
+**Not invoking `/loop`** — queue head advances to `do [#e130]`; the apply_patch group touches the `#ckv3`-refactored signature and warrants its own review + symbol-verification cycle.
+<!-- agent:boundary:94e44c5b -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -89,7 +119,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#k9e1]~
 - ~do [#5yqz]~
 - ~do [#epv5]~
-- do [#vb8h]
+- ~do [#vb8h]~
 - do [#e130]
 - do [#77v6]
 - do [#ysv9]
@@ -100,7 +130,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#vb8h] #k9e1-ffi-boundary Move the 4 reposition_boundary_to_end variants (+ _with_id, _preserve_head, _preserve_head_with_id) plus agent_doc_crdt_merge + agent_doc_merge_crdt + their FfiMergeResult helper struct to agent-doc-core::ffi. All pure; depend on agent_doc_core::template and agent_doc_core::crdt.
 - [ ] [#e130] #k9e1-ffi-apply-patch Move the 3 apply_patch variants (agent_doc_apply_patch, _with_caret, _with_boundary) to agent-doc-core::ffi. NOTE: FfiPatchResult + ffi_patch_ok/err/from_result + normalize_editor_visible_result were ALREADY relocated to core in #epv5 — only the 3 function bodies remain. Each needs template::apply_patches_with_overrides switched to apply_patches_with_overrides_pure (preloaded empty configs, no dummy_path). Touches the #ckv3-refactored patch surface.
 - [ ] [#77v6] #adcr-publish Decide on publishing agent-doc-core to crates.io (currently publish = false). Allows third-party FFI consumers and unblocks the editor-plugin slim-link target.
 - [ ] [#ysv9] #adoc-orchestration-crate Plan agent-doc-orchestration extraction — split route/git/sessions/ipc_socket/supervisor/capture/cycle_state/repair/sync/start out of the main crate into a sibling workspace member, leaving only the CLI entrypoint + command dispatch in agent-doc. Would create a 3-layer architecture (CLI → orchestration → core) and substantially cut the editor-plugin-only build target. Substantial refactor; depends on #adcr-baseline-measure to quantify the win first.

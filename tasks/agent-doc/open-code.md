@@ -141,20 +141,29 @@ Splitting these would require inverting all dependencies through trait objects o
 2. Keep orchestration monolithic — circular deps make split costly
 3. Extract agent backends only when trait boundaries stabilize
 Add #next-steps to the backlog
-<!-- agent:boundary:8c1d6f0e -->
+### Re: #next-steps — GLM-5.1
+
+Backlog updated in priority order. Top item: **#n89s** (interim dispatch proof policy fix for OpenCode).
+
+`#n89s` and `#xd6k` are quick fixes that should land before the full tracker (`#odsp2` in `agent-doc-bugs2.md`). The `agent-doc-core` extraction (#adcr) is a separate architectural track.
+
+Session accretion is at block level (116 exchange lines). Recommend compacting before the next implementation turn.
+<!-- agent:boundary:4fd3cc8e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue auto -->
-- Add #next-steps to the backlog
+
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#n89s] #agent-doc-bug Fix `dispatch_only_dispatch_start_proof_required` to return `false` for opencode harness (routed_reopen.rs:319) — no proof mechanism exists, SPEC confirms it
+- [ ] [#n89s] #agent-doc-bug Fix `dispatch_only_dispatch_start_proof_required` to return `false` for opencode harness (routed_reopen.rs:319) — interim fix until tracker is built
 - [ ] [#xd6k] #agent-doc-bug Add model name validation in `canonical_model_name` or probe builder for opencode harness — reject bare names without provider prefix (model_tier.rs:256, codex.rs:534)
+- [ ] [#adcr] Extract `agent-doc-core` crate (~17K lines: template, diff, component, frontmatter, crdt, pending, model_tier + leaf modules) — enables fast-compiling FFI/editor-plugin target independent of orchestration layer
+- [ ] [#fr8q] [recommended] Compact this session (116 exchange lines, block-level accretion) before next implementation turn
 <!-- /agent:backlog -->
 
 ## Icebox

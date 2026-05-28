@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -36,14 +36,19 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 
 Compacted content:
 - Archived 23 response topic(s): transfer full exchange; admin account management; admin account passwords; 20 more
-<!-- agent:boundary:ae7eae9b -->
+In /portal-broker/submit-a-deal, use `LTV (%)` and validate the field is a number.
+
+Should `Property / deal type` be a dropdown? Would you know the comprehensive set of values?
+#spec-test-commit-push
+<!-- agent:boundary:76c3a84f -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+- In /portal-broker/submit-a-deal, use `LTV (%)` and validate the field is a number.
 <!-- /agent:queue -->
 
 ## Backlog

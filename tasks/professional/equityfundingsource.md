@@ -180,7 +180,41 @@ Verification:
 - GitHub Actions inspection: `gh workflow list` returned no workflows; `gh run list --workflow CI --limit 1` and `gh run list --workflow tmux-test --limit 1` both reported no matching workflow.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:ebe33d5d -->
+
+### Re: local admin detail pages — gpt-5
+
+Fixed. The immediate localhost 500s were caused by the local D1 sandbox being behind the current migrations; `wrangler d1 migrations list --local` showed 0027 through 0032 still pending. I applied the local migrations, and the three reported authenticated API calls now return 200:
+
+- `/api/admin/application-leads?status=new` -> `{"leads":[]}`
+- `/api/admin/messages?message_limit=1&limit=10` -> `{"sessions":[],"session":null,"messages":[],"has_more":false}`
+- `/api/admin/lender-requests?status=pending` -> `{"requests":[]}`
+
+I also changed the dev worker startup so this does not recur after future pulls: `bun run dev:worker` applies pending local D1 migrations before building/starting Wrangler, and `dev:worker:once` now does the same.
+
+Changed paths in `src/equityfundingsource-dev`:
+
+- `app/equityfundingsource/bin/dev-worker.ts`
+- `app/equityfundingsource/dev-routes.test.ts`
+- `app/equityfundingsource/package.json`
+- `docs/current_progress.md`
+- `docs/deploy.md`
+- `prds/equity-funding-source-lending-portal-prd.md`
+
+Commit/push:
+
+- EFS repo commit `6a06b44` (`fix: migrate local d1 before worker dev`) pushed to `origin/main`.
+
+Verification:
+
+- `bun run cf:d1:migrate:local` applied the pending local migrations.
+- `wrangler d1 migrations list equityfundingsource --local` now reports no migrations to apply.
+- Authenticated local smoke checks for the three reported APIs returned 200.
+- `bun test app/equityfundingsource/dev-routes.test.ts` passed: 12 pass, 0 fail.
+- `make check` passed: Bun reported 202 pass, 0 fail, then app build and worker build completed.
+- GitHub Actions inspection: `gh workflow list` returned no workflows; `gh run list --workflow CI --limit 1` and `gh run list --workflow tmux-test --limit 1` both reported no matching workflow.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:fa580daa -->
 <!-- /agent:exchange -->
 ###
 <!--

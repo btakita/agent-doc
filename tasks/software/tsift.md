@@ -243,7 +243,7 @@ tsift/
 | Onboarding complexity | Low | Medium |
 
 **The split pays off when you start the tokensave Phase 2 ports.** The new algorithms crate gives agents a clean 2K LOC target instead of editing the 4.8K LOC `substrate.rs`. Recommend splitting as the first step of Phase 2, not before.
-<!-- agent:boundary:7bb4e694 -->
+<!-- agent:boundary:067bb9b3 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -124,21 +124,77 @@ What this does NOT include (full #2z8r):
 
 When #2z8r picks a provider, the UI contract above carries over: provider-matched → `address_verified=true`; everything else → manual + unverified, badge in admin.
 do [#2z8r]. #spec-test-commit-push-deploy
-<!-- agent:boundary:a7f7248b -->
+
+### Re: do [#2z8r]. #spec-test-commit-push-deploy — opus-4-7
+
+#2z8r landed end-to-end and is live in production. Submodule commit `5b6ebc0` (parent bump `f98cdcf`) — worker version `469c6559-6c0d-4003-b37e-a54409321e70` at https://equityfundingsource.brian-takita.workers.dev.
+
+#### Provider eval (the spike)
+
+| Provider     | Per-request cost           | Off-grid / rural | Lat/lng | License notes                                              |
+| ------------ | -------------------------- | ---------------- | ------- | ---------------------------------------------------------- |
+| Google Places | ~$2.83/1000 (Autocomplete) | Good             | Yes     | Most expensive; broadest international coverage            |
+| Mapbox       | ~$0.50/1000                | Good             | Yes     | "Must display map" license requirement                     |
+| Smarty       | ~$0.012-$0.06/address      | Best (US)        | Yes     | US specialist; best free-text/off-grid fallback            |
+| Nominatim    | Free (OSM)                 | Fair             | Yes     | Already deployed for borrower flow; usage-policy throttled |
+
+**Pick: Smarty long-term, Nominatim today.** Smarty wins the rubric for an EFS hard-money portal (US-only deal mix, off-grid parcels for CA bridge/construction, cheapest at low volume). But Smarty requires API-key provisioning + billing setup. The recommendation says "wire it to the existing free-text input" — so I shipped Nominatim now (already proven on the borrower side, free, no creds) behind a provider-neutral `/api/broker/address-search` endpoint. The suggestion contract (`label`, `street`, `city`, `state`, `zip`, `county`, `lat`, `lng`) is identical regardless of provider, so swapping in Smarty/Mapbox/Google is one file (`property_address_suggestions_`) with no UI changes.
+
+#### What landed
+
+**Backend (`app/equityfundingsource/lib/loan_applications/routes.ts`)**:
+- `property_address_suggestion_T` gains `lat`/`lng` (extracted from Nominatim's `lat`/`lon` fields).
+- New `GET /api/broker/address-search` gated to broker role, mirroring the borrower endpoint.
+- Borrower `onboarding_data_T` renamed `address_source: 'census'` → `'nominatim'` (matches the actual backend; the prior label was a misnomer) and now persists `property_lat`/`property_lng`.
+
+**Schema (`migrations/0033_broker_deals_property_address.sql`)** — applied to remote D1 (10 commands, 7.89ms):
+- `broker_deals` gains `property_street`/`property_city`/`property_state`/`property_zip`/`property_county` (TEXT), `property_lat`/`property_lng` (REAL), `address_source` (TEXT NOT NULL DEFAULT `''`), `address_verified` (INTEGER NOT NULL DEFAULT 0).
+
+**Broker repo + route**:
+- `broker_deal_create_` writes the new structured columns. `address_verified` is forced to 0 unless `address_source = 'nominatim'`, so clients cannot self-attest verification.
+- `POST /api/broker/deals` accepts the new fields and relaxes validation: either full structured parts OR a manual entry with non-empty `property_address` is accepted; legacy free-text submissions still pass.
+
+**Frontend**:
+- New `lib/ui--browser--efs/portal/shared/property_address_search.tsx` exposes `PropertyAddressSearch` + `property_address_value_T` as the shared contract.
+- Borrower `new_application.tsx` refactored to consume the shared component via `borrower_property_address_value_` / `apply_property_address_`. Legacy inline `PropertyAddressSearch`/`ManualField`/`census_address_suggestions_` removed.
+- Broker `submit_deal.tsx` replaces the free-text Property address `Field` with `PropertyAddressSearch` wired to `/api/broker/address-search`. `BrokerDealSubmitInput` carries the new fields end-to-end.
+- Admin `loan_detail.tsx` updated to parse `nominatim`/`manual` sources plus `property_lat`/`property_lng`.
+
+**Tests** — 220/220 pass (8 new in `tests/broker-portal.test.ts`):
+- Address-source enum + validator.
+- Migration 0033 column contract.
+- `broker_deal_create_` persists structured fields and gates verification on `nominatim`.
+- Submit route forwards every new field and uses the relaxed validator.
+- Borrower + broker address-search endpoints with role gating.
+- Nominatim suggestion lat/lng extraction.
+- Shared `PropertyAddressSearch` supports "Use what I typed", manual entry, and verified/unverified pills.
+- Broker submit-deal screen wires `PropertyAddressSearch` to the broker endpoint.
+
+**Spec updates**:
+- `docs/efs_broker_portal_full.md` Step 1 — Property details now documents the autocomplete UX, source values, and provider abstraction.
+- `docs/current_progress.md` Broker Portal section adds the #2z8r summary with the provider comparison rationale.
+
+**Verification**:
+- `make check` — 220 pass / 0 fail; browser + worker bundle green.
+- D1 remote migration apply — ✅ `0033_broker_deals_property_address.sql`.
+- Worker deploy — version `469c6559-6c0d-4003-b37e-a54409321e70` live at https://equityfundingsource.brian-takita.workers.dev.
+
+#### Follow-up captured
+
+When Robert/Judith approve a Smarty (or Mapbox/Google) account, swap the provider in `property_address_suggestions_` and persist the provider's stable ID alongside `lat`/`lng` to enable re-verification and map previews. The UI contract does not change.
+<!-- agent:boundary:fbebcb35 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue auto -->
-- do [#2z8r]. #spec-test-commit-push-deploy
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#2z8r] [recommended] Address autocomplete spike for /portal-broker/submit-a-deal Property address: compare Google Places vs. Mapbox vs. Smarty (per-request cost, accuracy, free-text fallback for off-grid parcels, lat/lng persistence, map previews in admin pipeline). Pick one, wire it to the existing free-text input with normalized address + lat/lng captured alongside the raw string.
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
 - [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document intelligence/search, borrower/broker/investor/admin portals, and tenant-ready resale packaging.
 - [ ] [#f4rq] Verify an EFS-owned sending domain in Resend, then switch APPLICATION_LEAD_NOTIFICATION_FROM and APPLICATION_LEAD_NOTIFICATION_TO from testing-mode values to EFS production addresses.

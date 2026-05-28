@@ -93,7 +93,8 @@ No, it is not automatically the same as your machine password. `ADMIN_GLOBAL_PAS
 I would not recommend reusing a machine password for this. If you do not know the current value, check the private secret store or rotate the Worker secret and then share the new temporary credential out-of-band, not in this committed markdown session.
 
 Closeout evidence: no repo files changed in this cycle. Commands run: `tsift status`, `agent-doc --version`, `agent-doc preflight`, `agent-doc plan`, and this `agent-doc finalize`. Verification is based on the deployed auth configuration: `ADMIN_GLOBAL_PASSWORD` is a Worker secret, not a machine-login integration. Confidence is high. Escalation: none.
-<!-- agent:boundary:e0b88b45 -->
+How can I see ADMIN_GLOBAL_PASSWORD?
+<!-- agent:boundary:780ae386 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -101,6 +102,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue auto -->
+- How can I see ADMIN_GLOBAL_PASSWORD?
 <!-- /agent:queue -->
 
 ## Backlog

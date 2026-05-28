@@ -243,7 +243,8 @@ tsift/
 | Onboarding complexity | Low | Medium |
 
 **The split pays off when you start the tokensave Phase 2 ports.** The new algorithms crate gives agents a clean 2K LOC target instead of editing the 4.8K LOC `substrate.rs`. Recommend splitting as the first step of Phase 2, not before.
-<!-- agent:boundary:067bb9b3 -->
+Add #next-steps for extracting crates interleaved with #next-steps of tokensave reverse engineer port.
+<!-- agent:boundary:49124cd0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -258,7 +259,7 @@ preset #spec-test-build-install-commit-push
 - ~[#npm-auth-setup]~
 - ~[#npm-publish-verify]~
 - ~[#full-e2e-verify]~
-- Would splitting separate crates improve agentic maintenance?
+- Add #next-steps for extracting crates interleaved with #next-steps of tokensave reverse engineer port.
 <!-- /agent:queue -->
 
 ## Backlog

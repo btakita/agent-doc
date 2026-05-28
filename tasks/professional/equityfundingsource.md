@@ -73,8 +73,18 @@ Verification:
 - EFS repo GitHub Actions check: `gh workflow list` returned no workflows; `gh run list --workflow CI --limit 1` and `gh run list --workflow tmux-test --limit 1` had no matching workflow to inspect.
 
 Confidence: high. Escalation: none.
-What is the admin password for the brian.takita+admin@gmail.com and btak.dev+admin@gmail.com accounts?
-<!-- agent:boundary:46db1137 -->
+What is the password for the brian.takita+admin@gmail.com and btak.dev+admin@gmail.com admin accounts?
+
+### Re: admin account passwords — gpt-5
+
+There is no unique per-account password for `brian.takita+admin@gmail.com` or `btak.dev+admin@gmail.com` right now. I created both production rows with empty personal password hashes.
+
+For `/admin/login`, that means these accounts can authenticate only with the configured shared `ADMIN_GLOBAL_PASSWORD` while their personal password hash is empty. I am not going to print that secret into this committed session document.
+
+To give either account its own password, sign in as an existing admin and update the user through `/portal-admin/users`, or rotate/set a temporary password through the production admin-password path and share it out-of-band.
+
+Closeout evidence: no repo files changed in this cycle. Commands run: `tsift status`, `agent-doc --version`, `agent-doc preflight`, `agent-doc plan`, and this `agent-doc finalize`. Verification is source/session knowledge from the prior D1 insert and auth behavior; no tests were needed. Confidence is high. Escalation: none.
+<!-- agent:boundary:ee684947 -->
 <!-- /agent:exchange -->
 ###
 <!--

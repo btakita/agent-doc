@@ -23,7 +23,7 @@ queue_active: true
 ## Status
 
 <!-- agent:status patch=replace -->
-EFS workers.dev production: `/apply` public prequalification + D1-backed `application_leads` admin review is deployed in Worker version `dd2fa976-a72c-4661-8a2d-aee196c57eb3` as of 2026-05-27; local `bun dev` on port 4200 mounts `/apply`; public site/footer email is `info@equityfundingsource.com`; logged-out navigation exposes Borrower Login, Apply for a Loan, Broker Portal, and Investor Portal with Broker Portal placed between Apply and Investor. Cloudflare Access protects /login/access-callback with ACCESS_TEAM_DOMAIN/AUD. Application lead notifications still route through Resend testing-mode config `APPLICATION_LEAD_NOTIFICATION_TO=brian.takita@gmail.com` and `APPLICATION_LEAD_NOTIFICATION_FROM=Equity Funding Source <onboarding@resend.dev>` until an EFS-owned sending domain is verified. Custom-domain cutover is deferred; continue using https://equityfundingsource.brian-takita.workers.dev until further notice.
+EFS workers.dev production: `/apply` public prequalification + D1-backed `application_leads` admin review is deployed in Worker version `00778168-53b8-4aca-9daa-b54db9f980b9` as of 2026-05-28; local `bun dev` on port 4200 mounts `/apply`; public site/footer email is `info@equityfundingsource.com`; logged-out navigation exposes Borrower Login, Apply for a Loan, Broker Portal, and Investor Portal with Broker Portal placed between Apply and Investor. Cloudflare Access protects /login/access-callback with ACCESS_TEAM_DOMAIN/AUD. `/portal-admin/users` lets existing admins create admin/borrower/broker/investor accounts without reopening public `/admin/signup`; production D1 has active admin rows for `brian.takita+admin@gmail.com` and `btak.dev+admin@gmail.com`. Application lead notifications still route through Resend testing-mode config `APPLICATION_LEAD_NOTIFICATION_TO=brian.takita@gmail.com` and `APPLICATION_LEAD_NOTIFICATION_FROM=Equity Funding Source <onboarding@resend.dev>` until an EFS-owned sending domain is verified. Custom-domain cutover is deferred; continue using https://equityfundingsource.brian-takita.workers.dev until further notice.
 <!-- /agent:status -->
 
 ## Exchange
@@ -40,7 +40,41 @@ Closeout evidence: changed documents are `tasks/professional/equityfundingsource
 Are there ways for an existing admin to create new admins in the admin dashboard? If not, please create an account management section in the admin portal.
 Please add brian.takita+admin@gmail.com and btak.dev+admin@gmail.com as admins to https://equityfundingsource.brian-takita.workers.dev/
 #spec-test-commit-push-deploy
-<!-- agent:boundary:b6291d87 -->
+
+
+### Re: admin account management — gpt-5
+
+Yes: existing admins can already create new admins in the admin dashboard at `/portal-admin/users`. The section is labeled User Management, is behind an authenticated admin session, and the create-user modal includes the `admin` role, so I did not add a duplicate account-management section.
+
+I added both requested production admin users directly to the remote D1 database for `https://equityfundingsource.brian-takita.workers.dev/`:
+
+- `brian.takita+admin@gmail.com` — `role=admin`, `status=active`
+- `btak.dev+admin@gmail.com` — `role=admin`, `status=active`
+
+They were inserted with empty personal password hashes, so admin login can use the configured global admin credential, and Cloudflare Access identity will link on first successful Access login.
+
+Changed paths in `src/equityfundingsource-dev`:
+
+- `prds/equity-funding-source-lending-portal-prd.md` — documents post-bootstrap admin provisioning through `/portal-admin/users`
+- `docs/current_progress.md` — records that existing admins can create admin/staff/user accounts there
+- `tests/admin-dashboard.test.ts` — pins the admin-only user-management route, role selector including `admin`, password requirement, and self-lockout guards
+- `tests/borrower-messages.test.ts` — rebased stale assertion from the latest remote so the full suite stays green
+
+Repo/deploy closeout:
+
+- Committed and pushed EFS source repo commit `c57821c858f8122474c9d666b4e869c8601880d5` to `origin/main`.
+- Deployed Worker version `00778168-53b8-4aca-9daa-b54db9f980b9` to `https://equityfundingsource.brian-takita.workers.dev`.
+- Verified the remote D1 query returns both requested emails as active admins.
+
+Verification:
+
+- `bun test tests/admin-dashboard.test.ts` passed.
+- `make check` passed after rebase: Bun reported `195 pass, 0 fail`, then build and worker build completed. The tsift digest still flags the expected logged `limiter down` string from upload-guard coverage, but the command exited 0 and Bun reported no failing tests.
+- Live smoke checks after deploy: `/admin/login` returned 200, `/admin/signup` returned 404, and unauthenticated `/api/admin/users` returned 401.
+- EFS repo GitHub Actions check: `gh workflow list` returned no workflows; `gh run list --workflow CI --limit 1` and `gh run list --workflow tmux-test --limit 1` had no matching workflow to inspect.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:b2e97526 -->
 <!-- /agent:exchange -->
 ###
 <!--

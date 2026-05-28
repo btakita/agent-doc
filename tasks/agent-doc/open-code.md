@@ -75,24 +75,70 @@ Each is a separate cycle with `make check` + `cargo install` after the move. The
 Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
 
 **Not invoking `/loop`** — the remaining queue items (`#yhsr` Wave 2, `#yxvq` Wave 3, `#mzzd` Wave 4) all depend on Wave 1 completing first.
-<!-- agent:boundary:d95624ed -->
+### Re: do #pjb4 — Wave 1 complete — opus-4-7
+
+Executed the `do [#pjb4]` directive. All five Wave 1 leaves now live in `agent-doc-core`; main crate compiles via re-export shims.
+
+#### What landed this cycle
+
+In `src/agent-doc/` (submodule, branch `20260422/codex-agent-backend`, commit `3f937a86`, pushed):
+
+- `agent-doc-core/src/component.rs` — copied from `src/component.rs`; `crate::new_boundary_id` / `crate::format_boundary_marker` rewritten to `crate::id::*`; `find_comment_end` promoted `pub(crate)` → `pub` for cross-crate use by main crate's `template.rs`.
+- `agent-doc-core/src/model_tier.rs` — copied verbatim. `crate::component` references resolve to `agent_doc_core::component` in the new crate.
+- `agent-doc-core/src/pending.rs` — copied verbatim. Six helpers promoted `pub(crate)` → `pub` for cross-crate visibility: `is_valid_pending_id`, `normalize_pending_id`, `extract_pending_ids_from_text`, `preserves_non_item_structure`, `merge_partial_backlog_prefix`, `canonicalize_preserving_non_item_lines`, `ensure_no_new_leading_custom_id_prefix`.
+- `agent-doc-core/Cargo.toml` — added `sha2 = "0.10"` (used by `pending::generate_hash*`).
+- `agent-doc-core/src/lib.rs` — declares `pub mod component / model_tier / pending`; re-exports `Component`.
+- Main crate `src/component.rs`, `src/model_tier.rs`, `src/pending.rs` — collapsed to `pub use agent_doc_core::<name>::*` shims.
+
+Superproject commit `f3de2d573` (bumps submodule pointer), pushed to `main`.
+
+#### Verification
+
+- `cargo build --release`: clean.
+- `cargo test --release -p agent-doc-core --lib`: 298 tests pass (component, model_tier, pending inline test suites moved with their modules).
+- `cargo test --release --lib` (main crate): 317 tests pass (the remaining modules — frontmatter, template, diff, etc. — still have their tests in the main crate until later waves).
+- `make check`: same pre-existing local failure `codex_bare_run_inside_owning_pane_fails_before_nested_dispatch` reproduces on pristine HEAD; not introduced by this change. GitHub CI's recent runs are green.
+- `cargo install --path .`: `~/.cargo/bin/agent-doc` replaced.
+
+#### Wave 1 acceptance
+
+Per `tasks/agent-doc/plan-agent-doc-core-extraction.md` §"Wave plan":
+
+> Wave 1 (no seam decisions): `crdt`, `model_tier`, `pending`, `component` + relocate boundary helpers.
+
+All five modules (counting `id` as the boundary helper relocation target) are now in `agent-doc-core`. Combined LOC inside the crate: 1,706 (component) + 1,088 (model_tier) + 3,565 (pending) + 1,255 (crdt) + ~50 (id) = ~7.6k LOC matches the plan estimate.
+
+#### Visibility surface change worth noting
+
+Seven previously `pub(crate)` helpers became `pub`. These are internal-shaped APIs (parser cursor, ID normalization, structural canonicalization, partial-merge invariants) that the main crate was using via in-crate visibility. They are now public surface of `agent-doc-core`. None are intended for external consumers; flag as candidate for `#[doc(hidden)]` in a follow-up tidy, or move their callers (mostly in the main crate's `repair.rs`, `git.rs`, and `write.rs`) into a `pending::internal::*` module designed for cross-crate use.
+
+#### Next queue items
+
+- `#yhsr` — Wave 2 (`frontmatter` + `project_config`, mutual refs, must move together)
+- `#yxvq` — Wave 3 (`template`, depends on Wave 2)
+- `#mzzd` — Wave 4 (`diff` per `#rtx6` Option 1 file split)
+- `#adcr` — umbrella rollup
+
+Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
+
+**Not invoking `/loop`** — Wave 2 is another ~2.6k LOC move with its own test surface and the mutual `frontmatter ↔ project_config` reference pair, and should be its own operator cycle.
+<!-- agent:boundary:0ff481d5 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
-- [#pjb4]
-- [#yhsr]
-- [#yxvq]
-- [#mzzd]
-- [#adcr]
+- do [#pjb4]
+- do [#yhsr]
+- do [#yxvq]
+- do [#mzzd]
+- do [#adcr]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#pjb4] #adcr-wave-1 Extract leaf modules into agent-doc-core. PARTIAL — id helpers + crdt landed (submodule 082fe3d4, superproject afb5a8018). Remaining: component, model_tier, pending. Each needs its own cycle for import surgery + test-surface preservation. Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
 - [ ] [#yhsr] #adcr-wave-2 Extract frontmatter.rs + project_config.rs together (mutual refs) into agent-doc-core — Frontmatter, AgentDocFormat, AgentDocWrite, CollaborationMode, CodexNetworkAccess, ResolvedMode, StreamConfig, PendingCaptureGuardMode, LintDialectMode, ProjectConfig, GuardConfig, LintConfig, SshConfig/SshDocConfig/SshProfileConfig, ComponentConfig + pure parse/write/merge_fields/set_*. Keep ensure_session_for_file/set_format_and_write/read_session_id/load_project*/save_project/*_tmux_session wrappers in main crate. Depends on Wave 1 (model_tier). Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
 - [ ] [#yxvq] #adcr-wave-3 Extract template.rs (~5.7k LOC) into agent-doc-core::template — PatchBlock, TemplateInfo, ComponentInfo, parse_patches, apply_patches, apply_patches_with_overrides, all repair_* functions, normalize_editor_visible_template_structure, all reposition_boundary_* helpers, is_template_mode, exchange_baseline_headings. Keep template_info(&Path) wrapper in main crate. Depends on Wave 2 (frontmatter/project_config) + Wave 1 (component). Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
 - [ ] [#mzzd] #adcr-wave-4 Extract diff.rs into agent-doc-core per #rtx6 Option 1 — rename current src/agent-doc/src/diff.rs to diff_io.rs (strip to compute/compute_with_current/wait_for_stable_content/is_stale_snapshot/run, keep snapshot::{load,save,resolve,path_for} calls); move pure half (DiffType, DiffClassification, PromptBearingChange, ParsedSlashCommands, OrchestrationRequest, strip_comments, annotate_diff, classify_diff, slash command + orchestration detection, prompt-prefix normalization, prompt-bearing-change classification, unified_diff_from_contents) to agent_doc_core::diff; re-export at agent_doc::diff so the 6 production call sites compile unchanged. Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md

@@ -108,7 +108,81 @@ Compacted content:
 - Decide whether to keep the rest of the queue active. If you pick **B**, I can run it next turn and the remaining 7 directives stay valid. If you pick **C**, I should re-scope each of the other 7 items for the same coupling concern before letting the auto-loop drive them.
 
 **Why I am gating instead of pushing through:** the existing CLAUDE.md guidance for tsift says "All public logic tested: `classify_task`, `apply_edit_op`, `rewrite_command`, SQL helpers all have unit tests." That convention covers the rewrite_command tests, but it does not mandate cross-crate public exposure. Picking C without you signing off would silently widen the tsift-cli public API.
-<!-- agent:boundary:00656bef -->
+
+### Re: do [#split-tsift-digest] — blocker: cycle in proposed grouping — opus-4-7
+
+**Halting the queue and reordering the backlog.** The original backlog ordering was grouped by naming-similarity, not by actual cross-module dependency. I ran a real import audit across the remaining root modules and found one cycle and one mis-ordered dependency chain.
+
+#### Internal dep graph (root `tsift` modules → other root modules)
+
+```
+config:           (leaf)
+lint:             (leaf)
+runtime_churn:    (leaf)
+perf_gate:        (leaf)
+audit:            (leaf)
+dci_benchmark:    (leaf)
+metric_digest:    (leaf)
+sift:             (leaf)
+tagpath_adapter:  (leaf)
+walk:             (leaf — `lang` is already external in tsift-graph)
+init:             config
+index:            walk
+summarize:        index
+session_cost:     runtime_churn
+session_digest:   lint, runtime_churn
+session_review:   lint, runtime_churn
+test_digest:      lint, summarize
+diff_digest:      lint, summarize
+log_digest:       lint, runtime_churn, summarize
+impact:           config, diff_digest, index, lint, summarize, walk
+status:           config, index, init, summarize
+```
+
+#### Two problems with the original priority
+
+1. **Cycle: proposed `tsift-search` ↔ `tsift-digest`.**
+   - `diff_digest` uses `summarize` → tsift-digest depends on tsift-search.
+   - `impact` (proposed for tsift-search) uses `diff_digest` → tsift-search depends on tsift-digest.
+   - Cargo rejects this.
+
+2. **Order inversion.** I had `#split-tsift-digest` second and `#split-tsift-quality` fifth. But `diff_digest`, `log_digest`, `test_digest`, `session_*` all import `lint` and `runtime_churn` from the proposed `tsift-quality`. So neither tsift-digest nor tsift-session can land until tsift-quality lands first.
+
+#### Corrected order (dependency-bottom-up)
+
+| # | Item | Reason |
+|---|---|---|
+| 1 | **#split-tsift-quality** | audit, lint, perf_gate, dci_benchmark, runtime_churn are leaves with zero internal deps. True first move. |
+| 2 | **#split-tsift-index** | index → walk only. Foundation for summarize, session, search, status. |
+| 3 | **#split-tsift-session** | Depends only on lint + runtime_churn → satisfied after #1. Independent of #2; can land in parallel. |
+| 4 | **#split-tsift-search** [gated, in review] | Needs cycle decision below. |
+| 5 | **#split-tsift-digest** [gated, in review] | Same cycle decision. |
+| 6 | **#demote-root-tsift** | Once business crates land + `status`/`impact` placed, root becomes shim. |
+| 7 | **#split-tsift-cli-subcommands** [recommended] | Independent CLI-side refactor. |
+
+Backlog reordered. Top is now `#split-tsift-quality`.
+
+#### Three options to break the digest ↔ search cycle
+
+| Option | What |
+|---|---|
+| **X.** Move `impact` into `tsift-digest` | impact is essentially a higher-level digest (diff + symbol-level rollup); already uses diff_digest internally. Keeps tsift-search focused on retrieval/ranking/summaries. Cleanest. |
+| **Y.** Promote `summarize` to its own `tsift-summarize` crate | Below both digest and search; both depend on it. More crates, separation matches actual responsibility. |
+| **Z.** Merge proposed digest + search into one `tsift-derive` crate | Avoids cycle by not splitting. Largest single new crate (~7k LOC); least architectural improvement. |
+
+**Recommendation: X.**
+
+#### `status` placement
+
+`status` depends on config + index + init + summarize. Under the original groupings, no proposed crate owns it. Options: leave in root tsift (problem for #demote-root-tsift), move to `tsift-cli` (it is essentially the `tsift status` command implementation), or new `tsift-status` crate. Recommend `tsift-cli`.
+
+#### What I need from you
+
+1. Confirm corrected order (or override).
+2. Pick X / Y / Z for the digest↔search cycle.
+3. Decide where `status` lives after the splits (root-shim vs tsift-cli vs new crate).
+4. Re-author the queue with whichever splits you want me to drive. The auto-loop will not advance until you confirm direction. Once you queue `do [#split-tsift-quality]`, it should land cleanly.
+<!-- agent:boundary:7f06c702 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -132,11 +206,9 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#split-tsift-digest] Extract diff_digest + log_digest + metric_digest + test_digest (~3.7k LOC) into tsift-digest crate — high-cohesion emitter group with shared serialization, schema versioning, and pruning patterns; minimal cross-deps
+- [ ] [#split-tsift-quality] Extract audit + lint + perf_gate + dci_benchmark + runtime_churn (~3.7k LOC) into tsift-quality crate — quality-gate surfaces depend on tsift-graph + tsift-index; isolates gate evaluation from emitter and session crates
 - [ ] [#split-tsift-index] Extract index + walk + config + init (~4.7k LOC) into tsift-index crate — foundation that tsift-session, tsift-quality, tsift-search will depend on; pulls in fs4, ignore, blake3, flate2 deps; carries SQLite schema bootstrap
 - [ ] [#split-tsift-session] Extract session_cost + session_digest + session_review (~7.1k LOC, largest pool) into tsift-session crate — depends on tsift-digest + tsift-index; biggest single LOC reduction in root tsift
-- [ ] [#split-tsift-quality] Extract audit + lint + perf_gate + dci_benchmark + runtime_churn (~3.7k LOC) into tsift-quality crate — quality-gate surfaces depend on tsift-graph + tsift-index; isolates gate evaluation from emitter and session crates
-- [ ] [#split-tsift-search] Extract sift + summarize + impact + tagpath_adapter (~3.2k LOC) into tsift-search crate — depends on tsift-index + tsift-graph; covers search ranking, AST-aware summaries, impact analysis, and tagpath annotation surface
 - [ ] [#demote-root-tsift] After all module splits land, demote root tsift crate to a thin re-export shim (or remove lib.rs entirely) — leave only the workspace root + binary metadata; verify external consumers (cargo install tsift) keep working
 - [ ] [#split-tsift-cli-subcommands] [recommended] tsift-cli is ~39k LOC in a single lib.rs — propose per-command module split (cmd_search, cmd_index, cmd_graph, cmd_explain, etc.) once root tsift is drained, to make command surface independently testable
 - [ ] [#npm-auth-setup] Configure NPM_TOKEN secret + TSIFT_ENABLE_NPM_PUBLISH=true variable in GitHub repo settings
@@ -147,6 +219,8 @@ preset #spec-test-build-install-commit-push
 ## Review
 
 <!-- agent:review -->
+- [/] [#split-tsift-search] Extract sift + summarize + impact + tagpath_adapter (~3.2k LOC) into tsift-search crate — depends on tsift-index + tsift-graph; covers search ranking, AST-aware summaries, impact analysis, and tagpath annotation surface
+- [/] [#split-tsift-digest] Extract diff_digest + log_digest + metric_digest + test_digest (~3.7k LOC) into tsift-digest crate — high-cohesion emitter group with shared serialization, schema versioning, and pruning patterns; minimal cross-deps
 - [/] [#split-sim-world] Extract sim_world (~390 LOC) into tsift-sim-world crate — smallest, most isolated module; low-risk pattern validation for the remaining splits; keeps sim/test helpers out of the prod-path tree
 - [/] [#full-e2e-verify] In fresh project: opencode plugin opencode-tsift && opencode then /tsift-status. On success mark #e2e-install done.
 - [/] [#npm-publish-verify] After auth configured, tag release and verify publish-opencode-plugin CI job succeeds and opencode-tsift appears on npmjs.org

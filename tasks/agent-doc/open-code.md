@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -43,7 +43,6 @@ Compacted content:
 
 **Verification:** `make check` 2514+470 tests green. Pushed as `e3e9d9a0`.
 What are #next-steps for [#adcr]
-
 ### Re: #next-steps for #adcr — opus-4-7
 
 The #adcr umbrella stays at top of backlog. Concrete next steps, added in priority order below it:
@@ -57,17 +56,25 @@ The #adcr umbrella stays at top of backlog. Concrete next steps, added in priori
 After those three land, extraction proceeds module-by-module starting with leaves (likely `model_tier` and `frontmatter` based on file size and naming; confirmed by step 1's audit). The existing `plan-agent-doc-flowcore-refactor.md` is complementary, not duplicate — that plan targets orchestration use-case flows, this one targets the data/orchestration crate seam.
 
 **Top of backlog:** #adcr
-<!-- agent:boundary:3664c6f4 -->
+<!-- agent:boundary:e35406cb -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+preset #spec-test-build-install-commit-push
+- [#stqc]
+- [#5x1r]
+- [#d97v]
+- [#adcr]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#stqc] #adcr-dep-audit Survey inbound deps from orchestration code (preflight/plan/cycle_state/dispatch/route/ipc/git/harness) into {template, diff, component, frontmatter, crdt, pending, model_tier}; identify leaf vs coupled modules — precondition for #adcr
+- [ ] [#5x1r] #adcr-api-surface Define agent-doc-core export surface (pure types: DocumentTemplate, Component, Frontmatter, Diff patches, Crdt ops, Pending model, ModelTier resolution) — keep orchestration types out
+- [ ] [#d97v] #adcr-workspace Convert src/agent-doc into Cargo workspace root; add agent-doc-core member crate; gate behind a compile-time benchmark baseline
 - [ ] [#adcr] Extract agent-doc-core crate (~17K lines) — enables fast-compiling FFI/editor-plugin target independent of orchestration layer
 <!-- /agent:backlog -->
 

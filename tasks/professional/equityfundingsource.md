@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-agent: codex
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -60,7 +60,10 @@ Confidence: high. Escalation: no deploy, code commit, or push was requested by t
 ### Re: In /portal-broker/submit-a-deal, use `LTV (%)` and validate the field is a number. — gpt-5
 
 Done. The implementation and verification details are in the preceding response; this exact-topic closeout is to advance the active queue head after the binary preserved it on the first write.
-<!-- agent:boundary:d4fe3369 -->
+### Re: Switch agent to claude — opus-4-7
+
+Acknowledged. The session is now running under Claude (opus-4-7); the `agent: claude` frontmatter edit takes effect on this cycle. No other prompts queued — ready for the next directive.
+<!-- agent:boundary:f0733891 -->
 <!-- /agent:exchange -->
 ###
 <!--

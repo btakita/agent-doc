@@ -56,7 +56,6 @@ The #adcr umbrella stays at top of backlog. Concrete next steps, added in priori
 After those three land, extraction proceeds module-by-module starting with leaves (likely `model_tier` and `frontmatter` based on file size and naming; confirmed by step 1's audit). The existing `plan-agent-doc-flowcore-refactor.md` is complementary, not duplicate — that plan targets orchestration use-case flows, this one targets the data/orchestration crate seam.
 
 **Top of backlog:** #adcr
-
 ### Re: #stqc #adcr-dep-audit results — opus-4-7
 
 **Method:** outbound `crate::` references (top-level `use` + body refs) within each target module, plus inbound reference counts from the orchestration set (preflight, plan, cycle_state, queue_dispatch, route, ipc_socket, git, harness, session_check, write, capture). Excludes test/comment matches.
@@ -114,7 +113,80 @@ Wave 4 (after `#adcr-snapshot-seam` resolves): `diff` (or its pure half).
 This makes Wave 1 the lowest-risk validation of the workspace structure proposed by `#d97v` before any seam work is required.
 
 **Top of backlog after this cycle:** #adcr-snapshot-seam (new precondition for #adcr blocking diff extraction), then #5x1r.
-<!-- agent:boundary:fcab0362 -->
+### Re: #5x1r #adcr-api-surface — opus-4-7
+
+Captured in `tasks/agent-doc/plan-agent-doc-core-extraction.md`. That file is now the umbrella plan for `#adcr` — it consolidates the `#stqc` audit, the API surface deliverable for this item, the workspace baseline contract that `#d97v` needs to satisfy, the `#rtx6` diff seam decision, and the wave order.
+
+#### Surface (`agent-doc-core/src/lib.rs` draft)
+
+Eight modules (`id`, `component`, `crdt`, `model_tier`, `pending`, `frontmatter`, `project_config`, `template`, `diff`), plus convenience re-exports of every public struct/enum from each module.
+
+Re-export block (verbatim from plan):
+
+```rust
+pub use component::Component;
+pub use crdt::CrdtDoc;
+pub use diff::{
+    DiffType, DiffClassification, PromptBearingChange, PromptBearingChangeKind,
+    ParsedSlashCommands, OrchestrationRequest, OrchestrationRequestMode,
+};
+pub use frontmatter::{
+    Frontmatter, AgentDocFormat, AgentDocWrite, CollaborationMode,
+    CodexNetworkAccess, ResolvedMode, StreamConfig,
+    PendingCaptureGuardMode, LintDialectMode,
+};
+pub use model_tier::{Tier, TierMap, ModelConfig, ModelSwitchScan};
+pub use pending::{
+    PendingItem, PendingState, PendingOp, PendingListMarker, TransitionResult,
+    ShadowPendingItem, ShadowPendingReport,
+    MalformedPendingItemLine, DroppedBacklogItem, DroppedBacklogReport,
+};
+pub use project_config::{
+    ProjectConfig, GuardConfig, LintConfig,
+    SshConfig, SshDocConfig, SshProfileConfig, ComponentConfig,
+};
+pub use template::{PatchBlock, TemplateInfo, ComponentInfo};
+```
+
+External deps the new crate needs: `anyhow`, `serde`, `uuid`, `pulldown_cmark`, `yrs`, `similar`. No `git2`, no `tokio`, no `nix`, no `tmux_interface` — those stay with orchestration.
+
+#### Pure vs I/O split (the non-obvious calls)
+
+The interesting design decisions are not the obvious data types — they're the functions that look pure but currently touch I/O. Plan §"Stays in main `agent-doc` crate" enumerates the wrappers:
+
+- `frontmatter::ensure_session_for_file(&Path)`, `set_format_and_write(&Path, ...)`, `read_session_id(&Path)` — keep in main crate; the pure `parse` / `write` move into core.
+- `template::template_info(&Path)` — main crate; pure inspector logic moves into core.
+- `model_tier::detect_harness()` — env-coupled; recommend wrapping it as a thin orchestration helper that calls a pure `Tier::from_harness_str(&str)` in core. This keeps `agent-doc-core` env-agnostic.
+- `project_config::load_project*` / `save_project` / `*_tmux_session` — main crate; pure parser/serializer (the `ProjectConfig` struct + serde derive) moves into core.
+
+#### Boundary helpers relocation
+
+`new_boundary_id`, `new_boundary_id_with_summary`, `format_boundary_marker`, and `BOUNDARY_ID_LEN` move from `lib.rs` into `agent-doc-core::id`. The main crate keeps `pub use agent_doc_core::id::*` so call sites in `component.rs`, `template.rs`, `boundary.rs`, etc. stay unchanged.
+
+#### Diff carve-out (#rtx6 ranked options)
+
+Documented at plan §"Diff seam decision". Recommendation: **option 1 — split `diff.rs` into `diff_data.rs` (pure, moves to core) + `diff_io.rs` (snapshot-backed, stays in main crate)**. Smallest blast radius; lets the four `snapshot::*` calls keep their current shape while still freeing the bulk of `diff.rs` (classification, slash-command parsing, prompt-bearing-change detection, annotation, comment stripping) for the editor-plugin/FFI target.
+
+Decision deferred to after Wave 3 lands so we have real call-site data for `compute` / `compute_with_current` / `wait_for_stable_content`.
+
+#### Acceptance (carried in plan)
+
+1. `agent-doc-core` cold-builds in under 30% of the main-crate cold build time.
+2. No `agent-doc-core` module imports any orchestration module (git, claim, sessions, ops_log, tmux, harness, route, ipc_socket, supervisor, cycle_state, preflight, plan, dispatch).
+3. No `agent-doc-core` function takes `&Path` or runs `std::fs` / `std::process::Command`.
+4. `make check` and `make tmux-ci` green at every wave boundary.
+
+#### Wave ordering recap
+
+Wave 1: `id` + `crdt` + `model_tier` + `pending` + `component` (~7.6k LOC, no seams).
+Wave 2: `frontmatter` + `project_config` (must move together; mutual refs).
+Wave 3: `template`.
+Wave 4 (after #rtx6): `diff` (or just its pure half).
+
+Plan-backed pending: I edited `#d97v` to cite the plan file path so the workspace scaffold work picks up the baseline contract.
+
+**Top of backlog after this cycle:** #rtx6, then #d97v.
+<!-- agent:boundary:4544aa93 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -122,7 +194,7 @@ This makes Wave 1 the lowest-risk validation of the workspace structure proposed
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~[#stqc]~
-- [#5x1r]
+- ~[#5x1r]~
 - [#d97v]
 - [#adcr]
 <!-- /agent:queue -->
@@ -131,8 +203,7 @@ preset #spec-test-build-install-commit-push
 
 <!-- agent:backlog -->
 - [ ] [#rtx6] [recommended] #adcr-snapshot-seam Decide diff.rs ↔ snapshot.rs seam — either extract Snapshot data type into agent-doc-core and keep load/save/resolve/path_for in orchestration, or inject snapshot through a trait. Required before extracting diff.
-- [ ] [#5x1r] #adcr-api-surface Define agent-doc-core export surface (pure types: DocumentTemplate, Component, Frontmatter, Diff patches, Crdt ops, Pending model, ModelTier resolution) — keep orchestration types out
-- [ ] [#d97v] #adcr-workspace Convert src/agent-doc into Cargo workspace root; add agent-doc-core member crate; gate behind a compile-time benchmark baseline
+- [ ] [#d97v] #adcr-workspace Convert src/agent-doc into Cargo workspace root; add agent-doc-core stub crate; record cargo build --timings baselines per tasks/agent-doc/plan-agent-doc-core-extraction.md
 - [ ] [#adcr] Extract agent-doc-core crate (~17K lines) — enables fast-compiling FFI/editor-plugin target independent of orchestration layer
 <!-- /agent:backlog -->
 
@@ -149,4 +220,5 @@ preset #spec-test-build-install-commit-push
 - 2026-05-27 [#xd6k] #agent-doc-bug Add model name validation in `canonical_model_name` or probe builder for opencode harness — reject bare names without provider prefix (model_tier.rs:256, codex.rs:534)
 - 2026-05-27 [#adcr] Extract agent-doc-core crate (~17K lines: template, diff, component, frontmatter, crdt, pending, model_tier + leaf modules) — enables fast-compiling FFI/editor-plugin target independent of orchestration layer
 - 2026-05-28 [#stqc] #adcr-dep-audit Survey inbound deps from orchestration code (preflight/plan/cycle_state/dispatch/route/ipc/git/harness) into {template, diff, component, frontmatter, crdt, pending, model_tier}; identify leaf vs coupled modules — precondition for #adcr
+- 2026-05-28 [#5x1r] #adcr-api-surface Define agent-doc-core export surface (pure types: DocumentTemplate, Component, Frontmatter, Diff patches, Crdt ops, Pending model, ModelTier resolution) — keep orchestration types out
 <!-- /agent:done -->

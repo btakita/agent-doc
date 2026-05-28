@@ -125,7 +125,41 @@ Added `#adoc-orchestration-impl` to the backlog (references the plan path). It's
 Plan: tasks/agent-doc/plan-agent-doc-orchestration-extraction.md
 
 **Not invoking `/loop`** — queue head advances to `do [#yybc]`, which is the obsolete no-op tracker (the FFI relocation pattern it tracked is fully done). Recommend striking it rather than spending a cycle; `#adcr` (umbrella, materially complete) sits behind it.
-<!-- agent:boundary:3829195d -->
+
+### Re: orchestration extraction — wave 0+1a landed — opus-4-7
+
+You inserted `do [#bz6s]` at the queue front and chose **Start wave 0+1 now**. I scaffolded the `agent-doc-orchestration` crate and moved the one genuinely dependency-free leaf. `#bz6s` stays open — this is the first of 5+ waves.
+
+#### What landed
+
+Submodule `0c06479c` on `20260422/codex-agent-backend`, pushed. Superproject `144511f42` on `main`, pushed.
+
+**Wave 0 — scaffold:** new workspace member `agent-doc-orchestration` (lib `agent_doc_orchestration`, deps `agent-doc-core`/`anyhow`/`interprocess`/`serde_json`, dev `tempfile`) + `COMPILE_BASELINE.md`.
+
+**Wave 1a — move the leaf:** `ipc_socket.rs` (414 LOC, **zero `crate::` refs**) → orchestration. Main re-exports via `pub use agent_doc_orchestration::ipc_socket`; the ~8 lib consumers (`boundary`/`git`/`write`/`ffi`/`ops_report`/`sim_world`/`supervisor`) and `main.rs`'s `pub(crate) use agent_doc::ipc_socket` resolve unchanged.
+
+#### Scope correction (important)
+
+The plan called wave 1 "move `sessions`, `ipc_socket`, `supervisor/`" as leaves — but that classification was by *intra-cluster* deps. The **full `crate::` closure** tells a different story:
+- `ipc_socket` — 0 `crate::` refs → true leaf ✓ (moved).
+- `sessions` — pulls in `input_diag`, `project_controller`, `session_actor`, `startup_miss`.
+- `supervisor/` — pulls in `env`, `harness`, `input_diag`, `test_support`.
+
+Moving `sessions`/`supervisor` now would create a **circular `agent-doc` ↔ `agent-doc-orchestration` dependency**. I deferred them to **wave 1b**, which must first resolve that closure (move or break the references to those 7 modules). Recorded in `COMPILE_BASELINE.md` and the `#bz6s` backlog text.
+
+#### Verification
+
+- `cargo build` / `build --release`: green.
+- `cargo test -p agent-doc-orchestration`: **11 pass** (the moved ipc_socket tests).
+- main lib: **85** (was 96 — the 11 moved to orchestration, no loss); bin: **2,261** (unchanged); integration: **13/14** (the 1 failure is the pre-existing codex env test — no new IPC regressions).
+- `cargo clippy -- -D warnings`: clean.
+- `nm -D libagent_doc.so`: **39** `agent_doc_` symbols still export.
+- Both binaries refreshed.
+
+Plan: tasks/agent-doc/plan-agent-doc-orchestration-extraction.md
+
+**Not invoking `/loop`** — `#bz6s` is a multi-wave effort; wave 1b needs the `sessions`/`supervisor` dependency-closure decision (move the 7 cascade modules vs. break the refs), which deserves its own scoping. `do [#bz6s]` stays queued for the next wave.
+<!-- agent:boundary:e91c7595 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -145,6 +179,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#e130]~
 - ~do [#77v6]~
 - ~do [#ysv9]~
+- do [#bz6s]
 - do [#yybc]
 - do [#adcr]
 <!-- /agent:queue -->
@@ -152,7 +187,7 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#bz6s] #adoc-orchestration-impl Implement the agent-doc-orchestration crate extraction per tasks/agent-doc/plan-agent-doc-orchestration-extraction.md — 5 waves (scaffold → leaves → state/capture → git → orchestrators → prune CLI deps), each a green-to-green cycle with make check + nm -D FFI symbol gate. ~44.5K LOC, multi-cycle.
+- [ ] [#bz6s] #adoc-orchestration-impl Implement agent-doc-orchestration extraction per tasks/agent-doc/plan-agent-doc-orchestration-extraction.md. DONE: wave 0 (scaffold crate) + wave 1a (ipc_socket moved, 39 FFI symbols intact). REMAINING: wave 1b (sessions + supervisor/ + their closure: input_diag/env/harness/project_controller/session_actor/startup_miss/test_support — must resolve circular agent-doc<->orchestration dep first), then waves 2-5 (state/capture → git → orchestrators → prune CLI deps). Each wave green-to-green with make check + nm -D gate.
 - [ ] [#yybc] #k9e1-ffi-mem POC follow-up: track the proven pattern (pub use agent_doc_core::ffi::* + force_link_core_ffi_symbols reference function in main) for future pure FFI relocations. POC moved agent_doc_free_string + agent_doc_free_state; nm verification confirmed symbols still in libagent_doc.so export table.
 - [ ] [#adcr] Extract agent-doc-core crate (~17K lines) — enables fast-compiling FFI/editor-plugin target independent of orchestration layer
 <!-- /agent:backlog -->

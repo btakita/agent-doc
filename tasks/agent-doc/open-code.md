@@ -33,7 +33,41 @@ queue_active: true
 Compacted content:
 - Archived 2 response topic(s): do #epv5; do #vb8h
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/fb8de777...
-<!-- agent:boundary:fd6d31fe -->
+
+### Re: do #e130 — apply_patch FFI relocated; FFI surface complete — opus-4-7
+
+Executed `do [#e130]` (`#k9e1-ffi-apply-patch`) — **the final FFI relocation**. The three `apply_patch` variants now live in `agent-doc-core::ffi`, and with them the entire pure-FFI surface is in core.
+
+#### What landed
+
+Submodule `3eeecd5f` on `20260422/codex-agent-backend`, pushed. Superproject `a8ff03528` on `main`, pushed.
+
+**Relocated to `agent-doc-core/src/ffi.rs`:** `agent_doc_apply_patch`, `agent_doc_apply_patch_with_caret`, `agent_doc_apply_patch_with_boundary`.
+
+**The `dummy_path` hack is gone.** Each function previously called the file-based `template::apply_patches_with_overrides(doc, …, Path::new("/dev/null"), …)`. They now call `apply_patches_with_overrides_pure` directly with `summary = None` and empty component/max_lines configs — the correct values for an editor FFI call that patches in-memory content with explicit mode overrides and no backing file. `FfiPatchResult` + helpers were already in core from `#epv5`. Removed the now-unused `use crate::{component, template};` from main; `force_link_core_ffi_symbols` references all three.
+
+**Minor behavior note:** the pre-patch boundary id no longer carries a `:null` slug (it was derived from `/dev/null`'s file stem — an accidental artifact of the dummy path). No test depended on it; verified by repo-wide search.
+
+#### Verification
+
+- `cargo build` / `cargo build --release`: green.
+- **`nm -D libagent_doc.so`**: 39 `agent_doc_` symbols export, including all 3 `apply_patch` variants — the full editor-plugin FFI surface resolves from the main cdylib unchanged.
+- `cargo test --bin agent-doc`: **2,261 pass**; `--lib`: 96 pass (both unchanged).
+- `cargo clippy -- -D warnings`: clean.
+- Both binaries refreshed.
+
+#### `#k9e1` FFI relocation — complete
+
+All 15 pure FFI functions now live in `agent-doc-core::ffi` across the four sub-tasks (`#k9e1` POC + `#epv5` + `#vb8h` + `#e130`). The editor-plugin slim-link target — linking only `agent-doc-core` (9.87s cold, 74 crates) instead of main (129s, 266 crates) — is now **unblocked** for the document-mutation surface.
+
+#### Recommendation on the tracker item
+
+`#yybc` (`#k9e1-ffi-mem`) tracked the relocation pattern "for future pure FFI relocations" — and those are all done. The item has no remaining purpose; I'd strike it from the queue (it sits behind the publish/orchestration items) rather than spend a cycle on a no-op. Leaving that to your call since you own the queue ordering.
+
+Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
+
+**Not invoking `/loop`** — the next queue item is an operator decision (publish `agent-doc-core` to crates.io — SemVer commitment, ownership readiness) that I can't execute unilaterally.
+<!-- agent:boundary:96d4ca76 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -50,7 +84,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#5yqz]~
 - ~do [#epv5]~
 - ~do [#vb8h]~
-- do [#e130]
+- ~do [#e130]~
 - do [#77v6]
 - do [#ysv9]
 - do [#yybc]
@@ -60,7 +94,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#e130] #k9e1-ffi-apply-patch Move the 3 apply_patch variants (agent_doc_apply_patch, _with_caret, _with_boundary) to agent-doc-core::ffi. NOTE: FfiPatchResult + ffi_patch_ok/err/from_result + normalize_editor_visible_result were ALREADY relocated to core in #epv5 — only the 3 function bodies remain. Each needs template::apply_patches_with_overrides switched to apply_patches_with_overrides_pure (preloaded empty configs, no dummy_path). Touches the #ckv3-refactored patch surface.
 - [ ] [#77v6] #adcr-publish Decide on publishing agent-doc-core to crates.io (currently publish = false). Allows third-party FFI consumers and unblocks the editor-plugin slim-link target.
 - [ ] [#ysv9] #adoc-orchestration-crate Plan agent-doc-orchestration extraction — split route/git/sessions/ipc_socket/supervisor/capture/cycle_state/repair/sync/start out of the main crate into a sibling workspace member, leaving only the CLI entrypoint + command dispatch in agent-doc. Would create a 3-layer architecture (CLI → orchestration → core) and substantially cut the editor-plugin-only build target. Substantial refactor; depends on #adcr-baseline-measure to quantify the win first.
 - [ ] [#yybc] #k9e1-ffi-mem POC follow-up: track the proven pattern (pub use agent_doc_core::ffi::* + force_link_core_ffi_symbols reference function in main) for future pure FFI relocations. POC moved agent_doc_free_string + agent_doc_free_state; nm verification confirmed symbols still in libagent_doc.so export table.

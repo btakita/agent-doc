@@ -37,7 +37,7 @@ Transferred this document's exchange content into `tasks/professional/equityfund
 The transfer created commit `ea44de165` for the demo document. The binary also transferred the source backlog and icebox along with the exchange, so the main EFS document now keeps the current status/review surface while the demo document owns the transferred exchange/backlog/icebox context.
 
 Closeout evidence: changed documents are `tasks/professional/equityfundingsource-demo.md`, `tasks/professional/equityfundingsource.md`, and the source done archive `tasks/professional/equityfundingsource.done.md`. Commands used included `tsift status`, `tsift status --fix`, `agent-doc --version`, `agent-doc preflight/read/plan/template-info`, `git diff/status/log`, `agent-doc transfer`, and this `agent-doc finalize`. Verification is document/source review only; no code changed and no tests were run. Confidence is high that the full source exchange was moved into the demo document because `agent-doc template-info` shows the transfer block in the target exchange and an empty source exchange before this closeout. No escalation was used.
-<!-- agent:boundary:9ffd618b -->
+<!-- agent:boundary:691add26 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -102,6 +102,7 @@ preset #spec-test-commit-push
 
 <!-- agent:icebox -->
 
+- [ ] [#e1kb] Point equityfundingsource.com and www.equityfundingsource.com at the Cloudflare Pages project equityfundingsource, then verify / and /funded-deals on the custom domain; if admin routes are expected on the custom domain too, decide whether to route those paths to the Worker or move the dynamic app fully behind the same hostname.
 <!-- /agent:icebox -->
 
 <!-- agent:done archive=tasks/professional/equityfundingsource.done.md -->

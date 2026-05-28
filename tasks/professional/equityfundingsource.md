@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -269,20 +269,55 @@ Top backlog item: `#bpq-api`.
 The current `/portal-broker/pre-qual-tool` page is static, so the first item is the backend calculation/API contract; UI wiring, submission handoff, and test/docs coverage follow it. No product code changed in this cycle.
 
 Closeout evidence: changed path is `tasks/professional/equityfundingsource.md` only. Commands run: `tsift status`, `tsift status --fix`, `agent-doc --version`, `agent-doc preflight`, `agent-doc plan`, `git status --short`, `git diff`, and this `agent-doc finalize`. Verification is the binary-owned finalize/session-check plus document review; no tests were run because this cycle only mutates the session backlog. Confidence is high. Escalation: none.
-<!-- agent:boundary:5d8f27d7 -->
+### Re: broker pre-qual API — gpt-5
+
+Done. `#bpq-api` is implemented and pushed in `src/equityfundingsource-dev` commit `05e3aaf` (`feat: add broker prequal api`).
+
+What changed:
+
+- Added a pure broker pre-qual calculator in `app/equityfundingsource/lib/broker/prequal.ts`.
+- Added broker-authenticated `POST /api/broker/pre-qual`.
+- The endpoint accepts `property_value`, `loan_amount`, `property_type`, and `loan_purpose`, with aliases for the existing static UI field names.
+- The response returns calculated LTV, indicative rate, eligibility status, commission estimate, reasons, and the active April 2026 Bridge Lending rate-sheet reference.
+- Added browser API types/helper for the later UI wiring item, without changing the static `/portal-broker/pre-qual-tool` UI yet.
+- Updated PRD, formula docs, current progress, and broker portal tests.
+
+Rules now captured in code/spec:
+
+- 65% max LTV guideline.
+- $100,000 minimum loan guideline.
+- `eligible`, `review_required`, and `outside_guidelines` statuses.
+- Construction/commercial/land scenarios require underwriter review.
+- 1% broker commission estimate.
+- Example scenario `$750,000` value / `$450,000` request returns `60%` LTV, `10.25%` indicative rate, and `$4,500` commission.
+
+Verification:
+
+- `bun test tests/broker-portal.test.ts` passed: 23 pass, 0 fail.
+- `make check` passed: Bun reported 206 pass, 0 fail; app build and worker build completed. The suite still prints the expected upload limiter and local missing-D1 log lines while passing.
+- `gh workflow list` returned no workflows.
+- `gh run list --workflow CI --limit 1` reported no workflow named `CI`.
+- `gh run list --workflow tmux-test --limit 1` reported no workflow named `tmux-test`.
+
+Closeout evidence: changed EFS paths are `app/equityfundingsource/lib/broker/prequal.ts`, `app/equityfundingsource/lib/broker/routes.ts`, `lib/ui--browser--efs/portal/broker/api.ts`, `tests/broker-portal.test.ts`, `prds/equity-funding-source-lending-portal-prd.md`, `docs/formula.md`, and `docs/current_progress.md`. EFS repo is clean after push. Confidence is high. Escalation: none.
+<!-- agent:boundary:ad906e79 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+preset #spec-test-commit-push
+- ~do [#bpq-api]~
+- do [#bpq-ui]
+- do [#bpq-prefill]
+- do [#bpq-tests]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#bpq-api] Broker pre-qual API: define EFS prequalification rules and add broker-authenticated POST /api/broker/pre-qual returning LTV, indicative rate, eligibility status, commission estimate, reasons, and rate-sheet reference.
 - [ ] [#bpq-ui] Broker pre-qual UI: replace static read-only fields in /portal-broker/pre-qual-tool with editable inputs, loading/error/retry states, and live API results.
 - [ ] [#bpq-prefill] Broker pre-qual to submission handoff: carry an eligible scenario into /portal-broker/submit-a-deal as prefilled deal fields or a saved draft.
 - [ ] [#bpq-tests] Broker pre-qual coverage: add tests for rule boundaries, validation errors, authenticated endpoint behavior, UI API wiring, and docs/current-progress updates.
@@ -337,4 +372,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 <!-- /agent:icebox -->
 
 <!-- agent:done archive=tasks/professional/equityfundingsource.done.md -->
+
+<!-- completed work archived in tasks/professional/equityfundingsource.done.md -->
 <!-- /agent:done -->

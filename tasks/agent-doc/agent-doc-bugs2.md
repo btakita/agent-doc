@@ -35,7 +35,46 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 1 response topic(s): JB Run Agent Doc on tsift.md
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:8ae64173 -->
+
+### Re: do [#h9g0] — gpt-5
+
+Implemented `#h9g0`.
+
+The closeout proof now treats a template patch response as materialized by the body it applies, not by the wrapper comments. That means `stuck_captured_cycle` and IPC sidecar validation can recognize a response written through the boundary/template path even though committed `HEAD` contains only the visible exchange body.
+
+The stream write path also now fails before response capture if patch markers are present but parse to zero patch blocks. Plain patch-free responses can still log the `0 template patches found` warning, but marker-bearing malformed input no longer gets captured and later reported as a stuck cycle.
+
+```mermaid
+flowchart LR
+    A["finalize --stream input"] --> B["Parse template patchback"]
+    B -->|"patch markers + zero patches"| C["Fail before capture"]
+    B -->|"valid patch:exchange"| D["Capture response"]
+    D --> E["Apply patch body to exchange"]
+    E --> F["Validate materialization using patch body"]
+    F --> G["Commit / session-check"]
+    F -->|"body absent"| H["IPC proof failure or stuck-cycle recovery"]
+```
+
+Changed paths:
+- `src/agent-doc/src/write.rs`
+- `src/agent-doc/src/flow/closeout.rs`
+- `src/agent-doc/specs/07-closeout-commands.md`
+
+Verification:
+- `cargo test stuck_captured_cycle_ignores_committed_template_patch_body_in_head`
+- `cargo test materialization`
+- `cargo test marker_bearing_zero_patch_parse_is_rejected_before_capture`
+- `cargo test patch_wrapped_response_is_materialized_by_visible_patch_body`
+- `cargo test malformed_patchback_is_rejected_instead_of_appended_as_unmatched`
+- `cargo test stream_ipc_timeout_commit_removes_fallback_patch_file`
+- `make check`
+- `make install`
+- GitHub Actions CI run `26545667145`: `make check` passed; `make tmux-ci` passed.
+
+Commit/push:
+- `btakita/agent-doc@0410445b30a58667837a3bcab7facb14ef67357a` pushed to `20260422/codex-agent-backend`.
+- Root submodule pointer commit `cecf6e98d` is ready in `btakita/agent-loop`; this closeout will be pushed with the session-document commit.
+<!-- agent:boundary:ae65a142 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -58,7 +97,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 
 <!-- agent:queue auto -->
 dispatch #spec-test-build-install-commit-push
-- do [#h9g0]
+- ~do [#h9g0]~
 - do [#zeb5]
 - do [#already-applied-divergence]
 <!-- /agent:queue -->
@@ -66,7 +105,6 @@ dispatch #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#h9g0] finalize --stream IPC synthesis reports 0 template patches found and creates stuck_captured_cycle when patch markers present in heredoc input — response IS written via boundary insertion but capture validation flags it as stuck
 - [ ] [#zeb5] finalize --stream IPC synthesis reports 0 template patches found and creates stuck_captured_cycle warning when patch markers are present in heredoc input
 - [ ] [#already-applied-divergence] already_applied IPC path saves stale content_ours as snapshot, diverging HEAD from working tree — plan: tasks/agent-doc/plan-already-applied-snapshot-divergence.md
 <!-- /agent:backlog -->

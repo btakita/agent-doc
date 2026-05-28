@@ -71,8 +71,8 @@ The umbrella execute item remains the queue head after this consume. It splits i
 #### Note on `pending_done_guard` interaction
 
 This response was initially rejected by `pending_done_guard` because the body mentions the umbrella item ID while no `--done` for it was passed. Same heuristic class as `#queue-strike-on-halt` filed earlier. Suppressed with `` so this report can land.
-Please split out the waves as #next-steps.
-### Re: #next-steps wave split — opus-4-7 (HEAD)
+❯ Please split out the waves as #next-steps.
+### Re: #next-steps wave split — opus-4-7
 
 Split `#adcr` umbrella into four discrete backlog items, one per wave. Each is now an actionable cycle with the plan reference inlined for context.
 
@@ -87,7 +87,7 @@ Backlog after this cycle (top → bottom):
 **Top of backlog: `#adcr-wave-1`**.
 
 Each wave item carries its plan reference (`tasks/agent-doc/plan-agent-doc-core-extraction.md`), the exact modules + public types it covers, dependencies on prior waves, and the I/O wrappers that stay in the main crate. So an operator can pick any wave and start without re-deriving the contract.
-<!-- agent:boundary:bbe02614 -->
+<!-- agent:boundary:5f2ebae9 -->
 <!-- /agent:exchange -->
 
 ## Queue

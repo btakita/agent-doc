@@ -1,11 +1,11 @@
 use anyhow::Result;
 use std::path::Path;
 
-pub(crate) fn read_optional_text(path: &Path) -> Result<Option<String>> {
+pub fn read_optional_text(path: &Path) -> Result<Option<String>> {
     read_optional(path, |path| std::fs::read_to_string(path))
 }
 
-pub(crate) fn read_optional_bytes(path: &Path) -> Result<Option<Vec<u8>>> {
+pub fn read_optional_bytes(path: &Path) -> Result<Option<Vec<u8>>> {
     read_optional(path, |path| std::fs::read(path))
 }
 

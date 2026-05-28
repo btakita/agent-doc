@@ -92,7 +92,9 @@ version = "0.1.0"
 dependencies = [
  "agent-doc-core",
  "anyhow",
+ "indexmap",
  "interprocess",
+ "regex",
  "serde_json",
  "tempfile",
 ]

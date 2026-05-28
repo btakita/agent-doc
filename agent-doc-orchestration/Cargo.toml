@@ -13,7 +13,9 @@ name = "agent_doc_orchestration"
 [dependencies]
 agent-doc-core = { path = "../agent-doc-core" }
 anyhow = "1"
+indexmap = { version = "2", features = ["serde"] }
 interprocess = { version = "2", default-features = false }
+regex = "1"
 serde_json = "1"
 
 [dev-dependencies]

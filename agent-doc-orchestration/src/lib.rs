@@ -11,5 +11,10 @@
 //! shims so existing call sites resolve unchanged during the migration.
 //!
 //! Wave 0 (scaffold) + Wave 1a: `ipc_socket` (the one dependency-free leaf).
+//! Direction A, increment 2: `env`, `fs_util`, `secret_redact` — three more
+//! zero-dependency foundation leaves (no `crate::` refs).
 
+pub mod env;
+pub mod fs_util;
 pub mod ipc_socket;
+pub mod secret_redact;

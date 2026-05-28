@@ -41,7 +41,8 @@ pub mod merge;
 pub mod model_tier;
 pub mod project_config;
 pub mod project_config_io;
-pub mod secret_redact;
+// Moved to `agent-doc-orchestration` (Direction A, increment 2).
+pub use agent_doc_orchestration::secret_redact;
 pub mod security;
 pub mod frontmatter_io;
 pub mod template;

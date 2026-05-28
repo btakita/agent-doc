@@ -316,7 +316,10 @@ Combined roadmap where each crate extraction enables the next tokensave port.
 **Step 7**: 1 day (final CLI wiring)
 **Total**: ~3 weeks
 #next-steps were not added to the backlog. #agent-doc-bug. Add #next-steps to the backlog.
-<!-- agent:boundary:13157d12 -->
+### Re: backlog update — glm-5.1
+
+Acknowledged. Adding the 7-step interleaved roadmap to the backlog now. Bug reported to `tasks/agent-doc/agent-doc-bugs2.md`.
+<!-- agent:boundary:0be07837 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -337,6 +340,13 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#step-1-core] Extract `tsift-core` crate — GraphStore trait, GraphNode, GraphEdge, GraphProjection types (~1.5K LOC from substrate.rs)
+- [ ] [#step-2-backends] Extract `tsift-sqlite` + `tsift-libsql` crates from substrate.rs + libsql_backend.rs (~3.7K LOC)
+- [ ] [#step-3-tokensave-reader] Add `tsift-tokensave` crate — DB reader adapter for .tokensave/tokensave.db with schema mapping + FTS5 search (~800 LOC)
+- [ ] [#step-4-graph] Extract `tsift-graph` crate + port LanguageExtractor trait, LanguageRegistry, complexity counting from tokensave (~600 new + ~1.4K moved)
+- [ ] [#step-5-algorithms] Add `tsift-algorithms` crate — port iterative Tarjan SCC, composite health score, dead code detection, coupling analysis from tokensave (~850 LOC)
+- [ ] [#step-6-resolution] Add `tsift-resolution` crate — port multi-strategy reference resolver, scoring heuristics, blocklist from tokensave (~450 LOC)
+- [ ] [#step-7-cli] Extract `tsift-cli` crate — move main.rs (39K LOC), wire new crates into CLI commands (tsift health, tsift dead-code, tsift coupling)
 - [ ] [#npm-auth-setup] Configure NPM_TOKEN secret + TSIFT_ENABLE_NPM_PUBLISH=true variable in GitHub repo settings
 - [ ] [#npm-publish-verify] After auth configured, tag release and verify publish-opencode-plugin CI job succeeds and opencode-tsift appears on npmjs.org
 - [ ] [#full-e2e-verify] In fresh project: opencode plugin opencode-tsift && opencode then /tsift-status. On success mark #e2e-install done.

@@ -60,6 +60,7 @@ mod cycle_state;
 mod dedupe;
 mod diff;
 mod diff_io;
+mod frontmatter_io;
 mod template_io;
 mod editor_route_errors;
 mod env;

@@ -41,6 +41,7 @@ pub mod project_config;
 pub mod secret_redact;
 pub mod security;
 pub mod syntax;
+pub mod frontmatter_io;
 pub mod template;
 pub mod template_io;
 

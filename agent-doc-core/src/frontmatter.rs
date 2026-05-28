@@ -97,7 +97,6 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::path::Path;
 use uuid::Uuid;
 
 use crate::model_tier::Tier;
@@ -618,29 +617,66 @@ pub fn parse(content: &str) -> Result<(Frontmatter, &str)> {
     Ok((fm, body))
 }
 
-/// Wrap a frontmatter parse failure with the target document path and a repair hint.
-pub fn contextualize_parse_error(file: &Path, err: anyhow::Error) -> anyhow::Error {
+/// Wrap a frontmatter parse failure with the target document display string
+/// and a repair hint.
+pub fn contextualize_parse_error(file_display: &str, err: anyhow::Error) -> anyhow::Error {
     anyhow::anyhow!(
         "invalid YAML frontmatter in {}: {}\n\nFix the frontmatter between the opening and closing --- markers, then rerun the command.",
-        file.display(),
+        file_display,
         err
     )
 }
 
-/// Parse frontmatter for a concrete document path so callers can surface actionable errors.
-pub fn parse_for_file<'a>(content: &'a str, file: &Path) -> Result<(Frontmatter, &'a str)> {
+/// Pure SSH-resolver context for [`parse_with_ssh_resolver`] / [`ensure_session_with_ssh_resolver`].
+///
+/// Callers in the orchestration layer pre-compute the project config + canonical
+/// relative path before invoking the pure parse path, so this module never has
+/// to touch `std::fs::canonicalize` or walk the project root from a `&Path`.
+pub struct SshResolverContext<'a> {
+    /// Resolved project config (already loaded from `.agent-doc/config.toml`).
+    pub project: &'a crate::project_config::ProjectConfig,
+    /// Path of the document relative to the project root, forward-slashed
+    /// (e.g. `tasks/agent-doc/plan.md`). Empty string when no project root.
+    pub doc_relative: &'a str,
+    /// Display string for the document path — used only for error messages.
+    pub file_display: &'a str,
+}
+
+/// Parse frontmatter using a pre-resolved SSH-defaults context.
+///
+/// Pure: no `&Path`, no `std::fs`. The file-based `parse_for_file` wrapper
+/// in `agent_doc::frontmatter_io` resolves the context and delegates here.
+pub fn parse_with_ssh_resolver<'a>(
+    content: &'a str,
+    ctx: &SshResolverContext<'_>,
+) -> Result<(Frontmatter, &'a str)> {
     let Some((yaml, body)) = split_frontmatter(content)? else {
         let mut fm = Frontmatter::default();
-        apply_required_ssh_defaults_for_file(&mut fm, file)?;
+        apply_required_ssh_defaults(&mut fm, ctx)?;
         return Ok((fm, content));
     };
     match serde_yaml::from_str(yaml) {
         Ok(mut fm) => {
-            apply_required_ssh_defaults_for_file(&mut fm, file)?;
+            apply_required_ssh_defaults(&mut fm, ctx)?;
             Ok((fm, body))
         }
-        Err(err) => Err(contextualize_yaml_parse_error(file, yaml, err)),
+        Err(err) => Err(contextualize_yaml_parse_error(ctx.file_display, yaml, err)),
     }
+}
+
+/// Ensure a session id using a pre-resolved SSH-defaults context.
+pub fn ensure_session_with_ssh_resolver(
+    content: &str,
+    ctx: &SshResolverContext<'_>,
+) -> Result<(String, String)> {
+    let (mut fm, body) = parse_with_ssh_resolver(content, ctx)?;
+    if let Some(existing) = fm.session.clone() {
+        return Ok((content.to_string(), existing));
+    }
+    let session_id = Uuid::new_v4().to_string();
+    fm.session = Some(session_id.clone());
+    let updated = write(&fm, body)?;
+    Ok((updated, session_id))
 }
 
 /// Write frontmatter back into a document, preserving the body.
@@ -819,19 +855,6 @@ pub fn ensure_session(content: &str) -> Result<(String, String)> {
     Ok((updated, session_id))
 }
 
-/// Ensure a document has a session id while preserving the target path in parse errors.
-pub fn ensure_session_for_file(content: &str, file: &Path) -> Result<(String, String)> {
-    let (mut fm, body) = parse_for_file(content, file)?;
-    if let Some(existing) = fm.session.clone() {
-        return Ok((content.to_string(), existing));
-    }
-
-    let session_id = Uuid::new_v4().to_string();
-    fm.session = Some(session_id.clone());
-    let updated = write(&fm, body)?;
-    Ok((updated, session_id))
-}
-
 fn split_frontmatter(content: &str) -> Result<Option<(&str, &str)>> {
     if !content.starts_with("---\n") {
         return Ok(None);
@@ -852,40 +875,41 @@ fn split_frontmatter(content: &str) -> Result<Option<(&str, &str)>> {
     Ok(Some((yaml, body)))
 }
 
-fn apply_required_ssh_defaults_for_file(fm: &mut Frontmatter, file: &Path) -> Result<()> {
+/// Apply required-SSH defaults to a frontmatter using a pre-resolved context.
+///
+/// Pure: no `&Path`, no `std::fs`. The caller is responsible for resolving
+/// the project config and computing the document's project-relative path
+/// before invoking.
+pub fn apply_required_ssh_defaults(
+    fm: &mut Frontmatter,
+    ctx: &SshResolverContext<'_>,
+) -> Result<()> {
     if !fm.required_ssh_targets.is_empty() {
         fm.required_ssh_targets = normalize_required_ssh_targets(&fm.required_ssh_targets);
         return Ok(());
     }
 
-    let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
-    let project = crate::project_config::load_project_for_doc(&canonical);
-    let Some(project_root) = crate::project_config::project_root_for_doc(&canonical) else {
+    if ctx.doc_relative.is_empty() {
         return Ok(());
-    };
-    let relative = canonical
-        .strip_prefix(&project_root)
-        .unwrap_or(canonical.as_path())
-        .to_string_lossy()
-        .replace('\\', "/");
+    }
 
     let resolved = if let Some(profile_name) = fm.required_ssh_profile.as_deref() {
-        resolve_required_ssh_profile_targets(&project.ssh, profile_name, file)?
-    } else if let Some(doc_cfg) = project.ssh.docs.get(&relative) {
+        resolve_required_ssh_profile_targets(&ctx.project.ssh, profile_name, ctx.file_display)?
+    } else if let Some(doc_cfg) = ctx.project.ssh.docs.get(ctx.doc_relative) {
         let mut targets = doc_cfg.targets.clone();
         if let Some(profile_name) = doc_cfg.profile.as_deref() {
             targets.extend(resolve_required_ssh_profile_targets(
-                &project.ssh,
+                &ctx.project.ssh,
                 profile_name,
-                file,
+                ctx.file_display,
             )?);
         }
         if targets.is_empty() {
             anyhow::bail!(
                 "document {} is configured as SSH-dependent in .agent-doc/config.toml but no required_ssh_targets resolved for `{}`.\n\nAdd direct targets under [ssh.docs.\"{}\"] or define a valid profile under [ssh.profiles.<name>].",
-                file.display(),
-                relative,
-                relative
+                ctx.file_display,
+                ctx.doc_relative,
+                ctx.doc_relative
             );
         }
         targets
@@ -900,12 +924,12 @@ fn apply_required_ssh_defaults_for_file(fm: &mut Frontmatter, file: &Path) -> Re
 fn resolve_required_ssh_profile_targets(
     ssh: &crate::project_config::SshConfig,
     profile_name: &str,
-    file: &Path,
+    file_display: &str,
 ) -> Result<Vec<String>> {
     let profile = ssh.profiles.get(profile_name).ok_or_else(|| {
         anyhow::anyhow!(
             "document {} requires SSH profile `{}` but .agent-doc/config.toml has no matching [ssh.profiles.{}] entry.",
-            file.display(),
+            file_display,
             profile_name,
             profile_name
         )
@@ -913,7 +937,7 @@ fn resolve_required_ssh_profile_targets(
     if profile.targets.is_empty() {
         anyhow::bail!(
             "document {} requires SSH profile `{}` but [ssh.profiles.{}] has no targets.",
-            file.display(),
+            file_display,
             profile_name,
             profile_name
         );
@@ -934,14 +958,14 @@ fn normalize_required_ssh_targets(targets: &[String]) -> Vec<String> {
 }
 
 fn contextualize_yaml_parse_error(
-    file: &Path,
+    file_display: &str,
     yaml: &str,
     err: serde_yaml::Error,
 ) -> anyhow::Error {
     let excerpt = err
         .location()
         .and_then(|location| render_frontmatter_excerpt(yaml, location.line(), location.column()));
-    let mut message = format!("invalid YAML frontmatter in {}: {}", file.display(), err);
+    let mut message = format!("invalid YAML frontmatter in {}: {}", file_display, err);
     if let Some(excerpt) = excerpt {
         message.push_str("\n\nFrontmatter excerpt:\n");
         message.push_str(&excerpt);
@@ -985,13 +1009,6 @@ fn render_frontmatter_excerpt(yaml: &str, line: usize, column: usize) -> Option<
     Some(rendered.join("\n"))
 }
 
-/// Read the session UUID from a document file. Returns empty string if not found.
-pub fn read_session_id(file: &std::path::Path) -> Option<String> {
-    let content = std::fs::read_to_string(file).ok()?;
-    let (fm, _) = parse(&content).ok()?;
-    fm.session
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1029,19 +1046,6 @@ mod tests {
         assert!(body.contains("# Doc"));
     }
 
-    #[test]
-    fn parse_for_file_includes_path_and_fix_hint() {
-        let path = Path::new("tasks/bad.md");
-        let err = parse_for_file("---\nprompt_presets:\n  key: [oops\n---\n", path).unwrap_err();
-        let message = err.to_string();
-        assert!(message.contains("invalid YAML frontmatter in tasks/bad.md"));
-        assert!(message.contains("Frontmatter excerpt:"));
-        assert!(message.contains("> 2 |   key: [oops"));
-        assert!(message.contains("^"));
-        assert!(
-            message.contains("Fix the frontmatter between the opening and closing --- markers")
-        );
-    }
 
     #[test]
     fn parse_model_tier_high() {
@@ -1916,71 +1920,6 @@ mod tests {
             fm.required_ssh_profile.as_deref(),
             Some("monsterrodholders")
         );
-    }
-
-    #[test]
-    fn parse_for_file_resolves_required_ssh_targets_from_project_doc_mapping() {
-        let dir = TempDir::new().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
-        std::fs::write(
-            dir.path().join(".agent-doc/config.toml"),
-            "[ssh.profiles.monsterrodholders]\n\
-targets = [\"monsterrodholders-server\"]\n\
-\n\
-[ssh.docs.\"tasks/monsterrodholders.md\"]\n\
-profile = \"monsterrodholders\"\n",
-        )
-        .unwrap();
-        let doc = dir.path().join("tasks/monsterrodholders.md");
-        std::fs::write(&doc, "---\nagent: codex\n---\nBody\n").unwrap();
-
-        let content = std::fs::read_to_string(&doc).unwrap();
-        let (fm, _) = parse_for_file(&content, &doc).unwrap();
-        assert_eq!(
-            fm.required_ssh_targets,
-            vec!["monsterrodholders-server".to_string()]
-        );
-    }
-
-    #[test]
-    fn parse_for_file_prefers_explicit_required_ssh_targets_over_project_mapping() {
-        let dir = TempDir::new().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
-        std::fs::write(
-            dir.path().join(".agent-doc/config.toml"),
-            "[ssh.docs.\"tasks/monsterrodholders.md\"]\n\
-targets = [\"monsterrodholders-server\"]\n",
-        )
-        .unwrap();
-        let doc = dir.path().join("tasks/monsterrodholders.md");
-        std::fs::write(
-            &doc,
-            "---\nrequired_ssh_targets:\n  - root@50.28.2.199\n---\nBody\n",
-        )
-        .unwrap();
-
-        let content = std::fs::read_to_string(&doc).unwrap();
-        let (fm, _) = parse_for_file(&content, &doc).unwrap();
-        assert_eq!(
-            fm.required_ssh_targets,
-            vec!["root@50.28.2.199".to_string()]
-        );
-    }
-
-    #[test]
-    fn parse_for_file_fails_closed_when_required_ssh_profile_missing() {
-        let dir = TempDir::new().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
-        std::fs::write(dir.path().join(".agent-doc/config.toml"), "").unwrap();
-        let doc = dir.path().join("tasks/monsterrodholders.md");
-        std::fs::write(&doc, "---\nrequired_ssh_profile: missing\n---\nBody\n").unwrap();
-
-        let content = std::fs::read_to_string(&doc).unwrap();
-        let err = parse_for_file(&content, &doc).unwrap_err();
-        assert!(err.to_string().contains("requires SSH profile `missing`"));
     }
 
     // --- resolve_harness_model tests ---

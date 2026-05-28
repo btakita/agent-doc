@@ -37,7 +37,22 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 3 response topic(s): #step-2-backends; #step-3-tokensave-reader; #step-5-algorithms
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:69d2fca8 -->
+### Re: #step-4-graph — glm-5.1
+
+Confirmed `tsift-graph` crate is fully extracted and working:
+
+- `packages/tsift-graph/` — ~2473 LOC across 3 modules:
+  - `lib.rs` (1289 LOC) — CallSite, CallEdge, RouteSite extraction, community detection, path finding
+  - `lang.rs` (832 LOC) — Lang enum, Symbol struct, language detection, tree-sitter queries
+  - `complexity.rs` (352 LOC) — ComplexityMetrics, LanguageExtractor trait, LanguageRegistry
+- `src/graph.rs` is a thin re-export shim (`pub use tsift_graph::*`)
+- 67 unit tests pass in tsift-graph; 827 total workspace tests pass
+- Build succeeds. Crate properly wired in workspace Cargo.toml with language feature forwarding
+
+No new code changes needed — crate was already code-complete from prior session. Marked #step-4-graph done.
+
+Next in queue: **#step-6-resolution** — Add `tsift-resolution` crate.
+<!-- agent:boundary:7d982dfc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -51,8 +66,8 @@ preset #spec-test-build-install-commit-push
 - ~[#step-1-core]~
 - ~[#step-2-backends]~
 - ~[#step-3-tokensave-reader]~
-- [#step-4-graph]
-- [#step-5-algorithms]
+- ~[#step-4-graph]~
+- ~[#step-5-algorithms]~
 - [#step-6-resolution]
 - [#step-7-cli]
 - [#npm-auth-setup]
@@ -63,7 +78,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#step-4-graph] Extract `tsift-graph` crate + port LanguageExtractor trait, Language Registry, complexity counting from tokensave (~600 new + ~1.4K moved)
 - [ ] [#step-6-resolution] Add `tsift-resolution` crate — port multi-strategy reference resolver, scoring heuristics, blocklist from tokensave (~450 LOC)
 - [ ] [#step-7-cli] Extract `tsift-cli` crate — move main.rs (39K LOC), wire new crates into CLI commands (tsift health, tsift dead-code, tsift coupling)
 - [ ] [#npm-auth-setup] Configure NPM_TOKEN secret + TSIFT_ENABLE_NPM_PUBLISH=true variable in GitHub repo settings

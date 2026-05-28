@@ -20,6 +20,7 @@ pub mod id;
 pub mod model_tier;
 pub mod pending;
 pub mod project_config;
+pub mod syntax;
 pub mod template;
 
 pub use component::Component;

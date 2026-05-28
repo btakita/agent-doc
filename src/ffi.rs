@@ -64,7 +64,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::component;
 use crate::crdt;
-use crate::frontmatter;
 use crate::template;
 
 /// Cross-editor sync lock — prevents concurrent layout syncs.
@@ -72,91 +71,6 @@ static SYNC_LOCKED: AtomicBool = AtomicBool::new(false);
 
 /// Sync debounce generation counter — only the latest scheduled sync fires.
 static SYNC_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-fn utf8_offsets_to_utf16_offsets(
-    doc: &str,
-    offsets: &[usize],
-) -> std::collections::HashMap<usize, usize> {
-    let mut targets = offsets.to_vec();
-    targets.sort_unstable();
-    targets.dedup();
-
-    let mut mapped = std::collections::HashMap::with_capacity(targets.len());
-    let mut target_idx = 0usize;
-    let mut utf8_offset = 0usize;
-    let mut utf16_offset = 0usize;
-
-    while target_idx < targets.len() && targets[target_idx] == 0 {
-        mapped.insert(0, 0);
-        target_idx += 1;
-    }
-
-    for ch in doc.chars() {
-        let next_utf8 = utf8_offset + ch.len_utf8();
-        while target_idx < targets.len() && targets[target_idx] < next_utf8 {
-            mapped.insert(targets[target_idx], utf16_offset);
-            target_idx += 1;
-        }
-
-        utf8_offset = next_utf8;
-        utf16_offset += ch.len_utf16();
-
-        while target_idx < targets.len() && targets[target_idx] == utf8_offset {
-            mapped.insert(targets[target_idx], utf16_offset);
-            target_idx += 1;
-        }
-    }
-
-    while target_idx < targets.len() {
-        mapped.insert(targets[target_idx], utf16_offset);
-        target_idx += 1;
-    }
-
-    mapped
-}
-
-/// Serialized component info returned by [`agent_doc_parse_components`].
-#[repr(C)]
-pub struct FfiComponentList {
-    /// JSON-encoded array of components. Free with [`agent_doc_free_string`].
-    pub json: *mut c_char,
-    /// Number of components parsed (convenience — also available in the JSON).
-    pub count: usize,
-}
-
-/// Result of [`agent_doc_apply_patch`].
-#[repr(C)]
-pub struct FfiPatchResult {
-    /// The patched document text, or null on error. Free with [`agent_doc_free_string`].
-    pub text: *mut c_char,
-    /// Error message if `text` is null. Free with [`agent_doc_free_string`].
-    pub error: *mut c_char,
-}
-
-fn ffi_patch_ok(text: String) -> FfiPatchResult {
-    FfiPatchResult {
-        text: CString::new(text).unwrap_or_default().into_raw(),
-        error: ptr::null_mut(),
-    }
-}
-
-fn ffi_patch_err(msg: &str) -> FfiPatchResult {
-    FfiPatchResult {
-        text: ptr::null_mut(),
-        error: CString::new(msg).unwrap_or_default().into_raw(),
-    }
-}
-
-fn ffi_patch_from_result(result: anyhow::Result<String>) -> FfiPatchResult {
-    match result {
-        Ok(text) => ffi_patch_ok(text),
-        Err(e) => ffi_patch_err(&format!("{e:#}")),
-    }
-}
-
-fn normalize_editor_visible_result(text: String) -> anyhow::Result<String> {
-    template::normalize_editor_visible_template_structure(&text)
-}
 
 /// Result of [`agent_doc_resolve_project_path`].
 #[repr(C)]
@@ -180,105 +94,6 @@ pub struct FfiMergeResult {
     pub state_len: usize,
     /// Error message if `text` is null. Free with [`agent_doc_free_string`].
     pub error: *mut c_char,
-}
-
-/// Parse components from a document.
-///
-/// Returns a [`FfiComponentList`] with a JSON-encoded array of components.
-/// Each component object has: `name`, `attrs`, `open_start`, `open_end`,
-/// `close_start`, `close_end`, `content`.
-///
-/// # Safety
-///
-/// `doc` must be a valid, NUL-terminated UTF-8 string.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_parse_components(doc: *const c_char) -> FfiComponentList {
-    let doc_str = match unsafe { CStr::from_ptr(doc) }.to_str() {
-        Ok(s) => s,
-        Err(_) => {
-            return FfiComponentList {
-                json: ptr::null_mut(),
-                count: 0,
-            };
-        }
-    };
-
-    let components = match component::parse(doc_str) {
-        Ok(c) => c,
-        Err(_) => {
-            return FfiComponentList {
-                json: ptr::null_mut(),
-                count: 0,
-            };
-        }
-    };
-
-    let count = components.len();
-
-    // Serialize to JSON with content included
-    let json_items: Vec<serde_json::Value> = components
-        .iter()
-        .map(|c| {
-            serde_json::json!({
-                "name": c.name,
-                "attrs": c.attrs,
-                "open_start": c.open_start,
-                "open_end": c.open_end,
-                "close_start": c.close_start,
-                "close_end": c.close_end,
-                "content": c.content(doc_str),
-            })
-        })
-        .collect();
-
-    let json_str = serde_json::to_string(&json_items).unwrap_or_default();
-    let c_json = CString::new(json_str).unwrap_or_default();
-
-    FfiComponentList {
-        json: c_json.into_raw(),
-        count,
-    }
-}
-
-/// Collect editor-facing visual token ranges from a markdown document.
-///
-/// The returned JSON array contains `{ kind, start, end }` objects, where
-/// offsets are UTF-16 document positions suitable for JetBrains and VS Code
-/// range APIs.
-///
-/// # Safety
-///
-/// `doc` must be a valid, NUL-terminated UTF-8 string.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_visual_tokens_json(doc: *const c_char) -> *mut c_char {
-    let doc_str = match unsafe { CStr::from_ptr(doc) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return ptr::null_mut(),
-    };
-    let tokens = crate::syntax::collect_visual_tokens(doc_str);
-    let offsets: Vec<usize> = tokens
-        .iter()
-        .flat_map(|token| [token.start, token.end])
-        .collect();
-    let utf16_offsets = utf8_offsets_to_utf16_offsets(doc_str, &offsets);
-    let editor_tokens: Vec<_> = tokens
-        .iter()
-        .map(|token| {
-            serde_json::json!({
-                "kind": token.kind,
-                "start": utf16_offsets[&token.start],
-                "end": utf16_offsets[&token.end],
-            })
-        })
-        .collect();
-    let json = match serde_json::to_string(&editor_tokens) {
-        Ok(json) => json,
-        Err(_) => return ptr::null_mut(),
-    };
-    match CString::new(json) {
-        Ok(value) => value.into_raw(),
-        Err(_) => ptr::null_mut(),
-    }
 }
 
 /// Apply a patch to a document component.
@@ -559,42 +374,6 @@ pub unsafe extern "C" fn agent_doc_merge_crdt(
     CString::new(merged).unwrap_or_default().into_raw()
 }
 
-/// Merge YAML key/value pairs into a document's frontmatter.
-///
-/// `yaml_fields` is a YAML string of fields to merge (additive — never removes keys).
-/// Returns the updated document content via [`FfiPatchResult`].
-///
-/// # Safety
-///
-/// All string pointers must be valid, NUL-terminated UTF-8.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_merge_frontmatter(
-    doc: *const c_char,
-    yaml_fields: *const c_char,
-) -> FfiPatchResult {
-    let make_err = |msg: &str| FfiPatchResult {
-        text: ptr::null_mut(),
-        error: CString::new(msg).unwrap_or_default().into_raw(),
-    };
-
-    let doc_str = match unsafe { CStr::from_ptr(doc) }.to_str() {
-        Ok(s) => s,
-        Err(e) => return make_err(&format!("invalid doc UTF-8: {e}")),
-    };
-    let fields_str = match unsafe { CStr::from_ptr(yaml_fields) }.to_str() {
-        Ok(s) => s,
-        Err(e) => return make_err(&format!("invalid yaml_fields UTF-8: {e}")),
-    };
-
-    match frontmatter::merge_fields(doc_str, fields_str) {
-        Ok(result) => FfiPatchResult {
-            text: CString::new(result).unwrap_or_default().into_raw(),
-            error: ptr::null_mut(),
-        },
-        Err(e) => make_err(&format!("{e}")),
-    }
-}
-
 /// Reposition boundary marker to end of exchange component.
 ///
 /// Removes all existing boundary markers from the document, strips transient
@@ -689,29 +468,6 @@ pub unsafe extern "C" fn agent_doc_reposition_boundary_to_end_preserve_head_with
     let result =
         template::reposition_boundary_to_end_preserve_head_with_id(doc_str, Some(boundary_id_str));
     ffi_patch_from_result(normalize_editor_visible_result(result))
-}
-
-/// Normalize/fail-close template structure before editor-visible IPC writes.
-///
-/// Safe duplicate scaffold shells are repaired. Ambiguous duplicate scaffold
-/// content, conversation text outside exchange, or malformed component shape
-/// returns an error so editor plugins can refuse to mutate the visible buffer.
-///
-/// # Safety
-///
-/// `doc` must be a valid, NUL-terminated UTF-8 string.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_normalize_template_structure(
-    doc: *const c_char,
-) -> FfiPatchResult {
-    let doc_str = match unsafe { CStr::from_ptr(doc) }.to_str() {
-        Ok(s) => s,
-        Err(e) => return ffi_patch_err(&format!("invalid doc UTF-8: {e}")),
-    };
-
-    ffi_patch_from_result(template::normalize_editor_visible_template_structure(
-        doc_str,
-    ))
 }
 
 /// Record a document change event for debounce tracking.
@@ -1519,8 +1275,19 @@ pub use agent_doc_core::ffi::*;
 /// linker keeps them in the cdylib export table.
 #[allow(dead_code)]
 fn force_link_core_ffi_symbols() {
-    let _: unsafe extern "C" fn(*mut c_char) = agent_doc_core::ffi::agent_doc_free_string;
-    let _: unsafe extern "C" fn(*mut u8, usize) = agent_doc_core::ffi::agent_doc_free_state;
+    use agent_doc_core::ffi::{
+        FfiComponentList, FfiPatchResult, agent_doc_free_state, agent_doc_free_string,
+        agent_doc_merge_frontmatter, agent_doc_normalize_template_structure,
+        agent_doc_parse_components, agent_doc_visual_tokens_json,
+    };
+    let _: unsafe extern "C" fn(*mut c_char) = agent_doc_free_string;
+    let _: unsafe extern "C" fn(*mut u8, usize) = agent_doc_free_state;
+    let _: unsafe extern "C" fn(*const c_char) -> FfiComponentList = agent_doc_parse_components;
+    let _: unsafe extern "C" fn(*const c_char) -> *mut c_char = agent_doc_visual_tokens_json;
+    let _: unsafe extern "C" fn(*const c_char, *const c_char) -> FfiPatchResult =
+        agent_doc_merge_frontmatter;
+    let _: unsafe extern "C" fn(*const c_char) -> FfiPatchResult =
+        agent_doc_normalize_template_structure;
 }
 
 #[cfg(test)]

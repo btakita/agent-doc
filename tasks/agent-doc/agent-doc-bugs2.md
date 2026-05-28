@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -73,7 +73,7 @@ Verification:
 Commit/push:
 - `btakita/agent-doc@0410445b30a58667837a3bcab7facb14ef67357a` pushed to `20260422/codex-agent-backend`.
 - Root submodule pointer commit `cecf6e98d` is ready in `btakita/agent-loop`; this closeout will be pushed with the session-document commit.
-### Re: do [#zeb5] — gpt-5 (HEAD)
+### Re: do [#zeb5] — gpt-5
 
 Closed `#zeb5` with the `#h9g0` implementation.
 
@@ -100,7 +100,47 @@ Verification already completed for that commit:
 - `make check`
 - `make install`
 - GitHub Actions CI run `26545667145`: `make check` passed; `make tmux-ci` passed.
-<!-- agent:boundary:7a59647b -->
+### Re: do [#already-applied-divergence] — gpt-5
+
+Implemented `#already-applied-divergence`.
+
+The socket `already_applied` path no longer saves stale `content_ours` when the live editor buffer has already applied the response. It now verifies the current disk buffer contains the materialized response-body probe, adopts that disk buffer as the snapshot when proven, runs response-block and prompt-artifact dedupe first, and repairs the visible file to the same deduped content when needed. If the disk buffer does not contain the response probe, it refuses to save stale `content_ours` and falls through to file IPC with an explicit proof diagnostic.
+
+```mermaid
+flowchart LR
+    A["socket already_applied"] --> B["Read current disk buffer"]
+    B -->|"matches content_ours"| C["Persist content_ours snapshot"]
+    B -->|"contains response probe"| D["Adopt disk buffer"]
+    D --> E["Dedupe response and prompt artifacts"]
+    E --> F["Repair visible file if needed"]
+    F --> G["Save snapshot and CRDT"]
+    B -->|"missing response probe"| H["Log proof failure"]
+    H --> I["Fall through to file IPC"]
+```
+
+Changed paths:
+- `src/agent-doc/src/write.rs`
+- `src/agent-doc/specs/07-closeout-commands.md`
+
+Key coverage added/updated:
+- `try_ipc_already_applied_socket_adopts_disk_when_response_is_present`
+- `try_ipc_already_applied_socket_dedupes_duplicate_response_before_snapshot`
+- `already_applied_socket_missing_disk_response_requests_file_fallback`
+
+Verification:
+- `cargo test already_applied_socket`
+- `cargo test socket_ack_content_prompt_duplication_uses_content_ours_and_repairs_visible_buffer`
+- `cargo test response_already_in_current`
+- `cargo test ipc_snapshot_dedupes_extra_prompt_copy_against_before_content`
+- `make check`
+- `make tmux-ci`
+- `make install` (`agent-doc 0.34.0` installed)
+- GitHub Actions CI run `26546620702`: `make check` passed; `make tmux-ci` passed.
+
+Commit/push:
+- `btakita/agent-doc@2409025bdca63fc62a7ee3836f32e9898ee35a93` pushed to `20260422/codex-agent-backend`.
+- Root submodule pointer commit `adbf1a3aa` is ready in `btakita/agent-loop`; this closeout will be pushed with the session-document commit.
+<!-- agent:boundary:910cb145 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -126,18 +166,13 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 #spec-test-build-install-commit-push
 -->
 
-<!-- agent:queue auto -->
-dispatch #spec-test-build-install-commit-push
-- ~do [#h9g0]~
-- ~do [#zeb5]~
-- do [#already-applied-divergence]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
 - [ ] [#next-steps-backlog-capture] Agent responses containing #next-steps recommendations do not auto-add items to backlog when prompt preset is present. Agent must manually call `--pending-add` but the planning output `pending_mutations: expect_add` is not enforced by session-check `pending_done_guard`.
-- [ ] [#already-applied-divergence] already_applied IPC path saves stale content_ours as snapshot, diverging HEAD from working tree — plan: tasks/agent-doc/plan-already-applied-snapshot-divergence.md
 <!-- /agent:backlog -->
 
 ## Review

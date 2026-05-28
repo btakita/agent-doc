@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -438,7 +438,6 @@ Verification:
 
 Escalation: none. Confidence: high.
 In the input, use `pl-10` instead of `pl-7`.
-#spec-test-commit-push
 ### Re: rate estimator input padding — gpt-5
 
 Done. I changed both public homepage rate-estimator amount inputs from `pl-7` to `pl-10`, updated the critical CSS utility from `.pl-7` to `.pl-10`, and added the PRD/test coverage requested by `#spec-test-commit-push`.
@@ -532,22 +531,45 @@ Verification:
 - Tmux CI inspection: `make -n tmux-ci` has no `tmux-ci` target in the EFS repo.
 
 Closeout evidence: EFS repo is clean after push; changed files were staged exactly before commit. Escalation: none. Confidence: high.
-<!-- agent:boundary:41da0e43 -->
+❯ Please make the padding-left equivalent to 24px. .pl-8 had no effect.
+### Re: #spec-test-commit-push padding-left 24px — gpt-5
+
+Done. I fixed the cascade issue from the previous `pl-8` attempt and pushed the correction.
+
+The two public homepage rate-estimator inputs now use `class="efs-input pl-6"`, which is the Tailwind-equivalent 24px left padding (`1.5rem`). The critical CSS rule is also loaded after the base `.efs-input,.efs-select{padding:10px 14px}` shorthand, so `.pl-6{padding-left:1.5rem}` wins instead of being overwritten.
+
+Changed EFS paths:
+
+- `lib/ui--server--efs/home/index.ts`
+- `lib/ui--server--efs/styles/index.ts`
+- `tests/public-header.test.ts`
+- `prds/equity-funding-source-lending-portal-prd.md`
+
+Commit / push:
+
+- EFS repo commit: `0afd62b fix: enforce estimator input padding`
+- Pushed `0afd62b` to `origin/main`
+- This supersedes the earlier `a72d622` `pl-8` attempt.
+- Not deployed; this queue item requested spec/test/commit/push, not deploy.
+
+Verification:
+
+- `bun test tests/public-header.test.ts` passed: 7 pass, 0 fail.
+- `git diff --check` passed.
+- `make check` passed: 212 pass, 0 fail; app build and worker build completed.
+- Built output inspection found both `efs-input pl-6` inputs and `.efs-input,.efs-select{...padding:10px 14px...}.pl-6{padding-left:1.5rem}` in `app/equityfundingsource/dist/worker/index.js`.
+- GitHub Actions inspection: `gh workflow list` returned no workflows; `gh run list --workflow CI --limit 1` and `gh run list --workflow tmux-test --limit 1` both reported no matching workflow.
+- Tmux CI inspection: `make -n tmux-ci` has no `tmux-ci` target in the EFS repo.
+
+Closeout evidence: EFS repo is clean after push; changed files were staged exactly before commit. Escalation: none. Confidence: high.
+<!-- agent:boundary:0b0a6b05 -->
 <!-- /agent:exchange -->
 ###
 <!--
-Please make the padding-left equivalent to 24px. .pl-8 had no effect.
----
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue auto -->
----
-`.pl-7` has the same styling as `.pl-10`.
-Try `.pl-7` or `.pl-8` and ensure the tailwind style is loaded.
-![img_10.png](img_10.png)
-#spec-test-commit-push
----
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

@@ -197,7 +197,40 @@ No new prompt this cycle — the diff was leftover working-tree drift from the w
 I'm not striking them or picking the direction for you — those are your calls. Standing by for A/B/C.
 
 Plan: tasks/agent-doc/plan-agent-doc-orchestration-extraction.md
-<!-- agent:boundary:4f7ab7a7 -->
+Direction A
+
+### Re: Direction A — foundation leaves moved (increment 2) — opus-4-7
+
+You picked **Direction A** (one large orchestration crate). I'm executing it incrementally, dependency-order, green-to-green. This increment moved the three zero-dependency foundation leaves.
+
+#### What landed
+
+Submodule `d568e6bb` on `20260422/codex-agent-backend`, pushed. Superproject `015155f69` on `main`, pushed.
+
+- **Moved to `agent-doc-orchestration`:** `env`, `fs_util`, `secret_redact` (no `crate::` refs; deps `anyhow`/`indexmap`/`regex`). Orchestration now holds 4 modules (+ `ipc_socket`).
+- Added `indexmap` + `regex` to the orchestration manifest (my earlier dep scan missed them).
+- `fs_util::read_optional_text`/`read_optional_bytes`: `pub(crate)` → `pub` (now consumed across the crate boundary).
+- Shims: `main.rs` `pub(crate) use agent_doc_orchestration::{env, fs_util, secret_redact}`; `lib.rs` re-exports `secret_redact` (it lived in both bin+lib trees).
+
+#### Not movable yet
+
+`config` looked like a foundation module but depends on `crate::project_config::{project_tmux_session,…}` — **main's file-based `project_config_io` wrappers**, not core. Moving it now would create a circular dep. It comes after `project_config_io` in the next increment.
+
+#### Verification
+
+- Build (debug + release) green; `clippy -- -D warnings` clean.
+- Orchestration tests: **40** (11 ipc + 29 moved: env 12 + fs_util 2 + secret_redact 15).
+- main lib **70** (−15), bin **2,232** (−29) — **no coverage lost** (secret_redact previously ran in *both* bin and lib trees; now once in orchestration).
+- `nm -D`: **39** FFI symbols still export. Both binaries refreshed.
+
+#### Remaining under Direction A (dependency order)
+
+`config` + `project_config_io` → `sessions`/`supervisor` closure (`input_diag`/`harness`/`project_controller`/`session_actor`/`startup_miss`/`test_support`/`prompt`/`ops_log`/`snapshot`) → cluster (`cycle_state`/`capture`/`repair`/`git`/`route`/`sync`/`start`). Many cycles; each green-to-green.
+
+Plan: tasks/agent-doc/plan-agent-doc-orchestration-extraction.md
+
+**Not invoking `/loop`** — Direction A is a long multi-cycle migration; I'll advance one safe increment per invocation. Note the queue head is `do [#yybc]` (the obsolete tracker, struck-then-superseded); to continue the extraction next time, re-queue `#bz6s` or just say "continue". `#yybc`/`#adcr` remain strike candidates.
+<!-- agent:boundary:a0d30b05 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -219,13 +252,14 @@ preset #spec-test-build-install-commit-push
 - ~do [#ysv9]~
 - ~do [#bz6s]~
 - do [#yybc]
+- do [#bz6s]
 - do [#adcr]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#bz6s] #adoc-orchestration-impl Implement agent-doc-orchestration extraction per tasks/agent-doc/plan-agent-doc-orchestration-extraction.md. DONE: wave 0 (scaffold crate) + wave 1a (ipc_socket moved, 39 FFI symbols intact). REMAINING: wave 1b (sessions + supervisor/ + their closure: input_diag/env/harness/project_controller/session_actor/startup_miss/test_support — must resolve circular agent-doc<->orchestration dep first), then waves 2-5 (state/capture → git → orchestrators → prune CLI deps). Each wave green-to-green with make check + nm -D gate.
+- [ ] [#bz6s] #adoc-orchestration-impl Implement agent-doc-orchestration extraction per tasks/agent-doc/plan-agent-doc-orchestration-extraction.md. DIRECTION A chosen (one large orchestration crate). DONE: wave 0 scaffold + ipc_socket + env/fs_util/secret_redact (4 foundation modules in orchestration). NEXT: config + project_config_io closure, then sessions/supervisor closure, then cluster (cycle_state/capture/repair/git/route/sync/start). Each green-to-green with make check + nm -D gate.
 - [ ] [#yybc] #k9e1-ffi-mem POC follow-up: track the proven pattern (pub use agent_doc_core::ffi::* + force_link_core_ffi_symbols reference function in main) for future pure FFI relocations. POC moved agent_doc_free_string + agent_doc_free_state; nm verification confirmed symbols still in libagent_doc.so export table.
 - [ ] [#adcr] Extract agent-doc-core crate (~17K lines) — enables fast-compiling FFI/editor-plugin target independent of orchestration layer
 <!-- /agent:backlog -->

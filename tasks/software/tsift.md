@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -411,7 +411,7 @@ Added `#split-tsift-summarize [done]` to backlog as a record of this cycle's res
 **Reminder:** session document is now well past the comfortable size (the 312-line / 10-no-op warning from last cycle still stands; this cycle adds another response). `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/software/tsift.md --commit` is recommended before the next split runs.
 
 **Confidence:** high. **Escalation:** none.
-<!-- agent:boundary:ee07b1dc -->
+<!-- agent:boundary:caf36317 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -420,7 +420,7 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#split-sim-world]~
 - ~do [#split-tsift-digest]~

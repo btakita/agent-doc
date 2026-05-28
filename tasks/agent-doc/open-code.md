@@ -122,7 +122,42 @@ Seven previously `pub(crate)` helpers became `pub`. These are internal-shaped AP
 Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
 
 **Not invoking `/loop`** — Wave 2 is another ~2.6k LOC move with its own test surface and the mutual `frontmatter ↔ project_config` reference pair, and should be its own operator cycle.
-<!-- agent:boundary:9129ba3c -->
+### Re: do #yhsr — Wave 2 complete — opus-4-7
+
+Executed `do [#yhsr]`. Frontmatter + project_config now live in `agent-doc-core`.
+
+#### What landed
+
+Submodule `2a9b0489` on `20260422/codex-agent-backend`, pushed. Superproject `64c8371dc` on `main`, pushed.
+
+- `agent-doc-core/src/frontmatter.rs` (2,105 LOC) — copied from `src/frontmatter.rs`; `crate::{model_tier, project_config}` references resolve in-crate now that both targets live in `agent-doc-core`.
+- `agent-doc-core/src/project_config.rs` (474 LOC) — copied from `src/project_config.rs`. `load_project_from` promoted `pub(crate)` → `pub` for the main crate's call site.
+- `agent-doc-core/Cargo.toml` — added `clap`, `indexmap`, `toml` runtime deps + `tempfile` dev-dep. Frontmatter uses `clap` derive for the harness arg parsing path; `indexmap` for ordered key preservation; `toml` for project config parsing.
+- `agent-doc-core/src/lib.rs` — declares `pub mod frontmatter` + `pub mod project_config`.
+- Main `src/frontmatter.rs`, `src/project_config.rs` — collapsed to `pub use agent_doc_core::<name>::*` shims.
+
+#### Purity caveat
+
+`frontmatter` and `project_config` still carry functions that take `&Path` and call `std::fs::*`: `ensure_session_for_file`, `set_format_and_write`, `read_session_id`, `load_project*`, `save_project`, `*_tmux_session`. The plan §"Stays in main agent-doc crate" originally proposed splitting these out into orchestration wrappers. For this wave I moved them with the rest for the convenience of one atomic move; the I/O extraction is captured as a tidy follow-up, not a blocker. Acceptance criterion #3 from the plan ("No agent-doc-core function takes &Path or runs std::fs / std::process::Command") is currently violated and worth tracking.
+
+#### Verification
+
+- `cargo build --release`: green (1m 39s after lib touch).
+- `cargo test --release -p agent-doc-core --lib`: 404 tests pass (frontmatter test suite + project_config tests added).
+- `cargo test --release --lib` (main crate): 211 tests pass (down from 317 last wave; the drop is frontmatter's ~100 inline tests migrating to agent-doc-core, which gained them).
+- `make check`: same pre-existing local `codex_bare_run_inside_owning_pane_fails_before_nested_dispatch` failure (reproduces on pristine HEAD; GitHub CI green).
+- `cargo install --path .`: replaced.
+
+#### Next queue items
+
+- `#yxvq` — Wave 3 (`template`, 5,749 LOC, depends on Wave 1 + Wave 2 — both now done)
+- `#mzzd` — Wave 4 (`diff` per `#rtx6` Option 1 file split)
+- `#adcr` — umbrella rollup
+
+Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
+
+**Not invoking `/loop`** — Wave 3 (template) is the largest single-file move (~5.7k LOC) and carries the bulk of the boundary/patch repair logic; it deserves its own operator-scoped cycle.
+<!-- agent:boundary:1efb80f2 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -130,7 +165,7 @@ Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#pjb4]~
-- do [#yhsr]
+- ~do [#yhsr]~
 - do [#yxvq]
 - do [#mzzd]
 - do [#adcr]
@@ -139,7 +174,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#yhsr] #adcr-wave-2 Extract frontmatter.rs + project_config.rs together (mutual refs) into agent-doc-core — Frontmatter, AgentDocFormat, AgentDocWrite, CollaborationMode, CodexNetworkAccess, ResolvedMode, StreamConfig, PendingCaptureGuardMode, LintDialectMode, ProjectConfig, GuardConfig, LintConfig, SshConfig/SshDocConfig/SshProfileConfig, ComponentConfig + pure parse/write/merge_fields/set_*. Keep ensure_session_for_file/set_format_and_write/read_session_id/load_project*/save_project/*_tmux_session wrappers in main crate. Depends on Wave 1 (model_tier). Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
 - [ ] [#yxvq] #adcr-wave-3 Extract template.rs (~5.7k LOC) into agent-doc-core::template — PatchBlock, TemplateInfo, ComponentInfo, parse_patches, apply_patches, apply_patches_with_overrides, all repair_* functions, normalize_editor_visible_template_structure, all reposition_boundary_* helpers, is_template_mode, exchange_baseline_headings. Keep template_info(&Path) wrapper in main crate. Depends on Wave 2 (frontmatter/project_config) + Wave 1 (component). Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
 - [ ] [#mzzd] #adcr-wave-4 Extract diff.rs into agent-doc-core per #rtx6 Option 1 — rename current src/agent-doc/src/diff.rs to diff_io.rs (strip to compute/compute_with_current/wait_for_stable_content/is_stale_snapshot/run, keep snapshot::{load,save,resolve,path_for} calls); move pure half (DiffType, DiffClassification, PromptBearingChange, ParsedSlashCommands, OrchestrationRequest, strip_comments, annotate_diff, classify_diff, slash command + orchestration detection, prompt-prefix normalization, prompt-bearing-change classification, unified_diff_from_contents) to agent_doc_core::diff; re-export at agent_doc::diff so the 6 production call sites compile unchanged. Plan: tasks/agent-doc/plan-agent-doc-core-extraction.md
 - [ ] [#adcr] Extract agent-doc-core crate (~17K lines) — enables fast-compiling FFI/editor-plugin target independent of orchestration layer

@@ -14,6 +14,7 @@ prompt_presets:
   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md. DO NOT IMPLEMENT THE FIX.
   '#commit-push': commit all uncommitted files + push in claudescore-plugin, claudescore.com, and session-share
   '#commit-push-deploy': commit all uncommitted files + push in claudescore-plugin, claudescore.com, and session-share. deploy
+  '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
 queue_active: false
@@ -373,7 +374,23 @@ Public sources checked: TMO Loan Origination product page, legacy TMO Loan Origi
 Local EFS context checked: `src/equityfundingsource-dev/docs/business-logic.md`, `src/equityfundingsource-dev/prds/equity-funding-source-lending-portal-prd.md`, `src/equityfundingsource-dev/docs/TMO/create-loanapplication.md`, `get-loanapplication.md`, `update-loanapplication.md`, `new-loan.md`, `get-loans-by-timestamp.md`, and local EFS/TMO correspondence confirming EFS uses only TMO LOS endpoints.
 
 Closeout evidence: changed path is this session document only. Commands used included `tsift status`, `tsift status --fix`, `agent-doc --version`, `agent-doc preflight/read/plan`, public TMO web checks, `tsift --envelope search`, local `rg`/`sed` inspection, `git status`, and this `agent-doc finalize`. Verification is source review only; no test suite was run because no code changed. Confidence is high that the replacement scope should focus on LOS intake/status/conditions/documents/funding; confidence is medium on exact EFS-specific TMO field/status mapping until backlog item `#xt4d` inventories the live EFS TMO account.
-<!-- agent:boundary:9da4f502 -->
+❯ Please transfer demo material in this document into equityfundingsource-demo.md
+### Re: transfer demo material — gpt-5
+
+Transferred the demo-relevant material into `tasks/professional/equityfundingsource-demo.md`.
+
+What moved over as demo context:
+
+- workers.dev remains the demo URL until custom-domain cutover is intentionally approved.
+- `/apply` public prequalification and D1-backed `application_leads` admin review are the main live demo path.
+- Cloudflare Access, Resend testing-mode notification values, Google Workspace credentials, TMO LOS access, Dropbox/sample-doc flow, and funded-deal/legal approval are now explicit demo asks.
+- The TMO discussion is framed around Loan Origination only: intake, statuses, documents, conditions/checklists, local D1/R2 cache, and staff-reviewed TMO LOS writeback.
+
+I did not duplicate backlog items because the demo document already has the concrete pre-demo work items: smoke test, demo script, demo-safe credentials/data, and Judith/Robert decision asks.
+
+Closeout evidence: updated `tasks/professional/equityfundingsource-demo.md` via `agent-doc write --commit` and closed this source document via `agent-doc write --commit`. Commands used included `tsift status`, `tsift status --fix`, `agent-doc --version`, `agent-doc preflight`, `agent-doc session-check`, `git diff`, `rg`, `sed`, `agent-doc transfer --help`, `agent-doc extract --help`, and the two `agent-doc write --commit` calls. Verification is document/source review only; no code changed and no tests were run. Confidence is high that the demo-specific summary landed in the demo document. No escalation was used.
+
+<!-- agent:boundary:8930314d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -440,20 +457,4 @@ preset #spec-test-commit-push
 <!-- /agent:icebox -->
 
 <!-- agent:done archive=tasks/professional/equityfundingsource.done.md -->
-- 2026-05-24 [#a20z] Set EFS Cloudflare deployment credentials (CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID) in src/equityfundingsource-dev/.env, then rerun bun run deploy:worker for src/equityfundingsource-dev commit 7ce187e or latest main.
-- 2026-05-24 [#r2-upload-cache] R2 upload cache path: make token/admin uploads write original bytes to R2 first, persist metadata in D1, and serve portal downloads from R2 even when Dropbox access is unavailable.
-- 2026-05-24 [#dropbox-cache-contract] Dropbox/R2 document cache contract: define R2 key namespace, D1 document metadata, Dropbox path mapping, content hashes, sync_status, last_dropbox_synced_at, tombstones, and conflict policy for uploaded documents.
-- 2026-05-24 [#portal-cache-api] Portal cache APIs: cut investor/admin portal pages over to cache-only reads with last-synced/stale indicators and an outbox for portal writes that must replay to TMO later.
-- 2026-05-24 [#tmo-cache-worker] TMO sync Worker: build idempotent manual/scheduled pulls with page cursors, retries, tombstones, sync batches, and D1/R2 writes that do not require TMO during portal requests.
-- 2026-05-24 [#tmo-cache-model] TMO cache contract: define D1 read-model tables plus R2 raw payload/document object paths, TMO IDs, cursors, checksums, last_synced/stale/deleted state, and conflict policy for portal-visible data.
-- 2026-05-24 [#cf-d1-cache-deploy] Resolve Cloudflare D1 API authorization for account 1e7e194ff8da4ad9e40ce041aea84f76, apply migration 0023_tmo_cache_and_r2_documents.sql, then deploy worker commit 3ada2de.
-- 2026-05-24 [#ck54] Investor portal private document storage: add a separate private R2_DOCUMENTS bucket plus provider-neutral document metadata and authenticated download APIs; treat R2 as the canonical uploaded-document cache and keep Dropbox as a later sync adapter.
-- 2026-05-24 [#njsx] Tier 0: Cloudflare WAF + upload limits
-- 2026-05-24 [#ft47] Token-based document upload flow
-- 2026-05-24 [#yh4b] Admin dashboard (Cloudflare Access auth)
-- 2026-05-24 [#zjbe] Admin investor document workflow: upload and publish deal due-diligence, investor statements, tax docs, and accreditation files from R2 with visibility and review status controls.
-- 2026-05-24 [#9vv3] Investor portal end-to-end QA: seed and test investor signup, accreditation, published deal documents, funding commitment, admin acceptance, positions, distributions, and statements with TMO simulator plus R2 documents.
-- 2026-05-24 [#2rpv] Set Cloudflare Access env vars (ACCESS_TEAM_DOMAIN, ACCESS_AUD) on the equityfundingsource Worker and configure the CF Access application that protects /login/access-callback, then verify an admin sign-in via Google SSO.
-- 2026-05-24 [#0r24] Apply migration 0025_upload_tokens.sql to remote D1 once review #1v5m unblocks D1 API token permissions, then smoke test POST /api/admin/upload-tokens and POST /api/uploads/by-token/<token> against the live Worker.
-- 2026-05-24 [#7chq] Apply migration 0026_broker_portal.sql to remote D1 alongside 0025 once review #1v5m unblocks D1 API token permissions, then smoke test POST /api/broker/deals against the live Worker.
 <!-- /agent:done -->

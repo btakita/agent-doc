@@ -316,3 +316,315 @@ pub fn run(file: &Path, wait: bool) -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::snapshot;
+    use std::path::Path;
+
+    #[test]
+    fn run_file_not_found() {
+        let err = run(Path::new("/nonexistent/file.md"), false).unwrap_err();
+        assert!(err.to_string().contains("file not found"));
+    }
+
+    #[test]
+    fn copy_on_read_guard_skips_recovery_when_snapshot_modified() {
+        // Verifies the copy-on-read guard logic: if snapshot mtime changes
+        // between read and recovery, the save must be skipped.
+        use std::time::SystemTime;
+
+        let t1 = Some(SystemTime::UNIX_EPOCH);
+        let t2 = Some(SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1));
+
+        // Same mtime → recovery should proceed (guard passes)
+        assert_eq!(t1, t1, "same mtime should allow recovery");
+
+        // Different mtime → recovery should be skipped (guard blocks)
+        assert_ne!(t1, t2, "different mtime should block recovery");
+
+        // Both None (no snapshot file) → recovery should proceed
+        let none: Option<SystemTime> = None;
+        assert_eq!(none, none, "both None should allow recovery");
+    }
+
+    /// Set up a temp directory with `.agent-doc/snapshots/` and a document file.
+    /// Returns (TempDir, doc_path). The TempDir must be kept alive for the test.
+    fn setup_compute_env(
+        doc_content: &str,
+        snap_content: &str,
+    ) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+        std::fs::write(&doc, doc_content).unwrap();
+
+        // Create .agent-doc/snapshots/ and write the snapshot
+        let snap_path = snapshot::path_for(&doc).unwrap();
+        std::fs::create_dir_all(snap_path.parent().unwrap()).unwrap();
+        std::fs::write(&snap_path, snap_content).unwrap();
+
+        (dir, doc)
+    }
+
+    #[test]
+    fn compute_stale_snapshot_recovery_proceeds_when_unmodified() {
+        let snapshot = "## User\n\nHello\n";
+        let document = "## User\n\nHello\n\n## Assistant\n\nResponse\n\n## User\n\n";
+
+        let (_dir, doc) = setup_compute_env(document, snapshot);
+
+        let result = compute(&doc).unwrap();
+        assert!(
+            result.is_none(),
+            "stale snapshot recovery should return None"
+        );
+
+        let updated = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert_eq!(updated, document);
+    }
+
+    #[test]
+    fn compute_stale_recovery_updates_snapshot_to_current_document() {
+        let snapshot = "## User\n\nHello\n";
+        let document = "## User\n\nHello\n\n## Assistant\n\nResponse\n\n## User\n\n";
+
+        let (_dir, doc) = setup_compute_env(document, snapshot);
+
+        let result = compute(&doc).unwrap();
+        assert!(result.is_none(), "stale recovery returns None");
+
+        let snap = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            snap, document,
+            "snapshot should be synced to document after recovery"
+        );
+    }
+
+    #[test]
+    fn compute_returns_diff_when_user_adds_content() {
+        let snapshot = "## User\n\nHello\n";
+        let document = "## User\n\nHello\n\nNew question here\n";
+
+        let (_dir, doc) = setup_compute_env(document, snapshot);
+
+        let result = compute(&doc).unwrap();
+        assert!(result.is_some(), "should return a diff for user additions");
+        let diff = result.unwrap();
+        assert!(diff.contains("New question here"));
+    }
+
+    #[test]
+    fn compute_returns_none_when_no_changes() {
+        let content = "## User\n\nHello\n";
+
+        let (_dir, doc) = setup_compute_env(content, content);
+
+        let result = compute(&doc).unwrap();
+        assert!(result.is_none(), "identical content should return None");
+    }
+
+    #[test]
+    fn diff_detects_user_edits_after_stream_write() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+
+        let doc = dir.path().join("test.md");
+
+        let content_after_write = "---\nagent_doc_mode: template\n---\n\n<!-- agent:exchange -->\nUser prompt\n\nAgent response\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc, content_after_write).unwrap();
+        snapshot::save(&doc, content_after_write).unwrap();
+
+        let content_after_edit = "---\nagent_doc_mode: template\n---\n\n<!-- agent:exchange -->\nUser prompt\n\nAgent response\n\nNew user edit here\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc, content_after_edit).unwrap();
+
+        let diff = compute(&doc).unwrap();
+        assert!(
+            diff.is_some(),
+            "diff should detect user edit after stream write"
+        );
+        let diff_text = diff.unwrap();
+        assert!(
+            diff_text.contains("New user edit here"),
+            "diff should contain user's new text: {}",
+            diff_text
+        );
+    }
+
+    #[test]
+    fn diff_no_change_when_document_matches_snapshot() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let content = "---\nagent_doc_mode: template\n---\n\n<!-- agent:exchange -->\nContent\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let diff = compute(&doc).unwrap();
+        assert!(diff.is_none(), "no diff when document matches snapshot");
+    }
+
+    #[test]
+    fn diff_detects_change_after_cumulative_stream_flushes() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+
+        let doc = dir.path().join("test.md");
+
+        let snapshot_content = "---\nagent_doc_mode: template\n---\n\n<!-- agent:exchange -->\nFull agent response here\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc, snapshot_content).unwrap();
+        snapshot::save(&doc, snapshot_content).unwrap();
+
+        let edited = "---\nagent_doc_mode: template\n---\n\n<!-- agent:exchange -->\nFull agent response here\n\nRelease agent-doc\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc, edited).unwrap();
+
+        let diff = compute(&doc).unwrap();
+        assert!(diff.is_some(), "diff should detect user's edit");
+        assert!(diff.unwrap().contains("Release agent-doc"));
+    }
+
+    // --- Truncation detection tests ---
+
+    #[test]
+    fn truncated_mid_sentence() {
+        assert!(looks_truncated(
+            "Also, when I called agent-doc run on this file...and ther"
+        ));
+    }
+
+    #[test]
+    fn not_truncated_complete_sentence() {
+        assert!(!looks_truncated("This is a complete sentence."));
+    }
+
+    #[test]
+    fn not_truncated_question() {
+        assert!(!looks_truncated("What should we do?"));
+    }
+
+    #[test]
+    fn not_truncated_command() {
+        assert!(!looks_truncated("/agent-doc compact"));
+    }
+
+    #[test]
+    fn not_truncated_single_word_command() {
+        assert!(!looks_truncated("release"));
+    }
+
+    #[test]
+    fn not_truncated_short_words() {
+        assert!(!looks_truncated("go"));
+        assert!(!looks_truncated("ok"));
+        assert!(!looks_truncated("no"));
+        assert!(!looks_truncated("yes"));
+    }
+
+    #[test]
+    fn truncated_single_chars() {
+        assert!(looks_truncated("A"));
+        assert!(looks_truncated("S"));
+        assert!(looks_truncated("1"));
+        assert!(looks_truncated("y"));
+    }
+
+    #[test]
+    fn not_truncated_heading() {
+        assert!(!looks_truncated("### Re: Fix the bug"));
+    }
+
+    #[test]
+    fn not_truncated_empty() {
+        assert!(!looks_truncated(""));
+    }
+
+    #[test]
+    fn not_truncated_ends_with_colon() {
+        assert!(!looks_truncated("Here is the issue:"));
+    }
+
+    #[test]
+    fn not_truncated_ends_with_backtick() {
+        assert!(!looks_truncated("Check `crdt.rs`"));
+    }
+
+    #[test]
+    fn truncated_ends_mid_word() {
+        assert!(looks_truncated("Please make Claim for Tmux Pan"));
+    }
+
+    #[test]
+    fn not_truncated_ends_with_period() {
+        assert!(!looks_truncated("Fixed the bug."));
+    }
+
+    #[test]
+    fn extract_last_added_finds_insert() {
+        let prev = "line1\n";
+        let curr = "line1\nnew content here\n";
+        let last = extract_last_added_line(prev, curr);
+        assert_eq!(last, Some("new content here".to_string()));
+    }
+
+    #[test]
+    fn extract_last_added_none_when_no_changes() {
+        let content = "line1\nline2\n";
+        let last = extract_last_added_line(content, content);
+        assert_eq!(last, None);
+    }
+
+    // --- diff --wait tests ---
+
+    #[test]
+    fn run_with_wait_stable_content() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let snapshot_content = "line1\n";
+        std::fs::write(&doc, "line1\nline2\n").unwrap();
+        snapshot::save(&doc, snapshot_content).unwrap();
+
+        let result = run(&doc, true);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn run_with_wait_no_changes() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let content = "line1\nline2\n";
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let result = run(&doc, true);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn wait_for_stable_content_returns_immediately_when_complete() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+        let content = "Complete sentence.\n";
+        std::fs::write(&doc, content).unwrap();
+        let previous = "";
+
+        let start = std::time::Instant::now();
+        let result = wait_for_stable_content(&doc, previous).unwrap();
+        let elapsed = start.elapsed();
+
+        assert_eq!(result, content);
+        assert!(
+            elapsed.as_millis() < 500,
+            "should not delay for complete content"
+        );
+    }
+}

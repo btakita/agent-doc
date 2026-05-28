@@ -470,7 +470,7 @@ Escalation: none. Confidence: high.
 Queue closeout repair: the `pl-10` rate-estimator input padding item was completed, tested, committed, and pushed in EFS commit `aabf6f6` as recorded in the response immediately above. No additional EFS source changes were made in this repair cycle.
 
 Verification for the implemented item remains: `bun test tests/public-header.test.ts`, `git diff --check`, and `make check` all passed before commit. Escalation: none. Confidence: high.
-<!-- agent:boundary:2e475cf4 -->
+<!-- agent:boundary:50e0325d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -478,10 +478,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 -->
 
 <!-- agent:queue auto -->
----
-In the input, use `pl-10` instead of `pl-7`.
-#spec-test-commit-push
----
 <!-- /agent:queue -->
 
 ## Backlog

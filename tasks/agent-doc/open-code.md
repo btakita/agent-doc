@@ -159,7 +159,32 @@ Moving `sessions`/`supervisor` now would create a **circular `agent-doc` ↔ `ag
 Plan: tasks/agent-doc/plan-agent-doc-orchestration-extraction.md
 
 **Not invoking `/loop`** — `#bz6s` is a multi-wave effort; wave 1b needs the `sessions`/`supervisor` dependency-closure decision (move the 7 cascade modules vs. break the refs), which deserves its own scoping. `do [#bz6s]` stays queued for the next wave.
-<!-- agent:boundary:c7718435 -->
+
+### Re: do #bz6s — wave 1b blocked; bottom-up sequencing superseded — opus-4-7
+
+Continued `#bz6s` (orchestration extraction). I analyzed the wave-1b closure before moving anything — and the analysis says **don't move it the way the plan assumed**. No code moved this cycle; the deliverable is the corrected scoping + a halt for your decision.
+
+#### The finding
+
+`sessions`/`supervisor` are leaves only by *intra-cluster* deps. Their full `crate::` closure pulls in `input_diag`, `env`, `harness`, `project_controller`, `session_actor`, `startup_miss`, `test_support`, then transitively `ops_log`, `config`, `prompt`, `fs_util`, `snapshot`, `harness_prompt`. Two facts kill the bottom-up move:
+
+1. **`snapshot → git`.** `snapshot` (a shared I/O utility) depends on `git`, a not-yet-moved cluster module. So the closure transitively reaches `git` and, through it, the rest of the cluster. There's no self-contained leaf set beyond `ipc_socket`.
+2. **Shared-util breadth.** `snapshot` is used by **35** files, `ops_log` by **27**, `config` by **11** — across *both* CLI commands and orchestration. They can't move to pure `core` (they do `std::fs`), and orchestration can't depend back on `agent-doc` (circular).
+
+So moving `sessions`/`supervisor` now would either create a circular `agent-doc ↔ agent-doc-orchestration` dependency or drag in `git` + ~15 more modules. I halted rather than force a non-compiling or architecturally-wrong move.
+
+#### Decision needed (revised options, in the plan)
+
+- **A — one large orchestration crate.** Move the whole entangled graph (cluster + shared I/O utils + sessions/supervisor/session_actor/project_controller/…) in essentially one migration; `agent-doc` keeps only `main.rs` + command modules touching none of it (most reach orchestration via `pub use` shims). Delivers the CLI-shell build win; large, multi-cycle, scheduled deliberately.
+- **B — 4th `agent-doc-base` layer** for the shared I/O utils. Cleaner long-term but **blocked by `snapshot → git`** — `snapshot` must drop/invert its `git` dependency first.
+- **C — defer.** Wave 1a already proved the crate + cross-crate shim + cdylib mechanism; the pure editor slim-link is already served by `agent-doc-core`. Hold the rest until a concrete build-time payoff justifies the large migration.
+
+**My recommendation:** A is the only option that yields the CLI-shell win without a `snapshot`/`git` refactor, but it's a deliberate multi-cycle effort — not something to auto-queue. B is cleaner but front-loads decoupling `snapshot` from `git`. C is the low-effort hold.
+
+Plan (REVISION section): tasks/agent-doc/plan-agent-doc-orchestration-extraction.md (superproject `6d2c4485e`).
+
+**Not invoking `/loop`** — `#bz6s` is blocked on the A/B/C decision; auto-looping would re-hit a blocked wave. I'd suggest pausing the queue (`queue_active: false`) until you pick a direction. `#yybc`/`#adcr` behind it remain effectively closed (recommend striking).
+<!-- agent:boundary:89f970a0 -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -35,7 +35,36 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 9 response topic(s): do [#adoc-queue-ipc-buffer-divergence]; do [#queue-strike-on-halt]; do [#jb-stale-busy-idle-footer] halt; 6 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:03c8731d -->
+❯ do [#jb-stale-busy-idle-footer]. #spec-test-build-install-commit-push
+### Re: do [#jb-stale-busy-idle-footer] — opus-4-8
+
+Implemented the two-part safe fix from `plan-jb-stale-busy-idle-footer.md` and shipped it through spec → test → build → install → commit → push. A genuinely-idle Claude pane no longer projects `AliveBusy` (queue-instead-of-dispatch / blocked Clear), and — critically — a live turn can never be mis-read as idle.
+
+#### The fix (submodule `faccb329`, pointer `e3b1af769`, both pushed)
+
+Two parts, both required, ordered for safety:
+
+- **Part 1 — Claude busy cue** (`harness.rs` `dispatch_blocker_reason`): scans recent pane lines for the interrupt hint (`esc to interrupt`) or a working spinner with an elapsed-seconds timer (spinner glyph + `…` gerund + `(<N>s`). `live_pane_prompt_ready` checks `has_busy_cue` **first**, so an active turn fails closed before any composer inference.
+- **Part 2 — ignorable static Claude chrome** (`harness.rs` `is_ignorable_output_line`): marks only the `ctx:N%` model/context status line ignorable — never the spinner, `❯`, or `⏵⏵`. With the busy cue in place, `last_prompt_candidate` resolves a genuinely-idle pane to the `⏵⏵`/`❯` composer even when the status line is the last meaningful line (the plan's question-1 state).
+
+The ordering is the safety guarantee: Part 1 catches a busy turn before Part 2 can ever surface a composer, so the bare `❯` present in *both* idle and busy panes cannot false-idle a live turn.
+
+#### Why this matches the captures, not a guess
+
+The plan's live captures showed the common idle/busy cases were already distinguished by the `(shift+tab to cycle)` vs `· N shell` permissions-line difference. This change adds the two narrower, provably-safe pieces the plan flagged as still-open: a real busy cue (so "busy" is asserted, not merely "not-ready"), and skipping the static status line so the question-1 state resolves correctly.
+
+#### Verification
+
+- **9 new tests** (all green): `harness.rs` — busy spinner, esc-to-interrupt, idle no-cue, status-chrome-ignorable-but-composer-isn't, status-skip-to-composer, idle-resolves-ready; `session_actor_cmd.rs` — idle composer ready, busy turn **not** ready, status-line-last ready.
+- `make check`: clippy clean; the only red is the pre-existing, tracked queue-consumption regression (CI run 26664619093 confirms it's the same single test; tmux integration tests are `ignored`, no tmux-leg regression — this change is pure pane-text classification).
+- Built `--release` + `cargo install` + `lib-install`; pushed submodule + superproject pointer + plan.
+
+#### Closeout
+
+Gated, not done: acceptance 1+2 (unit coverage) are met and the fix is live, but acceptance 3 — a **live JB replay** proving a stale-busy-projected idle Claude pane now dispatches instead of enqueuing — is owned by `#run-agent-doc-stale-busy-replay`. The route-error "busy on an active turn" vs "still starting" wording remains `#route-busy-vs-starting-wording`. Reopen `#jb-stale-busy-idle-footer` only if a live replay shows a residual misclassification.
+
+The other pending items referenced above are mentioned for context only; none are completed this cycle.
+<!-- agent:boundary:42141372 -->
 <!-- /agent:exchange --> 
 ###
 <!--
@@ -56,7 +85,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 #spec-test-build-install-commit-push
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#prompt-duplicated-while-typing]~
 - ~do [#duplicate-response-after-commit]~
@@ -64,7 +93,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#cancel-orphans-preflight-cycle]~
 - ~do [#adoc-queue-ipc-buffer-divergence]~
 - ~do [#queue-strike-on-halt]~
-- do [#jb-stale-busy-idle-footer]
+- ~do [#jb-stale-busy-idle-footer]~
 - do [#pending-add-append-not-prepend]
 - do [#next-steps-backlog-capture]
 - do [#run-agent-doc-stale-busy-replay]

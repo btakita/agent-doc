@@ -36,7 +36,7 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::component;
-use crate::snapshot;
+use agent_doc_orchestration::snapshot;
 
 const EXCHANGE_COMPONENT: &str = "exchange";
 

@@ -2,11 +2,11 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use crate::flow::operator_clear::OperatorClearInputState;
-use crate::session_actor::{ActorRecord, ActorState};
-use crate::sessions::{SessionEntry, SessionRegistry, Tmux};
-use crate::startup_miss::{SessionLogStatus, StartupMiss};
-use crate::supervisor::ipc::IpcMethod;
+use agent_doc_orchestration::flow::operator_clear::OperatorClearInputState;
+use agent_doc_orchestration::session_actor::{ActorRecord, ActorState};
+use agent_doc_orchestration::sessions::{SessionEntry, SessionRegistry, Tmux};
+use agent_doc_orchestration::startup_miss::{SessionLogStatus, StartupMiss};
+use agent_doc_orchestration::supervisor::ipc::IpcMethod;
 
 const TMUX_DIRECT_SUBMIT_MODE: &str = "tmux_literal_enter_delayed";
 const SUPERVISOR_INJECT_SUBMIT_MODE: &str = "supervisor_normalized_submit";
@@ -105,7 +105,7 @@ struct SessionContext {
     session_id: String,
     harness: String,
     actor_record: Option<ActorRecord>,
-    operator_status: crate::project_controller::SessionOperatorStatus,
+    operator_status: agent_doc_orchestration::project_controller::SessionOperatorStatus,
     registry_entry: Option<SessionEntry>,
     startup_miss: Option<StartupMiss>,
     log_status: Option<SessionLogStatus>,
@@ -164,7 +164,7 @@ pub fn history(file: &Path) -> Result<()> {
     }
 
     let path = session_log_path(&ctx.base_dir, &ctx.session_id);
-    let Some(content) = crate::fs_util::read_optional_text(&path)? else {
+    let Some(content) = agent_doc_orchestration::fs_util::read_optional_text(&path)? else {
         println!(
             "No session log recorded for {}",
             ctx.canonical_file.display()
@@ -211,18 +211,18 @@ pub fn attach(file: &Path, pane: Option<&str>) -> Result<()> {
     let window = tmux
         .pane_window(&pane_id)
         .with_context(|| format!("failed to read window for pane {pane_id}"))?;
-    let pid = crate::sessions::pane_pid(&pane_id)
+    let pid = agent_doc_orchestration::sessions::pane_pid(&pane_id)
         .with_context(|| format!("failed to read pane PID for {pane_id}"))?;
-    crate::project_controller::attach_pane(
+    agent_doc_orchestration::project_controller::attach_pane(
         &ctx.base_dir,
-        crate::project_controller::AttachPaneRequest {
+        agent_doc_orchestration::project_controller::AttachPaneRequest {
             file: ctx.canonical_file.clone(),
             session_id: ctx.session_id.clone(),
             pane_id: pane_id.clone(),
             window_id: window.clone(),
         },
     )?;
-    crate::sessions::attach_projection_only_in(
+    agent_doc_orchestration::sessions::attach_projection_only_in(
         &ctx.base_dir,
         &ctx.session_id,
         &pane_id,
@@ -248,7 +248,7 @@ pub fn attach(file: &Path, pane: Option<&str>) -> Result<()> {
 
 pub fn restart(file: &Path, mode: RestartMode, force: bool) -> Result<()> {
     let ctx = build_context(file)?;
-    let authorization = crate::project_controller::authorize_operator_command(
+    let authorization = agent_doc_orchestration::project_controller::authorize_operator_command(
         &ctx.base_dir,
         &ctx.canonical_file,
         "session_restart",
@@ -259,7 +259,7 @@ pub fn restart(file: &Path, mode: RestartMode, force: bool) -> Result<()> {
     }
     prepare_restart_live_busy_pane(&ctx, &tmux, force)?;
     ensure_supervisor_socket(&ctx)?;
-    let response = crate::supervisor::ipc::send_command(
+    let response = agent_doc_orchestration::supervisor::ipc::send_command(
         &ctx.supervisor_socket,
         &IpcMethod::Restart {
             mode: mode.as_str().to_string(),
@@ -314,7 +314,7 @@ fn force_restart_live_busy_pane(
     let pane = evidence.pane_id.as_deref().unwrap_or("unknown");
     log_restart_evidence_event(ctx, "session_restart_force_used", evidence);
     if let Err(err) = send_operator_interrupt_sequence(tmux, pane, &ctx.harness) {
-        crate::ops_log::log_op(
+        agent_doc_orchestration::ops_log::log_op(
             &ctx.canonical_file,
             &format!(
                 "session_restart_force_interrupt_failed file={} pane={} source={} error={:?}",
@@ -345,7 +345,7 @@ fn force_restart_live_busy_pane(
 
 pub fn clear(file: &Path) -> Result<()> {
     let ctx = build_context(file)?;
-    let authorization = crate::project_controller::authorize_operator_command(
+    let authorization = agent_doc_orchestration::project_controller::authorize_operator_command(
         &ctx.base_dir,
         &ctx.canonical_file,
         "session_clear",
@@ -355,7 +355,7 @@ pub fn clear(file: &Path) -> Result<()> {
     reconcile_idle_projection_before_clear(&ctx, &tmux)?;
     if supervisor_clear_inject_available(&ctx) {
         send_clear_via_supervisor(&ctx)?;
-        crate::ops_log::log_op(
+        agent_doc_orchestration::ops_log::log_op(
             &ctx.canonical_file,
             &format!(
                 "session_clear_sent file={} delivery=supervisor_ipc submit_mode={} pane_source=supervisor_runtime",
@@ -365,7 +365,7 @@ pub fn clear(file: &Path) -> Result<()> {
         );
     } else if let Some((pane, pane_source)) = resolve_direct_submit_pane(&ctx, &tmux) {
         send_clear_to_pane(&tmux, &pane, &ctx.canonical_file, &ctx.harness)?;
-        crate::ops_log::log_op(
+        agent_doc_orchestration::ops_log::log_op(
             &ctx.canonical_file,
             &format!(
                 "session_clear_sent file={} pane={} delivery=direct_pane_submit submit_mode={} pane_source={}",
@@ -377,7 +377,7 @@ pub fn clear(file: &Path) -> Result<()> {
         );
     } else {
         send_clear_via_supervisor(&ctx)?;
-        crate::ops_log::log_op(
+        agent_doc_orchestration::ops_log::log_op(
             &ctx.canonical_file,
             &format!(
                 "session_clear_sent file={} delivery=supervisor_ipc submit_mode={} pane_source=none",
@@ -387,7 +387,7 @@ pub fn clear(file: &Path) -> Result<()> {
         );
     }
     if matches!(ctx.harness.as_str(), "codex" | "opencode") {
-        crate::codex_hook::record_external_prompt_for_file(
+        agent_doc_orchestration::codex_hook::record_external_prompt_for_file(
             &ctx.canonical_file,
             &ctx.session_id,
             "/clear",
@@ -408,10 +408,10 @@ fn supervisor_clear_inject_available(ctx: &SessionContext) -> bool {
 
 fn send_clear_via_supervisor(ctx: &SessionContext) -> Result<()> {
     ensure_supervisor_socket(ctx)?;
-    let response = crate::supervisor::ipc::send_command(
+    let response = agent_doc_orchestration::supervisor::ipc::send_command(
         &ctx.supervisor_socket,
         &IpcMethod::Inject {
-            bytes: crate::supervisor::ipc::normalize_submit_text("/clear"),
+            bytes: agent_doc_orchestration::supervisor::ipc::normalize_submit_text("/clear"),
         },
     )
     .with_context(|| {
@@ -453,7 +453,7 @@ fn reconcile_idle_projection_before_clear(ctx: &SessionContext, tmux: &Tmux) -> 
         clean_exit_prompt,
         busy_reason.is_some(),
     );
-    crate::flow::operator_clear::log_clear_guard_event(&ctx.canonical_file, clear_state);
+    agent_doc_orchestration::flow::operator_clear::log_clear_guard_event(&ctx.canonical_file, clear_state);
 
     match clear_state {
         OperatorClearInputState::IdlePrompt => {
@@ -463,7 +463,7 @@ fn reconcile_idle_projection_before_clear(ctx: &SessionContext, tmux: &Tmux) -> 
         OperatorClearInputState::ProtectedInput => {
             if let Some(reason) = protected_reason {
                 let log_reason = reason.replace(char::is_whitespace, "_");
-                crate::ops_log::log_op(
+                agent_doc_orchestration::ops_log::log_op(
                     &ctx.canonical_file,
                     &format!(
                         "session_clear_protected_input_guard_refused file={} pane={} source={} reason={} current_command={} tail={:?}",
@@ -483,7 +483,7 @@ fn reconcile_idle_projection_before_clear(ctx: &SessionContext, tmux: &Tmux) -> 
         }
         OperatorClearInputState::Busy => {
             let busy_reason = busy_reason.unwrap_or_else(|| "busy cue".to_string());
-            crate::ops_log::log_op(
+            agent_doc_orchestration::ops_log::log_op(
                 &ctx.canonical_file,
                 &format!(
                     "session_clear_live_busy_guard_blocked file={} pane={} source={} reason={} current_command={} tail={:?}",
@@ -554,7 +554,7 @@ fn guard_starting_actor_operator_command(
     }
 
     let reason = starting_operator_guard_reason(action, dirty, dispatch_ready, clean_exit_prompt);
-    crate::ops_log::log_op(
+    agent_doc_orchestration::ops_log::log_op(
         &ctx.canonical_file,
         &format!(
             "session_operator_starting_guard_refused kind={} file={} pane={} source={} reason={} actor_state={} supervisor_state={} lease_state={} prompt_ready={} tail={:?}",
@@ -669,10 +669,10 @@ fn supervisor_runtime_applies_to_record(ctx: &SessionContext) -> bool {
 }
 
 fn document_dirty_after_committed_cycle(file: &Path) -> Result<bool> {
-    let Some(state) = crate::cycle_state::load(file)? else {
+    let Some(state) = agent_doc_orchestration::cycle_state::load(file)? else {
         return Ok(false);
     };
-    if state.phase != crate::cycle_state::CyclePhase::Committed {
+    if state.phase != agent_doc_orchestration::cycle_state::CyclePhase::Committed {
         return Ok(true);
     }
     let Some(hash) = state.file_hash.as_deref() else {
@@ -680,7 +680,7 @@ fn document_dirty_after_committed_cycle(file: &Path) -> Result<bool> {
     };
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
-    Ok(crate::ops_log::content_hash(&content) != hash)
+    Ok(agent_doc_orchestration::ops_log::content_hash(&content) != hash)
 }
 
 fn protected_clear_input_reason(
@@ -689,8 +689,8 @@ fn protected_clear_input_reason(
     evidence: &LivePaneEvidence,
 ) -> Option<String> {
     let pane = evidence.pane_id.as_deref()?;
-    let captured = crate::sessions::capture_pane_with_ansi(tmux, pane)
-        .or_else(|_| crate::sessions::capture_pane(tmux, pane))
+    let captured = agent_doc_orchestration::sessions::capture_pane_with_ansi(tmux, pane)
+        .or_else(|_| agent_doc_orchestration::sessions::capture_pane(tmux, pane))
         .ok()?;
     let harness = harness_for_evidence(ctx, evidence);
     harness.protected_prompt_input_reason(&captured)
@@ -704,7 +704,7 @@ fn pane_shows_clean_exit_prompt(
     let Some(pane) = evidence.pane_id.as_deref() else {
         return false;
     };
-    let Ok(captured) = crate::sessions::capture_pane(tmux, pane) else {
+    let Ok(captured) = agent_doc_orchestration::sessions::capture_pane(tmux, pane) else {
         return false;
     };
     let harness = harness_for_evidence(ctx, evidence);
@@ -717,8 +717,8 @@ fn operator_clear_busy_reason(
     evidence: &LivePaneEvidence,
 ) -> Option<String> {
     let pane = evidence.pane_id.as_deref()?;
-    let captured = crate::sessions::capture_pane_with_ansi(tmux, pane)
-        .or_else(|_| crate::sessions::capture_pane(tmux, pane))
+    let captured = agent_doc_orchestration::sessions::capture_pane_with_ansi(tmux, pane)
+        .or_else(|_| agent_doc_orchestration::sessions::capture_pane(tmux, pane))
         .ok()?;
     let harness = harness_for_evidence(ctx, evidence);
     let reason = harness.dispatch_blocker_reason(&captured)?;
@@ -735,12 +735,12 @@ fn operator_clear_busy_reason(
 fn harness_for_evidence(
     ctx: &SessionContext,
     evidence: &LivePaneEvidence,
-) -> crate::harness::HarnessConfig {
+) -> agent_doc_orchestration::harness::HarnessConfig {
     evidence
         .current_command
         .as_deref()
-        .and_then(crate::harness::HarnessConfig::from_pane_command)
-        .unwrap_or_else(|| crate::harness::HarnessConfig::from_agent_name(&ctx.harness))
+        .and_then(agent_doc_orchestration::harness::HarnessConfig::from_pane_command)
+        .unwrap_or_else(|| agent_doc_orchestration::harness::HarnessConfig::from_agent_name(&ctx.harness))
 }
 
 fn protected_clear_refusal_message(
@@ -781,7 +781,7 @@ fn busy_clear_refusal_message(file: &Path, evidence: &LivePaneEvidence, reason: 
 
 pub fn interrupt_clear(file: &Path) -> Result<()> {
     let ctx = build_context(file)?;
-    crate::project_controller::authorize_operator_command(
+    agent_doc_orchestration::project_controller::authorize_operator_command(
         &ctx.base_dir,
         &ctx.canonical_file,
         "session_interrupt_clear",
@@ -793,7 +793,7 @@ pub fn interrupt_clear(file: &Path) -> Result<()> {
         .as_deref()
         .with_context(|| format!("no live pane evidence for {}", ctx.canonical_file.display()))?;
     if !tmux.pane_alive(pane) {
-        crate::ops_log::log_op(
+        agent_doc_orchestration::ops_log::log_op(
             &ctx.canonical_file,
             &format!(
                 "session_interrupt_clear_skip_interrupt file={} pane={} reason=already_closed",
@@ -807,7 +807,7 @@ pub fn interrupt_clear(file: &Path) -> Result<()> {
     match interrupt_clear_initial_action(&evidence) {
         InterruptClearInitialAction::SkipInterruptAlreadyIdle => {
             let _ = reconcile_idle_projection_from_evidence(&ctx, &evidence);
-            crate::ops_log::log_op(
+            agent_doc_orchestration::ops_log::log_op(
                 &ctx.canonical_file,
                 &format!(
                     "session_interrupt_clear_skip_interrupt file={} pane={} reason=already_idle prompt_ready={} tail={:?}",
@@ -824,7 +824,7 @@ pub fn interrupt_clear(file: &Path) -> Result<()> {
 
     send_operator_interrupt_sequence(&tmux, pane, &ctx.harness)?;
     let outcome = wait_for_interrupt_clear_settle(&ctx, &tmux, pane, Duration::from_secs(10));
-    crate::ops_log::log_op(
+    agent_doc_orchestration::ops_log::log_op(
         &ctx.canonical_file,
         &format!(
             "session_interrupt_clear_settled file={} pane={} harness={} outcome={} editor_recovery_attempted={} blocking_state={} blocking_source={} prompt_ready={} last_command={} tail={:?}",
@@ -924,7 +924,7 @@ fn terminal_editor_command(command: &str) -> bool {
 }
 
 fn send_clear_to_pane(tmux: &Tmux, pane: &str, file: &Path, harness: &str) -> Result<()> {
-    crate::sessions::send_submitted_text_for_harness(tmux, pane, "/clear", harness).with_context(
+    agent_doc_orchestration::sessions::send_submitted_text_for_harness(tmux, pane, "/clear", harness).with_context(
         || {
             format!(
                 "failed to send `/clear` to authoritative pane {} for {}",
@@ -1049,7 +1049,7 @@ fn wait_for_interrupt_clear_settle(
         {
             editor_recovery_attempted = true;
             let command = evidence.current_command.as_deref().unwrap_or("unknown");
-            crate::ops_log::log_op(
+            agent_doc_orchestration::ops_log::log_op(
                 &ctx.canonical_file,
                 &format!(
                     "session_interrupt_clear_editor_recovery file={} pane={} command={}",
@@ -1119,7 +1119,7 @@ fn resolve_direct_submit_pane(
     }
 
     if let Some(pane) =
-        crate::sync::find_normal_path_owner_pane(tmux, &ctx.canonical_file, &ctx.session_id)
+        agent_doc_orchestration::sync::find_normal_path_owner_pane(tmux, &ctx.canonical_file, &ctx.session_id)
     {
         return Some((pane, DirectSubmitPaneSource::LiveOwner));
     }
@@ -1192,7 +1192,7 @@ pub(crate) fn restart_busy_refusal_message(
 }
 
 fn log_restart_evidence_event(ctx: &SessionContext, event: &str, evidence: &LivePaneEvidence) {
-    crate::ops_log::log_op(
+    agent_doc_orchestration::ops_log::log_op(
         &ctx.canonical_file,
         &format!(
             "{} file={} pane={} source={} state={} current_command={} prompt_ready={} tail={:?}",
@@ -1229,9 +1229,9 @@ fn reconcile_idle_projection_from_evidence(
     let Some(record) = ctx.actor_record.as_ref() else {
         return Ok(false);
     };
-    crate::project_controller::mark_lifecycle(
+    agent_doc_orchestration::project_controller::mark_lifecycle(
         &ctx.base_dir,
-        crate::project_controller::LifecycleRequest {
+        agent_doc_orchestration::project_controller::LifecycleRequest {
             file: ctx.canonical_file.clone(),
             session_id: record.session_id.clone(),
             pane_id: record.pane_id.clone(),
@@ -1242,9 +1242,9 @@ fn reconcile_idle_projection_from_evidence(
         },
     )?;
     if let Some(lease) = ctx.operator_status.supervisor_lease.as_ref() {
-        crate::project_controller::refresh_supervisor_lease(
+        agent_doc_orchestration::project_controller::refresh_supervisor_lease(
             &ctx.base_dir,
-            crate::project_controller::SupervisorHeartbeatRequest {
+            agent_doc_orchestration::project_controller::SupervisorHeartbeatRequest {
                 file: ctx.canonical_file.clone(),
                 session_id: record.session_id.clone(),
                 pane_id: record.pane_id.clone(),
@@ -1255,7 +1255,7 @@ fn reconcile_idle_projection_from_evidence(
             },
         )?;
     }
-    crate::ops_log::log_op(
+    agent_doc_orchestration::ops_log::log_op(
         &ctx.canonical_file,
         &format!(
             "session_operator_reconciled_idle_projection file={} pane={} source={} prior_actor_state={} prior_supervisor_state={} prior_lease_state={}",
@@ -1309,39 +1309,39 @@ fn idle_projection_needs_reconciliation(ctx: &SessionContext, evidence: &LivePan
 
 pub fn doctor(file: &Path, repair: bool) -> Result<()> {
     if repair {
-        let closeout = crate::repair::repair(file)?;
-        let repair_notes = crate::sync::repair_file_state(file)?;
-        crate::resync::run_fix(Some(file), None)?;
+        let closeout = agent_doc_orchestration::repair::repair(file)?;
+        let repair_notes = agent_doc_orchestration::sync::repair_file_state(file)?;
+        agent_doc_orchestration::resync::run_fix(Some(file), None)?;
         println!("Applied repair path for {}.", file.display());
         if closeout.repaired() {
             println!(
                 "closeout_repair: {}",
                 match closeout {
-                    crate::repair::RepairOutcome::ReplayedResponse => {
+                    agent_doc_orchestration::repair::RepairOutcome::ReplayedResponse => {
                         "replayed a captured response through the normal closeout path"
                     }
-                    crate::repair::RepairOutcome::AlreadyApplied => {
+                    agent_doc_orchestration::repair::RepairOutcome::AlreadyApplied => {
                         "completed a pending commit boundary for an already-applied response"
                     }
-                    crate::repair::RepairOutcome::ManualTailRemovalRespected => {
+                    agent_doc_orchestration::repair::RepairOutcome::ManualTailRemovalRespected => {
                         "respected a manual assistant-tail removal while closing the cycle"
                     }
-                    crate::repair::RepairOutcome::StalePreflightLockRepaired => {
+                    agent_doc_orchestration::repair::RepairOutcome::StalePreflightLockRepaired => {
                         "closed a stale preflight-started cycle"
                     }
-                    crate::repair::RepairOutcome::StalePreflightCycleAbandoned => {
+                    agent_doc_orchestration::repair::RepairOutcome::StalePreflightCycleAbandoned => {
                         "abandoned a stale empty preflight-started cycle"
                     }
-                    crate::repair::RepairOutcome::CommitBoundaryRecovered => {
+                    agent_doc_orchestration::repair::RepairOutcome::CommitBoundaryRecovered => {
                         "recovered a missing commit boundary"
                     }
-                    crate::repair::RepairOutcome::TemplateNormalized => {
+                    agent_doc_orchestration::repair::RepairOutcome::TemplateNormalized => {
                         "normalized template drift before closeout"
                     }
-                    crate::repair::RepairOutcome::CompletedBacklogReaped => {
+                    agent_doc_orchestration::repair::RepairOutcome::CompletedBacklogReaped => {
                         "reaped a stale completed backlog item during recovery"
                     }
-                    crate::repair::RepairOutcome::Noop => unreachable!(),
+                    agent_doc_orchestration::repair::RepairOutcome::Noop => unreachable!(),
                 }
             );
         }
@@ -1366,7 +1366,7 @@ pub fn doctor(file: &Path, repair: bool) -> Result<()> {
 fn build_context(file: &Path) -> Result<SessionContext> {
     let canonical_file = file
         .canonicalize()
-        .unwrap_or_else(|_| crate::git::resolve_absolute_file_path(file));
+        .unwrap_or_else(|_| agent_doc_orchestration::git::resolve_absolute_file_path(file));
     let content = std::fs::read_to_string(&canonical_file)
         .with_context(|| format!("failed to read {}", canonical_file.display()))?;
     let session_id = crate::frontmatter::read_session_id(&canonical_file)
@@ -1376,22 +1376,22 @@ fn build_context(file: &Path) -> Result<SessionContext> {
                 .and_then(|(fm, _)| fm.session)
         })
         .with_context(|| format!("{} has no agent_doc_session", canonical_file.display()))?;
-    let base_dir = crate::snapshot::find_project_root(&canonical_file).with_context(|| {
+    let base_dir = agent_doc_orchestration::snapshot::find_project_root(&canonical_file).with_context(|| {
         format!(
             "failed to locate project root for {}",
             canonical_file.display()
         )
     })?;
-    let harness = crate::session_actor::detect_document_harness_in(
+    let harness = agent_doc_orchestration::session_actor::detect_document_harness_in(
         &base_dir,
         &canonical_file.to_string_lossy(),
     );
     let operator_status =
-        crate::project_controller::session_operator_status(&base_dir, &canonical_file)?;
+        agent_doc_orchestration::project_controller::session_operator_status(&base_dir, &canonical_file)?;
     let registry_entry = lookup_registry_entry(&base_dir, &session_id, &canonical_file)?;
-    let startup_miss = crate::startup_miss::load(&canonical_file)?;
-    let log_status = crate::startup_miss::session_log_status(&canonical_file, &session_id)?;
-    let supervisor_socket = crate::supervisor::ipc::socket_path(&base_dir, &session_id);
+    let startup_miss = agent_doc_orchestration::startup_miss::load(&canonical_file)?;
+    let log_status = agent_doc_orchestration::startup_miss::session_log_status(&canonical_file, &session_id)?;
+    let supervisor_socket = agent_doc_orchestration::supervisor::ipc::socket_path(&base_dir, &session_id);
     let supervisor_runtime = query_supervisor_runtime(&supervisor_socket);
     let operator_status = reconcile_controller_lease_with_supervisor_runtime(
         &base_dir,
@@ -1421,7 +1421,7 @@ fn lookup_registry_entry(
     session_id: &str,
     canonical_file: &Path,
 ) -> Result<Option<SessionEntry>> {
-    let registry = crate::sessions::load_in(base_dir)?;
+    let registry = agent_doc_orchestration::sessions::load_in(base_dir)?;
     Ok(find_registry_entry(&registry, session_id, canonical_file))
 }
 
@@ -1443,7 +1443,7 @@ fn find_registry_entry(
 fn resolve_attach_pane(pane: Option<&str>) -> Result<String> {
     match pane {
         Some(pane_id) => Ok(pane_id.to_string()),
-        None => crate::sessions::current_pane().context(
+        None => agent_doc_orchestration::sessions::current_pane().context(
             "attach requires --pane when no tmux pane is active in the current environment",
         ),
     }
@@ -1482,7 +1482,7 @@ fn query_supervisor_runtime(socket: &Path) -> SupervisorRuntime {
             cwd_source: None,
         };
     }
-    match crate::supervisor::ipc::send_command(socket, &IpcMethod::State) {
+    match agent_doc_orchestration::supervisor::ipc::send_command(socket, &IpcMethod::State) {
         Ok(response) if response.ok => {
             let data = response.data.unwrap_or_default();
             let running = data
@@ -1603,8 +1603,8 @@ fn live_pane_evidence_for_pane(
         };
     }
 
-    let harness = crate::harness::HarnessConfig::from_agent_name(&ctx.harness);
-    let captured = crate::sessions::capture_pane(tmux, &pane_id).unwrap_or_default();
+    let harness = agent_doc_orchestration::harness::HarnessConfig::from_agent_name(&ctx.harness);
+    let captured = agent_doc_orchestration::sessions::capture_pane(tmux, &pane_id).unwrap_or_default();
     let prompt_ready = live_pane_prompt_ready(&harness, &captured);
     LivePaneEvidence {
         pane_id: Some(pane_id.clone()),
@@ -1638,7 +1638,7 @@ fn live_evidence_target(ctx: &SessionContext) -> (Option<String>, &'static str) 
     (None, "none")
 }
 
-fn live_pane_prompt_ready(harness: &crate::harness::HarnessConfig, captured: &str) -> bool {
+fn live_pane_prompt_ready(harness: &agent_doc_orchestration::harness::HarnessConfig, captured: &str) -> bool {
     if harness.has_busy_cue(captured) {
         return false;
     }
@@ -1656,7 +1656,7 @@ fn live_pane_prompt_ready(harness: &crate::harness::HarnessConfig, captured: &st
 }
 
 fn live_pane_bottom_status_is_idle(
-    harness: &crate::harness::HarnessConfig,
+    harness: &agent_doc_orchestration::harness::HarnessConfig,
     captured: &str,
 ) -> bool {
     if harness.binary != "codex" {
@@ -1665,7 +1665,7 @@ fn live_pane_bottom_status_is_idle(
     let Some(last_line) = captured
         .lines()
         .rev()
-        .map(crate::prompt::strip_ansi)
+        .map(agent_doc_orchestration::prompt::strip_ansi)
         .map(|line| line.trim().to_string())
         .find(|line| !line.is_empty())
     else {
@@ -1675,7 +1675,7 @@ fn live_pane_bottom_status_is_idle(
         return false;
     }
     if let Some(candidate) = harness.last_prompt_candidate(captured) {
-        let stripped = crate::prompt::strip_ansi(&candidate);
+        let stripped = agent_doc_orchestration::prompt::strip_ansi(&candidate);
         let trimmed = stripped.trim();
         if matches!(trimmed.chars().next(), Some('>' | '›' | '❯'))
             && !harness.is_dispatch_ready_prompt_line(trimmed)
@@ -1690,7 +1690,7 @@ fn last_meaningful_pane_line(captured: &str) -> Option<String> {
     captured
         .lines()
         .rev()
-        .map(crate::prompt::strip_ansi)
+        .map(agent_doc_orchestration::prompt::strip_ansi)
         .map(|line| line.trim().to_string())
         .find(|line| !line.is_empty())
         .map(|line| line.chars().take(160).collect())
@@ -1710,9 +1710,9 @@ fn reconcile_controller_lease_with_supervisor_runtime(
     base_dir: &Path,
     canonical_file: &Path,
     supervisor_socket: &Path,
-    operator_status: crate::project_controller::SessionOperatorStatus,
+    operator_status: agent_doc_orchestration::project_controller::SessionOperatorStatus,
     runtime: &SupervisorRuntime,
-) -> Result<crate::project_controller::SessionOperatorStatus> {
+) -> Result<agent_doc_orchestration::project_controller::SessionOperatorStatus> {
     if matches!(
         runtime.health,
         SupervisorHealth::NoSocket | SupervisorHealth::Unreachable
@@ -1732,9 +1732,9 @@ fn reconcile_controller_lease_with_supervisor_runtime(
         return Ok(operator_status);
     }
 
-    crate::project_controller::refresh_supervisor_lease(
+    agent_doc_orchestration::project_controller::refresh_supervisor_lease(
         base_dir,
-        crate::project_controller::SupervisorHeartbeatRequest {
+        agent_doc_orchestration::project_controller::SupervisorHeartbeatRequest {
             file: canonical_file.to_path_buf(),
             session_id: record.session_id.clone(),
             pane_id: record.pane_id.clone(),
@@ -1744,7 +1744,7 @@ fn reconcile_controller_lease_with_supervisor_runtime(
             runtime_state: runtime_state.as_str().to_string(),
         },
     )?;
-    crate::project_controller::session_operator_status(base_dir, canonical_file)
+    agent_doc_orchestration::project_controller::session_operator_status(base_dir, canonical_file)
 }
 
 fn parse_actor_state(raw: &str) -> Option<ActorState> {
@@ -1760,9 +1760,9 @@ fn parse_actor_state(raw: &str) -> Option<ActorState> {
 }
 
 fn format_controller_transition(
-    transition: &crate::project_controller::ActorTransitionStatus,
+    transition: &agent_doc_orchestration::project_controller::ActorTransitionStatus,
 ) -> String {
-    crate::session_actor::format_transition_event(crate::session_actor::OwnershipTransitionEvent {
+    agent_doc_orchestration::session_actor::format_transition_event(agent_doc_orchestration::session_actor::OwnershipTransitionEvent {
         caller: &transition.caller,
         reason: &transition.reason,
         prior_generation: transition.prior_generation,
@@ -1793,7 +1793,7 @@ fn print_status_summary(ctx: &SessionContext) {
                 record.last_transition.reason,
                 record.last_transition.prior_generation,
                 record.last_transition.new_generation,
-                crate::startup_miss::format_timestamp(record.last_transition.timestamp)
+                agent_doc_orchestration::startup_miss::format_timestamp(record.last_transition.timestamp)
             );
         }
         None => println!("actor: missing"),
@@ -1867,7 +1867,7 @@ fn print_status_summary(ctx: &SessionContext) {
             "startup_miss: pane={} origin={:?} at={}",
             miss.pane_id,
             miss.origin,
-            crate::startup_miss::format_timestamp(miss.timestamp)
+            agent_doc_orchestration::startup_miss::format_timestamp(miss.timestamp)
         ),
         None => println!("startup_miss: none"),
     }
@@ -1899,7 +1899,7 @@ fn print_status_summary(ctx: &SessionContext) {
             lease.runtime_state.as_deref().unwrap_or("unknown"),
             lease
                 .last_heartbeat
-                .map(crate::startup_miss::format_timestamp)
+                .map(agent_doc_orchestration::startup_miss::format_timestamp)
                 .unwrap_or_else(|| "unknown".to_string()),
             lease.supervisor_socket.as_deref().unwrap_or("unknown")
         ),
@@ -1911,7 +1911,7 @@ fn print_status_summary(ctx: &SessionContext) {
             attempt.command_kind,
             attempt.accepted_stage.as_deref().unwrap_or("none"),
             attempt.failed_stage.as_deref().unwrap_or("none"),
-            crate::startup_miss::format_timestamp(attempt.timestamp)
+            agent_doc_orchestration::startup_miss::format_timestamp(attempt.timestamp)
         );
     } else {
         println!("controller_last_command: none");
@@ -1922,7 +1922,7 @@ fn print_status_summary(ctx: &SessionContext) {
             println!(
                 "- projection={} at={} message={}",
                 diagnostic.projection,
-                crate::startup_miss::format_timestamp(diagnostic.timestamp),
+                agent_doc_orchestration::startup_miss::format_timestamp(diagnostic.timestamp),
                 diagnostic.message
             );
         }
@@ -1939,10 +1939,10 @@ fn capability_proof_status(ctx: &SessionContext) -> String {
         Err(err) => return format!("unknown (failed to parse frontmatter: {err})"),
     };
     #[cfg(test)]
-    let global_config = crate::config::Config::default();
+    let global_config = agent_doc_orchestration::config::Config::default();
     #[cfg(not(test))]
-    let global_config = crate::config::load().unwrap_or_default();
-    if !crate::agent::codex::managed_capability_contract_required_for_doc_and_harness(
+    let global_config = agent_doc_orchestration::config::load().unwrap_or_default();
+    if !agent_doc_orchestration::agent::codex::managed_capability_contract_required_for_doc_and_harness(
         &ctx.canonical_file,
         &fm,
         &global_config,
@@ -1951,7 +1951,7 @@ fn capability_proof_status(ctx: &SessionContext) -> String {
         return "not_required".to_string();
     }
     let expected_writable_contract = if ctx.harness == "codex" {
-        crate::agent::codex::managed_writable_root_contract_id_for_doc(
+        agent_doc_orchestration::agent::codex::managed_writable_root_contract_id_for_doc(
             &ctx.canonical_file,
             &fm,
             &global_config,
@@ -1961,14 +1961,14 @@ fn capability_proof_status(ctx: &SessionContext) -> String {
     };
     let proven_prefix = format!("{}_capability_proof status=proven", ctx.harness);
     let proven_result = if let Some(contract) = expected_writable_contract.as_deref() {
-        crate::startup_miss::session_log_has_event_after_latest_start_containing(
+        agent_doc_orchestration::startup_miss::session_log_has_event_after_latest_start_containing(
             &ctx.canonical_file,
             &ctx.session_id,
             &proven_prefix,
             &format!("writable_root_contract={contract}"),
         )
     } else {
-        crate::startup_miss::session_log_has_event_after_latest_start(
+        agent_doc_orchestration::startup_miss::session_log_has_event_after_latest_start(
             &ctx.canonical_file,
             &ctx.session_id,
             &proven_prefix,
@@ -1984,7 +1984,7 @@ fn capability_proof_status(ctx: &SessionContext) -> String {
         if status == "proven" && expected_writable_contract.is_some() {
             continue;
         }
-        match crate::startup_miss::session_log_has_event_after_latest_start(
+        match agent_doc_orchestration::startup_miss::session_log_has_event_after_latest_start(
             &ctx.canonical_file,
             &ctx.session_id,
             &format!("{}_capability_proof status={}", ctx.harness, status),
@@ -2072,9 +2072,9 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     fn empty_operator_status(
-        record: Option<crate::session_actor::ActorRecord>,
-    ) -> crate::project_controller::SessionOperatorStatus {
-        crate::project_controller::SessionOperatorStatus {
+        record: Option<agent_doc_orchestration::session_actor::ActorRecord>,
+    ) -> agent_doc_orchestration::project_controller::SessionOperatorStatus {
+        agent_doc_orchestration::project_controller::SessionOperatorStatus {
             record,
             transitions: Vec::new(),
             supervisor_lease: None,
@@ -2083,8 +2083,8 @@ mod tests {
         }
     }
 
-    fn test_actor_record(state: ActorState) -> crate::session_actor::ActorRecord {
-        crate::session_actor::ActorRecord {
+    fn test_actor_record(state: ActorState) -> agent_doc_orchestration::session_actor::ActorRecord {
+        agent_doc_orchestration::session_actor::ActorRecord {
             document_id: "/tmp/doc.md".to_string(),
             session_id: "session-1".to_string(),
             generation: 7,
@@ -2092,7 +2092,7 @@ mod tests {
             window_id: "@1".to_string(),
             harness: "codex".to_string(),
             state,
-            last_transition: crate::session_actor::ActorLastTransition {
+            last_transition: agent_doc_orchestration::session_actor::ActorLastTransition {
                 caller: "test".to_string(),
                 reason: "test".to_string(),
                 timestamp: 1,
@@ -2119,11 +2119,11 @@ mod tests {
     }
 
     fn test_session_context(
-        record: crate::session_actor::ActorRecord,
+        record: agent_doc_orchestration::session_actor::ActorRecord,
         runtime: SupervisorRuntime,
         lease_state: Option<&str>,
     ) -> SessionContext {
-        let lease = lease_state.map(|state| crate::project_controller::SupervisorLeaseStatus {
+        let lease = lease_state.map(|state| agent_doc_orchestration::project_controller::SupervisorLeaseStatus {
             generation: 7,
             supervisor_pid: Some(100),
             supervisor_socket: Some("/tmp/supervisor.sock".to_string()),
@@ -2136,7 +2136,7 @@ mod tests {
             session_id: "session-1".to_string(),
             harness: "codex".to_string(),
             actor_record: Some(record.clone()),
-            operator_status: crate::project_controller::SessionOperatorStatus {
+            operator_status: agent_doc_orchestration::project_controller::SessionOperatorStatus {
                 record: Some(record),
                 transitions: Vec::new(),
                 supervisor_lease: lease,
@@ -2163,14 +2163,14 @@ mod tests {
 
     #[test]
     fn live_pane_prompt_ready_detects_idle_opencode_prompt() {
-        let harness = crate::harness::HarnessConfig::opencode();
+        let harness = agent_doc_orchestration::harness::HarnessConfig::opencode();
 
         assert!(live_pane_prompt_ready(&harness, "work complete\n>\n"));
     }
 
     #[test]
     fn live_pane_prompt_ready_accepts_opencode_status_chrome_without_proof_output() {
-        let harness = crate::harness::HarnessConfig::opencode();
+        let harness = agent_doc_orchestration::harness::HarnessConfig::opencode();
 
         assert!(live_pane_prompt_ready(
             &harness,
@@ -2180,7 +2180,7 @@ mod tests {
 
     #[test]
     fn live_pane_prompt_ready_accepts_opencode_idle_splash_without_prompt_glyph() {
-        let harness = crate::harness::HarnessConfig::opencode();
+        let harness = agent_doc_orchestration::harness::HarnessConfig::opencode();
 
         assert!(live_pane_prompt_ready(
             &harness,
@@ -2198,7 +2198,7 @@ mod tests {
 
     #[test]
     fn live_pane_prompt_ready_accepts_codex_status_chrome_only_output() {
-        let harness = crate::harness::HarnessConfig::codex();
+        let harness = agent_doc_orchestration::harness::HarnessConfig::codex();
 
         assert!(live_pane_prompt_ready(
             &harness,
@@ -2208,7 +2208,7 @@ mod tests {
 
     #[test]
     fn live_pane_prompt_ready_accepts_codex_xhigh_status_chrome_only_output() {
-        let harness = crate::harness::HarnessConfig::codex();
+        let harness = agent_doc_orchestration::harness::HarnessConfig::codex();
 
         assert!(live_pane_prompt_ready(
             &harness,
@@ -2218,7 +2218,7 @@ mod tests {
 
     #[test]
     fn live_pane_prompt_ready_accepts_codex_footer_below_prior_output() {
-        let harness = crate::harness::HarnessConfig::codex();
+        let harness = agent_doc_orchestration::harness::HarnessConfig::codex();
 
         assert!(live_pane_prompt_ready(
             &harness,
@@ -2232,7 +2232,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 69% used
 
     #[test]
     fn live_pane_prompt_ready_rejects_codex_drafted_input_above_footer() {
-        let harness = crate::harness::HarnessConfig::codex();
+        let harness = agent_doc_orchestration::harness::HarnessConfig::codex();
 
         assert!(!live_pane_prompt_ready(
             &harness,
@@ -2245,7 +2245,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 69% used
 
     #[test]
     fn live_pane_prompt_ready_accepts_codex_default_placeholder() {
-        let harness = crate::harness::HarnessConfig::codex();
+        let harness = agent_doc_orchestration::harness::HarnessConfig::codex();
 
         assert!(live_pane_prompt_ready(
             &harness,
@@ -2258,7 +2258,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 55% used
 
     #[test]
     fn live_pane_prompt_ready_accepts_codex_write_tests_placeholder() {
-        let harness = crate::harness::HarnessConfig::codex();
+        let harness = agent_doc_orchestration::harness::HarnessConfig::codex();
 
         assert!(live_pane_prompt_ready(
             &harness,
@@ -2271,7 +2271,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
 
     #[test]
     fn live_pane_prompt_ready_rejects_codex_working_status_above_placeholder() {
-        let harness = crate::harness::HarnessConfig::codex();
+        let harness = agent_doc_orchestration::harness::HarnessConfig::codex();
 
         assert!(!live_pane_prompt_ready(
             &harness,
@@ -2286,7 +2286,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
 
     #[test]
     fn live_pane_prompt_ready_rejects_active_output_after_prompt() {
-        let harness = crate::harness::HarnessConfig::codex();
+        let harness = agent_doc_orchestration::harness::HarnessConfig::codex();
 
         assert!(!live_pane_prompt_ready(
             &harness,
@@ -2332,8 +2332,8 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
 
         assert_eq!(state, OperatorClearInputState::IdlePrompt);
         assert_eq!(
-            crate::flow::operator_clear::clear_guard_outcome(state),
-            crate::flow::types::FlowOutcome::Completed
+            agent_doc_orchestration::flow::operator_clear::clear_guard_outcome(state),
+            agent_doc_orchestration::flow::types::FlowOutcome::Completed
         );
     }
 
@@ -2352,8 +2352,8 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
 
         assert_eq!(state, OperatorClearInputState::Busy);
         assert_eq!(
-            crate::flow::operator_clear::clear_guard_outcome(state),
-            crate::flow::types::FlowOutcome::Blocked
+            agent_doc_orchestration::flow::operator_clear::clear_guard_outcome(state),
+            agent_doc_orchestration::flow::types::FlowOutcome::Blocked
         );
         let message =
             busy_clear_refusal_message(Path::new("/tmp/doc.md"), &evidence, "active codex turn");
@@ -2398,8 +2398,8 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
 
         assert_eq!(state, OperatorClearInputState::CleanExit);
         assert_eq!(
-            crate::flow::operator_clear::clear_guard_outcome(state),
-            crate::flow::types::FlowOutcome::Completed
+            agent_doc_orchestration::flow::operator_clear::clear_guard_outcome(state),
+            agent_doc_orchestration::flow::types::FlowOutcome::Completed
         );
     }
 
@@ -2615,7 +2615,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         let committed = "---\nagent_doc_session: session-1\n---\n\nDone.\n";
         std::fs::write(&doc, committed).unwrap();
-        crate::cycle_state::mark_committed(
+        agent_doc_orchestration::cycle_state::mark_committed(
             &doc,
             "commit_success",
             Some(committed),
@@ -2640,7 +2640,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
 
     #[test]
     fn idle_direct_pane_evidence_supersedes_stale_busy_projection() {
-        let record = crate::session_actor::ActorRecord {
+        let record = agent_doc_orchestration::session_actor::ActorRecord {
             document_id: "/tmp/doc.md".to_string(),
             session_id: "session-1".to_string(),
             generation: 7,
@@ -2648,7 +2648,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             window_id: "@1".to_string(),
             harness: "codex".to_string(),
             state: ActorState::Busy,
-            last_transition: crate::session_actor::ActorLastTransition {
+            last_transition: agent_doc_orchestration::session_actor::ActorLastTransition {
                 caller: "supervisor".to_string(),
                 reason: "work_started".to_string(),
                 timestamp: 1,
@@ -2662,10 +2662,10 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             session_id: "session-1".to_string(),
             harness: "codex".to_string(),
             actor_record: Some(record.clone()),
-            operator_status: crate::project_controller::SessionOperatorStatus {
+            operator_status: agent_doc_orchestration::project_controller::SessionOperatorStatus {
                 record: Some(record),
                 transitions: Vec::new(),
-                supervisor_lease: Some(crate::project_controller::SupervisorLeaseStatus {
+                supervisor_lease: Some(agent_doc_orchestration::project_controller::SupervisorLeaseStatus {
                     generation: 7,
                     supervisor_pid: Some(100),
                     supervisor_socket: Some("/tmp/supervisor.sock".to_string()),
@@ -2723,9 +2723,9 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             "---\nagent_doc_session: session-status\nagent: codex\n---\nBody\n",
         )
         .unwrap();
-        crate::session_actor::record_session_start_direct(&doc, "session-status", "%41", "@1", 1)
+        agent_doc_orchestration::session_actor::record_session_start_direct(&doc, "session-status", "%41", "@1", 1)
             .unwrap();
-        crate::session_actor::transition_state_direct(
+        agent_doc_orchestration::session_actor::transition_state_direct(
             &doc,
             "session-status",
             "%41",
@@ -2735,9 +2735,9 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             "prompt_ready",
         )
         .unwrap();
-        crate::project_controller::refresh_supervisor_lease(
+        agent_doc_orchestration::project_controller::refresh_supervisor_lease(
             dir.path(),
-            crate::project_controller::SupervisorHeartbeatRequest {
+            agent_doc_orchestration::project_controller::SupervisorHeartbeatRequest {
                 file: doc.clone(),
                 session_id: "session-status".to_string(),
                 pane_id: "%41".to_string(),
@@ -2749,9 +2749,9 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         )
         .unwrap();
 
-        let sock = crate::supervisor::ipc::SupervisorIpc::start(dir.path(), "session-status", {
+        let sock = agent_doc_orchestration::supervisor::ipc::SupervisorIpc::start(dir.path(), "session-status", {
             move |method| match method {
-                IpcMethod::State => crate::supervisor::ipc::IpcResponse::ok(serde_json::json!({
+                IpcMethod::State => agent_doc_orchestration::supervisor::ipc::IpcResponse::ok(serde_json::json!({
                     "running": true,
                     "state": "healthy",
                     "actor_state": "ready",
@@ -2764,7 +2764,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
                     "child_pid": 1002,
                     "cwd_source": "config",
                 })),
-                _ => crate::supervisor::ipc::IpcResponse::ok_empty(),
+                _ => agent_doc_orchestration::supervisor::ipc::IpcResponse::ok_empty(),
             }
         })
         .unwrap();
@@ -2868,35 +2868,35 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         .unwrap();
         let captured = Arc::new(Mutex::new(Vec::<String>::new()));
         let captured_for_ipc = captured.clone();
-        let sock = crate::supervisor::ipc::SupervisorIpc::start(dir.path(), "session-clear", {
+        let sock = agent_doc_orchestration::supervisor::ipc::SupervisorIpc::start(dir.path(), "session-clear", {
             move |method| match method {
                 IpcMethod::Inject { bytes } => {
                     captured_for_ipc.lock().unwrap().push(bytes);
-                    crate::supervisor::ipc::IpcResponse::ok_empty()
+                    agent_doc_orchestration::supervisor::ipc::IpcResponse::ok_empty()
                 }
-                IpcMethod::State => crate::supervisor::ipc::IpcResponse::ok(serde_json::json!({
+                IpcMethod::State => agent_doc_orchestration::supervisor::ipc::IpcResponse::ok(serde_json::json!({
                     "running": true,
                     "state": "healthy",
                     "actor_state": "ready",
                     "restart_count": 0,
                 })),
-                _ => crate::supervisor::ipc::IpcResponse::ok_empty(),
+                _ => agent_doc_orchestration::supervisor::ipc::IpcResponse::ok_empty(),
             }
         })
         .unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let pane_window = iso.pane_window(&pane).unwrap();
-        crate::sessions::register("session-clear", &pane, &doc.to_string_lossy()).unwrap();
-        crate::session_actor::record_session_start(&doc, "session-clear", &pane, &pane_window, 1)
+        agent_doc_orchestration::sessions::register("session-clear", &pane, &doc.to_string_lossy()).unwrap();
+        agent_doc_orchestration::session_actor::record_session_start(&doc, "session-clear", &pane, &pane_window, 1)
             .unwrap();
         clear(&doc).unwrap();
-        let latest = crate::codex_hook::load_latest_prompt_for_file(&doc)
+        let latest = agent_doc_orchestration::codex_hook::load_latest_prompt_for_file(&doc)
             .unwrap()
             .unwrap();
         assert_eq!(latest, "/clear");
         assert_eq!(
             captured.lock().unwrap().as_slice(),
-            &[crate::supervisor::ipc::normalize_submit_text("/clear")]
+            &[agent_doc_orchestration::supervisor::ipc::normalize_submit_text("/clear")]
         );
         drop(sock);
     }
@@ -2908,7 +2908,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         let iso = tmux_router::IsolatedTmux::new("session-clear-pane-select-actor");
         let actor_pane = iso.new_session("test", dir.path()).unwrap();
         let registry_pane = iso.new_window("test", dir.path()).unwrap();
-        let actor_record = crate::session_actor::ActorRecord {
+        let actor_record = agent_doc_orchestration::session_actor::ActorRecord {
             document_id: "doc".to_string(),
             session_id: "session-clear".to_string(),
             generation: 3,
@@ -2916,7 +2916,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             window_id: iso.pane_window(&actor_pane).unwrap(),
             harness: "codex".to_string(),
             state: ActorState::Ready,
-            last_transition: crate::session_actor::ActorLastTransition {
+            last_transition: agent_doc_orchestration::session_actor::ActorLastTransition {
                 caller: "test".to_string(),
                 reason: "actor".to_string(),
                 timestamp: 1,
@@ -2971,7 +2971,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         let dir = tempfile::tempdir().unwrap();
         let iso = tmux_router::IsolatedTmux::new("session-clear-pane-select-registry");
         let registry_pane = iso.new_session("test", dir.path()).unwrap();
-        let actor_record = crate::session_actor::ActorRecord {
+        let actor_record = agent_doc_orchestration::session_actor::ActorRecord {
             document_id: "doc".to_string(),
             session_id: "session-clear".to_string(),
             generation: 3,
@@ -2979,7 +2979,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             window_id: "@9999".to_string(),
             harness: "codex".to_string(),
             state: ActorState::Ready,
-            last_transition: crate::session_actor::ActorLastTransition {
+            last_transition: agent_doc_orchestration::session_actor::ActorLastTransition {
                 caller: "test".to_string(),
                 reason: "actor".to_string(),
                 timestamp: 1,

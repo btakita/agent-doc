@@ -873,7 +873,7 @@ impl SimWorld {
 
     fn repair_ipc_snapshot_duplicate_prompts(&mut self, before: &str, file: &Path) -> Result<()> {
         let (repaired, changed) =
-            crate::write::dedupe_ipc_snapshot_content(file, Some(before), &self.doc, "sim_ipc")?;
+            agent_doc_orchestration::write::dedupe_ipc_snapshot_content(file, Some(before), &self.doc, "sim_ipc")?;
         if changed {
             self.doc = repaired;
             self.coverage.prompt_duplicate_repairs += 1;
@@ -904,7 +904,7 @@ impl SimWorld {
     }
 
     fn apply_narrow_normalization_repair(&mut self, normalize_prefix_lines: &[String]) {
-        let repaired = crate::write::normalize_exchange_prefixes_for_targets(
+        let repaired = agent_doc_orchestration::write::normalize_exchange_prefixes_for_targets(
             &self.doc,
             normalize_prefix_lines,
         );
@@ -917,23 +917,23 @@ impl SimWorld {
     fn stale_full_content_visible_replacement(
         &mut self,
         source: FullContentReplacementSource,
-    ) -> crate::flow::document_mutation::FullContentVisibleReplacementDecision {
-        let proof = crate::flow::document_mutation::FullContentSourceProof::from_content(&self.doc);
+    ) -> agent_doc_orchestration::flow::document_mutation::FullContentVisibleReplacementDecision {
+        let proof = agent_doc_orchestration::flow::document_mutation::FullContentSourceProof::from_content(&self.doc);
         let replacement = template_doc(&format!(
             "### Re: replacement from {} — gpt-5\n\nDone.\n",
             source.as_str()
         ));
         self.append_to_exchange("❯ live prompt typed before full-content apply\n")
             .expect("template doc should keep an exchange component");
-        let decision = crate::flow::document_mutation::decide_full_content_visible_replacement(
+        let decision = agent_doc_orchestration::flow::document_mutation::decide_full_content_visible_replacement(
             &self.doc,
             Some(&proof),
         );
-        if decision == crate::flow::document_mutation::FullContentVisibleReplacementDecision::Apply
+        if decision == agent_doc_orchestration::flow::document_mutation::FullContentVisibleReplacementDecision::Apply
         {
             self.doc = replacement;
         } else if decision
-            == crate::flow::document_mutation::FullContentVisibleReplacementDecision::RejectStaleSourceBuffer
+            == agent_doc_orchestration::flow::document_mutation::FullContentVisibleReplacementDecision::RejectStaleSourceBuffer
         {
             self.coverage.stale_source_buffer_skips += 1;
         }
@@ -946,8 +946,8 @@ impl SimWorld {
         content_ours: &str,
         normalize_prefix_lines: &[String],
     ) {
-        if !crate::write::verify_sidecar_normalization(sidecar, normalize_prefix_lines) {
-            let fallback = crate::write::normalize_exchange_prefixes_for_targets(
+        if !agent_doc_orchestration::write::verify_sidecar_normalization(sidecar, normalize_prefix_lines) {
+            let fallback = agent_doc_orchestration::write::normalize_exchange_prefixes_for_targets(
                 content_ours,
                 normalize_prefix_lines,
             );
@@ -963,7 +963,7 @@ impl SimWorld {
         snapshot_candidate: &str,
     ) {
         self.doc = snapshot_candidate.to_string();
-        if crate::write::ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
+        if agent_doc_orchestration::write::ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
             baseline,
             snapshot_candidate,
             content_ours,
@@ -981,7 +981,7 @@ impl SimWorld {
     }
 
     fn repair_visible_duplicate_response(&mut self) {
-        let repaired = crate::dedupe::dedupe_responses(&self.doc);
+        let repaired = agent_doc_orchestration::dedupe::dedupe_responses(&self.doc);
         if repaired != self.doc {
             self.doc = repaired;
             self.coverage.visible_duplicate_repairs += 1;
@@ -996,16 +996,16 @@ impl SimWorld {
                 self.trace
             );
         }
-        let Some(diff_text) = crate::diff::unified_diff_from_contents(&self.snapshot, &self.doc)
+        let Some(diff_text) = agent_doc_orchestration::diff::unified_diff_from_contents(&self.snapshot, &self.doc)
         else {
             return Ok(());
         };
-        let has_follow_up = crate::diff::classify_prompt_bearing_changes(&diff_text)
+        let has_follow_up = agent_doc_orchestration::diff::classify_prompt_bearing_changes(&diff_text)
             .into_iter()
             .any(|change| {
                 matches!(
                     change.kind,
-                    crate::diff::PromptBearingChangeKind::PromptTarget
+                    agent_doc_orchestration::diff::PromptBearingChangeKind::PromptTarget
                 )
             });
         if has_follow_up {
@@ -1331,7 +1331,7 @@ impl SimWorld {
             .iter()
             .filter(|component| crate::component::is_tracked_work_component(&component.name))
             .flat_map(|component| {
-                crate::pending::detect_malformed_item_lines(component.content(&self.doc))
+                agent_doc_orchestration::pending::detect_malformed_item_lines(component.content(&self.doc))
             })
             .collect::<Vec<_>>();
         if !malformed.is_empty() {
@@ -1343,14 +1343,14 @@ impl SimWorld {
             bail!("malformed tracked checklist item(s): {refs}");
         }
 
-        if let Some(diff_text) = crate::diff::unified_diff_from_contents(&self.snapshot, &self.doc)
+        if let Some(diff_text) = agent_doc_orchestration::diff::unified_diff_from_contents(&self.snapshot, &self.doc)
         {
-            let prompt_targets = crate::diff::classify_prompt_bearing_changes(&diff_text)
+            let prompt_targets = agent_doc_orchestration::diff::classify_prompt_bearing_changes(&diff_text)
                 .into_iter()
                 .filter(|change| {
                     matches!(
                         change.kind,
-                        crate::diff::PromptBearingChangeKind::PromptTarget
+                        agent_doc_orchestration::diff::PromptBearingChangeKind::PromptTarget
                     )
                 })
                 .map(|change| change.text)
@@ -1547,7 +1547,7 @@ fn setup_baseline_drift_capture(
 ) -> (
     tempfile::TempDir,
     PathBuf,
-    crate::capture::CaptureRecord,
+    agent_doc_orchestration::capture::CaptureRecord,
     SimWorld,
 ) {
     let dir = tempfile::TempDir::new().unwrap();
@@ -1556,8 +1556,8 @@ fn setup_baseline_drift_capture(
     let mut world = SimWorld::new(seed);
     world.apply(SimCommand::EditPrompt).unwrap();
     std::fs::write(&doc, &world.doc).unwrap();
-    crate::snapshot::save(&doc, &world.doc).unwrap();
-    let capture = crate::capture::capture_response(&doc, response).unwrap();
+    agent_doc_orchestration::snapshot::save(&doc, &world.doc).unwrap();
+    let capture = agent_doc_orchestration::capture::capture_response(&doc, response).unwrap();
     (dir, doc, capture, world)
 }
 
@@ -1566,7 +1566,7 @@ fn apply_response_and_save_current(doc: &Path, world: &mut SimWorld, response: &
     world.apply_captured_response()?;
     world.apply(SimCommand::Commit)?;
     std::fs::write(doc, &world.doc)?;
-    crate::snapshot::save(doc, &world.doc)?;
+    agent_doc_orchestration::snapshot::save(doc, &world.doc)?;
     Ok(())
 }
 
@@ -1759,7 +1759,7 @@ fn post_exchange_comment_ownership_sim_covers_cleanup_and_handoff_paths() {
         "preflight-style recovery must not delete visible scratch comments"
     );
 
-    let direct_write = crate::write::normalize_template_structure_or_fail_preserving(
+    let direct_write = agent_doc_orchestration::write::normalize_template_structure_or_fail_preserving(
         &world.doc,
         file,
         Some(&world.snapshot),
@@ -1767,7 +1767,7 @@ fn post_exchange_comment_ownership_sim_covers_cleanup_and_handoff_paths() {
     .unwrap();
     assert_owned_scratch_comment_preserved(&direct_write, prompt);
 
-    let (ipc_handoff, changed) = crate::write::dedupe_ipc_snapshot_content(
+    let (ipc_handoff, changed) = agent_doc_orchestration::write::dedupe_ipc_snapshot_content(
         file,
         Some(&world.snapshot),
         &direct_write,
@@ -1783,7 +1783,7 @@ fn post_exchange_comment_ownership_sim_covers_cleanup_and_handoff_paths() {
     let mut repair_world = world;
     repair_world.captured_response = Some(response_patch("comment ownership"));
     repair_world.apply_captured_response().unwrap();
-    let repaired_write = crate::write::normalize_template_structure_or_fail_preserving(
+    let repaired_write = agent_doc_orchestration::write::normalize_template_structure_or_fail_preserving(
         &repair_world.doc,
         file,
         Some(&repair_world.snapshot),
@@ -1808,7 +1808,7 @@ fn post_exchange_comment_ownership_sim_covers_cleanup_and_handoff_paths() {
             .unwrap();
         (before, generated_world.doc)
     };
-    let (scrubbed, changed) = crate::write::dedupe_ipc_snapshot_content(
+    let (scrubbed, changed) = agent_doc_orchestration::write::dedupe_ipc_snapshot_content(
         file,
         Some(&generated.0),
         &generated.1,
@@ -2157,7 +2157,7 @@ fn full_content_source_proof_sim_rejects_stale_editor_buffers() {
 
         assert_eq!(
             decision,
-            crate::flow::document_mutation::FullContentVisibleReplacementDecision::RejectStaleSourceBuffer,
+            agent_doc_orchestration::flow::document_mutation::FullContentVisibleReplacementDecision::RejectStaleSourceBuffer,
             "{source:?} must reject full-content replacement when the editor buffer drifted"
         );
         assert!(
@@ -2535,13 +2535,13 @@ fn finalize_with_typing_in_post_exchange_comment_and_already_applied_ack_does_no
 
     let already_applied_ack = r#"{"type":"ack","status":"error","reason":"already_applied"}"#;
     assert_eq!(
-        crate::ipc_socket::classify_ack(already_applied_ack),
-        crate::ipc_socket::AckClassification::AlreadyApplied,
+        agent_doc_orchestration::ipc_socket::classify_ack(already_applied_ack),
+        agent_doc_orchestration::ipc_socket::AckClassification::AlreadyApplied,
         "protocol contract: status=error + reason=already_applied is the dedupe signal"
     );
     let send_err = anyhow!("IPC ack already_applied: {}", already_applied_ack);
     assert!(
-        crate::ipc_socket::is_already_applied_error(&send_err),
+        agent_doc_orchestration::ipc_socket::is_already_applied_error(&send_err),
         "send_message wraps already_applied acks in an error the write path can recognize"
     );
 
@@ -2559,7 +2559,7 @@ fn finalize_with_typing_in_post_exchange_comment_and_already_applied_ack_does_no
         2,
         "without the already_applied gate the file-IPC fallback would land a duplicate response heading"
     );
-    let (deduped, changed) = crate::write::dedupe_ipc_snapshot_content(
+    let (deduped, changed) = agent_doc_orchestration::write::dedupe_ipc_snapshot_content(
         file,
         Some(&live_after_plugin_apply),
         &counterfactual,
@@ -2601,8 +2601,8 @@ fn cycle_1779845677327_scratch_directives_survive_already_applied_ipc_race() {
 
     let already_applied_ack = r#"{"type":"ack","status":"error","reason":"already_applied"}"#;
     assert_eq!(
-        crate::ipc_socket::classify_ack(already_applied_ack),
-        crate::ipc_socket::AckClassification::AlreadyApplied,
+        agent_doc_orchestration::ipc_socket::classify_ack(already_applied_ack),
+        agent_doc_orchestration::ipc_socket::AckClassification::AlreadyApplied,
         "editor plugins must use already_applied so the binary skips file IPC fallback"
     );
 
@@ -2627,7 +2627,7 @@ fn cycle_1779845677327_scratch_directives_survive_already_applied_ipc_race() {
 
     let mut counterfactual = world.doc.clone();
     counterfactual.push_str(response_block);
-    let (deduped, changed) = crate::write::dedupe_ipc_snapshot_content(
+    let (deduped, changed) = agent_doc_orchestration::write::dedupe_ipc_snapshot_content(
         file,
         Some(&live_after_plugin_apply),
         &counterfactual,
@@ -2670,7 +2670,7 @@ fn ipc_snapshot_guard_blocks_live_queue_drift_after_preflight() {
     );
 
     assert!(
-        crate::write::ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
+        agent_doc_orchestration::write::ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
             &baseline,
             &ack_candidate,
             &content_ours,
@@ -2707,20 +2707,20 @@ fn baseline_drift_benign_user_commit_outside_response_auto_refreshes() {
         )
         .unwrap();
     std::fs::write(&doc, &world.doc).unwrap();
-    crate::snapshot::save(&doc, &world.doc).unwrap();
+    agent_doc_orchestration::snapshot::save(&doc, &world.doc).unwrap();
 
-    crate::capture::validate_replay(&doc, &capture)
+    agent_doc_orchestration::capture::validate_replay(&doc, &capture)
         .expect("benign user commit outside response must auto-refresh");
 
-    let refreshed = crate::capture::load_active(&doc).unwrap().unwrap();
+    let refreshed = agent_doc_orchestration::capture::load_active(&doc).unwrap().unwrap();
     assert_eq!(
         refreshed.file_hash.as_deref(),
-        Some(crate::ops_log::content_hash(&world.doc).as_str()),
+        Some(agent_doc_orchestration::ops_log::content_hash(&world.doc).as_str()),
         "file hash should refresh to the user-committed document"
     );
     assert_eq!(
         refreshed.snapshot_hash.as_deref(),
-        Some(crate::ops_log::content_hash(&world.doc).as_str()),
+        Some(agent_doc_orchestration::ops_log::content_hash(&world.doc).as_str()),
         "snapshot hash should refresh to the user-committed baseline"
     );
     let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
@@ -2741,9 +2741,9 @@ fn baseline_drift_user_edit_inside_committed_response_fails_closed() {
         "User rewrote the committed response.",
     );
     std::fs::write(&doc, &world.doc).unwrap();
-    crate::snapshot::save(&doc, &world.doc).unwrap();
+    agent_doc_orchestration::snapshot::save(&doc, &world.doc).unwrap();
 
-    let err = crate::capture::validate_replay(&doc, &capture)
+    let err = agent_doc_orchestration::capture::validate_replay(&doc, &capture)
         .expect_err("editing the committed response body must fail closed");
     assert!(
         err.to_string().contains("baseline no longer matches")
@@ -2762,20 +2762,20 @@ fn baseline_drift_user_edit_matches_normalized_response_adopts() {
         .doc
         .replace("❯ Submodule pointer updated.", "Submodule pointer updated.");
     std::fs::write(&doc, &world.doc).unwrap();
-    crate::snapshot::save(&doc, &world.doc).unwrap();
+    agent_doc_orchestration::snapshot::save(&doc, &world.doc).unwrap();
 
-    crate::capture::validate_replay(&doc, &capture)
+    agent_doc_orchestration::capture::validate_replay(&doc, &capture)
         .expect("user-normalized response body should be adopted");
 
-    let refreshed = crate::capture::load_active(&doc).unwrap().unwrap();
+    let refreshed = agent_doc_orchestration::capture::load_active(&doc).unwrap().unwrap();
     assert_eq!(
         refreshed.file_hash.as_deref(),
-        Some(crate::ops_log::content_hash(&world.doc).as_str()),
+        Some(agent_doc_orchestration::ops_log::content_hash(&world.doc).as_str()),
         "file hash should reflect the normalized user-cleaned response"
     );
     assert_eq!(
         refreshed.snapshot_hash.as_deref(),
-        Some(crate::ops_log::content_hash(&world.doc).as_str()),
+        Some(agent_doc_orchestration::ops_log::content_hash(&world.doc).as_str()),
         "snapshot hash should reflect the normalized user-cleaned response"
     );
 }

@@ -34,9 +34,9 @@ use std::path::Path;
 use anyhow::{Context, Result};
 
 use crate::frontmatter;
-use crate::sessions;
-use crate::snapshot;
-use crate::supervisor::ipc as supervisor_ipc;
+use agent_doc_orchestration::sessions;
+use agent_doc_orchestration::snapshot;
+use agent_doc_orchestration::supervisor::ipc as supervisor_ipc;
 
 /// Classification of a queue/orchestration item.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -227,7 +227,7 @@ fn try_supervisor_dispatch(
     // Use `inject` method to send the command text to the harness stdin.
     // The harness interprets `/command` lines natively.
     let bytes = supervisor_ipc::normalize_submit_text(&item.raw);
-    crate::input_diag::log_text_submit(
+    agent_doc_orchestration::input_diag::log_text_submit(
         Some(&ctx.file),
         "queue_dispatch.supervisor_ipc",
         &format!("socket:{}", sock.display()),
@@ -263,7 +263,7 @@ fn try_tmux_dispatch(item: &QueueItem, ctx: &DispatchContext) -> Result<Option<D
     let tmux = sessions::Tmux::default();
 
     // Send the command text + Enter to the pane
-    crate::input_diag::log_text_submit(
+    agent_doc_orchestration::input_diag::log_text_submit(
         Some(&ctx.file),
         "queue_dispatch.tmux_send_keys",
         &format!("pane:{pane_id}"),
@@ -423,19 +423,19 @@ mod tests {
 
         let captured = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
         let captured_for_ipc = captured.clone();
-        let mut ipc = crate::supervisor::ipc::SupervisorIpc::start(
+        let mut ipc = agent_doc_orchestration::supervisor::ipc::SupervisorIpc::start(
             dir.path(),
             "queue-session",
             move |method| match method {
-                crate::supervisor::ipc::IpcMethod::Inject { bytes } => {
+                agent_doc_orchestration::supervisor::ipc::IpcMethod::Inject { bytes } => {
                     captured_for_ipc.lock().unwrap().push(bytes);
-                    crate::supervisor::ipc::IpcResponse::ok_empty()
+                    agent_doc_orchestration::supervisor::ipc::IpcResponse::ok_empty()
                 }
-                crate::supervisor::ipc::IpcMethod::State
-                | crate::supervisor::ipc::IpcMethod::Pid
-                | crate::supervisor::ipc::IpcMethod::Restart { .. }
-                | crate::supervisor::ipc::IpcMethod::Stop { .. } => {
-                    crate::supervisor::ipc::IpcResponse::ok_empty()
+                agent_doc_orchestration::supervisor::ipc::IpcMethod::State
+                | agent_doc_orchestration::supervisor::ipc::IpcMethod::Pid
+                | agent_doc_orchestration::supervisor::ipc::IpcMethod::Restart { .. }
+                | agent_doc_orchestration::supervisor::ipc::IpcMethod::Stop { .. } => {
+                    agent_doc_orchestration::supervisor::ipc::IpcResponse::ok_empty()
                 }
             },
         )
@@ -447,7 +447,7 @@ mod tests {
         assert!(matches!(result, DispatchResult::Ok));
         assert_eq!(
             captured.lock().unwrap().as_slice(),
-            &[crate::supervisor::ipc::normalize_submit_text("/clear")]
+            &[agent_doc_orchestration::supervisor::ipc::normalize_submit_text("/clear")]
         );
 
         ipc.stop();

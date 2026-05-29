@@ -43,7 +43,8 @@ use anyhow::{Context, Result, bail};
 use std::path::Path;
 use std::process::Command;
 
-use crate::{component, component::is_backlog_component, pending, pending_cmd, snapshot};
+use agent_doc_orchestration::{pending, pending_cmd, snapshot};
+use crate::{component, component::is_backlog_component};
 
 /// Format an ISO-8601 timestamp using the system `date` command.
 fn iso_timestamp() -> String {
@@ -205,7 +206,7 @@ pub fn run(
         save_snapshot(file, &doc)?;
 
         if commit {
-            crate::git::commit(file)?;
+            agent_doc_orchestration::git::commit(file)?;
         }
         return Ok(());
     }
@@ -275,7 +276,7 @@ pub fn run(
     );
 
     if commit {
-        crate::git::commit(file)?;
+        agent_doc_orchestration::git::commit(file)?;
     }
 
     Ok(())

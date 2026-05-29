@@ -141,7 +141,7 @@ impl ServeState {
             Some(target) => target,
             None => {
                 let cwd = std::env::current_dir().context("failed to get current directory")?;
-                crate::snapshot::find_project_root(&cwd).unwrap_or(cwd)
+                agent_doc_orchestration::snapshot::find_project_root(&cwd).unwrap_or(cwd)
             }
         };
         if !raw_target.exists() {
@@ -151,7 +151,7 @@ impl ServeState {
             .canonicalize()
             .with_context(|| format!("failed to canonicalize {}", raw_target.display()))?;
         if canonical.is_file() {
-            let root = crate::snapshot::find_project_root(&canonical)
+            let root = agent_doc_orchestration::snapshot::find_project_root(&canonical)
                 .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
             Ok(Self {
                 root,
@@ -160,7 +160,7 @@ impl ServeState {
                 auth,
             })
         } else {
-            let root = crate::snapshot::find_project_root(&canonical).unwrap_or(canonical);
+            let root = agent_doc_orchestration::snapshot::find_project_root(&canonical).unwrap_or(canonical);
             Ok(Self {
                 root,
                 default_doc: None,
@@ -607,7 +607,7 @@ fn list_sessions(state: &ServeState) -> Result<Vec<ServeSession>> {
         return Ok(by_path.into_values().collect());
     }
 
-    if let Ok(registry) = crate::sessions::load_in(&state.root) {
+    if let Ok(registry) = agent_doc_orchestration::sessions::load_in(&state.root) {
         for (key, entry) in registry {
             let path = registry_entry_path(&state.root, &key, &entry);
             let session_id = (!entry.session_id.is_empty()).then_some(entry.session_id);
@@ -625,7 +625,7 @@ fn list_sessions(state: &ServeState) -> Result<Vec<ServeSession>> {
     Ok(by_path.into_values().collect())
 }
 
-fn registry_entry_path(root: &Path, key: &str, entry: &crate::sessions::SessionEntry) -> PathBuf {
+fn registry_entry_path(root: &Path, key: &str, entry: &agent_doc_orchestration::sessions::SessionEntry) -> PathBuf {
     if !entry.file.is_empty() {
         let file = Path::new(&entry.file);
         if file.is_absolute() {
@@ -667,7 +667,7 @@ fn make_session(
 ) -> Result<ServeSession> {
     let absolute = canonicalize_or_normalize(path);
     let absolute_str = absolute.display().to_string();
-    let hash = crate::snapshot::doc_hash_from_str(&absolute_str);
+    let hash = agent_doc_orchestration::snapshot::doc_hash_from_str(&absolute_str);
     let id = hash.chars().take(12).collect();
     let path = relative_path(root, &absolute).unwrap_or_else(|_| absolute_str.clone());
     let title = absolute
@@ -856,7 +856,7 @@ fn read_doc_fingerprint(doc: &Path) -> Result<DocFingerprint> {
         .and_then(system_time_ms);
     Ok(DocFingerprint {
         bytes: content.len(),
-        hash: crate::ops_log::content_hash(&content),
+        hash: agent_doc_orchestration::ops_log::content_hash(&content),
         modified_ms,
     })
 }
@@ -874,18 +874,18 @@ fn doc_event_payload(doc: &Path, fingerprint: &DocFingerprint) -> serde_json::Va
     })
 }
 
-fn active_partial_response(doc: &Path) -> Result<Option<crate::capture::PartialCaptureRecord>> {
-    let Some(state) = crate::cycle_state::load(doc)? else {
+fn active_partial_response(doc: &Path) -> Result<Option<agent_doc_orchestration::capture::PartialCaptureRecord>> {
+    let Some(state) = agent_doc_orchestration::cycle_state::load(doc)? else {
         return Ok(None);
     };
     if !state.is_open() {
         return Ok(None);
     }
-    crate::capture::load_partial_by_cycle(doc, &state.cycle_id)
+    agent_doc_orchestration::capture::load_partial_by_cycle(doc, &state.cycle_id)
 }
 
 fn partial_response_fingerprint(
-    record: &crate::capture::PartialCaptureRecord,
+    record: &agent_doc_orchestration::capture::PartialCaptureRecord,
 ) -> PartialResponseFingerprint {
     PartialResponseFingerprint {
         cycle_id: record.cycle_id.clone(),
@@ -895,7 +895,7 @@ fn partial_response_fingerprint(
     }
 }
 
-fn partial_response_payload(record: &crate::capture::PartialCaptureRecord) -> serde_json::Value {
+fn partial_response_payload(record: &agent_doc_orchestration::capture::PartialCaptureRecord) -> serde_json::Value {
     serde_json::json!({
         "path": record.file,
         "cycle_id": record.cycle_id,
@@ -1138,11 +1138,11 @@ fn handle_save(
 }
 
 fn active_cycle_in_scope(doc: &Path) -> Result<bool> {
-    Ok(crate::cycle_state::load(doc)?.is_some_and(|state| state.is_open()))
+    Ok(agent_doc_orchestration::cycle_state::load(doc)?.is_some_and(|state| state.is_open()))
 }
 
 fn write_and_close_active_cycle(doc: &Path, body: &str) -> Result<()> {
-    crate::write::atomic_write_pub(doc, body)
+    agent_doc_orchestration::write::atomic_write_pub(doc, body)
         .with_context(|| format!("failed to write {}", doc.display()))?;
     let binary = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("agent-doc"));
     let output = Command::new(binary)
@@ -1381,10 +1381,10 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        crate::snapshot::save(&doc, content).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_orchestration::snapshot::save(&doc, content).unwrap();
+        agent_doc_orchestration::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
         let mut writer =
-            crate::capture::PartialCheckpointWriter::with_interval(&doc, Duration::ZERO);
+            agent_doc_orchestration::capture::PartialCheckpointWriter::with_interval(&doc, Duration::ZERO);
         writer
             .maybe_checkpoint("### Re: live — gpt-5\n\nPartial response")
             .unwrap();
@@ -1408,10 +1408,10 @@ mod tests {
         std::fs::write(&doc, "# Session\n").unwrap();
 
         assert!(!active_cycle_in_scope(&doc).unwrap());
-        crate::cycle_state::start_preflight(&doc, Some("# Session\n"), Some("# Session\n"))
+        agent_doc_orchestration::cycle_state::start_preflight(&doc, Some("# Session\n"), Some("# Session\n"))
             .unwrap();
         assert!(active_cycle_in_scope(&doc).unwrap());
-        crate::cycle_state::mark_committed(&doc, "test", Some("# Session\n"), Some("# Session\n"))
+        agent_doc_orchestration::cycle_state::mark_committed(&doc, "test", Some("# Session\n"), Some("# Session\n"))
             .unwrap();
         assert!(!active_cycle_in_scope(&doc).unwrap());
     }
@@ -1469,10 +1469,10 @@ mod tests {
         .unwrap();
         std::fs::write(root.join("registered.md"), "# registered\n").unwrap();
 
-        let mut registry = crate::sessions::SessionRegistry::new();
+        let mut registry = agent_doc_orchestration::sessions::SessionRegistry::new();
         registry.insert(
             root.join("registered.md").display().to_string(),
-            crate::sessions::SessionEntry {
+            agent_doc_orchestration::sessions::SessionEntry {
                 pane: "%1".to_string(),
                 pid: 1,
                 cwd: root.display().to_string(),
@@ -1483,7 +1483,7 @@ mod tests {
                 supervisor_instance_id: String::new(),
             },
         );
-        crate::sessions::save_in(root, &registry).unwrap();
+        agent_doc_orchestration::sessions::save_in(root, &registry).unwrap();
 
         let state = ServeState {
             root: root.to_path_buf(),

@@ -26,8 +26,9 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use crate::sessions::Tmux;
-use crate::{frontmatter, snapshot};
+use agent_doc_orchestration::sessions::Tmux;
+use agent_doc_orchestration::snapshot;
+use crate::frontmatter;
 
 /// Configuration for a deep run.
 pub struct ParallelConfig {
@@ -169,11 +170,11 @@ pub fn run(file: &Path, config: ParallelConfig) -> Result<()> {
         ));
         // Prepend frontmatter env exports (unexpanded — target shell handles $(passage ...)
         // so secrets never appear in the tmux send-keys argument list or scrollback).
-        let env_prefix = crate::env::shell_export_prefix(&fm.env);
+        let env_prefix = agent_doc_orchestration::env::shell_export_prefix(&fm.env);
         let cmd_str = format!("{}{}", env_prefix, cmd_parts.join(" "));
 
         // Send the command to the pane
-        crate::sessions::send_submitted_text(&tmux, &pane_id, &cmd_str).with_context(|| {
+        agent_doc_orchestration::sessions::send_submitted_text(&tmux, &pane_id, &cmd_str).with_context(|| {
             format!("failed to send keys to pane {} for task {}", pane_id, i + 1)
         })?;
 

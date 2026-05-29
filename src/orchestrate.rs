@@ -59,17 +59,19 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use crate::{
+use agent_doc_orchestration::{
     agent,
     agent::streaming::StreamChunk,
-    component,
     config::{AgentConfig, Config},
     diff,
+    preflight::PreflightOutput,
+    snapshot, write,
+};
+use crate::{
+    component,
     frontmatter::{self, ResolvedMode},
     parallel,
-    preflight::PreflightOutput,
     queue_dispatch::{self, QueueItemKind},
-    snapshot, write,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -693,7 +695,7 @@ fn run_ordered_tasks_internal(
 ) -> Result<()> {
     let mut effective_model: Option<String> = options.model_override.map(String::from);
     let dispatch_ctx = build_dispatch_context(file);
-    crate::flow::orchestration_batch::log_queue_freeze_event(
+    agent_doc_orchestration::flow::orchestration_batch::log_queue_freeze_event(
         file,
         tasks.len(),
         options.exchange_source.is_some(),
@@ -734,9 +736,9 @@ fn run_ordered_tasks_internal(
                     lifecycle,
                     agent_runner,
                 ) {
-                    Ok(()) => crate::flow::orchestration_batch::BatchChildResult {
+                    Ok(()) => agent_doc_orchestration::flow::orchestration_batch::BatchChildResult {
                         label: task.label.clone(),
-                        outcome: crate::flow::types::FlowOutcome::Completed,
+                        outcome: agent_doc_orchestration::flow::types::FlowOutcome::Completed,
                         proof: Some(
                             graph_evidence
                                 .and_then(|evidence| {
@@ -746,18 +748,18 @@ fn run_ordered_tasks_internal(
                         ),
                     },
                     Err(err) => {
-                        let child = crate::flow::orchestration_batch::BatchChildResult {
+                        let child = agent_doc_orchestration::flow::orchestration_batch::BatchChildResult {
                             label: task.label.clone(),
-                            outcome: crate::flow::types::FlowOutcome::FailedClosed,
+                            outcome: agent_doc_orchestration::flow::types::FlowOutcome::FailedClosed,
                             proof: Some("child_step_error".to_string()),
                         };
-                        crate::flow::orchestration_batch::log_child_closeout_event(file, &child);
+                        agent_doc_orchestration::flow::orchestration_batch::log_child_closeout_event(file, &child);
                         return Err(err);
                     }
                 };
-                crate::flow::orchestration_batch::log_child_closeout_event(file, &child_result);
+                agent_doc_orchestration::flow::orchestration_batch::log_child_closeout_event(file, &child_result);
                 if idx + 1 < tasks.len()
-                    && !crate::flow::orchestration_batch::batch_should_continue(
+                    && !agent_doc_orchestration::flow::orchestration_batch::batch_should_continue(
                         options
                             .exchange_source
                             .map(|source| exchange_task_source_changed(file, source))
@@ -834,11 +836,11 @@ fn run_auto_dag_mode(
 
     let schedule_blocker = crate::auto_dag::guard_blocker(&schedule);
     let schedule_decision = if schedule_blocker.is_some() {
-        crate::flow::orchestration_batch::AutoDagScheduleDecision::SessionReviewBlocked
+        agent_doc_orchestration::flow::orchestration_batch::AutoDagScheduleDecision::SessionReviewBlocked
     } else {
-        crate::flow::orchestration_batch::AutoDagScheduleDecision::Ready
+        agent_doc_orchestration::flow::orchestration_batch::AutoDagScheduleDecision::Ready
     };
-    crate::flow::orchestration_batch::log_auto_dag_schedule_event(
+    agent_doc_orchestration::flow::orchestration_batch::log_auto_dag_schedule_event(
         file,
         schedule_decision,
         schedule.nodes.len(),
@@ -915,7 +917,7 @@ fn run_scheduled_dag_tasks_internal(
 ) -> Result<()> {
     let mut effective_model: Option<String> = options.ordered.model_override.map(String::from);
     let dispatch_ctx = build_dispatch_context(file);
-    crate::flow::orchestration_batch::log_queue_freeze_event(file, schedule.nodes.len(), true);
+    agent_doc_orchestration::flow::orchestration_batch::log_queue_freeze_event(file, schedule.nodes.len(), true);
 
     for batch in &schedule.batches {
         eprintln!("[orchestrate] auto-DAG batch: {}", batch.join(", "));
@@ -983,9 +985,9 @@ fn run_scheduled_dag_tasks_internal(
                         &node.id,
                         crate::auto_dag::AutoDagNodeState::Complete,
                     )?;
-                    let child = crate::flow::orchestration_batch::BatchChildResult {
+                    let child = agent_doc_orchestration::flow::orchestration_batch::BatchChildResult {
                         label: node.label.clone(),
-                        outcome: crate::flow::types::FlowOutcome::Completed,
+                        outcome: agent_doc_orchestration::flow::types::FlowOutcome::Completed,
                         proof: Some(
                             options
                                 .graph_evidence
@@ -995,7 +997,7 @@ fn run_scheduled_dag_tasks_internal(
                                 .unwrap_or_else(|| "finalize_session_check".to_string()),
                         ),
                     };
-                    crate::flow::orchestration_batch::log_child_closeout_event(file, &child);
+                    agent_doc_orchestration::flow::orchestration_batch::log_child_closeout_event(file, &child);
                 }
                 Err(err) => {
                     crate::auto_dag::update_node_state(
@@ -1004,12 +1006,12 @@ fn run_scheduled_dag_tasks_internal(
                         &node.id,
                         crate::auto_dag::AutoDagNodeState::Failed,
                     )?;
-                    let child = crate::flow::orchestration_batch::BatchChildResult {
+                    let child = agent_doc_orchestration::flow::orchestration_batch::BatchChildResult {
                         label: node.label.clone(),
-                        outcome: crate::flow::types::FlowOutcome::FailedClosed,
+                        outcome: agent_doc_orchestration::flow::types::FlowOutcome::FailedClosed,
                         proof: Some("auto_dag_child_step_error".to_string()),
                     };
-                    crate::flow::orchestration_batch::log_child_closeout_event(file, &child);
+                    agent_doc_orchestration::flow::orchestration_batch::log_child_closeout_event(file, &child);
                     return Err(err);
                 }
             }
@@ -1123,7 +1125,7 @@ fn run_ordered_task_step(
         .or(fm.resolve_harness_model(&harness))
         .map(|m| agent_doc::model_tier::canonical_model_name(m, &harness, &global_config.model));
     let model = resolved_model.as_deref();
-    let session_accretion = crate::session_accretion::inspect(file).ok();
+    let session_accretion = agent_doc_orchestration::session_accretion::inspect(file).ok();
     let mut prompt = build_agent_prompt(
         file,
         mode,
@@ -1145,15 +1147,15 @@ fn run_ordered_task_step(
         .or_else(|| global_config.agents.get(agent_name));
     let mut launch_env = expanded_env;
     if agent_name == "codex" {
-        let codex_network_access = crate::agent::resolve_codex_network_access(&fm, global_config);
-        crate::agent::apply_codex_network_access_env_overrides(
+        let codex_network_access = agent_doc_orchestration::agent::resolve_codex_network_access(&fm, global_config);
+        agent_doc_orchestration::agent::apply_codex_network_access_env_overrides(
             &mut launch_env,
             codex_network_access,
         );
         let sandbox_args = agent_config
             .map(|cfg| cfg.args.clone())
             .unwrap_or_else(agent::codex::default_base_args);
-        let status = crate::agent::codex_network_status_from_overrides(
+        let status = agent_doc_orchestration::agent::codex_network_status_from_overrides(
             &sandbox_args,
             codex_network_access,
             &launch_env,
@@ -1213,8 +1215,8 @@ fn run_ordered_task_step(
     };
     let finalize_text = if mode.is_template() {
         let normalization =
-            crate::flow::orchestration_batch::normalize_child_template_response(finalize_response);
-        crate::flow::orchestration_batch::log_child_patchback_normalization_event(
+            agent_doc_orchestration::flow::orchestration_batch::normalize_child_template_response(finalize_response);
+        agent_doc_orchestration::flow::orchestration_batch::log_child_patchback_normalization_event(
             file,
             &normalization,
         );
@@ -1247,13 +1249,13 @@ fn run_ordered_task_step(
 }
 
 fn close_open_preflight_handoff_cycle(file: &Path) -> Result<()> {
-    let Some(state) = crate::cycle_state::load(file)? else {
+    let Some(state) = agent_doc_orchestration::cycle_state::load(file)? else {
         return Ok(());
     };
-    if state.phase != crate::cycle_state::CyclePhase::PreflightStarted {
+    if state.phase != agent_doc_orchestration::cycle_state::CyclePhase::PreflightStarted {
         return Ok(());
     }
-    if crate::capture::load_by_id(file, &state.cycle_id)?.is_some() {
+    if agent_doc_orchestration::capture::load_by_id(file, &state.cycle_id)?.is_some() {
         return Ok(());
     }
 
@@ -1265,7 +1267,7 @@ fn close_open_preflight_handoff_cycle(file: &Path) -> Result<()> {
         .with_context(|| format!("failed to read {} before orchestrating", file.display()))?;
     let snapshot_content = snapshot::load(file)?;
     snapshot::save(file, &file_content)?;
-    crate::cycle_state::mark_abandoned(
+    agent_doc_orchestration::cycle_state::mark_abandoned(
         file,
         "orchestrate_preflight_handoff_closed",
         snapshot_content.as_deref(),
@@ -1341,7 +1343,7 @@ fn stream_step_response(
 ) -> Result<StreamStepResult> {
     let mut response = String::new();
     let mut last_streamed_response = None;
-    let mut checkpoint_writer = crate::capture::PartialCheckpointWriter::new(file);
+    let mut checkpoint_writer = agent_doc_orchestration::capture::PartialCheckpointWriter::new(file);
 
     for chunk_result in chunks {
         let chunk = chunk_result.context("stream chunk error")?;
@@ -1352,7 +1354,7 @@ fn stream_step_response(
             }
             if !chunk.is_final && should_stream_exchange_patch(&response) {
                 let exchange = render_streamed_exchange(seed, &response);
-                crate::stream::flush_to_document(file, &exchange, "exchange", "")?;
+                agent_doc_orchestration::stream::flush_to_document(file, &exchange, "exchange", "")?;
                 last_streamed_response = Some(response.clone());
             }
         }
@@ -1378,7 +1380,7 @@ fn stream_step_response(
 
 #[cfg(test)]
 fn orchestrate_finalize_text_for_template(response: String) -> String {
-    crate::flow::orchestration_batch::normalize_child_template_response(response).response
+    agent_doc_orchestration::flow::orchestration_batch::normalize_child_template_response(response).response
 }
 
 fn should_stream_exchange_patch(response: &str) -> bool {
@@ -1463,7 +1465,7 @@ fn expand_frontmatter_env(fm: &frontmatter::Frontmatter) -> Vec<(String, Option<
     if fm.env.is_empty() {
         return Vec::new();
     }
-    match crate::env::expand_values(&fm.env) {
+    match agent_doc_orchestration::env::expand_values(&fm.env) {
         Ok(values) => values,
         Err(err) => {
             eprintln!(
@@ -1480,17 +1482,17 @@ fn build_agent_prompt(
     mode: ResolvedMode,
     diff_text: Option<&str>,
     doc: &str,
-    session_accretion: Option<&crate::session_accretion::SessionAccretionReport>,
+    session_accretion: Option<&agent_doc_orchestration::session_accretion::SessionAccretionReport>,
 ) -> String {
     let diff_text = diff_text.unwrap_or_default();
     let prompt_bearing = diff::format_prompt_bearing_changes(diff_text)
         .map(|section| format!("\n\n{}\n", section))
         .unwrap_or_default();
-    let active_format_requirements = crate::prompt_contract::format_active_format_requirements(doc)
+    let active_format_requirements = agent_doc_orchestration::prompt_contract::format_active_format_requirements(doc)
         .map(|section| format!("\n\n{}\n", section))
         .unwrap_or_default();
     let document_section =
-        crate::prompt_context::build_document_section(file, diff_text, doc, session_accretion);
+        agent_doc_orchestration::prompt_context::build_document_section(file, diff_text, doc, session_accretion);
 
     if mode.is_template() {
         format!(
@@ -1627,11 +1629,11 @@ fn queue_task_batch(doc: &str) -> Result<ResolvedTaskBatch> {
         .find(|comp| comp.name == "queue")
         .ok_or_else(|| anyhow::anyhow!("document has no `agent:queue` component"))?;
     let body = queue.content(doc);
-    let entries = crate::queue::parse(body)?;
+    let entries = agent_doc_orchestration::queue::parse(body)?;
     let (fm, _) = frontmatter::parse(doc)?;
-    let activation = crate::queue::resolve_activation(
+    let activation = agent_doc_orchestration::queue::resolve_activation(
         &entries,
-        crate::queue::has_auto_attr(&queue.attrs),
+        agent_doc_orchestration::queue::has_auto_attr(&queue.attrs),
         false,
         fm.queue_active.unwrap_or(false),
     );
@@ -1643,11 +1645,11 @@ fn queue_task_batch(doc: &str) -> Result<ResolvedTaskBatch> {
     let mut batch = ResolvedTaskBatch::default();
     for entry in activation.entries_after {
         match entry {
-            crate::queue::QueueEntry::Prompt(prompt) => {
+            agent_doc_orchestration::queue::QueueEntry::Prompt(prompt) => {
                 batch.tasks.push(normalize_task(&prompt.text));
             }
-            crate::queue::QueueEntry::Preset(preset)
-            | crate::queue::QueueEntry::Dispatch(preset) => {
+            agent_doc_orchestration::queue::QueueEntry::Preset(preset)
+            | agent_doc_orchestration::queue::QueueEntry::Dispatch(preset) => {
                 if !batch
                     .requested_presets
                     .iter()
@@ -1656,9 +1658,9 @@ fn queue_task_batch(doc: &str) -> Result<ResolvedTaskBatch> {
                     batch.requested_presets.push(preset);
                 }
             }
-            crate::queue::QueueEntry::Completed(_)
-            | crate::queue::QueueEntry::StartFence(_)
-            | crate::queue::QueueEntry::StopFence => {}
+            agent_doc_orchestration::queue::QueueEntry::Completed(_)
+            | agent_doc_orchestration::queue::QueueEntry::StartFence(_)
+            | agent_doc_orchestration::queue::QueueEntry::StopFence => {}
         }
     }
     Ok(batch)
@@ -1960,7 +1962,7 @@ fn finalize_orchestration_batch_changed(
     total_steps: usize,
     lifecycle: &impl LifecycleOps,
 ) -> Result<()> {
-    crate::flow::orchestration_batch::log_source_changed_event(file, completed_steps, total_steps);
+    agent_doc_orchestration::flow::orchestration_batch::log_source_changed_event(file, completed_steps, total_steps);
     eprintln!(
         "[orchestrate] source task list changed after step {}/{}; stopping before next step",
         completed_steps, total_steps
@@ -3083,7 +3085,7 @@ mod tests {
             "synchronous orchestra\npreset #spec-test\n- do #first\n<!-- agent:boundary:keep -->",
         );
         fs::write(&doc, &handoff).unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(&snapshot), Some(&handoff)).unwrap();
+        agent_doc_orchestration::cycle_state::start_preflight(&doc, Some(&snapshot), Some(&handoff)).unwrap();
 
         close_open_preflight_handoff_cycle(&doc).unwrap();
         inject_prompt(&doc, "do #first").unwrap();
@@ -3094,8 +3096,8 @@ mod tests {
         assert!(!snap.contains("❯ do #first"));
         assert!(live.contains("❯ do #first"));
         assert_eq!(
-            crate::cycle_state::load(&doc).unwrap().unwrap().phase,
-            crate::cycle_state::CyclePhase::Abandoned
+            agent_doc_orchestration::cycle_state::load(&doc).unwrap().unwrap().phase,
+            agent_doc_orchestration::cycle_state::CyclePhase::Abandoned
         );
     }
 
@@ -4267,7 +4269,7 @@ exit 2
         let envs = agent.envs.borrow();
         assert_eq!(envs.len(), 1);
         assert!(envs[0].iter().any(|(key, value)| {
-            key == crate::agent::CODEX_SANDBOX_NETWORK_DISABLED_ENV && value.is_none()
+            key == agent_doc_orchestration::agent::CODEX_SANDBOX_NETWORK_DISABLED_ENV && value.is_none()
         }));
     }
 
@@ -4592,8 +4594,8 @@ exit 2
             "- [ ] [#ctxpack] Add bounded context pack\n",
             "<!-- /agent:backlog -->\n",
         );
-        let report = crate::session_accretion::SessionAccretionReport {
-            level: crate::session_accretion::SessionAccretionLevel::Warn,
+        let report = agent_doc_orchestration::session_accretion::SessionAccretionReport {
+            level: agent_doc_orchestration::session_accretion::SessionAccretionLevel::Warn,
             reasons: vec!["document hit 2 no-op closeouts in the last 30 minutes".to_string()],
             ..Default::default()
         };

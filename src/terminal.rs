@@ -38,8 +38,8 @@ use anyhow::{Context, Result};
 use std::path::Path;
 use std::process::Command;
 
-use crate::config;
-use crate::sessions::Tmux;
+use agent_doc_orchestration::config;
+use agent_doc_orchestration::sessions::Tmux;
 
 /// Run the terminal command: ensure tmux session exists, launch terminal if needed.
 pub fn run(file: &Path, session_name: Option<&str>) -> Result<()> {
@@ -138,7 +138,7 @@ fn classify_session(tmux: &Tmux, name: &str) -> SessionTarget {
 /// but "foo" doesn't exist, we check if there's any OTHER session with live agent-doc
 /// panes for this project.
 fn find_active_project_session(tmux: &Tmux) -> Result<Option<String>> {
-    let registry = crate::sessions::load()?;
+    let registry = agent_doc_orchestration::sessions::load()?;
     for entry in registry.values() {
         if tmux.pane_alive(&entry.pane) {
             // This pane is alive — find which tmux session it belongs to

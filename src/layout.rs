@@ -61,8 +61,9 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
-use crate::sessions::{PaneMoveOp, Tmux};
-use crate::{frontmatter, sessions};
+use agent_doc_orchestration::sessions::{PaneMoveOp, Tmux};
+use agent_doc_orchestration::sessions;
+use crate::frontmatter;
 
 /// Split direction for the mirror window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -100,7 +101,7 @@ pub fn run_with_tmux(
 
     if files.len() == 1 {
         // Single file — just focus it, no layout needed.
-        return crate::focus::run_with_tmux(files[0], pane, tmux);
+        return agent_doc_orchestration::focus::run_with_tmux(files[0], pane, tmux);
     }
 
     // Resolve each file to its session pane.

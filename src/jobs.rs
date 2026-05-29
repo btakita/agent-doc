@@ -21,7 +21,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::{plan, snapshot};
+use agent_doc_orchestration::snapshot;
+use crate::plan;
 
 const JOB_PACKET_CONTRACT_VERSION: &str = "agent-doc-job-packet-v1";
 const WORKER_RESULT_CONTRACT_VERSION: &str = "agent-doc-worker-result-v1";
@@ -1511,7 +1512,7 @@ fn relative_to(root: &Path, path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::snapshot;
+    use agent_doc_orchestration::snapshot;
     use std::io::Write;
     use std::os::unix::fs::PermissionsExt;
     use tempfile::TempDir;

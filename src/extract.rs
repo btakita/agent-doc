@@ -35,10 +35,11 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use agent_doc_orchestration::{security, snapshot, write};
 use crate::{
     component,
     component::{is_backlog_component, is_icebox_component},
-    frontmatter, security, snapshot, write,
+    frontmatter,
 };
 
 /// Check pane ownership for the target file. Returns Ok if no conflict or if
@@ -490,7 +491,7 @@ pub fn transfer(
     // Commit the target so transferred headings are in git HEAD.
     // Without this, the next agent-doc commit classifies all transferred
     // headings as "new" and marks each with (HEAD).
-    crate::git::commit(target)?;
+    agent_doc_orchestration::git::commit(target)?;
 
     eprintln!(
         "[transfer] Moved component '{}' from {} → {}",
@@ -550,7 +551,7 @@ fn transfer_pending_items(
     }
 
     let (remaining_body, matched_body, matched_ids) =
-        crate::pending::extract_items_by_id(pending_content, ids)?;
+        agent_doc_orchestration::pending::extract_items_by_id(pending_content, ids)?;
 
     if matched_ids.is_empty() {
         let id_list: Vec<String> = ids.iter().map(|id| format!("#{}", id)).collect();
@@ -590,7 +591,7 @@ fn transfer_pending_items(
     write::atomic_write_pub(target, &new_target)?;
     snapshot::save(target, &new_target)?;
 
-    crate::git::commit(target)?;
+    agent_doc_orchestration::git::commit(target)?;
 
     eprintln!(
         "[transfer] Moved {} {} item(s) ({}) from {} → {}",
@@ -704,7 +705,7 @@ fn transfer_referral(source: &Path, target: &Path, component_name: &str) -> Resu
     write::atomic_write_pub(target, &new_target)?;
     snapshot::save(target, &new_target)?;
 
-    crate::git::commit(target)?;
+    agent_doc_orchestration::git::commit(target)?;
 
     eprintln!(
         "[transfer] Inserted referral to {}:{} in {}",

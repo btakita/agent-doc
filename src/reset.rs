@@ -35,7 +35,8 @@ use anyhow::Result;
 use std::io::Write;
 use std::path::Path;
 
-use crate::{frontmatter, snapshot};
+use agent_doc_orchestration::snapshot;
+use crate::frontmatter;
 
 pub fn run(file: &Path, from_current: bool, preserve_session: bool) -> Result<()> {
     if !file.exists() {

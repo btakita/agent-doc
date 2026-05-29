@@ -23,7 +23,7 @@
 
 use anyhow::{Context, Result};
 
-use crate::{config, sessions::Tmux};
+use agent_doc_orchestration::{config, sessions::Tmux};
 
 /// Show the currently configured tmux session.
 pub fn show() -> Result<()> {

@@ -22,7 +22,7 @@ use std::path::Path;
 use std::process::Command;
 use std::time::SystemTime;
 
-use crate::git;
+use agent_doc_orchestration::git;
 
 pub fn run(file: &Path, archive: bool) -> Result<()> {
     if !file.exists() {

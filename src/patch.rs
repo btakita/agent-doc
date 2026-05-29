@@ -39,7 +39,8 @@ use std::io::Read;
 use std::path::Path;
 use std::process::Command;
 
-use crate::{PatchMode, component, project_config, snapshot};
+use agent_doc_orchestration::snapshot;
+use crate::{PatchMode, component, project_config};
 
 /// Load component configs from `.agent-doc/config.toml` relative to the document.
 /// Walks up from the document's parent directory to find the project root.

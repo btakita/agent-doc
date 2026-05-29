@@ -68,7 +68,7 @@ fn test_mtime_granularity_100ms_rapid_edits() {
     // Action: Simulate 10 rapid document_changed calls within 100ms
     let start = std::time::Instant::now();
     for i in 0..10 {
-        agent_doc::debounce::document_changed(&doc_str);
+        agent_doc_orchestration::debounce::document_changed(&doc_str);
         if i < 9 {
             std::thread::sleep(Duration::from_millis(5));
         }
@@ -78,20 +78,20 @@ fn test_mtime_granularity_100ms_rapid_edits() {
 
     // Validation 1: is_idle should return false for 1500ms window
     assert!(
-        !agent_doc::debounce::is_idle(&doc_str, 1500),
+        !agent_doc_orchestration::debounce::is_idle(&doc_str, 1500),
         "is_idle() should be false immediately after edits"
     );
 
     // Validation 2: is_typing_via_file should also return true
     assert!(
-        agent_doc::debounce::is_typing_via_file(&doc_str, 1500),
+        agent_doc_orchestration::debounce::is_typing_via_file(&doc_str, 1500),
         "is_typing_via_file() should detect active typing despite mtime granularity"
     );
 
     // Validation 3: After 1500ms, should be idle
     std::thread::sleep(Duration::from_millis(1500));
     assert!(
-        agent_doc::debounce::is_idle(&doc_str, 100),
+        agent_doc_orchestration::debounce::is_idle(&doc_str, 100),
         "is_idle() should be true after debounce period"
     );
 }
@@ -120,13 +120,13 @@ fn test_mtime_granularity_1s_coarse_system() {
     let doc_str = doc.to_string_lossy().to_string();
 
     // Action: Two document_changed calls 500ms apart
-    agent_doc::debounce::document_changed(&doc_str);
+    agent_doc_orchestration::debounce::document_changed(&doc_str);
     std::thread::sleep(Duration::from_millis(500));
-    agent_doc::debounce::document_changed(&doc_str);
+    agent_doc_orchestration::debounce::document_changed(&doc_str);
 
     // Validation: Both should still be captured despite mtime appearing to be the same
     assert!(
-        !agent_doc::debounce::is_idle(&doc_str, 1500),
+        !agent_doc_orchestration::debounce::is_idle(&doc_str, 1500),
         "is_idle() should track both edits in LAST_CHANGE, not rely on file mtime"
     );
 }
@@ -176,7 +176,7 @@ fn test_untracked_file_is_idle_returns_true() {
 
     // Validation: is_idle returns true for untracked files
     assert!(
-        agent_doc::debounce::is_idle(untracked_file, 1500),
+        agent_doc_orchestration::debounce::is_idle(untracked_file, 1500),
         "is_idle() must return true for untracked files to prevent infinite wait"
     );
 }
@@ -191,7 +191,7 @@ fn test_untracked_file_is_tracked_returns_false() {
     let untracked_file = "/tmp/never-tracked-test2.md";
 
     assert!(
-        !agent_doc::debounce::is_tracked(untracked_file),
+        !agent_doc_orchestration::debounce::is_tracked(untracked_file),
         "is_tracked() must return false for files with no document_changed() calls"
     );
 }
@@ -201,10 +201,10 @@ fn test_untracked_file_is_tracked_returns_false() {
 #[test]
 fn test_tracked_file_is_tracked_returns_true() {
     let tracked_file = "/tmp/just-tracked.md";
-    agent_doc::debounce::document_changed(tracked_file);
+    agent_doc_orchestration::debounce::document_changed(tracked_file);
 
     assert!(
-        agent_doc::debounce::is_tracked(tracked_file),
+        agent_doc_orchestration::debounce::is_tracked(tracked_file),
         "is_tracked() must return true after document_changed() is called"
     );
 }
@@ -221,7 +221,7 @@ fn test_probe_pattern_untracked_skips_await() {
     let untracked = "/tmp/untracked-probe-test.md";
 
     // Probe pattern: check is_tracked first
-    if !agent_doc::debounce::is_tracked(untracked) {
+    if !agent_doc_orchestration::debounce::is_tracked(untracked) {
         // Skip await_idle for untracked files
         return;
     }
@@ -544,7 +544,7 @@ fn test_status_file_staleness_30s_timeout() {
 
     // Test case 1: 29 seconds old → still busy
     write_status_at_time(&status_file, "generating", 29_000);
-    let status = agent_doc::debounce::get_status_via_file(&doc_str);
+    let status = agent_doc_orchestration::debounce::get_status_via_file(&doc_str);
     assert_eq!(
         status, "generating",
         "Status 29s old should still be returned, not timed out"
@@ -552,7 +552,7 @@ fn test_status_file_staleness_30s_timeout() {
 
     // Test case 2: exactly 30 seconds old → timed out
     write_status_at_time(&status_file, "generating", 30_000);
-    let status = agent_doc::debounce::get_status_via_file(&doc_str);
+    let status = agent_doc_orchestration::debounce::get_status_via_file(&doc_str);
     assert_eq!(
         status, "idle",
         "Status exactly 30s old should be considered timed out"
@@ -560,7 +560,7 @@ fn test_status_file_staleness_30s_timeout() {
 
     // Test case 3: 31 seconds old → definitely timed out
     write_status_at_time(&status_file, "generating", 31_000);
-    let status = agent_doc::debounce::get_status_via_file(&doc_str);
+    let status = agent_doc_orchestration::debounce::get_status_via_file(&doc_str);
     assert_eq!(
         status, "idle",
         "Status 31s old should definitely be timed out"
@@ -581,7 +581,7 @@ fn test_status_file_write_includes_current_timestamp() {
     std::fs::write(&doc, "content").unwrap();
     let doc_str = doc.to_string_lossy().to_string();
 
-    agent_doc::debounce::set_status(&doc_str, "generating");
+    agent_doc_orchestration::debounce::set_status(&doc_str, "generating");
 
     let entries: Vec<_> = std::fs::read_dir(&status_dir).unwrap().collect();
     assert_eq!(entries.len(), 1, "set_status should create one status file");

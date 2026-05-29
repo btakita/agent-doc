@@ -30,7 +30,7 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
-use crate::{sessions, snapshot};
+use agent_doc_orchestration::{sessions, snapshot};
 
 /// State file types to migrate, with their subdirectory and extension.
 const STATE_FILES: &[(&str, &str)] = &[

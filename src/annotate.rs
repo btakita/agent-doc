@@ -36,7 +36,7 @@ use sha2::{Digest, Sha256};
 use similar::{ChangeTag, TextDiff};
 use std::path::{Path, PathBuf};
 
-use crate::snapshot;
+use agent_doc_orchestration::snapshot;
 
 const ANNOTATION_DIR: &str = ".agent-doc/annotations";
 

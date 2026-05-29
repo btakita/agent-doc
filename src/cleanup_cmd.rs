@@ -12,7 +12,7 @@ use std::path::Path;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crate::callback;
+use agent_doc_orchestration::callback;
 
 /// Main cleanup entry point.
 pub fn run(

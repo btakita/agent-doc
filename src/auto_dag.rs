@@ -187,7 +187,7 @@ pub(crate) fn write_schedule(file: &Path, schedule: &AutoDagSchedule) -> Result<
         std::fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
-    crate::write::atomic_write_pub(
+    agent_doc_orchestration::write::atomic_write_pub(
         &path,
         &serde_json::to_string_pretty(schedule).context("failed to serialize auto-DAG schedule")?,
     )?;
@@ -674,8 +674,8 @@ fn schedule_id(file: &Path, tasks: &[ParsedTask], batches: &[Vec<String>]) -> Re
         })).collect::<Vec<_>>(),
         "batches": batches,
     });
-    let doc_hash = crate::snapshot::doc_hash(file)?;
-    let seed_hash = crate::ops_log::content_hash(&seed.to_string());
+    let doc_hash = agent_doc_orchestration::snapshot::doc_hash(file)?;
+    let seed_hash = agent_doc_orchestration::ops_log::content_hash(&seed.to_string());
     Ok(format!("dag-{}-{}", &doc_hash[..8], &seed_hash[..12]))
 }
 
@@ -753,7 +753,7 @@ fn dedup(items: &mut Vec<String>) {
 
 fn project_root(file: &Path) -> Result<PathBuf> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    crate::snapshot::find_project_root(&canonical)
+    agent_doc_orchestration::snapshot::find_project_root(&canonical)
         .with_context(|| format!("could not find .agent-doc root for {}", file.display()))
 }
 

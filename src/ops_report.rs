@@ -115,7 +115,7 @@ pub fn run_summary(project_root: Option<&Path>, limit: usize, json: bool) -> Res
     let cwd = std::env::current_dir()?;
     let root = match project_root {
         Some(root) => root.to_path_buf(),
-        None => crate::snapshot::find_project_root(&cwd).unwrap_or(cwd),
+        None => agent_doc_orchestration::snapshot::find_project_root(&cwd).unwrap_or(cwd),
     };
     let log_path = root.join(".agent-doc/logs/ops.log");
     let contents = std::fs::read_to_string(&log_path)
@@ -381,12 +381,12 @@ fn resolve_diagnosis_root(project_root: Option<&Path>, file: Option<&Path>) -> R
         return Ok(root.to_path_buf());
     }
     if let Some(file) = file
-        && let Some(root) = crate::snapshot::find_project_root(file)
+        && let Some(root) = agent_doc_orchestration::snapshot::find_project_root(file)
     {
         return Ok(root);
     }
     let cwd = std::env::current_dir()?;
-    Ok(crate::snapshot::find_project_root(&cwd).unwrap_or(cwd))
+    Ok(agent_doc_orchestration::snapshot::find_project_root(&cwd).unwrap_or(cwd))
 }
 
 fn normalize_file_query(file: &Path, root: &Path) -> String {
@@ -470,7 +470,7 @@ fn scan_text_files_source(
                     path: file.clone(),
                     line: Some(idx + 1),
                     kind: "text".to_string(),
-                    text: Some(truncate_text(&crate::secret_redact::redact(line), 700)),
+                    text: Some(truncate_text(&agent_doc_orchestration::secret_redact::redact(line), 700)),
                     json: None,
                 });
             }
@@ -581,7 +581,7 @@ fn matches_terms(text: &str, terms: &[String]) -> bool {
 }
 
 fn json_summary(contents: &str) -> serde_json::Value {
-    let redacted = crate::secret_redact::redact(contents);
+    let redacted = agent_doc_orchestration::secret_redact::redact(contents);
     match serde_json::from_str::<serde_json::Value>(&redacted) {
         Ok(value) => summarize_json_value(&value),
         Err(_) => serde_json::json!({

@@ -31,24 +31,11 @@
 
 pub mod component;
 pub mod crdt;
-pub use agent_doc_orchestration::debounce;
 pub mod ffi;
 pub mod frontmatter;
-// Moved to `agent-doc-orchestration` (Wave 1a of `#adoc-orchestration-crate`).
-// Re-exported so `crate::ipc_socket::*` call sites resolve unchanged.
-pub use agent_doc_orchestration::ipc_socket;
-pub use agent_doc_orchestration::merge;
 pub mod model_tier;
 pub mod project_config;
-// Moved to `agent-doc-orchestration` (Direction A, increment 3).
-pub use agent_doc_orchestration::project_config_io;
-// Moved to `agent-doc-orchestration` (Direction A, increment 2).
-pub use agent_doc_orchestration::secret_redact;
-// Moved to `agent-doc-orchestration` (Direction A, increment 6 big-bang).
-pub use agent_doc_orchestration::security;
-pub use agent_doc_orchestration::frontmatter_io;
 pub mod template;
-pub use agent_doc_orchestration::template_io;
 
 // Boundary ID helpers moved to `agent_doc_core::id` (Wave 1 of #adcr extraction).
 // Re-exported here so existing `crate::new_boundary_id` etc. call sites in

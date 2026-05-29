@@ -521,7 +521,7 @@ fn socket_ipc_post_block_prompt_drift_uses_content_ours_snapshot() {
     let listener_root = root.to_path_buf();
     let ack_dir = agent_doc_dir.join("ack-content");
     let server = std::thread::spawn(move || {
-        agent_doc::ipc_socket::start_listener(&listener_root, move |msg| {
+        agent_doc_orchestration::ipc_socket::start_listener(&listener_root, move |msg| {
             let payload: Value = serde_json::from_str(msg).ok()?;
             let Some(id) = patch_id(&payload) else {
                 return Some(serde_json::json!({"type": "ack"}).to_string());
@@ -545,13 +545,13 @@ fn socket_ipc_post_block_prompt_drift_uses_content_ours_snapshot() {
         .ok();
     });
     for _ in 0..100 {
-        if agent_doc::ipc_socket::is_listener_active(root) {
+        if agent_doc_orchestration::ipc_socket::is_listener_active(root) {
             break;
         }
         std::thread::sleep(Duration::from_millis(10));
     }
     assert!(
-        agent_doc::ipc_socket::is_listener_active(root),
+        agent_doc_orchestration::ipc_socket::is_listener_active(root),
         "fake socket listener did not start"
     );
 
@@ -563,7 +563,7 @@ fn socket_ipc_post_block_prompt_drift_uses_content_ours_snapshot() {
         0,
     );
 
-    let _ = fs::remove_file(agent_doc::ipc_socket::socket_path(root));
+    let _ = fs::remove_file(agent_doc_orchestration::ipc_socket::socket_path(root));
     drop(server);
 
     let payload = seen_payload

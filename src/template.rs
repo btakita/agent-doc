@@ -1,6 +1,6 @@
 //! Template-mode support — pure half moved to `agent_doc_core::template`
 //! (Wave 3 of #adcr); `&Path` / `std::fs` wrappers (apply_patches,
-//! apply_patches_with_overrides, template_info) live in [`crate::template_io`]
+//! apply_patches_with_overrides, template_info) live in [`agent_doc_orchestration::template_io`]
 //! (Wave 5 / `#ckv3`).
 //!
 //! Thin re-export so `crate::template::*` call sites in run.rs, stream.rs,
@@ -11,4 +11,4 @@
 //! unchanged.
 
 pub use agent_doc_core::template::*;
-pub use crate::template_io::{apply_patches, apply_patches_with_overrides, template_info};
+pub use agent_doc_orchestration::template_io::{apply_patches, apply_patches_with_overrides, template_info};

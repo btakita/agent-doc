@@ -32,7 +32,7 @@ use anyhow::Result;
 use std::path::Path;
 use uuid::Uuid;
 
-use crate::config::Config;
+use agent_doc_orchestration::config::Config;
 
 /// Initialize a project (no file given): check prereqs, create .agent-doc/, install skill.
 fn init_project() -> Result<()> {

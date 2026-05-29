@@ -50,8 +50,8 @@
 
 use anyhow::Result;
 
-use crate::sessions::{self, Tmux};
-use crate::sync;
+use agent_doc_orchestration::sessions::{self, Tmux};
+use agent_doc_orchestration::sync;
 
 pub fn run() -> Result<()> {
     run_with_tmux(&Tmux::default_server())
@@ -216,7 +216,7 @@ fn sync_after_autoclaim_in(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sessions::{SessionEntry, SessionRegistry};
+    use agent_doc_orchestration::sessions::{SessionEntry, SessionRegistry};
     use tmux_router::IsolatedTmux;
     use tempfile::TempDir;
 

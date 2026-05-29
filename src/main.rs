@@ -6,17 +6,17 @@
 //! - `AgentDocMode` enum (`Append`, `Template`, `Stream`) is a `ValueEnum` used by `Convert`
 //!   and `Mode` subcommands; `Append` maps to inline format, `Template`/`Stream` to CRDT.
 //! - On startup, calls `upgrade::warn_if_outdated()` for all subcommands except `Upgrade`.
-//! - Loads global config via `config::load()` before dispatching; config is threaded into
+//! - Loads global config via `agent_doc_orchestration::config::load()` before dispatching; config is threaded into
 //!   subcommands that accept an agent backend (`Run`, `Stream`, `Watch`, `Init`).
-//! - Each subcommand delegates immediately to its own module (`run::run`, `diff::run`, etc.);
+//! - Each subcommand delegates immediately to its own module (`agent_doc_orchestration::run::run`, `agent_doc_orchestration::diff::run`, etc.);
 //!   `main` contains no business logic beyond argument destructuring and dispatch.
 //! - `Route` no longer runs a follow-up sync; editor/plugin sync remains the
 //!   authoritative layout path.
 //! - `Write` auto-detects the write strategy from frontmatter when no `--template`/`--stream`
-//!   flag is given; CRDT-mode documents use `write::run_stream`, others use `write::run`.
-//! - `Prompt --all` runs `prompt::run_all()`; otherwise `FILE` is required.
+//!   flag is given; CRDT-mode documents use `agent_doc_orchestration::write::run_stream`, others use `agent_doc_orchestration::write::run`.
+//! - `Prompt --all` runs `agent_doc_orchestration::prompt::run_all()`; otherwise `FILE` is required.
 //! - `History --restore <commit>` calls `history::restore`; bare `History` calls `history::list`.
-//! - `Watch` dispatches to `watch::stop`, `watch::status`, or `watch::start` based on flags.
+//! - `Watch` dispatches to `agent_doc_orchestration::watch::stop`, `agent_doc_orchestration::watch::status`, or `agent_doc_orchestration::watch::start` based on flags.
 //! - `Skill install --reload` prints `SKILL_RELOAD=compact` or `SKILL_RELOAD=restart` when the
 //!   skill was updated, enabling the caller to take the appropriate reload action.
 //! - `LibPath` prints the platform-appropriate shared library path (`libagent_doc.so/dylib/dll`)
@@ -30,59 +30,32 @@
 //! - `Upgrade` bypasses the version check that all other subcommands run on startup.
 //!
 //! ## Evals
-//! - dispatch_run: `agent-doc run <file>` → `run::run` called with correct args
-//! - dispatch_write_crdt_autodetect: CRDT frontmatter + no flags → `write::run_stream` selected
-//! - dispatch_write_inline_autodetect: inline frontmatter + no flags → `write::run` selected
-//! - dispatch_prompt_all: `--all` → `prompt::run_all`, no FILE required
+//! - dispatch_run: `agent-doc run <file>` → `agent_doc_orchestration::run::run` called with correct args
+//! - dispatch_write_crdt_autodetect: CRDT frontmatter + no flags → `agent_doc_orchestration::write::run_stream` selected
+//! - dispatch_write_inline_autodetect: inline frontmatter + no flags → `agent_doc_orchestration::write::run` selected
+//! - dispatch_prompt_all: `--all` → `agent_doc_orchestration::prompt::run_all`, no FILE required
 //! - dispatch_history_restore: `--restore <sha>` → `history::restore` called
-//! - dispatch_watch_stop: `--stop` flag → `watch::stop` called
+//! - dispatch_watch_stop: `--stop` flag → `agent_doc_orchestration::watch::stop` called
 //! - dispatch_skill_install_reload: skill updated + `--reload compact` → prints `SKILL_RELOAD=compact`
 //! - dispatch_lib_path_missing: library absent → exits with code 1
 
-pub(crate) use agent_doc_orchestration::agent;
 mod annotate;
-pub(crate) use agent_doc_orchestration::archive_index;
 mod audit_docs;
 mod auto_dag;
 mod autoclaim;
-pub(crate) use agent_doc_orchestration::boundary;
-pub(crate) use agent_doc_orchestration::callback;
-pub(crate) use agent_doc_orchestration::capture;
-pub(crate) use agent_doc_orchestration::claim;
 mod clean;
 mod cleanup_cmd;
-pub(crate) use agent_doc_orchestration::codex_hook;
 mod commands;
-pub(crate) use agent_doc_orchestration::compact;
-pub(crate) use agent_doc_orchestration::config;
 mod convert;
-pub(crate) use agent_doc_orchestration::cycle_state;
-pub(crate) use agent_doc_orchestration::dedupe;
-pub(crate) use agent_doc_orchestration::diff;
-#[allow(unused_imports)] // used only by #[cfg(test)] code in the CLI shell
-pub(crate) use agent_doc_orchestration::frontmatter_io;
-pub(crate) use agent_doc_orchestration::project_config_io;
-#[allow(unused_imports)] // used only by #[cfg(test)] code in the CLI shell
-pub(crate) use agent_doc_orchestration::template_io;
-pub(crate) use agent_doc_orchestration::env;
 mod extract;
-pub(crate) use agent_doc_orchestration::flow;
-pub(crate) use agent_doc_orchestration::focus;
-pub(crate) use agent_doc_orchestration::fs_util;
-pub(crate) use agent_doc_orchestration::gc;
-pub(crate) use agent_doc_orchestration::git;
-pub(crate) use agent_doc_orchestration::harness;
-pub(crate) use agent_doc_orchestration::harness_prompt;
 mod history;
 mod hook_cmd;
 mod init;
-pub(crate) use agent_doc_orchestration::input_diag;
 mod install;
 mod jobs;
 mod layout;
 mod lib_gc;
 mod lib_install;
-pub(crate) use agent_doc_orchestration::lint_gate;
 mod migrate;
 mod mode;
 mod notify;
@@ -91,56 +64,26 @@ mod orchestrate;
 mod outline;
 mod parallel;
 mod patch;
-pub(crate) use agent_doc_orchestration::pending;
-pub(crate) use agent_doc_orchestration::pending_cmd;
 mod plan;
 mod plugin;
-pub(crate) use agent_doc_orchestration::preflight;
 mod project_config;
-pub(crate) use agent_doc_orchestration::project_controller;
-pub(crate) use agent_doc_orchestration::prompt;
-pub(crate) use agent_doc_orchestration::prompt_context;
-pub(crate) use agent_doc_orchestration::prompt_contract;
-pub(crate) use agent_doc_orchestration::queue;
 mod queue_dispatch;
 mod read;
 mod rename;
-pub(crate) use agent_doc_orchestration::repair;
 mod reset;
-pub(crate) use agent_doc_orchestration::response_toc;
-pub(crate) use agent_doc_orchestration::resync;
-pub(crate) use agent_doc_orchestration::route;
-pub(crate) use agent_doc_orchestration::run;
-pub(crate) use agent_doc_orchestration::secret_redact;
-pub(crate) use agent_doc_orchestration::security;
 mod serve;
-pub(crate) use agent_doc_orchestration::session_accretion;
-pub(crate) use agent_doc_orchestration::session_actor;
 mod session_actor_cmd;
-pub(crate) use agent_doc_orchestration::session_check;
 mod session_cmd;
-pub(crate) use agent_doc_orchestration::sessions;
 #[cfg(test)]
 mod sim_world;
 mod skill;
-pub(crate) use agent_doc_orchestration::snapshot;
-pub(crate) use agent_doc_orchestration::start;
-pub(crate) use agent_doc_orchestration::startup_miss;
-pub(crate) use agent_doc_orchestration::stream;
-pub(crate) use agent_doc_orchestration::supervisor;
-pub(crate) use agent_doc_orchestration::sync;
 mod terminal;
 #[cfg(test)]
 mod test_support;
-#[allow(unused_imports)] // used only by #[cfg(test)] code in the CLI shell
-pub(crate) use agent_doc::ipc_socket;
-pub(crate) use agent_doc_orchestration::ops_log;
 mod tsift_graph;
 mod undo;
 mod upgrade;
-pub(crate) use agent_doc_orchestration::watch;
 mod worktree;
-pub(crate) use agent_doc_orchestration::write;
 
 // Re-export library modules so binary-internal modules can use `crate::` paths
 pub(crate) use agent_doc::component;
@@ -461,9 +404,9 @@ enum Commands {
         #[arg(
             long = "route-owned-reap-policy",
             hide = true,
-            default_value_t = start::RouteOwnedReapPolicy::Auto
+            default_value_t = agent_doc_orchestration::start::RouteOwnedReapPolicy::Auto
         )]
-        route_owned_reap_policy: start::RouteOwnedReapPolicy,
+        route_owned_reap_policy: agent_doc_orchestration::start::RouteOwnedReapPolicy,
     },
     /// Route agent-doc command to the correct tmux pane
     Route {
@@ -1572,7 +1515,7 @@ fn main() -> anyhow::Result<()> {
         );
     }
 
-    let config = config::load()?;
+    let config = agent_doc_orchestration::config::load()?;
 
     match cli.command {
         Commands::Run {
@@ -1582,7 +1525,7 @@ fn main() -> anyhow::Result<()> {
             model,
             dry_run,
             no_git,
-        } => run::run(
+        } => agent_doc_orchestration::run::run(
             &file,
             branch,
             agent.as_deref(),
@@ -1653,7 +1596,7 @@ fn main() -> anyhow::Result<()> {
                 let to_ref = to.as_deref().unwrap_or("HEAD");
                 history::git_diff(&file, &from_ref, to_ref)
             } else {
-                diff::run(&file, wait)
+                agent_doc_orchestration::diff::run(&file, wait)
             }
         }
         Commands::Reset {
@@ -1664,7 +1607,7 @@ fn main() -> anyhow::Result<()> {
         Commands::Clean { file, archive } => clean::run(&file, archive),
         Commands::AuditDocs { root } => audit_docs::run(root.as_deref()),
         Commands::Gc { root, dry_run } => {
-            let result = gc::run(root.as_deref(), dry_run)?;
+            let result = agent_doc_orchestration::gc::run(root.as_deref(), dry_run)?;
             if dry_run {
                 eprintln!(
                     "[gc] Dry run: {} files would be deleted, {} kept",
@@ -1679,8 +1622,8 @@ fn main() -> anyhow::Result<()> {
             route_owned,
             route_owned_reap_policy,
         } => match route_owned_reap_policy {
-            start::RouteOwnedReapPolicy::Auto => start::run(&file, force, route_owned),
-            policy => start::run_with_reap_policy(&file, force, route_owned, policy),
+            agent_doc_orchestration::start::RouteOwnedReapPolicy::Auto => agent_doc_orchestration::start::run(&file, force, route_owned),
+            policy => agent_doc_orchestration::start::run_with_reap_policy(&file, force, route_owned, policy),
         },
         Commands::Route {
             file,
@@ -1692,19 +1635,19 @@ fn main() -> anyhow::Result<()> {
             debounce,
             wait_for_ready,
         } => {
-            // NOTE: sync::run_layout_only was previously called here after route when
+            // NOTE: agent_doc_orchestration::sync::run_layout_only was previously called here after route when
             // --col args were provided. Removed because the JB plugin calls `agent-doc sync`
             // separately with the correct --window arg. Running sync from both route AND
             // the plugin created a double-sync glitch (panes bouncing between stash and
             // agent-doc window). The plugin's sync is authoritative for layout.
             let mode = if dispatch_only {
-                route::RouteMode::DispatchOnly
+                agent_doc_orchestration::route::RouteMode::DispatchOnly
             } else {
-                route::RouteMode::Managed
+                agent_doc_orchestration::route::RouteMode::Managed
             };
             let wait_for_ready =
                 wait_for_ready.map(|secs| std::time::Duration::from_secs(secs.min(600)));
-            route::run(
+            agent_doc_orchestration::route::run(
                 &file,
                 pane.as_deref(),
                 debounce,
@@ -1716,16 +1659,16 @@ fn main() -> anyhow::Result<()> {
         }
         Commands::Prompt { file, answer, all } => {
             if all {
-                return prompt::run_all();
+                return agent_doc_orchestration::prompt::run_all();
             }
             let file = file.context("FILE required when not using --all")?;
             match answer {
-                Some(option) => prompt::answer(&file, option),
-                None => prompt::run(&file),
+                Some(option) => agent_doc_orchestration::prompt::answer(&file, option),
+                None => agent_doc_orchestration::prompt::run(&file),
             }
         }
-        Commands::Commit { file } => git::commit(&file).map(|_| ()),
-        Commands::Dedupe { file } => dedupe::run(&file),
+        Commands::Commit { file } => agent_doc_orchestration::git::commit(&file).map(|_| ()),
+        Commands::Dedupe { file } => agent_doc_orchestration::dedupe::run(&file),
         Commands::Claim {
             file,
             position,
@@ -1733,7 +1676,7 @@ fn main() -> anyhow::Result<()> {
             window,
             force,
             isolate,
-        } => claim::run(
+        } => agent_doc_orchestration::claim::run(
             &file,
             position.as_deref(),
             pane.as_deref(),
@@ -1741,7 +1684,7 @@ fn main() -> anyhow::Result<()> {
             force,
             isolate,
         ),
-        Commands::Focus { file, pane } => focus::run(&file, pane.as_deref()),
+        Commands::Focus { file, pane } => agent_doc_orchestration::focus::run(&file, pane.as_deref()),
         Commands::Layout {
             files,
             split,
@@ -1764,20 +1707,20 @@ fn main() -> anyhow::Result<()> {
             exact_visible,
         } => {
             if rename && let Some(ref f) = focus {
-                sync::write_rename_debounce(f);
+                agent_doc_orchestration::sync::write_rename_debounce(f);
             }
             if no_autostart {
                 if exact_visible {
-                    sync::run_layout_only_exact_visible(
+                    agent_doc_orchestration::sync::run_layout_only_exact_visible(
                         &columns,
                         window.as_deref(),
                         focus.as_deref(),
                     )
                 } else {
-                    sync::run_layout_only(&columns, window.as_deref(), focus.as_deref())
+                    agent_doc_orchestration::sync::run_layout_only(&columns, window.as_deref(), focus.as_deref())
                 }
             } else {
-                sync::run(&columns, window.as_deref(), focus.as_deref())
+                agent_doc_orchestration::sync::run(&columns, window.as_deref(), focus.as_deref())
             }
         }
         Commands::Patch {
@@ -1793,13 +1736,13 @@ fn main() -> anyhow::Result<()> {
             max_cycles,
         } => {
             if stop {
-                watch::stop()
+                agent_doc_orchestration::watch::stop()
             } else if status {
-                watch::status()
+                agent_doc_orchestration::watch::status()
             } else {
-                watch::start(
+                agent_doc_orchestration::watch::start(
                     &config,
-                    watch::WatchConfig {
+                    agent_doc_orchestration::watch::WatchConfig {
                         debounce_ms: debounce,
                         max_cycles,
                     },
@@ -1809,12 +1752,12 @@ fn main() -> anyhow::Result<()> {
         Commands::Outline { file, json } => outline::run(&file, json),
         Commands::Resync { file, fix, session } => {
             if fix {
-                resync::run_fix(file.as_deref(), session.as_deref())
+                agent_doc_orchestration::resync::run_fix(file.as_deref(), session.as_deref())
             } else {
-                resync::run(false, session.as_deref(), file.as_deref())
+                agent_doc_orchestration::resync::run(false, session.as_deref(), file.as_deref())
             }
         }
-        Commands::Fix { file, session } => resync::run_fix(file.as_deref(), session.as_deref()),
+        Commands::Fix { file, session } => agent_doc_orchestration::resync::run_fix(file.as_deref(), session.as_deref()),
         Commands::Skill { command } => {
             match command {
                 SkillCommands::Install {
@@ -1868,10 +1811,10 @@ fn main() -> anyhow::Result<()> {
         Commands::Write { args, commit } => {
             let lint_override = match args.lint.as_deref() {
                 None => None,
-                Some(s) => Some(lint_gate::LintCliMode::parse(s).map_err(|e| anyhow::anyhow!(e))?),
+                Some(s) => Some(agent_doc_orchestration::lint_gate::LintCliMode::parse(s).map_err(|e| anyhow::anyhow!(e))?),
             };
-            write::run_command(
-                write::CommandOptions {
+            agent_doc_orchestration::write::run_command(
+                agent_doc_orchestration::write::CommandOptions {
                     file: args.file,
                     baseline_file: args.baseline_file,
                     is_template: args.template,
@@ -1900,19 +1843,19 @@ fn main() -> anyhow::Result<()> {
                     commit_sibling_message: args.commit_sibling_message,
                 },
                 if commit {
-                    write::CommitMode::BestEffort
+                    agent_doc_orchestration::write::CommitMode::BestEffort
                 } else {
-                    write::CommitMode::None
+                    agent_doc_orchestration::write::CommitMode::None
                 },
             )
         }
         Commands::Finalize { args } => {
             let lint_override = match args.lint.as_deref() {
                 None => None,
-                Some(s) => Some(lint_gate::LintCliMode::parse(s).map_err(|e| anyhow::anyhow!(e))?),
+                Some(s) => Some(agent_doc_orchestration::lint_gate::LintCliMode::parse(s).map_err(|e| anyhow::anyhow!(e))?),
             };
-            write::run_command(
-                write::CommandOptions {
+            agent_doc_orchestration::write::run_command(
+                agent_doc_orchestration::write::CommandOptions {
                     file: args.file,
                     baseline_file: args.baseline_file,
                     is_template: args.template,
@@ -1940,7 +1883,7 @@ fn main() -> anyhow::Result<()> {
                     commit_sibling: args.commit_sibling,
                     commit_sibling_message: args.commit_sibling_message,
                 },
-                write::CommitMode::Required,
+                agent_doc_orchestration::write::CommitMode::Required,
             )
         }
         Commands::Stream {
@@ -1952,10 +1895,10 @@ fn main() -> anyhow::Result<()> {
             lint,
         } => {
             let lint_override = match lint.as_deref() {
-                Some(s) => Some(lint_gate::LintCliMode::parse(s).map_err(|e| anyhow::anyhow!(e))?),
+                Some(s) => Some(agent_doc_orchestration::lint_gate::LintCliMode::parse(s).map_err(|e| anyhow::anyhow!(e))?),
                 None => None,
             };
-            stream::run(
+            agent_doc_orchestration::stream::run(
                 &file,
                 interval,
                 agent.as_deref(),
@@ -1971,13 +1914,13 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Commands::Repair { file } => {
-            let outcome = repair::repair(&file)?;
+            let outcome = agent_doc_orchestration::repair::repair(&file)?;
             if !outcome.repaired() {
                 eprintln!("[repair] No pending response found for {}", file.display());
             }
             Ok(())
         }
-        Commands::Preflight { file } => preflight::run(&file),
+        Commands::Preflight { file } => agent_doc_orchestration::preflight::run(&file),
         Commands::Plan { file } => plan::run(&file),
         Commands::Jobs { action } => match action {
             JobsAction::Create {
@@ -1999,7 +1942,7 @@ fn main() -> anyhow::Result<()> {
                 jobs::collect(&file, cycle.as_deref(), json)
             }
         },
-        Commands::SessionCheck { file } => session_check::run(&file),
+        Commands::SessionCheck { file } => agent_doc_orchestration::session_check::run(&file),
         Commands::Serve {
             file,
             host,
@@ -2024,15 +1967,15 @@ fn main() -> anyhow::Result<()> {
             query,
             limit,
             json,
-        } => response_toc::run_toc(&file, backlog_id.as_deref(), query.as_deref(), limit, json),
+        } => agent_doc_orchestration::response_toc::run_toc(&file, backlog_id.as_deref(), query.as_deref(), limit, json),
         Commands::ResponseFetch {
             file,
             locator,
             before,
             after,
             json,
-        } => response_toc::run_fetch(&file, &locator, before, after, json),
-        Commands::ArchiveIndex { file, rebuild } => archive_index::run_index(&file, rebuild),
+        } => agent_doc_orchestration::response_toc::run_fetch(&file, &locator, before, after, json),
+        Commands::ArchiveIndex { file, rebuild } => agent_doc_orchestration::archive_index::run_index(&file, rebuild),
         Commands::ArchiveSearch {
             file,
             query,
@@ -2041,7 +1984,7 @@ fn main() -> anyhow::Result<()> {
             limit,
             json,
             rebuild,
-        } => archive_index::run_search(
+        } => agent_doc_orchestration::archive_index::run_search(
             &file,
             query.as_deref(),
             backlog_id.as_deref(),
@@ -2057,7 +2000,7 @@ fn main() -> anyhow::Result<()> {
             message,
             tag,
             commit,
-        } => compact::run(
+        } => agent_doc_orchestration::compact::run(
             &file,
             keep,
             component.as_deref(),
@@ -2113,7 +2056,7 @@ fn main() -> anyhow::Result<()> {
         } => migrate::run(&files, all, dry_run),
         Commands::Claims => {
             let cwd = std::env::current_dir()?;
-            if let Some(root) = snapshot::find_project_root(&cwd) {
+            if let Some(root) = agent_doc_orchestration::snapshot::find_project_root(&cwd) {
                 let log_path = root.join(".agent-doc/claims.log");
                 if let Ok(contents) = std::fs::read_to_string(&log_path)
                     && !contents.is_empty()
@@ -2203,7 +2146,7 @@ fn main() -> anyhow::Result<()> {
             &pending_add_gated,
             no_create_pending,
         ),
-        Commands::Boundary { file, component } => boundary::run(&file, component.as_deref()),
+        Commands::Boundary { file, component } => agent_doc_orchestration::boundary::run(&file, component.as_deref()),
         Commands::Terminal { file, session } => terminal::run(&file, session.as_deref()),
         Commands::Autoclaim => autoclaim::run(),
         Commands::Upgrade => upgrade::run(),
@@ -2263,7 +2206,7 @@ fn main() -> anyhow::Result<()> {
             ControllerAction::Status {
                 project_root,
                 ensure,
-            } => project_controller::run_status(project_root.as_deref(), ensure),
+            } => agent_doc_orchestration::project_controller::run_status(project_root.as_deref(), ensure),
             ControllerAction::Serve {
                 project_root,
                 launch_mode,
@@ -2271,7 +2214,7 @@ fn main() -> anyhow::Result<()> {
                 controller_generation,
                 previous_controller_pid,
                 handoff_state,
-            } => project_controller::run_serve(
+            } => agent_doc_orchestration::project_controller::run_serve(
                 project_root.as_deref(),
                 &launch_mode,
                 listen_socket.as_deref(),
@@ -2280,7 +2223,7 @@ fn main() -> anyhow::Result<()> {
                 &handoff_state,
             ),
             ControllerAction::Shutdown { project_root } => {
-                project_controller::run_shutdown(project_root.as_deref())
+                agent_doc_orchestration::project_controller::run_shutdown(project_root.as_deref())
             }
         },
         Commands::Hook { action } => match action {
@@ -2296,15 +2239,15 @@ fn main() -> anyhow::Result<()> {
             HookAction::Listen { root } => hook_cmd::listen(root.as_deref()),
             HookAction::Gc { root } => hook_cmd::gc(root.as_deref()),
             HookAction::CheckCallbacks { root } => {
-                let pending = callback::scan_pending_callbacks(root.as_deref())?;
+                let pending = agent_doc_orchestration::callback::scan_pending_callbacks(root.as_deref())?;
                 let json = serde_json::to_string_pretty(
                     &serde_json::json!({"pending_callbacks": pending}),
                 )?;
                 println!("{}", json);
                 Ok(())
             }
-            HookAction::CodexUserPromptSubmit => codex_hook::handle_user_prompt_submit(),
-            HookAction::CodexStop => codex_hook::handle_stop(),
+            HookAction::CodexUserPromptSubmit => agent_doc_orchestration::codex_hook::handle_user_prompt_submit(),
+            HookAction::CodexStop => agent_doc_orchestration::codex_hook::handle_stop(),
         },
         Commands::Cleanup {
             file,
@@ -2313,31 +2256,31 @@ fn main() -> anyhow::Result<()> {
             fallback_model,
         } => cleanup_cmd::run(&file, timeout, poll_interval, &fallback_model),
         Commands::Backlog { file, action } => match action {
-            PendingAction::Add { item } => pending_cmd::add(&file, &item, false),
-            PendingAction::AddGated { item } => pending_cmd::add(&file, &item, true),
+            PendingAction::Add { item } => agent_doc_orchestration::pending_cmd::add(&file, &item, false),
+            PendingAction::AddGated { item } => agent_doc_orchestration::pending_cmd::add(&file, &item, true),
             PendingAction::Remove { target, contains } => {
-                pending_cmd::remove(&file, &target, contains)
+                agent_doc_orchestration::pending_cmd::remove(&file, &target, contains)
             }
-            PendingAction::Prune => pending_cmd::reap(&file),
-            PendingAction::Reap => pending_cmd::reap(&file),
-            PendingAction::Backfill => pending_cmd::backfill(&file),
-            PendingAction::Done { id } => pending_cmd::done(&file, &id),
-            PendingAction::Edit { id, text } => pending_cmd::edit(&file, &id, &text),
-            PendingAction::Clear => pending_cmd::clear(&file),
+            PendingAction::Prune => agent_doc_orchestration::pending_cmd::reap(&file),
+            PendingAction::Reap => agent_doc_orchestration::pending_cmd::reap(&file),
+            PendingAction::Backfill => agent_doc_orchestration::pending_cmd::backfill(&file),
+            PendingAction::Done { id } => agent_doc_orchestration::pending_cmd::done(&file, &id),
+            PendingAction::Edit { id, text } => agent_doc_orchestration::pending_cmd::edit(&file, &id, &text),
+            PendingAction::Clear => agent_doc_orchestration::pending_cmd::clear(&file),
             PendingAction::Reorder { ids } => {
                 let ids: Vec<String> = ids
                     .split(',')
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty())
                     .collect();
-                pending_cmd::reorder(&file, &ids)
+                agent_doc_orchestration::pending_cmd::reorder(&file, &ids)
             }
-            PendingAction::List => pending_cmd::list(&file),
+            PendingAction::List => agent_doc_orchestration::pending_cmd::list(&file),
             PendingAction::ResolveGate { gate_type } => {
-                pending_cmd::resolve_gate(&file, &gate_type)
+                agent_doc_orchestration::pending_cmd::resolve_gate(&file, &gate_type)
             }
             PendingAction::SetGateType { id, gate_type } => {
-                pending_cmd::set_gate_type(&file, &id, &gate_type)
+                agent_doc_orchestration::pending_cmd::set_gate_type(&file, &id, &gate_type)
             }
         },
         Commands::ResolveGateCmd { gate_type, scope } => {
@@ -2346,9 +2289,9 @@ fn main() -> anyhow::Result<()> {
                 s
             } else {
                 let cwd = std::env::current_dir()?;
-                snapshot::find_project_root(&cwd).unwrap_or(cwd)
+                agent_doc_orchestration::snapshot::find_project_root(&cwd).unwrap_or(cwd)
             };
-            let total = pending_cmd::resolve_gate_scan(&gate_type, &scan_root)?;
+            let total = agent_doc_orchestration::pending_cmd::resolve_gate_scan(&gate_type, &scan_root)?;
             if total == 0 {
                 eprintln!(
                     "[resolve-gate] no [/{}] items found under {}",
@@ -2371,12 +2314,12 @@ fn main() -> anyhow::Result<()> {
                 ttl,
             } => {
                 let ops: Vec<&str> = operations.split(',').map(|s| s.trim()).collect();
-                let request = callback::create_request(&file, &ops, context.as_deref(), ttl)?;
+                let request = agent_doc_orchestration::callback::create_request(&file, &ops, context.as_deref(), ttl)?;
                 println!("{}", serde_json::to_string_pretty(&request)?);
                 Ok(())
             }
             CallbackAction::Read { file } => {
-                match callback::read_request(&file)? {
+                match agent_doc_orchestration::callback::read_request(&file)? {
                     Some(request) => {
                         println!("{}", serde_json::to_string_pretty(&request)?);
                     }
@@ -2393,7 +2336,7 @@ fn main() -> anyhow::Result<()> {
                 status,
                 summary,
             } => {
-                callback::write_response(&file, &request_id, &status, &summary, None)?;
+                agent_doc_orchestration::callback::write_response(&file, &request_id, &status, &summary, None)?;
                 eprintln!("[callback] response written for request {}", request_id);
                 Ok(())
             }
@@ -2401,9 +2344,9 @@ fn main() -> anyhow::Result<()> {
                 let cwd = std::env::current_dir()?;
                 let root_path = root
                     .map(PathBuf::from)
-                    .or_else(|| snapshot::find_project_root(&cwd))
+                    .or_else(|| agent_doc_orchestration::snapshot::find_project_root(&cwd))
                     .context("could not find project root")?;
-                callback::cleanup_expired(&root_path, 300)
+                agent_doc_orchestration::callback::cleanup_expired(&root_path, 300)
             }
         },
     }

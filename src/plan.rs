@@ -43,10 +43,11 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+use agent_doc_orchestration::{diff, pending, security};
 use crate::{
     component,
     component::{is_backlog_component, is_tracked_work_component},
-    diff, frontmatter, pending, security,
+    frontmatter,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -153,7 +154,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
 
     let doc_diff = diff::compute(file)?;
     let harness_diff = if doc_diff.is_none() {
-        crate::harness_prompt::synthetic_diff_for_file(file)?
+        agent_doc_orchestration::harness_prompt::synthetic_diff_for_file(file)?
     } else {
         None
     };
@@ -199,8 +200,8 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
 
     let prompt_bearing_changes = diff::classify_prompt_bearing_changes(&prompt_diff_text);
     let prompt_targets =
-        crate::flow::session_cycle::prompt_targets_from_changes(&prompt_bearing_changes);
-    let added_diff_lines = crate::prompt_contract::collect_added_diff_lines(&prompt_diff_text);
+        agent_doc_orchestration::flow::session_cycle::prompt_targets_from_changes(&prompt_bearing_changes);
+    let added_diff_lines = agent_doc_orchestration::prompt_contract::collect_added_diff_lines(&prompt_diff_text);
 
     let execution_scope = execution_scope_for_prompt_targets(
         &prompt_targets,
@@ -336,10 +337,10 @@ fn active_queue_prompt_diff(content: &str) -> Option<String> {
         .iter()
         .find(|component| component.name == "queue")?;
     let body = &content[queue_component.open_end..queue_component.close_start];
-    let entries = crate::queue::parse(body).ok()?;
-    let has_auto = crate::queue::has_auto_attr(&queue_component.attrs);
+    let entries = agent_doc_orchestration::queue::parse(body).ok()?;
+    let has_auto = agent_doc_orchestration::queue::has_auto_attr(&queue_component.attrs);
     let (fm, _) = frontmatter::parse(content).ok()?;
-    let activation = crate::queue::resolve_activation(
+    let activation = agent_doc_orchestration::queue::resolve_activation(
         &entries,
         has_auto,
         false,
@@ -348,7 +349,7 @@ fn active_queue_prompt_diff(content: &str) -> Option<String> {
     if !activation.active {
         return None;
     }
-    crate::queue::prompts(&activation.entries_after)
+    agent_doc_orchestration::queue::prompts(&activation.entries_after)
         .first()
         .map(|prompt| diff::synthetic_added_lines_diff(&prompt.text, "queue"))
 }
@@ -364,12 +365,12 @@ fn queue_is_active_for_diff(content: &str, diff_text: &str) -> bool {
         return false;
     };
     let body = &content[queue_component.open_end..queue_component.close_start];
-    let Ok(entries) = crate::queue::parse(body) else {
+    let Ok(entries) = agent_doc_orchestration::queue::parse(body) else {
         return false;
     };
-    let has_auto = crate::queue::has_auto_attr(&queue_component.attrs);
+    let has_auto = agent_doc_orchestration::queue::has_auto_attr(&queue_component.attrs);
     let (fm, _) = frontmatter::parse(content).unwrap_or_default();
-    crate::queue::resolve_activation(
+    agent_doc_orchestration::queue::resolve_activation(
         &entries,
         has_auto,
         diff::detect_queue_trigger(diff_text),
@@ -392,16 +393,16 @@ fn execution_scope_for_prompt_targets(
     harness_prompt_only: bool,
     prompt_presets: &indexmap::IndexMap<String, String>,
 ) -> ExecutionScope {
-    match crate::flow::session_cycle::classify_execution_scope(
+    match agent_doc_orchestration::flow::session_cycle::classify_execution_scope(
         prompt_targets,
         added_diff_lines,
         harness_prompt_only,
         prompt_presets,
     ) {
-        crate::flow::session_cycle::SessionExecutionScope::PlanBacklogOnly => {
+        agent_doc_orchestration::flow::session_cycle::SessionExecutionScope::PlanBacklogOnly => {
             ExecutionScope::PlanBacklogOnly
         }
-        crate::flow::session_cycle::SessionExecutionScope::Normal => ExecutionScope::Normal,
+        agent_doc_orchestration::flow::session_cycle::SessionExecutionScope::Normal => ExecutionScope::Normal,
     }
 }
 
@@ -413,13 +414,13 @@ fn finalize_placeholder_commands(
     let pending = pending_mutations
         .iter()
         .map(
-            |mutation| crate::flow::session_cycle::FinalizePendingMutation {
+            |mutation| agent_doc_orchestration::flow::session_cycle::FinalizePendingMutation {
                 kind: match mutation.kind {
                     PendingMutationKind::ResolveExisting => {
-                        crate::flow::session_cycle::FinalizePendingMutationKind::ResolveExisting
+                        agent_doc_orchestration::flow::session_cycle::FinalizePendingMutationKind::ResolveExisting
                     }
                     PendingMutationKind::ExpectAdd => {
-                        crate::flow::session_cycle::FinalizePendingMutationKind::ExpectAdd
+                        agent_doc_orchestration::flow::session_cycle::FinalizePendingMutationKind::ExpectAdd
                     }
                 },
                 id: &mutation.id,
@@ -427,7 +428,7 @@ fn finalize_placeholder_commands(
             },
         )
         .collect::<Vec<_>>();
-    vec![crate::flow::session_cycle::finalize_command(
+    vec![agent_doc_orchestration::flow::session_cycle::finalize_command(
         file,
         fm.resolve_mode(),
         &pending,
@@ -586,7 +587,7 @@ fn infer_write_scope(text: &str) -> Vec<String> {
 
 fn tsift_context_plan(file: &Path) -> TsiftContextPlan {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let root = crate::snapshot::find_project_root(&canonical)
+    let root = agent_doc_orchestration::snapshot::find_project_root(&canonical)
         .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
     let status = if root.join(".tsift/index.db").exists() {
         "available"
@@ -658,17 +659,17 @@ fn pending_mutations_for_doc(
         }
     }
 
-    let auto_done = crate::session_check::resolve_auto_done(file).unwrap_or(false);
-    for id in crate::session_check::inline_done_signal_ids(file, prompt_targets, auto_done)? {
+    let auto_done = agent_doc_orchestration::session_check::resolve_auto_done(file).unwrap_or(false);
+    for id in agent_doc_orchestration::session_check::inline_done_signal_ids(file, prompt_targets, auto_done)? {
         push_resolve_existing_mutation(&mut pending_mutations, &items, &id);
     }
 
-    if crate::prompt_contract::prompt_requests_backlog_work(
+    if agent_doc_orchestration::prompt_contract::prompt_requests_backlog_work(
         prompt_targets,
         added_diff_lines,
         &fm.prompt_presets,
     ) {
-        let target_files = crate::prompt_contract::explicit_backlog_targets(
+        let target_files = agent_doc_orchestration::prompt_contract::explicit_backlog_targets(
             file,
             prompt_targets,
             added_diff_lines,
@@ -677,7 +678,7 @@ fn pending_mutations_for_doc(
         .into_iter()
         .map(|path| path.display().to_string())
         .collect();
-        let issue_units = crate::prompt_contract::ordered_issue_units_for_agent_doc_bug(
+        let issue_units = agent_doc_orchestration::prompt_contract::ordered_issue_units_for_agent_doc_bug(
             prompt_targets,
             added_diff_lines,
             &fm.prompt_presets,
@@ -789,7 +790,7 @@ fn shared_doc_security_blockers(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::snapshot;
+    use agent_doc_orchestration::snapshot;
     use std::io::Write;
     use tempfile::TempDir;
 
@@ -833,7 +834,7 @@ mod tests {
         }
     }
 
-    fn write_cycles_log(doc: &std::path::Path, entries: &[crate::ops_log::CycleEntry]) {
+    fn write_cycles_log(doc: &std::path::Path, entries: &[agent_doc_orchestration::ops_log::CycleEntry]) {
         let log_path = doc.parent().unwrap().join(".agent-doc/logs/cycles.jsonl");
         std::fs::create_dir_all(log_path.parent().unwrap()).unwrap();
         let mut file = std::fs::File::create(log_path).unwrap();
@@ -2575,7 +2576,7 @@ do #nooploop. spec-test-build-install-commit-push
         write_cycles_log(
             &doc,
             &[
-                crate::ops_log::CycleEntry {
+                agent_doc_orchestration::ops_log::CycleEntry {
                     op: "commit_noop".to_string(),
                     file: "plan.md".to_string(),
                     timestamp: now.saturating_sub(20).to_string(),
@@ -2583,7 +2584,7 @@ do #nooploop. spec-test-build-install-commit-push
                     snapshot_hash: None,
                     file_hash: None,
                 },
-                crate::ops_log::CycleEntry {
+                agent_doc_orchestration::ops_log::CycleEntry {
                     op: "commit_noop".to_string(),
                     file: "plan.md".to_string(),
                     timestamp: now.saturating_sub(10).to_string(),
@@ -2664,7 +2665,7 @@ do #cmpclr. spec-test-build-install-commit-push
         write_cycles_log(
             &doc,
             &[
-                crate::ops_log::CycleEntry {
+                agent_doc_orchestration::ops_log::CycleEntry {
                     op: "commit".to_string(),
                     file: "plan.md".to_string(),
                     timestamp: now.saturating_sub(120).to_string(),
@@ -2672,7 +2673,7 @@ do #cmpclr. spec-test-build-install-commit-push
                     snapshot_hash: None,
                     file_hash: None,
                 },
-                crate::ops_log::CycleEntry {
+                agent_doc_orchestration::ops_log::CycleEntry {
                     op: "commit_noop".to_string(),
                     file: "plan.md".to_string(),
                     timestamp: now.saturating_sub(110).to_string(),
@@ -2680,7 +2681,7 @@ do #cmpclr. spec-test-build-install-commit-push
                     snapshot_hash: None,
                     file_hash: None,
                 },
-                crate::ops_log::CycleEntry {
+                agent_doc_orchestration::ops_log::CycleEntry {
                     op: "commit".to_string(),
                     file: "plan.md".to_string(),
                     timestamp: now.saturating_sub(100).to_string(),
@@ -2688,7 +2689,7 @@ do #cmpclr. spec-test-build-install-commit-push
                     snapshot_hash: None,
                     file_hash: None,
                 },
-                crate::ops_log::CycleEntry {
+                agent_doc_orchestration::ops_log::CycleEntry {
                     op: "commit_noop".to_string(),
                     file: "plan.md".to_string(),
                     timestamp: now.saturating_sub(90).to_string(),
@@ -2696,7 +2697,7 @@ do #cmpclr. spec-test-build-install-commit-push
                     snapshot_hash: None,
                     file_hash: None,
                 },
-                crate::ops_log::CycleEntry {
+                agent_doc_orchestration::ops_log::CycleEntry {
                     op: "commit".to_string(),
                     file: "plan.md".to_string(),
                     timestamp: now.saturating_sub(80).to_string(),
@@ -2704,7 +2705,7 @@ do #cmpclr. spec-test-build-install-commit-push
                     snapshot_hash: None,
                     file_hash: None,
                 },
-                crate::ops_log::CycleEntry {
+                agent_doc_orchestration::ops_log::CycleEntry {
                     op: "commit_noop".to_string(),
                     file: "plan.md".to_string(),
                     timestamp: now.saturating_sub(70).to_string(),
@@ -2712,7 +2713,7 @@ do #cmpclr. spec-test-build-install-commit-push
                     snapshot_hash: None,
                     file_hash: None,
                 },
-                crate::ops_log::CycleEntry {
+                agent_doc_orchestration::ops_log::CycleEntry {
                     op: "commit".to_string(),
                     file: "plan.md".to_string(),
                     timestamp: now.saturating_sub(60).to_string(),
@@ -2720,7 +2721,7 @@ do #cmpclr. spec-test-build-install-commit-push
                     snapshot_hash: None,
                     file_hash: None,
                 },
-                crate::ops_log::CycleEntry {
+                agent_doc_orchestration::ops_log::CycleEntry {
                     op: "commit_noop".to_string(),
                     file: "plan.md".to_string(),
                     timestamp: now.saturating_sub(50).to_string(),
@@ -2728,7 +2729,7 @@ do #cmpclr. spec-test-build-install-commit-push
                     snapshot_hash: None,
                     file_hash: None,
                 },
-                crate::ops_log::CycleEntry {
+                agent_doc_orchestration::ops_log::CycleEntry {
                     op: "commit".to_string(),
                     file: "plan.md".to_string(),
                     timestamp: now.saturating_sub(40).to_string(),
@@ -2736,7 +2737,7 @@ do #cmpclr. spec-test-build-install-commit-push
                     snapshot_hash: None,
                     file_hash: None,
                 },
-                crate::ops_log::CycleEntry {
+                agent_doc_orchestration::ops_log::CycleEntry {
                     op: "commit_noop".to_string(),
                     file: "plan.md".to_string(),
                     timestamp: now.saturating_sub(30).to_string(),
@@ -2746,7 +2747,7 @@ do #cmpclr. spec-test-build-install-commit-push
                 },
             ],
         );
-        crate::session_accretion::record_recent_exchange_compaction(&doc).unwrap();
+        agent_doc_orchestration::session_accretion::record_recent_exchange_compaction(&doc).unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -2804,11 +2805,11 @@ do #aftercmp. spec-test-build-install-commit-push
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         std::fs::write(&doc, current).unwrap();
         snapshot::save(&doc, baseline).unwrap();
-        crate::session_accretion::record_recent_exchange_compaction(&doc).unwrap();
+        agent_doc_orchestration::session_accretion::record_recent_exchange_compaction(&doc).unwrap();
         write_cycles_log(
             &doc,
             &[
-                crate::ops_log::CycleEntry {
+                agent_doc_orchestration::ops_log::CycleEntry {
                     op: "commit_noop".to_string(),
                     file: "plan.md".to_string(),
                     timestamp: now.saturating_sub(5).to_string(),
@@ -2816,7 +2817,7 @@ do #aftercmp. spec-test-build-install-commit-push
                     snapshot_hash: None,
                     file_hash: None,
                 },
-                crate::ops_log::CycleEntry {
+                agent_doc_orchestration::ops_log::CycleEntry {
                     op: "commit_noop".to_string(),
                     file: "plan.md".to_string(),
                     timestamp: now.saturating_sub(4).to_string(),

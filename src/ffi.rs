@@ -90,7 +90,7 @@ pub struct FfiProjectPath {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn agent_doc_document_changed(file_path: *const c_char) {
     if let Ok(path) = unsafe { CStr::from_ptr(file_path) }.to_str() {
-        crate::debounce::document_changed(path);
+        agent_doc_orchestration::debounce::document_changed(path);
     }
 }
 
@@ -121,7 +121,7 @@ pub unsafe extern "C" fn agent_doc_document_changed_digest(
     let Ok(len) = usize::try_from(content_len) else {
         return;
     };
-    crate::debounce::document_changed_with_digest(path, len, hash);
+    agent_doc_orchestration::debounce::document_changed_with_digest(path, len, hash);
 }
 
 /// Check if the document has been tracked (at least one `document_changed` call recorded).
@@ -140,14 +140,14 @@ pub unsafe extern "C" fn agent_doc_is_tracked(file_path: *const c_char) -> i32 {
         Ok(s) => s,
         Err(_) => return 0,
     };
-    crate::debounce::is_tracked(path) as i32
+    agent_doc_orchestration::debounce::is_tracked(path) as i32
 }
 
 /// Return the number of files tracked in the debounce state.
 /// Used by IDE plugins for state diagnostics.
 #[unsafe(no_mangle)]
 pub extern "C" fn agent_doc_tracked_count() -> u32 {
-    crate::debounce::tracked_count() as u32
+    agent_doc_orchestration::debounce::tracked_count() as u32
 }
 
 /// Non-blocking idle check — returns `true` if no `document_changed` event
@@ -168,15 +168,15 @@ pub unsafe extern "C" fn agent_doc_is_idle(file_path: *const c_char, debounce_ms
         Ok(s) => s,
         Err(_) => return 1, // Invalid path — don't block callers
     };
-    let in_process_idle = crate::debounce::is_idle(path, debounce_ms as u64);
+    let in_process_idle = agent_doc_orchestration::debounce::is_idle(path, debounce_ms as u64);
     if !in_process_idle {
         return 0;
     }
     // In-process says idle. If the file was never tracked in this process (e.g., after
     // plugin restart), also check the file-based indicator so cross-process typing state
     // from another plugin instance isn't silently lost.
-    if !crate::debounce::is_tracked(path) {
-        return (!crate::debounce::is_typing_via_file(path, debounce_ms as u64)) as i32;
+    if !agent_doc_orchestration::debounce::is_tracked(path) {
+        return (!agent_doc_orchestration::debounce::is_typing_via_file(path, debounce_ms as u64)) as i32;
     }
     1
 }
@@ -201,11 +201,11 @@ pub unsafe extern "C" fn agent_doc_await_idle(
     };
     // When the file is untracked in-process (e.g., after plugin restart), bridge to
     // file-based indicator so cross-process typing state isn't silently ignored.
-    if !crate::debounce::is_tracked(path) {
-        return crate::debounce::await_idle_via_file(path, debounce_ms as u64, timeout_ms as u64)
+    if !agent_doc_orchestration::debounce::is_tracked(path) {
+        return agent_doc_orchestration::debounce::await_idle_via_file(path, debounce_ms as u64, timeout_ms as u64)
             as i32;
     }
-    crate::debounce::await_idle(path, debounce_ms as u64, timeout_ms as u64) as i32
+    agent_doc_orchestration::debounce::await_idle(path, debounce_ms as u64, timeout_ms as u64) as i32
 }
 
 /// Check if a plugin in another process has typed recently (cross-process).
@@ -230,7 +230,7 @@ pub unsafe extern "C" fn agent_doc_is_typing_via_file(
         Ok(s) => s,
         Err(_) => return 0,
     };
-    crate::debounce::is_typing_via_file(path, debounce_ms as u64) as i32
+    agent_doc_orchestration::debounce::is_typing_via_file(path, debounce_ms as u64) as i32
 }
 
 /// Block until the file-based typing indicator shows idle, or timeout expires.
@@ -252,7 +252,7 @@ pub unsafe extern "C" fn agent_doc_await_idle_via_file(
         Ok(s) => s,
         Err(_) => return 1, // Invalid path — don't block
     };
-    crate::debounce::await_idle_via_file(path, debounce_ms as u64, timeout_ms as u64) as i32
+    agent_doc_orchestration::debounce::await_idle_via_file(path, debounce_ms as u64, timeout_ms as u64) as i32
 }
 
 /// Set the response status for a file (Option B: in-process).
@@ -273,7 +273,7 @@ pub unsafe extern "C" fn agent_doc_set_status(file_path: *const c_char, status: 
         Ok(s) => s,
         Err(_) => return,
     };
-    crate::debounce::set_status(path, st);
+    agent_doc_orchestration::debounce::set_status(path, st);
 }
 
 /// Get the response status for a file (file-based).
@@ -290,7 +290,7 @@ pub unsafe extern "C" fn agent_doc_get_status(file_path: *const c_char) -> *mut 
         Ok(s) => s,
         Err(_) => return CString::new("idle").unwrap().into_raw(),
     };
-    let status = crate::debounce::get_status(path);
+    let status = agent_doc_orchestration::debounce::get_status(path);
     CString::new(status)
         .unwrap_or_else(|_| CString::new("idle").unwrap())
         .into_raw()
@@ -310,7 +310,7 @@ pub unsafe extern "C" fn agent_doc_is_busy(file_path: *const c_char) -> i32 {
         Ok(s) => s,
         Err(_) => return 0,
     };
-    crate::debounce::is_busy(path) as i32
+    agent_doc_orchestration::debounce::is_busy(path) as i32
 }
 
 /// Try to acquire the sync lock. Returns `true` if acquired, `false` if already held.
@@ -380,7 +380,7 @@ pub unsafe extern "C" fn agent_doc_start_ipc_listener(
     let root_path = std::path::PathBuf::from(&root_str);
 
     std::thread::spawn(move || {
-        let result = crate::ipc_socket::start_listener(&root_path, move |msg| {
+        let result = agent_doc_orchestration::ipc_socket::start_listener(&root_path, move |msg| {
             // Lend the message to the callback (no ownership transfer)
             let c_msg = match CString::new(msg) {
                 Ok(c) => c,
@@ -432,7 +432,7 @@ pub unsafe extern "C" fn agent_doc_start_ipc_listener_v2(
     let root_path = std::path::PathBuf::from(&root_str);
 
     std::thread::spawn(move || {
-        let result = crate::ipc_socket::start_listener(&root_path, move |msg| {
+        let result = agent_doc_orchestration::ipc_socket::start_listener(&root_path, move |msg| {
             let c_msg = match CString::new(msg) {
                 Ok(c) => c,
                 Err(_) => return Some(r#"{"type":"ack","status":"error"}"#.to_string()),
@@ -467,7 +467,7 @@ pub unsafe extern "C" fn agent_doc_stop_ipc_listener(project_root: *const c_char
         Ok(s) => s,
         Err(_) => return,
     };
-    let sock = crate::ipc_socket::socket_path(std::path::Path::new(root_str));
+    let sock = agent_doc_orchestration::ipc_socket::socket_path(std::path::Path::new(root_str));
     if let Err(e) = std::fs::remove_file(&sock)
         && e.kind() != std::io::ErrorKind::NotFound
     {

@@ -25,7 +25,7 @@
 use anyhow::Result;
 use std::path::Path;
 
-use crate::{snapshot, write};
+use agent_doc_orchestration::{snapshot, write};
 
 pub fn run(file: &Path) -> Result<()> {
     if !file.exists() {

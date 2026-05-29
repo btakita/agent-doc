@@ -116,7 +116,19 @@ This is the replay-safety path: a wrong change risks re-applying a stale respons
 The printed command works and is safe: `agent-doc reset --from-current --preserve-session tasks/agent-doc/agent-doc-bugs2.md` rebuilds the sidecars without clearing session state. (This `agent-doc` re-invocation went through fine, so you may not even need it right now.)
 
 This is a good candidate to implement next — it's bounded and deterministically testable (capture → compact → assert the capture is discarded and the drain no longer bails). Want me to take it, or continue with the queue head `#adoc-queue-ipc-buffer-divergence`?
-<!-- agent:boundary:0b603739 -->
+do [#stale-capture-after-compaction-blocks-route]. #spec-test-build-install-commit-push
+
+JB `Run Agent Doc` had an error.
+```
+resync: stash pane %28 is registered in its own project root — skipping kill
+[route] debounce OK — file idle for 141.9s and typing indicator idle
+[route] target tmux session: 0
+[repair] repaired stale preflight_started cycle cycle-1780074863050 for tasks/agent-doc/agent-doc-bugs2.md
+[commit] prior response is already committed in HEAD for tasks/agent-doc/agent-doc-bugs2.md — leaving later local user follow-up edits uncommitted for the next response cycle. This is not a full closeout for the follow-up prompt; run `agent-doc tasks/agent-doc/agent-doc-bugs2.md` to answer it or pipe the response through `agent-doc write --commit tasks/agent-doc/agent-doc-bugs2.md`.
+[perf] commit total: 10ms
+Error: authoritative actor generation 204 for tasks/agent-doc/agent-doc-bugs2.md owns pane %8 but route could not drain the active closeout before dispatch: [session-check] INTERRUPTED: cycle `cycle-1780074863050` is `committed` (repair_preflight_stale_lock), but the document still has unresolved prompt-bearing user changes with no new agent-doc cycle started: prompt_target: do [#stale-capture-after-compaction-blocks-route]. #spec-test-build-install-commit-push
+```
+<!-- agent:boundary:e2461960 -->
 <!-- /agent:exchange --> 
 ###
 <!--
@@ -155,6 +167,7 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#backlog-auto-marker-misfire] The 'auto' attribute on the agent:backlog marker (queue-only attribute) misfired an auto-run that destructively rewrote the backlog — minted new IDs wrapping 'do [#...]' stubs of already-done items; user reported original task text lost and recovery needed git/sidecar archaeology. Fix: reject 'auto'/unknown attrs on agent:backlog (warn, no mutation); auto-loop must trigger only from the queue 'auto' attribute; never rewrite committed backlog item text in an auto-run. Plan: tasks/agent-doc/plan-backlog-auto-marker-misfire.md. DO NOT IMPLEMENT.
 - [ ] [#stale-capture-after-compaction-blocks-route] Run Agent Doc fails closed with 'captured response baseline no longer matches current document' (manual reset --from-current --preserve-session) when a stale capture sidecar references a response that compaction already archived out of the doc. validate_replay correctly bails (can't tell compacted-vs-lost). Plan: tasks/agent-doc/plan-stale-capture-after-compaction-blocks-route.md (recommend Option A — compaction discards its own captures). Reported 2026-05-29.
 - [ ] [#jb-load-tmux-window-verify] [recommended] Live-verify the new JB Load Tmux Window action (plugin 0.2.136): install the signed zip, confirm it autostarts/loads the tmux pane for a focused doc whose pane is not up (e.g. corky.md). If the autostart sync genuinely fails to spawn the pane in that case (vs. by-design passive open), capture the route/sync logs as a separate autostart bug.
 - [ ] [#adoc-queue-ipc-buffer-divergence] Root cause #4 FIXED (submodule 729f7bc2): response-replay / stale-cycle hash matching now neutralizes the agent:queue component (tag + body) and the queue_active frontmatter, so queue-maintenance churn no longer wedges a committed cycle as stuck_captured_cycle. REMAINING #2 (live IDE buffer re-adds auto / diverges from committed inactive snapshot): blocker found — ipc_socket::send_patch carries component CONTENT only and cannot converge a queue opening-tag attribute (auto) or the queue_active frontmatter; try_ipc_full_content is disabled and rejects template docs, so no IPC seam exists yet. Needs a plugin protocol extension (PatchWatcher.kt + FFI) to converge queue tag + frontmatter to the editor buffer, plus a deterministic live-IPC-listener repro harness (SimWorld). Plan: tasks/agent-doc/plan-queue-ipc-drift.md.

@@ -147,7 +147,46 @@ Added **`[#clippy-workspace-gate]`** to the top of the backlog (actionable; rank
 4. `#full-e2e-verify` (blocked on #2/#3)
 
 **Top of backlog: `#clippy-workspace-gate`.**
-<!-- agent:boundary:954833c7 -->
+### Re: Please evaluate the extraction — is the test suite working, any regressions? — opus-4-8
+
+**Verdict: the extraction is clean — no functional regressions, test suite working correctly.** I did find one real *non-extraction* issue (a clippy coverage gap) and fixed the coupled parts; the rest is captured as a new top-of-backlog item.
+
+#### Is the test suite working as it should? — Yes
+
+- `cargo test --workspace`: **993 passed across 40 suites, 0 failed, 0 ignored.** No `#[ignore]` anywhere.
+- The per-module tests **moved with their code** — the workspace total held at 993 the whole way (34 → 36 → 38 → 40 suites as each new crate's lib+doctest binaries were added). Nothing was silently dropped.
+- The dead-test gap that *started* this whole arc is closed: `make check`'s `test:` runs `cargo test --workspace` (was root-only). I re-verified each split's tests actually execute (e.g. `Running tests/sim_world.rs`, `tsift_digest`, `tsift_status` binaries).
+- CI green on every split (`26624750805`, `26625103762`, `26625522294`).
+
+#### Are there regressions from the extraction? — No
+
+- Public API preserved: every moved module is re-exported from root `tsift` (`pub use tsift_{digest,search,status}::…`), so `tsift::diff_digest::*` / `tsift::sift::*` / `tsift::status::*` callers in `tsift-cli` compile unchanged. Smoke-tested `diff-digest`, `search`, `status` through the installed binary — all work.
+- No dependency cycles; default + `--features backend-libsql` both build; `cargo install` binary verified.
+- Minor note (not a regression): the digest/search crates depend on `tsift-graph` with default (all-language) features, matching the existing `tsift-index` precedent rather than forwarding root's `lang-*` selection. Behavior is identical for the default build; only a non-default `--no-default-features` consumer would see all grammars in the digest path. Pre-existing pattern, left as-is.
+
+#### The one real finding: a clippy coverage gap (mirror of the dead-test bug)
+
+`make check`'s clippy leg runs `cargo clippy --all-targets` against the **root package only** — exactly like `test:` was before `#split-sim-world`. `cargo clippy --workspace` surfaces pre-existing lint debt that was never checked. I cleaned the cheap/coupled crates and pushed them (CI green):
+
+- **tsift-libsql** — dropped unused imports; **migrated the deprecated `libsql::Database::open(...)` → `block_on(&rt, Builder::new_local(...).build())`** (matches the existing `open_remote` path); dropped two `unused_mut`; scoped test-only `Graph{Freshness,Projection,Provenance}` into the test module.
+- **tsift-tokensave** — dropped unused `VecDeque` + `Graph*` imports.
+- **tsift-resolution** — three `useless vec!` → arrays in `scoring.rs` tests (these became *visible* because `#split-sim-world`'s `GraphFreshness` test-import fix made that test compile again).
+
+Commit `4f7f053` (CI green — the first run hit a transient infra failure where the runner died during the cache step *before* `make ci-full` ran; the "Full CI suite" step never started; re-run passed clean).
+
+I **did not** flip `make check`'s clippy to `--workspace` yet, because that requires first clearing `tsift-cli`'s remaining debt (9 `dead_code` `graph_db_*` helpers flagged unused in both lib and lib-test, plus one `too_many_arguments`) — a delete-vs-gate decision on someone's diagnostic helpers that deserves its own focused pass rather than getting buried here. Captured as `#next-steps` below.
+
+#### #next-steps
+
+Added **`[#clippy-workspace-gate]`** to the top of the backlog (actionable; ranked above the externally-blocked npm chain). The backlog is now in priority order:
+
+1. **`#clippy-workspace-gate`** ← top (actionable) — clear tsift-cli lint debt, then flip make-check clippy to `--workspace`.
+2. `#npm-auth-setup` (externally blocked — needs your GitHub repo-settings access)
+3. `#npm-publish-verify` (blocked on #2)
+4. `#full-e2e-verify` (blocked on #2/#3)
+
+**Top of backlog: `#clippy-workspace-gate`.**
+<!-- agent:boundary:ceab114e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -166,6 +205,7 @@ dispatch #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#clippy-workspace-gate] Close the clippy coverage gap — flip make check's clippy leg from root-only `cargo clippy --all-targets` to `cargo clippy --workspace --all-targets -D warnings` (mirrors the test→--workspace fix from #split-sim-world). Blocked on first clearing tsift-cli's remaining lint debt: 9 dead_code graph_db_* helpers (graph_db_neighborhood_depths/_page_handle_coverage_pct/_node_has_handle_coverage/_duplicate_name_precision/_has_community_signal/_has_semantic_signal/_source_handle_is_fresh/_edge_kind_rank_score + traversal_relative_path_is_generated_artifact) flagged unused in lib AND lib-test — decide delete vs cfg-gate — plus one too_many_arguments. libsql/tokensave/resolution already cleaned in #lint-cleanup-non-root-crates.
 - [ ] [#npm-auth-setup] Configure NPM_TOKEN secret + TSIFT_ENABLE_NPM_PUBLISH=true variable in GitHub repo settings
 - [ ] [#npm-publish-verify] After auth configured, tag release and verify publish-opencode-plugin CI job succeeds and opencode-tsift appears on npmjs.org
 - [ ] [#full-e2e-verify] In fresh project: opencode plugin opencode-tsift && opencode then /tsift-status. On success mark #e2e-install done.

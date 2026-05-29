@@ -531,7 +531,24 @@ If you want it a touch shorter for the position description:
 - **"investor-facing demos under tight timelines"** — describes *your* delivery work and the working conditions; it doesn't disclose what the product does, who the investors are, or any business plan.
 
 What I deliberately left out (would cross into §5 business info): the specific product, the use case, named investors, funding details, or the system architecture. If you want any of those in, that's your call as the party to the agreement — but I'd keep them out of a public profile.
-<!-- agent:boundary:7862854e -->
+❯ Include Rubric-based Repo + Agent Harness analysis tools.
+
+### Re: Add rubric-based repo + agent-harness analysis tools — opus-4-8
+
+Folded in. These read as engineering-tooling you built (capability-level), so they're confidentiality-safe — no product/business disclosure. Updated bullet:
+
+```
+• Confidential AI Startup — Real-time AI systems engineering. Built real-time asset-generation pipelines (audio/visual content generated and streamed live), rubric-based repository and agent-harness analysis tooling for automated code/agent evaluation, and delivered investor-facing demos under tight timelines. Stack: Rust, Python, TypeScript, LiveKit, WebRTC.
+```
+
+Shorter variant for the LinkedIn position description:
+
+```
+• Confidential AI Startup — Real-time AI systems engineering: real-time asset-generation pipelines, rubric-based repo + agent-harness analysis tooling, and live investor demos under tight timelines. Rust, Python, TypeScript, LiveKit, WebRTC.
+```
+
+This also reinforces your **agent tooling / code-analysis** positioning (ties back to tsift and the agent-doc/agent-kit line in your Open Source section), so it strengthens the resume narrative beyond just this one role. Same confidentiality caveat — it describes the *tools you built*, not their product.
+<!-- agent:boundary:d8d10dae -->
 <!-- /agent:exchange -->
 ###
 <!--

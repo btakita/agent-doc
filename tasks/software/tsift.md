@@ -209,7 +209,60 @@ This confirms the per-command-cluster pattern works at scale before tackling the
 #### Top of backlog
 
 `[#cli-cluster-graph]` — Phase 2: move `cmd_graph`, `cmd_communities`, `cmd_path`, `cmd_explain`, `cmd_explain_with_budget`, and `cmd_traverse` bodies into `packages/tsift-cli/src/commands/graph.rs`. Larger cluster (~6 functions); same recipe as this one.
-<!-- agent:boundary:34ef7b93 -->
+
+### Re: do [#cli-cluster-graph] — opus-4-7
+
+Phase 2 cluster #2 done.
+
+#### What moved
+
+Six functions (~945 LOC total) → `packages/tsift-cli/src/commands/graph.rs`:
+
+- `cmd_graph` (~269 LOC) — `tsift graph <symbol>` callers/callees with tagpath annotation, edge collapsing, scope dispatch
+- `cmd_communities` (~148 LOC) — Louvain community detection over the call graph
+- `cmd_traverse` (~30 LOC) — Graphify-style traversal graph dispatch (json + html)
+- `cmd_path` (~86 LOC) — BFS shortest-path between two symbols
+- `cmd_explain` (~31 LOC) — default-budget wrapper, now `#[cfg(test)]`-gated
+- `cmd_explain_with_budget` (~381 LOC) — the real `tsift explain` engine with budget preview, tagpath annotation, and rendering
+
+#### Visibility changes (mechanical)
+
+Promoted 18 helpers + `CommunityDetectionReport` struct to `pub(crate)`:
+
+| Group | Helpers |
+|-------|---------|
+| Traversal | `build_traversal_graph`, `traversal_report`, `traversal_report_html`, `verify_convex_projection_snapshot` |
+| Community / explain | `build_explain_budget_report`, `community_tagpath_cache_part`, `compact_members`, `detect_communities_cached`, `print_explain_budget_human`, `update_community_annotation_diagnostics` |
+| Edge rendering | `format_edge_groups`, `should_collapse_edge_groups` |
+| Path/symbol | `symbol_path_summary` |
+| Index / tagpath | `open_index_db`, `query_tagpath_root` |
+| Relativization | `relativize_edges`, `relativize_symbols` |
+| Misc | `shell_quote` |
+
+No bodies changed.
+
+#### Verification
+
+- `cargo build -p tsift-cli` — clean, no new errors
+- `make check` — green workspace-wide (clippy `-D warnings`, cargo test, opencode-tsift npm publish dry-run)
+- `cargo install --path packages/tsift-cli` — `~/.cargo/bin/tsift` refreshed
+- `cargo build --release -p tsift-cli` — `target/release/tsift` refreshed
+
+#### Commits
+
+- tsift @ `c6836c4` — `cli: Phase 2 — extract graph command cluster into commands/graph.rs` (pushed)
+- agent-loop @ `f3b3c04` — submodule pointer bump (pushed)
+
+VERSIONS.md `Unreleased` updated with the `#cli-cluster-graph` entry.
+
+#### lib.rs trajectory
+
+Phase 1a-i (output infra) → Phase 1a-ii (envelopes) → Phase 1b (CLI types) → Phase 2 cluster #1 (index+search) → Phase 2 cluster #2 (graph). lib.rs is now ~36.5k LOC, down from ~39.2k at Phase 1a-i kickoff. Two clusters left to land before tagpath helpers and the smaller infra/quality/summarize/digests clusters.
+
+#### Top of backlog
+
+`[#cli-extract-tagpath-helpers]` — Phase 1a-iii: extract `TagpathSearchOpts`, `TagpathAnnotationDiagnostic`, `CommunityMemberAmbiguityDiagnostic`, `annotate_hits_with_tagpath`, `annotate_stored_symbols_with_tagpath`, `annotate_stored_edges_with_tagpath`, `annotate_communities_with_tagpath`, `annotate_path_nodes_with_tagpath` (~700 LOC) into `packages/tsift-cli/src/output/tagpath.rs`. Sits below the graph/community cmd cluster (now drained) and moves cleanly because the annotate functions are already `pub`.
+<!-- agent:boundary:c03e670e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -223,7 +276,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#cli-extract-cli-types]~
 - ~do [#cli-cleanup-unused-imports]~
 - ~do [#cli-cluster-index-search]~
-- do [#cli-cluster-graph]
+- ~do [#cli-cluster-graph]~
 - do [#cli-extract-tagpath-helpers]
 - do [#cli-cluster-quality]
 - do [#cli-cluster-summarize]
@@ -237,7 +290,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#cli-cluster-graph] Phase 2 — move cmd_graph + cmd_communities + cmd_path + cmd_explain + cmd_traverse bodies into packages/tsift-cli/src/commands/graph.rs.
 - [ ] [#cli-extract-tagpath-helpers] Phase 1a-iii — extract TagpathSearchOpts + TagpathAnnotationDiagnostic + CommunityMemberAmbiguityDiagnostic + annotate_hits_with_tagpath + annotate_stored_symbols_with_tagpath + annotate_stored_edges_with_tagpath + annotate_communities_with_tagpath + annotate_path_nodes_with_tagpath (~700 LOC) into packages/tsift-cli/src/output/tagpath.rs. Sits below the graph/community cmd cluster but moves cleanly because the annotate functions are already pub.
 - [ ] [#cli-cluster-quality] Phase 2 — move cmd_audit + cmd_audit_tagpath + cmd_lint + cmd_perf_gate bodies into packages/tsift-cli/src/commands/quality.rs.
 - [ ] [#cli-cluster-summarize] Phase 2 — move cmd_summarize body (and helpers) into packages/tsift-cli/src/commands/summarize.rs.

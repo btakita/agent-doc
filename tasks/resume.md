@@ -205,7 +205,24 @@ So the format to use:
 - What you built: ❌ `built a real-time video AI avatar system for [use case]`
 
 The skills list for the entry can be as specific as the technology names. Just don't pair them with a description of the product.
-<!-- agent:boundary:d8a280d7 -->
+❯ Python, Typescript, Realtime asset generation?
+
+### Re: Python, TypeScript, Realtime asset generation — sonnet-4-6
+
+All fine. Same rule applies — these are skill/domain descriptors, not Dreamable's business information.
+
+- **Python, TypeScript** — technology names, clearly yours to claim
+- **Realtime asset generation** — describes a work domain/capability area, same as "AI/ML engineering" or "WebRTC media pipelines." Not a product description.
+
+So the Confidential entry could read:
+
+```
+Confidential AI Startup — Software Development Consultant (Apr–May 2026)
+Skills: Rust, Python, TypeScript, LiveKit, WebRTC, realtime asset generation
+```
+
+That's clean, accurate, and reveals nothing about their product or business. The key is you're describing *your* capabilities, not their system.
+<!-- agent:boundary:1dd644ad -->
 <!-- /agent:exchange -->
 ###
 <!--

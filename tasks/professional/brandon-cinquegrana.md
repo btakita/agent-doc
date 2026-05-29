@@ -86,12 +86,51 @@ If equityfundingsource was a founder role, lift it to its own header *above* the
 
 One question back: were any of these equity/founder roles, or were all three client contracts? That single fact is what changes the answer.
 
+❯ Please transcribe + diarize the call with brandon-cinquegrana.
+❯ [phone_20260528-140602_2144332110.m4a](../../mail/contacts/brandon-cinquegrana/recordings/phone_20260528-140602_2144332110.m4a)
+
+### Re: Recent projects — freelancing umbrella vs. separate companies — opus-4-8
+
+Default to **one freelancing/consulting umbrella** with dreamable, equityfundingsource, and monsterrodholders listed as dated engagements beneath it. Break one out into its own company entry only when the relationship was actually a *role*, not a contract.
+
+The decision rule:
+
+| Present as… | When |
+|---|---|
+| **Sub-bullet under your consulting banner** | Engaged as a contractor/consultant; deliverable-based; weeks-to-months; no title or equity. |
+| **Standalone company entry** | You held a defined ongoing role (founder, co-founder, principal, officer) or equity — or the engagement is long/notable enough that the name carries more weight than the umbrella. |
+
+Why the umbrella is the default for a recruiter audience (Brandon screens for startups):
+
+- Three separate short company entries read as job-hopping. The same three as clients under *"Independent Software Consultant, 2023–present"* read as a stable, in-demand consultant.
+- It's truthful to a contractor relationship and parses cleanly in ATS — continuous employment, one employer block.
+- You frame the narrative once instead of defending three exits.
+
+Applying it to your three:
+
+- **monsterrodholders** — WooCommerce/WordPress client work. Umbrella, client bullet. Lead with outcome (migration, checkout/WAF fixes, uptime/revenue), not the stack.
+- **equityfundingsource** — the one to decide deliberately. Founder/principal/equity stake → standalone entry. Client build → umbrella. Tell me which and I'll phrase it.
+- **dreamable** — present as a **completed engagement**, neutrally, under the umbrella. It closed in a settlement / mutual release, so keep it low-profile: dates plus a neutral scope line, no outcome drama, and never reference the settlement. Don't drop it if doing so opens a visible gap, but don't feature it either.
+
+Structure I'd use:
+
+```
+Independent Software Consultant — Self-employed | 2023–Present
+  • EquityFundingSource — <one-line impact>
+  • MonsterRodHolders   — <one-line impact>
+  • Dreamable           — <neutral scope line>
+```
+
+If equityfundingsource was a founder role, lift it to its own header *above* the consulting block and keep the other two beneath the umbrella.
+
+One question back: were any of these equity/founder roles, or were all three client contracts? That single fact is what changes the answer.
+
 #### Note: the IPC corruption that hit while you typed this prompt
 
 That was the known **`#ipcfullprompt`** bug — full-document IPC corruption while typing a live prompt. Preflight auto-recovered it this cycle: it moved the stale boundary back to the end of the completed turn and repaired the prompt prefixes, so your four prompt lines survived intact. The only residue is a stray empty `###` heading below `/agent:exchange` (harmless, outside the response region). There's also a `stuck_captured_cycle` warning for an orphaned 1863-byte capture from the corrupted cycle — but both prior responses are confirmed in HEAD, so nothing was lost, and this finalize reconciles it.
 
 The bug already has a full plan (`tasks/agent-doc/plan-full-document-ipc-corruption-typing-prompt.md`), but `#ipcfullprompt` was prematurely moved to the done archive on 2026-05-26 while still plan-only and unfixed. It just reproduced on 0.34.0, so I've re-opened it in the `agent-doc-bugs2.md` backlog as `#ipcfullprompt-recur`.
-<!-- agent:boundary:a4733ac3 -->
+<!-- agent:boundary:12716557 -->
 <!-- /agent:exchange -->
 ###
 <!--

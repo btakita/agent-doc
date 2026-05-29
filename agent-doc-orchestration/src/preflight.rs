@@ -2952,12 +2952,26 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
         && !activation.entries_after.is_empty()
         && !need_clear_drained_body
     {
-        queue_warnings.push(PreflightWarning {
-            code: "inactive_queue_residue".to_string(),
-            message: "agent:queue is inactive but still contains directive/item residue; only active queue state is executable priority context".to_string(),
-            document_agent: None,
-            active_harness: None,
-        });
+        // `inactive_queue_residue` is a per-*edit* signal, not a per-preflight
+        // nag. It is useful when the operator just added/changed content in an
+        // inactive queue (so a `do [#id]` they expected to run silently will
+        // not). It is pure noise when the inactive queue is unchanged from the
+        // committed snapshot — exactly the steady state an `item_modified` halt
+        // leaves behind, where re-warning on every preflight with no user edit
+        // drives the #adoc-queue-ipc-drift loop. Only warn when the inactive
+        // queue body actually changed since the snapshot this cycle.
+        if inactive_queue_changed_vs_snapshot(file, &activation.entries_after) {
+            queue_warnings.push(PreflightWarning {
+                code: "inactive_queue_residue".to_string(),
+                message: "agent:queue is inactive but still contains directive/item residue; only active queue state is executable priority context".to_string(),
+                document_agent: None,
+                active_harness: None,
+            });
+        } else {
+            eprintln!(
+                "[preflight] queue: inactive with retained entries unchanged from snapshot — stable, not re-flagged as residue"
+            );
+        }
     }
 
     // Strip auto attribute from opening tag when queue drains
@@ -3103,6 +3117,36 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
         queue_halted: None,
         warnings: queue_warnings,
     })
+}
+
+/// True when the current inactive-queue entry set differs from the queue body
+/// recorded in the snapshot (the committed baseline for this cycle). Used to
+/// scope the `inactive_queue_residue` warning to genuine operator edits instead
+/// of re-warning every preflight on a stable, already-committed inactive queue
+/// (the steady state an `item_modified` halt leaves behind — #adoc-queue-ipc-drift).
+///
+/// Comparison is normalized through `queue::parse` + `queue::render` so trivial
+/// whitespace / boundary churn does not register as a change. A missing or
+/// unreadable snapshot, or a snapshot with no queue component, is treated as
+/// "changed" so a freshly-populated inactive queue still warns.
+fn inactive_queue_changed_vs_snapshot(
+    file: &Path,
+    current_entries: &[crate::queue::QueueEntry],
+) -> bool {
+    let Ok(Some(snapshot_content)) = snapshot::load(file) else {
+        return true;
+    };
+    let Ok(components) = crate::component::parse(&snapshot_content) else {
+        return true;
+    };
+    let Some(snap_queue) = components.iter().find(|c| c.name == "queue") else {
+        return true;
+    };
+    let snap_body = &snapshot_content[snap_queue.open_end..snap_queue.close_start];
+    let Ok(snap_entries) = crate::queue::parse(snap_body) else {
+        return true;
+    };
+    crate::queue::render(&snap_entries) != crate::queue::render(current_entries)
 }
 
 fn queue_entries_are_drained_residue(entries: &[crate::queue::QueueEntry]) -> bool {
@@ -4544,6 +4588,96 @@ mod tests {
         let _ = run_queue_maintenance(&doc, None).unwrap();
         let after = std::fs::read_to_string(&doc).unwrap();
         assert_eq!(before, after, "queue maintenance must be idempotent after dedup");
+    }
+
+    #[test]
+    fn preflight_does_not_reflag_stable_inactive_queue_as_residue() {
+        // #adoc-queue-ipc-drift root cause #1: after an `item_modified` halt the
+        // queue goes inactive (queue_active: false, no `auto`) with a retained
+        // live tail, and the halt synced that shape into the snapshot. On the
+        // NEXT preflight the inactive queue is unchanged from the snapshot, so
+        // re-emitting `inactive_queue_residue` every cycle (with no user edit)
+        // is pure loop noise and must be suppressed.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        // Snapshot == file: a stable, already-committed inactive queue with a
+        // retained tail (the post-halt steady state).
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: false\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- ~do [#first-done]~\n",
+            "- do [#second-live]\n",
+            "<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+
+        assert!(
+            !state
+                .warnings
+                .iter()
+                .any(|w| w.code == "inactive_queue_residue"),
+            "stable inactive queue (unchanged vs snapshot) must not re-warn residue: {:?}",
+            state.warnings
+        );
+        // The retained tail is preserved, and maintenance is idempotent.
+        let before = std::fs::read_to_string(&doc).unwrap();
+        assert!(before.contains("- do [#second-live]"));
+        let _ = run_queue_maintenance(&doc, None).unwrap();
+        let after = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(before, after, "stable inactive queue must not be mutated");
+    }
+
+    #[test]
+    fn preflight_flags_inactive_queue_when_changed_this_cycle() {
+        // Counterpart guard (Scenario B): when the operator adds content to an
+        // inactive queue this cycle (snapshot empty queue, file has a new live
+        // item), the residue warning must still fire so the user knows the
+        // `do [#id]` they added will not run while the queue is inactive.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let snapshot_content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: false\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n"
+        );
+        let current_content = snapshot_content.replace(
+            "<!-- agent:queue -->\n<!-- /agent:queue -->",
+            "<!-- agent:queue -->\n- do [#freshly-added]\n<!-- /agent:queue -->",
+        );
+        std::fs::write(&doc, &current_content).unwrap();
+        snapshot::save(&doc, snapshot_content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+
+        assert!(
+            state
+                .warnings
+                .iter()
+                .any(|w| w.code == "inactive_queue_residue"),
+            "inactive queue changed this cycle must warn residue: {:?}",
+            state.warnings
+        );
     }
 
     #[test]

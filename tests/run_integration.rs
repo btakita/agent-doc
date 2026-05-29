@@ -589,6 +589,15 @@ fn codex_bare_run_inside_owning_pane_fails_before_nested_dispatch() {
 
     agent_doc()
         .current_dir(tmp.path())
+        // Deterministically simulate a Codex harness. `detect_harness()` checks
+        // Claude/OpenCode markers before Codex, so an inherited `CLAUDECODE`
+        // (e.g. running the suite from inside a Claude Code session) would
+        // otherwise short-circuit the codex recursive-deadlock guard.
+        .env_remove("CLAUDECODE")
+        .env_remove("CLAUDE_CODE")
+        .env_remove("CLAUDE_CODE_SESSION")
+        .env_remove("OPENCODE")
+        .env_remove("OPENCODE_CLIENT")
         .env("CODEX_SESSION", "codex-session")
         .env("TMUX_PANE", "%77")
         .arg(doc.to_str().unwrap())

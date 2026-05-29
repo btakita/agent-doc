@@ -456,15 +456,36 @@ fn normalize_append_patch_content(content: &str) -> String {
             if trimmed.starts_with("<!-- agent:boundary:") && trimmed.ends_with(" -->") {
                 None
             } else if markdown_heading_has_head_marker(line) {
-                Some(line.trim_end_matches(" (HEAD)").to_string())
+                Some(strip_user_prompt_prefix(line.trim_end_matches(" (HEAD)")))
             } else {
-                Some(line.to_string())
+                Some(strip_user_prompt_prefix(line))
             }
         })
         .collect::<Vec<_>>()
         .join("\n")
         .trim()
         .to_string()
+}
+
+/// Strip a leading `❯ ` / `❯` user-prompt prefix from a line for dedup comparison.
+///
+/// The exchange user-prompt normalization adds a `❯ ` prefix to user lines, but a
+/// synthesized boundary-aware exchange patch and the live editor buffer can differ
+/// only by that prefix (one normalized, the other not). Without stripping it, the
+/// `append_patch_already_present` `contains` check misses the duplicate and the
+/// prompt is re-appended — the `#prompt-duplicated-while-typing` duplication. The
+/// `❯` glyph is a presentation prefix, not prompt content, so stripping it for
+/// comparison cannot drop a genuinely distinct prompt. Lines without the prefix are
+/// returned unchanged.
+fn strip_user_prompt_prefix(line: &str) -> String {
+    let trimmed_start = line.trim_start();
+    if let Some(rest) = trimmed_start.strip_prefix("❯ ") {
+        rest.to_string()
+    } else if let Some(rest) = trimmed_start.strip_prefix('❯') {
+        rest.trim_start().to_string()
+    } else {
+        line.to_string()
+    }
 }
 
 fn markdown_heading_has_head_marker(line: &str) -> bool {
@@ -1805,5 +1826,56 @@ Fix applied to skip non-agent <!-- sequences.
     fn converge_queue_auto_none_without_queue_component() {
         let doc = "<!-- agent:exchange -->\nhi\n<!-- /agent:exchange -->\n";
         assert_eq!(converge_queue_auto(doc, false), None);
+    }
+
+    // #prompt-duplicated-while-typing: dedup must be agnostic to the `❯ ` user-prompt
+    // prefix, since a synthesized exchange patch and the live buffer can differ only
+    // by it. Otherwise the prompt re-appends and duplicates while typing.
+    #[test]
+    fn append_patch_already_present_ignores_user_prompt_prefix() {
+        assert!(
+            append_patch_already_present("expand the section", "❯ expand the section"),
+            "bare buffer vs prefixed patch must dedup"
+        );
+        assert!(
+            append_patch_already_present("❯ expand the section", "expand the section"),
+            "prefixed buffer vs bare patch must dedup"
+        );
+        assert!(
+            append_patch_already_present("❯ expand the section", "❯ expand the section"),
+            "both prefixed must dedup"
+        );
+    }
+
+    #[test]
+    fn append_patch_distinct_prompts_not_deduped() {
+        assert!(
+            !append_patch_already_present("❯ expand the section", "❯ summarize the section"),
+            "genuinely distinct prompts must not be treated as duplicates"
+        );
+    }
+
+    #[test]
+    fn append_with_caret_does_not_duplicate_prefixed_prompt() {
+        // The live buffer already holds the bare typed prompt after the boundary; a
+        // synthesized exchange patch carries the same prompt with the `❯ ` prefix.
+        // Appending must be a no-op (single copy), not a duplicate.
+        let doc = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — opus-4-8\n\n",
+            "Answer.\n",
+            "<!-- agent:boundary:abc12345 -->\n",
+            "expand the Confidential AI Startup section\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let components = parse(doc).unwrap();
+        let exchange = components.iter().find(|c| c.name == "exchange").unwrap();
+        let result =
+            exchange.append_with_caret(doc, "❯ expand the Confidential AI Startup section", None);
+        assert_eq!(
+            result.matches("expand the Confidential AI Startup section").count(),
+            1,
+            "prefixed synthesized patch must not duplicate the already-typed prompt:\n{result}"
+        );
     }
 }

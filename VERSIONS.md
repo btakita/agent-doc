@@ -6,6 +6,22 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Prompt-prefix dedup gap fixed (`#prompt-duplicated-while-typing`, partial).** The
+  shared-core append dedup (`component::append_patch_already_present` via
+  `normalize_append_patch_content`) stripped boundary / `(HEAD)` markers but not the
+  `❯ ` user-prompt prefix. A synthesized boundary-aware exchange patch and the live
+  editor buffer can differ by exactly that prefix, so the `contains` dedup missed and
+  the prompt re-appended → the duplicate-while-typing report. `normalize_append_patch_content`
+  now strips a leading `❯ `/`❯` prefix (`strip_user_prompt_prefix`), making dedup
+  prefix-agnostic and symmetric (cannot collapse a distinct prompt — the glyph is
+  presentation, not content). The JetBrains plugin loads the cdylib by path and
+  hot-reloads on mtime change, so `agent-doc lib-install` ships this to the live editor
+  with no plugin reinstall. Tests: `append_patch_already_present_ignores_user_prompt_prefix`,
+  `append_patch_distinct_prompts_not_deduped`,
+  `append_with_caret_does_not_duplicate_prefixed_prompt`. The structural buffer-snapshot
+  race (synthesized patch carries the buffer at T1 while it advanced to T2) remains
+  tracked. Plan: tasks/agent-doc/plan-prompt-duplicated-while-typing.md.
+
 - **Queue head no longer struck on halt/refusal responses (`#queue-strike-on-halt`).**
   Consuming the active `agent:queue` head now requires an explicit completion
   signal. The CLI `finalize` / `write --commit` path requires a closeout flag —

@@ -455,7 +455,28 @@ If you're targeting more marketing/e-commerce roles instead, pin: **WooCommerce,
 ```
 Cloudflare Workers, Cloudflare, Serverless Architecture, Full-Stack Development, TypeScript, Rust (Programming Language), Python (Programming Language), React.js, Hono, Node.js, REST APIs, WebRTC, Real-Time Communication, WordPress, WooCommerce, PHP, Docker, Content Delivery Network (CDN), Web Performance Optimization, Search Engine Optimization (SEO), Google Tag Manager, Google Analytics, Google Ads, Google Merchant Center, Conversion Rate Optimization, E-Commerce, Fintech, Cloud Computing
 ```
-<!-- agent:boundary:61f0f64f -->
+❯ LinkedIn recommends the top 5 skills then an expanded skillset
+
+### Re: Top 5 + expanded skillset for LinkedIn — opus-4-8
+
+Right — LinkedIn lets you **pin 5 skills** to a position (those show first and drive recommendations), and the rest sit in the expanded set. Here's the split, leading with the EFS/edge-engineering angle since that's your strongest 2026 entry:
+
+#### Top 5 (pin these)
+```
+Cloudflare Workers, Full-Stack Development, TypeScript, Rust (Programming Language), Serverless Architecture
+```
+
+#### Expanded skillset (the rest)
+```
+Python (Programming Language), React.js, Hono, Node.js, REST APIs, WebRTC, Real-Time Communication, Cloudflare, Content Delivery Network (CDN), Docker, Cloud Computing, WordPress, WooCommerce, PHP, Web Performance Optimization, Search Engine Optimization (SEO), Google Tag Manager, Google Analytics, Google Ads, Google Merchant Center, Conversion Rate Optimization, E-Commerce, Fintech
+```
+
+If you'd rather lead with the marketing/e-commerce angle (for WordPress/agency roles), swap the top 5 to:
+```
+WooCommerce, Google Ads, Conversion Rate Optimization, Search Engine Optimization (SEO), Full-Stack Development
+```
+…and move Cloudflare Workers / Rust / Serverless down into the expanded set.
+<!-- agent:boundary:fd0c850f -->
 <!-- /agent:exchange -->
 ###
 <!--

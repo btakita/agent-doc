@@ -225,6 +225,13 @@ impl HarnessConfig {
         match self.binary.as_str() {
             "codex" => trimmed.contains("·") && trimmed.contains("Context "),
             "opencode" => is_opencode_idle_chrome_line(trimmed),
+            // #jb-stale-busy-idle-footer: skip Claude's static model/context status
+            // line (`Opus … ctx:N% … <cwd> <branch> <user>@<host>`) so a genuinely
+            // idle pane resolves to the `❯`/`⏵⏵` composer below it. Only the static
+            // status line — never the active-turn spinner — matches; combined with
+            // the Claude busy cue (checked first in `live_pane_prompt_ready`), this
+            // can only surface the composer for panes with no active turn.
+            "claude" => is_claude_status_chrome_line(trimmed),
             _ => false,
         }
     }
@@ -313,6 +320,25 @@ impl HarnessConfig {
 
             if has_non_idle_content && !has_ready_prompt {
                 return Some("opencode active turn".to_string());
+            }
+            return None;
+        }
+
+        if self.binary == "claude" {
+            // #jb-stale-busy-idle-footer part 1: give Claude a busy cue keyed on the
+            // active-turn markers (interrupt hint or the working spinner with an
+            // elapsed-seconds timer). This must fire before any composer/footer-based
+            // idle inference so a live turn is never mis-read as idle once the static
+            // status line becomes ignorable (part 2).
+            let recent = output
+                .lines()
+                .rev()
+                .take(8)
+                .map(crate::prompt::strip_ansi)
+                .map(|line| line.trim().to_ascii_lowercase())
+                .collect::<Vec<_>>();
+            if claude_active_turn_busy(&recent) {
+                return Some("active claude turn".to_string());
             }
             return None;
         }
@@ -441,6 +467,70 @@ fn is_opencode_help_screen(output: &str) -> bool {
 fn is_context_usage_status_line(trimmed: &str) -> bool {
     let lower = trimmed.to_ascii_lowercase();
     lower.contains("context ") && lower.contains("% used")
+}
+
+/// True for Claude Code's static model/context status line, e.g.
+/// `Opus 4.8 ctx:40% ~/work/btakita/agent-loop main brian@cachyos-x8664` or
+/// `Opus 4.8 (1M context) ctx:23% ~/…/agent-loop/resume main brian@host`.
+/// Keyed on the `ctx:N%` context indicator, which is unique to this chrome line —
+/// it never appears on the `❯`/`⏵⏵` composer or the active-turn spinner — so
+/// marking it ignorable cannot hide a real prompt or a busy cue.
+/// (#jb-stale-busy-idle-footer)
+fn is_claude_status_chrome_line(trimmed: &str) -> bool {
+    let lower = trimmed.to_ascii_lowercase();
+    let Some(pos) = lower.find("ctx:") else {
+        return false;
+    };
+    let rest = &lower.as_bytes()[pos + "ctx:".len()..];
+    let mut j = 0;
+    while j < rest.len() && rest[j].is_ascii_digit() {
+        j += 1;
+    }
+    j > 0 && j < rest.len() && rest[j] == b'%'
+}
+
+/// True when any of the recent (already lower-cased, trimmed) Claude pane lines
+/// shows an active turn: the interrupt hint (`esc to interrupt`) or a working
+/// spinner with an elapsed-seconds timer (e.g. `· roosting… (14s · ↓ 487 tokens
+/// · thinking with high effort)`). (#jb-stale-busy-idle-footer part 1)
+fn claude_active_turn_busy(recent_lower: &[String]) -> bool {
+    recent_lower
+        .iter()
+        .any(|line| line.contains("esc to interrupt") || is_claude_working_spinner_line(line))
+}
+
+/// True for a Claude working-spinner line: a spinner glyph at the start, a gerund
+/// ellipsis (`…`), and an elapsed-seconds timer (`(<N>s`). Requiring all three
+/// keeps the idle composer, status, and permissions lines from matching.
+fn is_claude_working_spinner_line(line: &str) -> bool {
+    let has_spinner = line.starts_with('·')
+        || line.starts_with('✶')
+        || line.starts_with('✳')
+        || line.starts_with('✻')
+        || line.starts_with('●')
+        || line.starts_with('*');
+    has_spinner && line.contains('…') && contains_elapsed_seconds_timer(line)
+}
+
+/// True if `line` contains an elapsed-seconds timer token `(<digits>s` (e.g. the
+/// `(14s` in a Claude spinner). Byte-scanned so it is safe across the multi-byte
+/// glyphs that surround it.
+fn contains_elapsed_seconds_timer(line: &str) -> bool {
+    let b = line.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'(' {
+            let mut j = i + 1;
+            while j < b.len() && b[j].is_ascii_digit() {
+                j += 1;
+            }
+            if j > i + 1 && j < b.len() && b[j] == b's' {
+                return true;
+            }
+        }
+        i += 1;
+    }
+    false
 }
 
 fn is_opencode_idle_chrome_line(trimmed: &str) -> bool {
@@ -1018,6 +1108,106 @@ mod tests {
     fn trigger_command_substitution_codex() {
         let h = HarnessConfig::codex();
         assert_eq!(h.trigger_command("plan.md"), "agent-doc plan.md");
+    }
+
+    // #jb-stale-busy-idle-footer — live captures from a real Claude Code session.
+
+    // Idle Claude pane: composer + status + permissions. No active-turn marker.
+    const CLAUDE_IDLE_PANE: &str = concat!(
+        "────────────────────────────────────────\n",
+        "❯\n",
+        "────────────────────────────────────────\n",
+        "  Opus 4.8 ctx:40% ~/work/btakita/agent-loop main brian@cachyos-x8664\n",
+        "  ⏵⏵ bypass permissions on (shift+tab to cycle)\n",
+    );
+
+    // Busy Claude pane (mid-turn): spinner with elapsed timer above the composer;
+    // the permissions line drops `(shift+tab to cycle)` for `· N shell`.
+    const CLAUDE_BUSY_PANE: &str = concat!(
+        "· Roosting… (14s · ↓ 487 tokens · thinking with high effort)\n",
+        "────────────────────────────────────────\n",
+        "❯\n",
+        "────────────────────────────────────────\n",
+        "  Opus 4.8 (1M context) ctx:23% ~/work/btakita/agent-loop/resume main brian@cachyos-x8664\n",
+        "  ⏵⏵ bypass permissions on · 1 shell\n",
+    );
+
+    #[test]
+    fn claude_busy_pane_spinner_is_a_busy_cue() {
+        let h = HarnessConfig::claude();
+        assert!(
+            h.has_busy_cue(CLAUDE_BUSY_PANE),
+            "mid-turn spinner with elapsed timer must read as busy"
+        );
+        assert_eq!(
+            h.dispatch_blocker_reason(CLAUDE_BUSY_PANE).as_deref(),
+            Some("active claude turn")
+        );
+    }
+
+    #[test]
+    fn claude_esc_to_interrupt_is_a_busy_cue() {
+        let h = HarnessConfig::claude();
+        let pane = concat!(
+            "✶ Generating… (3s · esc to interrupt)\n",
+            "❯\n",
+            "  Opus 4.8 ctx:40% ~/work/btakita/agent-loop main brian@host\n",
+            "  ⏵⏵ bypass permissions on · 1 shell\n",
+        );
+        assert!(h.has_busy_cue(pane), "esc to interrupt must read as busy");
+    }
+
+    #[test]
+    fn claude_idle_pane_has_no_busy_cue() {
+        let h = HarnessConfig::claude();
+        assert!(
+            !h.has_busy_cue(CLAUDE_IDLE_PANE),
+            "idle composer pane must not read as busy"
+        );
+    }
+
+    #[test]
+    fn claude_status_chrome_line_is_ignorable_but_composer_is_not() {
+        let h = HarnessConfig::claude();
+        assert!(
+            h.is_ignorable_output_line("  Opus 4.8 ctx:40% ~/work/btakita/agent-loop main brian@host")
+        );
+        assert!(h.is_ignorable_output_line("Opus 4.8 (1M context) ctx:23% ~/x/resume main b@h"));
+        // The composer and permissions lines must NEVER be ignorable.
+        assert!(!h.is_ignorable_output_line("❯"));
+        assert!(!h.is_ignorable_output_line("⏵⏵ bypass permissions on (shift+tab to cycle)"));
+        assert!(!h.is_ignorable_output_line("⏵⏵ bypass permissions on · 1 shell"));
+        // The active-turn spinner must NEVER be ignorable.
+        assert!(!h.is_ignorable_output_line(
+            "· Roosting… (14s · ↓ 487 tokens · thinking with high effort)"
+        ));
+    }
+
+    #[test]
+    fn last_prompt_candidate_skips_claude_status_line_to_composer() {
+        // The plan's question-1 state: the static status line is the last
+        // meaningful line. Skipping it must surface the `⏵⏵` composer below.
+        let h = HarnessConfig::claude();
+        let pane = concat!(
+            "❯\n",
+            "  ⏵⏵ bypass permissions on (shift+tab to cycle)\n",
+            "  Opus 4.8 ctx:40% ~/work/btakita/agent-loop main brian@host\n",
+        );
+        let candidate = h.last_prompt_candidate(pane).unwrap();
+        assert!(
+            h.is_dispatch_ready_prompt_line(&candidate),
+            "status line must be skipped so the composer is the candidate: {candidate:?}"
+        );
+    }
+
+    #[test]
+    fn claude_idle_pane_resolves_to_ready_composer() {
+        // End-to-end at the harness layer: idle pane is not busy and its last
+        // candidate is the dispatch-ready `⏵⏵ … (shift+tab to cycle)` composer.
+        let h = HarnessConfig::claude();
+        assert!(!h.has_busy_cue(CLAUDE_IDLE_PANE));
+        let candidate = h.last_prompt_candidate(CLAUDE_IDLE_PANE).unwrap();
+        assert!(h.is_dispatch_ready_prompt_line(&candidate), "{candidate:?}");
     }
 
     #[test]

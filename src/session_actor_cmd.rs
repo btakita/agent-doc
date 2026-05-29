@@ -2294,6 +2294,51 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         ));
     }
 
+    // #jb-stale-busy-idle-footer: a genuinely idle Claude pane (composer + status
+    // + permissions) must project ready, while a mid-turn pane (spinner) must not.
+    #[test]
+    fn live_pane_prompt_ready_accepts_idle_claude_composer() {
+        let harness = agent_doc_orchestration::harness::HarnessConfig::claude();
+        let idle = concat!(
+            "────────────────────\n",
+            "❯\n",
+            "────────────────────\n",
+            "  Opus 4.8 ctx:40% ~/work/btakita/agent-loop main brian@cachyos-x8664\n",
+            "  ⏵⏵ bypass permissions on (shift+tab to cycle)\n",
+        );
+        assert!(live_pane_prompt_ready(&harness, idle));
+    }
+
+    #[test]
+    fn live_pane_prompt_ready_rejects_busy_claude_turn() {
+        let harness = agent_doc_orchestration::harness::HarnessConfig::claude();
+        // Mid-turn: spinner above an otherwise-idle-looking composer. The busy cue
+        // must win so the live turn is never clobbered by dispatch/clear.
+        let busy = concat!(
+            "· Roosting… (14s · ↓ 487 tokens · thinking with high effort)\n",
+            "────────────────────\n",
+            "❯\n",
+            "────────────────────\n",
+            "  Opus 4.8 (1M context) ctx:23% ~/work/btakita/agent-loop/resume main brian@host\n",
+            "  ⏵⏵ bypass permissions on · 1 shell\n",
+        );
+        assert!(!live_pane_prompt_ready(&harness, busy));
+    }
+
+    #[test]
+    fn live_pane_prompt_ready_accepts_idle_claude_when_status_line_is_last() {
+        // The plan's question-1 state: no trailing `⏵⏵` line, status line last.
+        // With the status line ignorable and no busy cue, the `⏵⏵` composer above
+        // it becomes the candidate → ready.
+        let harness = agent_doc_orchestration::harness::HarnessConfig::claude();
+        let idle = concat!(
+            "❯\n",
+            "  ⏵⏵ bypass permissions on (shift+tab to cycle)\n",
+            "  Opus 4.8 ctx:40% ~/work/btakita/agent-loop main brian@cachyos-x8664\n",
+        );
+        assert!(live_pane_prompt_ready(&harness, idle));
+    }
+
     #[test]
     fn protected_clear_refusal_points_to_interrupt_clear() {
         let evidence = LivePaneEvidence {

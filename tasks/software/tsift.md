@@ -119,7 +119,7 @@ Fields promoted to `pub` (they're constructed at ~40 sites in lib.rs; alternativ
 - Superproject HEAD: `0fcf36cb1` (pushed).
 
 **Confidence:** high. **Escalation:** none. Next queue head is `do [#cli-extract-tagpath-helpers]` (Phase 1a-iii).
-<!-- agent:boundary:f99a9841 -->
+<!-- agent:boundary:a2636a5b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -128,10 +128,9 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#cli-extract-output]~
-- do [#cli-extract-output-envelope]
 - do [#cli-extract-tagpath-helpers]
 - do [#cli-extract-cli-types]
 - do [#cli-cluster-index-search]

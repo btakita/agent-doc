@@ -1,12 +1,12 @@
 //! Project-config I/O — `&Path`-taking and `std::fs`-using wrappers
-//! around the pure [`agent_doc_core::project_config`] surface. Lives in
-//! the main crate so `agent-doc-core` can satisfy plan acceptance
-//! criterion #3 ("no `&Path` or `std::fs` in core"). Wave 5 / `#bjrv`
-//! of `#adcr`.
+//! around the pure [`agent_doc_core::project_config`] surface. Kept out of
+//! `agent-doc-core` so it can satisfy plan acceptance criterion #3 ("no
+//! `&Path` or `std::fs` in core"). Wave 5 / `#bjrv` of `#adcr`; relocated to
+//! `agent-doc-orchestration` under `#adoc-orchestration-crate` Direction A.
 //!
-//! Re-exported from [`crate::project_config`] so the ~25 existing call
-//! sites in main (session_check, session_accretion, mode, claim, patch,
-//! lint_gate, etc.) continue resolving unchanged.
+//! Re-exported through the main crate's `project_config` shim so the ~25
+//! existing call sites in main (session_check, session_accretion, mode,
+//! claim, patch, lint_gate, etc.) continue resolving unchanged.
 
 #![allow(dead_code)]
 

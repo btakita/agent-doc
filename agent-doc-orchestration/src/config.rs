@@ -26,12 +26,16 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-// Import ModelConfig from the library version (works in both binary and library contexts)
-use crate::frontmatter::CodexNetworkAccess;
-use agent_doc::model_tier::ModelConfig;
+// Pure types from agent-doc-core (relocated under Direction A).
+use agent_doc_core::frontmatter::CodexNetworkAccess;
+use agent_doc_core::model_tier::ModelConfig;
 
-// Re-export project-level configuration from the shared module (for convenience)
-pub use crate::project_config::{
+// Re-export project-level tmux helpers from the sibling I/O module (for
+// convenience). Consumed across the crate boundary by the main `agent-doc`
+// crate (start/claim/route/resync via `crate::config::*`), so the
+// orchestration crate's own compilation can't see the uses.
+#[allow(unused_imports)]
+pub use crate::project_config_io::{
     clear_project_tmux_session, project_tmux_session, update_project_tmux_session,
 };
 

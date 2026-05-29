@@ -95,8 +95,10 @@ dependencies = [
  "indexmap",
  "interprocess",
  "regex",
+ "serde",
  "serde_json",
  "tempfile",
+ "toml",
 ]
 
 [[package]]

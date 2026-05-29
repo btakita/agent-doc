@@ -40,7 +40,8 @@ pub use agent_doc_orchestration::ipc_socket;
 pub mod merge;
 pub mod model_tier;
 pub mod project_config;
-pub mod project_config_io;
+// Moved to `agent-doc-orchestration` (Direction A, increment 3).
+pub use agent_doc_orchestration::project_config_io;
 // Moved to `agent-doc-orchestration` (Direction A, increment 2).
 pub use agent_doc_orchestration::secret_redact;
 pub mod security;

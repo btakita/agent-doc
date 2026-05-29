@@ -14,7 +14,9 @@
 //! Direction A, increment 2: `env`, `fs_util`, `secret_redact` — three more
 //! zero-dependency foundation leaves (no `crate::` refs).
 
+pub mod config;
 pub mod env;
 pub mod fs_util;
 pub mod ipc_socket;
+pub mod project_config_io;
 pub mod secret_redact;

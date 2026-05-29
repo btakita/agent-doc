@@ -387,7 +387,61 @@ If Rob hires counsel and they send you a §8-warning letter at any point, that's
 Yes — an attorney can and should speak on your behalf, and that's the highest-value "someone else speaks for me" channel. Anyone else (friend, PR person, spokesperson, even spouse acting on your direction) is treated as you for §8 purposes and creates the same legal exposure as if you'd spoken directly. The $200–$500 spent on a flat-fee attorney demand letter is the cleanest way to get loud, public, protected speech on the record.
 
 **Not legal advice.** Litigation privilege scope and the agency test for non-disparagement clauses vary by jurisdiction and by exact §8 wording. Confirm with a CA or CT attorney before having anyone — including counsel — make any public statement about Dreamable.
-<!-- agent:boundary:2ebc69dd -->
+❯ Can I explain the work I did if I don't include Dreamable? Can I say I made "dynamic displays for realtime voice agents on my LinkedIn?".
+
+### Re: LinkedIn / portfolio description of the work without naming Dreamable — opus-4-7
+
+**Short answer.** Yes, with care. The relevant constraint isn't §8 non-disparagement here — it's **§5 confidentiality** and **§6 Company Property**. Generic functional descriptions of *categories* of work you did are almost universally permitted; specific technical, product, or business details that aren't public *are* confidential and stay off LinkedIn. "Dynamic displays for realtime voice agents" sits in the borderline zone — fine as a skill category, risky if it functions as an identifier of Dreamable in your industry.
+
+**The framework**
+
+Three categories, with different rules:
+
+1. **Skill claims and generic role descriptions** — *always* safe. "Built React frontends for AI products" / "Worked on streaming UI for voice/audio AI" / "Built realtime voice agent interfaces with WebRTC and LLM integrations." These are skill claims attached to your experience, not disclosures of Dreamable's product or business.
+2. **Product-category descriptions** — usually safe, sometimes not. "Dynamic displays for realtime voice agents" is closer to product-category than skill. Safe as long as the description matches a generic, well-known product category that *multiple companies* operate in. Risky if the description is specific enough that anyone in the field can identify Dreamable from it.
+3. **Specific implementation, architecture, customer, or strategy disclosures** — never safe under §5. Don't disclose internal tech stack details Dreamable hadn't publicly announced, customer names, internal product code names, business metrics, model choices, or anything you only know because you were inside the company.
+
+**Applied to your proposed line**
+
+*"Built dynamic displays for realtime voice agents"* on LinkedIn:
+
+- **As an unattributed skill in your "Recent work" or "Skills" section** — fine. It's a category, not a product. Hundreds of engineers can claim this generically.
+- **As a portfolio entry with the April–May 2026 timeframe** — borderline. If Dreamable is the only or primary company building "dynamic displays for realtime voice agents" in your network's awareness, the implicit identification is the same as naming them. Same risk under §5 as direct disclosure.
+- **Combined with screenshots, code samples, or specific UI patterns from the engagement** — clear §5/§6 breach regardless of attribution. Don't post any artifacts.
+
+The mitigations to make it safe:
+
+- **Broaden the framing.** "Built realtime voice-agent interfaces" or "Built streaming UI for AI agents" — more generic, harder to pin to one company. Less specific = less identifying = lower §5 risk.
+- **Drop the engagement-specific timeframe.** A "Recent Projects" entry without dates is harder to triangulate against your LinkedIn history.
+- **Lean on your OSS work for the public-portfolio signal.** Your tsift, homebrew-tap, and other public repos created during the window are *yours* under Addendum §2(b) — fully public, fully attributable to you, no §5/§6 concern. Lead the LinkedIn update with that work; it's the strongest signal and carries no risk.
+
+**Specific risk vectors to avoid**
+
+- *Naming or describing Dreamable's customers*, even pseudonymously — clear §5.
+- *Describing internal architecture* (e.g., "I used GPT-4o-realtime with X latency budget and Y voice-activity-detection strategy") — §5 if any of those specifics weren't public.
+- *Listing the engagement on your CV under the company name* — different rule. CVs (private, sent to recruiters) are generally allowed to list past clients even with NDAs in place, but Dreamable specifically may have wanted that suppressed; check §5 wording for whether it bars *naming Dreamable as a client* on resumes/portfolios. Many engagements explicitly carve out CV usage; some don't.
+- *"I built X for a stealth/well-known voice-AI startup"* with knowing-wink framing — bad. Indirect identification triggers the same §5 issue.
+
+**What's clearly permitted regardless**
+
+- Tweeting / posting about your OSS work (tsift, homebrew-tap) — yours under §2(b).
+- Saying you "work on realtime voice AI interfaces" as a current skill area.
+- Listing skills (React, WebRTC, streaming UIs, LLM tool calls, etc.) without engagement attribution.
+- Generic blog posts about realtime UI patterns, voice-agent UX, etc., as long as you write them from public-knowledge sources and not your Dreamable work product.
+
+**Recommended posture for the next 6–12 months**
+
+1. **Lead with the OSS.** Update LinkedIn with tsift, homebrew-tap, the other public repos. That's your strongest verifiable signal, fully yours, no risk.
+2. **Add generic skill claims**, no client attribution: "Realtime voice agent UI", "WebRTC streaming interfaces", "AI agent dashboards", etc.
+3. **Hold the specific engagement description** until either (a) the $5k is paid and the legal relationship is fully resolved, or (b) you confirm with a CA-licensed attorney that the specific phrasing doesn't cross §5. The 30-minute referral consult covers this.
+4. **If a recruiter asks about your last engagement**, you can confirm dates and generic role privately (one-on-one conversations have different §5 implications than public posts) — but stay on category-level descriptions and don't share artifacts.
+
+**Bottom line**
+
+You're not stuck silent. The OSS portfolio is the strongest move and is risk-free. Generic skill claims about realtime voice-agent interfaces are also fine. The specific phrasing you asked about — "dynamic displays for realtime voice agents" — is on the safe-ish side as a skill claim but borderline if it functions as a fingerprint for Dreamable in your industry. Broaden the framing slightly and you're clearly in the safe zone.
+
+**Not legal advice.** §5 confidentiality scope and what counts as "indirect identification" are jurisdiction- and clause-specific. Worth confirming the exact phrasing with a CA-licensed attorney before posting publicly — same 30-minute referral consult.
+<!-- agent:boundary:24500ee9 -->
 <!-- /agent:exchange -->
 
 ## Queue

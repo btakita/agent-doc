@@ -222,7 +222,50 @@ The JB plugin loads the cdylib by path (`agent-doc lib-path`) and **hot-reloads 
 - **Still open:** the structural buffer-snapshot race — the synthesized patch carries the buffer at T1 while you keep typing to T2, so the de-prefixed texts no longer match as a substring. That needs the L1 change (exclude live post-boundary user text from the synthesized patch) and a captured live trace. The item stays gated for that remainder.
 
 Please type a prompt into `resume.md` again (the old repro: during an in-flight cycle) and tell me if it still duplicates. If it does, grab the buffer snapshot and I'll go after the L1 structural race next. The queue is still paused on `#jb-stale-busy-idle-footer`.
-<!-- agent:boundary:80671c45 -->
+❯ It still duplicated. Contents in /home/brian/work/btakita/agent-loop/tasks/resume.md
+
+### Re: It still duplicated (resume.md) — opus-4-8
+
+The `resume.md` capture is the L1 structural buffer-snapshot race I gated for last cycle — and it pinpoints the mechanism exactly. Fixed the confirmed core contributor (submodule, both binaries + cdylib live). `#prompt-duplicated-while-typing` stays gated for live re-verification.
+
+#### What the capture proves
+
+The duplication starts **exactly at the divergent line**, not before it:
+
+- Lines that matched survived once: `[#yfg1]`, `[#bndq]`, `do [#s75b]`, `do [#vapk]`.
+- Divergence: the synthesized patch carried a half-typed snapshot `- [#s93y]: Add to ` (T1) while your live buffer had been typed on to `- [#s93y]: Add to resume` (T2).
+- From that line onward the whole tail re-appended — including the `&lt;!-- /agent:exchange --&gt;` close marker and the Queue/Backlog/Done blocks, twice.
+
+Two structural tells narrow the path: boundary `70bccf9b` is **intact and unmoved**, and **no new boundary** was minted. That rules out the reposition path and points at the append/dedup path.
+
+#### Root cause (confirmed, deterministic)
+
+`component::append_patch_already_present` deduped via a single `contains()` substring check. Under the T1/T2 snapshot divergence the two normalized regions differ mid-block (`Add to` vs `Add to resume`), so `contains()` returns false → "not present" → the region re-appends from the divergence point, dragging the close marker + post-exchange sections with it. The v0.34.0 `❯`-prefix fix couldn't catch this because the two texts genuinely differ in content, not just the prompt prefix.
+
+Both editor append entry points (`append_with_caret`, `append_with_boundary`) gate on this function via FFI (`ffi.rs:716` → core), so the live JetBrains buffer hits the same check.
+
+#### Fix (safe by construction)
+
+`append_patch_already_present` now also returns "already present" when the patch is an **in-progress keystroke-snapshot** of the live region: `patch_is_typing_snapshot_of` aligns the patch to a contiguous run of the existing region under per-line prefix matching (each patch line equals, or is a non-empty prefix of, the aligned existing line, with ≥1 prefix divergence). When it matches, the append is a full no-op — the longer **live** buffer is kept. This can only *suppress* re-appending text the live region already supersedes; it can never delete content or collapse a genuinely distinct prompt (a mid-line replacement is not a prefix, so it still appends — covered by a test).
+
+New tests (all fail pre-fix): `append_patch_dedupes_midblock_typing_snapshot` (the exact resume.md shape), `append_patch_typing_snapshot_does_not_collapse_distinct_lines`, `append_with_boundary_does_not_duplicate_typing_snapshot` (asserts the close marker count stays 1).
+
+#### Already live — no plugin reinstall
+
+`cargo build --release` + `cargo install --path .` + `agent-doc lib-install`. The cdylib `~/.cargo/bin/libagent_doc-0.34.0.so` carries the fix; the JB plugin hot-reloads it by mtime on the next FFI call. No `.kt` changed.
+
+#### Honest status
+
+- **Full suite is NOT all green.** One test is red — but it is **pre-existing and unrelated**: `finalize_consumes_synthetic_queue_prompt_when_response_topic_targets_head_id` fails at clean HEAD `2a6f60e5` with zero working-tree changes, and CI on `main` is already red on the same test (run 26662056181). It's a queue-head-consumption regression (response topic targets a preset id but the head doesn't drain). Captured as `#queue-head-consume-on-topic-id-regression` at the top of the backlog. Everything else in `make check` passes, including all `component::` tests.
+- **`#prompt-duplicated-while-typing` stays gated.** The dedup no-op should short-circuit the entire append chain regardless of the downstream concatenation, but I did not statically trace the exact editor-side full-tail concatenation, so this needs your live confirmation.
+
+#### Your move
+
+1. Type a prompt into `resume.md` again during an in-flight cycle and tell me if it still duplicates. If it does, grab the buffer snapshot again — that would mean the carrier is the reposition/normalize path, not the dedup, and I'll go there next.
+2. `resume.md` on disk is still corrupted (the duplicated tail). Say the word and I'll `git checkout tasks/resume.md` to restore the clean committed copy, or you can keep it as evidence.
+
+The queue is still paused on `#jb-stale-busy-idle-footer`.
+<!-- agent:boundary:b99f76f3 -->
 <!-- /agent:exchange --> 
 ###
 <!--
@@ -261,6 +304,7 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#queue-head-consume-on-topic-id-regression] CI + make check RED on main (run 26662056181; reproduces at clean HEAD 2a6f60e5 with zero working-tree changes; CI was green on run 26653786056 so it went red recently): tests/finalize_integration.rs::finalize_consumes_synthetic_queue_prompt_when_response_topic_targets_head_id FAILS. A finalize response heading '### Re: #spec-test-build-install-commit-push' that targets queue head preset id #spec-test-build-install-commit-push logs '[queue] skipped consumption because the active prompt did not target the queue head' instead of '[queue] consumed'; head not drained, queue_active stays true. Pre-existing, separate from #prompt-duplicated-while-typing. Bisect the commit that turned it red and restore response-topic-targets-head-id consumption.
 - [ ] [#route-busy-vs-starting-wording] [recommended] route.rs starting-actor FailClosed reports 'still starting (waited Ns for claude startup)' even when the pane is busy on an active turn (live capture: pane %33 showed '· Roosting… (Ns · …)' spinner + '⏵⏵ … · N shell'). Distinguish 'busy on an active turn' from 'cold starting' in the error via a Claude busy-cue on the active-turn spinner. Fragile (random gerund; 'esc to interrupt' vs 'thinking with high effort') — UX-only, low priority. Ground truth + analysis: tasks/agent-doc/plan-jb-stale-busy-idle-footer.md.
 - [ ] [#codex-queue-head-exact-heading-guidance] [recommended] After #queue-strike-on-halt narrowed the Codex Stop-hook heading-match to exact-topic only, a Codex auto-loop completion with a descriptive heading (### Re: <descriptive topic>) no longer auto-consumes the queue head — only an exact ### Re: do [#id] heading does. Add SKILL.md / harness-invocation guidance telling Codex auto-loop completions to title the response heading exactly with the queue head prompt (or emit an explicit done signal), and live-verify a Codex auto-queue still advances across items. Plan: tasks/agent-doc/plan-queue-strike-on-halt-response.md.
 - [ ] [#backlog-auto-marker-misfire] The 'auto' attribute on the agent:backlog marker (queue-only attribute) misfired an auto-run that destructively rewrote the backlog — minted new IDs wrapping 'do [#...]' stubs of already-done items; user reported original task text lost and recovery needed git/sidecar archaeology. Fix: reject 'auto'/unknown attrs on agent:backlog (warn, no mutation); auto-loop must trigger only from the queue 'auto' attribute; never rewrite committed backlog item text in an auto-run. Plan: tasks/agent-doc/plan-backlog-auto-marker-misfire.md. DO NOT IMPLEMENT.
@@ -279,7 +323,7 @@ preset #spec-test-build-install-commit-push
 - [/] [#cancel-orphans-preflight-cycle] Canceling a run then invoking Run Agent Doc fails closed because the explicit cancel does not abandon the orphaned preflight_started cycle (route waits for staleness). Distinct from the stale-busy actor/lease items: this is per-document cycle_state left open by cancel. Plan: tasks/agent-doc/plan-cancel-orphans-preflight-cycle.md (recommend Option A — JB cancel emits a signal that abandons the no-capture preflight_started cycle). Reported 2026-05-29.
 - [/] [#exchange-prompt-dropped-on-merge] User-authored exchange prompt (observed: "go") silently dropped during an IPC content_ours merge while the IDE held ipc.sock — never reaches snapshot/HEAD, assistant never responds, next preflight reports no_changes. Same drift family as #adoc-queue-ipc-buffer-divergence / #duplicate-response-after-commit but the victim is user input. Repro 2026-05-29 on src/boost-client/tasks/monsterrodholders.md (dropped the "go" authorizing #gfwconnect; assistant replied "nothing changed" for two cycles). Plan: tasks/agent-doc/plan-exchange-prompt-dropped-on-merge.md (recommend Option A — union user prompt lines / fail closed + add dropped_prompt_guard to session-check).
 - [/] [#duplicate-response-after-commit] Late-IPC reposition signal re-inserts already-committed response body into working tree, wrapped in duplicate boundary markers. Symptom: next preflight interrupts with "direct response patchback without agent-doc cycle"; agent-doc write --commit returns "empty response — nothing to write"; only manual Edit-based dedup recovers. Repro: tasks/dreamable/separation.md cycle after commit 231eafc83 on 2026-05-28. Plan: tasks/agent-doc/plan-duplicate-response-after-commit.md (recommend Option A — both detect over-application in session-check and make IPC reposition idempotent).
-- [/] [#prompt-duplicated-while-typing] User prompt duplicated in the live editor while typing — in-progress prompt text appears twice in the buffer during/after typing, before any new agent-doc cycle. Distinct from #duplicate-response-after-commit (response body) and #adoc-queue-ipc-drift (queue/snapshot loop). Suspected: PatchWatcher.kt normalize+setText (lines 774/801) double-counts post-boundary keystrokes against the try_ipc() boundary-aware synthesized exchange patch payload; await_idle debounce narrows but does not close the race. Plan: tasks/agent-doc/plan-prompt-duplicated-while-typing.md (recommend Option A — single-source post-boundary user region + idempotent apply).
+- [/] [#prompt-duplicated-while-typing] [/] [#prompt-duplicated-while-typing] User prompt duplicated in the live editor while typing. PARTIAL FIX 1 (v0.34.0, submodule 2a6f60e5): prefix-agnostic append dedup (strip_user_prompt_prefix) for the ❯-prefix mismatch shape. PARTIAL FIX 2 (this cycle): L1 buffer-snapshot typing race — component::append_patch_already_present now recognizes when a synthesized patch carries an EARLIER keystroke-snapshot of the live region (per-line prefix alignment via patch_is_typing_snapshot_of) and no-ops instead of re-appending the divergent tail. Confirmed live in tasks/resume.md 2026-05-29: half-typed '- [#s93y]: Add to' snapshot vs live '...Add to resume' broke the old contains() substring check and re-appended the entire tail (close marker + Queue/Backlog/Done duplicated). Boundary 70bccf9b stayed intact and no new boundary was minted, ruling out the reposition path. Tests: append_patch_dedupes_midblock_typing_snapshot, append_patch_typing_snapshot_does_not_collapse_distinct_lines, append_with_boundary_does_not_duplicate_typing_snapshot. Both binaries built+installed; cdylib lib-installed for JB hot-reload. GATED on live re-verify (type a prompt into resume.md during an in-flight cycle). RESIDUAL: the exact editor-side full-tail concatenation downstream of the dedup miss was not statically traced — the dedup no-op short-circuits the append entirely so it should not surface, but confirm live. Plan: tasks/agent-doc/plan-prompt-duplicated-while-typing.md.
 - [/] [#queue-auto-no-continue] Queue auto trigger does not continue after finalize session-check warning about pending shadow items. Steps to reproduce: (1) Session document with queue_active=true, queue_trigger=auto, and multiple queued items. (2) finalize --stream completes cycle but session-check issues pending shadow warning for items outside live agent:backlog. (3) Queue consumes head item but auto trigger does not fire for next item. (4) agent-doc write --commit with --done reaps the item, queue reports 9 remaining but auto continues stop. Expected: queue auto should continue to next item after successful closeout. Actual: queue stops after first item. Session: tasks/software/tsift.md. agent-doc version: 0.34.0. The pending shadow warnings about items appearing both inside and outside agent:backlog may be blocking the auto-continue path.
 - [/] [#snrun] [recommended] Implement tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md: make JB Run Agent Doc distinguish rescued-stash accepted-only proof misses, active-turn busy collisions, and stale starting projections; add route/plugin regressions plus live replay evidence.
 <!-- /agent:review -->

@@ -116,6 +116,53 @@ the user region single-source and the apply idempotent, which also hardens the r
 - Re-run the live IntelliJ repro and confirm no duplication while typing during an
   in-flight write-back.
 
+## Investigation 2026-05-29 (static analysis — mechanism still unconfirmed)
+
+Static read of the apply/synthesis/reposition paths **ruled out** the obvious
+duplicators. None of these can double a post-boundary prompt on their own:
+
+- **Native boundary reposition is idempotent.** `reposition_boundary_to_end*`
+  (`template.rs`) calls `remove_all_boundaries()` then re-appends a single marker
+  at end of `exchange`. Re-running it cannot duplicate user text.
+- **Rust synthesis is dedup-guarded.** `build_ipc_patches_json` (`write.rs:10561+`)
+  synthesizes from the *agent* `unmatched`, not user text, and skips synthesis
+  when the content already exists in the target component.
+- **Editor append is dedup-guarded.** `applyComponentPatchNative` →
+  `appendPatchAlreadyPresentUtil` short-circuits when the append content is
+  already present; `patchReplayAlreadyPresentUtil` (`PatchWatcher.kt:728`) skips a
+  response patch already present in live/disk/committed content.
+- **Disk-vs-buffer reposition source is guarded.**
+  `shouldPreferCommittedDiskContentForRepositionUtil` (`PatchWatcher.kt:1721`)
+  prefers committed `diskContent` **only** when the normalized editor and disk
+  content are equal (modulo boundary/HEAD/attribution/prefix). So when the live
+  buffer holds a freshly-typed post-boundary prompt absent from disk, it returns
+  `false` and the reposition uses the live buffer — it does **not** delete or
+  recompute over the typed prompt.
+- **EDT proof guard rejects mid-apply edits.** `applyPatch` /
+  `repositionBoundaryViaDocument` capture `EditorApplyProof(content, modStamp)`
+  and re-check `editorApplyProofStillCurrentUtil` inside the `WriteCommandAction`,
+  rejecting if the buffer changed since capture.
+
+**Conclusion:** the duplication is not reproducible through the deterministic
+native pipeline; it is a live EDT-timing race (e.g. a patch computed against a
+buffer snapshot whose `normalizeExchangePrefixes` step re-incorporates the typed
+prompt while another in-flight apply/reposition for the same cycle also carries
+it, within a window the modStamp proof does not distinguish). Confirming it needs
+**live instrumentation**, not more static analysis.
+
+### Next concrete step (instrumentation-first)
+
+Before writing Option A, capture the actual race: add temporary debug logging in
+`PatchWatcher.applyPatch` and `repositionBoundaryViaDocument` that records, on
+every `setText`, the `patch_id`, the post-boundary `exchange` user-region of both
+`content` (pre) and `result` (post), and the modStamp. Reproduce in IntelliJ by
+typing into `exchange` during an in-flight write-back, then read `idea.log` to see
+which apply doubles the region. Only then implement Option A against the proven
+path, with the captured trace frozen into a deterministic `PatchWatcherTest` /
+Rust pipeline test. (Item gated, not done: no safe deterministic fix is possible
+until the race is captured; shipping a speculative collapse guard risks a guard
+that never fires or collapses legitimate content.)
+
 ## Related
 
 - `#duplicate-response-after-commit` — response-body duplication via late IPC reposition.

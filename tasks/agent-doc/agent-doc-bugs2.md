@@ -59,7 +59,25 @@ Per the project's own gates — *no hallucinating under uncertainty*, *manual te
 - Concrete next step set: temporary `PatchWatcher` instrumentation logging `patch_id` + pre/post post-boundary user-region on every `setText`, reproduce in IntelliJ while typing during an in-flight write-back, freeze the captured trace into a deterministic test, then implement Option A against the proven path.
 
 **Why gated, not done:** no code fix landed — a safe fix needs the live capture above (instrumentation requires a running IntelliJ session I can't drive headless). `#prompt-duplicated-while-typing` is gated so the queue won't re-attempt it as a fresh `do`. `#ipcfullprompt-recur` (your new backlog item, left open) is the closely-related full-document-IPC-corruption recurrence — same IPC-during-typing root family; both should be tackled together with the instrumentation-first approach.
-<!-- agent:boundary:5d768dc1 -->
+❯ do [#exchange-prompt-dropped-on-merge]. #spec-test-build-install-commit-push
+### Re: do [#ipcfullprompt-recur] — Option 2 + instrumentation (gated) — opus-4-8
+
+Did Option 2 with the additional logging you asked for. Since the corruption isn't reliably reproducible, I instrumented every whole-buffer mutation/adoption seam so the **next** real occurrence is captured automatically — rather than ship a speculative fix.
+
+**Audit first (binary guards already comprehensive).** Both IPC transports already route through fail-closed guards — `guard_ipc_snapshot_adoption_against_live_prompt_drift` + `..._against_prompt_duplication` at the socket *and* file adoption paths in `write.rs`. They demonstrably work (they're why my earlier turn deferred + exited 75 instead of corrupting). The gap was **observability of the paths that proceed**.
+
+**Instrumentation landed:**
+- **Binary (`write.rs`):** new `log_ipc_snapshot_adoption_allowed` after the guards on both transports. Previously only *blocked* adoptions logged; *allowed* ones were silent. Now every adoption emits `ipc_snapshot_adoption_blocked` **or** `ipc_snapshot_adoption_allowed` with `snap_source`, snapshot/content_ours len+hash, and an independent `drift_recheck`/`dup_growth_recheck`. A non-benign re-check on an *allowed* line is a smoking gun for a guard-coverage gap.
+- **JetBrains (`PatchWatcher.kt`, v0.2.135):** `documentMutationDiagnosticUtil` logged at every editor-visible `setText` (`applyPatch.component`, `repositionBoundary`) — op, patch_id, transport, pre/post fingerprint, mod-stamp, idle, and the **post-boundary user-region length pre vs post** with `user_region_changed`. That flag is the direct prompt-duplication/deletion signal.
+
+**Verification:** `make check` green (incl. FlowCore token-budget gate); new Rust tests (`ipc_snapshot_adoption_allowed_*`) and Kotlin tests (`DocumentMutationDiagnosticTest`) pass; both binaries rebuilt; JB plugin v0.2.135 built + signed.
+
+**How to capture the packet now** (next time it happens in IntelliJ): `idea.log` shows `[patch-watcher] document-mutation … user_region_changed=true` for the offending `setText`, and `.agent-doc/logs/ops.log` shows the paired `ipc_snapshot_adoption_(allowed|blocked)` line with the content shape. That pinpoints transport + payload → drives the SimWorld regression + real fix.
+
+**Committed + pushed:** submodule `be0d5297` → `origin/20260422/codex-agent-backend`; superproject `cf64e89e6` (pointer + plan) → `origin/main`. **Install the v0.2.135 JB plugin** (`editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.135-signed.zip`) to get the editor-side diagnostics live.
+
+**Why gated, not done:** this is instrumentation, not a behavioral fix — acceptance needs a captured packet + the resulting SimWorld regression. Reproduce once with the new logging and share `idea.log` + `ops.log`, and I'll land the real fix against the proven path.
+<!-- agent:boundary:df7f0c8b -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -520,10 +520,17 @@ fn resolve_agent_model(
     harness: &str,
     model_config: &agent_doc_core::model_tier::ModelConfig,
 ) -> Option<String> {
-    frontmatter_model.map(|m| {
-        let canonical = agent_doc_core::model_tier::canonical_model_name(m, harness, model_config);
-        short_model_name(&canonical).to_string()
-    })
+    let m = frontmatter_model?;
+    let canonical = agent_doc_core::model_tier::canonical_model_name(m, harness, model_config);
+    // The Claude Code `opus` alias is deferred — agent-doc never pins a concrete
+    // opus version, so it cannot attribute a specific id. Return None so the
+    // running skill self-stamps its real model identity (always the current
+    // opus, e.g. `opus-4-8`), keeping attribution from lagging a release.
+    // Explicitly pinned ids (e.g. `claude-opus-4-8`) still stamp their short name.
+    if harness == "claude-code" && canonical.trim() == "opus" {
+        return None;
+    }
+    Some(short_model_name(&canonical).to_string())
 }
 
 fn canonical_harness_name(value: &str) -> Option<String> {
@@ -8356,9 +8363,20 @@ mod tests {
     }
 
     #[test]
-    fn resolve_agent_model_expands_claude_code_opus_alias() {
+    fn resolve_agent_model_defers_claude_code_opus_alias() {
+        // The bare `opus` alias is deferred: agent-doc pins no version, so
+        // attribution returns None and the running skill self-stamps its real
+        // model identity (always the current opus).
         let cfg = agent_doc_core::model_tier::ModelConfig::default();
         let result = resolve_agent_model(Some("opus"), "claude-code", &cfg);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn resolve_agent_model_stamps_pinned_concrete_opus() {
+        // An explicitly pinned concrete opus id still stamps its short name.
+        let cfg = agent_doc_core::model_tier::ModelConfig::default();
+        let result = resolve_agent_model(Some("claude-opus-4-8"), "claude-code", &cfg);
         assert_eq!(result, Some("opus-4-8".to_string()));
     }
 

@@ -36,7 +36,7 @@
 //! - `tier_from_str_invalid`: unknown strings return `Err`.
 //! - `harness_detection_default`: with no env vars set, `detect_harness()` returns `"default"`.
 //! - `resolve_builtin_claude_code`: `resolve_tier_to_model(Tier::High, "claude-code", &Config::default())`
-//!   returns `Some("claude-opus-4-8")`.
+//!   returns `Some("opus")` (the deferred Claude Code opus alias).
 //! - `resolve_unknown_harness_uses_default`: an unknown harness falls through to the
 //!   `"default"` built-in map.
 //! - `tier_from_model_name_roundtrip`: `tier_from_model_name("opus", "claude-code", ...)`
@@ -47,7 +47,13 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
-const CLAUDE_CODE_OPUS_MODEL: &str = "claude-opus-4-8";
+/// The Claude Code `opus` model alias. It is **deferred**, not version-pinned:
+/// agent-doc passes it through verbatim to `claude --model opus`, which Claude
+/// Code resolves to its current latest opus. Keeping it unversioned means launch
+/// (`--model`) and `### Re:` attribution can never silently lag a Claude Code
+/// opus release — the concrete id is owned by Claude Code, and attribution is
+/// self-stamped by the running agent (see `resolve_agent_model`).
+const CLAUDE_CODE_OPUS_ALIAS: &str = "opus";
 
 /// Harness-agnostic model complexity tier.
 ///
@@ -156,7 +162,7 @@ fn builtin_claude_code() -> TierMap {
     TierMap {
         low: Some("haiku".to_string()),
         med: Some("sonnet".to_string()),
-        high: Some(CLAUDE_CODE_OPUS_MODEL.to_string()),
+        high: Some(CLAUDE_CODE_OPUS_ALIAS.to_string()),
     }
 }
 
@@ -242,11 +248,13 @@ pub fn resolve_tier_to_model(
     builtin_for(harness).get(tier).map(|s| s.to_string())
 }
 
-fn claude_code_model_alias(model_name: &str) -> Option<&'static str> {
-    match model_name.trim() {
-        "opus" => Some(CLAUDE_CODE_OPUS_MODEL),
-        _ => None,
-    }
+/// True for any model id that names a Claude Code opus: the deferred bare
+/// `opus` alias or a concrete `claude-opus-*` / `opus-*` id a user may pin.
+/// Used for High-tier classification. agent-doc deliberately does not store the
+/// concrete current opus version — Claude Code owns it.
+fn is_claude_code_opus(model_name: &str) -> bool {
+    let m = model_name.trim();
+    m == CLAUDE_CODE_OPUS_ALIAS || m.starts_with("claude-opus") || m.starts_with("opus-")
 }
 
 /// Returns `true` when `model_name` lacks a provider prefix required by the
@@ -257,10 +265,14 @@ pub fn is_bare_model_name(model_name: &str) -> bool {
     !trimmed.contains('/') || trimmed.starts_with('/')
 }
 
-/// Resolve harness-owned model aliases to the concrete model id agent-doc should
-/// launch and stamp in attribution. The Claude Code `opus` alias is intentionally
-/// versioned here so `claude_model: opus`, `/model opus`, and high-tier fallback
-/// all follow the same current Claude Code definition.
+/// Resolve harness-owned model aliases to the model id agent-doc should launch
+/// and stamp in attribution. The Claude Code `opus`/`sonnet`/`haiku` aliases are
+/// **deferred**: they pass through unchanged so `claude --model <alias>` resolves
+/// the current latest model itself. agent-doc no longer pins a concrete opus
+/// version — `claude_model: opus`, `/model opus`, and the high-tier fallback all
+/// emit `--model opus`, and attribution self-stamps the running model (see
+/// `resolve_agent_model`). Explicit concrete ids (e.g. `claude-opus-4-8`) pass
+/// through unchanged for users who pin a version.
 ///
 /// For the opencode harness, bare model names (without a `provider/` prefix)
 /// are rejected with a warning to stderr and returned unchanged so the caller
@@ -271,11 +283,6 @@ pub fn canonical_model_name(
     harness: &str,
     _model_config: &ModelConfig,
 ) -> String {
-    if harness == "claude-code"
-        && let Some(canonical) = claude_code_model_alias(model_name)
-    {
-        return canonical.to_string();
-    }
     if harness == "opencode" && is_bare_model_name(model_name) {
         eprintln!(
             "[model_tier] WARNING: opencode model name {:?} lacks a provider prefix \
@@ -302,7 +309,7 @@ pub fn tier_from_model_name(
         return Some(t);
     }
     builtin_for(harness).tier_of(model_name).or_else(|| {
-        if harness == "claude-code" && claude_code_model_alias(model_name).is_some() {
+        if harness == "claude-code" && is_claude_code_opus(model_name) {
             Some(Tier::High)
         } else {
             None
@@ -710,7 +717,7 @@ mod tests {
         let cfg = ModelConfig::default();
         assert_eq!(
             resolve_tier_to_model(Tier::High, "claude-code", &cfg).as_deref(),
-            Some("claude-opus-4-8")
+            Some("opus")
         );
         assert_eq!(
             resolve_tier_to_model(Tier::Med, "claude-code", &cfg).as_deref(),
@@ -792,7 +799,7 @@ mod tests {
         let cfg = ModelConfig::default();
         let (tier, name) = parse_model_arg("high", "claude-code", &cfg).unwrap();
         assert_eq!(tier, Tier::High);
-        assert_eq!(name, "claude-opus-4-8");
+        assert_eq!(name, "opus");
     }
 
     #[test]
@@ -800,17 +807,39 @@ mod tests {
         let cfg = ModelConfig::default();
         let (tier, name) = parse_model_arg("opus", "claude-code", &cfg).unwrap();
         assert_eq!(tier, Tier::High);
-        assert_eq!(name, "claude-opus-4-8");
+        assert_eq!(name, "opus");
     }
 
     #[test]
-    fn canonical_model_name_expands_claude_code_opus_alias() {
+    fn canonical_model_name_defers_claude_code_opus_alias() {
         let cfg = ModelConfig::default();
+        // `opus` is deferred — it passes through verbatim so `claude --model opus`
+        // resolves the current latest opus itself (no pinned version).
+        assert_eq!(canonical_model_name("opus", "claude-code", &cfg), "opus");
+        assert_eq!(canonical_model_name("opus", "codex", &cfg), "opus");
+        // Concrete pinned ids pass through unchanged for users who want a version.
         assert_eq!(
-            canonical_model_name("opus", "claude-code", &cfg),
+            canonical_model_name("claude-opus-4-8", "claude-code", &cfg),
             "claude-opus-4-8"
         );
-        assert_eq!(canonical_model_name("opus", "codex", &cfg), "opus");
+    }
+
+    #[test]
+    fn tier_from_model_name_classifies_concrete_and_deferred_opus_as_high() {
+        let cfg = ModelConfig::default();
+        // Deferred alias and any concrete opus id both gate as High tier.
+        assert_eq!(
+            tier_from_model_name("opus", "claude-code", &cfg),
+            Some(Tier::High)
+        );
+        assert_eq!(
+            tier_from_model_name("claude-opus-4-8", "claude-code", &cfg),
+            Some(Tier::High)
+        );
+        assert_eq!(
+            tier_from_model_name("claude-opus-4-9", "claude-code", &cfg),
+            Some(Tier::High)
+        );
     }
 
     #[test]
@@ -991,7 +1020,7 @@ mod tests {
         let cfg = ModelConfig::default();
         let diff = "@@ -1,3 +1,4 @@\n context\n+/model opus\n+real edit\n";
         let result = scan_model_switch(diff, "claude-code", &cfg);
-        assert_eq!(result.model_switch.as_deref(), Some("claude-opus-4-8"));
+        assert_eq!(result.model_switch.as_deref(), Some("opus"));
         assert_eq!(result.model_switch_tier, Some(Tier::High));
         assert!(!result.stripped_diff.contains("/model opus"));
         assert!(result.stripped_diff.contains("real edit"));
@@ -1003,7 +1032,7 @@ mod tests {
         let diff = "+/model high\n+other line\n";
         let result = scan_model_switch(diff, "claude-code", &cfg);
         assert_eq!(result.model_switch_tier, Some(Tier::High));
-        assert_eq!(result.model_switch.as_deref(), Some("claude-opus-4-8"));
+        assert_eq!(result.model_switch.as_deref(), Some("opus"));
         assert!(!result.stripped_diff.contains("/model high"));
     }
 
@@ -1069,7 +1098,7 @@ mod tests {
         let cfg = ModelConfig::default();
         let diff = "+/model opus\n+/model haiku\n";
         let result = scan_model_switch(diff, "claude-code", &cfg);
-        assert_eq!(result.model_switch.as_deref(), Some("claude-opus-4-8"));
+        assert_eq!(result.model_switch.as_deref(), Some("opus"));
         // Both lines stripped.
         assert!(!result.stripped_diff.contains("/model"));
     }

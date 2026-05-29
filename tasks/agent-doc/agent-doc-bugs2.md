@@ -42,7 +42,7 @@ Fixed the late-IPC committed-response over-application and wired a deterministic
 
 #### Root cause
 
-After a clean `finalize`, the IPC reposition / stale-patch replay can re-insert a response **that already reached HEAD** back into the working tree — sometimes wrapped in a second identical `<!-- agent:boundary:* -->` marker, and **not necessarily adjacent** to its original. The existing recovery only collapsed *consecutive* `### Re:` duplicates (`dedupe_responses`), so the non-adjacent / boundary-wrapped shape slipped past it and hit the generic `detect_bypassed_response_write` guard, which reported `direct response patchback`. `write --commit` then dead-ended with `empty response — nothing to write` because the body was already in the live exchange — over-applied, not missing.
+After a clean `finalize`, the IPC reposition / stale-patch replay can re-insert a response **that already reached HEAD** back into the working tree — sometimes wrapped in a second identical `agent:boundary` marker, and **not necessarily adjacent** to its original. The existing recovery only collapsed *consecutive* `### Re:` duplicates (`dedupe_responses`), so the non-adjacent / boundary-wrapped shape slipped past it and hit the generic `detect_bypassed_response_write` guard, which reported `direct response patchback`. `write --commit` then dead-ended with `empty response — nothing to write` because the body was already in the live exchange — over-applied, not missing.
 
 #### Fix (binary-side, deterministic)
 
@@ -125,7 +125,7 @@ Not entirely from the binary alone. The duplicate insertion happens **editor-sid
 - Pushed; submodule CI re-run in progress (prior run on this branch green).
 
 **Gated**, not closed: code-complete and unit-verified, but awaiting a live-session confirmation plus the still-open plugin-side root-cause prevention. The backlog priority order is unchanged; the next open item is the IPC-buffer-divergence plugin protocol work.
-<!-- agent:boundary:df5c464a -->
+<!-- agent:boundary:4a2cdc8c -->
 <!-- /agent:exchange -->
 ###
 <!--

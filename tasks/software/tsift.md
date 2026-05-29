@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -76,7 +76,42 @@ VERSIONS.md `Unreleased` updated with the Phase 1b entry.
 #### Top of backlog
 
 `[#cli-cluster-index-search]` — Phase 2: move `cmd_index` + `cmd_search` bodies into `packages/tsift-cli/src/commands/index_search.rs`. Smallest cluster, validates the per-command pattern before larger ones.
-<!-- agent:boundary:f87e5e81 -->
+
+### Re: do [#cli-cleanup-unused-imports] — opus-4-7
+
+`make check` is green workspace-wide. Pre-existing clippy reds cleared across three crates:
+
+**tsift-cli/src/lib.rs** — dropped unused `DEFAULT_BUDGET_BYTES`, `DEFAULT_BUDGET_ITEMS`, `DEFAULT_FOLLOW_UP_ITEMS` from the `output` import (left over from Phase 1a-i; the constants live in `output.rs` and are referenced there directly).
+
+**tsift-resolution/src/scoring.rs** — dropped unused `GraphFreshness` import.
+
+**tsift-algorithms** — five clippy errors:
+
+- `coupling.rs:54-55` — `.or_insert_with(HashSet::new)` → `.or_default()` (clippy::unwrap_or_default)
+- `dead_code.rs:89` — collapsed `if let Some(&idx) = node_idx.get(name) { if !reachable[idx] { ... } }` into `if let ... && !reachable[idx]` using let-chains
+- `scc.rs:59` — Tarjan's inner recursive `strongconnect` closure has 8 params (state arrays passed by mutable ref). Added `#[allow(clippy::too_many_arguments)]` rather than wrapping in a struct — that's the idiomatic shape for Tarjan SCC and matches every reference implementation
+- `health.rs:79` — same closure pattern, same `#[allow(clippy::too_many_arguments)]`
+- `health.rs:26` — `build_graph` returns `(Vec<String>, HashMap<String, usize>, Vec<HashSet<usize>>, Vec<HashSet<usize>>)`. Added `#[allow(clippy::type_complexity)]`; introducing a named return struct here would only obscure that this is two adjacency maps plus a name⇄index pair
+
+No behavior change in any of these.
+
+#### Verification
+
+- `make check` → exit 0 (cargo clippy `-D warnings` clean; cargo test passes; opencode-tsift npm publish dry-run ok)
+- `cargo install --path packages/tsift-cli` — `~/.cargo/bin/tsift` refreshed for tmux sessions
+- `cargo build --release -p tsift-cli` — `target/release/tsift` refreshed for the `.bin/` symlink
+
+#### Commits
+
+- tsift @ `1432872` — `cleanup: drop pre-existing clippy reds keeping make check red` (pushed)
+- agent-loop @ `0fe1802` — submodule pointer bump (pushed)
+
+VERSIONS.md `Unreleased` updated with the `#cli-cleanup-unused-imports` entry.
+
+#### Top of backlog
+
+`[#cli-cluster-index-search]` — Phase 2: move `cmd_index` + `cmd_search` bodies into `packages/tsift-cli/src/commands/index_search.rs`. Smallest cluster, validates the per-command pattern before the larger graph/quality/infra/digests clusters.
+<!-- agent:boundary:36e3255f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -85,9 +120,10 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#cli-extract-cli-types]~
+- do [#cli-cleanup-unused-imports]
 - do [#cli-cluster-index-search]
 - do [#cli-cluster-graph]
 - do [#cli-extract-tagpath-helpers]
@@ -103,7 +139,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#cli-cleanup-unused-imports] [recommended] Drop the pre-existing `GraphFreshness` + `DEFAULT_BUDGET_*` unused-import warnings in packages/tsift-cli/src/lib.rs. `make check` runs clippy with -D warnings, so these (plus the 5 pre-existing clippy errors in tsift-algorithms/tsift-resolution) keep the workspace check red. Confirmed pre-existing via stash test — not caused by Phase 1b.
 - [ ] [#cli-cluster-index-search] Phase 2 — move cmd_index + cmd_search bodies into packages/tsift-cli/src/commands/index_search.rs (re-exported from lib.rs). Smallest cluster, validates the per-command pattern before larger ones.
 - [ ] [#cli-cluster-graph] Phase 2 — move cmd_graph + cmd_communities + cmd_path + cmd_explain + cmd_traverse bodies into packages/tsift-cli/src/commands/graph.rs.
 - [ ] [#cli-extract-tagpath-helpers] Phase 1a-iii — extract TagpathSearchOpts + TagpathAnnotationDiagnostic + CommunityMemberAmbiguityDiagnostic + annotate_hits_with_tagpath + annotate_stored_symbols_with_tagpath + annotate_stored_edges_with_tagpath + annotate_communities_with_tagpath + annotate_path_nodes_with_tagpath (~700 LOC) into packages/tsift-cli/src/output/tagpath.rs. Sits below the graph/community cmd cluster but moves cleanly because the annotate functions are already pub.

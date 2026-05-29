@@ -35,7 +35,13 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 6 response topic(s): do [#jb-stale-busy-idle-footer]; [#ipcfullprompt-recur2] reproduced at brandon; Was this a plugin issue?; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:d792b2d0 -->
+
+### Re: queue auto enabled — opus-4-8
+
+Auto-loop activated (`agent:queue auto`). Queue head is now `#jb-load-tmux-window-verify`, followed by `#queue-head-consume-on-topic-id-regression` and 7 more.
+
+Starting the loop. Note `#jb-load-tmux-window-verify` is a live IntelliJ task (install the signed plugin zip, confirm the Load Tmux Window action autostarts a focused doc's pane) — that can't be driven from a headless session, so when the loop reaches it I'll gate it for live verification rather than falsely mark it done, then continue to the actionable code items behind it.
+<!-- agent:boundary:50887731 -->
 <!-- /agent:exchange --> 
 ###
 <!--
@@ -56,7 +62,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 #spec-test-build-install-commit-push
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - do [#jb-load-tmux-window-verify]
 - do [#queue-head-consume-on-topic-id-regression]

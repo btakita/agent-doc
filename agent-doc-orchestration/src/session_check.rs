@@ -359,6 +359,46 @@ pub fn detect_jb_cache_conflict_accept_duplicate_replay(
     }))
 }
 
+/// A late-IPC reposition / stale-patch replay re-inserted the committed
+/// response into the working tree after the cycle already reached `HEAD`.
+///
+/// The duplicate body matches `HEAD`'s committed response (possibly wrapped in
+/// redundant `<!-- agent:boundary:* -->` markers and non-adjacent), so the
+/// safe repair is to restore the committed `HEAD` content over the working tree
+/// and snapshot. See `tasks/agent-doc/plan-duplicate-response-after-commit.md`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LateIpcResponseOverapplication {
+    pub remediated_content: String,
+}
+
+/// Detect the late-IPC committed-response over-application shape.
+///
+/// Unlike [`detect_jb_cache_conflict_accept_duplicate_replay`], this does not
+/// require the duplicate to be a *consecutive* `### Re:` block — the reposition
+/// signal can leave the re-applied copy separated by boundary markers, which
+/// the consecutive-only `dedupe_responses` collapse misses, letting the generic
+/// `detect_bypassed_response_write` guard misclassify it as a manual patchback.
+/// We instead prove that the working tree is `HEAD` plus extra duplicate copies
+/// of already-committed responses (identical scaffold, same response set), in
+/// which case restoring `HEAD` is provably safe.
+pub fn detect_late_ipc_response_overapplication(
+    file: &Path,
+) -> Result<Option<LateIpcResponseOverapplication>> {
+    let current = match std::fs::read_to_string(file) {
+        Ok(content) => content,
+        Err(_) => return Ok(None),
+    };
+    let Some(head) = crate::git::show_head(file)? else {
+        return Ok(None);
+    };
+    if crate::dedupe::is_committed_response_overapplication(&current, &head) {
+        return Ok(Some(LateIpcResponseOverapplication {
+            remediated_content: head,
+        }));
+    }
+    Ok(None)
+}
+
 fn parent_pointer_recovery_hint(file: &Path) -> String {
     format!(
         "Use `agent-doc commit {}` to finish the missing parent pointer commit, then re-run `agent-doc session-check {}`.",
@@ -685,6 +725,20 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
         return Ok(SessionCheckStatus::Interrupted(format!(
             "[session-check] INTERRUPTED: found consecutive duplicate response patchback at `{}`. Run `agent-doc dedupe {}` or rerun closeout so the write path can repair it before commit.",
             heading,
+            file.display()
+        )));
+    }
+
+    // Late-IPC reposition / stale-patch replay re-inserted the committed
+    // response (possibly boundary-wrapped and non-adjacent) into the working
+    // tree after it already reached HEAD. Recognize it as an over-application
+    // before the generic `detect_bypassed_response_write` guard accuses the
+    // operator of a manual patchback; preflight auto-repairs by restoring HEAD.
+    if detect_late_ipc_response_overapplication(file)?.is_some() {
+        return Ok(SessionCheckStatus::Interrupted(format!(
+            "[session-check] INTERRUPTED: found late-IPC committed-response over-application at `{}`; the working tree re-adds a response already in HEAD. Run `agent-doc preflight {}` to auto-repair (restores the committed HEAD), or `agent-doc write --commit {}` to recover through the normal closeout boundary.",
+            file.display(),
+            file.display(),
             file.display()
         )));
     }
@@ -5127,6 +5181,92 @@ Body\n\
                 );
             }
             other => panic!("expected accept replay interruption, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn session_check_classifies_late_ipc_response_overapplication() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("doc.md");
+        // Two distinct committed responses A, B in HEAD.
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: first — gpt-5\n\nAnswer A.\n",
+            "### Re: second — gpt-5\n\nAnswer B.\n",
+            "<!-- agent:boundary:committed -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "doc.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "committed responses", "--no-verify"])
+            .output()
+            .unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(committed), Some(committed))
+            .unwrap();
+
+        // Late-IPC replay re-adds the EARLIER response A at the tail — a
+        // non-consecutive duplicate the JB-cache replay detector misses.
+        let overapplied = committed.replace(
+            "<!-- agent:boundary:committed -->\n<!-- /agent:exchange -->",
+            "### Re: first — gpt-5\n\nAnswer A.\n<!-- agent:boundary:replayed -->\n<!-- /agent:exchange -->",
+        );
+        fs::write(&doc, overapplied).unwrap();
+
+        assert!(
+            detect_jb_cache_conflict_accept_duplicate_replay(&doc)
+                .unwrap()
+                .is_none(),
+            "non-adjacent duplicate is not a consecutive accept-replay"
+        );
+        assert!(
+            detect_late_ipc_response_overapplication(&doc)
+                .unwrap()
+                .is_some(),
+            "late-IPC over-application should be detected"
+        );
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(
+                    message.contains("late-IPC committed-response over-application"),
+                    "expected late-IPC over-application classification: {message}"
+                );
+                assert!(
+                    !message.contains("direct response patchback"),
+                    "must not misclassify over-application as a manual patchback: {message}"
+                );
+            }
+            other => panic!("expected late-IPC over-application interruption, got {other:?}"),
         }
     }
 

@@ -1169,6 +1169,31 @@ fn enforce_no_uncommitted_closeout_drift(file: &Path) -> Result<()> {
         return Ok(());
     }
 
+    // Late-IPC reposition / stale-patch replay re-inserted the committed
+    // response into the working tree after it already reached HEAD (possibly
+    // wrapped in redundant boundary markers and non-adjacent, which the
+    // consecutive-only dedupe replay path above misses). Restore the committed
+    // HEAD over the working tree + snapshot before the generic direct-patchback
+    // guard fires. See tasks/agent-doc/plan-duplicate-response-after-commit.md.
+    if let Some(overapplication) =
+        crate::session_check::detect_late_ipc_response_overapplication(file)?
+    {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "late_ipc_response_overapplication_repaired file={}",
+                file.display()
+            ),
+        );
+        eprintln!(
+            "[preflight] late_ipc_overapplication: restoring committed HEAD over re-added response for {}",
+            file.display()
+        );
+        crate::write::atomic_write_pub(file, &overapplication.remediated_content)?;
+        crate::snapshot::save(file, &overapplication.remediated_content)?;
+        return Ok(());
+    }
+
     // Phase 3 (#jbccc3): JB File Cache Conflict cancel auto-recovery.
     //
     // When the binary-owned write path applied the response (snapshot has it,
@@ -5137,6 +5162,78 @@ mod tests {
                 .unwrap()
                 .is_some(),
             "preconditions: accepted-conflict duplicate replay should be detected"
+        );
+
+        run(&doc).unwrap();
+
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), committed);
+        assert_eq!(snapshot::load(&doc).unwrap().unwrap(), committed);
+        let diff = Command::new("git")
+            .current_dir(root)
+            .args(["diff", "--", "session.md"])
+            .output()
+            .unwrap();
+        assert!(
+            diff.stdout.is_empty(),
+            "preflight repair should restore the working tree to committed HEAD"
+        );
+    }
+
+    #[test]
+    fn preflight_repairs_late_ipc_response_overapplication() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+
+        // HEAD has two distinct committed responses, A then B.
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: first answer — opus-4-8\n\n",
+            "Answer A.\n",
+            "### Re: second answer — opus-4-8\n\n",
+            "Answer B.\n",
+            "<!-- agent:boundary:committed -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, committed).unwrap();
+        snapshot::save(&doc, committed).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "committed responses", "--no-verify"])
+            .output()
+            .unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(committed), Some(committed))
+            .unwrap();
+
+        // Late-IPC replay re-inserts an EARLIER committed response (A) at the
+        // tail, separated from its original by response B. This is NOT a
+        // consecutive duplicate, so the JB-cache-conflict replay detector misses
+        // it, but it is still a committed-response over-application.
+        let overapplied = committed.replace(
+            "<!-- agent:boundary:committed -->\n<!-- /agent:exchange -->",
+            "### Re: first answer — opus-4-8\n\nAnswer A.\n<!-- agent:boundary:replayed -->\n<!-- /agent:exchange -->",
+        );
+        std::fs::write(&doc, overapplied).unwrap();
+
+        assert!(
+            crate::session_check::detect_jb_cache_conflict_accept_duplicate_replay(&doc)
+                .unwrap()
+                .is_none(),
+            "preconditions: non-adjacent duplicate is missed by the consecutive replay detector"
+        );
+        assert!(
+            crate::session_check::detect_late_ipc_response_overapplication(&doc)
+                .unwrap()
+                .is_some(),
+            "preconditions: late-IPC over-application should be detected"
         );
 
         run(&doc).unwrap();

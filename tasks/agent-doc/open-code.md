@@ -33,7 +33,29 @@ queue_active: false
 Compacted content:
 - Archived 2 response topic(s): queue tidy → #bz6s Wave 5 complete (extraction done); do [#yybc]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/fb8de777...
-<!-- agent:boundary:342bfeda -->
+❯ What are #next-steps to split out modules?
+### Re: #next-steps to split out modules — opus-4-7
+
+First, the honest constraint: the big extraction is done and `agent-doc-orchestration` is **deliberately one crate** (Direction A). The internal cycles that forced that — `git↔cycle_state`, `capture↔repair`, `route↔sync` — still block cleanly splitting the *cluster* into more crates. So "split out more modules" has real limits; the feasible moves are narrower than the original extraction.
+
+Also closed **`#adcr`** (extract `agent-doc-core`) — it was already satisfied (core is extracted + published 0.1.0); the binary auto-struck its queue item last cycle, now marked done in the backlog too.
+
+**Top of backlog: `#adoc-pure-to-core`.**
+
+#### Next steps, by priority (added to backlog)
+
+| # | Item | Value / risk |
+|---|------|--------------|
+| 1 | **`#adoc-pure-to-core`** | Push genuinely-pure modules from orchestration down to the fast-building `agent-doc-core`. Confirmed-clean now: **`heuristics`** (zero deps) and **`replay_guard`** (only the core-backed `template` shim). Others (`dedupe`/`callback`/`editor_route_errors`) are blocked by `snapshot → git` I/O. **Clean, low-risk, low-but-real value** — shrinks the 340-dep crate. |
+| 2 | **`#adoc-sqlite-isolation`** `[recommended]` | The single biggest build cost in orchestration is **`rusqlite` (bundled SQLite — a large C compile)**. It's used by `archive_index` + `project_controller`. A feasibility spike: can `archive_index` be carved into its own crate to isolate that C build from orchestration recompiles? **Blocker:** `project_controller` (cluster-central) also uses rusqlite, so it likely needs an interface seam (inject a DB handle/trait) first. **High value, uncertain feasibility — spike before committing.** |
+| 3 | **`#adoc-orch-shim-cleanup`** | Rewrite CLI-shell `crate::X` → `agent_doc_orchestration::X` and delete the `pub use` shims in `agent-doc/src/{lib,main}.rs`. **Mechanical polish**, finishes the migration cleanly — not a true split, lowest priority. |
+
+#### What's *not* worth attempting
+
+Splitting the tmux/PTY/route/sync/git cluster into separate crates — the cycle entanglement that drove Direction A still applies; you'd be back to breaking `route↔sync`/`git↔cycle_state`. The build-time win there is better pursued via the `#adoc-sqlite-isolation` seam (isolate the heaviest *dep*, not the entangled modules).
+
+Want me to start with `#adoc-pure-to-core` (the clean one) or run the `#adoc-sqlite-isolation` feasibility spike first?
+<!-- agent:boundary:b31de174 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -48,7 +70,9 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#adcr] Extract agent-doc-core crate (~17K lines) — enables fast-compiling FFI/editor-plugin target independent of orchestration layer
+- [ ] [#adoc-orch-shim-cleanup] Finish the migration: rewrite CLI-shell crate::X call sites to agent_doc_orchestration::X and delete the pub use shims in agent-doc/src/{lib,main}.rs. Mechanical/low-risk polish, not a true crate split. Plan's optional final step.
+- [ ] [#adoc-sqlite-isolation] [recommended] Feasibility spike: carve archive_index (+ rusqlite/bundled-SQLite, the slowest build dep) into its own crate to isolate the C build from agent-doc-orchestration recompiles. Blocker to investigate first: project_controller ALSO uses rusqlite and is cluster-central, so this likely needs an interface seam (pass a DB handle/trait in) before the split is clean. Spike before committing.
+- [ ] [#adoc-pure-to-core] Relocate genuinely-pure orchestration modules down to agent-doc-core (fast-building leaf layer). Confirmed-clean candidates: heuristics (zero crate/external deps) and replay_guard (only crate::template, which is core-backed). Audit the rest (dedupe/callback/editor_route_errors are blocked by snapshot->git I/O). Clean low-risk module splits; shrinks the 340-dep orchestration crate.
 <!-- /agent:backlog -->
 
 ## Icebox

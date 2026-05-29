@@ -301,7 +301,44 @@ For now, don't bypass JAMS — bypass *the need to use any forum* via demand-let
 4. Have the lawyer-referral attorney draft a one-paragraph "bilateral waiver" proposal and include it in the demand letter as a mutual cost-saver.
 
 **Not legal advice.** §1281.97 procedures and small-claims-vs-arbitration carve-outs are state-specific and have shifted recently. Confirm both points with a CA-licensed attorney before relying on them. The $35 referral consult covers both questions in one call.
-<!-- agent:boundary:18bd4d6e -->
+Can I ask his family member when he will pay in public?
+
+### Re: Publicly asking Rob's family member about payment — opus-4-7
+
+**Don't.** This is the single riskiest move on the table — low probability of getting you paid, high probability of converting a $5k breach claim into a multi-front legal problem where *you* are the defendant. Specifically:
+
+**Legal risks (stacked, not alternatives)**
+
+- **§8 non-disparagement breach.** Publicly involving Rob's family member implies — by the act of escalating to family — that Rob can't manage his obligations, is dodging you, or is otherwise reputationally compromised. Courts read non-disparagement clauses against the totality of conduct, not just the literal words. A public "@robsdad when's your son paying me?" post is almost guaranteed to be read as disparagement regardless of how factually it's phrased.
+- **Tortious interference / harassment.** The family member is not a party to the contract and has no legal connection to the debt. Publicly pressuring an uninvolved third party to coerce performance is the textbook fact pattern for intentional infliction of emotional distress (IIED) and, in California, potential civil harassment under CCP §527.6 if it's repeated. CT has similar statutes.
+- **Defamation exposure.** "Rob owes me $5k" is factual and true. "@Rob's-mom your son owes me $5k" carries an implicit accusation about Rob's character to a specific audience. The implicit assertion ("he won't pay," "he's avoiding me," "he's untrustworthy") is harder to defend as pure fact.
+- **Restraining orders.** If the family member feels harassed, they can seek a civil harassment restraining order against you. These are granted on a low evidentiary threshold in both CA and CT, take 2–3 weeks to litigate, and create a public record that follows you indefinitely.
+
+**Strategic risks**
+
+- **Hardens Rob's resistance.** Counterparties who were just slow-paying become committed adversaries when you involve their family. Many people who would have paid out of inertia + reputation will instead lawyer up out of pride.
+- **Surrenders the moral high ground.** Right now you're the wronged party owed $5k. The moment you publicly contact a family member, the framing flips — you become the harasser, Rob becomes the protective family member, and any future arbitrator/judge reads the record with that bias.
+- **Permanent online record.** Public posts get screenshotted. Even if you delete them, they survive in Rob's lawyer's evidence file forever.
+
+**What the underlying instinct is right about**
+
+Family/social pressure can be genuinely effective at unlocking payment from someone who's deliberately stalling. The mistake is doing it *in public*. Two private versions that capture most of the effect with much less risk:
+
+- **Mention the social-network risk in a private demand letter, never act on it.** In the formal lawyer demand letter (escalation step 4 from earlier), add: *"Consultant has not communicated this matter to any of Company's professional or personal contacts and prefers to resolve it directly and discreetly. Consultant reserves all rights regarding lawful communication with third parties having a legitimate interest in this matter, including investors, customers, and potential business partners."* That's a credible threat that does its work without ever being executed.
+- **If Rob has co-founders, investors, or a board, contact them privately (not publicly).** Investors and board members have a legitimate interest in knowing about unpaid debts — that's not §8 disparagement in most jurisdictions because it's a privileged business communication. Family is not in this category; investors are.
+
+**What "in public" gets you that "in private" doesn't**
+
+Almost nothing useful. Public pressure is satisfying emotionally but rarely produces money. Private pressure on the right targets (Rob himself, his counsel if known, his investors/board if applicable) is the same psychological pressure without the legal exposure.
+
+**Practical answer to the literal question**
+
+Can you legally do it? Probably not without exposure. Should you do it? No. The cost-benefit is upside-down: 1–5% chance it accelerates payment, 30–60% chance it triggers §8 breach litigation or a harassment claim that costs you more than $5k to defend.
+
+**Stick to the demand-letter ladder.** Step 1 (friendly check) → step 3 (your demand letter) → step 4 (lawyer demand letter). If Rob hasn't paid by step 4, file small claims or JAMS per the prior response. None of those routes involves contacting his family, and all of them are likelier to produce payment than public family pressure.
+
+**Not legal advice.** §527.6 civil harassment and IIED are real causes of action with low evidentiary thresholds. Confirm with a CA or CT attorney before taking any action that targets non-parties to the contract.
+<!-- agent:boundary:ac06ccd3 -->
 <!-- /agent:exchange -->
 
 ## Queue

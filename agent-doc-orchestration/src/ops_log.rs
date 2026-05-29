@@ -30,7 +30,7 @@ use std::path::Path;
 
 /// Append a timestamped log line to `.agent-doc/logs/ops.log`.
 ///
-/// Finds the project root by walking up from `file` (same as `snapshot::find_project_root`).
+/// Finds the project root by walking up from `file` (`fs_util::find_project_root`).
 /// Best-effort: silently returns on any I/O error.
 pub fn log_op(file: &Path, message: &str) {
     let _ = try_log_op(file, message);
@@ -107,7 +107,7 @@ fn try_log_cycle(
     file_content: Option<&str>,
 ) -> Option<()> {
     let canonical = file.canonicalize().ok()?;
-    let project_root = crate::snapshot::find_project_root(&canonical)?;
+    let project_root = crate::fs_util::find_project_root(&canonical)?;
     let logs_dir = project_root.join(".agent-doc/logs");
     std::fs::create_dir_all(&logs_dir).ok()?;
     let log_path = logs_dir.join("cycles.jsonl");
@@ -138,7 +138,7 @@ fn try_log_cycle(
 
 fn try_log_op(file: &Path, message: &str) -> Option<()> {
     let canonical = file.canonicalize().ok()?;
-    let project_root = crate::snapshot::find_project_root(&canonical)?;
+    let project_root = crate::fs_util::find_project_root(&canonical)?;
     let logs_dir = project_root.join(".agent-doc/logs");
     std::fs::create_dir_all(&logs_dir).ok()?;
     let log_path = logs_dir.join("ops.log");

@@ -1,5 +1,17 @@
 use anyhow::Result;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+/// Walk up the directory tree from `path` to find the directory containing
+/// `.agent-doc` (the project root). Returns `None` if no such ancestor exists.
+pub fn find_project_root(path: &Path) -> Option<PathBuf> {
+    let mut current = if path.is_file() { path.parent()? } else { path };
+    loop {
+        if current.join(".agent-doc").is_dir() {
+            return Some(current.to_path_buf());
+        }
+        current = current.parent()?;
+    }
+}
 
 pub fn read_optional_text(path: &Path) -> Result<Option<String>> {
     read_optional(path, |path| std::fs::read_to_string(path))

@@ -138,7 +138,7 @@ mod terminal;
 #[cfg(test)]
 mod test_support;
 pub(crate) use agent_doc::ipc_socket;
-mod ops_log;
+pub(crate) use agent_doc_orchestration::ops_log;
 mod tsift_graph;
 mod undo;
 mod upgrade;

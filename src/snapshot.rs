@@ -133,16 +133,10 @@ pub fn pending_path_for(doc: &Path) -> Result<PathBuf> {
     Ok(project_root.join(PENDING_DIR).join(format!("{}.md", hash)))
 }
 
-/// Walk up from a path to find the directory containing `.agent-doc/`.
-pub fn find_project_root(path: &Path) -> Option<PathBuf> {
-    let mut current = if path.is_file() { path.parent()? } else { path };
-    loop {
-        if current.join(".agent-doc").is_dir() {
-            return Some(current.to_path_buf());
-        }
-        current = current.parent()?;
-    }
-}
+// `find_project_root` moved to `agent_doc_orchestration::fs_util` (Direction A,
+// increment 4). Re-exported here so `snapshot::find_project_root` call sites and
+// this module's internal unqualified callers resolve unchanged.
+pub use crate::fs_util::find_project_root;
 
 // ---------------------------------------------------------------------------
 // Advisory file lock for snapshot operations

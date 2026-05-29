@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -299,7 +299,7 @@ Shared-util foundation now at 7 modules in orchestration (`ipc_socket` / `env` /
 #### Next
 
 Backlog #bz6s updated — ops_log struck from the NEXT list. The remaining sessions/supervisor closure is gated by `snapshot → git`: `snapshot` is used by 35 files and its `git` dependency transitively reaches the whole cluster (the keystone the plan's REVISION flagged). Next increment should either invert `snapshot`'s git coupling or move a smaller still-independent module before committing to the large cluster migration.
-<!-- agent:boundary:c394fb6b -->
+<!-- agent:boundary:68e7e2ae -->
 <!-- /agent:exchange -->
 
 ## Queue

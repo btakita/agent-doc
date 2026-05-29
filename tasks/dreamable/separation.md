@@ -1585,7 +1585,89 @@ These are strong defenses regardless of §7 scope.
 Paste §7's exact text into your next prompt. I'll give you a definitive read on whether the language reaches the daughter outreach and what to do before/after signing. Without the exact wording, I can only tell you which interpretation is more likely under each reading — not which interpretation actually applies to your §7.
 
 **Not legal advice.** Mutual-release scope interpretation is a fact-intensive question of CA contract law. The interaction with §1542 waiver and broad-release-versus-narrow-release distinctions deserves the same CA attorney consult that the recording and daughter-outreach situations already warranted. The 30-minute referral consult is now multiply paying for itself.
-<!-- agent:boundary:6d5929c0 -->
+❯ If I don't have enough money to pay JAMS, what is my recourse?
+
+### Re: Recourse when you can't afford JAMS fees — opus-4-7
+
+**Short answer.** Don't pay JAMS. You have multiple statutory and practical paths to avoid JAMS fees entirely, ranked here by lowest-cost / highest-likelihood-of-success. The starting move is "**file in court, let Rob deal with the arbitration question**" — that puts the cost burden on him, not you.
+
+#### The actual recourse paths
+
+**1. Don't file JAMS in the first place — file in court.** *(Best path for your situation.)*
+
+You are under no obligation to initiate JAMS. §10 says disputes "shall be resolved by JAMS arbitration," but it doesn't compel *you* to be the one to file. Two ways to put Rob on defense without paying JAMS:
+
+- **File SF small claims** (~$50 fee for a $5k claim). Most likely outcome: Rob pays before the hearing, court proceeds without arbitration challenge, or Rob files a motion to compel that costs him $3k+ in legal work. As covered in the prior turn, ~70–80% the case proceeds to a hearing.
+- **File CA Superior Court limited civil** (~$370 fee). Same dynamic — Rob has to pay for the motion to compel arbitration, which costs him more than $5k. Most rational defendants settle instead.
+
+If Rob files a motion to compel arbitration, **oppose it with an unconscionability argument** based on cost. The CA Supreme Court (Armendariz) and a long line of cases hold that arbitration clauses are unconscionable when forum costs are prohibitive relative to the party's resources. Inability to pay is precisely the fact pattern that wins.
+
+**2. CA Civil Code §1284.3 / CCP §1284.2** — fee-shifting in employment arbitration.
+
+If your dispute is classified as employment-related (consultant misclassified as contractor), CA law shifts arbitration costs to the employer beyond what would be paid in court. JAMS Employment Minimum Standards cap *your* fee at $250 with Dreamable paying the rest. Apply by characterizing the underlying engagement as employment-like in your JAMS filing.
+
+**3. CCP §1281.97 reverse-leverage** — if Rob is the one who's broke too.
+
+If you do file JAMS and Rob (the drafting party) fails to pay his share of fees within 30 days of invoice, you can withdraw from arbitration and proceed in court with fee-shifting against him. This only helps if Rob defaults, but it's worth knowing — small-startup founders often *can't* easily authorize a $1,750+ wire for a dispute they thought was settled.
+
+**4. JAMS hardship fee waiver** — apply directly.
+
+JAMS has a hardship waiver process under its administrative rules. Application requires:
+
+- A declaration of financial hardship (income, expenses, assets, liabilities)
+- Typically modeled on the federal in forma pauperis standard
+- Decision is at JAMS administrative discretion
+
+This is genuine but limited — JAMS approves hardship waivers conservatively, and even when approved, the waiver may be partial (e.g., reduces your share, doesn't eliminate it). Don't count on it as your primary path. Useful as a defensive move *after* a motion to compel succeeds.
+
+**5. Pro bono / law school clinics** — they sometimes fund forum costs.
+
+Some legal aid organizations and law-school clinics will front JAMS filing fees for cases they take, recoverable from a successful award. CT Statewide Legal Services (1-800-453-3320) and UConn, Quinnipiac, and Yale law clinics are worth contacting directly. Their criteria vary.
+
+**6. Settle before any forum cost.** *(Most likely outcome.)*
+
+The demand-letter ladder from earlier turns resolves most $5k disputes before forum costs ever apply. Steps 1–3 (friendly check → polite reminder → certified-mail demand) cost ~$10 total and produce payment in the majority of cases. The threat of *any* forum filing — small claims, limited civil, JAMS — typically motivates payment from a counterparty who was just being slow.
+
+#### The unconscionability defense if Rob compels arbitration
+
+This is the legal mechanic to know. If you file in court and Rob moves to compel JAMS arbitration, you oppose the motion with a sworn declaration showing:
+
+1. **Your financial inability to advance JAMS fees.** Bank statements, income, expenses, assets/liabilities. Don't overstate; courts respect honest disclosure.
+2. **Total JAMS cost estimate** ($5k–$15k all-in, per the prior turn's breakdown).
+3. **Proportionality to claim** ($5k claim, $5k+ forum cost = forum is functionally unavailable).
+4. **Fee-shifting structure** — §10 requires each side to bear own attorneys' fees, eliminating recovery.
+
+Courts have refused to compel arbitration on these exact facts in cases like *Roman v. Superior Court* (2009), *Murphy v. Check 'N Go* (2007), and progeny. Your argument is well-precedented.
+
+If the court refuses to compel, the case stays in court. You proceed in small claims or limited civil with the $50–$370 filing fee, not the $1,750+ JAMS cost.
+
+#### Practical sequencing for your specific situation
+
+Given you have limited money:
+
+1. **Today–this week**: Send the friendly status check (free). Most likely outcome: Rob pays. No forum cost ever incurred.
+2. **Day 14–21**: If no payment, send certified-mail demand letter (~$10). Often resolves at this step.
+3. **Day 30–45**: If still no payment, **file SF small claims** ($50 fee), not JAMS. This is your default escalation, not JAMS.
+4. **If Rob moves to compel arbitration**: Oppose with the unconscionability declaration above. Cost to you: $0 (you write the opposition; no attorney needed for small claims).
+5. **If court grants the motion to compel** *despite* the unconscionability argument: Apply for JAMS hardship fee waiver; if denied, contact CT Statewide Legal Services and law-school clinics for funding; as a last resort, do *not* advance fees, force Dreamable into §1281.97 fee-default territory.
+
+The dollar progression: $0 → $10 → $50–$60 → potentially $250 (JAMS Employment Standards cap if applicable) → potentially $1,750 (full JAMS fee, but only after multiple intermediate steps have failed).
+
+**You almost certainly never reach the $1,750 step.** The structure of the escalation ladder is specifically designed so that the cheap steps resolve most cases.
+
+#### What to absolutely not do
+
+- **Don't file JAMS preemptively.** You'd pay $1,750 to invoke a forum that's bad for your leverage (private, low public-record pressure). File in court instead.
+- **Don't borrow money to pay JAMS fees.** A loan with interest to recover a $5k claim is almost always net-negative.
+- **Don't withdraw the $5k claim** because you fear the forum cost. The forum cost is hypothetical and avoidable; the $5k claim is real.
+- **Don't tell Rob you can't afford JAMS** in any communication. That tips your hand and may invite him to use JAMS strategically.
+
+#### Bottom line
+
+**Your recourse is to never file JAMS.** Use the demand-letter ladder, then file court (small claims or limited civil), and if Rob compels arbitration, oppose with unconscionability based on inability to pay. The realistic path costs you $0–$60 total, not $1,750+.
+
+**Not legal advice.** Inability-to-pay unconscionability declarations are sworn documents and need to be accurate. The 30-minute CA attorney consult can review the declaration before you file it. The Armendariz line is well-established but each case is fact-specific.
+<!-- agent:boundary:f9b913cb -->
 <!-- /agent:exchange -->
 
 ## Queue

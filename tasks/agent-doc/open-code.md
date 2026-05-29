@@ -107,7 +107,24 @@ Diagnosed the recurring drift and filed it for a deliberate fix rather than a sp
 - Fix plan → `tasks/agent-doc/plan-queue-ipc-drift.md` (commit, with root-cause analysis + a required deterministic repro harness + fix direction: reconcile the IPC buffer to the committed queue shape after maintenance/commit; don't strand live residue when a queue halts; decouple `stuck_captured_cycle` from queue-component churn).
 
 **Why no code change this turn:** the bug spans IPC-buffer ↔ snapshot ↔ queue-halt ↔ capture-ledger reconciliation. It is not deterministically reproducible from a clean state (it needed a cross-turn stale IPC buffer), so a blind patch on this critical path risks worse regressions. The plan builds the repro first. The immediate symptom is already resolved.
-<!-- agent:boundary:10174e0a -->
+### Re: implement the queue-drift fix — opus-4-7
+
+Implemented a targeted, tested fix for the most damaging symptom and narrowed the root cause. Pushed. (Note: this references `#adoc-orch-shim-cleanup` only as the example duplicated prompt id — that item is **not** done.)
+
+**Diagnosis (repro-first, per the plan):** built a repro mirroring the exact live queue shape — `enqueue_route_dispatch_prompt` is **not** the duplication source (regression test proves it). The duplicate live prompt is a **CRDT/3-way merge artifact** of the divergent IPC-buffer vs committed snapshot queue body.
+
+**Fix landed (submodule `63cfd377`, superproject `a8a40f3f2`, pushed):**
+- `queue::dedup_live_prompts` — collapse duplicate live `Prompt` entries (two identical live prompts is never valid; `Completed`/`Preset`/fences preserved).
+- `preflight::run_queue_maintenance` dedups before activation/strike and persists the collapsed body. Preflight is now **idempotent after dedup**, so a merge-duplicated head no longer grows the diff each cycle.
+- 4 tests: `dedup_live_prompts_*`, `preflight_collapses_duplicate_live_queue_prompt` (+ idempotency assert), and an `enqueue` regression guard proving enqueue is clean.
+- Verification: orchestration **1848/0**, core+sqlite **652**, `make check` green except the pre-existing codex test, clippy clean. Both binaries rebuilt + installed.
+
+**Honest scope:** this **caps** the user-visible corruption (growing duplicate + non-idempotent preflight). It does **not** fix the underlying IPC-buffer/snapshot merge divergence — that root cause stays tracked in `tasks/agent-doc/plan-queue-ipc-drift.md` (repro-harness-first).
+
+**Action needed:** the running route-owned process (PID 138671) is a pre-fix binary and will keep re-injecting divergence until restarted; the dedup now caps the damage, but restart that process/session to run the new build.
+
+Separately: confirmed `#adoc-make-check-orch-tests` is still open — `make check` lacks `--workspace`, so it never runs the 1848 orchestration tests (the Phase C compile-fix only made them runnable via `cargo test -p`).
+<!-- agent:boundary:cb1dcd54 -->
 <!-- /agent:exchange -->
 
 ## Queue

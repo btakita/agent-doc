@@ -597,6 +597,8 @@ Skills: Rust, Python, TypeScript, LiveKit, WebRTC, real-time systems, agent-harn
 ```
 Drop "asset-generation" and "investor demos"; keep bare skills. You lose almost no signal and remove the two contestable phrases.
 
+Can I keep investor demos if I drop asset-generation?
+
 #### If Robert Ross objects
 
 Per the settlement:
@@ -607,7 +609,24 @@ Per the settlement:
 - **§11 Entire Agreement** — the settlement supersedes the prior consulting agreement and the April 6 termination notice, so the settlement's terms are what govern.
 
 **Bottom line:** the risk is contained to two phrases. Easiest de-risk is the bare-skills version above. If you want to keep the richer wording, that's a defensible judgment call — but run it past counsel first, since you (not I) are the party bound by the agreement. I've added a backlog item to make that decision before anything is published.
-<!-- agent:boundary:57095ca6 -->
+
+### Re: Keep investor demos if I drop asset-generation? — opus-4-8
+
+*Still not legal advice.* Yes — that's the safer of the two to keep, and dropping asset-generation removes the bigger risk.
+
+**Why "investor demos" is lower risk:**
+- It describes *your delivery activity* (you built and ran demos), not *what the product does*. Building investor demos is generic startup-engineering work — true of countless roles.
+- It doesn't name the product, the technology behind the demos, or any business plan. "I delivered investor-facing demos under tight timelines" is a statement about how you worked, not about Dreamable's trade secrets.
+
+**The one caveat:** keep it generic. Safe: *"delivered investor-facing demos under tight timelines."* Riskier: pairing it back with *what* the demos showed (e.g., "demos of real-time avatar generation") — that recombines into product disclosure. As long as "investor demos" stands alone without describing the demo content, it's fine.
+
+**Resulting bullet:**
+```
+• Confidential AI Startup — Real-time AI systems engineering: built agent-harness analysis tooling and delivered investor-facing demos under tight timelines. Rust, Python, TypeScript, LiveKit, WebRTC.
+```
+
+That keeps the "ships fast for a startup, trusted with investor-facing work" signal — which is good resume signal — while dropping the asset-generation phrase that pointed at their product. The backlog item still stands if you want counsel to bless the final wording.
+<!-- agent:boundary:9da6fe02 -->
 <!-- /agent:exchange -->
 ###
 <!--

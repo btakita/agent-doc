@@ -299,7 +299,33 @@ Shared-util foundation now at 7 modules in orchestration (`ipc_socket` / `env` /
 #### Next
 
 Backlog #bz6s updated — ops_log struck from the NEXT list. The remaining sessions/supervisor closure is gated by `snapshot → git`: `snapshot` is used by 35 files and its `git` dependency transitively reaches the whole cluster (the keystone the plan's REVISION flagged). Next increment should either invert `snapshot`'s git coupling or move a smaller still-independent module before committing to the large cluster migration.
-<!-- agent:boundary:68e7e2ae -->
+
+### Re: continue #bz6s — increment 5: input_diag → orchestration — opus-4-7
+
+Moved `input_diag` (structured tmux/supervisor input diagnostics) into `agent-doc-orchestration`. This was unblocked by increment 4: input_diag's only production dependency is `crate::ops_log`, which is now in orchestration.
+
+#### What landed
+
+- **`input_diag` → orchestration.** All 10 helpers (`log_key_event`, `log_text_submit`, `log_byte_events`, `log_transform_event`, `log_prompt_detection`, `format_*`, `verbose_enabled`, `KeyEventMeta`) promoted `pub(crate)` → `pub` and moved. `main.rs` re-exports via `pub(crate) use agent_doc_orchestration::input_diag;`, so its 6 consumers (`start`, `route`, `sync`, `sessions`, `queue_dispatch`, `supervisor/pty`) resolve unchanged.
+- **Self-contained orchestration `test_support`.** input_diag's tests mutate env vars (`AGENT_DOC_TMUX_INPUT_DIAG`, `AGENT_DOC_DEBUG_STDIN`) under a process-global lock. Since cargo compiles each crate's tests into a *separate* test binary, a crate-local `#[cfg(test)] TEST_ENV_LOCK` is correct and sufficient — no cross-crate static sharing needed. Added a minimal `env_lock` / `ProcessGlobalLockGuard` (the depth-reentrant pattern, mirroring main's). Verified orchestration has no other env-mutating tests to race with. Main keeps its own `test_support` (still used by `prompt`, `harness_prompt`, etc.).
+
+Orchestration is now at **8 modules** (`ipc_socket` / `env` / `fs_util` / `secret_redact` / `config` / `project_config_io` / `ops_log` / `input_diag`).
+
+#### Verification
+
+- `make check` green (clippy + full suite): 2213 (main, down 3 — input_diag's tests moved out) + orchestration's input_diag suite (3 passed) + the other crates, 0 failed. Only red is the documented pre-existing live-tmux test `codex_bare_run_inside_owning_pane_fails_before_nested_dispatch`; `make check` exits 0 tolerating it.
+- `cargo build --release` green; `nm -D libagent_doc.so` exports the full 39-symbol `agent_doc_*` FFI surface intact (no FFI touched).
+
+#### Next — decision point
+
+This exhausts the clean zero/low-dependency leaf moves. What remains all hits real coupling:
+
+- `harness_prompt` / `test_support` (shared one) → gated by **`codex_hook`** (82K).
+- `prompt` → gated by **`sessions`** (cluster).
+- `snapshot` → gated by **`git`** — and `git` transitively reaches the whole entangled cluster (`cycle_state` / `capture` / `repair` / `route` / `sync` / `start`).
+
+So the next increment is no longer mechanical. Per the plan's REVISION (operator decision needed), the realistic options are: **(A)** invert `snapshot`'s `git` dependency (pass a commit/hash interface in) so `snapshot` can sit below orchestration, then the cluster can follow; or **(B)** a deliberate big-bang move of the entire entangled cluster + `sessions`/`supervisor` in one large diff. The build-time payoff (CLI shell without tokio/reqwest/git2/etc.) only arrives once the heavy-dep cluster moves — the leaf moves so far shrink main but don't yet change its dependency tree. Recommend scheduling (A) or (B) deliberately rather than auto-queuing, since both are large single cycles.
+<!-- agent:boundary:a32a9eb9 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -329,7 +355,7 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#bz6s] #adoc-orchestration-impl Implement agent-doc-orchestration extraction per tasks/agent-doc/plan-agent-doc-orchestration-extraction.md (DIRECTION A). DONE: scaffold + ipc_socket + env/fs_util/secret_redact + project_config_io + config + ops_log (7 modules in orchestration; find_project_root pulled down into fs_util). NEXT: sessions/supervisor closure (input_diag/harness/project_controller/session_actor/startup_miss/test_support/prompt/snapshot) — gated by snapshot->git keystone, then cluster (cycle_state/capture/repair/git/route/sync/start). Each green-to-green with make check + nm -D gate.
+- [ ] [#bz6s] #adoc-orchestration-impl Implement agent-doc-orchestration extraction per tasks/agent-doc/plan-agent-doc-orchestration-extraction.md (DIRECTION A). DONE: scaffold + ipc_socket + env/fs_util/secret_redact + project_config_io + config + ops_log + input_diag (8 modules in orchestration; find_project_root in fs_util; orchestration carries its own cfg(test) test_support). NEXT: remaining sessions/supervisor closure (harness_prompt/test_support gated by codex_hook; prompt gated by sessions; snapshot gated by git) then cluster (cycle_state/capture/repair/git/route/sync/start). Zero/low-dep leaves are now exhausted — next is the snapshot->git keystone decouple or a deliberate big-bang cluster move. Each green-to-green with make check + nm -D gate.
 - [ ] [#yybc] #k9e1-ffi-mem POC follow-up: track the proven pattern (pub use agent_doc_core::ffi::* + force_link_core_ffi_symbols reference function in main) for future pure FFI relocations. POC moved agent_doc_free_string + agent_doc_free_state; nm verification confirmed symbols still in libagent_doc.so export table.
 - [ ] [#adcr] Extract agent-doc-core crate (~17K lines) — enables fast-compiling FFI/editor-plugin target independent of orchestration layer
 <!-- /agent:backlog -->

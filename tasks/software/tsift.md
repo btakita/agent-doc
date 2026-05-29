@@ -207,6 +207,10 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#split-sim-world] Extract sim_world (~390 LOC, src/sim_world.rs) into a new tsift-sim-world crate — smallest/most-isolated module, validates the crate-extraction pattern; root tsift re-exports via pub use. (promoted from agent:review)
+- [ ] [#split-tsift-digest] Extract diff_digest + log_digest + metric_digest + test_digest (src/, ~3.7k LOC) into a new tsift-digest crate. tsift-cli already calls these as tsift::diff_digest::* etc., so crate + root re-export keeps callers compiling. (promoted from agent:review)
+- [ ] [#split-tsift-search] Extract sift + impact + tagpath_adapter (src/) into a new tsift-search crate (summarize already in tsift-summarize). Depends on tsift-index + tsift-graph (both exist). (promoted from agent:review)
+- [ ] [#demote-root-tsift] After the sim-world/digest/search splits land, demote root tsift to a thin re-export shim (or remove lib.rs); verify cargo install tsift consumers keep working. (promoted from agent:review)
 - [ ] [#npm-auth-setup] Configure NPM_TOKEN secret + TSIFT_ENABLE_NPM_PUBLISH=true variable in GitHub repo settings
 - [ ] [#npm-publish-verify] After auth configured, tag release and verify publish-opencode-plugin CI job succeeds and opencode-tsift appears on npmjs.org
 - [ ] [#full-e2e-verify] In fresh project: opencode plugin opencode-tsift && opencode then /tsift-status. On success mark #e2e-install done.

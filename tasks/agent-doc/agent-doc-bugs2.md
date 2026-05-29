@@ -87,17 +87,39 @@ Opening or selecting a document fires only the **passive** `agent-doc sync --no-
 Install `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.136-signed.zip` (Settings → Plugins → ⚙ → Install from Disk; if classes changed structurally, uninstall → restart → install → restart). Then open a doc whose pane isn't up and invoke **Load Tmux Window**. I captured `#jb-load-tmux-window-verify` to track that live check — and if the autostart sync genuinely fails to spawn the pane there (vs. the by-design passive open), that's a separate autostart bug and I'll want the route/sync logs.
 
 Queue head remains `#adoc-queue-ipc-buffer-divergence` (the heavier plugin-protocol work) — say the word and I'll take it.
-<!-- agent:boundary:ad3a28c7 -->
-<!-- /agent:exchange --> 
-###
-<!--
 JB `Run Agent Doc` error
 ```
 [route] debounce OK — file idle for 0.5s and typing indicator idle
 [route] target tmux session: 0
 Error: authoritative actor generation 204 for tasks/agent-doc/agent-doc-bugs2.md owns pane %8 but route could not drain the active closeout before dispatch: captured response baseline no longer matches current document for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md. Rebuild sidecars without clearing session state: `agent-doc reset --from-current --preserve-session /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
 ```
----
+
+### Re: Run Agent Doc baseline-mismatch error — opus-4-8
+
+Traced it to a real stale-capture-after-compaction friction. Diagnosed + captured a plan; held off coding because it's fail-closed replay-safety logic. Plan committed `72217b875`.
+
+#### What happened (traced through the code)
+
+The route's pre-dispatch "drain the active closeout" step runs repair → `capture::validate_replay`, which fails closed when the file drifted **and** the captured response body is no longer present in the document. Earlier this session the exchange was **compacted** (archived older `### Re:` topics), so the capture sidecars for those archived responses point at bodies that are now gone from the doc. `validate_replay` can't tell "deliberately compacted (safe to drop)" from "lost (must not discard)", so it correctly bails and prints the manual `reset --from-current --preserve-session`.
+
+So the error is the safety guard doing its job — but the *cause* is that compaction leaves its captures behind, and the recovery is manual.
+
+#### Why I didn't one-shot a fix
+
+This is the replay-safety path: a wrong change risks re-applying a stale response or silently dropping a real one. The existing `#adoc-baseline-drift-after-user-commit` handling covers the inverse (body still intact → refresh baseline); this needs the compaction-owned discard. I captured `#stale-capture-after-compaction-blocks-route` with the recommended fix:
+
+- **Option A (recommended):** compaction marks/deletes the capture sidecars for the responses it archives, in the same operation. Compaction owns that archive decision, so it's provably safe — no guessing. The route then finds no stale active capture to drain.
+- Options B/C (route-side correlation, or auto-running the reset) are heavier or blunter fallbacks.
+
+#### Your immediate unblock
+
+The printed command works and is safe: `agent-doc reset --from-current --preserve-session tasks/agent-doc/agent-doc-bugs2.md` rebuilds the sidecars without clearing session state. (This `agent-doc` re-invocation went through fine, so you may not even need it right now.)
+
+This is a good candidate to implement next — it's bounded and deterministically testable (capture → compact → assert the capture is discarded and the drain no longer bails). Want me to take it, or continue with the queue head `#adoc-queue-ipc-buffer-divergence`?
+<!-- agent:boundary:0b603739 -->
+<!-- /agent:exchange --> 
+###
+<!--
 The completed queue item was not removed from the queue. #mermaid
 #spec-test-build-install-commit-push
 ---
@@ -133,6 +155,8 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#stale-capture-after-compaction-blocks-route] Run Agent Doc fails closed with 'captured response baseline no longer matches current document' (manual reset --from-current --preserve-session) when a stale capture sidecar references a response that compaction already archived out of the doc. validate_replay correctly bails (can't tell compacted-vs-lost). Plan: tasks/agent-doc/plan-stale-capture-after-compaction-blocks-route.md (recommend Option A — compaction discards its own captures). Reported 2026-05-29.
+- [ ] [#jb-load-tmux-window-verify] [recommended] Live-verify the new JB Load Tmux Window action (plugin 0.2.136): install the signed zip, confirm it autostarts/loads the tmux pane for a focused doc whose pane is not up (e.g. corky.md). If the autostart sync genuinely fails to spawn the pane in that case (vs. by-design passive open), capture the route/sync logs as a separate autostart bug.
 - [ ] [#adoc-queue-ipc-buffer-divergence] Root cause #4 FIXED (submodule 729f7bc2): response-replay / stale-cycle hash matching now neutralizes the agent:queue component (tag + body) and the queue_active frontmatter, so queue-maintenance churn no longer wedges a committed cycle as stuck_captured_cycle. REMAINING #2 (live IDE buffer re-adds auto / diverges from committed inactive snapshot): blocker found — ipc_socket::send_patch carries component CONTENT only and cannot converge a queue opening-tag attribute (auto) or the queue_active frontmatter; try_ipc_full_content is disabled and rejects template docs, so no IPC seam exists yet. Needs a plugin protocol extension (PatchWatcher.kt + FFI) to converge queue tag + frontmatter to the editor buffer, plus a deterministic live-IPC-listener repro harness (SimWorld). Plan: tasks/agent-doc/plan-queue-ipc-drift.md.
 - [ ] [#queue-strike-on-halt] Queue head consumed on halt/refusal response. write.rs:1233-1242 + response_explicitly_targets_queue_head (write.rs:2481) treat any `### Re: <head-id> <suffix>` heading as completion signal even when body explicitly says "backlog left intact" + passes no --done/--pending-gate. Repro: tasks/agent-doc/open-code.md cycle 619af4d0b struck [#d97v] after halt response. Plan: tasks/agent-doc/plan-queue-strike-on-halt-response.md (recommend Option A — require explicit completion signal).
 - [ ] [#jb-stale-busy-idle-footer] Three JB Run Agent Doc / Clear Session Context reports queue-instead-of-dispatch or block Clear while the live pane footer shows a Claude Code idle composer: monsterrodholders.md (actor gen 233, pane %19), equityfundingsource.md (gen 35, pane %3), tsift.md (pane %21, footer 22.4K (11%) ctrl+p commands). The tsift.md case is the strongest stale-busy candidate — Clear was blocked though the footer indicates idle. Fix: route.rs / session_actor_cmd.rs busy projection should treat the Claude Code idle-composer footer (ctrl+p commands / context % used) as idle direct evidence to repair a stale busy actor/lease projection before queuing or blocking, mirroring the existing OpenCode context % used idle-composer rule. Relates to #run-agent-doc-stale-busy-replay and #snrun (plan tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md).

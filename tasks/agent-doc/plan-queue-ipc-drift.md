@@ -84,11 +84,48 @@ Three subsystems interact badly when a doc is owned by a live
   dedup, so the drift no longer grows on each cycle. Tests:
   `dedup_live_prompts_*` (queue), `preflight_collapses_duplicate_live_queue_prompt`.
 
+### Root cause #1 addressed (2026-05-29) — residue warning is now per-edit, not per-preflight
+
+The recurring `inactive_queue_residue` warning was the *every-preflight-with-no-
+user-edit* symptom. Root analysis: the warning fired purely from the static
+"inactive + non-empty queue" state, so a stable post-halt queue (the live tail an
+`item_modified` halt retains and syncs into the snapshot) re-warned on every
+preflight forever. An earlier attempt to suppress the warning whenever live
+prompts remained was **wrong** — it broke the legitimate Scenario B
+(`test_preflight_warns_but_does_not_target_inactive_queue_edit`: a user adds a
+live `do [#id]` to an inactive queue and must be warned it will not run), and the
+two states are indistinguishable in steady state.
+
+The correct, narrow fix: `inactive_queue_residue` is now scoped to *genuine
+edits* — preflight emits it only when the inactive queue body changed vs the
+snapshot this cycle (`inactive_queue_changed_vs_snapshot`, normalized through
+`queue::parse`+`queue::render`). A stable inactive queue unchanged from the
+committed snapshot is not re-flagged. This removes the recurring warning that fed
+the drift loop while preserving the warning on real inactive-queue edits. Tests:
+`preflight_does_not_reflag_stable_inactive_queue_as_residue`,
+`preflight_flags_inactive_queue_when_changed_this_cycle`,
+`test_preflight_warns_but_does_not_target_inactive_queue_edit` (unchanged, still
+green). Spec: `specs/07-orchestration-commands.md` § Post-commit queue consumption.
+
+### Incidental test-isolation fix (2026-05-29)
+
+`codex_bare_run_inside_owning_pane_fails_before_nested_dispatch`
+(`tests/run_integration.rs`) failed whenever the suite ran from inside a Claude
+Code session: `detect_harness()` checks Claude/OpenCode markers before Codex, so
+an inherited `CLAUDECODE` short-circuited the codex recursive-deadlock guard. The
+test now clears the competing harness markers so it deterministically simulates a
+Codex harness from any environment. Not part of the drift loop, but required for a
+green `make check` from the agent-doc session harness.
+
 ### Still open (root cause — needs the repro harness)
 
 - The **merge divergence itself** (why the IPC buffer re-activates `auto` + a
   duplicate vs the committed inactive snapshot) is not yet fixed — dedup caps the
-  damage but doesn't stop the divergence. Still needs items #2/#4 above.
+  damage but doesn't stop the divergence. Still needs items #2/#4 above. The
+  durable fix is to push the halt's queue-shape change (strip `auto`, clear
+  `queue_active`) **through the IPC listener** so the IDE buffer converges,
+  rather than only writing to disk where the plugin's stale in-memory buffer
+  wins on its next flush.
 - A **running pre-fix `start --route-owned` process** keeps the old binary; it must
   be restarted for any fix to take effect on a live session.
 

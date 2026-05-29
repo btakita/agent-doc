@@ -19,6 +19,7 @@ class AgentDocPopupAction : AnAction() {
             "AgentDoc.InterruptClearSessionContext",
             "AgentDoc.CopySessionDiagnostics",
             "AgentDoc.SyncLayout",
+            "AgentDoc.LoadTmuxWindow",
             "AgentDoc.RefreshEnvironment",
         )
 

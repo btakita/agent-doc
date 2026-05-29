@@ -92,6 +92,14 @@
             <add-to-group group-id="ToolsMenu" anchor="last"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
+        <action id="AgentDoc.LoadTmuxWindow"
+                class="com.github.btakita.agentdoc.LoadTmuxWindowAction"
+                text="Load Tmux Window"
+                description="Load (autostart) the tmux window for the focused agent-doc document on demand">
+            <keyboard-shortcut first-keystroke="ctrl shift alt W" keymap="$default"/>
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
         <action id="AgentDoc.ShowSessionStatus"
                 class="com.github.btakita.agentdoc.ShowSessionStatusAction"
                 text="Show Session Status"

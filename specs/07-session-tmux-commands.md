@@ -139,6 +139,16 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 - Passive `sync --no-autostart` keeps layout repair explicit and does not run
   `repair_layout`; automatic editor sync should not rename/move stash windows
   while it is only trying to follow a selection event.
+- Because opening/selecting a document fires only the passive `sync
+  --no-autostart` path, a freshly-opened document whose tmux pane is not already
+  up is **not** autoloaded (by design — the passive path avoids attach-first
+  pane growth). The editor exposes an explicit on-demand loader, `Load Tmux
+  Window` (JB action `AgentDoc.LoadTmuxWindow`), which runs the autostart
+  layout-sync path (`sync` with autostart, i.e. without `--no-autostart`) for
+  the focused document so the pane is created and the harness started via the
+  normal `route` auto-start. The action must not invoke `agent-doc start`
+  directly (that runs the harness as a blocking restart-loop child unsuitable
+  for a plugin thread).
 - If an editor supplies `--window W`, `W` must already be an `agent-doc` window for the target tmux session. When the named session has no visible `agent-doc` window, normal sync must fail closed and preserve layout instead of reconciling remembered docs onto an arbitrary non-`agent-doc` window.
 - Post-sync registry updates must fail closed if tmux-router reports a
   geometry-only pane assignment that disagrees with a still-live authoritative

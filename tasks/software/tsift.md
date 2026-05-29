@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -420,7 +420,51 @@ Added `#split-tsift-summarize [done]` to backlog as a record of this cycle's res
 Marking `#split-tsift-summarize` done in the backlog (it landed last cycle as `8f2dee3`; I added it as a `[ ]` record by mistake instead of using `--done` directly). Queue should now reconcile: the `do [#split-tsift-summarize]` directive in the queue resolves to a done item and auto-strikes.
 
 No new user directive in this cycle's prompt changes — just the boundary artifact from the prior response. Remaining queue: `do [#split-tsift-cli-subcommands]` (`[recommended]` only, orthogonal to the rest). Not auto-looping; please direct next.
-<!-- agent:boundary:870f9936 -->
+
+### Re: do [#split-tsift-cli-subcommands] — too big for one cycle, gating with phased plan — opus-4-7
+
+**Halting.** `packages/tsift-cli/src/lib.rs` is **39,374 lines and 48 `cmd_*` functions**. A clean split is months of careful work — well beyond a single agent-doc cycle. Doing it in one shot would either (a) take 50+ tool calls of move-and-rebuild and burn the rest of this session's budget without finishing, or (b) ship a half-broken CLI by EOD. I am not going to do either by guessing.
+
+**Phased plan I can execute in cycles, one bite at a time:**
+
+| Phase | Scope | Cycles est. |
+|---|---|---|
+| 1a | Extract shared infra first: `ToolEnvelope` + `ResponseBudget` + output-format enums + tagpath annotation helpers into `packages/tsift-cli/src/output/` (or a `tsift-cli-shared` crate if you prefer crate-level isolation). | 1 |
+| 1b | Lift clap CLI types (`Cli`, `Commands`, `GraphDbQuery`, etc.) into `packages/tsift-cli/src/cli.rs`. | 1 |
+| 2 | Move command bodies one cluster at a time into `packages/tsift-cli/src/commands/<topic>.rs`. Suggested clusters that match the existing CLAUDE.md command table: `index_search.rs` (index, search), `graph.rs` (graph, communities, path, explain, traverse), `digests.rs` (diff_digest, log_digest, test_digest, metric_digest, session_*, context_pack), `quality.rs` (audit, audit_tagpath, lint, perf_gate), `summarize.rs` (summarize), `infra.rs` (init, status, locks, sql, route, rewrite, convex_sync, graph_db_*, edit). 6 clusters × 1 cycle each. | 6 |
+| 3 | Optional: promote each `commands/<topic>.rs` into its own workspace crate (`tsift-cmd-search`, etc.) if you want independent test compilation. Default: keep them as modules in tsift-cli; promote only the ones that need isolation. | as needed |
+
+Total: ~8 cycles for the meaningful surface reduction, before any optional crate promotion.
+
+**Why phases and not one big move:**
+
+1. **Shared visibility surface is dense.** A grep for `pub(crate) fn` in tsift-cli's lib.rs returns helpers like `rewrite_command`, `annotate_hits_with_tagpath`, `shell_split`, etc. that 30+ cmd functions touch. Lifting these into `output/` and `cli.rs` first means each command move thereafter is local — no re-traversal of "what else does this need."
+2. **Each phase is independently shippable and reversible.** If phase 2's `digests.rs` cluster turns out wrong, only that cluster reverts; phases 1a / 1b stay.
+3. **`tests/exit_code.rs` runs against the binary.** As long as each phase keeps the binary entrypoint stable, the existing 990-test workspace stays green per phase. One huge change risks one huge red.
+
+**What I'd recommend instead of `do [#split-tsift-cli-subcommands]` as one directive:**
+
+Replace it with 8 sequential backlog items (`#cli-extract-output`, `#cli-extract-cli-types`, `#cli-cluster-index-search`, `#cli-cluster-graph`, …). Queue them one at a time, review each landing, then proceed. I can stage that backlog now if you say so.
+
+**Also — root-tsift drain still wants to land first.** The CLAUDE.md backlog item literally reads "once root tsift is drained" as the trigger. We have ~9.7k LOC still in root (`diff_digest`, `impact`, `log_digest`, `metric_digest`, `sift`, `status`, `tagpath_adapter`, `test_digest`, `sim_world`). Landing `#split-tsift-digest` and `#split-tsift-search` first reduces the moving target for the CLI split — several cmd_ functions in tsift-cli call `tsift::diff_digest::*` / `tsift::summarize::*` and a per-command split rewrites those call sites. Doing the CLI split now means rewriting them twice.
+
+**Recommended sequencing:**
+
+1. `#split-tsift-digest` (4 modules, summarize-as-dep, no cycle)
+2. `#split-tsift-search` (3 modules: sift, impact, tagpath_adapter — depends on digest via impact)
+3. `status.rs` → tsift-cli (1 module, ~2k LOC, simple move)
+4. `#split-sim-world` resolution (delete or rehome)
+5. `#demote-root-tsift` (one-line PR)
+6. **Then** `#split-tsift-cli-subcommands` Phase 1a through Phase 2 (8 cycles)
+
+**What I need from you:**
+
+1. Confirm phased approach (or override with "just rip it, one mega-cycle").
+2. Confirm sequencing (or move CLI split ahead of root drain — I think you'll regret it, but it's your call).
+3. If you confirm phases, say "stage the 8 CLI backlog items" and I'll add them.
+
+**Reminder, fifth time:** session document is huge. `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/software/tsift.md --commit` before the next substantive cycle, please. The exchange replays cost more tokens each cycle.
+<!-- agent:boundary:10aecc78 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -429,7 +473,7 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#split-sim-world]~
 - ~do [#split-tsift-digest]~
@@ -439,14 +483,13 @@ preset #spec-test-build-install-commit-push
 - ~do [#split-tsift-quality]~
 - ~do [#split-tsift-search]~
 - ~do [#demote-root-tsift]~
-- do [#split-tsift-summarize]
+- ~do [#split-tsift-summarize]~
 - do [#split-tsift-cli-subcommands]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#split-tsift-cli-subcommands] [recommended] tsift-cli is ~39k LOC in a single lib.rs — propose per-command module split (cmd_search, cmd_index, cmd_graph, cmd_explain, etc.) once root tsift is drained, to make command surface independently testable
 - [ ] [#npm-auth-setup] Configure NPM_TOKEN secret + TSIFT_ENABLE_NPM_PUBLISH=true variable in GitHub repo settings
 - [ ] [#npm-publish-verify] After auth configured, tag release and verify publish-opencode-plugin CI job succeeds and opencode-tsift appears on npmjs.org
 - [ ] [#full-e2e-verify] In fresh project: opencode plugin opencode-tsift && opencode then /tsift-status. On success mark #e2e-install done.
@@ -455,6 +498,7 @@ preset #spec-test-build-install-commit-push
 ## Review
 
 <!-- agent:review -->
+- [/] [#split-tsift-cli-subcommands] [recommended] tsift-cli is ~39k LOC in a single lib.rs — propose per-command module split (cmd_search, cmd_index, cmd_graph, cmd_explain, etc.) once root tsift is drained, to make command surface independently testable
 - [/] [#demote-root-tsift] After all module splits land, demote root tsift crate to a thin re-export shim (or remove lib.rs entirely) — leave only the workspace root + binary metadata; verify external consumers (cargo install tsift) keep working
 - [/] [#split-tsift-search] Extract sift + summarize + impact + tagpath_adapter (~3.2k LOC) into tsift-search crate — depends on tsift-index + tsift-graph; covers search ranking, AST-aware summaries, impact analysis, and tagpath annotation surface
 - [/] [#split-tsift-digest] Extract diff_digest + log_digest + metric_digest + test_digest (~3.7k LOC) into tsift-digest crate — high-cohesion emitter group with shared serialization, schema versioning, and pruning patterns; minimal cross-deps

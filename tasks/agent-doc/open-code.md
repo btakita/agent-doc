@@ -325,7 +325,29 @@ This exhausts the clean zero/low-dependency leaf moves. What remains all hits re
 - `snapshot` → gated by **`git`** — and `git` transitively reaches the whole entangled cluster (`cycle_state` / `capture` / `repair` / `route` / `sync` / `start`).
 
 So the next increment is no longer mechanical. Per the plan's REVISION (operator decision needed), the realistic options are: **(A)** invert `snapshot`'s `git` dependency (pass a commit/hash interface in) so `snapshot` can sit below orchestration, then the cluster can follow; or **(B)** a deliberate big-bang move of the entire entangled cluster + `sessions`/`supervisor` in one large diff. The build-time payoff (CLI shell without tokio/reqwest/git2/etc.) only arrives once the heavy-dep cluster moves — the leaf moves so far shrink main but don't yet change its dependency tree. Recommend scheduling (A) or (B) deliberately rather than auto-queuing, since both are large single cycles.
-<!-- agent:boundary:a32a9eb9 -->
+❯ Do the big bang change.
+
+### Re: Do the big bang change — opus-4-7
+
+Done — the full Direction-A cluster migration landed green. Submodule `cc6be806`, superproject pointer `c92df0565`.
+
+#### What landed
+
+- **52 modules now in orchestration.** The entire entangled cluster (`snapshot`/`git`/`cycle_state`/`capture`/`repair`/`route`/`sync`/`start`) + `sessions`/`supervisor` + their neighbors (`run`/`stream`/`watch`/`compact`/`codex_hook`/`harness`/`project_controller`/`session_actor`/`session_check`/`preflight`/`prompt*`/`queue`/`gc`/`claim`/`focus`/`agent`/`flow`/… + `frontmatter_io`/`template_io`/`security`). `agent-doc` is now a CLI shell over orchestration over core.
+- **No body rewriting.** Orchestration mirrors the 5 core-backed lib shims (`component`/`crdt`/`frontmatter`/`project_config`/`template`) so every `crate::X` in the moved modules resolves intra-crate; `agent_doc::` lib-path refs were rewritten to `agent_doc_core::` (`model_tier`, `id`) / `crate::` (`debounce`, `merge`, `template`). The CLI shell keeps `pub use` shims so its ~100 call sites compile unchanged.
+- **Deps + build.rs.** Orchestration gained the heavy-dep union and a `build.rs` for `AGENT_DOC_BUILD_TIMESTAMP`.
+- **Cross-crate test fixtures (the tricky part).** `IsolatedTmux` re-imported from `tmux_router`; the CLI shell's `test_support` got its own crate-local `TEST_ENV_LOCK` (separate test binary); and `project_controller`'s in-process controller test short-circuits are now exposed through a new **`test-support` cargo feature** that the shell enables in `dev-dependencies` — this restores pre-extraction behavior for the one shell test (`session_actor_cmd … controller_lease …`) that depended on a moved `#[cfg(test)]` runtime shortcut. Source-inspection guard tests (`test_cli`, `debounce_gaps`, `full_content_static`) were repointed to the orchestration paths.
+
+#### Verification
+
+- `make check` green (clippy `-D warnings` + full suite, 600+ tests across all three crates) **modulo** the pre-existing live-tmux environmental test `codex_bare_run_inside_owning_pane_fails_before_nested_dispatch` (now in orchestration's test binary; failing identically at increments 4/5).
+- `cargo build --release` green; `nm -D libagent_doc.so` exports the full **39-symbol** `agent_doc_*` FFI surface intact (`ffi.rs` stays in the CLI shell lib).
+- One genuine regression found and fixed mid-cycle: the cross-crate `#[cfg(test)]` controller short-circuit (confirmed it passed at increment 5, failed after the move) → resolved with the `test-support` feature, not waived.
+
+#### Next — Wave 5 (the actual build-time payoff)
+
+The move itself does **not** yet change the CLI shell's dependency tree — `agent-doc` still depends on orchestration, which pulls all the heavy deps. Acceptance criteria #2–3 are delivered by Wave 5: prune the now-transitive-only direct deps from the CLI shell's `Cargo.toml`, measure the CLI-shell cold build, and record it in `COMPILE_BASELINE.md`. `#bz6s` stays open for that. Recommend running it as its own focused cycle.
+<!-- agent:boundary:fa89fde9 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -355,7 +377,7 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#bz6s] #adoc-orchestration-impl Implement agent-doc-orchestration extraction per tasks/agent-doc/plan-agent-doc-orchestration-extraction.md (DIRECTION A). DONE: scaffold + ipc_socket + env/fs_util/secret_redact + project_config_io + config + ops_log + input_diag (8 modules in orchestration; find_project_root in fs_util; orchestration carries its own cfg(test) test_support). NEXT: remaining sessions/supervisor closure (harness_prompt/test_support gated by codex_hook; prompt gated by sessions; snapshot gated by git) then cluster (cycle_state/capture/repair/git/route/sync/start). Zero/low-dep leaves are now exhausted — next is the snapshot->git keystone decouple or a deliberate big-bang cluster move. Each green-to-green with make check + nm -D gate.
+- [ ] [#bz6s] #adoc-orchestration-impl agent-doc-orchestration extraction per tasks/agent-doc/plan-agent-doc-orchestration-extraction.md (DIRECTION A) — BIG-BANG COMPLETE. 52 modules now in orchestration; 3-layer architecture (CLI shell -> orchestration -> core) done. CLI shell keeps pub use shims; new test-support cargo feature exposes project_controller's in-process test short-circuits to the shell's tests. make check green (clippy + 600+ tests) modulo the pre-existing live-tmux codex_bare_run; 39-symbol FFI surface intact. NEXT (Wave 5): prune now-transitive-only heavy deps from the CLI shell Cargo.toml (acceptance #2), measure CLI-shell cold build, record COMPILE_BASELINE.md (#3) — this is what delivers the build-time payoff.
 - [ ] [#yybc] #k9e1-ffi-mem POC follow-up: track the proven pattern (pub use agent_doc_core::ffi::* + force_link_core_ffi_symbols reference function in main) for future pure FFI relocations. POC moved agent_doc_free_string + agent_doc_free_state; nm verification confirmed symbols still in libagent_doc.so export table.
 - [ ] [#adcr] Extract agent-doc-core crate (~17K lines) — enables fast-compiling FFI/editor-plugin target independent of orchestration layer
 <!-- /agent:backlog -->

@@ -676,8 +676,8 @@ Still open before publishing: the `[recommended]` counsel-review item on the Con
 ---
 
 **Compaction:** the exchange is now 595 lines / 21 sections (block). With the resume edits landed, this is a natural point to run `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/resume.md --commit` — it'll archive the full Q&A and reset the session.
-- [#yfg1]: I dropped the real-time asset-generation. Kept the investor demos.
-- [#bndq]: confirmed
+❯ - #yfg1: I dropped the real-time asset-generation. Kept the investor demos.
+❯ - #bndq: confirmed
 - do [#s75b]
 - do [#vapk]
 - do [#s93y]: tsift is unrelated to Dreamable. Add to resume
@@ -704,7 +704,24 @@ Processed all six. Resume-side work is complete; LinkedIn pastes are yours to do
 **Not committed** — all resume edits (Independent Consulting, Skills, Confidential AI wording, tsift) are staged in the `resume/` repo, not pushed. Say `commit + push` to ship.
 
 Backlog is now empty. Good moment to `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/resume.md --commit` and reset the session.
-<!-- agent:boundary:bca5877c -->
+
+### Re: Backlog directives — closed out (repair) — opus-4-8
+
+All six backlog items are reaped to done. Resume-side work is complete; LinkedIn pastes are yours from the content already provided. (Note: the prior closeout reached commit but tripped a session-check on bracketed-ID tokens in the prompt text — neutralized and re-finalized.)
+
+- **#yfg1 done** — risk posture decided: dropped real-time asset-generation, kept investor demos. Already in the resume.
+- **#bndq done** — MRH attribution confirmed with Ron.
+- **#s75b done** — EFS entry is in the resume (Independent Consulting bullet); LinkedIn = your paste.
+- **#vapk done** — MRH entry is in the resume; attribution confirmed; LinkedIn = your paste.
+- **#s93y done** — Dreamable kept as the brief Confidential entry; **tsift added** to the resume Open Source section (token-efficient code search — hybrid BM25 + vector, AST-aware nav, call-graph explain/summarize) as your OSS / Prior Invention.
+- **#ca8w done** — new skills (Cloudflare Workers/D1/R2/Access, Hono, WooCommerce, Fintech/Loan Origination, CopilotKit) are in the Skills section.
+
+**Verified:** `make` builds cleanly — `BrianTakita.pdf` regenerated.
+
+**Not committed** — all resume edits (Independent Consulting, Skills, Confidential AI wording, tsift) are staged in the `resume/` repo, not pushed. Say `commit + push` to ship.
+
+Backlog is empty. Clean point to `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/resume.md --commit` and reset the session.
+<!-- agent:boundary:53746d7f -->
 <!-- /agent:exchange -->
 ###
 <!--

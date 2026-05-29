@@ -134,7 +134,43 @@ VERSIONS.md `Unreleased` updated with the `#cli-cluster-quality` entry. lib.rs n
 #### Top of backlog
 
 `[#cli-cluster-summarize]` — Phase 2: move `cmd_summarize` body (and helpers) into `packages/tsift-cli/src/commands/summarize.rs`. Single-function cluster, but the helper surface around extract/diff/stats may be larger than the body itself.
-<!-- agent:boundary:89719aa2 -->
+
+### Re: do [#cli-cluster-summarize] — opus-4-7
+
+Phase 2 cluster #4 done.
+
+#### What moved
+
+`cmd_summarize` (~281 LOC, single function but covers the full surface) → `packages/tsift-cli/src/commands/summarize.rs`. The body handles symbol lookup, file lookup, `--extract` with optional `--diff`, `--stats`, plus json/compact/human renderers.
+
+#### Visibility changes (mechanical)
+
+Promoted 11 helpers to `pub(crate)`:
+
+- Source discovery: `collect_source_files`, `resolve_extract_base`, `resolve_extract_scope`
+- Diff/extract: `summarize_diff_matches_scope`, `summarize_full_extract_deleted_summary_paths`
+- Cache/db access: `find_symbols_db_for_file`, `load_summarize_config`, `open_existing_summary_db_read_only`
+- Stats: `emit_summary_stats_warnings`
+- Formatting: `summarize_relative_file_path`, `truncate_for_compact`
+
+#### Verification
+
+- `cargo build -p tsift-cli` — clean, no new warnings
+- `make check` — green workspace-wide
+- `cargo install --path packages/tsift-cli` — `~/.cargo/bin/tsift` refreshed
+- `cargo build --release -p tsift-cli` — `target/release/tsift` refreshed
+
+#### Commits
+
+- tsift @ `afd0705` — `cli: Phase 2 — extract summarize command into commands/summarize.rs` (pushed)
+- agent-loop @ `007825b` — submodule pointer bump (pushed)
+
+VERSIONS.md `Unreleased` updated. lib.rs now ~35.5k LOC.
+
+#### Top of backlog
+
+`[#cli-cluster-infra]` — Phase 2: move `cmd_init`, `cmd_status`, `cmd_locks`, `cmd_sql`, `cmd_route`, `cmd_rewrite`, `cmd_convex_sync`, `cmd_graph_db_*`, `cmd_edit` bodies into `packages/tsift-cli/src/commands/infra.rs`. **Large cluster** — `cmd_graph_db*` alone is ~7 functions plus the `GraphDbExperimentalBackend` business-logic surface (which currently stays in lib.rs because Phase 1b deliberately left it).
+<!-- agent:boundary:0191f4e0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -151,7 +187,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#cli-cluster-graph]~
 - ~do [#cli-extract-tagpath-helpers]~
 - ~do [#cli-cluster-quality]~
-- do [#cli-cluster-summarize]
+- ~do [#cli-cluster-summarize]~
 - do [#cli-cluster-infra]
 - do [#cli-cluster-digests]
 - do [#npm-auth-setup]
@@ -162,7 +198,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#cli-cluster-summarize] Phase 2 — move cmd_summarize body (and helpers) into packages/tsift-cli/src/commands/summarize.rs.
 - [ ] [#cli-cluster-infra] Phase 2 — move cmd_init + cmd_status + cmd_locks + cmd_sql + cmd_route + cmd_rewrite + cmd_convex_sync + cmd_graph_db_* + cmd_edit bodies into packages/tsift-cli/src/commands/infra.rs.
 - [ ] [#cli-cluster-digests] Phase 2 — move cmd_diff_digest + cmd_log_digest + cmd_test_digest + cmd_metric_digest + cmd_session_digest + cmd_session_cost + cmd_session_review + cmd_context_pack bodies into packages/tsift-cli/src/commands/digests.rs. Depends on tsift-digest and tsift-session landing first.
 - [ ] [#npm-auth-setup] Configure NPM_TOKEN secret + TSIFT_ENABLE_NPM_PUBLISH=true variable in GitHub repo settings

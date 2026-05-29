@@ -30,85 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260529-001012.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260529-014716.md`*
 
 Compacted content:
-- Archived 12 response topic(s): #next-steps for crate split; do [#split-sim-world]; do [#split-tsift-digest]; 9 more
+- Archived 2 response topic(s): do [#cli-extract-output]; do [#cli-extract-output-envelope]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
-### Re: do [#cli-extract-output] — Phase 1a-i done, sub-phases queued — opus-4-7
-
-
-**Done — partial scope.** Extracted what's cleanly movable now; surfaced two sub-phases for the rest.
-
-**Phase 1a-i landed (commit `89b0f2c`):**
-
-- `packages/tsift-cli/src/output.rs` (new — ~115 LOC) — `OutputFormat`, `ResponseBudget`, `ResponseBudgetPreset`, `adaptive_response_budget`, `DEFAULT_BUDGET_ITEMS` / `DEFAULT_BUDGET_BYTES` / `DEFAULT_FOLLOW_UP_ITEMS`.
-- `packages/tsift-cli/src/lib.rs` — `mod output;` declaration + `use output::{...}` import block at the top; original definitions removed.
-- `VERSIONS.md` — `Unreleased` entry.
-
-**Why not all of Phase 1a in one cycle:**
-
-When I started, the backlog item listed four item-groups for Phase 1a:
-1. `OutputFormat` — moved ✓
-2. `ResponseBudget` / `ResponseBudgetPreset` / `adaptive_response_budget` — moved ✓
-3. `ToolEnvelope` + helpers — **not moved**
-4. `annotate_*_with_tagpath` family — **not moved**
-
-Items 3 and 4 are not flat moves:
-
-- `ToolEnvelope<'a, T: Serialize>` is constructed at ~40 sites in `lib.rs`. The struct itself is small, but moving it requires either making the inner fields `pub(crate)` (small breakage of encapsulation) or providing a constructor; either way, the move has to be paired with a sweep over the construction sites.
-- `annotate_hits_with_tagpath` (391 LOC alone) references `TagpathAnnotationDiagnostic`, which embeds `CommunityMemberAmbiguityDiagnostic`, which references `tsift::graph::CommunityResult`. None of those types are about output formatting — they're community-detection diagnostics that happen to flow through the annotation path. Co-locating them in `output.rs` would mis-place them; they probably want to land alongside the `cmd_communities` cluster in Phase 2 `#cli-cluster-graph`. Or `output/tagpath.rs` if you'd rather keep all annotation glue together.
-
-**Staged the two follow-on items:**
-
-| ID | Phase | Description |
-|---|---|---|
-| `#cli-extract-output-envelope` | 1a-ii | Move `ToolEnvelope*` + `TranscriptArtifactRef` into `output.rs` |
-| `#cli-extract-tagpath-helpers` | 1a-iii | Move annotate_*_with_tagpath + their helper diagnostics into `output/tagpath.rs` |
-
-After both land, `#cli-extract-output` is fully resolved. I marked `#cli-extract-output` done because Phase 1a-i was its only single-cycle slice; the follow-on items capture what was deferred and are tracked in the backlog now.
-
-**Commands run:**
-- `cargo build --release` — clean.
-- `cargo test --release --no-fail-fast --workspace` — **990 passed across 31 suites**.
-- `cargo install --path packages/tsift-cli` — installed `tsift 0.1.62`.
-
-**Repo state:**
-- tsift submodule HEAD: `89b0f2c cli: Phase 1a-i — extract output infra (ResponseBudget, OutputFormat, budget constants)` (pushed).
-- Superproject HEAD: `d071235d0 tsift: cli Phase 1a-i — extract output infra (submodule pointer)` (pushed).
-
-**Confidence:** high — workspace test sweep green, install verified.
-
-**Escalation:** none. The next queue item is `do [#cli-extract-cli-types]` (Phase 1b — lift clap CLI types). Independent of Phase 1a-ii / 1a-iii; safe to run next.
-
-### Re: do [#cli-extract-output-envelope] — opus-4-7
-
-
-**Done.** Phase 1a-ii landed at `ff332c8`.
-
-Rolled back the in-flight Phase 1b draft (cli.rs creation + lib.rs imports) when you re-queued the deferred items; respecting the new order.
-
-**Moved into `packages/tsift-cli/src/output.rs`:**
-- `ToolEnvelopeMetric`
-- `ToolEnvelopeSummary`
-- `ToolEnvelope<'a, T: Serialize>`
-- `TranscriptArtifactRef`
-
-Fields promoted to `pub` (they're constructed at ~40 sites in lib.rs; alternative would be a `new()` constructor per type). Module doc comment updated.
-
-**Commands run:**
-- `cargo build --release` — clean.
-- `cargo test --release --no-fail-fast --workspace` — **990 passed across 31 suites**.
-- `cargo install --path packages/tsift-cli` — `tsift 0.1.62` installed.
-
-**Repo state:**
-- tsift submodule HEAD: `ff332c8` (pushed).
-- Superproject HEAD: `0fcf36cb1` (pushed).
-
-**Confidence:** high. **Escalation:** none. Next queue head is `do [#cli-extract-tagpath-helpers]` (Phase 1a-iii).
-What are #next-steps? Please order the queue and backlog by priority.
-<!-- agent:boundary:8ca641b4 -->
+<!-- agent:boundary:3f3e4d80 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -117,17 +44,19 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- ~do [#cli-extract-output]~
-- do [#cli-extract-tagpath-helpers]
 - do [#cli-extract-cli-types]
 - do [#cli-cluster-index-search]
 - do [#cli-cluster-graph]
-- do [#cli-cluster-digests]
+- do [#cli-extract-tagpath-helpers]
 - do [#cli-cluster-quality]
 - do [#cli-cluster-summarize]
 - do [#cli-cluster-infra]
+- do [#cli-cluster-digests]
+- do [#npm-auth-setup]
+- do [#npm-publish-verify]
+- do [#full-e2e-verify]
 <!-- /agent:queue -->
 
 ## Backlog

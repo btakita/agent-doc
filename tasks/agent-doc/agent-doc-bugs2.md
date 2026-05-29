@@ -53,7 +53,17 @@ What I verified statically (grounds the gate):
 What still needs you (the live part): install `agent-doc-jetbrains-0.2.137-signed.zip`, open a `.md` doc whose tmux pane is NOT up (e.g. corky.md), invoke Load Tmux Window, and confirm it spawns/attaches the pane and starts the harness. If it fails to spawn in that case, capture route/sync logs and file a separate autostart bug.
 
 Keeping `#jb-load-tmux-window-verify` open + gated awaiting that live confirmation.
-<!-- agent:boundary:5ff915b3 -->
+
+### Re: do [#queue-head-consume-on-topic-id-regression] — opus-4-8
+
+Fixed and committed. Root cause: `#queue-strike-on-halt` (submodule `baa44a37`) over-narrowed queue-head consumption — it removed the heading-based consumption path from the finalize/`write` flow **and** collapsed `response_topic_matches_queue_head` to exact full-text only. That broke consumption whenever a response heading targets the head's id exactly.
+
+**Fix (submodule `7541af22`):**
+- **finalize/`write` path** — new `response_targets_synthetic_queue_head_id`: a *synthetic/preset* head (a prompt carrying a trailing `#preset` id, not a bare `do [#id]` directive) is consumed when the response heading resolves to **exactly** the head id (e.g. `### Re: #spec-test-build-install-commit-push`). Bare `do [#id]` heads still require an explicit `--done`/`--pending-gate`/`--pending-edit` flag, so strike-on-halt is preserved.
+- **Codex Stop-hook path** — `response_topic_matches_queue_head` now also matches a topic that resolves to exactly the head id (`### Re: #fix1` for head `do #fix1`), not only exact full text. Trailing modifiers (`#id halt`/`#id deferred`) still never match.
+
+**Verification:** both previously-RED tests now pass — `finalize_consumes_synthetic_queue_prompt_when_response_topic_targets_head_id` and `codex_hook::stop_auto_closes_open_cycle_then_blocks_for_next_auto_queue_head` (the latter was the same regression in the Codex path, also red at clean HEAD). Added unit coverage for the bare-do-directive detector and exact-id resolver. `make check` green (clippy + full suite). Both binaries rebuilt+installed. SPEC.md + specs/07-orchestration-commands.md aligned. Submodule pushed; superproject pointer bumped (`33672c0b6`). CI run `26667229199` triggered (prior two were RED on this regression) — watching for green.
+<!-- agent:boundary:9d44a0e5 -->
 <!-- /agent:exchange --> 
 ###
 <!--
@@ -77,7 +87,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#jb-load-tmux-window-verify]~
-- do [#queue-head-consume-on-topic-id-regression]
+- ~do [#queue-head-consume-on-topic-id-regression]~
 - do [#route-busy-vs-starting-wording]
 - do [#codex-queue-head-exact-heading-guidance]
 - do [#backlog-auto-marker-misfire]
@@ -91,7 +101,6 @@ preset #spec-test-build-install-commit-push
 
 <!-- agent:backlog -->
 - [ ] [#ipcfullprompt-recur2] CURE ONLY (capture/detection split out to #ipcfullprompt-capture, done). Editor-side PatchWatcher.setText PREVENTION: stop the live editor buffer from producing full-document/full-tail duplication or deletion while a prompt is being typed. Gated on the transport/payload packet from idea.log (enable #com.github.btakita.agentdoc debug logging) to pin the exact setText call shape. Add a SimWorld/Kotlin regression for the prevention once the fix lands; bump pluginVersion past 0.2.137 and reinstall the signed plugin. Stays open until prevention lands and is live-verified. Plan: tasks/agent-doc/plan-full-document-ipc-corruption-typing-prompt.md.
-- [ ] [#queue-head-consume-on-topic-id-regression] CI + make check RED on main (run 26662056181; reproduces at clean HEAD 2a6f60e5 with zero working-tree changes; CI was green on run 26653786056 so it went red recently): tests/finalize_integration.rs::finalize_consumes_synthetic_queue_prompt_when_response_topic_targets_head_id FAILS. A finalize response heading '### Re: #spec-test-build-install-commit-push' that targets queue head preset id #spec-test-build-install-commit-push logs '[queue] skipped consumption because the active prompt did not target the queue head' instead of '[queue] consumed'; head not drained, queue_active stays true. Pre-existing, separate from #prompt-duplicated-while-typing. Bisect the commit that turned it red and restore response-topic-targets-head-id consumption.
 - [ ] [#route-busy-vs-starting-wording] [recommended] route.rs starting-actor FailClosed reports 'still starting (waited Ns for claude startup)' even when the pane is busy on an active turn (live capture: pane %33 showed '· Roosting… (Ns · …)' spinner + '⏵⏵ … · N shell'). Distinguish 'busy on an active turn' from 'cold starting' in the error via a Claude busy-cue on the active-turn spinner. Fragile (random gerund; 'esc to interrupt' vs 'thinking with high effort') — UX-only, low priority. Ground truth + analysis: tasks/agent-doc/plan-jb-stale-busy-idle-footer.md.
 - [ ] [#codex-queue-head-exact-heading-guidance] [recommended] After #queue-strike-on-halt narrowed the Codex Stop-hook heading-match to exact-topic only, a Codex auto-loop completion with a descriptive heading (### Re: <descriptive topic>) no longer auto-consumes the queue head — only an exact ### Re: do [#id] heading does. Add SKILL.md / harness-invocation guidance telling Codex auto-loop completions to title the response heading exactly with the queue head prompt (or emit an explicit done signal), and live-verify a Codex auto-queue still advances across items. Plan: tasks/agent-doc/plan-queue-strike-on-halt-response.md.
 - [ ] [#backlog-auto-marker-misfire] The 'auto' attribute on the agent:backlog marker (queue-only attribute) misfired an auto-run that destructively rewrote the backlog — minted new IDs wrapping 'do [#...]' stubs of already-done items; user reported original task text lost and recovery needed git/sidecar archaeology. Fix: reject 'auto'/unknown attrs on agent:backlog (warn, no mutation); auto-loop must trigger only from the queue 'auto' attribute; never rewrite committed backlog item text in an auto-run. Plan: tasks/agent-doc/plan-backlog-auto-marker-misfire.md. DO NOT IMPLEMENT.

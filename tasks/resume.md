@@ -548,7 +548,29 @@ Shorter variant for the LinkedIn position description:
 ```
 
 This also reinforces your **agent tooling / code-analysis** positioning (ties back to tsift and the agent-doc/agent-kit line in your Open Source section), so it strengthens the resume narrative beyond just this one role. Same confidentiality caveat — it describes the *tools you built*, not their product.
-<!-- agent:boundary:d8d10dae -->
+❯ Please rank the 3 jobs by relevance and impression.
+
+### Re: Ranking the 3 consulting jobs by relevance + impression — opus-4-8
+
+Ranked for a senior AI/full-stack engineering audience (recruiters, eng hiring managers):
+
+#### 1. Confidential AI Startup — *highest relevance + impression*
+- **Why #1:** Real-time AI systems, Rust, LiveKit/WebRTC, agent-harness tooling — this is exactly the high-demand, hard-to-hire profile. Strongest signal even though it's the shortest and confidentiality-limited.
+- **Caveat:** the "Confidential" label slightly dampens impression (no logo, no verifiable product). The skills carry it anyway.
+
+#### 2. Equity Funding Source — *high relevance, strong impression*
+- **Why #2:** Greenfield full-stack platform on a modern edge stack (Cloudflare Workers/D1/R2), real shipped product with a live URL, multi-role auth, OCR pipeline design. Concrete, verifiable, end-to-end ownership — recruiters love "architected and shipped from scratch."
+- **Edges out as #1 for fintech/full-stack roles specifically.** Drops to #2 for pure-AI roles.
+
+#### 3. MonsterRodHolders.com — *lower relevance, solid impression for the right roles*
+- **Why #3:** WordPress/WooCommerce + Google Ads/SEO is narrower and reads as "agency/marketing-ops" rather than product engineering. Still impressive *work* (security RCA, conversion-tracking overhaul, measurable ad-waste savings) — but for senior AI/platform roles it's the least on-target.
+- **Strongest for:** e-commerce, WordPress agency, or growth-engineering roles, where it would jump to #1.
+
+#### Takeaway for ordering on the page
+Within the single **Independent Consulting** entry, list them **EFS → Confidential AI → MonsterRodHolders** (your current order). EFS first because it's verifiable and concrete; Confidential AI second because it's strong but unnamed; MRH last. That ordering front-loads credibility while still leading with modern-stack signal.
+
+If you're targeting AI-first roles, swap to **Confidential AI → EFS → MRH** to lead with the AI signal.
+<!-- agent:boundary:32659982 -->
 <!-- /agent:exchange -->
 ###
 <!--

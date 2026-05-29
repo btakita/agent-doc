@@ -6858,10 +6858,13 @@ mod tests {
             .output()
             .unwrap();
 
+        // Genuine replay residue carries the `❯ ` answered-form marker — that is
+        // the ownership proof that lets the scrub remove it without eating a live
+        // re-typed prompt (#ipcfullprompt-recur).
         let live = snapshot.replace(
             "<!-- agent:boundary:head -->\n<!-- /agent:exchange -->",
             &format!(
-                "<!-- agent:boundary:head -->\n{prompt}\n#spec-test-build-install-commit-push\n<!-- /agent:exchange -->"
+                "<!-- agent:boundary:head -->\n❯ {prompt}\n❯ #spec-test-build-install-commit-push\n<!-- /agent:exchange -->"
             ),
         );
         std::fs::write(&doc, live).unwrap();
@@ -6870,8 +6873,8 @@ mod tests {
 
         let file_after = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            !file_after.contains(&format!("\n{prompt}\n#spec-test-build-install-commit-push")),
-            "preflight should scrub duplicate answered prompt tails before diffing:\n{file_after}"
+            !file_after.contains(&format!("head -->\n❯ {prompt}\n❯ #spec-test-build-install-commit-push")),
+            "preflight should scrub duplicate answered-form prompt tails before diffing:\n{file_after}"
         );
         assert!(
             file_after.contains("Keep this scratch note."),
@@ -6879,7 +6882,7 @@ mod tests {
         );
         let snapshot_after = crate::snapshot::load(&doc).unwrap().unwrap();
         assert!(
-            !snapshot_after.contains(&format!("\n{prompt}\n#spec-test-build-install-commit-push")),
+            !snapshot_after.contains(&format!("head -->\n❯ {prompt}\n❯ #spec-test-build-install-commit-push")),
             "snapshot must not absorb the duplicate tail cleanup prompt"
         );
     }

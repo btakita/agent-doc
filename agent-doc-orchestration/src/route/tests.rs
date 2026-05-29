@@ -357,6 +357,9 @@ fn route_preserves_scratch_comment_when_response_quotes_same_text() {
 #[test]
 fn route_scrubs_duplicate_answered_prompt_tail_before_dispatch() {
     let prompt = "The content of the html comment below this agent:exchange element was deleted after the last agent-doc turn. Should we diff line by line?";
+    // Genuine delayed replay re-adds the just-answered prompt in answered form
+    // (carrying the `❯ ` marker) — that is the ownership proof that lets route
+    // scrub it safely.
     let content = format!(
         concat!(
             "---\nagent_doc_format: template\n---\n\n",
@@ -366,8 +369,8 @@ fn route_scrubs_duplicate_answered_prompt_tail_before_dispatch() {
             "### Re: mixed scratch comment deletion — gpt-5\n\n",
             "Answered already.\n",
             "<!-- agent:boundary:head -->\n",
-            "{prompt}\n",
-            "#spec-test-build-install-commit-push\n",
+            "❯ {prompt}\n",
+            "❯ #spec-test-build-install-commit-push\n",
             "<!-- /agent:exchange -->\n"
         ),
         prompt = prompt
@@ -386,8 +389,31 @@ fn route_scrubs_duplicate_answered_prompt_tail_before_dispatch() {
         "answered prompt block must remain in exchange history:\n{cleaned}"
     );
     assert!(
-        !cleaned.contains(&format!("<!-- agent:boundary:head -->\n{prompt}")),
-        "route must not dispatch with duplicate raw prompt text after the boundary:\n{cleaned}"
+        !cleaned.contains(&format!("<!-- agent:boundary:head -->\n❯ {prompt}")),
+        "route must not dispatch with duplicate answered-form prompt after the boundary:\n{cleaned}"
+    );
+}
+
+#[test]
+fn route_preserves_unprefixed_live_prompt_matching_an_answered_prompt() {
+    // Regression for #ipcfullprompt-recur: a freshly-typed prompt that happens to
+    // match a previously-answered prompt (e.g. a re-typed "go") has no `❯ ` marker
+    // and MUST be preserved for dispatch — never scrubbed as duplicate residue.
+    let content = concat!(
+        "---\nagent_doc_format: template\n---\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "❯ go\n",
+        "### Re: go — gpt-5\n\n",
+        "Did the thing.\n",
+        "<!-- agent:boundary:head -->\n",
+        "go\n",
+        "<!-- /agent:exchange -->\n",
+    );
+
+    let cleanup = scrub_duplicate_prompt_comments_for_route(content, &[]).unwrap();
+    assert!(
+        cleanup.is_none(),
+        "a bare re-typed prompt must not be scrubbed: {cleanup:?}"
     );
 }
 

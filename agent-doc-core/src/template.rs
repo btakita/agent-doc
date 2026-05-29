@@ -1154,8 +1154,10 @@ fn post_exchange_comment_line_preserve_set(doc: &str) -> HashSet<String> {
 ///
 /// This covers delayed route/editor replay that re-adds the just-answered
 /// prompt after closeout. The cleanup is intentionally narrow: every
-/// non-comment tail line must match a contiguous prompt block immediately before
-/// an existing response heading.
+/// non-comment tail line must (a) carry the `❯ ` answered-form marker — proof it
+/// is a copy of an answered prompt rather than a freshly-typed live prompt — and
+/// (b) match a contiguous prompt block immediately before an existing response
+/// heading. A bare unprefixed post-boundary prompt is always preserved.
 pub fn remove_duplicate_answered_exchange_prompt_tail(doc: &str) -> Option<String> {
     let components = component::parse(doc).ok()?;
     let exchange = components
@@ -1213,6 +1215,17 @@ fn duplicate_exchange_tail_prompt_lines(lines: &[(usize, usize, &str)]) -> Optio
             continue;
         }
         if is_exchange_turn_heading(trimmed) {
+            return None;
+        }
+        // Ownership proof: only an answered-form line (carrying the `❯ ` prompt
+        // marker) can be delayed-replay residue, because the marker is added by
+        // the answer/normalize cycle, never by a user typing a fresh prompt. A
+        // bare, unprefixed post-boundary line is a LIVE prompt the user just
+        // typed — even when its text matches a previously-answered prompt (e.g.
+        // a re-typed "go"/"yes"/"continue") — and must never be scrubbed.
+        // Without this guard the text-only match silently ate live prompts
+        // (#ipcfullprompt-recur: "go" on monsterrodholders.md).
+        if !trimmed.starts_with('❯') {
             return None;
         }
         prompt_lines.push(normalize_duplicate_exchange_prompt_line(trimmed)?);
@@ -5118,8 +5131,8 @@ Existing answer.
                 "### Re: mixed scratch comment deletion — gpt-5\n\n",
                 "Answered already.\n",
                 "<!-- agent:boundary:head -->\n",
-                "{prompt}\n",
-                "#spec-test-build-install-commit-push\n",
+                "❯ {prompt}\n",
+                "❯ #spec-test-build-install-commit-push\n",
                 "<!-- /agent:exchange -->\n"
             ),
             prompt = prompt
@@ -5135,8 +5148,8 @@ Existing answer.
             "answered prompt block must remain in exchange history:\n{repaired}"
         );
         assert!(
-            !repaired.contains(&format!("<!-- agent:boundary:head -->\n{prompt}")),
-            "duplicate raw prompt tail after the boundary should be removed:\n{repaired}"
+            !repaired.contains(&format!("<!-- agent:boundary:head -->\n❯ {prompt}")),
+            "duplicate answered-form prompt tail after the boundary should be removed:\n{repaired}"
         );
         assert!(
             repaired.contains("<!-- agent:boundary:head -->\n<!-- /agent:exchange -->"),
@@ -5590,5 +5603,51 @@ Existing answer.
             "-->\n"
         );
         guard_no_conversation_tail_outside_exchange(doc).unwrap();
+    }
+
+    #[test]
+    fn remove_duplicate_answered_tail_scrubs_prefixed_replay_residue() {
+        // Answered-form residue (carries `❯ `) re-added below the boundary is
+        // safely removable replay residue.
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ go\n",
+            "### Re: go — gpt-5\n\n",
+            "Did the thing.\n",
+            "<!-- agent:boundary:head -->\n",
+            "❯ go\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let cleaned = remove_duplicate_answered_exchange_prompt_tail(doc)
+            .expect("prefixed answered-form residue should be scrubbed");
+        assert!(
+            !cleaned.contains("head -->\n❯ go"),
+            "answered-form residue tail must be removed:\n{cleaned}"
+        );
+        assert!(
+            cleaned.contains("❯ go\n### Re: go"),
+            "answered history must be preserved:\n{cleaned}"
+        );
+    }
+
+    #[test]
+    fn remove_duplicate_answered_tail_preserves_unprefixed_live_prompt() {
+        // #ipcfullprompt-recur: a freshly-typed prompt (no `❯ `) that matches a
+        // previously-answered prompt is a LIVE prompt and must never be scrubbed.
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ go\n",
+            "### Re: go — gpt-5\n\n",
+            "Did the thing.\n",
+            "<!-- agent:boundary:head -->\n",
+            "go\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        assert!(
+            remove_duplicate_answered_exchange_prompt_tail(doc).is_none(),
+            "a bare re-typed live prompt must be preserved"
+        );
     }
 }

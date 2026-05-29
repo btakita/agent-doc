@@ -30,91 +30,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260529-080122.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260529-151416.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #next-steps for the three JB Run Agent Doc / Clear errors
+- Archived 4 response topic(s): do [#prompt-duplicated-while-typing]; do [#ipcfullprompt-recur]; I upgraded the JB plugin; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#ipcfullprompt-recur]. #spec-test-build-install-commit-push
-### Re: do [#prompt-duplicated-while-typing] — investigation (gated, not a speculative fix) — opus-4-8
-
-I will not ship a fabricated fix for this one. I did a full static root-cause pass and **ruled out every obvious duplicator** — the native pipeline cannot double a post-boundary prompt on its own:
-
-| Suspected path | Verdict from code |
-|----------------|-------------------|
-| Native boundary reposition (`template.rs`) | **idempotent** — `remove_all_boundaries()` then re-append one marker; can't duplicate |
-| Rust synthesis (`build_ipc_patches_json`, write.rs) | dedup-guarded; synthesizes *agent* content, skips if already present |
-| Editor append (`applyComponentPatchNative`) | `appendPatchAlreadyPresentUtil` + `patchReplayAlreadyPresentUtil` short-circuit re-delivery |
-| Disk-vs-buffer reposition source (`shouldPreferCommittedDiskContentForRepositionUtil`) | prefers disk **only** when normalized editor==disk, so it won't drop/recompute over freshly-typed post-boundary text |
-| EDT apply race | `EditorApplyProof(content, modStamp)` re-checked inside `WriteCommandAction`, rejects mid-apply edits |
-
-**Conclusion:** this is a live EDT-timing race (a patch computed against a buffer snapshot whose `normalizeExchangePrefixes` re-incorporates the typed prompt, overlapping another in-flight apply/reposition for the same cycle within a window the modStamp proof doesn't distinguish). It is **not** reproducible through the deterministic native pipeline, so I can't write a trustworthy regression test or a confirmed fix from static analysis alone.
-
-Per the project's own gates — *no hallucinating under uncertainty*, *manual testing gate*, *verify live system after fix* — the right move is to **capture the race before fixing it**, not to ship a speculative collapse-guard that may never fire or may eat legitimate content.
-
-**Ironically, this very turn reproduced the contention live:** my `finalize` hit `IPC timeout (2s) → CRDT merge → visible write deferred → exit 75` while you were typing `#ipcfullprompt-recur` into the buffer. Same IPC-contention-during-typing window, captured in the runtime log.
-
-**Done this turn:**
-- Ruled-out paths + sharpened hypothesis recorded in `tasks/agent-doc/plan-prompt-duplicated-while-typing.md` (commit `c1b6080b6`).
-- Concrete next step set: temporary `PatchWatcher` instrumentation logging `patch_id` + pre/post post-boundary user-region on every `setText`, reproduce in IntelliJ while typing during an in-flight write-back, freeze the captured trace into a deterministic test, then implement Option A against the proven path.
-
-**Why gated, not done:** no code fix landed — a safe fix needs the live capture above (instrumentation requires a running IntelliJ session I can't drive headless). `#prompt-duplicated-while-typing` is gated so the queue won't re-attempt it as a fresh `do`. `#ipcfullprompt-recur` (your new backlog item, left open) is the closely-related full-document-IPC-corruption recurrence — same IPC-during-typing root family; both should be tackled together with the instrumentation-first approach.
-❯ do [#exchange-prompt-dropped-on-merge]. #spec-test-build-install-commit-push
-### Re: do [#ipcfullprompt-recur] — Option 2 + instrumentation (gated) — opus-4-8
-
-Did Option 2 with the additional logging you asked for. Since the corruption isn't reliably reproducible, I instrumented every whole-buffer mutation/adoption seam so the **next** real occurrence is captured automatically — rather than ship a speculative fix.
-
-**Audit first (binary guards already comprehensive).** Both IPC transports already route through fail-closed guards — `guard_ipc_snapshot_adoption_against_live_prompt_drift` + `..._against_prompt_duplication` at the socket *and* file adoption paths in `write.rs`. They demonstrably work (they're why my earlier turn deferred + exited 75 instead of corrupting). The gap was **observability of the paths that proceed**.
-
-**Instrumentation landed:**
-- **Binary (`write.rs`):** new `log_ipc_snapshot_adoption_allowed` after the guards on both transports. Previously only *blocked* adoptions logged; *allowed* ones were silent. Now every adoption emits `ipc_snapshot_adoption_blocked` **or** `ipc_snapshot_adoption_allowed` with `snap_source`, snapshot/content_ours len+hash, and an independent `drift_recheck`/`dup_growth_recheck`. A non-benign re-check on an *allowed* line is a smoking gun for a guard-coverage gap.
-- **JetBrains (`PatchWatcher.kt`, v0.2.135):** `documentMutationDiagnosticUtil` logged at every editor-visible `setText` (`applyPatch.component`, `repositionBoundary`) — op, patch_id, transport, pre/post fingerprint, mod-stamp, idle, and the **post-boundary user-region length pre vs post** with `user_region_changed`. That flag is the direct prompt-duplication/deletion signal.
-
-**Verification:** `make check` green (incl. FlowCore token-budget gate); new Rust tests (`ipc_snapshot_adoption_allowed_*`) and Kotlin tests (`DocumentMutationDiagnosticTest`) pass; both binaries rebuilt; JB plugin v0.2.135 built + signed.
-
-**How to capture the packet now** (next time it happens in IntelliJ): `idea.log` shows `[patch-watcher] document-mutation … user_region_changed=true` for the offending `setText`, and `.agent-doc/logs/ops.log` shows the paired `ipc_snapshot_adoption_(allowed|blocked)` line with the content shape. That pinpoints transport + payload → drives the SimWorld regression + real fix.
-
-**Committed + pushed:** submodule `be0d5297` → `origin/20260422/codex-agent-backend`; superproject `cf64e89e6` (pointer + plan) → `origin/main`. **Install the v0.2.135 JB plugin** (`editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.135-signed.zip`) to get the editor-side diagnostics live.
-
-**Why gated, not done:** this is instrumentation, not a behavioral fix — acceptance needs a captured packet + the resulting SimWorld regression. Reproduce once with the new logging and share `idea.log` + `ops.log`, and I'll land the real fix against the proven path.
-❯ I upgraded the JB plugin.
-
-### Re: I upgraded the JB plugin — diagnostics are live — opus-4-8
-
-Good — v0.2.135 means the editor-side instrumentation is now active, and a responsive IPC plugin should also clear the editor-buffer-vs-disk closeout blocker we kept hitting (this cycle committing cleanly is the proof).
-
-**What's now capturing**, with no further action from you:
-- **Editor (`idea.log`):** every visible `setText` logs `[patch-watcher] document-mutation op=… patch_id=… transport=… pre=… post=… user_region_changed=…`. `user_region_changed=true` on a `repositionBoundary`/`applyPatch.component` line is the direct prompt-duplication/deletion signal.
-- **Binary (`.agent-doc/logs/ops.log`):** every IPC snapshot adoption now logs `ipc_snapshot_adoption_allowed` or `ipc_snapshot_adoption_blocked` with `snap_source` + len/hash + `drift_recheck`/`dup_growth_recheck`.
-
-**When `#ipcfullprompt-recur` (or the prompt-duplication sibling) next fires:** grab the `[patch-watcher] document-mutation … user_region_changed=true` line from `idea.log` plus the paired `ipc_snapshot_adoption_*` line from `ops.log` for the same patch_id, and send them over. That pins the transport + payload, and I'll land the real fix + a frozen SimWorld regression against the proven path.
-
-To confirm the editor diagnostics are wired, you can enable debug logging for the category if needed: **Help → Diagnostic Tools → Debug Log Settings →** add `#com.github.btakita.agentdoc`. The `document-mutation` lines log at INFO so they should appear in `idea.log` regardless.
-
-Both gated items (`#ipcfullprompt-recur`, `#prompt-duplicated-while-typing`) stay parked until a captured packet arrives.
-❯ agent-doc on monsterrodholders.md still ate the prompt "go".
-❯ #spec-test-build-install-commit-push
-
-### Re: agent-doc ate the prompt "go" — root cause found + fixed — opus-4-8
-
-The instrumentation paid off — it caught the real cause, and it was **not** where any of the plans suspected (not a PatchWatcher `setText`, not the IPC snapshot guard — those fired and recovered correctly). idea.log had the smoking gun:
-
-```
-[route] removed duplicate answered prompt tail after exchange boundary in tasks/monsterrodholders.md
-```
-
-**Root cause (binary route path, not the editor).** `route.rs::scrub_duplicate_prompt_comments_for_route` → `template::remove_duplicate_answered_exchange_prompt_tail` deletes a post-boundary prompt when it text-matches an earlier answered prompt. And `normalize_duplicate_exchange_prompt_line` **strips the `❯` marker** before comparing — so your freshly-typed `go` (unprefixed) matched a previously-answered `❯ go` and was silently deleted. `go`/`yes`/`continue` are exactly the short prompts that recur, so it fired easily. The binary IPC guards never even saw it; the prompt was gone before dispatch.
-
-**Fix.** `duplicate_exchange_tail_prompt_lines` now requires every tail line to carry the `❯ ` answered-form marker before it can be scrubbed as replay residue. That marker is added only by the answer/normalize cycle — never by a user typing a fresh prompt — so it's the ownership proof the plan demanded. A bare unprefixed post-boundary prompt is now **always preserved and dispatched**. Worst case for genuine residue that somehow lost its marker: it gets re-dispatched (recoverable), never deleted (data loss).
-
-**Verification (deterministic — no live repro needed for this one):**
-- `make check` green. New tests: core `remove_duplicate_answered_tail_preserves_unprefixed_live_prompt` (the `go` regression) + `..._scrubs_prefixed_replay_residue`; route `route_preserves_unprefixed_live_prompt_matching_an_answered_prompt`; updated the route/preflight/normalize fixtures to model real answered-form (prefixed) residue.
-- `cargo install` + `cargo build --release` — both binaries rebuilt, so the fix is live for new route dispatches.
-
-**Committed + pushed:** submodule `bb99c4f0` → `origin/20260422/codex-agent-backend`; superproject `ad1286552` (pointer + plan) → `origin/main`.
-
-Marking `#ipcfullprompt-recur` **done** — this was the data-loss cause and it's fixed with a regression test that will catch any recurrence. The v0.2.135 diagnostics stay in place to catch any *other* whole-buffer facet (stray `###`, stuck capture), which the binary guards already fail-closed + recover. If `go` still vanishes after this, that diagnostic pair will tell us immediately — but the regression test says it won't.
-<!-- agent:boundary:89c7df16 -->
+<!-- agent:boundary:1d43ad4d -->
 <!-- /agent:exchange -->
 ###
 <!--

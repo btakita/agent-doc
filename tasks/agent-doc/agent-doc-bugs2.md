@@ -165,7 +165,19 @@ If you want closure on the completed work without losing the open bug, I can **s
 - Keep **`#ipcfullprompt-recur2`** open, narrowed to the **cure only** (the `PatchWatcher.setText` prevention + SimWorld regression), gated on the editor packet.
 
 Say the word and I'll do that split. Otherwise `#ipcfullprompt-recur2` stays open as-is. Either way, I'm not marking the corruption fixed while it can still occur.
-<!-- agent:boundary:8a54e4be -->
+❯ split it
+
+### Re: split it — opus-4-8
+
+Done — split recorded.
+
+- **`#ipcfullprompt-capture` → done.** The forensic detection/preservation that shipped this session (response-block + scaffold detectors, fail-closed IPC guards, live brandon-cinquegrana.md capture). Reaped to the done archive.
+- **`#ipcfullprompt-recur2` → narrowed to the cure only.** Now tracks just the editor-side `PatchWatcher.setText` prevention + its SimWorld/Kotlin regression, gated on the `idea.log` transport packet. It stays open until prevention lands and is live-verified — the corruption can still occur, it is only captured now.
+
+No code or detector behavior changed this cycle; this is a backlog bookkeeping split so the finished work is recorded as done without falsely closing the still-reproducible bug.
+
+`#jb-load-tmux-window-verify` is now queued — it is a live IntelliJ install + verify task (signed plugin, focused-doc autostart check), so it runs when you drive the queue, not as part of this split.
+<!-- agent:boundary:75bd7b0a -->
 <!-- /agent:exchange --> 
 ###
 <!--
@@ -192,6 +204,7 @@ preset #spec-test-build-install-commit-push
 - do [#route-busy-vs-starting-wording]
 - do [#codex-queue-head-exact-heading-guidance]
 - do [#backlog-auto-marker-misfire]
+- do [#jb-load-tmux-window-verify]
 - do [#pending-add-append-not-prepend]
 - do [#next-steps-backlog-capture]
 - do [#run-agent-doc-stale-busy-replay]
@@ -201,7 +214,7 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#ipcfullprompt-recur2] CAPTURE IMPLEMENTED + EXTENDED. (1) Default-on forensic detector (submodule 5ba20b7c): detect_response_block_corruption + write.rs IPC-adoption hooks → .agent-doc/logs/ops.log + .agent-doc/logs/ipcfullprompt/. (2) Extended for the full-tail scaffold-duplication shape (submodule dcf20f33, pointer 597ec5b19): detect_duplicated_scaffold flags any canonical structural marker (>1 on its own line) — reproduced live at brandon-cinquegrana.md (two agent:exchange close markers around an in-progress prompt 'Can it be re' / 'Can it be rep11ro'; the response-block detector missed it; preserved at .agent-doc/logs/ipcfullprompt/manual-20260529-brandon-{baseline,candidate}.md; working tree restored to HEAD). Binary IPC guards verified fail-closed — corruption stayed uncommitted. STILL OPEN: editor-side PatchWatcher.setText PREVENTION needs the transport/payload packet from idea.log (enable #com.github.btakita.agentdoc debug logging); detection/capture is now comprehensive (response-block + scaffold). Plan: tasks/agent-doc/plan-full-document-ipc-corruption-typing-prompt.md.
+- [ ] [#ipcfullprompt-recur2] CURE ONLY (capture/detection split out to #ipcfullprompt-capture, done). Editor-side PatchWatcher.setText PREVENTION: stop the live editor buffer from producing full-document/full-tail duplication or deletion while a prompt is being typed. Gated on the transport/payload packet from idea.log (enable #com.github.btakita.agentdoc debug logging) to pin the exact setText call shape. Add a SimWorld/Kotlin regression for the prevention once the fix lands; bump pluginVersion past 0.2.137 and reinstall the signed plugin. Stays open until prevention lands and is live-verified. Plan: tasks/agent-doc/plan-full-document-ipc-corruption-typing-prompt.md.
 - [ ] [#queue-head-consume-on-topic-id-regression] CI + make check RED on main (run 26662056181; reproduces at clean HEAD 2a6f60e5 with zero working-tree changes; CI was green on run 26653786056 so it went red recently): tests/finalize_integration.rs::finalize_consumes_synthetic_queue_prompt_when_response_topic_targets_head_id FAILS. A finalize response heading '### Re: #spec-test-build-install-commit-push' that targets queue head preset id #spec-test-build-install-commit-push logs '[queue] skipped consumption because the active prompt did not target the queue head' instead of '[queue] consumed'; head not drained, queue_active stays true. Pre-existing, separate from #prompt-duplicated-while-typing. Bisect the commit that turned it red and restore response-topic-targets-head-id consumption.
 - [ ] [#route-busy-vs-starting-wording] [recommended] route.rs starting-actor FailClosed reports 'still starting (waited Ns for claude startup)' even when the pane is busy on an active turn (live capture: pane %33 showed '· Roosting… (Ns · …)' spinner + '⏵⏵ … · N shell'). Distinguish 'busy on an active turn' from 'cold starting' in the error via a Claude busy-cue on the active-turn spinner. Fragile (random gerund; 'esc to interrupt' vs 'thinking with high effort') — UX-only, low priority. Ground truth + analysis: tasks/agent-doc/plan-jb-stale-busy-idle-footer.md.
 - [ ] [#codex-queue-head-exact-heading-guidance] [recommended] After #queue-strike-on-halt narrowed the Codex Stop-hook heading-match to exact-topic only, a Codex auto-loop completion with a descriptive heading (### Re: <descriptive topic>) no longer auto-consumes the queue head — only an exact ### Re: do [#id] heading does. Add SKILL.md / harness-invocation guidance telling Codex auto-loop completions to title the response heading exactly with the queue head prompt (or emit an explicit done signal), and live-verify a Codex auto-queue still advances across items. Plan: tasks/agent-doc/plan-queue-strike-on-halt-response.md.

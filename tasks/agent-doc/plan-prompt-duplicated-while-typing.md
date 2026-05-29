@@ -163,6 +163,37 @@ Rust pipeline test. (Item gated, not done: no safe deterministic fix is possible
 until the race is captured; shipping a speculative collapse guard risks a guard
 that never fires or collapses legitimate content.)
 
+## Progress 2026-05-29 — prefix-mismatch dedup gap fixed (partial Option A, shared core)
+
+The earlier static analysis above asserted "editor append is dedup-guarded" — but
+that guard had a concrete gap it missed. Confirmed deterministically in the **shared
+core** apply path (used by the CLI and the editor via FFI
+`agent_doc_apply_patch_with_caret` → `component::append_with_caret`):
+
+- `append_patch_already_present` compares via `normalize_append_patch_content`, which
+  stripped `<!-- agent:boundary:* -->` and `(HEAD)` markers but **not** the `❯ `
+  user-prompt prefix.
+- The exchange user-prompt normalization adds `❯ ` to user lines, so a synthesized
+  boundary-aware exchange patch and the live buffer can differ by exactly that prefix.
+  The `contains` check then missed the duplicate (asymmetric: a bare buffer does not
+  contain the `❯ `-prefixed patch text) → the prompt re-appended → the duplication.
+
+Fix: `normalize_append_patch_content` now strips a leading `❯ `/`❯` prefix per line
+(`strip_user_prompt_prefix`), making dedup prefix-agnostic and symmetric. The `❯`
+glyph is presentation, not content, so this cannot collapse a genuinely distinct
+prompt. The plugin calls this through FFI, so the editor apply path is hardened with
+no Kotlin change. Tests (fail pre-fix): `append_patch_already_present_ignores_user_prompt_prefix`,
+`append_patch_distinct_prompts_not_deduped`,
+`append_with_caret_does_not_duplicate_prefixed_prompt`.
+
+**Still open (structural remainder):** the buffer-snapshot race where the synthesized
+patch carries the buffer at T1 but the live buffer advanced to T2 (more keystrokes),
+so the de-prefixed texts no longer match as a substring. That needs the L1 change
+(exclude live post-boundary user text from the synthesized patch) plus the captured
+live trace described above. The prefix-agnostic dedup closes the most common reported
+shape; the structural race stays tracked here pending live verification on the rebuilt
+cdylib.
+
 ## Related
 
 - `#duplicate-response-after-commit` — response-body duplication via late IPC reposition.

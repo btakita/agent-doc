@@ -80,6 +80,7 @@ name = "agent-doc-orchestration"
 version = "0.1.0"
 dependencies = [
  "agent-doc-core",
+ "agent-doc-sqlite",
  "agent-kit",
  "alacritty_terminal",
  "anyhow",
@@ -114,6 +115,18 @@ dependencies = [
  "uuid",
  "yrs",
  "zip",
+]
+
+[[package]]
+name = "agent-doc-sqlite"
+version = "0.1.0"
+dependencies = [
+ "agent-doc-core",
+ "anyhow",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

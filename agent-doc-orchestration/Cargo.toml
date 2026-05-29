@@ -18,6 +18,7 @@ test-support = []
 
 [dependencies]
 agent-doc-core = { path = "../agent-doc-core" }
+agent-doc-sqlite = { path = "../agent-doc-sqlite" }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 fs2 = "0.4"

@@ -56,7 +56,10 @@ pub mod security;
 
 // The orchestration cluster + sessions/supervisor + neighbors (increment 6).
 pub mod agent;
-pub mod archive_index;
+/// Re-export of the archive index, now owned by `agent-doc-sqlite`, so existing
+/// `crate::archive_index::*` and `agent_doc_orchestration::archive_index::*`
+/// call sites keep working after the SQLite-layer extraction.
+pub use agent_doc_sqlite::archive_index;
 pub mod boundary;
 pub mod callback;
 pub mod capture;

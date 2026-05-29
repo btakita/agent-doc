@@ -24,6 +24,7 @@ pub mod project_config;
 pub mod replay_guard;
 pub mod syntax;
 pub mod template;
+pub mod topic;
 
 pub use component::Component;
 pub use crdt::CrdtDoc;

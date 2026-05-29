@@ -75,6 +75,7 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::{archive_index, component, frontmatter, snapshot};
+use agent_doc_core::topic::parse_topic_sections_with_tail;
 
 /// A parsed exchange pair (User prompt + Assistant response).
 #[derive(Debug)]
@@ -481,66 +482,6 @@ fn run_component_compact_partial(
 /// Each section is the `### Re:` heading line + its content until the next `### Re:` (or end).
 /// Boundary markers (`<!-- agent:boundary:... -->`) are stripped from the final section
 /// so they are not archived.
-pub fn parse_topic_sections(content: &str) -> (String, Vec<String>) {
-    let parsed = parse_topic_sections_with_tail(content);
-    (parsed.preamble, parsed.sections)
-}
-
-#[derive(Debug, Default)]
-struct TopicSections {
-    preamble: String,
-    sections: Vec<String>,
-    trailing: String,
-}
-
-fn parse_topic_sections_with_tail(content: &str) -> TopicSections {
-    let mut preamble = String::new();
-    let mut sections: Vec<String> = Vec::new();
-    let mut current: Option<String> = None;
-    let mut found_first = false;
-    let mut after_boundary = false;
-    let mut trailing = String::new();
-
-    for line in content.lines() {
-        // Strip boundary markers — they are managed by the binary, not archived
-        if line.starts_with("<!-- agent:boundary:") {
-            after_boundary = true;
-            continue;
-        }
-        if after_boundary {
-            trailing.push_str(line);
-            trailing.push('\n');
-            continue;
-        }
-
-        if line.starts_with("### Re:") || line.starts_with("#### Re:") || line.starts_with("## Re:")
-        {
-            if let Some(prev) = current.take() {
-                sections.push(prev);
-            }
-            found_first = true;
-            current = Some(format!("{}\n", line));
-        } else if found_first {
-            let section = current.get_or_insert_with(String::new);
-            section.push_str(line);
-            section.push('\n');
-        } else {
-            preamble.push_str(line);
-            preamble.push('\n');
-        }
-    }
-
-    if let Some(last) = current {
-        sections.push(last);
-    }
-
-    TopicSections {
-        preamble,
-        sections,
-        trailing,
-    }
-}
-
 fn split_component_content_at_boundary(content: &str) -> (String, String) {
     let mut before = String::new();
     let mut after = String::new();
@@ -1035,6 +976,7 @@ fn is_leap_year(y: i64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agent_doc_core::topic::parse_topic_sections;
     use crate::component::is_backlog_component;
 
     #[test]

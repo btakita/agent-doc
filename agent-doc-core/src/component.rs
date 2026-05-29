@@ -434,7 +434,56 @@ fn append_patch_already_present(existing: &str, content: &str) -> bool {
     if patch.is_empty() {
         return false;
     }
-    normalize_append_patch_content(existing).contains(&patch)
+    let existing_norm = normalize_append_patch_content(existing);
+    if existing_norm.contains(&patch) {
+        return true;
+    }
+    // #prompt-duplicated-while-typing (L1 structural buffer-snapshot race): a
+    // synthesized boundary-aware exchange patch carries an *earlier* keystroke
+    // snapshot of the live user region (T1 — e.g. a half-typed line "Add to ")
+    // while the editor buffer kept being typed (T2 — "Add to resume"). The two
+    // texts then diverge mid-region, so the `contains` substring check above
+    // misses the duplicate and the whole tail re-appends from the divergence
+    // point. Recognize when the patch aligns to a contiguous run of the existing
+    // region under per-line prefix matching (each patch line is a prefix of, or
+    // equal to, the aligned existing line) and treat it as already present.
+    // This can only *suppress* re-appending text the live region already
+    // supersedes — the no-op keeps the longer live buffer — so it can never
+    // delete content or collapse a genuinely distinct prompt.
+    patch_is_typing_snapshot_of(&existing_norm, &patch)
+}
+
+/// True when `patch` is an in-progress keystroke-snapshot of a contiguous run
+/// already present in `existing`: every patch line equals, or is a non-empty
+/// prefix of, the aligned existing line, with at least one such prefix
+/// divergence (an exact run is already handled by the `contains` check). Both
+/// inputs must already be normalized via `normalize_append_patch_content`.
+fn patch_is_typing_snapshot_of(existing: &str, patch: &str) -> bool {
+    let e: Vec<&str> = existing.lines().collect();
+    let p: Vec<&str> = patch.lines().collect();
+    if p.is_empty() || p.len() > e.len() {
+        return false;
+    }
+    'outer: for start in 0..=(e.len() - p.len()) {
+        let mut saw_prefix_divergence = false;
+        for (j, pl) in p.iter().enumerate() {
+            let el = e[start + j];
+            if pl == &el {
+                continue;
+            }
+            // An empty patch line must match exactly — `starts_with("")` is
+            // always true and would let a blank line align to anything.
+            if !pl.is_empty() && el.starts_with(pl) {
+                saw_prefix_divergence = true;
+                continue;
+            }
+            continue 'outer;
+        }
+        if saw_prefix_divergence {
+            return true;
+        }
+    }
+    false
 }
 
 fn needs_exchange_heading_separator(component_name: &str, prior: &str, content: &str) -> bool {
@@ -1852,6 +1901,86 @@ Fix applied to skip non-agent <!-- sequences.
         assert!(
             !append_patch_already_present("❯ expand the section", "❯ summarize the section"),
             "genuinely distinct prompts must not be treated as duplicates"
+        );
+    }
+
+    // #prompt-duplicated-while-typing (L1 structural buffer-snapshot race),
+    // captured live in tasks/resume.md 2026-05-29: the synthesized patch held a
+    // half-typed snapshot ("- [#s93y]: Add to") while the live buffer had been
+    // typed further ("- [#s93y]: Add to resume"). The two regions are identical
+    // except that one line; the old `contains` check broke at the divergence and
+    // re-appended the entire tail. Dedup must recognize the snapshot relationship.
+    #[test]
+    fn append_patch_dedupes_midblock_typing_snapshot() {
+        let live = concat!(
+            "- [#yfg1]: I dropped the real-time asset-generation. Kept the investor demos.\n",
+            "- [#bndq]: confirmed\n",
+            "- do [#s75b]\n",
+            "- do [#vapk]\n",
+            "- [#s93y]: Add to resume\n",
+            "- [#ca8w]\n",
+            "Add MonsterRodHolders and EFS to the resume if not already added.",
+        );
+        let snapshot = concat!(
+            "- [#yfg1]: I dropped the real-time asset-generation. Kept the investor demos.\n",
+            "- [#bndq]: confirmed\n",
+            "- do [#s75b]\n",
+            "- do [#vapk]\n",
+            "- [#s93y]: Add to\n",
+            "- [#ca8w]\n",
+            "Add MonsterRodHolders and EFS to the resume if not already added.",
+        );
+        assert!(
+            append_patch_already_present(live, snapshot),
+            "earlier keystroke snapshot must dedup against the live, further-typed region"
+        );
+    }
+
+    #[test]
+    fn append_patch_typing_snapshot_does_not_collapse_distinct_lines() {
+        // A genuinely distinct prompt block (not a prefix snapshot) must still
+        // append — the divergent line is not a prefix of the live line.
+        let live = "- do task one\n- and the second thing\n- finally";
+        let distinct = "- do task one\n- and a different thing\n- finally";
+        assert!(
+            !append_patch_already_present(live, distinct),
+            "a mid-line replacement (not a prefix) is a distinct edit, not a snapshot"
+        );
+    }
+
+    #[test]
+    fn append_with_boundary_does_not_duplicate_typing_snapshot() {
+        // The boundary stays high in the exchange; the live region below it has
+        // been typed past the synthesized patch's snapshot. Appending the stale
+        // snapshot must be a full no-op (document unchanged), not a duplication.
+        let doc = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — opus-4-8\n\n",
+            "Answer.\n",
+            "<!-- agent:boundary:70bccf9b -->\n",
+            "- [#yfg1]: ok\n",
+            "- [#s93y]: Add to resume\n",
+            "- [#ca8w]\n",
+            "Add MonsterRodHolders and EFS to the resume if not already added.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let components = parse(doc).unwrap();
+        let exchange = components.iter().find(|c| c.name == "exchange").unwrap();
+        let snapshot = concat!(
+            "- [#yfg1]: ok\n",
+            "- [#s93y]: Add to\n",
+            "- [#ca8w]\n",
+            "Add MonsterRodHolders and EFS to the resume if not already added.",
+        );
+        let result = exchange.append_with_boundary(doc, snapshot, "70bccf9b");
+        assert_eq!(
+            result, doc,
+            "stale typing-snapshot append must be a no-op:\n{result}"
+        );
+        assert_eq!(
+            result.matches("<!-- /agent:exchange -->").count(),
+            1,
+            "exchange close marker must not duplicate:\n{result}"
         );
     }
 

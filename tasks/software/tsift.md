@@ -139,7 +139,39 @@ Every `cmd_*` body now lives in a focused module:
 #### Backlog status
 
 All six CLI-split clusters plus `#cli-extract-{cli-types,tagpath-helpers}` are done. The remaining open backlog items (`#npm-auth-setup`, `#npm-publish-verify`, `#full-e2e-verify`) are the OpenCode-plugin npm publish track — a separate workstream gated on GitHub repo-settings access (NPM_TOKEN secret + `TSIFT_ENABLE_NPM_PUBLISH` variable), which you pruned from the active queue this cycle. They stay open; no remaining queued work.
-<!-- agent:boundary:15ac0d09 -->
+❯ What are #next-steps to complete the review items?
+### Re: What are #next-steps to complete the review items? — opus-4-8
+
+First — I filed the `#agent-doc-bug` you reported (prompt duplicated while typing) to `tasks/agent-doc/agent-doc-bugs2.md` as `[#prompt-duplicated-while-typing]` with a full plan at `tasks/agent-doc/plan-prompt-duplicated-while-typing.md` (root-cause hypothesis + Option A/B fix). It's a distinct symptom from the two existing IPC-duplication bugs. Details at the bottom.
+
+Now the tsift review items. They split into two tracks:
+
+#### Track A — crate-split architecture (agent-actionable now)
+
+I checked `src/tsift/` against the review items:
+
+- **`#split-tsift-cli-subcommands` — effectively DONE this session.** The Phase 1/2 work split `tsift-cli/lib.rs` (39.2k → 32.8k LOC) into `commands/{index_search,graph,quality,summarize,infra,digests}.rs` + `cli.rs` + `output/tagpath.rs`. The command surface is now modular. **Recommend marking this review item done** (your call — it's gated).
+- **`#split-sim-world` — not done.** `src/sim_world.rs` (~390 LOC) still in root. Smallest, most isolated → the right next step to validate the crate-extraction pattern.
+- **`#split-tsift-digest` — not done.** `diff_digest.rs`, `log_digest.rs`, `metric_digest.rs`, `test_digest.rs` still in root `src/`. Now low-risk because `tsift-cli`'s digests cluster already calls these as `tsift::diff_digest::*` etc., so a crate + root re-export keeps callers compiling.
+- **`#split-tsift-search` — not done.** `sift.rs`, `impact.rs`, `tagpath_adapter.rs` still in root (`summarize` already lives in `tsift-summarize`). Depends on `tsift-index` + `tsift-graph` (both exist).
+- **`#demote-root-tsift` — blocked** until the three splits above land; then root `tsift` becomes a thin re-export shim (verify `cargo install tsift` consumers).
+
+Suggested order (low-risk → unblocking): `#split-sim-world` → `#split-tsift-digest` → `#split-tsift-search` → `#demote-root-tsift`.
+
+These are gated in `agent:review` deliberately (proposals). I have **not** promoted them to the active backlog unilaterally — say the word and I'll promote them in that order and start with `#split-sim-world`.
+
+#### Track B — OpenCode npm publish (externally blocked)
+
+`#npm-auth-setup` → `#npm-publish-verify` → `#full-e2e-verify` / `#e2e-install` form a chain gated on **`#npm-auth-setup`**, which needs GitHub repo-settings access (set `NPM_TOKEN` secret + `TSIFT_ENABLE_NPM_PUBLISH=true` variable). That's a human/admin step I can't do from here — it blocks the rest of Track B. If you run it (or tell me the token's in place), I can drive `#npm-publish-verify` onward.
+
+#### Backlog status
+
+Top of the current `agent:backlog`: **`[#npm-auth-setup]`** — but it's externally blocked, so the *actionable* next step is Track A's `#split-sim-world`. The 3-item backlog (auth → publish-verify → full-e2e) is already in dependency order. If you want Track A prioritized, I'll promote those review items above the npm chain.
+
+#### Re: the duplication bug (filed)
+
+Symptom matches this session's recurring `live_prompt_drift_after_preflight` / `mid-turn cycle rotation` / `already_applied` IPC diagnostics. Hypothesis (unproven, flagged as such in the plan): the editor-side normalize+`setText` in `PatchWatcher` re-incorporates post-boundary keystrokes that the Rust-side `try_ipc()` boundary-aware synthesized exchange patch *also* carries, so `setText(result)` writes the typed prompt twice; the `await_idle` debounce narrows but doesn't close the race. Recommended fix (Option A): make the post-boundary user region single-source (editor buffer authoritative; exclude live user text from the synthesized patch) + idempotent apply keyed on (patch_id, user-region-hash) — which would also harden the two related IPC-duplication bugs.
+<!-- agent:boundary:1247c3d9 -->
 <!-- /agent:exchange -->
 ###
 <!--

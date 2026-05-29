@@ -282,7 +282,39 @@ Independent Consulting                                           2026
 ```
 
 This groups them visually as one "consulting period" while still distinguishing each client. EFS leads since it's the strongest.
-<!-- agent:boundary:2e2b95b8 -->
+❯ Please create the Independent Consulting role using the opus model.
+
+### Re: Created the Independent Consulting role — opus-4-8
+
+Added the **Independent Consulting** entry to `resume/BrianTakita.md`, placed at the top of Experience (most recent, 2026 – Present, above Presence AI). It groups all three engagements as one consulting period with EFS leading:
+
+```
+### Independent Consulting — _Software Engineer / Consultant_
+
+<small>2026 – Present</small>
+
+- **Equity Funding Source** — Architected and built a full-stack loan origination
+  platform on Cloudflare's edge stack: public prequalification intake, D1-backed
+  application-lead pipeline, multi-role auth via Cloudflare Access. Built an
+  invite-only admin portal and designed an OCR document-intelligence pipeline.
+  Cloudflare Workers, D1, R2, Cloudflare Access, Hono, React, TypeScript, Resend, Wrangler.
+- **MonsterRodHolders.com** — E-commerce/WordPress consulting for a WooCommerce
+  storefront (57-SKU catalog). Documented an admin-account security compromise +
+  remediation, evaluated WordPress-vs-Shopify migration, configured Cloudflare CDN,
+  restored analytics. WordPress, WooCommerce, Cloudflare CDN, Google Analytics.
+- **Confidential AI Startup** — Short-term AI systems engineering consultant
+  (Apr–May 2026). Rust, Python, TypeScript, LiveKit, WebRTC, realtime asset
+  generation, code/harness analysis.
+```
+
+I followed the existing freelance bullet pattern (bold company prefix), matching the `### Brian Takita — _Full-Stack Engineer_` section already in the resume.
+
+**Verified:** `make` builds cleanly — `BrianTakita.pdf` regenerated.
+
+**Not committed.** The change is staged in the `resume/` repo (its own git remote, `btakita/resume`) but not committed or pushed, since you asked me to *create* the role, not deploy it. Tell me `commit + push` when you've reviewed it.
+
+**One flag:** the MonsterRodHolders bullet is in now, but I'd confirm attribution with Ron before this goes live publicly (LinkedIn/published PDF) — added a backlog reminder.
+<!-- agent:boundary:b750d68e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -296,6 +328,7 @@ This groups them visually as one "consulting period" while still distinguishing 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#bndq] [recommended] Confirm MonsterRodHolders attribution with Ron before using the resume/LinkedIn entry publicly
 - [ ] [#s75b] Add EFS experience entry to resume + LinkedIn (Workers/D1/R2/Hono/Cloudflare Access, loan origination platform)
 - [ ] [#vapk] Add MRH experience entry to resume + LinkedIn (WordPress/WooCommerce/Cloudflare CDN/security audit) — confirm attribution with Ron first
 - [ ] [#s93y] Decide on Dreamable entry: omit or list as brief consulting role with no product details; highlight tsift as OSS from same period

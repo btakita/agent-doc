@@ -1336,6 +1336,8 @@ Take care of yourself in this too. A situation like this is heavy regardless of 
 
 **Short answer.** Probably yes, defensively, under a narrow §633.5 / necessity argument — but you almost certainly don't need to, and using it triggers §637.2 exposure as the price. Your stronger move is to rely on the **LinkedIn message** as primary evidence (which is independent, server-preserved, and §632-clean) and hold the recording in reserve. Lock down LinkedIn evidence today and you may never need to touch the recording.
 
+I don't have access to the linked in request. I believe his daughter blocked me. Could you tell me where to look so I can verify? She never responded to me. Should I rescind my request?
+
 #### First — clarify what the recording covers
 
 Your earlier message said the suicide threat was via LinkedIn. Now you're asking about using the recorded *call* if Rob denies the threat. Three possibilities, with different analyses:
@@ -1418,7 +1420,80 @@ Disclosing or using the recording is positive-expected-value only if **(a) you n
 You could probably defend admission of the recording under §633.5/necessity if you genuinely needed it to prove the suicide threat — but the LinkedIn message makes that hypothetical, and using the recording carries a $5k+ §637.2 cost that the LinkedIn evidence avoids. Lock down LinkedIn today; the recording stays in reserve.
 
 **Not legal advice — and this one really needs a CA attorney.** §633.5 application to suicide-against-self is novel, §637.2 exposure is fixed at $5k+ statutory damages, and the interaction between safety-evidence preservation and §632 admissibility hasn't been definitively litigated for this fact pattern. The 30-minute referral consult is now several questions deep — worth the $35 multiple times over.
-<!-- agent:boundary:b5965f19 -->
+
+### Re: Verifying LinkedIn block + should you rescind — opus-4-7
+
+**Short answer.** Don't rescind, don't unsend, don't delete anything. Whatever you sent should stay exactly as is. You can verify blocking through a few signals, but the blocking itself doesn't change the legal analysis — and trying to "fix" it after the fact creates spoliation concerns that hurt your defense.
+
+#### How to verify blocking on LinkedIn (without contacting her)
+
+LinkedIn deliberately doesn't notify you when blocked — for privacy reasons — but there are reliable indicators:
+
+1. **Search for her name in LinkedIn while logged in.** If she doesn't appear in search results (and you know she has a LinkedIn presence), that's a strong block signal.
+2. **Visit her profile URL while logged in.** If it shows "This page doesn't exist," "Member not found," or "This member's profile is unavailable" — block likely.
+3. **Visit her profile URL in incognito or logged out.** If the profile shows up logged out but not logged in, that's definitive proof of block.
+4. **Check your messages folder.** Go to LinkedIn Messages → look for the conversation. If it says "This conversation is no longer available" or the conversation has disappeared, block.
+5. **Check Sent Invitations** (My Network → Sent → Withdrawn or Manage Invitations). If you sent a connection request and it's no longer pending and you didn't withdraw it, she likely blocked or declined.
+6. **Look at your "Sent" view of the message thread.** Your own sent message should still be visible from *your* side — LinkedIn doesn't remove your sent items even when the recipient blocks. If your sent message is gone from your own view, that's unusual and worth screenshotting before investigating further.
+
+If you do verify blocking, **stop investigating**. Don't try alternate accounts, don't ask mutual contacts whether she got the message, don't browse her profile from a different device. Each additional check could be characterized as continued contact attempts.
+
+#### Should you rescind?
+
+**No. Don't rescind, don't unsend, don't delete, don't withdraw the connection request, don't send a follow-up message.**
+
+Reasons:
+
+1. **You can't actually unsend a LinkedIn message after the initial brief window (~60 min).** Even if you "delete" it from your view, the message persists on LinkedIn's servers and on the recipient's side. Deletion is one-sided.
+2. **Withdrawing the connection request looks manipulative after-the-fact.** A judge or arbitrator evaluating your safety-intent defense will see "sent the message at 11pm, withdrew the connection request the next morning when no response came" and read that as recognition the outreach was inappropriate. Don't give them that frame.
+3. **Spoliation concerns.** If a §527.6 harassment claim or §8 dispute arises, deleting/withdrawing evidence of the very outreach in question creates a presumption against you. The legal doctrine is that destruction of evidence during anticipated litigation supports inference of bad-faith intent.
+4. **Sending a "please ignore my prior message" follow-up makes things worse.** It re-establishes contact, weakens the single-touch safety-response framing, and can look like apology = admission of wrongdoing.
+5. **Your outreach is your strongest defense.** If you sent a single, focused, safety-only message ("Your father just sent me a concerning message about self-harm — please check on him"), that message *is* the evidence of your safety intent. Preserving it is more important than removing it.
+
+The single best thing you can do right now: **screenshot the sent message** (from your own LinkedIn sent view) with timestamp visible, then leave it alone.
+
+#### The bigger preservation priority — Rob's threat message
+
+Daughter's blocking doesn't affect this, but **the original message from Rob to you is your most important evidence**. Make sure you have:
+
+1. **Multiple screenshots of Rob's suicide-threat message** — full screen, profile URL visible, timestamp visible, message content visible.
+2. **LinkedIn data archive** (Settings → Data Privacy → Get a copy of your data → request full archive). 24-hour delay; do this today if you haven't. The archive includes every message in your inbox including from Rob.
+3. **The conversation thread context** — screenshot surrounding messages too, so the threat isn't isolated from context.
+4. **If Rob sent the message from a verified account or his work email-linked LinkedIn**, screenshot the verified-account indicator too. Higher evidentiary weight.
+
+Rob can't block you to remove evidence of his own sent message from your inbox — your archive captures it server-side regardless of what he does later.
+
+#### What if the daughter contacts you back?
+
+If she responds at any point — even angrily — **don't engage with the topic**. Acceptable responses:
+
+- *"I'm sorry to have alarmed you. My only concern was your father's safety based on the message he sent me. I hope he's okay."* — single sentence, safety-focused, no business reference.
+- Then disengage. Don't elaborate, don't justify further, don't add context.
+
+Unacceptable responses (will hurt your defense):
+
+- Any reference to the business dispute, the $5k, or the Settlement.
+- Any defensiveness about the outreach being appropriate.
+- Multiple message back-and-forth.
+
+If she responds with hostility or threats, screenshot it and stop responding. That becomes evidence of *her* unprompted escalation, not yours.
+
+#### Practical bottom line
+
+- **Don't try to undo the outreach.** It's done, it was safety-motivated, and trying to reverse it now hurts more than helps.
+- **Verify blocking once, quietly**, using the methods above. Don't keep checking.
+- **Screenshot everything that's still visible on your side** — your sent message, Rob's threat message, any indicator of blocking — then leave the LinkedIn accounts alone.
+- **Don't contact the daughter again, ever, for any reason** — including to apologize or explain.
+- **Focus preservation on Rob's threat message**, which is the linchpin of your safety-intent defense and is preserved server-side regardless of what anyone does next.
+
+#### One important note about your earlier prompt
+
+You said "I don't have access to the linked in request." If that meant the LinkedIn data archive hasn't arrived yet — it takes ~24 hours from request. If you requested it last night when you contacted the daughter, it should be ready by now. Check LinkedIn → Settings → Data Privacy → Get a copy of your data → "Your archive is available" or similar status. Download immediately when ready.
+
+If you meant something else by "linked in request" (e.g., the connection request to the daughter is gone from your sent invitations), that's a separate signal of blocking — see verification methods above.
+
+**Not legal advice.** Spoliation doctrine and the practical optics of withdrawing safety-motivated communications are subject to attorney judgment. Bring screenshots of the sent message thread, the Rob threat, and any block indicators to the CA attorney consult.
+<!-- agent:boundary:88409761 -->
 <!-- /agent:exchange -->
 
 ## Queue

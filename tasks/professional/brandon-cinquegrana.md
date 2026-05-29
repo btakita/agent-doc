@@ -146,7 +146,26 @@ If the original engagement had a confidentiality/IP clause (very common), you we
 4. If you want certainty, have an attorney compare §3/§5 against the transcript — it's a 15-minute read for them.
 
 Bottom line: the call is **low risk** as recruiter small-talk, the disparagement/terms angles are clean, and the realistic-but-modest exposure is the product description under §5 — mitigated by being generic, to a recruiter, and possibly already public. Added `#dreamable-confidentiality-check` to the backlog to close the open factual questions before you send anything.
-<!-- agent:boundary:ebeaa8ff -->
+❯ Please create a resume for the job.
+
+### Re: Create a resume for the Equal Experts job — opus-4-8
+
+Built → `resume/BrianTakita-equal-experts.pdf` (4 pages). Open: `file:///home/brian/work/btakita/agent-loop/resume/BrianTakita-equal-experts.pdf`
+
+**What I made:**
+
+- A new profile `resume/profiles/equal-experts.toml` targeting what Brandon described — a **senior/principal full-stack & back-end consultant** for a staffing consultancy placing engineers on varied client projects. It emphasizes consulting breadth + seniority + back-end depth, with the real-time-AI / agent-tooling work as the differentiator, and bolds the matching phrases/skills. Experience is filtered to the strongest senior arc (Independent Consulting → Presence AI → Open Source → Censible → SocialChorus → CrystalCommerce → Rundavoo → Milyoni → TrueCar → Pivotal Labs), dropping the intern / IT-analyst / minor entries.
+
+**One thing I had to fix first.** The build source isn't `BrianTakita.md` — `build.py` reads `resume/data.toml` through the `agent-resume` tool. That `data.toml` was **stale**: it had no Independent Consulting section at all, so the first build silently dropped your most recent and most relevant work (the section filter matched nothing, no warning). I added the **Independent Consulting** block to `data.toml` — Equity Funding Source, MonsterRodHolders, and **Confidential AI Startup** — so it now leads the Experience section.
+
+**Confidentiality kept intact.** Dreamable appears only as **"Confidential AI Startup"** with skills-only framing (real-time AI inference/streaming pipelines, agent-harness tooling, investor demos — Rust/Python/TS/LiveKit/WebRTC/CopilotKit), no product architecture and no name. That matches both the prior cycle's umbrella framing and the §5 confidentiality review. Verified: "Dreamable" appears 0 times in the PDF.
+
+**Notes / your call:**
+
+- **Length:** 4 pages. Fine for a 20-year senior/principal consultant a recruiter is vetting, but if you'd rather a tight 2-pager I can add a `[sections]` trim (drop Career Highlights or the pre-2014 roles) and rebuild.
+- **Uncommitted:** the new profile, the `data.toml` edit, and the PDF are uncommitted in the `resume/` submodule. Say the word and I'll commit them there + bump the submodule pointer.
+- This covers `#brandon-resume`'s artifact; I left that item open since sending it to Brandon is still pending. Added `#resume-data-toml-sync` to track the source-drift cleanup.
+<!-- agent:boundary:08ee3851 -->
 <!-- /agent:exchange -->
 ###
 <!--

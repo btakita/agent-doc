@@ -111,7 +111,42 @@ Done → `mail/contacts/brandon-cinquegrana/recordings/phone_20260528-140602_214
 - **monsterrodholders** — the other smaller client (retail, ~$200K/yr).
 
 So none are founder/equity roles — all three belong **under the consulting umbrella**, with Dreamable as the most prominent entry (longest, near-full-time) and EFS / MRH as concurrent client bullets. That resolves the equityfundingsource question: client build → umbrella bullet, not a standalone company.
-<!-- agent:boundary:eb2732a8 -->
+❯ This call happened before I signed the Separation agreement with robert-ross. Am I liable for any information in the call?
+
+### Re: Liability for what you said in the call — opus-4-8
+
+**Not legal advice — you have a signed agreement, so a quick attorney read is the only authoritative answer.** What I can do is map what the call actually contains against the clauses in the signed release. (I'm treating "Separation agreement with robert-ross" as the *Dreamable Settlement and Mutual Release* — Rob is the Dreamable principal; the robert-ross session links straight into `../dreamable/`. Tell me if it's a separate document.)
+
+**First, the timing framing is weaker than it sounds.** "The call was before I signed" doesn't give a clean pass, because the obligations that matter here aren't *created* by the settlement — they **survive termination** and almost always originate in the **original engagement contract**:
+
+- **§5 Confidentiality** — hold in strictest confidence, don't use or disclose Dreamable's non-public info (technical data, trade secrets, product plans, customer/finance/personnel info). Explicitly survives termination.
+- **§3 Intellectual Property** — code/docs/work product developed during the engagement are the Company's; survives termination.
+- **§8 Non-Disparagement** — no negative statements about the other party.
+
+If the original engagement had a confidentiality/IP clause (very common), you were already bound during the call — the settlement just reaffirms it. I don't have that original contract; **that's the first thing to confirm.**
+
+**Now, what the call actually contains** (I re-scanned the transcript):
+
+- **Non-disparagement (§8): clean.** You said nothing negative about Dreamable or Rob — only that the engagement "ended." No exposure.
+- **Settlement terms: not disclosed.** The call predates signing, and you didn't discuss any terms. No exposure.
+- **Names: none.** You never named Rob or any person.
+- **The one real exposure — your description of Dreamable's product.** You described it as "agent-to-community creation… like Rome… LiveKit integration… real-time agent walkthroughs of technical material… generated on the fly or pre-generated with interactive components." That is exactly the "technical data / product plans" §5 is about — **if** it's non-public. The agentic-harness eval tools you mentioned are lower risk (you described that work *existed*, not the IP itself), but if they were built *for* Dreamable, §3 makes them Company IP.
+
+**What cuts in your favor:**
+
+- The description was high-level and generic, to a **recruiter** (not a competitor), in the normal course of describing your own experience.
+- If Dreamable has publicly described its product (website, marketing, demos), that content isn't "non-public" and §5 doesn't reach it.
+- The release is **mutual** — it bars *claims that existed as of the effective date*. Conduct before signing that the company knew or could have known about is likely within the released claims. But standard releases carve out the surviving §3/§5/§8 duties and don't waive *future* misuse, so the release helps for past claims, not for going-forward disclosure.
+
+**Practical recommendation:**
+
+1. Don't circulate the recording or transcript further.
+2. For the resume and the Equal Experts take-home, describe Dreamable by **your transferable skills** — LiveKit, real-time multimodal, full-stack — not Dreamable's product architecture or unreleased plans. (Same as the umbrella framing from the prior cycle, just with a confidentiality lens.)
+3. Confirm the **original engagement contract's** confidentiality/IP scope, and check whether Dreamable's product is publicly described.
+4. If you want certainty, have an attorney compare §3/§5 against the transcript — it's a 15-minute read for them.
+
+Bottom line: the call is **low risk** as recruiter small-talk, the disparagement/terms angles are clean, and the realistic-but-modest exposure is the product description under §5 — mitigated by being generic, to a recruiter, and possibly already public. Added `#dreamable-confidentiality-check` to the backlog to close the open factual questions before you send anything.
+<!-- agent:boundary:ebeaa8ff -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -126,6 +161,7 @@ Please read tasks/dreamable/052826_dreamable_-_brian_takita_settlement_and_mutua
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#dreamable-confidentiality-check] [recommended] Before sending the resume / doing the Equal Experts take-home, pin down the scope of Dreamable's confidentiality + IP clauses (signed mutual release §3 IP-assignment and §5 Confidentiality both survive termination) and check the ORIGINAL engagement contract for a pre-existing NDA. Keep all Dreamable framing skills-only (LiveKit / real-time / full-stack), never proprietary product architecture or unreleased plans. Consider an attorney review of the 2026-05-28 Brandon call transcript.
 - [ ] [#brandon-resume] [Contact] Send Brian's resume to Brandon Cinquegrana via LinkedIn for the Equal Experts network vetting (a ~2hr / 14-day take-home assignment follows). Brian said he'd send it the evening of 2026-05-28. Resume should present Dreamable + EquityFundingSource + monsterrodholders under one consulting umbrella — all client/consulting engagements per the call, no founder roles.
 - [ ] [#brandon-email] [Contact] Get Brandon Cinquegrana's email/phone before drafting any email - only LinkedIn is on file. Pull from the LinkedIn 'Contact info' panel or ask Brian directly. [recommended]
 <!-- /agent:backlog -->

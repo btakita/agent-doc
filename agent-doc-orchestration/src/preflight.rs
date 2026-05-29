@@ -2666,6 +2666,24 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
     let mut current_content = content.clone();
     let mut queue_warnings = Vec::new();
 
+    // Collapse duplicate live prompts before any other maintenance. Two
+    // identical live queue prompts are never valid; they only appear when a
+    // divergent IPC-buffer/snapshot CRDT/3-way merge duplicates a queue line
+    // (#adoc-queue-ipc-drift). Converging here stops the duplicate from growing
+    // on each preflight and re-syncs the rendered queue body.
+    if let Some(deduped) = crate::queue::dedup_live_prompts(&activation.entries_after) {
+        let dropped = activation.entries_after.len() - deduped.len();
+        let new_body = crate::queue::render(&deduped);
+        current_content = {
+            let comps = crate::component::parse(&current_content)?;
+            let q = comps.iter().find(|c| c.name == "queue").unwrap();
+            q.replace_content(&current_content, &new_body)
+        };
+        activation.entries_after = deduped;
+        mutated = true;
+        eprintln!("[preflight] queue: collapsed {dropped} duplicate live prompt(s)");
+    }
+
     // Consume start fence if needed
     if activation.consumed_start_fence {
         let new_body = crate::queue::render(&activation.entries_after);
@@ -2701,11 +2719,10 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
     for id in &gated_ids {
         eligible_ids.insert(id.clone());
     }
-    let entries_for_strike = if activation.consumed_start_fence {
-        activation.entries_after.clone()
-    } else {
-        entries.clone()
-    };
+    // `activation.entries_after` already reflects start-fence consumption and
+    // the duplicate-prompt collapse above, so it is the authoritative current
+    // entry set for the strike pass in every branch.
+    let entries_for_strike = activation.entries_after.clone();
     if !eligible_ids.is_empty()
         && let Some((new_entries, struck)) =
             strike_done_queue_head_prompts(&entries_for_strike, &eligible_ids)
@@ -4478,6 +4495,55 @@ mod tests {
         assert!(updated.contains("<!-- agent:queue -->"));
         assert!(!updated.contains("agent:queue auto"));
         assert!(updated.contains("- do [#newhead]"));
+    }
+
+    #[test]
+    fn preflight_collapses_duplicate_live_queue_prompt() {
+        // #adoc-queue-ipc-drift: a merge-duplicated live head must converge to a
+        // single prompt and persist deduped, so the drift does not grow on each
+        // preflight.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "preset #spec-test-build-install-commit-push\n",
+            "- ~do [#adoc-sqlite-seam]~\n",
+            "- do [#adoc-orch-shim-cleanup]\n",
+            "- do [#adoc-orch-shim-cleanup]\n",
+            "<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            updated.matches("- do [#adoc-orch-shim-cleanup]").count(),
+            1,
+            "duplicate live queue prompt must collapse to one:\n{updated}"
+        );
+        // The remaining single live prompt is still an executable queue head.
+        assert_eq!(
+            state.queue_prompts,
+            vec!["do [#adoc-orch-shim-cleanup]".to_string()],
+            "deduped queue exposes exactly one live prompt: {state:?}"
+        );
+        // Re-running maintenance on the converged doc is a no-op (stable).
+        let before = std::fs::read_to_string(&doc).unwrap();
+        let _ = run_queue_maintenance(&doc, None).unwrap();
+        let after = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(before, after, "queue maintenance must be idempotent after dedup");
     }
 
     #[test]

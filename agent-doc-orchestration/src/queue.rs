@@ -380,6 +380,28 @@ pub fn prompts(entries: &[QueueEntry]) -> Vec<&QueuePrompt> {
         .collect()
 }
 
+/// Collapse duplicate live `Prompt` entries that share the same trimmed text,
+/// keeping the first occurrence. Two identical live queue prompts are never a
+/// valid state — they only appear when a divergent IPC-buffer/snapshot CRDT or
+/// 3-way merge duplicates a queue line (see `#adoc-queue-ipc-drift`). Returns
+/// `None` when nothing changed so callers can avoid spurious mutations.
+/// `Completed`/`Preset`/fence entries are left untouched.
+pub fn dedup_live_prompts(entries: &[QueueEntry]) -> Option<Vec<QueueEntry>> {
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut deduped = Vec::with_capacity(entries.len());
+    let mut dropped = false;
+    for entry in entries {
+        if let QueueEntry::Prompt(prompt) = entry
+            && !seen.insert(prompt.text.trim().to_string())
+        {
+            dropped = true;
+            continue;
+        }
+        deduped.push(entry.clone());
+    }
+    if dropped { Some(deduped) } else { None }
+}
+
 pub fn first_prompt(entries: &[QueueEntry]) -> Option<&QueuePrompt> {
     entries.iter().find_map(|e| match e {
         QueueEntry::Prompt(p) => Some(p),
@@ -479,6 +501,36 @@ fn first_live_control_or_prompt(entries: &[QueueEntry]) -> Option<&QueueEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dedup_live_prompts_collapses_duplicate_live_prompt() {
+        // #adoc-queue-ipc-drift: a merge-duplicated live head must collapse to one,
+        // while Completed residue / Preset entries are preserved.
+        let entries = parse(concat!(
+            "preset #spec-test-build-install-commit-push\n",
+            "- ~do [#adoc-sqlite-seam]~\n",
+            "- do [#adoc-orch-shim-cleanup]\n",
+            "- do [#adoc-orch-shim-cleanup]\n",
+        ))
+        .unwrap();
+        let deduped = dedup_live_prompts(&entries).expect("duplicate should be collapsed");
+        assert_eq!(
+            prompts(&deduped).len(),
+            1,
+            "duplicate live prompt collapses to one: {deduped:?}"
+        );
+        assert_eq!(deduped.iter().filter(|e| matches!(e, QueueEntry::Completed(_))).count(), 1);
+        assert!(deduped.iter().any(|e| matches!(e, QueueEntry::Preset(_))));
+    }
+
+    #[test]
+    fn dedup_live_prompts_noop_without_duplicates() {
+        let entries = parse("- do [#a]\n- do [#b]\n").unwrap();
+        assert!(
+            dedup_live_prompts(&entries).is_none(),
+            "no duplicates → no mutation"
+        );
+    }
 
     #[test]
     fn parse_single_line_items() {

@@ -547,6 +547,51 @@ fn route_enqueue_dispatch_prompt_activates_existing_queue_without_duplicate() {
 }
 
 #[test]
+fn route_enqueue_dispatch_prompt_no_dup_with_completed_residue_and_live_head() {
+    // Repro for #adoc-queue-ipc-drift: a halted/inactive-then-reactivated queue
+    // that still carries struck `Completed` residue plus a single live prompt.
+    // Re-dispatching the live head must NOT append a duplicate, and must NOT
+    // supersede the live head into a struck id.
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_format: template\n",
+        "queue_active: true\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue auto -->\n",
+        "preset #spec-test-build-install-commit-push\n",
+        "- ~do [#adoc-sqlite-isolation]~\n",
+        "- ~do [#adoc-sqlite-seam]~\n",
+        "- do [#adoc-orch-shim-cleanup]\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#adoc-orch-shim-cleanup] Finish the migration.\n",
+        "<!-- /agent:backlog -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    crate::snapshot::save(&doc, content).unwrap();
+
+    let outcome =
+        enqueue_route_dispatch_prompt(&doc, "do [#adoc-orch-shim-cleanup]", "test_busy_actor")
+            .expect("route should treat the live head as already queued");
+
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    assert_eq!(
+        updated.matches("- do [#adoc-orch-shim-cleanup]").count(),
+        1,
+        "re-dispatching the live queue head must not duplicate it:\n{updated}\noutcome={outcome:?}"
+    );
+    assert!(
+        !outcome.appended,
+        "live head re-dispatch must not append:\n{updated}\noutcome={outcome:?}"
+    );
+}
+
+#[test]
 fn route_enqueue_dispatch_prompt_supersedes_single_auto_queue_prompt() {
     let dir = tempfile::TempDir::new().unwrap();
     std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();

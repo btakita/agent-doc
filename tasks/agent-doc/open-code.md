@@ -38,7 +38,7 @@ Compacted content:
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#adoc-sqlite-isolation]~
 - ~do [#adoc-sqlite-seam]~
@@ -48,7 +48,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [x] [#adoc-make-check-orch-tests] [recommended] make check (cargo nextest --all-targets) does not run agent-doc-orchestration's isolated test suite (1844 tests incl. project_controller/session_actor persistence) — they only run via explicit cargo test -p agent-doc-orchestration. Wire the orchestration test target into the make check gate. (filetime dev-dep + test_support::ScopedCurrentDir were added in the sqlite-seam phase C to make that target compile again.)
 - [ ] [#adoc-orch-shim-cleanup] Finish the migration: rewrite CLI-shell crate::X call sites to agent_doc_orchestration::X and delete the pub use shims in agent-doc/src/{lib,main}.rs. Mechanical/low-risk polish, not a true crate split. Plan's optional final step.
 <!-- /agent:backlog -->
 

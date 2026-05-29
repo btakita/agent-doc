@@ -448,7 +448,14 @@ If you're targeting more marketing/e-commerce roles instead, pin: **WooCommerce,
 ---
 
 **Compaction:** still at **block** (347 lines / 11 cycles). When you're done pasting, `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/resume.md --commit` will reset the exchange.
-<!-- agent:boundary:2a331d3d -->
+❯ Make this a comma separated list for LinkedIn
+
+### Re: Comma-separated skill list for LinkedIn — opus-4-8
+
+```
+Cloudflare Workers, Cloudflare, Serverless Architecture, Full-Stack Development, TypeScript, Rust (Programming Language), Python (Programming Language), React.js, Hono, Node.js, REST APIs, WebRTC, Real-Time Communication, WordPress, WooCommerce, PHP, Docker, Content Delivery Network (CDN), Web Performance Optimization, Search Engine Optimization (SEO), Google Tag Manager, Google Analytics, Google Ads, Google Merchant Center, Conversion Rate Optimization, E-Commerce, Fintech, Cloud Computing
+```
+<!-- agent:boundary:61f0f64f -->
 <!-- /agent:exchange -->
 ###
 <!--

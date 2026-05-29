@@ -294,6 +294,7 @@ The bug is "not reliably reproducible," so the next step is to capture one real 
 
 - **(a) Quick, no code:** enable plugin debug logging now — IDEA → `Help > Diagnostic Tools > Debug Log Settings` → add `#com.github.btakita.agentdoc`. Next time it corrupts, `idea.log` records the offending `setText` (transport + payload + `user_region_changed`), and I implement the targeted editor fix + SimWorld regression from that.
 - **(b) Default-on capture (I implement):** forward the editor corruption signal to `.agent-doc/logs/ops.log` and add a binary preflight detector for the `ipcfullprompt` shape (a deleted/duplicated `### Re:` block vs prior HEAD that no cycle authored), so capture no longer depends on a manual opt-in. Detection-only, binary-side — no speculative change to the corruption-prone apply path.
+Implement default-on capture. #spec-test-build-install-commit-push
 
 I recommend doing **both**: turn on (a) right now so we don't lose the next occurrence, and let me build (b) so it's permanent. Say which and I'll proceed.
 
@@ -302,7 +303,34 @@ I recommend doing **both**: turn on (a) right now so we don't lose the next occu
 This session has grown large (exchange 242 lines / 7 response sections; preflight flags accretion `block`). Good moment to `agent-doc compact tasks/agent-doc/agent-doc-bugs2.md --commit` and reset — your call. The queue is still paused on `#jb-stale-busy-idle-footer`.
 
 This re-opens an unfixed item rather than completing it, so the pending-done guard does not apply here.
-<!-- agent:boundary:fc9baf22 -->
+
+### Re: implement default-on capture — opus-4-8
+
+Done — shipped through spec → test → build → install → commit → push. The corruption is now captured automatically on the next occurrence, no manual editor opt-in.
+
+#### What landed (submodule `5ba20b7c`, pointer `432c4e341`, pushed)
+
+- **New core detector** — `agent_doc_core::ipc_corruption::detect_response_block_corruption(prior, current)`: returns one finding per previously-committed `### Re:` heading that is **deleted** (count → 0) or **duplicated** (count grows) in the live editor buffer. Pure, deterministic, zero-dep. Ignores brand-new headings (expected growth) and the working-tree-only `(HEAD)` annotation, so no false positives on normal cycles.
+- **Wired into both IPC adoption paths** (`write.rs`, socket + file) — captures the live candidate buffer *before* the fail-closed guards replace it, then logs `ipcfullprompt_corruption_suspected` to `.agent-doc/logs/ops.log` and preserves the baseline + candidate under `.agent-doc/logs/ipcfullprompt/<ts>-<patchid>.{baseline,candidate}.md`. **Detection-only** — it never changes the adoption decision; the existing guards still own that.
+- **Spec** — new write-path invariant in `specs/07-closeout-commands.md`.
+
+#### Why this is the right "default-on"
+
+The binary write path runs on every finalize/write/stream cycle and processes the editor's IPC ack, so the candidate live buffer passes through this hook every time — capture no longer depends on the `#com.github.btakita.agentdoc` `idea.log` opt-in that was off during the brandon/bugs2 occurrences. The forensic artifacts give exactly what the plan's Phase-1 needs: the corrupted candidate, the baseline it diverged from, the transport (`source=`), and the patch id.
+
+#### Tests / verification
+
+- Core: 7 `ipc_corruption` unit tests (deleted, duplicated, new-heading-ignored, `(HEAD)`-ignored, clean, no-prior, summary).
+- Orchestration: `ipcfullprompt_corruption_logged_on_deleted_response` (asserts ops.log line + preserved forensic files) and `ipcfullprompt_corruption_silent_on_clean_candidate`.
+- `make check`: clippy clean; the only red is the pre-existing, already-tracked `#queue-head-consume-on-topic-id-regression`.
+- Built `--release` + `cargo install` + `lib-install`; pushed submodule branch + superproject pointer.
+
+#### Still open (the actual fix)
+
+`#ipcfullprompt-recur2` stays open: this delivers **capture**, not the cure. The editor-side `PatchWatcher.setText` fix needs one real captured packet to pinpoint the transport/payload — which this now guarantees we'll get. Next time it corrupts (this doc, brandon, or anywhere), check `.agent-doc/logs/ipcfullprompt/` and the `ipcfullprompt_corruption_suspected` ops.log line, and I'll implement the targeted fix + SimWorld regression from it.
+
+This re-opened item tracks an unfixed bug; capture is one sub-deliverable, so the pending-done guard does not apply.
+<!-- agent:boundary:2df451ae -->
 <!-- /agent:exchange --> 
 ###
 <!--
@@ -341,7 +369,7 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#ipcfullprompt-recur2] FULL-DOCUMENT IPC CORRUPTION re-confirmed 2026-05-29 in agent-doc-bugs2.md + brandon-cinquegrana.md. Investigation: binary IPC-snapshot guards VERIFIED fail-closed (ops.log: every ipc_snapshot_adoption blocked w/ live_prompt_drift_after_preflight; allowed lines benign) so binary is not the source. Corruption is EDITOR-SIDE PatchWatcher.setText (bypasses binary guards); brandon 822a9369e committed a full ### Re: Recent projects response DELETION, since recovered (no permanent loss; present at brandon:53). BLOCKER: v0.2.135 editor diagnostics only emit to idea.log under manual #com.github.btakita.agentdoc debug opt-in (OFF) so no packet captured. NEXT: (a) enable plugin debug logging to capture next setText packet, or (b) implement default-on forensic capture (forward editor user_region_changed signal to ops.log + binary preflight ipcfullprompt-shape detector). #ipcfullprompt + #ipcfullprompt-recur both prematurely archived to agent-doc-bugs2.done.md while unfixed. Plan: tasks/agent-doc/plan-full-document-ipc-corruption-typing-prompt.md.
+- [ ] [#ipcfullprompt-recur2] CAPTURE IMPLEMENTED (submodule 5ba20b7c, pointer 432c4e341, pushed): default-on forensic detector — agent_doc_core::ipc_corruption::detect_response_block_corruption + write.rs socket/file IPC-adoption hooks log ipcfullprompt_corruption_suspected to .agent-doc/logs/ops.log and preserve baseline+candidate under .agent-doc/logs/ipcfullprompt/ when a prior-committed ### Re: block is deleted/duplicated in the live editor buffer. Detection-only (never changes adoption); ignores new headings + (HEAD) annotation. No manual debug opt-in. STILL OPEN — the actual editor-side PatchWatcher.setText FIX awaits a real captured packet from the next occurrence. Binary IPC-snapshot guards already verified fail-closed. Plan: tasks/agent-doc/plan-full-document-ipc-corruption-typing-prompt.md.
 - [ ] [#queue-head-consume-on-topic-id-regression] CI + make check RED on main (run 26662056181; reproduces at clean HEAD 2a6f60e5 with zero working-tree changes; CI was green on run 26653786056 so it went red recently): tests/finalize_integration.rs::finalize_consumes_synthetic_queue_prompt_when_response_topic_targets_head_id FAILS. A finalize response heading '### Re: #spec-test-build-install-commit-push' that targets queue head preset id #spec-test-build-install-commit-push logs '[queue] skipped consumption because the active prompt did not target the queue head' instead of '[queue] consumed'; head not drained, queue_active stays true. Pre-existing, separate from #prompt-duplicated-while-typing. Bisect the commit that turned it red and restore response-topic-targets-head-id consumption.
 - [ ] [#route-busy-vs-starting-wording] [recommended] route.rs starting-actor FailClosed reports 'still starting (waited Ns for claude startup)' even when the pane is busy on an active turn (live capture: pane %33 showed '· Roosting… (Ns · …)' spinner + '⏵⏵ … · N shell'). Distinguish 'busy on an active turn' from 'cold starting' in the error via a Claude busy-cue on the active-turn spinner. Fragile (random gerund; 'esc to interrupt' vs 'thinking with high effort') — UX-only, low priority. Ground truth + analysis: tasks/agent-doc/plan-jb-stale-busy-idle-footer.md.
 - [ ] [#codex-queue-head-exact-heading-guidance] [recommended] After #queue-strike-on-halt narrowed the Codex Stop-hook heading-match to exact-topic only, a Codex auto-loop completion with a descriptive heading (### Re: <descriptive topic>) no longer auto-consumes the queue head — only an exact ### Re: do [#id] heading does. Add SKILL.md / harness-invocation guidance telling Codex auto-loop completions to title the response heading exactly with the queue head prompt (or emit an explicit done signal), and live-verify a Codex auto-queue still advances across items. Plan: tasks/agent-doc/plan-queue-strike-on-halt-response.md.

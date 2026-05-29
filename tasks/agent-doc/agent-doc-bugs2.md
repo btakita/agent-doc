@@ -35,7 +35,34 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 3 response topic(s): do [#adoc-queue-ipc-drift]; do [#adoc-queue-ipc-buffer-divergence]; JB `Run Agent Doc` queued instead of dispatching (actor wasn't really busy)
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:f9439f45 -->
+order the queue and backlog by priority
+
+### Re: order the queue and backlog by priority — opus-4-7
+
+Reordered both lists by severity (data corruption → workflow correctness → polish/coverage).
+
+**Backlog top → bottom:**
+
+1. `#prompt-duplicated-while-typing` — live editor input is being corrupted/duplicated as the user types. Active data-loss class on the user-facing side of the IPC seam.
+2. `#duplicate-response-after-commit` — late IPC reposition re-inserts the already-committed response body in the working tree. Requires manual `Edit`-based dedup to recover. Data corruption on the agent side.
+3. `#adoc-queue-ipc-buffer-divergence` — live IDE buffer diverges from the committed inactive snapshot. Blocker identified (IPC carries content only, not tag attrs / frontmatter); needs plugin protocol extension.
+4. `#queue-strike-on-halt` — queue head wrongly struck on halt/refusal responses. Correctness bug that silently consumes scheduled work.
+5. `#pending-add-append-not-prepend` — `--pending-add` violates the SKILL.md "front of list" contract. Workflow contract violation, manually recoverable.
+6. `#next-steps-backlog-capture` — `#next-steps` recommendations don't auto-add to backlog. Automation enforcement gap (`session-check` doesn't enforce planning `expect_add`).
+7. `#run-agent-doc-stale-busy-replay` — follow-up test coverage for an already-shipped fix. Lowest urgency.
+
+**Queue top → bottom (active items, struck `#adoc-queue-ipc-drift` moved to bottom):**
+
+1. `do [#duplicate-response-after-commit]`
+2. `do [#adoc-queue-ipc-buffer-divergence]`
+3. `do [#queue-strike-on-halt]`
+4. `do [#pending-add-append-not-prepend]`
+5. `do [#next-steps-backlog-capture]`
+
+Note: `#prompt-duplicated-while-typing` and `#run-agent-doc-stale-busy-replay` are not in the queue — only in the backlog — so the queue's effective top is `#duplicate-response-after-commit` (the highest-priority item that is queued).
+
+Top of backlog: `#prompt-duplicated-while-typing`.
+<!-- agent:boundary:9961fdb8 -->
 <!-- /agent:exchange -->
 ###
 <!--

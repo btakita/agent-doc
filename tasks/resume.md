@@ -347,7 +347,32 @@ Investigated `src/boost-client` (read-only). The Google Ads work is substantial 
 
 1. This is the **resume** session doc, but the work is in `boost-client`. Those Google Ads items already live in `boost-client/tasks/monsterrodholders.md` — that's where any continuation should be driven (`agent-doc boost-client/tasks/monsterrodholders.md`), so the backlog stays with the project.
 2. This exchange is now 257 lines / 9 cycles (accretion **block** level). Recommend `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/resume.md --commit` before the next resume topic.
-<!-- agent:boundary:ced8dade -->
+❯ Please add a full list of skills.
+
+### Re: Expanded the Skills section — opus-4-8
+
+Expanded the `## Skills` section in `resume/BrianTakita.md` into a comprehensive list, keeping every existing entry and adding the technologies surfaced across the 2026 engagements and this session. Organized into rough groupings (no headers — single comma list per the template format):
+
+- **Agents/AI:** added MCP, LLM Tooling (kept Context Engineering, Agents, Agentic Systems, Claude)
+- **Languages:** added JavaScript (kept Rust, Python, TypeScript, Zig, Go, C#, Ruby on Rails)
+- **Frameworks:** added Astro, Hono, Bun (kept React, Next.js, Svelte, Angular, Vue, Node)
+- **Realtime:** added LiveKit, Real-Time Streaming (kept WebRTC)
+- **Data/edge:** added D1, R2 (kept Postgres, TimescaleDB, Supabase, Firebase)
+- **Cloud:** added Cloudflare, Cloudflare Workers, Cloudflare Access, Cloudflare CDN (kept AWS, GCP, Azure, etc.)
+- **E-commerce/CMS:** added WooCommerce (kept WordPress, Squarespace, Wix)
+- **Marketing/Analytics:** added Web Performance Optimization, Technical SEO, Schema.org/Structured Data, Google Tag Manager, Google Analytics 4, Google Ads, Google Merchant Center, Conversion Tracking
+- **Domains:** added E-commerce, Fintech, Loan Origination
+
+**Verified:** `make` builds cleanly — `BrianTakita.pdf` regenerated.
+
+**Not committed** — staged-and-built only in the `resume/` repo, same as the Independent Consulting entry. Say `commit + push` when you've reviewed both.
+
+One note on the new analytics/Ads skills (GTM, Google Ads, Merchant Center, Conversion Tracking): those came from the MonsterRodHolders work, so the same attribution caveat applies before this goes public — already on the backlog.
+
+---
+
+**Reminder:** this exchange is now 290 lines / 9 cycles (accretion **block**). Worth running `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/resume.md --commit` before the next topic.
+<!-- agent:boundary:5dc1784c -->
 <!-- /agent:exchange -->
 ###
 <!--

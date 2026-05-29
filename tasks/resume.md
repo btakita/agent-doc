@@ -652,7 +652,31 @@ Yes — CopilotKit is a public open-source framework (React/TypeScript for build
 ```
 
 And add **CopilotKit** to your resume `## Skills` list and the LinkedIn skill set when you do the next resume edit. Same counsel-review backlog item covers final wording sign-off.
-<!-- agent:boundary:c4056d83 -->
+❯ Update the resume.
+
+### Re: Updated the resume — opus-4-8
+
+Wrote the finalized wording into `resume/BrianTakita.md`:
+
+**Confidential AI Startup bullet** (replaced the original one-liner):
+```
+- **Confidential AI Startup** — Real-time AI systems engineering (Apr–May 2026): built real-time AI inference and streaming pipelines and agent-harness analysis tooling, and delivered investor-facing demos under tight timelines. Rust, Python, TypeScript, LiveKit, WebRTC, CopilotKit.
+```
+- Dropped "realtime asset generation" → "real-time AI inference and streaming pipelines" (product-neutral)
+- Added CopilotKit to the stack
+
+**Skills section:** added **CopilotKit** (next to LiveKit).
+
+**Verified:** `make` builds cleanly — `BrianTakita.pdf` regenerated.
+
+**Not committed** — staged in the `resume/` repo with the earlier Independent Consulting + Skills edits, not committed/pushed. Say `commit + push` when ready.
+
+Still open before publishing: the `[recommended]` counsel-review item on the Confidential AI wording, and the MonsterRodHolders attribution confirmation with Ron.
+
+---
+
+**Compaction:** the exchange is now 595 lines / 21 sections (block). With the resume edits landed, this is a natural point to run `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/resume.md --commit` — it'll archive the full Q&A and reset the session.
+<!-- agent:boundary:70bccf9b -->
 <!-- /agent:exchange -->
 ###
 <!--

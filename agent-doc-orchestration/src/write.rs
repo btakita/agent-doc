@@ -8111,6 +8111,55 @@ fn guard_ipc_snapshot_adoption_against_prompt_duplication(
     true
 }
 
+/// Emit a diagnostic for every IPC snapshot adoption that the two fail-closed
+/// guards did NOT block. Blocked adoptions already log richly; allowed ones were
+/// previously silent, so a corruption that slips through as "allowed" left no
+/// trace. This symmetric `ipc_snapshot_adoption_allowed` line records the final
+/// snapshot shape plus an independent drift/dup re-check (both must be benign on
+/// an allowed path — a non-benign re-check here flags a guard-coverage gap).
+fn log_ipc_snapshot_adoption_allowed(
+    file: &Path,
+    source: &str,
+    patch_id: Option<&str>,
+    baseline: Option<&str>,
+    content_ours: Option<&str>,
+    decision: &IpcRepairDecision,
+    was_blocked: bool,
+) {
+    if was_blocked {
+        return;
+    }
+    let drift_recheck = match (baseline, content_ours) {
+        (Some(base), Some(ours)) => ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
+            base,
+            &decision.snapshot_content,
+            ours,
+        ),
+        _ => false,
+    };
+    let dup_recheck = content_ours
+        .map(|ours| user_prompt_count_growth(ours, &decision.snapshot_content))
+        .unwrap_or(0);
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "ipc_snapshot_adoption_allowed file={} source={} patch_id={} snap_source={} snapshot_len={} snapshot_hash={} content_ours_len={} content_ours_hash={} drift_recheck={} dup_growth_recheck={}",
+            file.display(),
+            source,
+            patch_id.unwrap_or("-"),
+            decision.snap_source.label(),
+            decision.snapshot_content.len(),
+            crate::ops_log::content_hash(&decision.snapshot_content),
+            content_ours.map(|o| o.len()).unwrap_or(0),
+            content_ours
+                .map(crate::ops_log::content_hash)
+                .unwrap_or_else(|| "-".to_string()),
+            drift_recheck,
+            dup_recheck,
+        ),
+    );
+}
+
 fn persist_already_applied_socket_content_ours_snapshot(
     file: &Path,
     patch_id: &str,
@@ -9327,7 +9376,7 @@ pub fn try_ipc(
                     } else {
                         repair_decision.snapshot_content = effective_snap;
                     }
-                    guard_ipc_snapshot_adoption_against_live_prompt_drift(
+                    let drift_fired = guard_ipc_snapshot_adoption_against_live_prompt_drift(
                         file,
                         "socket_ack_content",
                         Some(&patch_id),
@@ -9335,12 +9384,21 @@ pub fn try_ipc(
                         content_ours,
                         &mut repair_decision,
                     );
-                    guard_ipc_snapshot_adoption_against_prompt_duplication(
+                    let dup_fired = guard_ipc_snapshot_adoption_against_prompt_duplication(
                         file,
                         "socket_ack_content",
                         Some(&patch_id),
                         content_ours,
                         &mut repair_decision,
+                    );
+                    log_ipc_snapshot_adoption_allowed(
+                        file,
+                        "socket_ack_content",
+                        Some(&patch_id),
+                        baseline,
+                        content_ours,
+                        &repair_decision,
+                        drift_fired || dup_fired,
                     );
 
                     let expected_response = response_materialization_probe(patches, unmatched);
@@ -10338,23 +10396,33 @@ fn write_ipc_and_poll(
             ) {
                 return Ok(false);
             }
-            guard_ipc_snapshot_adoption_against_live_prompt_drift(
+            let file_baseline = payload
+                .get("baseline")
+                .and_then(|value| value.as_str())
+                .filter(|value| !value.is_empty());
+            let drift_fired = guard_ipc_snapshot_adoption_against_live_prompt_drift(
                 doc_file,
                 "file_ipc",
                 Some(patch_id),
-                payload
-                    .get("baseline")
-                    .and_then(|value| value.as_str())
-                    .filter(|value| !value.is_empty()),
+                file_baseline,
                 options.content_ours,
                 &mut repair_decision,
             );
-            guard_ipc_snapshot_adoption_against_prompt_duplication(
+            let dup_fired = guard_ipc_snapshot_adoption_against_prompt_duplication(
                 doc_file,
                 "file_ipc",
                 Some(patch_id),
                 options.content_ours,
                 &mut repair_decision,
+            );
+            log_ipc_snapshot_adoption_allowed(
+                doc_file,
+                "file_ipc",
+                Some(patch_id),
+                file_baseline,
+                options.content_ours,
+                &repair_decision,
+                drift_fired || dup_fired,
             );
             repair_ipc_decision_visible_state(doc_file, &repair_decision, Some(patch_id))?;
             crate::ops_log::log_op(
@@ -12845,6 +12913,79 @@ scratch
                 && log.contains("invariant=live_prompt_drift_after_preflight")
                 && log.contains("recovery=content_ours_snapshot_next_cycle"),
             "live prompt drift should name its failed invariant and recovery:\n{log}"
+        );
+    }
+
+    #[test]
+    fn ipc_snapshot_adoption_allowed_logs_benign_recheck() {
+        // Every adoption that the fail-closed guards did NOT block must still leave
+        // a diagnostic so a corruption slipping through as "allowed" is traceable.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "placeholder").unwrap();
+
+        let baseline = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Q\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let content_ours = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Q\n### Re: Q — gpt-5\n\nAnswered.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let decision = IpcRepairDecision::content_ours(content_ours.to_string());
+
+        log_ipc_snapshot_adoption_allowed(
+            &doc,
+            "socket_ack_content",
+            Some("pid-allowed"),
+            Some(baseline),
+            Some(content_ours),
+            &decision,
+            false,
+        );
+
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("ipc_snapshot_adoption_allowed")
+                && log.contains("source=socket_ack_content")
+                && log.contains("patch_id=pid-allowed")
+                && log.contains("drift_recheck=false")
+                && log.contains("dup_growth_recheck=0"),
+            "allowed adoption must log a benign re-check:\n{log}"
+        );
+    }
+
+    #[test]
+    fn ipc_snapshot_adoption_allowed_is_silent_when_blocked() {
+        // Blocked adoptions log their own rich diagnostic; the allowed line must not
+        // also fire (it would falsely report an unguarded adoption).
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "placeholder").unwrap();
+
+        let decision = IpcRepairDecision::content_ours("snapshot".to_string());
+        log_ipc_snapshot_adoption_allowed(
+            &doc,
+            "file_ipc",
+            Some("pid-blocked"),
+            None,
+            None,
+            &decision,
+            true,
+        );
+
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap_or_default();
+        assert!(
+            !log.contains("ipc_snapshot_adoption_allowed"),
+            "allowed diagnostic must stay silent once a guard fired:\n{log}"
         );
     }
 

@@ -471,6 +471,12 @@ class PatchWatcher(private val project: Project) : Disposable {
                             ?: repositionBoundaryToEnd(sourceContent, "exchange", boundaryId)
                     } ?: return@runWriteCommandAction
                     if (result != content && editorApplyProofStillCurrentUtil(proof, document.text, document.modificationStamp)) {
+                        LOG.info(
+                            documentMutationDiagnosticUtil(
+                                "repositionBoundary", filePath, boundaryId, "document_api",
+                                content, result, document.modificationStamp, true,
+                            )
+                        )
                         document.setText(result)
                     } else if (result != content) {
                         LOG.warn("[patch-watcher] stale editor generation before reposition for $filePath; retrying")
@@ -798,6 +804,12 @@ class PatchWatcher(private val project: Project) : Disposable {
                 LOG.warn("[patch-watcher] stale editor generation during component patch for ${patch.file}; rejecting")
                 return@runWriteCommandAction
             }
+            LOG.info(
+                documentMutationDiagnosticUtil(
+                    "applyPatch.component", patch.file, patch.patchId, "document_api",
+                    content, result, document.modificationStamp, true,
+                )
+            )
             document.setText(result)
             wrote = true
             LOG.info("Patch applied to ${patch.file} (${result.length - content.length} chars changed)")
@@ -1740,6 +1752,56 @@ private fun outsideComponentContentMatchesExactly(left: String, right: String, c
 
     return left.substring(0, leftRange.first) == right.substring(0, rightRange.first) &&
         left.substring(leftRange.second) == right.substring(rightRange.second)
+}
+
+/** Stable, collision-tolerant content fingerprint for forensic log correlation. */
+internal fun documentMutationContentHashUtil(content: String): String =
+    "%08x:%d".format(content.hashCode(), content.length)
+
+/**
+ * The post-boundary tail of the `exchange` component: everything after the last
+ * `<!-- agent:boundary:* -->` marker up to the exchange close. This is the live
+ * user-prompt region; comparing it pre/post a `setText` reveals prompt
+ * duplication (grows) or deletion (shrinks) caused by a whole-buffer mutation.
+ */
+internal fun postBoundaryExchangeRegionUtil(content: String): String {
+    val range = findComponentRangeUtil(content, "exchange") ?: return ""
+    val body = content.substring(range.first, range.second)
+    val lastBoundary = body.lastIndexOf("<!-- agent:boundary:")
+    val tailStart = if (lastBoundary < 0) {
+        0
+    } else {
+        val nl = body.indexOf('\n', lastBoundary)
+        if (nl < 0) body.length else nl + 1
+    }
+    return body.substring(tailStart).trim()
+}
+
+/**
+ * Structured diagnostic for an editor-visible whole-buffer mutation (`setText`).
+ * Logged at every such site so a full-document IPC corruption packet can be
+ * reconstructed from `idea.log` without a live debugger — operation, patch id,
+ * transport, pre/post fingerprints, and whether the post-boundary user region
+ * changed (the corruption/duplication signal). See
+ * tasks/agent-doc/plan-full-document-ipc-corruption-typing-prompt.md (#ipcfullprompt-recur).
+ */
+internal fun documentMutationDiagnosticUtil(
+    operation: String,
+    file: String,
+    patchId: String?,
+    transport: String,
+    preContent: String,
+    postContent: String,
+    modStamp: Long,
+    idleReached: Boolean,
+): String {
+    val preRegion = postBoundaryExchangeRegionUtil(preContent)
+    val postRegion = postBoundaryExchangeRegionUtil(postContent)
+    return "[patch-watcher] document-mutation op=$operation file=$file patch_id=${patchId ?: "-"} " +
+        "transport=$transport pre=${documentMutationContentHashUtil(preContent)} " +
+        "post=${documentMutationContentHashUtil(postContent)} mod_stamp=$modStamp idle=$idleReached " +
+        "pre_user_region_len=${preRegion.length} post_user_region_len=${postRegion.length} " +
+        "user_region_changed=${preRegion != postRegion}"
 }
 
 private fun collectReHeadingsUtil(content: String): Set<String> {

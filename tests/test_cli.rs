@@ -123,13 +123,13 @@ fn live_tmux_tests_are_not_in_default_development_suite() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let sources = [
         "src/autoclaim.rs",
-        "src/focus.rs",
-        "src/resync.rs",
-        "src/route.rs",
+        "agent-doc-orchestration/src/focus.rs",
+        "agent-doc-orchestration/src/resync.rs",
+        "agent-doc-orchestration/src/route.rs",
         "src/session_actor_cmd.rs",
-        "src/sessions.rs",
-        "src/start.rs",
-        "src/sync.rs",
+        "agent-doc-orchestration/src/sessions.rs",
+        "agent-doc-orchestration/src/start.rs",
+        "agent-doc-orchestration/src/sync.rs",
     ];
     let mut unignored = Vec::new();
 
@@ -163,7 +163,7 @@ fn process_global_test_mutations_share_session_check_lock() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let test_support = fs::read_to_string(manifest_dir.join("src/test_support.rs")).unwrap();
     assert!(
-        test_support.contains("crate::harness_prompt::TEST_ENV_LOCK")
+        test_support.contains("crate::test_support::TEST_ENV_LOCK")
             && test_support.contains("struct ProcessGlobalLockGuard")
             && test_support.contains("PROCESS_GLOBAL_LOCK_DEPTH")
             && test_support.contains("struct ScopedCurrentDir")
@@ -172,7 +172,7 @@ fn process_global_test_mutations_share_session_check_lock() {
         "test_support must route env and cwd test guards through a reentrant shared process-global lock"
     );
 
-    let session_check = fs::read_to_string(manifest_dir.join("src/session_check.rs")).unwrap();
+    let session_check = fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/session_check.rs")).unwrap();
     assert!(
         session_check.contains("fn inspect(file: &std::path::Path)")
             && session_check.contains("fn inspect_with_warnings(file: &std::path::Path)")
@@ -180,7 +180,7 @@ fn process_global_test_mutations_share_session_check_lock() {
         "session_check test inspection helpers must use the crate-wide process-global lock"
     );
 
-    let pty = fs::read_to_string(manifest_dir.join("src/supervisor/pty.rs")).unwrap();
+    let pty = fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/supervisor/pty.rs")).unwrap();
     assert!(
         pty.contains("struct EnvGuard")
             && pty.contains("AGENT_DOC_PTY_PARENT_LEAK")
@@ -193,13 +193,13 @@ fn process_global_test_mutations_share_session_check_lock() {
 fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let hot_paths = [
-        "src/git.rs",
+        "agent-doc-orchestration/src/git.rs",
         "src/orchestrate.rs",
-        "src/preflight.rs",
-        "src/repair.rs",
-        "src/route.rs",
-        "src/session_check.rs",
-        "src/write.rs",
+        "agent-doc-orchestration/src/preflight.rs",
+        "agent-doc-orchestration/src/repair.rs",
+        "agent-doc-orchestration/src/route.rs",
+        "agent-doc-orchestration/src/session_check.rs",
+        "agent-doc-orchestration/src/write.rs",
     ];
     let tokens = [
         "guard_",
@@ -233,20 +233,20 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
 
 fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
     match (source, token) {
-        ("src/git.rs", "guard_") => 19,
-        ("src/git.rs", "reason=") => 4,
+        ("agent-doc-orchestration/src/git.rs", "guard_") => 19,
+        ("agent-doc-orchestration/src/git.rs", "reason=") => 4,
         ("src/orchestrate.rs", "guard_") => 2,
-        ("src/preflight.rs", "reason=") => 2,
-        ("src/repair.rs", "guard_") => 10,
-        ("src/repair.rs", "reason=") => 5,
-        ("src/route.rs", "accepted_only") => 4,
-        ("src/route.rs", "flow_reason=") => 2,
-        ("src/route.rs", "guard_") => 7,
-        ("src/route.rs", "proof=") => 2,
-        ("src/route.rs", "reason=") => 10,
-        ("src/session_check.rs", "guard_") => 15,
-        ("src/write.rs", "guard_") => 70,
-        ("src/write.rs", "reason=") => 25,
+        ("agent-doc-orchestration/src/preflight.rs", "reason=") => 2,
+        ("agent-doc-orchestration/src/repair.rs", "guard_") => 10,
+        ("agent-doc-orchestration/src/repair.rs", "reason=") => 5,
+        ("agent-doc-orchestration/src/route.rs", "accepted_only") => 4,
+        ("agent-doc-orchestration/src/route.rs", "flow_reason=") => 2,
+        ("agent-doc-orchestration/src/route.rs", "guard_") => 7,
+        ("agent-doc-orchestration/src/route.rs", "proof=") => 2,
+        ("agent-doc-orchestration/src/route.rs", "reason=") => 10,
+        ("agent-doc-orchestration/src/session_check.rs", "guard_") => 15,
+        ("agent-doc-orchestration/src/write.rs", "guard_") => 70,
+        ("agent-doc-orchestration/src/write.rs", "reason=") => 25,
         _ => 0,
     }
 }

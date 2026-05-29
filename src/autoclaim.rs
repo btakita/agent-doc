@@ -216,7 +216,8 @@ fn sync_after_autoclaim_in(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sessions::{IsolatedTmux, SessionEntry, SessionRegistry};
+    use crate::sessions::{SessionEntry, SessionRegistry};
+    use tmux_router::IsolatedTmux;
     use tempfile::TempDir;
 
     fn env_lock() -> crate::test_support::ProcessGlobalLockGuard {

@@ -124,7 +124,7 @@ pub fn save_project(config: &ProjectConfig) -> Result<()> {
 }
 
 /// Save project config to an explicit path. Used by `save_project()` and tests.
-pub(crate) fn save_project_to(config: &ProjectConfig, path: &Path) -> Result<()> {
+pub fn save_project_to(config: &ProjectConfig, path: &Path) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }

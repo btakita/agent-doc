@@ -66,6 +66,9 @@ tagpath = { version = "0.11.1", default-features = false }
 tiny_http = { version = "0.12", default-features = false, features = ["ssl-rustls"] }
 
 [dev-dependencies]
+# Enable orchestration's in-process controller test short-circuits for the CLI
+# shell's own tests (project_controller moved to orchestration in #bz6s).
+agent-doc-orchestration = { path = "agent-doc-orchestration", features = ["test-support"] }
 assert_cmd = "2"
 existence = "0.4"
 filetime = "0.2"

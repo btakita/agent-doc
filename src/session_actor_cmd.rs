@@ -2824,7 +2824,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
     fn send_clear_to_pane_submits_clear_command() {
         let dir = tempfile::tempdir().unwrap();
         let socket = format!("session-clear-direct-pane-{}", uuid::Uuid::new_v4());
-        let iso = crate::sessions::IsolatedTmux::new(&socket);
+        let iso = tmux_router::IsolatedTmux::new(&socket);
         let pane = iso.new_session("test", dir.path()).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(150));
         let output_path = dir.path().join("clear.txt");
@@ -2858,7 +2858,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn clear_falls_back_to_supervisor_inject_when_authoritative_pane_is_not_on_default_tmux() {
         let dir = tempfile::tempdir().unwrap();
-        let iso = crate::sessions::IsolatedTmux::new("session-clear-direct-pane");
+        let iso = tmux_router::IsolatedTmux::new("session-clear-direct-pane");
         let pane = iso.new_session("test", dir.path()).unwrap();
         let doc = dir.path().join("doc.md");
         std::fs::write(
@@ -2905,7 +2905,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_direct_submit_pane_prefers_authoritative_actor() {
         let dir = tempfile::tempdir().unwrap();
-        let iso = crate::sessions::IsolatedTmux::new("session-clear-pane-select-actor");
+        let iso = tmux_router::IsolatedTmux::new("session-clear-pane-select-actor");
         let actor_pane = iso.new_session("test", dir.path()).unwrap();
         let registry_pane = iso.new_window("test", dir.path()).unwrap();
         let actor_record = crate::session_actor::ActorRecord {
@@ -2969,7 +2969,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_direct_submit_pane_falls_back_to_registry() {
         let dir = tempfile::tempdir().unwrap();
-        let iso = crate::sessions::IsolatedTmux::new("session-clear-pane-select-registry");
+        let iso = tmux_router::IsolatedTmux::new("session-clear-pane-select-registry");
         let registry_pane = iso.new_session("test", dir.path()).unwrap();
         let actor_record = crate::session_actor::ActorRecord {
             document_id: "doc".to_string(),

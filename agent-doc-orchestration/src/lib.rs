@@ -23,7 +23,21 @@
 //! `#[cfg(test)] test_support` (crate-local `TEST_ENV_LOCK`) for its
 //! env-mutating tests, since orchestration's test binary is independent of the
 //! main crate's.
+//! Direction A, increment 6 (big-bang): the entire entangled cluster +
+//! sessions/supervisor + neighbors moves in one migration. Orchestration is now
+//! self-contained over `agent_doc_core`; the main crate becomes a CLI shell
+//! re-exporting these modules via `pub use` shims. Core-backed lib modules
+//! (`component`/`crdt`/`frontmatter`/`project_config`/`template`) are mirrored
+//! here as shims so moved bodies need no `crate::` rewriting.
 
+// Core-backed shims (mirror the main-crate shims).
+pub mod component;
+pub mod crdt;
+pub mod frontmatter;
+pub mod project_config;
+pub mod template;
+
+// Foundation utilities (increments 1–5).
 pub mod config;
 pub mod env;
 pub mod fs_util;
@@ -32,6 +46,69 @@ pub mod ipc_socket;
 pub mod ops_log;
 pub mod project_config_io;
 pub mod secret_redact;
+
+// I/O wrappers for the core-backed shims.
+pub mod frontmatter_io;
+pub mod template_io;
+
+// Path/security helpers.
+pub mod security;
+
+// The orchestration cluster + sessions/supervisor + neighbors (increment 6).
+pub mod agent;
+pub mod archive_index;
+pub mod boundary;
+pub mod callback;
+pub mod capture;
+pub mod claim;
+pub mod codex_hook;
+pub mod compact;
+pub mod cycle_state;
+pub mod debounce;
+pub mod dedupe;
+pub mod diff;
+pub mod diff_io;
+pub mod editor_route_errors;
+pub mod flow;
+pub mod focus;
+pub mod gc;
+pub mod git;
+pub mod git_sibling;
+pub mod harness;
+pub mod harness_prompt;
+pub mod heuristics;
+pub mod hooks;
+pub mod lint_gate;
+pub mod pending;
+pub mod pending_cmd;
+pub mod preflight;
+pub mod project_controller;
+pub mod prompt;
+pub mod prompt_context;
+pub mod prompt_contract;
+pub mod queue;
+pub mod repair;
+pub mod replay_guard;
+pub mod response_toc;
+pub mod resync;
+pub mod route;
+pub mod run;
+pub mod session_accretion;
+pub mod session_actor;
+pub mod session_check;
+pub mod sessions;
+pub mod snapshot;
+pub mod start;
+pub mod startup_miss;
+pub mod status_cmd;
+pub mod stream;
+pub mod supervisor;
+pub mod sync;
+pub mod watch;
+pub mod write;
+
+// Core-backed shim for the CRDT merge path (merge -> crdt).
+pub mod merge;
 
 #[cfg(test)]
 mod test_support;

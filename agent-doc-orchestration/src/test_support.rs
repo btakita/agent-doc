@@ -6,10 +6,7 @@
 //! serialize env-mutating tests within *this* crate's test process — no
 //! cross-crate sharing is required (or possible) for a `#[cfg(test)]` static.
 
-use std::sync::{LazyLock, Mutex, MutexGuard};
-
-/// Process-global lock serializing tests that mutate environment variables.
-pub(crate) static TEST_ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+use std::sync::MutexGuard;
 
 thread_local! {
     static PROCESS_GLOBAL_LOCK_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
@@ -18,7 +15,7 @@ thread_local! {
 /// RAII guard for the process-global test lock. Reentrant within a thread: a
 /// nested `env_lock()` returns a guard that holds no inner `MutexGuard`, so the
 /// outer guard owns the actual lock for the whole nesting.
-pub(crate) struct ProcessGlobalLockGuard {
+pub struct ProcessGlobalLockGuard {
     _guard: Option<MutexGuard<'static, ()>>,
 }
 
@@ -34,7 +31,7 @@ impl Drop for ProcessGlobalLockGuard {
 
 /// Acquire the process-global env lock, serializing env-mutating tests within
 /// this crate's test binary. Reentrant on the same thread.
-pub(crate) fn env_lock() -> ProcessGlobalLockGuard {
+pub fn env_lock() -> ProcessGlobalLockGuard {
     let already_held = PROCESS_GLOBAL_LOCK_DEPTH.with(|depth| {
         let current = depth.get();
         depth.set(current + 1);
@@ -44,7 +41,7 @@ pub(crate) fn env_lock() -> ProcessGlobalLockGuard {
         return ProcessGlobalLockGuard { _guard: None };
     }
 
-    let guard = TEST_ENV_LOCK
+    let guard = crate::harness_prompt::TEST_ENV_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     ProcessGlobalLockGuard {

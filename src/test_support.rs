@@ -1,3 +1,11 @@
+// Process-global lock for the main (`agent-doc` bin) test binary. The orchestration
+// cluster moved to `agent-doc-orchestration` (which has its own crate-local lock keyed
+// on `harness_prompt::TEST_ENV_LOCK`); each crate's tests compile into a separate test
+// process, so the CLI shell's env-mutating tests serialize on this lock.
+#[cfg(test)]
+pub(crate) static TEST_ENV_LOCK: std::sync::LazyLock<std::sync::Mutex<()>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(()));
+
 #[cfg(test)]
 thread_local! {
     static PROCESS_GLOBAL_LOCK_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
@@ -30,7 +38,7 @@ pub(crate) fn env_lock() -> ProcessGlobalLockGuard {
         return ProcessGlobalLockGuard { _guard: None };
     }
 
-    let guard = crate::harness_prompt::TEST_ENV_LOCK
+    let guard = crate::test_support::TEST_ENV_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     ProcessGlobalLockGuard {
@@ -73,12 +81,12 @@ mod tests {
     fn env_lock_uses_harness_prompt_lock() {
         let guard = super::env_lock();
         assert!(
-            crate::harness_prompt::TEST_ENV_LOCK.try_lock().is_err(),
+            crate::test_support::TEST_ENV_LOCK.try_lock().is_err(),
             "test_support::env_lock must serialize with harness/session-check env guards"
         );
         drop(guard);
         assert!(
-            crate::harness_prompt::TEST_ENV_LOCK.try_lock().is_ok(),
+            crate::test_support::TEST_ENV_LOCK.try_lock().is_ok(),
             "shared env lock should be available after test_support guard drops"
         );
     }
@@ -88,12 +96,12 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let scoped = super::ScopedCurrentDir::set(tmp.path());
         assert!(
-            crate::harness_prompt::TEST_ENV_LOCK.try_lock().is_err(),
+            crate::test_support::TEST_ENV_LOCK.try_lock().is_err(),
             "ScopedCurrentDir must hold the shared process-global test lock"
         );
         drop(scoped);
         assert!(
-            crate::harness_prompt::TEST_ENV_LOCK.try_lock().is_ok(),
+            crate::test_support::TEST_ENV_LOCK.try_lock().is_ok(),
             "shared lock should be available after cwd guard drops"
         );
     }

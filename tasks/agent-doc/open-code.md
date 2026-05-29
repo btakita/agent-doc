@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -278,12 +278,33 @@ The `sessions`/`supervisor` closure: `input_diag`, `harness`, `project_controlle
 Plan: tasks/agent-doc/plan-agent-doc-orchestration-extraction.md
 
 **Not invoking `/loop`** — advancing one safe increment per invocation. Re-activate (`queue_active: true`) or say `continue` for the next.
-<!-- agent:boundary:f9f3be13 -->
+
+### Re: continue #bz6s — increment 4: ops_log + find_project_root → fs_util — opus-4-7
+
+Picked up the next Direction-A increment. One more shared-utility module moved to `agent-doc-orchestration`, plus a small decoupling that unblocks the `ops_log`/`input_diag` chain.
+
+#### What landed
+
+- **`ops_log` → orchestration.** Best-effort operational logging (`log_op`, `log_cycle`, `content_hash`, `CycleEntry`) now lives in `agent-doc-orchestration`. `main.rs` re-exports it via `pub(crate) use agent_doc_orchestration::ops_log;` so every `crate::ops_log::*` call site resolves unchanged. Added `sha2 = "0.10"` to the orchestration crate — ops_log's only new external dep.
+- **`find_project_root` pulled down into `fs_util`.** `ops_log` was the lone blocker still reaching back into the main crate's `snapshot` module (`snapshot::find_project_root`, 2 call sites). That helper is a pure `.agent-doc/`-ancestor path walk with no git/snapshot coupling, so it belongs in `fs_util` (already in orchestration). `snapshot::find_project_root` is now a one-line re-export shim — its 8 internal callers and the wider 47-file `find_project_root` surface compile unchanged.
+
+Shared-util foundation now at 7 modules in orchestration (`ipc_socket` / `env` / `fs_util` / `secret_redact` / `config` / `project_config_io` / `ops_log`) before the harder `snapshot → git` keystone that gates the sessions/supervisor cluster.
+
+#### Verification
+
+- `make check` green (clippy + full suite) across all three crates: 2216 + 65 + the smaller suites all passed, 0 failed. The single red is the pre-existing live-tmux environmental test `codex_bare_run_inside_owning_pane_fails_before_nested_dispatch` (codex nested-dispatch routing assertion — unrelated to a logging/path-util relocation). `make check` exits 0 tolerating it, per the documented "modulo the live-tmux environmental test".
+- `cargo build --release` green; `nm -D target/release/libagent_doc.so` exports the full 39-symbol `agent_doc_*` FFI surface intact (this increment touched no FFI).
+- ops_log's 4 inline tests moved with it and pass under the orchestration crate.
+
+#### Next
+
+Backlog #bz6s updated — ops_log struck from the NEXT list. The remaining sessions/supervisor closure is gated by `snapshot → git`: `snapshot` is used by 35 files and its `git` dependency transitively reaches the whole cluster (the keystone the plan's REVISION flagged). Next increment should either invert `snapshot`'s git coupling or move a smaller still-independent module before committing to the large cluster migration.
+<!-- agent:boundary:c394fb6b -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#k5s7]~
 - ~do [#n7dd]~
@@ -300,6 +321,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#ysv9]~
 - ~do [#bz6s]~
 - ~do [#bz6s]~
+- do [#bz6s]
 - do [#yybc]
 - do [#adcr]
 <!-- /agent:queue -->
@@ -307,7 +329,7 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#bz6s] #adoc-orchestration-impl Implement agent-doc-orchestration extraction per tasks/agent-doc/plan-agent-doc-orchestration-extraction.md. DIRECTION A chosen (one large orchestration crate). DONE: wave 0 scaffold + ipc_socket + env/fs_util/secret_redact (4 foundation modules in orchestration). NEXT: config + project_config_io closure, then sessions/supervisor closure, then cluster (cycle_state/capture/repair/git/route/sync/start). Each green-to-green with make check + nm -D gate.
+- [ ] [#bz6s] #adoc-orchestration-impl Implement agent-doc-orchestration extraction per tasks/agent-doc/plan-agent-doc-orchestration-extraction.md (DIRECTION A). DONE: scaffold + ipc_socket + env/fs_util/secret_redact + project_config_io + config + ops_log (7 modules in orchestration; find_project_root pulled down into fs_util). NEXT: sessions/supervisor closure (input_diag/harness/project_controller/session_actor/startup_miss/test_support/prompt/snapshot) — gated by snapshot->git keystone, then cluster (cycle_state/capture/repair/git/route/sync/start). Each green-to-green with make check + nm -D gate.
 - [ ] [#yybc] #k9e1-ffi-mem POC follow-up: track the proven pattern (pub use agent_doc_core::ffi::* + force_link_core_ffi_symbols reference function in main) for future pure FFI relocations. POC moved agent_doc_free_string + agent_doc_free_state; nm verification confirmed symbols still in libagent_doc.so export table.
 - [ ] [#adcr] Extract agent-doc-core crate (~17K lines) — enables fast-compiling FFI/editor-plugin target independent of orchestration layer
 <!-- /agent:backlog -->
@@ -320,12 +342,4 @@ preset #spec-test-build-install-commit-push
 ## Completed / Reaped
 
 <!-- agent:done archive=tasks/agent-doc/open-code.done.md -->
-- 2026-05-27 [#fr8q] [recommended] Compact this session (116 exchange lines, block-level accretion) before next implementation turn
-- 2026-05-27 [#n89s] #agent-doc-bug Fix `dispatch_only_dispatch_start_proof_required` to return `false` for opencode harness (routed_reopen.rs:319) — interim fix until tracker is built
-- 2026-05-27 [#xd6k] #agent-doc-bug Add model name validation in `canonical_model_name` or probe builder for opencode harness — reject bare names without provider prefix (model_tier.rs:256, codex.rs:534)
-- 2026-05-27 [#adcr] Extract agent-doc-core crate (~17K lines: template, diff, component, frontmatter, crdt, pending, model_tier + leaf modules) — enables fast-compiling FFI/editor-plugin target independent of orchestration layer
-- 2026-05-28 [#stqc] #adcr-dep-audit Survey inbound deps from orchestration code (preflight/plan/cycle_state/dispatch/route/ipc/git/harness) into {template, diff, component, frontmatter, crdt, pending, model_tier}; identify leaf vs coupled modules — precondition for #adcr
-- 2026-05-28 [#5x1r] #adcr-api-surface Define agent-doc-core export surface (pure types: DocumentTemplate, Component, Frontmatter, Diff patches, Crdt ops, Pending model, ModelTier resolution) — keep orchestration types out
-- 2026-05-28 [#rtx6] [recommended] #adcr-snapshot-seam Decide diff.rs ↔ snapshot.rs seam — either extract Snapshot data type into agent-doc-core and keep load/save/resolve/path_for in orchestration, or inject snapshot through a trait. Required before extracting diff.
-- 2026-05-28 [#d97v] #adcr-workspace Convert src/agent-doc into Cargo workspace root; add agent-doc-core stub crate; record cargo build --timings baselines per tasks/agent-doc/plan-agent-doc-core-extraction.md
 <!-- /agent:done -->

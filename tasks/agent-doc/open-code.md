@@ -72,7 +72,30 @@ Investigation showed `session_actor` delegates **all** persistence to `project_c
 #### Verification
 
 `cargo build` full workspace green; core+sqlite tests **652 passed**; `cargo build --release` + `cargo install --path .` both succeeded (binaries current). `make check` is clean **except** one pre-existing failure — `codex_bare_run_inside_owning_pane_fails_before_nested_dispatch` (`run_integration.rs`), a codex/tmux-dispatch test that touches none of the relocated code. I confirmed it fails on clean HEAD with my changes stashed, so it is **not** a regression from this work.
-<!-- agent:boundary:af4e2aa8 -->
+### Re: do [#adoc-sqlite-seam] — Phase C complete — opus-4-7
+
+Phase C done — the seam is complete and the build-isolation goal is met. `#adoc-sqlite-seam` is marked done.
+
+#### What landed (submodule `81fb4bc4`, superproject `9ba120105`, pushed)
+
+- Moved **all** of `project_controller`'s SQLite into `agent_doc_sqlite::state_store`: `open_state_db` + schema, row mapping, actor/transition/lease/dispatch/projection reads, `insert_actor_transition`, `upsert_actor_document`, lease/dispatch writes, layout state, and the CAS + legacy-migration transaction bodies.
+- Moved the storage types (`ActorState`/`ActorRecord`/`ActorLastTransition`) and the 5 status types into `agent-doc-sqlite`, re-exported from `session_actor`/`project_controller` so **all call sites are unchanged**.
+- Orchestration glue (`ops_log`, `sessions.json` projection, drift checks, `handle_*`, `serve`) stays in `project_controller` and calls `state_store::*`. Small tendrils lifted to params: `upsert_actor_document` takes `launch_mode` + `controller_epoch`; legacy-projection load stays in orchestration and feeds `state_store` transaction fns.
+- `rusqlite` is now **dev-only** for `agent-doc-orchestration` — editing orchestration source no longer compiles/links `libsqlite3-sys`. `cargo tree -e normal --depth 1` shows only `agent-doc-sqlite`.
+
+#### Test-infra fix (needed to validate)
+
+`agent-doc-orchestration`'s test target was **uncompilable on HEAD** (pre-existing: missing `filetime` dev-dep used by `gc.rs`; `ScopedCurrentDir` missing from `test_support`). Fixed both — this unhid **1844** orchestration tests, including the `project_controller`/`session_actor` persistence tests that validate this seam.
+
+#### Verification
+
+- `cargo build` full workspace clean; `cargo test -p agent-doc-core -p agent-doc-sqlite` → **652 passed**.
+- `cargo test -p agent-doc-orchestration` → **1844 passed / 0 failed** (incl. all `project_controller` + `session_actor` tests).
+- `make check` green **except** the pre-existing `codex_bare_run_inside_owning_pane_fails_before_nested_dispatch` (proven to fail on HEAD without these changes).
+- `cargo build --release` + `cargo install --path .` succeeded; both binaries current.
+
+Follow-up: `make check` does not run orchestration's isolated suite (separate pre-existing gap) — captured in backlog.
+<!-- agent:boundary:acdb8a8e -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -87,7 +110,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#adoc-sqlite-seam] [recommended] Build-isolation seam — remove rusqlite from agent-doc-orchestration. PHASE A+B DONE (submodule commit 0bae9a72): agent-doc-sqlite crate created; archive_index relocated into it; compact↔archive_index cycle broken by moving parse_topic_sections → agent_doc_core::topic. PHASE C REMAINING (the actual isolation): project_controller (cluster-central) still keeps rusqlite, so orchestration still links libsqlite3-sys. Surgically extract its ~15 SQL functions (open_state_db/schema + actor/lease/dispatch/layout/projection store) into a StateDb seam in agent-doc-sqlite; move storage types (ActorRecord/ActorState/ActorLastTransition) down + re-export; repoint session_actor + handle_* call sites; drop rusqlite from orchestration normal deps (dev-dep for the ~10 DB tests, or move them). Only Phase C isolates the bundled-SQLite C build from orchestration recompiles.
 - [ ] [#adoc-orch-shim-cleanup] Finish the migration: rewrite CLI-shell crate::X call sites to agent_doc_orchestration::X and delete the pub use shims in agent-doc/src/{lib,main}.rs. Mechanical/low-risk polish, not a true crate split. Plan's optional final step.
 <!-- /agent:backlog -->
 

@@ -164,7 +164,25 @@ Appears under your own name as a contractor period; no company entry needed.
 **Practical note on LinkedIn:** LinkedIn expects a company name for each experience entry. "Confidential" or "Private Company" in the company field works fine — recruiters see it routinely for NDA engagements. If you add a public description, keep it to skill/tech-category level (e.g., "AI infrastructure development in Rust") without business-domain specifics.
 
 **Recommended:** Given it was only 7 weeks and the work can't be shown, Option A with minimal description is cleaner than a gap. Or skip it entirely and let tsift (your own IP, same period) carry the narrative for that time.
-<!-- agent:boundary:2bd79937 -->
+❯ I cannot describe that I used Livekit?
+
+### Re: LiveKit and Dreamable — sonnet-4-6
+
+**You can claim LiveKit as a skill — but don't attribute it specifically to Dreamable.**
+
+The distinction:
+
+- **"I know LiveKit" (your Skills section)** — fine. Skills you've gained are yours regardless of where you used them.
+- **"At [Confidential Client], I built X using LiveKit"** — edges into revealing their technical stack, which is "technical data" under §5 of the settlement.
+
+**But it doesn't matter for the resume:** LiveKit is already attributed to **Presence AI** in your current resume:
+
+> *"…frame sequencing on NVIDIA H100 GPUs via WebRTC using LiveKit"*
+
+That's the right attribution and it's clean. No need to also attribute it to a confidential engagement. Keep LiveKit under Presence AI and in your Skills list — that's sufficient and accurate.
+
+If you used LiveKit at Dreamable too, you can mentally count it toward your depth of experience, but there's no resume reason to add a second attribution when the first one already demonstrates it.
+<!-- agent:boundary:548c5f7e -->
 <!-- /agent:exchange -->
 ###
 <!--

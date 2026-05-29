@@ -491,6 +491,54 @@ pub fn ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
         .any(|change| !prompt_bearing_change_owned_by_content_ours(change, &owned_changes))
 }
 
+/// The raw text of the `agent:exchange` component, or empty if absent. Used to
+/// scope dropped-prompt detection to user-authored exchange content only —
+/// queue / backlog / scratch-comment drift is legitimately preserved in the
+/// working tree for the next cycle and is not a data-loss case.
+fn exchange_component_text(doc: &str) -> String {
+    let Ok(components) = crate::component::parse(doc) else {
+        return String::new();
+    };
+    components
+        .iter()
+        .find(|c| c.name == "exchange")
+        .map(|c| c.content(doc).to_string())
+        .unwrap_or_default()
+}
+
+/// `#exchange-prompt-dropped-on-merge`: the user-authored prompt-bearing lines
+/// present in the IPC `candidate` (disk / ack sidecar) `agent:exchange` that
+/// `content_ours` does not own — i.e. the exchange prompt lines that would be
+/// lost when `content_ours` is adopted. Scoped to the `agent:exchange`
+/// component so queue / backlog / scratch drift (preserved for the next cycle)
+/// is not misread as a dropped prompt. Recorded so `session-check` can fail
+/// closed on the data-loss class.
+fn dropped_prompt_lines_after_content_ours(
+    baseline: &str,
+    candidate: &str,
+    content_ours: &str,
+) -> Vec<String> {
+    let baseline_ex = exchange_component_text(baseline);
+    let candidate_ex = exchange_component_text(candidate);
+    let content_ours_ex = exchange_component_text(content_ours);
+
+    let candidate_changes = prompt_bearing_user_changes_between(&baseline_ex, &candidate_ex);
+    if candidate_changes.is_empty() {
+        return Vec::new();
+    }
+    let owned_changes = prompt_bearing_user_changes_between(&baseline_ex, &content_ours_ex);
+    candidate_changes
+        .into_iter()
+        // Only a new prompt target (a `do #id` / `❯ ...` / prompt-shaped line) is
+        // an unambiguously dropped user prompt. Multi-line content edits are
+        // noisy diff context, not a discrete prompt to recover.
+        .filter(|change| change.kind == crate::diff::PromptBearingChangeKind::PromptTarget)
+        .filter(|change| !prompt_bearing_change_owned_by_content_ours(change, &owned_changes))
+        .map(|change| change.text.trim().to_string())
+        .filter(|text| !text.is_empty() && !text.contains('\n'))
+        .collect()
+}
+
 fn snapshot_content_to_persist<'a>(
     mode: SnapshotPersistMode,
     content_ours: &'a str,
@@ -8042,6 +8090,31 @@ fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
         ),
     );
     let _ = crate::cycle_state::record_ipc_snapshot_adoption_blocked(file);
+    // #exchange-prompt-dropped-on-merge: persist the dropped user prompt lines
+    // now, while the divergent candidate still carries them. The post-commit
+    // session-check disk diff cannot win the race against an editor that
+    // overwrites disk with the converged content_ours buffer, so the dropped
+    // prompt guard reads this persisted evidence to fail closed instead.
+    let dropped = dropped_prompt_lines_after_content_ours(base, &decision.snapshot_content, ours);
+    if !dropped.is_empty() {
+        if let Err(e) = crate::cycle_state::record_dropped_exchange_prompts(file, &dropped) {
+            eprintln!(
+                "[write] warning: failed to record dropped exchange prompt(s) for {}: {}",
+                file.display(),
+                e
+            );
+        }
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "dropped_exchange_prompt_recorded file={} source={} patch_id={} count={}",
+                file.display(),
+                source,
+                patch_id.unwrap_or("-"),
+                dropped.len()
+            ),
+        );
+    }
     decision.replace_snapshot_with_content_ours_for_live_prompt_drift(ours);
     true
 }
@@ -11551,6 +11624,43 @@ mod tests {
 
     fn patch_with_heading(heading: &str) -> crate::template::PatchBlock {
         crate::template::PatchBlock::new("exchange", format!("{heading}\n\nbody line one\n"))
+    }
+
+    #[test]
+    fn dropped_prompt_lines_after_content_ours_captures_unowned_prompt() {
+        let baseline = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nAnswered.\n",
+            "<!-- agent:boundary:b0 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        // candidate (disk / ack sidecar) carries the user's freshly-typed "go".
+        let candidate = baseline.replace(
+            "<!-- agent:boundary:b0 -->",
+            "go\n<!-- agent:boundary:b0 -->",
+        );
+        // content_ours (baseline + response, no user edits) does NOT have "go".
+        let content_ours = baseline;
+
+        let dropped = dropped_prompt_lines_after_content_ours(baseline, &candidate, content_ours);
+        assert_eq!(dropped, vec!["go".to_string()]);
+    }
+
+    #[test]
+    fn dropped_prompt_lines_after_content_ours_empty_when_content_ours_owns_prompt() {
+        let baseline = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nAnswered.\n",
+            "<!-- agent:boundary:b0 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let with_go = baseline.replace(
+            "<!-- agent:boundary:b0 -->",
+            "go\n<!-- agent:boundary:b0 -->",
+        );
+        // Both candidate and content_ours contain "go" → nothing is dropped.
+        let dropped = dropped_prompt_lines_after_content_ours(baseline, &with_go, &with_go);
+        assert!(dropped.is_empty());
     }
 
     #[test]

@@ -128,6 +128,14 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
         warnings: Vec::new(),
     };
     if matches!(report.status, SessionCheckStatus::Ok(_)) {
+        match check_dropped_exchange_prompt_guard(file)? {
+            GuardResult::None => {}
+            GuardResult::Warn(lines) => report.warnings.extend(lines),
+            GuardResult::Error(message) => {
+                report.status = SessionCheckStatus::Interrupted(message);
+                return Ok(report);
+            }
+        }
         if let Some(message) = check_completed_pending_reap_guard(file)? {
             report.status = SessionCheckStatus::Interrupted(message);
             return Ok(report);
@@ -222,6 +230,72 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
         }
     }
     Ok(report)
+}
+
+fn normalized_prompt_for_match(line: &str) -> String {
+    line.trim().trim_start_matches('❯').trim().to_string()
+}
+
+/// True when `doc`'s `agent:exchange` component contains a line matching the
+/// given prompt (normalized: leading `❯` and whitespace stripped). Used to
+/// decide whether a recorded dropped prompt has been resolved (reached the
+/// committed document) so the guard can clear and stop firing.
+fn exchange_contains_prompt_line(doc: &str, prompt: &str) -> bool {
+    let needle = normalized_prompt_for_match(prompt);
+    if needle.is_empty() {
+        return true;
+    }
+    let Ok(components) = crate::component::parse(doc) else {
+        return false;
+    };
+    let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
+        return false;
+    };
+    exchange
+        .content(doc)
+        .lines()
+        .any(|line| normalized_prompt_for_match(line) == needle)
+}
+
+/// `#exchange-prompt-dropped-on-merge`: fail closed when this cycle recorded a
+/// user-authored exchange prompt dropped during a `content_ours` IPC adoption
+/// and that prompt is still absent from the committed `HEAD`. The evidence is
+/// persisted at adoption time, so this guard catches the silent-loss class even
+/// when the editor overwrote the disk prompt via IPC buffer convergence before
+/// the post-commit disk diff could observe it.
+fn check_dropped_exchange_prompt_guard(file: &Path) -> Result<GuardResult> {
+    let Some(state) = crate::cycle_state::load(file)? else {
+        return Ok(GuardResult::None);
+    };
+    if state.dropped_exchange_prompts.is_empty() {
+        return Ok(GuardResult::None);
+    }
+    let head = crate::git::show_head(file)?.unwrap_or_default();
+    let still_missing: Vec<String> = state
+        .dropped_exchange_prompts
+        .iter()
+        .filter(|prompt| !exchange_contains_prompt_line(&head, prompt))
+        .cloned()
+        .collect();
+    if still_missing.is_empty() {
+        // The dropped prompt reached the committed document — resolved.
+        crate::cycle_state::clear_dropped_exchange_prompts(file)?;
+        return Ok(GuardResult::None);
+    }
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "dropped_exchange_prompt_guard_failed file={} count={}",
+            file.display(),
+            still_missing.len()
+        ),
+    );
+    Ok(GuardResult::Error(format!(
+        "[session-check] INTERRUPTED: user-authored exchange prompt(s) were dropped during an IPC content_ours merge and are missing from the committed document: {}. The cycle committed `content_ours` without these prompt-bearing line(s); re-add them to `agent:exchange` and re-run `agent-doc finalize {}` / `agent-doc write --commit {}` so they are answered (see #exchange-prompt-dropped-on-merge).",
+        still_missing.join("; "),
+        file.display(),
+        file.display()
+    )))
 }
 
 fn check_completed_pending_reap_guard(file: &Path) -> Result<Option<String>> {
@@ -5268,6 +5342,105 @@ Body\n\
             }
             other => panic!("expected late-IPC over-application interruption, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn session_check_fails_closed_on_dropped_exchange_prompt() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        for args in [
+            vec!["init"],
+            vec!["config", "user.email", "test@example.com"],
+            vec!["config", "user.name", "Test"],
+        ] {
+            Command::new("git").current_dir(root).args(&args).output().unwrap();
+        }
+
+        let doc = root.join("doc.md");
+        // HEAD = content_ours: the assistant response, but NOT the user's "go".
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nAnswered.\n",
+            "<!-- agent:boundary:committed -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        for args in [vec!["add", "doc.md"], vec!["commit", "-m", "ours", "--no-verify"]] {
+            Command::new("git").current_dir(root).args(&args).output().unwrap();
+        }
+        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(committed), Some(committed))
+            .unwrap();
+        // Adoption-time evidence: the user's "go" was dropped into content_ours.
+        crate::cycle_state::record_dropped_exchange_prompts(&doc, &["go".to_string()]).unwrap();
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(
+                    message.contains("dropped during an IPC content_ours merge"),
+                    "expected dropped-prompt classification: {message}"
+                );
+                assert!(message.contains("go"), "should name the dropped prompt: {message}");
+            }
+            other => panic!("expected dropped-prompt interruption, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn session_check_clears_dropped_prompt_marker_once_in_head() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        for args in [
+            vec!["init"],
+            vec!["config", "user.email", "test@example.com"],
+            vec!["config", "user.name", "Test"],
+        ] {
+            Command::new("git").current_dir(root).args(&args).output().unwrap();
+        }
+
+        let doc = root.join("doc.md");
+        // HEAD now DOES contain the previously-dropped prompt "go" (a later cycle
+        // recovered it), so the recorded marker is stale and must clear.
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "go\n",
+            "### Re: go — gpt-5\n\nStarted.\n",
+            "<!-- agent:boundary:committed -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        for args in [vec!["add", "doc.md"], vec!["commit", "-m", "recovered", "--no-verify"]] {
+            Command::new("git").current_dir(root).args(&args).output().unwrap();
+        }
+        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(committed), Some(committed))
+            .unwrap();
+        crate::cycle_state::record_dropped_exchange_prompts(&doc, &["go".to_string()]).unwrap();
+
+        assert!(
+            matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
+            "guard should clear when the dropped prompt is present in HEAD"
+        );
+        assert!(
+            crate::cycle_state::load(&doc)
+                .unwrap()
+                .expect("state")
+                .dropped_exchange_prompts
+                .is_empty(),
+            "resolved marker should be cleared"
+        );
     }
 
     #[test]

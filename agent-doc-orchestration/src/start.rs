@@ -4245,6 +4245,7 @@ mod tests {
             pending_kept_open_ids: Vec::new(),
             reaped_pending_ids: Vec::new(),
             ipc_snapshot_adoption_blocked: false,
+            dropped_exchange_prompts: Vec::new(),
         }
     }
 

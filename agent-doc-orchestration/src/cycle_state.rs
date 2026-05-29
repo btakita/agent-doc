@@ -98,6 +98,14 @@ pub struct CycleState {
     pub reaped_pending_ids: Vec<String>,
     #[serde(default)]
     pub ipc_snapshot_adoption_blocked: bool,
+    /// `#exchange-prompt-dropped-on-merge`: user-authored exchange prompt lines
+    /// that were dropped when `content_ours` was adopted over a divergent IPC
+    /// candidate (live prompt drift after preflight). Recorded at adoption time
+    /// so `session-check` can fail closed on the data-loss class even if the
+    /// editor later overwrites the disk prompt via IPC buffer convergence
+    /// (the silent-loss race the post-commit disk diff cannot win).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dropped_exchange_prompts: Vec<String>,
 }
 
 impl CycleState {
@@ -146,6 +154,7 @@ pub fn start_preflight(
         pending_kept_open_ids: Vec::new(),
         reaped_pending_ids: Vec::new(),
         ipc_snapshot_adoption_blocked: false,
+        dropped_exchange_prompts: Vec::new(),
     };
     save(file, &state)?;
     append_phase_event_to_session_log(file, &state);
@@ -412,6 +421,53 @@ pub fn record_ipc_snapshot_adoption_blocked(file: &Path) -> Result<Option<CycleS
     Ok(Some(state))
 }
 
+/// `#exchange-prompt-dropped-on-merge`: record user-authored exchange prompt
+/// line(s) dropped when `content_ours` was adopted over a divergent IPC
+/// candidate, so `session-check` can fail closed even after the editor
+/// overwrites the disk prompt. Appends only previously-unseen prompt lines.
+pub fn record_dropped_exchange_prompts(
+    file: &Path,
+    prompts: &[String],
+) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+    let mut changed = false;
+    for prompt in prompts {
+        let trimmed = prompt.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if !state
+            .dropped_exchange_prompts
+            .iter()
+            .any(|existing| existing == trimmed)
+        {
+            state.dropped_exchange_prompts.push(trimmed.to_string());
+            changed = true;
+        }
+    }
+    if changed {
+        state.updated_at = now_secs();
+        save(file, &state)?;
+    }
+    Ok(Some(state))
+}
+
+/// Clear the recorded dropped-prompt markers once they are resolved (the prompt
+/// reached the committed document on a later cycle).
+pub fn clear_dropped_exchange_prompts(file: &Path) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+    if !state.dropped_exchange_prompts.is_empty() {
+        state.dropped_exchange_prompts.clear();
+        state.updated_at = now_secs();
+        save(file, &state)?;
+    }
+    Ok(Some(state))
+}
+
 pub fn mark_committed(
     file: &Path,
     event: &str,
@@ -556,6 +612,7 @@ fn synthetic_state_with_id(
         pending_kept_open_ids: Vec::new(),
         reaped_pending_ids: Vec::new(),
         ipc_snapshot_adoption_blocked: false,
+        dropped_exchange_prompts: Vec::new(),
     }
 }
 
@@ -672,6 +729,29 @@ mod tests {
                 .unwrap()
                 .expect("state should persist")
                 .ipc_snapshot_adoption_blocked
+        );
+    }
+
+    #[test]
+    fn record_and_clear_dropped_exchange_prompts() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+        start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+
+        record_dropped_exchange_prompts(&doc, &["go".to_string(), "go".to_string()]).unwrap();
+        record_dropped_exchange_prompts(&doc, &["go".to_string(), "do #x".to_string()]).unwrap();
+        let state = load(&doc).unwrap().expect("state");
+        // De-duplicated across calls.
+        assert_eq!(state.dropped_exchange_prompts, vec!["go", "do #x"]);
+
+        clear_dropped_exchange_prompts(&doc).unwrap();
+        assert!(
+            load(&doc)
+                .unwrap()
+                .expect("state")
+                .dropped_exchange_prompts
+                .is_empty()
         );
     }
 

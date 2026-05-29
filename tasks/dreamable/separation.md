@@ -338,7 +338,56 @@ Can you legally do it? Probably not without exposure. Should you do it? No. The 
 **Stick to the demand-letter ladder.** Step 1 (friendly check) → step 3 (your demand letter) → step 4 (lawyer demand letter). If Rob hasn't paid by step 4, file small claims or JAMS per the prior response. None of those routes involves contacting his family, and all of them are likelier to produce payment than public family pressure.
 
 **Not legal advice.** §527.6 civil harassment and IIED are real causes of action with low evidentiary thresholds. Confirm with a CA or CT attorney before taking any action that targets non-parties to the contract.
-<!-- agent:boundary:ac06ccd3 -->
+❯ Can I have anyone speak on my behalf?
+
+### Re: Having someone speak on your behalf — opus-4-7
+
+**Short answer.** Mostly no. Speech *on your behalf* — anyone you direct, encourage, compensate, or coordinate with — is legally attributed to you for §8 purposes. The narrow exceptions are (a) your attorney acting in litigation, (b) independent third parties speaking on their own initiative without coordination, and (c) court/arbitration filings made by your counsel. Everything else is treated as your statement and triggers the same §8 risk as if you said it yourself.
+
+**The agency principle**
+
+Non-disparagement clauses are read against the *principal* (you) when an *agent* speaks. The test isn't whether the words came out of your mouth — it's whether the speaker was acting on your behalf, at your direction, or in coordination with you. Courts use a totality-of-circumstances analysis: encouragement, compensation, joint editing of the message, prior agreement to speak, and timing relative to your dispute all count as agency.
+
+This means the obvious workarounds don't work:
+
+- **A friend posts the facts at your request** — your speech. §8 breach.
+- **You retweet/share/like a third party's post about Dreamable** — your speech (amplification).
+- **You hire a PR person or publicist to make statements** — your speech (compensation = clearest agency).
+- **You ghostwrite a post for a friend to publish under their name** — your speech (coordination + drafting).
+- **You post anonymously** — your speech (discovery unmasks anonymous accounts, and the deception itself is evidence of bad faith).
+
+**What does work — safe channels**
+
+1. **Your attorney in litigation context.** Statements made by counsel in a demand letter, JAMS demand, court filing, or settlement negotiation are protected by **litigation privilege** (California Civil Code §47(b), broad version). The attorney can say things in those forums you couldn't safely say yourself, and §8 generally doesn't reach them. This is the primary lever.
+2. **Your attorney in pre-litigation communications.** A flat-fee demand letter on attorney letterhead, sent to Rob privately, is generally protected even before arbitration is filed — litigation privilege extends to communications in serious anticipation of litigation. CA case law (Rubin v. Green, 4 Cal. 4th 1187) supports broad pre-litigation protection.
+3. **Third parties speaking truly independently.** If another former Dreamable contractor with their own unpaid claim posts about their own experience, that's their speech, not yours — unless you coordinated. Same for an industry friend who heard about the situation through normal channels. The key word is *independently*: no encouragement, no coordination, no review of their draft.
+4. **Truthful responses by your professional references.** Someone who's known you professionally can answer "do you know if Brian had any issues with his last engagement?" with truthful, neutral facts they personally observed. That's their speech, not yours.
+5. **Your spouse or close family member speaking on their own initiative.** Same independence test. A spouse who's angry on your behalf and posts about it without coordinating with you is on safer ground than a friend you specifically asked to post — but the relationship makes coordination harder to disprove, so this is borderline. Best avoided.
+
+**What people often try that doesn't work**
+
+- *"I'll just give an interview to a journalist."* If you sit for the interview and the journalist quotes you, that's your speech. Even off-the-record gets attributed via context.
+- *"My business partner / co-founder will say it."* If they have any business relationship with you, the agency presumption is strong. They're acting in your collective interest.
+- *"I'll fund a third-party advocacy organization to speak out."* Direct funding is direct agency. Even indirect funding (donations, mutual aid) is risky when timing aligns with the dispute.
+
+**The two-tier strategy**
+
+This is the safe and effective use of "someone speaking on my behalf":
+
+**Tier 1 — Your attorney does the loud work.** A lawyer demand letter, JAMS filing, or court complaint can state the facts of the breach forcefully and publicly (court filings are public records) without triggering §8, because litigation privilege governs. The fee for a flat-fee demand letter is $200–$500 and *this is the channel* — it captures most of the "third-party speaks for me" effect with full legal protection.
+
+**Tier 2 — You stay silent in public.** Don't post. Don't retweet. Don't share. Let the court filing and attorney correspondence carry the public-record signal. Anyone Googling Dreamable later will find the court docket; anyone asking you directly gets a measured "we're in arbitration / litigation" response.
+
+**One thing to watch for**
+
+If Rob hires counsel and they send you a §8-warning letter at any point, that's important data — it means Rob is monitoring your speech and prepared to enforce §8. Document any such letter and adjust accordingly. Conversely, if Rob never sends such a letter even when you make public attorney-fronted demands, his appetite for §8 enforcement is probably low.
+
+**Practical answer**
+
+Yes — an attorney can and should speak on your behalf, and that's the highest-value "someone else speaks for me" channel. Anyone else (friend, PR person, spokesperson, even spouse acting on your direction) is treated as you for §8 purposes and creates the same legal exposure as if you'd spoken directly. The $200–$500 spent on a flat-fee attorney demand letter is the cleanest way to get loud, public, protected speech on the record.
+
+**Not legal advice.** Litigation privilege scope and the agency test for non-disparagement clauses vary by jurisdiction and by exact §8 wording. Confirm with a CA or CT attorney before having anyone — including counsel — make any public statement about Dreamable.
+<!-- agent:boundary:2ebc69dd -->
 <!-- /agent:exchange -->
 
 ## Queue

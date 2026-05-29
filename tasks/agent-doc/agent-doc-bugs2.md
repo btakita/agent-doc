@@ -98,7 +98,37 @@ Fixed: the queue head is no longer struck on a halt/refusal response. Committed 
 #### Follow-up
 
 The Codex exact-heading narrowing is conservative (it errs toward *not* consuming, which is the safe direction), but it means a Codex auto-loop completion with a descriptive heading won't auto-advance. Queued a `[recommended]` backlog item to add SKILL guidance for Codex auto-loop heading titling and live-verify Codex queue advancement — that behavioral path can't be proven from this Claude Code session.
-<!-- agent:boundary:18887731 -->
+
+### Re: do [#jb-stale-busy-idle-footer] halt — blocked on live pane captures — opus-4-8
+
+I'm **halting** this item rather than shipping a guess. Root cause is code-confirmed and the safe fix is designed, but completing it requires live ground truth I don't have, and a wrong heuristic here is dangerous. Plan written: `tasks/agent-doc/plan-jb-stale-busy-idle-footer.md` (committed `3390f3909`). No `--done`/`--pending-gate` — the queue head stays in place.
+
+#### Root cause (confirmed in code)
+
+`session_actor_cmd::live_pane_prompt_ready` projects a live pane `AliveBusy` for a genuinely idle Claude pane because of two gaps:
+
+1. **Claude footer chrome isn't ignorable.** `HarnessConfig::is_ignorable_output_line` handles only `codex`/`opencode` footers (`_ => false` for claude). So `last_prompt_candidate` (bottom-up first non-ignorable line) returns the Claude status/footer line instead of the `❯` / `⏵⏵ … (shift+tab to cycle)` composer one line above → not dispatch-ready → `AliveBusy`. Claude lacks the footer-skip that `last_prompt_candidate_skips_codex_footer` already gives Codex.
+2. **Claude has no busy cue.** `dispatch_blocker_reason` / `has_busy_cue` return `None` for any non-codex/non-opencode binary, so the busy guard never fires for Claude.
+
+The composer detection itself is already correct: `is_dispatch_ready_prompt_line` matches bare `❯`/`⏵` and `⏵⏵ … (shift+tab to cycle)` and rejects drafted input.
+
+#### Why I won't one-line this
+
+Just marking the footer ignorable is **unsafe on its own**. During an active Claude turn the bottom is `❯ input box` → spinner (`esc to interrupt`) → footer. If only the footer is skipped, a bottom-up scan surfaces the bare `❯` and mis-classifies a *busy* turn as idle → Clear/dispatch would clobber a live turn. The fix must therefore add a Claude busy cue **first** (so `has_busy_cue` fires on active turns) and only then make the static footer ignorable. Both halves need exact strings from real captures.
+
+#### What I need from you to finish it
+
+The exact Claude Code text, captured live (`tmux capture-pane -p -t %21`, etc.) from one of the reported panes in both states:
+
+- the **idle footer/status line** to mark ignorable (the report's `22.4K (11%) ctrl+p commands` is ambiguous — `ctrl+p commands` is an OpenCode marker, so I won't hard-code it blind), and
+- the **busy/active-turn line** (`esc to interrupt` + spinner/timer shape) to anchor the new busy cue.
+
+With those two strings I can implement + unit-test both halves deterministically and add the SimWorld/live-replay coverage (ties to `#run-agent-doc-stale-busy-replay`).
+
+#### Queue status
+
+This is a real blocker requiring your input, so I'm **pausing the auto-loop** here instead of spinning on it. The queue still has 4 items behind this one (`#pending-add-append-not-prepend`, `#next-steps-backlog-capture`, `#run-agent-doc-stale-busy-replay`, `#jb-busy-queue-ux-feedback`). Tell me to **skip this item** (I'll gate/strike it and continue the queue), or paste the captures and I'll implement it now.
+<!-- agent:boundary:58395921 -->
 <!-- /agent:exchange --> 
 ###
 <!--

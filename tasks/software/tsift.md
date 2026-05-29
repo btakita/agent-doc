@@ -91,7 +91,50 @@ VERSIONS.md `Unreleased` updated with the Phase 1a-iii entry. With this and the 
 #### Top of backlog
 
 `[#cli-cluster-quality]` — Phase 2: move `cmd_audit`, `cmd_audit_tagpath`, `cmd_lint`, `cmd_perf_gate` bodies into `packages/tsift-cli/src/commands/quality.rs`. Smaller cluster than graph.
-<!-- agent:boundary:eb90249e -->
+
+### Re: do [#cli-cluster-quality] — opus-4-7
+
+Phase 2 cluster #3 done.
+
+#### What moved
+
+Three functions (~412 LOC total) → `packages/tsift-cli/src/commands/quality.rs`:
+
+- `cmd_audit_tagpath` (~210 LOC) — reconciles tsift symbol index against tagpath `.naming/index.json`, reports `tsift_only_files` / `tagpath_only_files` with per-file `policy_hints`
+- `cmd_audit` (~136 LOC) — skill drift detection: scans installed Claude skills, checks health, compares against manifest, optional cleanup recommendations
+- `cmd_lint` (~66 LOC) — markdown linting against the live AST symbol index
+
+#### Backlog note
+
+The backlog item listed `cmd_perf_gate` as a fourth function in this cluster, but **no such CLI command exists** — `tsift::perf_gate` is a library API consumed by `cmd_graph_db_backend_eval` (which lives in the infra cluster). The three above are the full quality command surface.
+
+#### Visibility changes (mechanical)
+
+Promoted 2 helpers to `pub(crate)`:
+
+- `tagpath_audit_policy_hints`
+- `tagpath_audit_supported_extensions`
+
+Both used only by `cmd_audit_tagpath` for the `policy_hints` per-file diagnostic and the extension allowlist.
+
+#### Verification
+
+- `cargo build -p tsift-cli` — clean, no new warnings
+- `make check` — green workspace-wide
+- `cargo install --path packages/tsift-cli` — `~/.cargo/bin/tsift` refreshed
+- `cargo build --release -p tsift-cli` — `target/release/tsift` refreshed
+
+#### Commits
+
+- tsift @ `cda1b6f` — `cli: Phase 2 — extract quality command cluster into commands/quality.rs` (pushed)
+- agent-loop @ `007df77` — submodule pointer bump (pushed)
+
+VERSIONS.md `Unreleased` updated with the `#cli-cluster-quality` entry. lib.rs now ~35.8k LOC — down from ~39.2k at Phase 1a-i kickoff.
+
+#### Top of backlog
+
+`[#cli-cluster-summarize]` — Phase 2: move `cmd_summarize` body (and helpers) into `packages/tsift-cli/src/commands/summarize.rs`. Single-function cluster, but the helper surface around extract/diff/stats may be larger than the body itself.
+<!-- agent:boundary:89719aa2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -107,7 +150,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#cli-cluster-index-search]~
 - ~do [#cli-cluster-graph]~
 - ~do [#cli-extract-tagpath-helpers]~
-- do [#cli-cluster-quality]
+- ~do [#cli-cluster-quality]~
 - do [#cli-cluster-summarize]
 - do [#cli-cluster-infra]
 - do [#cli-cluster-digests]
@@ -119,7 +162,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#cli-cluster-quality] Phase 2 — move cmd_audit + cmd_audit_tagpath + cmd_lint + cmd_perf_gate bodies into packages/tsift-cli/src/commands/quality.rs.
 - [ ] [#cli-cluster-summarize] Phase 2 — move cmd_summarize body (and helpers) into packages/tsift-cli/src/commands/summarize.rs.
 - [ ] [#cli-cluster-infra] Phase 2 — move cmd_init + cmd_status + cmd_locks + cmd_sql + cmd_route + cmd_rewrite + cmd_convex_sync + cmd_graph_db_* + cmd_edit bodies into packages/tsift-cli/src/commands/infra.rs.
 - [ ] [#cli-cluster-digests] Phase 2 — move cmd_diff_digest + cmd_log_digest + cmd_test_digest + cmd_metric_digest + cmd_session_digest + cmd_session_cost + cmd_session_review + cmd_context_pack bodies into packages/tsift-cli/src/commands/digests.rs. Depends on tsift-digest and tsift-session landing first.

@@ -8273,6 +8273,79 @@ fn log_ipc_snapshot_adoption_allowed(
     );
 }
 
+/// #ipcfullprompt-recur2 — default-on forensic capture. The fail-closed snapshot
+/// guards above protect what gets *committed*, but a full-document editor-side
+/// IPC mutation (e.g. `PatchWatcher.setText`) can still corrupt the
+/// editor-visible buffer — deleting or duplicating a previously-committed
+/// `### Re:` response block — while the user types a live prompt. This records
+/// every such occurrence to `ops.log` and preserves the candidate buffer, so the
+/// bug (which is not reliably reproducible) is captured the next time it happens
+/// without any manual editor debug opt-in. Detection only: it never changes the
+/// adoption decision — the guards above own that.
+///
+/// `candidate` must be the live editor buffer as received (capture it before the
+/// guards replace `decision.snapshot_content`).
+fn log_ipcfullprompt_corruption_if_any(
+    file: &Path,
+    source: &str,
+    patch_id: Option<&str>,
+    baseline: Option<&str>,
+    candidate: &str,
+) {
+    let Some(base) = baseline else {
+        return;
+    };
+    let findings = crate::ipc_corruption::detect_response_block_corruption(base, candidate);
+    if findings.is_empty() {
+        return;
+    }
+    let summary = crate::ipc_corruption::summarize_findings(&findings);
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "ipcfullprompt_corruption_suspected file={} source={} patch_id={} candidate_len={} candidate_hash={} baseline_len={} baseline_hash={} {}",
+            file.display(),
+            source,
+            patch_id.unwrap_or("-"),
+            candidate.len(),
+            crate::ops_log::content_hash(candidate),
+            base.len(),
+            crate::ops_log::content_hash(base),
+            summary,
+        ),
+    );
+    preserve_ipcfullprompt_forensic(file, patch_id, base, candidate);
+}
+
+/// Best-effort: preserve the baseline + corrupted candidate buffers under
+/// `.agent-doc/logs/ipcfullprompt/` so the exact corruption shape can be analyzed
+/// later (the plan's Phase-1 "preserve the pre/post for one failing cycle").
+/// Never panics or returns errors.
+fn preserve_ipcfullprompt_forensic(
+    file: &Path,
+    patch_id: Option<&str>,
+    baseline: &str,
+    candidate: &str,
+) {
+    let Ok(canonical) = file.canonicalize() else {
+        return;
+    };
+    let Some(root) = crate::fs_util::find_project_root(&canonical) else {
+        return;
+    };
+    let dir = root.join(".agent-doc/logs/ipcfullprompt");
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let stem = format!("{}-{}", ts, patch_id.unwrap_or("nopatch"));
+    let _ = std::fs::write(dir.join(format!("{stem}.baseline.md")), baseline);
+    let _ = std::fs::write(dir.join(format!("{stem}.candidate.md")), candidate);
+}
+
 fn persist_already_applied_socket_content_ours_snapshot(
     file: &Path,
     patch_id: &str,
@@ -9489,6 +9562,9 @@ pub fn try_ipc(
                     } else {
                         repair_decision.snapshot_content = effective_snap;
                     }
+                    // Capture the live editor buffer before the guards replace it,
+                    // so the #ipcfullprompt forensic detector sees the candidate.
+                    let ipcfullprompt_candidate = repair_decision.snapshot_content.clone();
                     let drift_fired = guard_ipc_snapshot_adoption_against_live_prompt_drift(
                         file,
                         "socket_ack_content",
@@ -9512,6 +9588,13 @@ pub fn try_ipc(
                         content_ours,
                         &repair_decision,
                         drift_fired || dup_fired,
+                    );
+                    log_ipcfullprompt_corruption_if_any(
+                        file,
+                        "socket_ack_content",
+                        Some(&patch_id),
+                        baseline,
+                        &ipcfullprompt_candidate,
                     );
 
                     let expected_response = response_materialization_probe(patches, unmatched);
@@ -10513,6 +10596,9 @@ fn write_ipc_and_poll(
                 .get("baseline")
                 .and_then(|value| value.as_str())
                 .filter(|value| !value.is_empty());
+            // Capture the live editor buffer before the guards replace it, so the
+            // #ipcfullprompt forensic detector sees the candidate.
+            let ipcfullprompt_candidate = repair_decision.snapshot_content.clone();
             let drift_fired = guard_ipc_snapshot_adoption_against_live_prompt_drift(
                 doc_file,
                 "file_ipc",
@@ -10536,6 +10622,13 @@ fn write_ipc_and_poll(
                 options.content_ours,
                 &repair_decision,
                 drift_fired || dup_fired,
+            );
+            log_ipcfullprompt_corruption_if_any(
+                doc_file,
+                "file_ipc",
+                Some(patch_id),
+                file_baseline,
+                &ipcfullprompt_candidate,
             );
             repair_ipc_decision_visible_state(doc_file, &repair_decision, Some(patch_id))?;
             crate::ops_log::log_op(
@@ -13231,6 +13324,98 @@ scratch
         assert!(
             !log.contains("ipc_snapshot_adoption_allowed"),
             "allowed diagnostic must stay silent once a guard fired:\n{log}"
+        );
+    }
+
+    #[test]
+    fn ipcfullprompt_corruption_logged_on_deleted_response() {
+        // #ipcfullprompt-recur2: a live editor buffer (candidate) that dropped a
+        // previously-committed `### Re:` block must leave a forensic ops.log line
+        // and preserve the baseline + candidate for analysis — default-on capture,
+        // no manual editor debug opt-in required.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "placeholder").unwrap();
+
+        let baseline = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: first — opus-4-8\nA1.\n",
+            "### Re: second — opus-4-8\nA2.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        // candidate dropped the second response block.
+        let candidate = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: first — opus-4-8\nA1.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        log_ipcfullprompt_corruption_if_any(
+            &doc,
+            "socket_ack_content",
+            Some("pid-corrupt"),
+            Some(baseline),
+            candidate,
+        );
+
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("ipcfullprompt_corruption_suspected")
+                && log.contains("source=socket_ack_content")
+                && log.contains("patch_id=pid-corrupt")
+                && log.contains("deleted=1")
+                && log.contains("response_deleted(### Re: second — opus-4-8:1->0)"),
+            "deleted prior response must be captured:\n{log}"
+        );
+        let forensic_dir = agent_doc_dir.join("logs/ipcfullprompt");
+        let preserved: Vec<_> = fs::read_dir(&forensic_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        assert!(
+            preserved.iter().any(|n| n.ends_with(".baseline.md"))
+                && preserved.iter().any(|n| n.ends_with(".candidate.md")),
+            "forensic baseline + candidate must be preserved: {preserved:?}"
+        );
+    }
+
+    #[test]
+    fn ipcfullprompt_corruption_silent_on_clean_candidate() {
+        // A candidate that only *adds* a new response (expected growth) must not
+        // be flagged — no false positive on normal cycles.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "placeholder").unwrap();
+
+        let baseline = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: first — opus-4-8\nA1.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let candidate = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: first — opus-4-8\nA1.\n",
+            "### Re: second — opus-4-8\nA2.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        log_ipcfullprompt_corruption_if_any(
+            &doc,
+            "file_ipc",
+            Some("pid-clean"),
+            Some(baseline),
+            candidate,
+        );
+
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap_or_default();
+        assert!(
+            !log.contains("ipcfullprompt_corruption_suspected"),
+            "clean growth must not be flagged as corruption:\n{log}"
         );
     }
 

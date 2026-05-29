@@ -83,6 +83,9 @@ pub mod harness_prompt;
 // zero-dep). Re-exported so `crate::heuristics::*` call sites resolve unchanged.
 pub use agent_doc_core::heuristics;
 pub mod hooks;
+// Relocated to `agent-doc-core` (#ipcfullprompt-recur2 — pure, zero-dep forensic
+// detector). Re-exported so `crate::ipc_corruption::*` call sites resolve.
+pub use agent_doc_core::ipc_corruption;
 pub mod lint_gate;
 pub mod pending;
 pub mod pending_cmd;

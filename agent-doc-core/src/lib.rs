@@ -18,6 +18,7 @@ pub mod ffi;
 pub mod frontmatter;
 pub mod heuristics;
 pub mod id;
+pub mod ipc_corruption;
 pub mod model_tier;
 pub mod pending;
 pub mod project_config;

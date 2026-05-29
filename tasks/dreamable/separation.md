@@ -114,7 +114,38 @@ What does survive past signing:
 **One thing to check before signing.** Re-read the original Consulting Agreement (§6, §7, and any "Restrictive Covenants" / "Non-Solicitation" section) for any post-termination restrictions on competing work or soliciting Dreamable's customers/employees. The Settlement preserves the Consulting Agreement by reference in §11, so any post-termination clauses there still apply. The Settlement itself doesn't add new post-signing restrictions on your work — just confidentiality and non-disparagement.
 
 **Bottom line.** Once signed, you're free to build whatever you want — open-source, private, commercial, competing tools — provided you (a) don't reuse Dreamable confidential information and (b) don't make disparaging statements about Dreamable. Existing carve-outs from the Addendum continue to apply, and §3's broad assignment language is contained to the April 6 – May 26 window.
-<!-- agent:boundary:d9fae84f -->
+
+### Re: Payment delay and contract effectiveness — opus-4-7
+
+**Short answer.** Yes — the Settlement is in effect from the moment both parties sign. Payment is Dreamable's *contractual obligation under* the agreement, not a *condition precedent to* the agreement. A significant payment delay is a breach by Dreamable; it does not, by itself, suspend or void the agreement. That asymmetry matters, because the §7 mutual release (with the §1542 waiver) extinguishes your claims on execution, while you only get a contract claim for the $5,000 in return.
+
+**What "in effect" means here**
+
+- **Mutual Release (§7)** — operative on execution. Once both signatures are on the document, you have released all claims arising out of the engagement, including any unpaid-wages claim that might otherwise have exceeded $5k.
+- **IP assignment (§3)** — operative on execution. The engagement-period work product is Company property whether or not Rob pays.
+- **Confidentiality (§5) and Non-Disparagement (§8)** — operative on execution and surviving.
+- **Payment (§2)** — Dreamable's contractual *obligation*. Settlement agreements typically don't condition the release on actual receipt of payment unless that's drafted in explicitly. Without a "payment is a condition precedent" clause, the release fires first.
+
+**What you can do if Rob delays significantly**
+
+1. **Send a demand letter** citing §2. Reasonable cure window (10–14 days is typical), referencing the agreement section and the executed signature page.
+2. **Initiate JAMS arbitration in San Francisco County** per §10. For a $5,000 claim this is wildly disproportionate — JAMS filing fees alone start around $1,750, and §10 makes each side bear their own attorneys' fees with equal split on arbitrator costs. Practically, the arbitration clause makes a $5k breach uneconomic to pursue formally.
+3. **Small-claims alternative** — California small-claims caps at $12,500 for individuals, but §10's arbitration clause likely forecloses that route. Worth asking a CA-licensed attorney whether the arbitration clause is enforceable for amounts below a certain threshold (some states carve out small-dollar claims).
+4. **Rescission** is theoretically available for material breach, but courts are reluctant to rescind a fully-executed mutual release. Don't count on it.
+
+**Mitigations to consider before signing**
+
+The cleanest fix is to make payment a condition precedent or use simultaneous exchange:
+
+- **Option A — Payment on or before signing.** "Settlement Payment shall be made by wire transfer to Consultant on or before the Effective Date. This Agreement shall not become effective until such payment is received." One-line edit; Rob either wires the $5k or you don't sign.
+- **Option B — Escrow.** Funds in escrow released to you on counter-signature. More friction, used when trust is low.
+- **Option C — Payment-conditional release.** "The releases in Section 7 are expressly conditioned on Consultant's receipt of the Settlement Payment. If the Settlement Payment is not received within [N] days of the Effective Date, the releases shall be null and void *ab initio*." Preserves your unpaid-wages claim if Rob stiffs you.
+- **Option D — Liquidated damages / interest.** "Any portion of the Settlement Payment not paid within [N] days of the Effective Date shall accrue interest at the maximum rate permitted by California law and Company shall reimburse Consultant for any collection costs, including reasonable attorneys' fees." Doesn't fix the asymmetry but raises the cost of delay and gives you fee-shifting that §10 otherwise removes.
+
+**Recommendation.** Given the JAMS-in-SF venue + each-side-pays-own-fees structure, the $5k is effectively unenforceable through the contract's own dispute mechanism if Rob delays. Insist on **Option A** (payment on or before signing). It's a one-line edit, it costs Rob nothing if he intends to pay, and it removes the asymmetry entirely. If he resists Option A, fall back to **Option C** so you retain leverage.
+
+**Not legal advice.** This is a structural read of the document. Before signing or making changes, run the options past a CA-licensed employment/contracts attorney — at minimum a 30-minute paid consult. The §1542 waiver alone is worth that fee.
+<!-- agent:boundary:c0996192 -->
 <!-- /agent:exchange -->
 
 ## Queue

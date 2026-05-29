@@ -660,7 +660,60 @@ That said, the realistic move is: send the friendly check today, set a reminder 
 4. **At the end of the cure window**: File SF small claims if unpaid. Earliest realistic filing: somewhere between Effective Date + ~30 days (if §2 has tight timing) and Effective Date + ~45 days (if §2 is silent).
 
 **Not legal advice.** §116.320 has been amended several times — confirm the current pre-filing demand specifics with the SF Superior Court self-help center (free) before you file. They walk litigants through the form and timing at no cost.
-<!-- agent:boundary:f54efc28 -->
+❯ Do I need to be physically present to file in SF? If robert-ross never pays me, is the agreement null and void?
+
+### Re: Physical presence to file + null-and-void if Rob never pays — opus-4-7
+
+Two questions, answered separately.
+
+#### 1. Do you need to be physically present to file in SF?
+
+**For filing — no.** SF Superior Court accepts small-claims filings via e-filing (CourtConnect) and by mail. You can complete the SC-100 form, attach a copy of the Settlement, and submit it from CT without ever traveling.
+
+**For the hearing — usually yes, but remote appearance is widely available post-COVID.** This is the more important question, because missing the hearing as the plaintiff means dismissal (you lose) and missing it as the defendant means a default judgment against them.
+
+- **SF Superior Court has a remote-appearance program** for small claims via Microsoft Teams / Zoom. The court permits remote appearance on motion (often granted as a matter of course for out-of-state plaintiffs) or as a matter of right depending on the case type and the current local rules. Check sfsuperiorcourt.org/divisions/civil/small-claims for current policies.
+- **Request remote appearance when you file.** The SC-100 e-filing flow typically includes a remote-appearance request option. Specify your CT address and the cost-prohibitive nature of travel for a $5k claim.
+- **Risk if denied**: You'd need to either fly to SF (~$300–$500 plus a day or two of time and lodging) or dismiss without prejudice and consider the alternatives below.
+
+**Alternative forums that avoid the physical-presence problem:**
+
+- **CA Superior Court limited civil** (under $25k): allows attorney representation, so a CA-licensed attorney appears for you. Higher filing fee (~$370) but you stay in CT. This becomes economically reasonable if you can pair the filing with the lawyer-demand-letter step and roll the cost into a fee-shifting claim under CA Civ. Code §1281.97 if Rob defaults on arbitration fees.
+- **Online dispute resolution (ODR)**: Some CA counties offer ODR for small civil cases. SF doesn't have a robust small-claims ODR program yet (as of late 2025), but worth checking when you file.
+- **JAMS arbitration with remote hearing**: JAMS conducts most arbitrations virtually now. Counterintuitively, this might actually be the cheapest path for a CT-based plaintiff with a CA-based defendant *if* §1281.97 kicks in and Rob defaults on his JAMS fees, because then you're back in CA Superior Court with fee-shifting.
+
+**Practical recommendation:** File SF small claims via e-filing with a remote-appearance request. If the request is denied and you can't travel, dismiss without prejudice and refile in CA Superior Court limited civil with a local CA attorney handling the appearance (~$500–$1,500 for a one-hearing engagement). This still nets you the $5k assuming Rob doesn't appear or settles before the hearing.
+
+#### 2. If Rob never pays, is the agreement null and void?
+
+**No — not automatically.** The Settlement is a binding executed contract. Rob's failure to pay is a *material breach*, which gives you remedies but does not, by itself, vaporize the agreement. The §7 mutual release with the §1542 waiver remains operative unless and until a court formally rescinds the agreement on your motion — and California courts strongly disfavor rescinding executed mutual releases.
+
+**The two possible paths and what each gets you**
+
+**Path A — sue for the $5k (specific performance / contract damages).** This is what 99% of plaintiffs do in your situation. You treat the agreement as in force, file for breach, and win a judgment for $5k plus interest and possibly costs. The §7 release stays intact, the §8 non-disparagement stays intact, the §3 IP assignment stays intact. You get the $5k and the matter is over. **This is the right path.**
+
+**Path B — sue for rescission of the entire Settlement.** You ask the court to *undo* the agreement so that the §7 release evaporates and you're restored to your pre-settlement legal position — meaning you could then sue for the full unpaid fees you would have been owed under the original Consulting Agreement (potentially $20k–$28k at the original rate over 7 weeks, minus what you already received). This is theoretically possible but:
+
+- **Hard to obtain.** California courts protect the finality of settlement agreements as a matter of public policy. Civil Code §3406 etc. allow rescission for material failure of consideration, but courts apply the doctrine narrowly to executed mutual releases. You'd need to show (a) Rob's breach was material and incurable, (b) money damages (the $5k) are inadequate, and (c) you've offered to restore the status quo (i.e., you haven't accepted any partial payment without reservation of rights).
+- **All-or-nothing.** A court grants rescission OR damages, not both. If you elect rescission and lose, you've also lost your simple $5k breach claim.
+- **Expensive.** Rescission isn't a small-claims-friendly cause of action. You'd need CA Superior Court unlimited civil and probably $5k–$15k in attorney fees to litigate it, against a recoverable amount that's speculative even if you win.
+- **Time-bound.** You generally must elect rescission promptly upon discovery of the breach. Waiting months while sending demand letters and accepting partial communication signals affirmance of the contract, which forecloses rescission as a remedy.
+
+**Bottom line on null-and-void**
+
+The instinct ("if he doesn't pay, the deal's off") is intuitive but legally wrong for executed settlements with mutual releases. The deal stays *on* until you take formal action to undo it, and undoing it is rarely worth the cost. The §7 release does not have a self-executing payment-condition unless you negotiated one in (the prior turn's "Option C — payment-conditional release" addresses this — but you've already signed, so it's not an option here).
+
+**What this means practically**
+
+- Don't rely on or assume the agreement evaporates. It doesn't.
+- Don't tell Rob "you're in breach so the deal is off." That's incorrect and weakens your position.
+- The correct framing: "You're in breach of §2. I am pursuing my contract remedies for the $5k under §10." Treat the agreement as fully in force, governed, and enforceable, and pursue the $5k as a debt.
+- The §7 release, §8 non-disparagement, §3 IP assignment all remain operative throughout the collection process — same constraints on your behavior as if Rob had already paid.
+
+**Could you ever rescind successfully?** Theoretically yes, if Rob refuses to pay for many months, makes clear he never intends to pay, and you act promptly to seek rescission. But by that point you've spent more on litigation than the $5k recovery, and you've gambled away the certainty of a simple breach win. Not recommended.
+
+**Not legal advice.** Rescission of executed settlements is a fact-intensive area of CA contract law with shifting case-law standards. Confirm with a CA-licensed attorney before electing rescission over breach-of-contract damages. The 30-minute referral consult is enough to cover this question definitively.
+<!-- agent:boundary:f5aa4f2e -->
 <!-- /agent:exchange -->
 
 ## Queue

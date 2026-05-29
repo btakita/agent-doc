@@ -8292,13 +8292,20 @@ fn log_ipcfullprompt_corruption_if_any(
     baseline: Option<&str>,
     candidate: &str,
 ) {
-    let Some(base) = baseline else {
-        return;
-    };
-    let findings = crate::ipc_corruption::detect_response_block_corruption(base, candidate);
+    // Scaffold duplication is a self-check on the candidate (the full-tail
+    // duplication shape — two `<!-- /agent:exchange -->` markers — captured live in
+    // brandon-cinquegrana.md), so it runs even when no baseline is available.
+    let mut findings = crate::ipc_corruption::detect_duplicated_scaffold(candidate);
+    // Response-block delete/duplicate needs the prior committed baseline.
+    if let Some(base) = baseline {
+        findings.extend(crate::ipc_corruption::detect_response_block_corruption(
+            base, candidate,
+        ));
+    }
     if findings.is_empty() {
         return;
     }
+    let base = baseline.unwrap_or("");
     let summary = crate::ipc_corruption::summarize_findings(&findings);
     crate::ops_log::log_op(
         file,
@@ -13379,6 +13386,40 @@ scratch
             preserved.iter().any(|n| n.ends_with(".baseline.md"))
                 && preserved.iter().any(|n| n.ends_with(".candidate.md")),
             "forensic baseline + candidate must be preserved: {preserved:?}"
+        );
+    }
+
+    #[test]
+    fn ipcfullprompt_scaffold_duplication_logged_without_baseline() {
+        // The brandon-cinquegrana.md shape: a full-tail duplication leaves two
+        // `<!-- /agent:exchange -->` markers around an in-progress prompt. This is
+        // a self-check on the candidate, so it must fire even with no baseline.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "placeholder").unwrap();
+
+        let candidate = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: prior — opus-4-8\nAnswer.\n",
+            "<!-- agent:boundary:709a41ae -->\n",
+            "Is the issue still happening?\nCan it be re\n",
+            "<!-- /agent:exchange -->\n",
+            "## Queue\n<!-- agent:queue -->\n<!-- /agent:queue -->\n",
+            "Can it be rep11ro\n",
+            "<!-- /agent:exchange -->\n",
+            "## Queue\n<!-- agent:queue -->\n<!-- /agent:queue -->\n",
+        );
+
+        log_ipcfullprompt_corruption_if_any(&doc, "socket_ack_content", Some("pid-x"), None, candidate);
+
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("ipcfullprompt_corruption_suspected")
+                && log.contains("scaffold_duplicated=")
+                && log.contains("scaffold_duplicated(<!-- /agent:exchange -->:1->2)"),
+            "full-tail scaffold duplication must be captured without a baseline:\n{log}"
         );
     }
 

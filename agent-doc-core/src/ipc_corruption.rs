@@ -42,6 +42,10 @@ pub enum IpcCorruptionKind {
     ResponseDeleted,
     /// A `### Re:` block appears more times in `current` than in `prior`.
     ResponseDuplicated,
+    /// A canonical structural component marker (e.g. `<!-- /agent:exchange -->`)
+    /// appears more than once — the full-tail duplication shape where the
+    /// post-exchange scaffold (close marker + Queue/Backlog/Icebox) is copied.
+    ScaffoldDuplicated,
 }
 
 impl IpcCorruptionKind {
@@ -50,6 +54,7 @@ impl IpcCorruptionKind {
         match self {
             IpcCorruptionKind::ResponseDeleted => "response_deleted",
             IpcCorruptionKind::ResponseDuplicated => "response_duplicated",
+            IpcCorruptionKind::ScaffoldDuplicated => "scaffold_duplicated",
         }
     }
 }
@@ -125,6 +130,49 @@ pub fn detect_response_block_corruption(prior: &str, current: &str) -> Vec<IpcCo
     findings
 }
 
+/// Canonical structural component markers that must appear at most once in a
+/// healthy template document. More than one — on its own line — is the full-tail
+/// duplication shape of `#ipcfullprompt`: the editor copied the post-exchange
+/// scaffold (close marker + Queue/Backlog/Icebox) around a live, in-progress
+/// prompt, producing two `<!-- /agent:exchange -->` markers.
+const STRUCTURAL_MARKERS: &[&str] = &[
+    "<!-- /agent:exchange -->",
+    "<!-- agent:queue -->",
+    "<!-- /agent:queue -->",
+    "<!-- agent:backlog -->",
+    "<!-- /agent:backlog -->",
+    "<!-- agent:icebox -->",
+    "<!-- /agent:icebox -->",
+];
+
+/// Detect a duplicated structural scaffold in `current` (a self-check; no prior
+/// needed). Counts only lines that, when trimmed, exactly equal a canonical
+/// structural marker — so an inline mention inside response prose does not
+/// inflate the count — and returns one finding per marker that appears more than
+/// once. This is the `#ipcfullprompt` full-tail-duplication signature that
+/// `detect_response_block_corruption` (which keys on `### Re:` headings) misses.
+pub fn detect_duplicated_scaffold(current: &str) -> Vec<IpcCorruptionFinding> {
+    let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+    for line in current.lines() {
+        let trimmed = line.trim();
+        for marker in STRUCTURAL_MARKERS {
+            if trimmed == *marker {
+                *counts.entry(*marker).or_insert(0) += 1;
+            }
+        }
+    }
+    counts
+        .into_iter()
+        .filter(|(_, count)| *count > 1)
+        .map(|(marker, count)| IpcCorruptionFinding {
+            kind: IpcCorruptionKind::ScaffoldDuplicated,
+            heading: marker.to_string(),
+            prior_count: 1,
+            current_count: count,
+        })
+        .collect()
+}
+
 /// Render findings as a compact single-line summary for ops.log. Truncates each
 /// heading so a long topic cannot blow up the log line.
 pub fn summarize_findings(findings: &[IpcCorruptionFinding]) -> String {
@@ -135,6 +183,10 @@ pub fn summarize_findings(findings: &[IpcCorruptionFinding]) -> String {
     let duplicated = findings
         .iter()
         .filter(|f| f.kind == IpcCorruptionKind::ResponseDuplicated)
+        .count();
+    let scaffold = findings
+        .iter()
+        .filter(|f| f.kind == IpcCorruptionKind::ScaffoldDuplicated)
         .count();
     let details: Vec<String> = findings
         .iter()
@@ -153,9 +205,10 @@ pub fn summarize_findings(findings: &[IpcCorruptionFinding]) -> String {
         })
         .collect();
     format!(
-        "deleted={} duplicated={} details=[{}]",
+        "deleted={} duplicated={} scaffold_duplicated={} details=[{}]",
         deleted,
         duplicated,
+        scaffold,
         details.join("; ")
     )
 }
@@ -259,6 +312,73 @@ mod tests {
         let prior = "<!-- agent:exchange -->\njust a prompt\n<!-- /agent:exchange -->\n";
         let current = "<!-- agent:exchange -->\n### Re: x — opus-4-8\nhi\n<!-- /agent:exchange -->\n";
         assert!(detect_response_block_corruption(prior, current).is_empty());
+    }
+
+    // #ipcfullprompt-recur2: the full-tail duplication shape captured live in
+    // tasks/professional/brandon-cinquegrana.md 2026-05-29 — the editor copied the
+    // post-exchange scaffold around an in-progress prompt, leaving two
+    // `<!-- /agent:exchange -->` markers. `detect_response_block_corruption` misses
+    // this (no `### Re:` was duplicated); `detect_duplicated_scaffold` must catch it.
+    #[test]
+    fn detect_duplicated_scaffold_flags_two_exchange_close_markers() {
+        let corrupted = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: prior — opus-4-8\nAnswer.\n",
+            "<!-- agent:boundary:709a41ae -->\n",
+            "Is the issue still happening?\nCan it be re\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "## Queue\n<!-- agent:queue -->\n<!-- /agent:queue -->\n",
+            "## Backlog\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n",
+            "## Icebox\n<!-- agent:icebox -->\n<!-- /agent:icebox -->\n",
+            "Can it be rep11ro\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "## Queue\n<!-- agent:queue -->\n<!-- /agent:queue -->\n",
+        );
+        let findings = detect_duplicated_scaffold(corrupted);
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.kind == IpcCorruptionKind::ScaffoldDuplicated
+                    && f.heading == "<!-- /agent:exchange -->"
+                    && f.current_count == 2),
+            "two exchange close markers must be flagged: {findings:?}"
+        );
+        // The duplicated queue scaffold is also flagged.
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.heading == "<!-- agent:queue -->" && f.current_count == 2)
+        );
+    }
+
+    #[test]
+    fn detect_duplicated_scaffold_clean_doc_has_no_findings() {
+        let clean = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: x — opus-4-8\nAnswer.\n",
+            "<!-- /agent:exchange -->\n",
+            "## Queue\n<!-- agent:queue -->\n<!-- /agent:queue -->\n",
+            "## Backlog\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n",
+        );
+        assert!(detect_duplicated_scaffold(clean).is_empty());
+    }
+
+    #[test]
+    fn detect_duplicated_scaffold_ignores_inline_marker_mentions() {
+        // A marker mentioned inline inside prose (not on its own line) must not
+        // inflate the count — only standalone marker lines are structural.
+        let doc = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: x — opus-4-8\n",
+            "The close marker is written `<!-- /agent:exchange -->` inline here.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        assert!(
+            detect_duplicated_scaffold(doc).is_empty(),
+            "inline mention must not count as a structural duplicate"
+        );
     }
 
     #[test]

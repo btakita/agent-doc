@@ -59,7 +59,35 @@ A first attempt — suppressing the warning whenever *live prompts* remained —
 This item's **observable loop symptoms** are now both capped: duplicate-growth (prior `dedup_live_prompts` mitigation) and the recurring residue warning (this cycle). The genuinely-remaining work is the **IPC-buffer divergence itself** (#2) and **`stuck_captured_cycle` decoupling** (#4) — both require a deterministic live-IPC-listener repro harness that can't be modeled without simulating the IDE buffer. I split that into a new backlog item `[#adoc-queue-ipc-buffer-divergence]` (top of backlog) rather than re-spin this umbrella, so the next queue item proceeds and the hard part stays explicitly tracked.
 
 The root fix for #2: halt + queue-maintenance currently write the deactivated queue shape to disk, but a live IDE buffer overwrites it on its next flush — the change must go *through the IPC listener* so the editor buffer converges.
-<!-- agent:boundary:8ca90cb4 -->
+
+### Re: do [#adoc-queue-ipc-buffer-divergence] — opus-4-8
+
+Completed the Rust-side half of this item (root cause #4) and shipped it; root cause #2 is now precisely scoped to a cross-language deliverable. **Left the backlog item open on purpose** — #2 is not done, so marking it complete would be false.
+
+#### Shipped: root cause #4 — replay-hash matching immune to queue churn
+
+`stuck_captured_cycle` / stale-cycle recovery validated the committed response against **whole-document** hashes. Queue maintenance rewrites the `agent:queue` component body, its opening-tag `auto` attribute, and the `queue_active:` frontmatter on nearly every cycle — all independent of the response body (which always targets `exchange`). So queue-only churn invalidated every stored replay hash, the match failed, and the committed response was reported "not present in HEAD", wedging the cycle. That is exactly the recurring `stuck_captured_cycle` from the drift loop — and it fired live during my previous finalize (`live_prompt_drift_after_preflight`).
+
+Fix: a shared `git::normalize_for_replay_hash` neutralizes the `agent:queue` component (tag + body) **and** strips the `queue_active:` frontmatter line before hashing. Both the store side (`cycle_state`) and compare side (`repair`) call it, so they normalize identically — queue-only churn now matches (cycle recovers) while a genuine response-body change still fails closed (`detect_bypassed_response_write` guard untouched).
+
+- `git.rs` (`normalize_for_replay_hash`, `neutralize_queue_component`, `strip_queue_active_frontmatter`), `cycle_state.rs`, `repair.rs`
+- Tests: `normalize_for_replay_hash_neutralizes_queue_churn`, `recover_repairs_stale_preflight_cycle_despite_queue_only_churn`
+- Spec: `specs/07-closeout-commands.md`
+- `make check` green (exit 0); both binaries rebuilt + installed; submodule `729f7bc2` + superproject `e52a81b32` pushed; CI green.
+
+#### Why root cause #2 stays open — and the blocker I found
+
+#2 is the IPC-buffer divergence itself: the live IDE buffer re-adds `auto` / diverges from the committed inactive snapshot. The fix is to push the queue-shape change **through the IPC listener** so the editor buffer converges. Investigating the seam this cycle surfaced a hard blocker:
+
+- `ipc_socket::send_patch` carries component **content** only. The actual divergence is the `auto` attribute on the **opening tag** plus the `queue_active:` frontmatter — a content-replace patch touches neither.
+- `try_ipc_full_content*` is disabled by default and rejects template docs outright.
+
+So there is **no existing IPC seam** to converge a queue tag-attribute / frontmatter change. Closing #2 requires a plugin protocol extension (PatchWatcher.kt + FFI) that applies queue tag + frontmatter convergence to the editor buffer, plus the deterministic live-IPC-listener repro harness (SimWorld). I left `#adoc-queue-ipc-buffer-divergence` open with this design recorded in `tasks/agent-doc/plan-queue-ipc-drift.md`. **Restart the route-owned `agent-doc` process** so the #4 fix takes effect on this live session.
+
+#### Noted
+
+Your new backlog item `#prompt-duplicated-while-typing` is captured. It is not the queue head this cycle, so I have not acted on it; the referenced `plan-prompt-duplicated-while-typing.md` does not exist yet. Queue it (or send `#agent-doc-bug`) when you want the plan written and the PatchWatcher double-apply race investigated.
+<!-- agent:boundary:bc9850cf -->
 <!-- /agent:exchange -->
 ###
 <!--

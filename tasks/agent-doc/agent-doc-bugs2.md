@@ -59,7 +59,7 @@ A first attempt — suppressing the warning whenever *live prompts* remained —
 This item's **observable loop symptoms** are now both capped: duplicate-growth (prior `dedup_live_prompts` mitigation) and the recurring residue warning (this cycle). The genuinely-remaining work is the **IPC-buffer divergence itself** (#2) and **`stuck_captured_cycle` decoupling** (#4) — both require a deterministic live-IPC-listener repro harness that can't be modeled without simulating the IDE buffer. I split that into a new backlog item `[#adoc-queue-ipc-buffer-divergence]` (top of backlog) rather than re-spin this umbrella, so the next queue item proceeds and the hard part stays explicitly tracked.
 
 The root fix for #2: halt + queue-maintenance currently write the deactivated queue shape to disk, but a live IDE buffer overwrites it on its next flush — the change must go *through the IPC listener* so the editor buffer converges.
-<!-- agent:boundary:ec6b3799 -->
+<!-- agent:boundary:8ca90cb4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -93,7 +93,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 #spec-test-build-install-commit-push
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#adoc-queue-ipc-drift]~
 - do [#duplicate-response-after-commit]

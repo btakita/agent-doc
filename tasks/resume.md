@@ -676,7 +676,35 @@ Still open before publishing: the `[recommended]` counsel-review item on the Con
 ---
 
 **Compaction:** the exchange is now 595 lines / 21 sections (block). With the resume edits landed, this is a natural point to run `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/resume.md --commit` — it'll archive the full Q&A and reset the session.
-<!-- agent:boundary:70bccf9b -->
+- [#yfg1]: I dropped the real-time asset-generation. Kept the investor demos.
+- [#bndq]: confirmed
+- do [#s75b]
+- do [#vapk]
+- do [#s93y]: tsift is unrelated to Dreamable. Add to resume
+- do [#ca8w]
+
+### Re: Backlog directives — closed out — opus-4-8
+
+Processed all six. Resume-side work is complete; LinkedIn pastes are yours to do from the content already provided.
+
+- **[#yfg1] done** — risk-posture decided: you dropped real-time asset-generation, kept investor demos. Already written into the resume last cycle.
+- **[#bndq] done** — MRH attribution confirmed with Ron.
+- **[#s75b] done** — EFS entry is in the resume (Independent Consulting bullet). LinkedIn entry = your paste.
+- **[#vapk] done** — MRH entry is in the resume; attribution now confirmed (#bndq). LinkedIn entry = your paste.
+- **[#s93y] done** — Dreamable kept as the brief Confidential entry (no product details); **tsift added** to the resume Open Source section as your OSS / Prior Invention from the same period:
+  ```
+  #### tsift — Token-Efficient Code Search for AI Agents (Rust)
+  - hybrid BM25 + vector (Sift) search, AST-aware navigation across tree-sitter grammars, call-graph explain/summarize
+  - native tool routing + bounded "envelope" digests that cut agent context spend
+  ```
+- **[#ca8w] done** — new skills (Cloudflare Workers/D1/R2/Access, Hono, WooCommerce, Fintech/Loan Origination, +CopilotKit) are in the Skills section.
+
+**Verified:** `make` builds cleanly — `BrianTakita.pdf` regenerated.
+
+**Not committed** — all resume edits (Independent Consulting, Skills, Confidential AI wording, tsift) are staged in the `resume/` repo, not pushed. Say `commit + push` to ship.
+
+Backlog is now empty. Good moment to `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/resume.md --commit` and reset the session.
+<!-- agent:boundary:bca5877c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -690,13 +718,9 @@ Still open before publishing: the `[recommended]` counsel-review item on the Con
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#yfg1] [recommended] Before publishing the Confidential AI Startup entry (resume/LinkedIn), decide risk posture: either drop the 'real-time asset-generation' + 'investor demos' specifics down to a bare skills line, or run the exact wording past counsel. Reference Dreamable settlement §3/§5/§8/§10.
-- [ ] [#bndq] [recommended] Confirm MonsterRodHolders attribution with Ron before using the resume/LinkedIn entry publicly
-- [ ] [#s75b] Add EFS experience entry to resume + LinkedIn (Workers/D1/R2/Hono/Cloudflare Access, loan origination platform)
-- [ ] [#vapk] Add MRH experience entry to resume + LinkedIn (WordPress/WooCommerce/Cloudflare CDN/security audit) — confirm attribution with Ron first
-- [ ] [#s93y] Decide on Dreamable entry: omit or list as brief consulting role with no product details; highlight tsift as OSS from same period
-- [ ] [#ca8w] Add new skills to resume/LinkedIn skills section: Cloudflare Workers, D1, R2, Cloudflare Access, Hono, WooCommerce, Fintech/Loan Origination
 <!-- /agent:backlog -->
 
 <!-- agent:done archive=tasks/resume.done.md -->
+
+<!-- completed work archived in tasks/resume.done.md -->
 <!-- /agent:done -->

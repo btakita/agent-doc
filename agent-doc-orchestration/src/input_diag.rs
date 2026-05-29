@@ -10,9 +10,9 @@ use std::path::Path;
 const PREFIX: &str = "tmux_input_event";
 
 #[derive(Clone, Copy, Default)]
-pub(crate) struct KeyEventMeta<'a> {
-    pub(crate) harness: Option<&'a str>,
-    pub(crate) detail: Option<&'a str>,
+pub struct KeyEventMeta<'a> {
+    pub harness: Option<&'a str>,
+    pub detail: Option<&'a str>,
 }
 
 fn sanitize_field(value: &str) -> String {
@@ -44,12 +44,12 @@ fn emit(file: Option<&Path>, message: String) {
     }
 }
 
-pub(crate) fn verbose_enabled() -> bool {
+pub fn verbose_enabled() -> bool {
     std::env::var_os("AGENT_DOC_TMUX_INPUT_DIAG").is_some()
         || std::env::var_os("AGENT_DOC_DEBUG_STDIN").is_some()
 }
 
-pub(crate) fn format_key_event(
+pub fn format_key_event(
     source: &str,
     destination: &str,
     transform: &str,
@@ -75,7 +75,7 @@ pub(crate) fn format_key_event(
     message
 }
 
-pub(crate) fn log_key_event(
+pub fn log_key_event(
     file: Option<&Path>,
     source: &str,
     destination: &str,
@@ -98,7 +98,7 @@ pub(crate) fn log_key_event(
     );
 }
 
-pub(crate) fn log_key_event_verbose(
+pub fn log_key_event_verbose(
     file: Option<&Path>,
     source: &str,
     destination: &str,
@@ -112,7 +112,7 @@ pub(crate) fn log_key_event_verbose(
     }
 }
 
-pub(crate) fn format_payload_event(
+pub fn format_payload_event(
     source: &str,
     destination: &str,
     transform: &str,
@@ -132,7 +132,7 @@ pub(crate) fn format_payload_event(
     )
 }
 
-pub(crate) fn log_text_submit(
+pub fn log_text_submit(
     file: Option<&Path>,
     source: &str,
     destination: &str,
@@ -179,7 +179,7 @@ fn key_name(byte: u8) -> &'static str {
     }
 }
 
-pub(crate) fn log_byte_events(
+pub fn log_byte_events(
     file: Option<&Path>,
     source: &str,
     destination: &str,
@@ -204,7 +204,7 @@ pub(crate) fn log_byte_events(
     }
 }
 
-pub(crate) fn log_transform_event(
+pub fn log_transform_event(
     file: Option<&Path>,
     source: &str,
     destination: &str,
@@ -234,7 +234,7 @@ pub(crate) fn log_transform_event(
     );
 }
 
-pub(crate) fn log_prompt_detection(
+pub fn log_prompt_detection(
     file: Option<&Path>,
     source: &str,
     destination: &str,

@@ -18,11 +18,20 @@
 //! Pulled `find_project_root` (a pure path walk) down into `fs_util` so
 //! `ops_log` no longer reaches back into the main crate's `snapshot` module;
 //! `snapshot::find_project_root` is now a re-export shim.
+//! Direction A, increment 5: `input_diag` — structured tmux/supervisor input
+//! diagnostics (production-dep on `ops_log` only). Brings a self-contained
+//! `#[cfg(test)] test_support` (crate-local `TEST_ENV_LOCK`) for its
+//! env-mutating tests, since orchestration's test binary is independent of the
+//! main crate's.
 
 pub mod config;
 pub mod env;
 pub mod fs_util;
+pub mod input_diag;
 pub mod ipc_socket;
 pub mod ops_log;
 pub mod project_config_io;
 pub mod secret_redact;
+
+#[cfg(test)]
+mod test_support;

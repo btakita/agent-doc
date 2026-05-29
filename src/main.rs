@@ -79,7 +79,7 @@ mod history;
 mod hook_cmd;
 mod hooks;
 mod init;
-mod input_diag;
+pub(crate) use agent_doc_orchestration::input_diag;
 mod install;
 mod jobs;
 mod layout;

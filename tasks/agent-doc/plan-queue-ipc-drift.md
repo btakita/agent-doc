@@ -117,17 +117,50 @@ test now clears the competing harness markers so it deterministically simulates 
 Codex harness from any environment. Not part of the drift loop, but required for a
 green `make check` from the agent-doc session harness.
 
-### Still open (root cause — needs the repro harness)
+### Root cause #4 fixed (2026-05-29) — replay-hash matching is now immune to queue churn
 
-- The **merge divergence itself** (why the IPC buffer re-activates `auto` + a
-  duplicate vs the committed inactive snapshot) is not yet fixed — dedup caps the
-  damage but doesn't stop the divergence. Still needs items #2/#4 above. The
-  durable fix is to push the halt's queue-shape change (strip `auto`, clear
-  `queue_active`) **through the IPC listener** so the IDE buffer converges,
-  rather than only writing to disk where the plugin's stale in-memory buffer
-  wins on its next flush.
-- A **running pre-fix `start --route-owned` process** keeps the old binary; it must
-  be restarted for any fix to take effect on a live session.
+`stuck_captured_cycle` / stale-preflight recovery validated the response against
+whole-document hashes (`file_hash`/`snapshot_hash` + a boundary-only
+`normalized_*` variant). Queue maintenance rewrites the `agent:queue` component
+body, its opening-tag attributes (`auto`), and the `queue_active:` frontmatter
+flag on essentially every cycle — all independent of the response body, which
+always targets `exchange`. So queue-only churn changed every stored hash and the
+replay match failed, leaving the committed response reported "not present" and
+the cycle wedged (the recurring `stuck_captured_cycle` symptom).
+
+Fix: new shared `git::normalize_for_replay_hash` neutralizes the `agent:queue`
+component (tag + body) **and** strips the `queue_active:` frontmatter line before
+hashing. Both the store side (`cycle_state::normalized_content_hash`) and the
+compare side (`repair::normalized_content_hash`) call it, so they normalize
+identically. Queue-only churn now produces a normalized-hash match (cycle
+recovers), while a genuine response-body change still fails closed (the
+`detect_bypassed_response_write` guard is unchanged). Tests:
+`git::normalize_for_replay_hash_neutralizes_queue_churn`,
+`repair::recover_repairs_stale_preflight_cycle_despite_queue_only_churn`. Spec:
+`specs/07-closeout-commands.md`.
+
+### Still open — root cause #2 needs a plugin protocol extension (cross-language)
+
+The **IPC-buffer divergence itself** (the live IDE buffer re-adding `auto` /
+diverging from the committed inactive snapshot) is **not** fixed. Investigation
+this cycle established the constraint:
+
+- The halt/queue-maintenance disk write is correct, but a live IDE buffer
+  overwrites it on its next flush. To converge, preflight must push the
+  queue-shape change **through the IPC listener** (`ipc_socket::send_patch`).
+- **Blocker:** `send_patch` carries component *content* only. The core
+  divergence is the `auto` attribute on the **opening tag** (`<!-- agent:queue
+  auto -->` vs `<!-- agent:queue -->`) plus the `queue_active:` frontmatter — a
+  content-replace patch touches neither. `try_ipc_full_content*` is disabled by
+  default and rejects template docs outright. So there is **no existing IPC seam**
+  to converge a queue tag-attribute / frontmatter change; closing #2 needs a
+  plugin protocol extension (PatchWatcher.kt + FFI) that applies queue tag +
+  frontmatter convergence to the editor buffer, plus the deterministic
+  live-IPC-listener repro harness (SimWorld) named above. This is a distinct
+  cross-language deliverable, tracked by `#adoc-queue-ipc-buffer-divergence`.
+- A **running pre-fix `start --route-owned` process** keeps the old binary (with
+  pre-fix stored replay hashes); it must be restarted for the #4 fix to take
+  effect on the live session.
 
 ## Acceptance
 

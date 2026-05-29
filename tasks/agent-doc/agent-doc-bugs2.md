@@ -30,102 +30,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260529-151416.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260529-155930.md`*
 
 Compacted content:
-- Archived 4 response topic(s): do [#prompt-duplicated-while-typing]; do [#ipcfullprompt-recur]; I upgraded the JB plugin; 1 more
+- Archived 2 response topic(s): do [#duplicate-response-after-commit]; do [#duplicate-response-after-commit]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: do [#duplicate-response-after-commit] — opus-4-8
-
-Fixed the late-IPC committed-response over-application and wired a deterministic auto-repair. Branch `20260422/codex-agent-backend`, submodule `a8ff47d5`, superproject `b46744323`.
-
-#### Root cause
-
-After a clean `finalize`, the IPC reposition / stale-patch replay can re-insert a response **that already reached HEAD** back into the working tree — sometimes wrapped in a second identical `agent:boundary` marker, and **not necessarily adjacent** to its original. The existing recovery only collapsed *consecutive* `### Re:` duplicates (`dedupe_responses`), so the non-adjacent / boundary-wrapped shape slipped past it and hit the generic `detect_bypassed_response_write` guard, which reported `direct response patchback`. `write --commit` then dead-ended with `empty response — nothing to write` because the body was already in the live exchange — over-applied, not missing.
-
-#### Fix (binary-side, deterministic)
-
-- `dedupe::is_committed_response_overapplication(current, head)` — proves the working tree is HEAD **plus strictly more duplicate response blocks**: identical non-response scaffold (modulo blank lines + boundary markers) and the same *set* of distinct `### Re:` blocks as HEAD, comparing the response **multiset** against HEAD directly instead of relying on adjacency. Any new/lost response content or scaffold drift returns false and falls through to the normal patchback guard.
-- `session_check::detect_late_ipc_response_overapplication` + a new `inspect_core` classification ahead of the bypassed-write guard — operators now see a `late-IPC committed-response over-application` interruption, never the misleading manual-patchback message.
-- `preflight` repair restores committed HEAD over the working tree + snapshot (`late_ipc_response_overapplication_repaired`) with no redundant commit — so the next cycle **self-heals** instead of requiring manual `Edit` dedup.
-- Spec: `07-closeout-commands.md` late-IPC over-application repair contract.
-
-##### Lifecycle of the corruption + where it's now closed
-
-```mermaid
-flowchart TD
-    A[Cycle N: finalize commit_success<br/>response in HEAD] --> B[try_ipc_reposition_boundary signal]
-    B --> C{IPC listener replays<br/>stale committed response?}
-    C -->|no| OK[clean tree = HEAD]
-    C -->|yes| D[working tree = HEAD<br/>+ duplicate body<br/>wrapped in boundary markers]
-    D --> E{Cycle N+1 preflight repair}
-    E -->|consecutive dup| F[JB-cache replay repair<br/>existing path]
-    E -->|non-adjacent / boundary-wrapped<br/>NEW| G[late_ipc_overapplication:<br/>restore HEAD over tree+snapshot]
-    F --> OK
-    G --> OK
-    style G fill:#cce5cc
-    style D fill:#f8d7da
-```
-
-#### Can the corruption be *mathematically* eliminated?
-
-Not entirely from the binary alone. The duplicate insertion happens **editor-side** in the plugin's IPC listener replaying against a pre-commit buffer view; truly eliminating it needs the idempotent-by-commit-hash reposition protocol — plugin + FFI work that stays open as a separate backlog item. What this change *does* guarantee is that whenever the working tree is provably HEAD-plus-duplicates, recovery is **deterministic and automatic** — the operator-facing dead-end is gone.
-
-#### Verification
-
-- New tests: 6 `dedupe` unit (boundary-wrapped + `(HEAD)`-variant detection; rejects identical / new content / scaffold drift / lost response), 1 `session_check` classification, 1 `preflight` end-to-end repair — all green.
-- `make check` (clippy + full test suite + sim-medium + version-sync): green (exit 0).
-- Built `cargo build --release` + `cargo install --path .` (both `.bin/agent-doc` and `~/.cargo/bin/agent-doc` refreshed).
-- Pushed; submodule CI re-run in progress (prior run on this branch green).
-
-**Gated**, not closed: code-complete and unit-verified, but awaiting a live-session confirmation plus the still-open plugin-side root-cause prevention. The backlog priority order is unchanged; the next open item is the IPC-buffer-divergence plugin protocol work.
-
-### Re: do [#duplicate-response-after-commit] — opus-4-8
-
-Fixed the late-IPC committed-response over-application and wired a deterministic auto-repair. Branch `20260422/codex-agent-backend`, submodule `a8ff47d5`, superproject `b46744323`.
-
-#### Root cause
-
-After a clean `finalize`, the IPC reposition / stale-patch replay can re-insert a response **that already reached HEAD** back into the working tree — sometimes wrapped in a second identical `agent:boundary` marker, and **not necessarily adjacent** to its original. The existing recovery only collapsed *consecutive* `### Re:` duplicates (`dedupe_responses`), so the non-adjacent / boundary-wrapped shape slipped past it and hit the generic `detect_bypassed_response_write` guard, which reported `direct response patchback`. `write --commit` then dead-ended with `empty response — nothing to write` because the body was already in the live exchange — over-applied, not missing.
-
-#### Fix (binary-side, deterministic)
-
-- `dedupe::is_committed_response_overapplication(current, head)` — proves the working tree is HEAD **plus strictly more duplicate response blocks**: identical non-response scaffold (modulo blank lines + boundary markers) and the same *set* of distinct `### Re:` blocks as HEAD, comparing the response **multiset** against HEAD directly instead of relying on adjacency. Any new/lost response content or scaffold drift returns false and falls through to the normal patchback guard.
-- `session_check::detect_late_ipc_response_overapplication` + a new `inspect_core` classification ahead of the bypassed-write guard — operators now see a `late-IPC committed-response over-application` interruption, never the misleading manual-patchback message.
-- `preflight` repair restores committed HEAD over the working tree + snapshot (`late_ipc_response_overapplication_repaired`) with no redundant commit — so the next cycle **self-heals** instead of requiring manual `Edit` dedup.
-- Spec: `07-closeout-commands.md` late-IPC over-application repair contract.
-
-##### Lifecycle of the corruption + where it's now closed
-
-```mermaid
-flowchart TD
-    A[Cycle N: finalize commit_success<br/>response in HEAD] --> B[try_ipc_reposition_boundary signal]
-    B --> C{IPC listener replays<br/>stale committed response?}
-    C -->|no| OK[clean tree = HEAD]
-    C -->|yes| D[working tree = HEAD<br/>+ duplicate body<br/>wrapped in boundary markers]
-    D --> E{Cycle N+1 preflight repair}
-    E -->|consecutive dup| F[JB-cache replay repair<br/>existing path]
-    E -->|non-adjacent / boundary-wrapped<br/>NEW| G[late_ipc_overapplication:<br/>restore HEAD over tree+snapshot]
-    F --> OK
-    G --> OK
-    style G fill:#cce5cc
-    style D fill:#f8d7da
-```
-
-#### Can the corruption be *mathematically* eliminated?
-
-Not entirely from the binary alone. The duplicate insertion happens **editor-side** in the plugin's IPC listener replaying against a pre-commit buffer view; truly eliminating it needs the idempotent-by-commit-hash reposition protocol — plugin + FFI work that stays open as a separate backlog item. What this change *does* guarantee is that whenever the working tree is provably HEAD-plus-duplicates, recovery is **deterministic and automatic** — the operator-facing dead-end is gone.
-
-#### Verification
-
-- New tests: 6 `dedupe` unit (boundary-wrapped + `(HEAD)`-variant detection; rejects identical / new content / scaffold drift / lost response), 1 `session_check` classification, 1 `preflight` end-to-end repair — all green.
-- `make check` (clippy + full test suite + sim-medium + version-sync): green (exit 0).
-- Built `cargo build --release` + `cargo install --path .` (both `.bin/agent-doc` and `~/.cargo/bin/agent-doc` refreshed).
-- Pushed; submodule CI re-run in progress (prior run on this branch green).
-
-**Gated**, not closed: code-complete and unit-verified, but awaiting a live-session confirmation plus the still-open plugin-side root-cause prevention. The backlog priority order is unchanged; the next open item is the IPC-buffer-divergence plugin protocol work.
-<!-- agent:boundary:4a2cdc8c -->
+<!-- agent:boundary:1b0ac6c4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -157,6 +67,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 preset #spec-test-build-install-commit-push
 - ~do [#prompt-duplicated-while-typing]~
 - ~do [#duplicate-response-after-commit]~
+- do [#exchange-prompt-dropped-on-merge]
 - do [#adoc-queue-ipc-buffer-divergence]
 - do [#queue-strike-on-halt]
 - do [#jb-stale-busy-idle-footer]

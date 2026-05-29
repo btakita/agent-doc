@@ -775,7 +775,90 @@ If Rob pays before the hearing:
 Don't worry about the public record persisting after dismissal — it's expected, it benefits you more than it hurts you, and the leverage from the filing itself is the main point. If you settle and Rob asks you to dismiss with prejudice, that's standard and reasonable. If Rob asks you to seal the record, that's an unusual ask and not something you should agree to without consideration (he's asking for value beyond just paying you the $5k).
 
 **Not legal advice.** Specific docket retention policies, sealing standards, and third-party aggregator behavior vary by jurisdiction. Confirm SF Superior Court's current docket-retention policy with the clerk if you have specific concerns about long-term searchability.
-<!-- agent:boundary:791dc077 -->
+❯ If robert-ross threatened to kill himself, can I do a wellness check on him? If he claims his mental health is poor, is the agreement still enforcable?
+
+### Re: Wellness check + mental-health claims and contract enforceability — opus-4-7
+
+Two distinct questions. The first is about safety and should be handled completely separately from the business dispute. The second is a contract-law question with a clear answer.
+
+#### 1. Wellness check on Rob
+
+**Yes — you can and should request a wellness check if you have credible concern about his safety.** Wellness checks are not restricted by §8 non-disparagement, the §7 release, or anything else in the Settlement. Reporting a credible suicide threat to authorities is a privileged, humanitarian response, not disparagement.
+
+**How to do it**
+
+- **Call the non-emergency police line for the city where Rob lives.** For SF: SFPD non-emergency 415-553-0123. Don't call 911 unless you believe the threat is imminent (active suicide attempt, recently expressed intent + means + plan).
+- **What to tell them**: Rob's full name, his address (SF address from the Settlement preamble: 846A North Point St., per my earlier summary), what was said, when it was said, the medium (text, email, call), and your contact info as the reporter.
+- **They may want to see the actual message.** Be prepared to forward the text or email to them.
+- **You can also call 988 (Suicide and Crisis Lifeline)** if you're unsure whether the threat is imminent or want to talk through what to do. 988 counselors can advise on whether to escalate to a wellness check.
+
+**Privilege and §8**
+
+- Reporting a credible safety threat to authorities is **not** disparagement. Truthful safety reports to law enforcement are protected by qualified privilege (and in many states absolute privilege) when made in good faith with reasonable basis.
+- The Settlement's §8 doesn't reach this — non-disparagement clauses cannot, as a matter of public policy, bar reporting of genuine safety concerns to police or crisis services.
+- Do **not** post about the threat on social media, group chats, or any public forum. That's a separate question with §8 risk *and* serious humanitarian/safety concerns about contagion and inflammation. Limit the report to authorities and 988.
+
+**A separate concern**
+
+If you suspect the suicide threat is being used as a tactic to manipulate you in the business dispute (some people do this), you should still call the wellness check anyway. The right framework here is:
+
+- **You don't have to decide whether the threat is genuine.** That's the responsibility of trained mental-health professionals and law enforcement. Your job is to report the credible statement and let them assess.
+- **Even if it's a manipulation tactic**, a wellness check is the right response: it (a) takes the threat seriously if it's real, and (b) signals you won't let manipulation derail collection if it's not.
+- **Document the threat in your own records** (screenshot the text/email, note the date/time, save metadata) for two reasons: (1) so you can show it to police if asked, and (2) so it's part of the record if Rob later claims he was incapacitated.
+
+**Don't**: confront him about it, try to talk him down yourself (you're not trained for that and you have a financial dispute with him which clouds your role), or use it as leverage. The wellness check is the appropriate, safe, and legal response.
+
+#### 2. Is the agreement still enforceable if Rob claims poor mental health?
+
+**Yes — almost certainly still enforceable.** California contract law evaluates mental capacity *at the time of contracting*, not later. Rob signing the Settlement on May 28, 2026 means he had legal capacity at that moment unless he can prove otherwise with medical evidence. Subsequent mental-health difficulties don't void a contract he already executed.
+
+**The legal framework**
+
+California Civil Code §§38–39 and Probate Code §810 set out the capacity standard:
+
+- **Cognitive test (§38)**: Did the party understand the nature and consequences of the transaction? Almost everyone meets this bar even during mental-health crises.
+- **Volitional test (Probate Code §810)**: Was the party capable of acting in a reasonable manner relative to the transaction, *and* did the other party (you) have reason to know of any incapacity?
+
+**Important defenses available to Rob — and why they probably fail**
+
+- *"I was depressed when I signed."* Not a defense. Depression doesn't equal incapacity. Courts require severe, demonstrable cognitive impairment at the moment of contracting.
+- *"My mental health is deteriorating now, so I can't pay."* Not a defense. Subsequent incapacity doesn't void a previously-executed contract. He owes you the $5k regardless of his current mental state.
+- *"I was in crisis when I signed."* Possible but hard to prove. Even if he can document being in crisis on May 28, he'd need to show that crisis actually impaired his understanding of the agreement — a high bar requiring contemporaneous medical records.
+- *"I had a known mental-health condition and you knew about it."* Could be a defense if (a) the condition was severe enough to impair capacity AND (b) you had actual knowledge of the impairment at the time of contracting. If you didn't know, this fails.
+
+**Voidable, not void**
+
+Even if Rob could prove incapacity, the contract is *voidable* at his election, not automatically *void*. He'd have to file an affirmative claim for rescission, prove incapacity by clear and convincing evidence, and offer to restore the status quo (which means he'd need to return whatever consideration he received from you under the Settlement — and he received the §7 mutual release, which is hard to "give back" in any meaningful way).
+
+**Strong presumption of capacity**
+
+California courts apply a strong presumption that adults have capacity to contract. The burden of proof is entirely on Rob, and the standard (clear and convincing evidence of incapacity at the precise moment of execution) is harder than ordinary preponderance. Most capacity defenses fail.
+
+**Practical implications for collection**
+
+- **Continue the demand-letter ladder.** Mental-health claims by Rob don't pause your right to collect.
+- **Don't reference his mental health in your communications.** Stick to the §2 obligation and demand payment. Any mention of mental health from your side could be characterized as harassment or coercion. Be neutral and professional.
+- **If Rob's lawyer raises capacity as a defense**, that's their problem to prove. Your contract is presumed valid.
+- **If Rob is hospitalized or under a conservatorship**, collection still proceeds — you'd serve the conservator or the legal entity (Dreamable, Inc.) which has no mental-health defense. The corporate entity is what owes you the money, not Rob personally.
+- **If Rob files bankruptcy**, your $5k claim becomes an unsecured claim in the bankruptcy estate. Most $5k claims see partial or no recovery in bankruptcy, depending on the bankruptcy type and the estate's assets.
+
+**One important nuance**
+
+The Settlement is between you and **Dreamable, Inc.** — the corporate entity — not Rob personally. Corporate entities don't have mental states; the corporation owes you $5k regardless of any individual officer's mental health. Even if Rob personally is incapacitated, Dreamable's payment obligation persists. The corporation's other officers, board members, or counsel can authorize payment without Rob's involvement.
+
+**Practical recommendation**
+
+If Rob has actually threatened suicide and is in genuine crisis:
+
+1. **Step 1 (do today)**: Call SFPD non-emergency for a wellness check. Provide the text or email as evidence.
+2. **Step 2 (this week)**: Pause your direct outreach to Rob for ~5–7 days. Don't send the friendly check or demand letter during this period.
+3. **Step 3 (after pause)**: Resume the collection process by directing communications to **Dreamable, Inc.'s registered agent or general counsel**, not Rob personally. The corporate entity is the debtor; you can reach the obligation without going through Rob. Look up Dreamable's registered agent on the CA Secretary of State business search (bizfileonline.sos.ca.gov).
+4. **Step 4**: If Rob's wellness is stabilized and you eventually need to escalate, file in CA against **Dreamable, Inc.** — the corporate entity, not Rob personally. This sidesteps any mental-capacity defense entirely.
+
+This sequence handles the safety concern with appropriate seriousness, removes you from the position of pressuring someone in crisis, and preserves your collection rights through the corporate entity.
+
+**Not legal advice.** Capacity-to-contract defenses are fact-intensive and the §38/§39/§810 standards can shift in case law. If Rob actually asserts capacity as a defense, get a CA attorney involved — same 30-minute referral consult covers the question. And separately, if you're concerned about Rob's safety, **the wellness check is the right call regardless of any legal calculation**.
+<!-- agent:boundary:cf9d63d3 -->
 <!-- /agent:exchange -->
 
 ## Queue

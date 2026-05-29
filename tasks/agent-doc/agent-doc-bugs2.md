@@ -30,99 +30,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260529-060029.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260529-071750.md`*
 
 Compacted content:
-- Archived 4 response topic(s): do [#h9g0]; do [#zeb5]; do [#already-applied-divergence]; 1 more
+- Archived 3 response topic(s): do [#adoc-queue-ipc-drift]; do [#adoc-queue-ipc-buffer-divergence]; JB `Run Agent Doc` queued instead of dispatching (actor wasn't really busy)
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: do [#adoc-queue-ipc-drift] — opus-4-7
-
-Landed a discrete fix for the most visible symptom of the drift loop and split the deeper divergence into its own tracked item.
-
-#### What shipped this cycle
-
-**`inactive_queue_residue` is now a per-*edit* signal, not a per-preflight nag.** The warning previously fired purely from the static "inactive + non-empty queue" state, so the live tail an `item_modified` halt retains (and syncs into the snapshot) re-warned on *every* subsequent edit-free preflight — exactly the "recurring on every preflight with no user edit" symptom in the plan. It now fires only when the inactive queue body actually changed vs the snapshot this cycle (`inactive_queue_changed_vs_snapshot`, normalized through `queue::parse`+`render`).
-
-- `agent-doc-orchestration/src/preflight.rs` — gate + helper
-- Tests: `preflight_does_not_reflag_stable_inactive_queue_as_residue`, `preflight_flags_inactive_queue_when_changed_this_cycle`
-- Spec: `specs/07-orchestration-commands.md` § Post-commit queue consumption
-
-A first attempt — suppressing the warning whenever *live prompts* remained — was **wrong**: it broke the legitimate case where a user adds a `do [#id]` to an inactive queue and must be told it won't run (`test_preflight_warns_but_does_not_target_inactive_queue_edit`). The two states are indistinguishable in steady state; "changed vs snapshot this cycle" is the correct discriminator, since the bug's defining trait is *no user edit*.
-
-**Incidental test-isolation fix.** `codex_bare_run_inside_owning_pane_fails_before_nested_dispatch` failed whenever `make check` ran from inside a Claude Code session: `detect_harness()` checks Claude/OpenCode markers before Codex, so an inherited `CLAUDECODE` short-circuited the codex recursive-deadlock guard. The test now clears competing harness markers. Required for a green suite from the agent-doc session harness.
-
-`make check` green (exit 0, 0 failures); both binaries rebuilt + installed; submodule `b3dd9598` + superproject `21356aada` pushed; latest CI run green.
-
-#### Why the umbrella item is reaped but the bug isn't fully closed
-
-This item's **observable loop symptoms** are now both capped: duplicate-growth (prior `dedup_live_prompts` mitigation) and the recurring residue warning (this cycle). The genuinely-remaining work is the **IPC-buffer divergence itself** (#2) and **`stuck_captured_cycle` decoupling** (#4) — both require a deterministic live-IPC-listener repro harness that can't be modeled without simulating the IDE buffer. I split that into a new backlog item `[#adoc-queue-ipc-buffer-divergence]` (top of backlog) rather than re-spin this umbrella, so the next queue item proceeds and the hard part stays explicitly tracked.
-
-The root fix for #2: halt + queue-maintenance currently write the deactivated queue shape to disk, but a live IDE buffer overwrites it on its next flush — the change must go *through the IPC listener* so the editor buffer converges.
-
-### Re: do [#adoc-queue-ipc-buffer-divergence] — opus-4-8
-
-Completed the Rust-side half of this item (root cause #4) and shipped it; root cause #2 is now precisely scoped to a cross-language deliverable. **Left the backlog item open on purpose** — #2 is not done, so marking it complete would be false.
-
-#### Shipped: root cause #4 — replay-hash matching immune to queue churn
-
-`stuck_captured_cycle` / stale-cycle recovery validated the committed response against **whole-document** hashes. Queue maintenance rewrites the `agent:queue` component body, its opening-tag `auto` attribute, and the `queue_active:` frontmatter on nearly every cycle — all independent of the response body (which always targets `exchange`). So queue-only churn invalidated every stored replay hash, the match failed, and the committed response was reported "not present in HEAD", wedging the cycle. That is exactly the recurring `stuck_captured_cycle` from the drift loop — and it fired live during my previous finalize (`live_prompt_drift_after_preflight`).
-
-Fix: a shared `git::normalize_for_replay_hash` neutralizes the `agent:queue` component (tag + body) **and** strips the `queue_active:` frontmatter line before hashing. Both the store side (`cycle_state`) and compare side (`repair`) call it, so they normalize identically — queue-only churn now matches (cycle recovers) while a genuine response-body change still fails closed (`detect_bypassed_response_write` guard untouched).
-
-- `git.rs` (`normalize_for_replay_hash`, `neutralize_queue_component`, `strip_queue_active_frontmatter`), `cycle_state.rs`, `repair.rs`
-- Tests: `normalize_for_replay_hash_neutralizes_queue_churn`, `recover_repairs_stale_preflight_cycle_despite_queue_only_churn`
-- Spec: `specs/07-closeout-commands.md`
-- `make check` green (exit 0); both binaries rebuilt + installed; submodule `729f7bc2` + superproject `e52a81b32` pushed; CI green.
-
-#### Why root cause #2 stays open — and the blocker I found
-
-#2 is the IPC-buffer divergence itself: the live IDE buffer re-adds `auto` / diverges from the committed inactive snapshot. The fix is to push the queue-shape change **through the IPC listener** so the editor buffer converges. Investigating the seam this cycle surfaced a hard blocker:
-
-- `ipc_socket::send_patch` carries component **content** only. The actual divergence is the `auto` attribute on the **opening tag** plus the `queue_active:` frontmatter — a content-replace patch touches neither.
-- `try_ipc_full_content*` is disabled by default and rejects template docs outright.
-
-So there is **no existing IPC seam** to converge a queue tag-attribute / frontmatter change. Closing #2 requires a plugin protocol extension (PatchWatcher.kt + FFI) that applies queue tag + frontmatter convergence to the editor buffer, plus the deterministic live-IPC-listener repro harness (SimWorld). I left `#adoc-queue-ipc-buffer-divergence` open with this design recorded in `tasks/agent-doc/plan-queue-ipc-drift.md`. **Restart the route-owned `agent-doc` process** so the #4 fix takes effect on this live session.
-
-#### Noted
-
-Your new backlog item `#prompt-duplicated-while-typing` is captured. It is not the queue head this cycle, so I have not acted on it; the referenced `plan-prompt-duplicated-while-typing.md` does not exist yet. Queue it (or send `#agent-doc-bug`) when you want the plan written and the PatchWatcher double-apply race investigated.
-JB `Run Agent Doc` error
-```
-resync: stash pane %21 is registered in its own project root — skipping kill
-resync: stash pane %2 is registered in its own project root — skipping kill
-resync: stash pane %20 is registered in its own project root — skipping kill
-resync: stash pane %3 is registered in its own project root — skipping kill
-resync: stash pane %4 is registered in its own project root — skipping kill
-[route] debounce OK — file idle for 0.9s and typing indicator idle
-[route] target tmux session: 0
-[route] authoritative actor generation 233 for tasks/monsterrodholders.md is busy on pane %19; queued pending dispatch "Do Option A. #spec-test-commit-push-deploy" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
-```
-#spec-test-build-install-commit-push
-
-### Re: JB `Run Agent Doc` queued instead of dispatching (actor wasn't really busy) — opus-4-8
-
-Fixed the routing bug you confirmed: the actor was reported busy but wasn't, so the dispatch got queued instead of run. Deferring the queue head (`#adoc-queue-ipc-buffer-divergence` / #2) per your call.
-
-#### Root cause
-
-The log line — `authoritative actor generation 233 ... is busy on pane %19; queued pending dispatch ... in agent:queue auto ... instead of injecting a duplicate trigger` — is the *correct* response to a genuinely-busy actor. The defect was upstream: a **stale busy projection**. In `decide_authoritative_reopen`, a dispatch-only reroute against a `Busy` actor went straight to `FailClosed` (→ queue) **without consulting the live pane**. So when the actor had actually finished its turn and the pane was showing a dispatch-ready prompt, the stale `busy` lease/projection still won and your prompt was queued instead of dispatched.
-
-#### Fix
-
-When the actor is projected `Busy` but `current_generation_ready_prompt_proven` shows a dispatch-ready prompt on the current generation's pane, route now treats the busy projection as stale, promotes it to `Ready`, and dispatches via direct pane submit. This extends the direct-evidence rule the router **already** applies to `starting` actors (a proven ready prompt promotes to ready) to the `busy` case. A `Busy` projection **without** a proven ready prompt is left untouched and still fails closed (queues) — busy direct evidence stays fail-closed; only idle direct evidence repairs. So this never dispatches into a real running turn.
-
-- New pure predicate `busy_projection_repaired_by_ready_prompt` (`flow/routed_reopen.rs`), applied in `route.rs` before dispatch-action classification, logged via `ops_log` (`route_authoritative_actor_busy_projection_repaired_by_ready_prompt`).
-- Tests: `busy_projection_repaired_only_with_proven_ready_prompt`, `repaired_busy_actor_dispatches_directly_in_dispatch_only_mode`.
-- Spec: `specs/08-session-routing.md` § Authoritative actor dispatch.
-- `make check` green, both binaries installed, submodule `89c99c79` + superproject `7f92c1fcd` pushed, CI green.
-
-This is squarely the "active-turn busy collision vs stale projection" sub-part of the open `#snrun` review item. I added a follow-up backlog item for a **live JB replay regression** (the fix is unit-tested on the pure decision functions; a live SimWorld/tmux-ci replay would lock it in) and noted the still-open `#snrun` rescued-stash proof-miss distinction.
-
-#### Deferred
-
-The queue head (#2 — the IPC-buffer divergence needing a plugin protocol extension) stays open and untouched, per your "defer #2 for now". **Restart the route-owned `agent-doc` process** so both this routing fix and the earlier #4 replay-hash fix take effect on the live session.
-<!-- agent:boundary:50b0c12b -->
+<!-- agent:boundary:f9439f45 -->
 <!-- /agent:exchange -->
 ###
 <!--

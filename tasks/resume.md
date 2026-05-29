@@ -466,6 +466,8 @@ Right — LinkedIn lets you **pin 5 skills** to a position (those show first and
 Cloudflare Workers, Full-Stack Development, TypeScript, Rust (Programming Language), Serverless Architecture
 ```
 
+Any of the top 5 skills that can be differentiating?
+
 #### Expanded skillset (the rest)
 ```
 Python (Programming Language), React.js, Hono, Node.js, REST APIs, WebRTC, Real-Time Communication, Cloudflare, Content Delivery Network (CDN), Docker, Cloud Computing, WordPress, WooCommerce, PHP, Web Performance Optimization, Search Engine Optimization (SEO), Google Tag Manager, Google Analytics, Google Ads, Google Merchant Center, Conversion Rate Optimization, E-Commerce, Fintech
@@ -476,7 +478,38 @@ If you'd rather lead with the marketing/e-commerce angle (for WordPress/agency r
 WooCommerce, Google Ads, Conversion Rate Optimization, Search Engine Optimization (SEO), Full-Stack Development
 ```
 …and move Cloudflare Workers / Rust / Serverless down into the expanded set.
-<!-- agent:boundary:fd0c850f -->
+Please format the description for LinkedIn.
+
+### Re: Differentiating top-5 skills + LinkedIn description — opus-4-8
+
+#### Which top-5 skills differentiate
+
+Of the five, the differentiators vs. table-stakes:
+
+- **Rust (Programming Language)** — strongest differentiator. Few full-stack/web engineers ship production Rust; rarer still paired with edge + AI.
+- **Cloudflare Workers** — differentiating. Edge-native serverless is still a minority skill, and you've shipped a real D1/R2/Access app on it, not a toy.
+- **Serverless Architecture** — moderately differentiating, but generic on its own; it gains weight *because* it's backed by the Workers/Rust specifics.
+- **TypeScript** — table stakes. Expected, not differentiating.
+- **Full-Stack Development** — table stakes. Everyone claims it.
+
+**Sharper alternative top 5** (more differentiating, still truthful): **Rust (Programming Language), Cloudflare Workers, WebRTC, Real-Time Communication, Serverless Architecture** — leans into the rare combo (edge + real-time + systems) that separates you from the generic full-stack pool. Keep TypeScript / Full-Stack in the expanded set where recruiters still filter on them.
+
+#### LinkedIn-formatted role description
+
+LinkedIn position descriptions are plain text (no markdown; `•` bullets and line breaks render fine, ~2,000 char limit). Paste-ready:
+
+```
+Building production systems across fintech, e-commerce, and real-time AI.
+
+• Equity Funding Source — Architected a full-stack loan origination platform on Cloudflare's edge (Workers, D1, R2): public prequalification intake, application-lead pipeline, and multi-role authentication (admin / borrower / broker / investor) via Cloudflare Access. Built an invite-only admin portal and designed an OCR document-intelligence pipeline. Stack: Cloudflare Workers, D1, R2, Cloudflare Access, Hono, React, TypeScript.
+
+• MonsterRodHolders.com — E-commerce / WordPress consulting for a WooCommerce storefront. Overhauled Google Ads conversion tracking (fixed flat-$1 conversions via Google for WooCommerce + dynamic-value tagging), recovered organic SEO, hardened security after an admin-account compromise, and optimized site performance.
+
+• Confidential AI Startup — Real-time AI systems engineering (Rust, Python, LiveKit, WebRTC).
+```
+
+Same MonsterRodHolders attribution caveat applies before publishing (already on the backlog).
+<!-- agent:boundary:4a9667fb -->
 <!-- /agent:exchange -->
 ###
 <!--

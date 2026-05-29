@@ -3,6 +3,19 @@ agent_doc_session: db08a891-c339-4a49-9f49-2d8a1f30ed10
 tmux_session: '0'
 agent_doc_format: template
 agent_doc_write: crdt
+agent: claude
+opencode_model: GLM-5.1
+claude_args: --dangerously-skip-permissions
+codex_args: -s danger-full-access
+codex_network_access: enabled
+prompt_presets:
+  '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md. DO NOT IMPLEMENT THE FIX.
+  '#corky-bug': Please create a plan for corky to fix this issue. Add to the backlog of agent-loop/tasks/software/corky.md
+  '#mermaid': Include explanatory mermaid diagram(s).
+  '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
+  '#spec-test-commit': update spec + tests. commit
+  '#spec-test-commit-push': update spec + tests. commit + push
+  '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
 ---
 
 
@@ -53,9 +66,97 @@ agent_doc_write: crdt
 Compacted content:
 - Archived 11 response topic(s): Arunprakash S contact created; WBD Rust Backend Developer; Resume updated + email sent to Arunprakash; 8 more
 - Prior summary/context: ### Session Summary **agent-resume Rust crate** ([btakita/agent-resume](https://github.com/btakita/agent-resume)) - H...
-<!-- agent:boundary:6cb4330b -->
-<!-- /agent:exchange -->
+❯ What would you recommend to show my skills for:
+❯ - Dreamable (redacted or private to follow IP in my separation agreement). See tasks/dreamable/052826_dreamable_-_brian_takita_settlement_and_mutual_release_agreement_signed.md
+❯ - Monsterrodholders
+❯ - Equity Funding Source
 
-<!-- agent:pending -->
-- [x] Commit and push resume repo
-<!-- /agent:pending -->
+❯ I will add to LinkedIn and my resume.
+
+### Re: Skills to show — Dreamable / Monsterrodholders / Equity Funding Source — sonnet-4-6
+
+#### Dreamable (confidentiality-constrained)
+
+Section 5 of the settlement bars disclosure of non-public business info (technical data, trade secrets, product plans). Section 3 assigned all work product IP to Dreamable. You can list the engagement and your own skills; you cannot describe what you built for them.
+
+**Safe framing:**
+
+> **Dreamable, Inc. — Software Development Consultant** *(Apr–May 2026)*
+> Short-term consulting engagement; work product IP assigned to company per agreement.
+
+Better angle: your **Prior Inventions from the same period are yours**. Per the addendum, tsift and homebrew-tap (built Apr 6 – May 26) are Consultant property. Lead with those instead:
+
+> **tsift** — Built and shipped a token-efficient CLI search plugin for Claude Code during this period: hybrid BM25 + vector (Sift) search, AST-aware code navigation, native tool routing. Used as primary code-navigation tool across projects.
+
+Recommendation: if the Dreamable entry adds little signal (7 weeks, settled, can't describe the work), omit it from the resume and LinkedIn Experience, and let tsift + homebrew-tap appear under Open Source / Tools.
+
+---
+
+#### Monsterrodholders — What to Show
+
+**LinkedIn position:**
+> **Freelance E-commerce & WordPress Consultant** — MonsterRodHolders.com *(2026)*
+
+**Resume bullets:**
+
+- Identified critical security compromise (admin account hijacked) on WooCommerce site; documented remediation path and evaluated platform migration options (WordPress vs Shopify)
+- Conducted competitive analysis across a 57-SKU fishing-tackle catalog: 4 competitors analyzed, 22 resellers mapped across 15 states, pricing intelligence gathered
+- Configured Cloudflare CDN for performance and DDoS protection; restored Google Analytics tracking pipeline
+- Advised on shipping rule logic for rod holders, landing nets, and river anchors
+
+**What you can show publicly:** monsterrodholders.com is live — but attribution requires Ron's sign-off before putting it in a portfolio. Flag him to confirm.
+
+---
+
+#### Equity Funding Source — What to Show
+
+This is the strongest portfolio entry of the three — greenfield fintech platform on modern Cloudflare edge stack.
+
+**LinkedIn position:**
+> **Software Engineer / Tech Lead** — Equity Funding Source *(2026)*
+> Full-stack loan origination platform — Cloudflare Workers, D1, R2, Cloudflare Access, React, TypeScript
+
+**Resume bullets:**
+
+- Architected and built a full-stack loan origination platform from scratch: public prequalification form, D1-backed application lead pipeline, email notification via Resend
+- Implemented multi-role authentication (admin / borrower / broker / investor) using Cloudflare Access with one-time PIN — no external auth vendor required
+- Built invite-only admin portal: lead review queue, user account creation, protected route management
+- Designed OCR/document intelligence pipeline for automated loan document extraction (field extraction → reviewed writeback → TMO integration)
+- Planned integration with The Mortgage Office (TMO) via outbound webhooks for loan-lifecycle sync
+- Stack: Cloudflare Workers · D1 · R2 · Cloudflare Access · React · TypeScript · Hono · Resend · Wrangler
+
+**Portfolio artifact:** https://equityfundingsource.brian-takita.workers.dev (live deployment — link on LinkedIn until custom domain is live)
+
+---
+
+#### Skills to add to LinkedIn / Resume Skills section
+
+From these three engagements, new additions worth surfacing:
+
+- **Cloudflare Workers, D1, R2, Cloudflare Access** (from EFS — edge-native full-stack)
+- **Hono** (Workers-native web framework)
+- **WooCommerce, Cloudflare CDN** (from MRH)
+- **Fintech / Loan Origination** (domain — EFS)
+- **Security Auditing** (WordPress — MRH)
+<!-- agent:boundary:558a01c2 -->
+<!-- /agent:exchange -->
+###
+<!--
+-->
+
+## Queue
+
+<!-- agent:queue -->
+<!-- /agent:queue -->
+
+## Backlog
+
+<!-- agent:backlog -->
+- [ ] [#s75b] Add EFS experience entry to resume + LinkedIn (Workers/D1/R2/Hono/Cloudflare Access, loan origination platform)
+- [ ] [#vapk] Add MRH experience entry to resume + LinkedIn (WordPress/WooCommerce/Cloudflare CDN/security audit) — confirm attribution with Ron first
+- [ ] [#s93y] Decide on Dreamable entry: omit or list as brief consulting role with no product details; highlight tsift as OSS from same period
+- [ ] [#ca8w] Add new skills to resume/LinkedIn skills section: Cloudflare Workers, D1, R2, Cloudflare Access, Hono, WooCommerce, Fintech/Loan Origination
+<!-- /agent:backlog -->
+
+<!-- agent:done archive=tasks/resume.done.md -->
+<!-- /agent:done -->

@@ -63,7 +63,17 @@ Fixed and committed. Root cause: `#queue-strike-on-halt` (submodule `baa44a37`) 
 - **Codex Stop-hook path** — `response_topic_matches_queue_head` now also matches a topic that resolves to exactly the head id (`### Re: #fix1` for head `do #fix1`), not only exact full text. Trailing modifiers (`#id halt`/`#id deferred`) still never match.
 
 **Verification:** both previously-RED tests now pass — `finalize_consumes_synthetic_queue_prompt_when_response_topic_targets_head_id` and `codex_hook::stop_auto_closes_open_cycle_then_blocks_for_next_auto_queue_head` (the latter was the same regression in the Codex path, also red at clean HEAD). Added unit coverage for the bare-do-directive detector and exact-id resolver. `make check` green (clippy + full suite). Both binaries rebuilt+installed. SPEC.md + specs/07-orchestration-commands.md aligned. Submodule pushed; superproject pointer bumped (`33672c0b6`). CI run `26667229199` triggered (prior two were RED on this regression) — watching for green.
-<!-- agent:boundary:9d44a0e5 -->
+
+### Re: do [#route-busy-vs-starting-wording] — opus-4-8
+
+Fixed and committed (submodule `6b5a6b4d`). The authoritative-actor `FailClosed` reroute error always read `(waited Ns for <harness> startup)`, which mis-reads a pane that is **busy on an active turn** (e.g. a live Claude turn showing the working spinner / interrupt hint) as a stuck cold start.
+
+**Fix:** the `FailClosed` branch in `route_via_authoritative_actor` now probes the live pane (best-effort `capture_pane`) for a harness busy cue via `HarnessConfig::dispatch_blocker_reason` — the same detector that already distinguishes an active Claude/Codex/OpenCode turn from idle. When a cue is present it words the wait context as `the pane is busy on an active <harness> turn (<cue>), not cold-starting`; otherwise it keeps the `waited Ns for <harness> startup` phrasing. **Behavior is unchanged** — the route still fails closed; only the diagnostic wording differs (UX-only, as scoped).
+
+Extracted `failclosed_wait_context` as a pure helper with unit coverage for both branches. `make check` green, both binaries rebuilt+installed, submodule pushed, superproject pointer bumped (`a992ae098`). No spec change — the fail-closed contract is unchanged and the wording isn't specced at that granularity.
+
+(Persistence note: the first finalize hit a transient unresponsive IPC listener + a ~25-min-stale live-buffer record; recovered by resetting the partial state, clearing the stale record, and re-finalizing via `--force-disk`.)
+<!-- agent:boundary:14ca0f6f -->
 <!-- /agent:exchange --> 
 ###
 <!--
@@ -88,7 +98,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 preset #spec-test-build-install-commit-push
 - ~do [#jb-load-tmux-window-verify]~
 - ~do [#queue-head-consume-on-topic-id-regression]~
-- do [#route-busy-vs-starting-wording]
+- ~do [#route-busy-vs-starting-wording]~
 - do [#codex-queue-head-exact-heading-guidance]
 - do [#backlog-auto-marker-misfire]
 - do [#pending-add-append-not-prepend]
@@ -101,7 +111,6 @@ preset #spec-test-build-install-commit-push
 
 <!-- agent:backlog -->
 - [ ] [#ipcfullprompt-recur2] CURE ONLY (capture/detection split out to #ipcfullprompt-capture, done). Editor-side PatchWatcher.setText PREVENTION: stop the live editor buffer from producing full-document/full-tail duplication or deletion while a prompt is being typed. Gated on the transport/payload packet from idea.log (enable #com.github.btakita.agentdoc debug logging) to pin the exact setText call shape. Add a SimWorld/Kotlin regression for the prevention once the fix lands; bump pluginVersion past 0.2.137 and reinstall the signed plugin. Stays open until prevention lands and is live-verified. Plan: tasks/agent-doc/plan-full-document-ipc-corruption-typing-prompt.md.
-- [ ] [#route-busy-vs-starting-wording] [recommended] route.rs starting-actor FailClosed reports 'still starting (waited Ns for claude startup)' even when the pane is busy on an active turn (live capture: pane %33 showed '· Roosting… (Ns · …)' spinner + '⏵⏵ … · N shell'). Distinguish 'busy on an active turn' from 'cold starting' in the error via a Claude busy-cue on the active-turn spinner. Fragile (random gerund; 'esc to interrupt' vs 'thinking with high effort') — UX-only, low priority. Ground truth + analysis: tasks/agent-doc/plan-jb-stale-busy-idle-footer.md.
 - [ ] [#codex-queue-head-exact-heading-guidance] [recommended] After #queue-strike-on-halt narrowed the Codex Stop-hook heading-match to exact-topic only, a Codex auto-loop completion with a descriptive heading (### Re: <descriptive topic>) no longer auto-consumes the queue head — only an exact ### Re: do [#id] heading does. Add SKILL.md / harness-invocation guidance telling Codex auto-loop completions to title the response heading exactly with the queue head prompt (or emit an explicit done signal), and live-verify a Codex auto-queue still advances across items. Plan: tasks/agent-doc/plan-queue-strike-on-halt-response.md.
 - [ ] [#backlog-auto-marker-misfire] The 'auto' attribute on the agent:backlog marker (queue-only attribute) misfired an auto-run that destructively rewrote the backlog — minted new IDs wrapping 'do [#...]' stubs of already-done items; user reported original task text lost and recovery needed git/sidecar archaeology. Fix: reject 'auto'/unknown attrs on agent:backlog (warn, no mutation); auto-loop must trigger only from the queue 'auto' attribute; never rewrite committed backlog item text in an auto-run. Plan: tasks/agent-doc/plan-backlog-auto-marker-misfire.md. DO NOT IMPLEMENT.
 - [ ] [#pending-add-append-not-prepend] `--pending-add` appends new items below the previous CLI arg within the same finalize cycle, contradicting SKILL.md "Pending capture rule" ("Put new items at the beginning of agent:backlog"). Repro: tasks/agent-doc/open-code.md commit f94e7851c — agent added wave-4, wave-3, wave-2, wave-1 expecting wave-1 on top per SKILL.md; actual backlog was wave-4 on top (pure CLI-arg order). User flagged it as bug; agent had to issue --pending-reorder. Plan: tasks/agent-doc/plan-pending-add-prepend-semantics.md (recommend Option A — strict prepend, drop the implicit adjacency heuristic).

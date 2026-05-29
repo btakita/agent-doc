@@ -537,7 +537,58 @@ Even worst-case ($100 spend to recover $5,000) is a 50x return on out-of-pocket 
 Don't let the $200–$500 number block you from starting the process. Send the free friendly check (step 1) this week. The $200–$500 is a worst-case spend that arrives only after multiple cheaper steps have already failed, and even then there are free alternatives via law school clinics. The most likely outcome is that you spend $0 to $10 and Rob pays.
 
 **Not legal advice.** Cost estimates above are based on typical market rates as of late 2025/early 2026 and may vary by region.
-<!-- agent:boundary:69e0fc68 -->
+❯ Will the small claims filing be public?
+
+### Re: Public visibility of a small-claims filing — opus-4-7
+
+**Yes — small-claims filings are public records in both CA and CT.** That's actually part of the leverage: a publicly searchable unpaid-debt case is a real reputational cost for Dreamable, especially when investors run due diligence. It also keeps you fully clear of §8 non-disparagement — statements *in* the filing are protected by litigation privilege.
+
+**What's visible**
+
+- **Party names** (you and "Dreamable, Inc." — and "Robert Ross" if you name him individually as a defendant).
+- **Case number and filing date.**
+- **Nature of claim** — typically a one-line description like "money damages — breach of contract."
+- **Hearing/trial dates.**
+- **Outcome / judgment** if the case proceeds.
+
+**Where it shows up**
+
+- **California**: SF Superior Court case index, plus statewide CourtConnect-style portals for civil filings.
+- **Connecticut**: judicial.ct.gov has a fully searchable online case search by party name. Filings are typically indexed within days.
+- **Third-party aggregators** (UniCourt, CourtListener, Trellis, PACER for federal): scrape court dockets and republish them, which makes Google indexing more likely over the following weeks/months. A google search for "Dreamable, Inc. lawsuit" or "Robert Ross unpaid debt" could surface the filing.
+
+**What's typically NOT visible online**
+
+- **The complaint text itself** — sometimes available, sometimes requires a courthouse visit or pay-per-document fetch. Depends on jurisdiction.
+- **Specific dollar amounts** — varies. The judgment if entered is public; the complaint demand may or may not be.
+- **Settlement amounts** — almost never visible unless filed as part of the judgment record.
+
+**Strategic implications**
+
+This is the strongest non-attorney pressure point you have:
+
+- **Investor due-diligence cost to Rob.** Any future VC, acquirer, or lender running diligence on Dreamable will find a docket entry showing an unpaid-debt case. That's harder for Rob to explain than the actual $5k.
+- **Self-fulfilling incentive to settle.** Many counterparties pay the moment they receive small-claims service because the public-record cost exceeds the disputed amount. The filing fee (~$75 CA / ~$95 CT) often *is* the demand letter that works.
+- **§8 is not a barrier.** The litigation privilege (CA Civil Code §47(b)) covers statements made in the filing itself. Rob can't claim §8 breach over the public docket — you're exercising a contractual right under §10 to seek redress, and the docket entry is a procedural consequence, not your speech.
+
+**Where the §8 risk does return**
+
+- **Posting about the filing on social media.** *After* you file, posting "I sued Dreamable for unpaid wages — see the docket" on LinkedIn/Twitter is no longer covered by litigation privilege; it's commentary about the filing. That's the same §8 risk as the public-statement question earlier. Don't do this.
+- **Discussing the filing with third parties beyond legitimate-interest contacts.** Telling reporters, posting on industry forums, etc. — same risk as point above.
+- **The filing itself is fine; the publicity around it from your side is what creates §8 exposure.** Let the docket speak for itself.
+
+**Naming choice matters**
+
+- **Sue "Dreamable, Inc." only** — corporate defendant only, contained to business reputation.
+- **Sue "Robert Ross" individually too** — adds personal exposure for Rob, which is more reputationally damaging but harder to win against the individual unless §2 specifically names him as personally liable (it almost certainly doesn't — the settlement is between you and Dreamable, Inc.). Adding him as an individual defendant typically invites a quick dismissal motion against him personally, which costs you nothing in small claims but adds pressure.
+- **For maximum leverage with minimum legal risk**: name only Dreamable, Inc. The corporate filing is enough public-record pain.
+
+**Practical answer**
+
+Yes, public — and that's a feature for your collection strategy, not a downside. The public-record nature is precisely why small-claims filing often triggers immediate payment from a stalling counterparty: it costs Rob $75 in your court fee + permanent public record. Stay quiet about the filing on social media after you file; let the docket be the leverage on its own.
+
+**Not legal advice.** Specific docket visibility, indexing speed, and third-party aggregation policies vary by jurisdiction and shift over time. Confirm publication mechanics with the specific court clerk when you file.
+<!-- agent:boundary:87490ca1 -->
 <!-- /agent:exchange -->
 
 ## Queue

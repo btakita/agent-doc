@@ -570,7 +570,44 @@ Ranked for a senior AI/full-stack engineering audience (recruiters, eng hiring m
 Within the single **Independent Consulting** entry, list them **EFS → Confidential AI → MonsterRodHolders** (your current order). EFS first because it's verifiable and concrete; Confidential AI second because it's strong but unnamed; MRH last. That ordering front-loads credibility while still leading with modern-stack signal.
 
 If you're targeting AI-first roles, swap to **Confidential AI → EFS → MRH** to lead with the AI signal.
-<!-- agent:boundary:32659982 -->
+❯ Am I at risk for divulging trade secrets with my Confidential AI Startup description?
+❯ What would the process be if robert-ross has an objection to what I wrote?
+
+### Re: Trade-secret risk + objection process — opus-4-8
+
+*Not legal advice — I'm not a lawyer. This is a practical read of the settlement you have on file (`052826_dreamable_..._signed.md`). For anything you're unsure about, run the exact wording past counsel.*
+
+#### Risk in the current description
+
+**Overall: low, but two phrases carry the only real risk.**
+
+Safe (no risk): the technology names — Rust, Python, TypeScript, LiveKit, WebRTC. Those are generic skills, explicitly yours to claim. Listing that you did real-time AI engineering is fine.
+
+The two phrases that could be argued against under **§5 (Confidentiality — "technical data, trade secrets, product plans")**:
+
+1. **"real-time asset-generation pipelines"** — if real-time asset generation *is* Dreamable's core product/trade secret, then naming the capability — even generically, even unattributed — could be read as hinting at their product direction. This is the single highest-risk phrase.
+2. **"investor-facing demos"** — lower risk, but combined with "AI startup," the Apr–May 2026 dates, and your public profile, it narrows toward identifying them and their go-to-market activity.
+
+**"rubric-based repo + agent-harness analysis tooling"** — low risk if it reads as general engineering capability; §3 assigned the *work product* to them, but describing the *kind of tool you can build* is a skill claim, not disclosure.
+
+**Lowest-risk version** (if you want to be conservative):
+```
+Confidential AI Startup — Software Development Consultant (Apr–May 2026)
+Skills: Rust, Python, TypeScript, LiveKit, WebRTC, real-time systems, agent-harness tooling
+```
+Drop "asset-generation" and "investor demos"; keep bare skills. You lose almost no signal and remove the two contestable phrases.
+
+#### If Robert Ross objects
+
+Per the settlement:
+
+- **§10 Governing Law** — formal disputes go to **binding arbitration (JAMS, San Francisco County, California law)**; each party bears its own attorneys' fees and an equal share of arbitration costs. That's expensive and slow for *both* sides, so it's rarely the first move.
+- **Realistic sequence:** he'd most likely send an informal objection / cease-style notice first. The pragmatic response is to engage, revise or remove the contested wording, and resolve it without arbitration. Removing two phrases from a resume is cheap; arbitration is not.
+- **§8 Non-Disparagement is mutual** — it cuts both ways. He can't make disparaging public statements about you either, and it explicitly doesn't bar truthful testimony in a proceeding.
+- **§11 Entire Agreement** — the settlement supersedes the prior consulting agreement and the April 6 termination notice, so the settlement's terms are what govern.
+
+**Bottom line:** the risk is contained to two phrases. Easiest de-risk is the bare-skills version above. If you want to keep the richer wording, that's a defensible judgment call — but run it past counsel first, since you (not I) are the party bound by the agreement. I've added a backlog item to make that decision before anything is published.
+<!-- agent:boundary:57095ca6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -584,6 +621,7 @@ If you're targeting AI-first roles, swap to **Confidential AI → EFS → MRH** 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#yfg1] [recommended] Before publishing the Confidential AI Startup entry (resume/LinkedIn), decide risk posture: either drop the 'real-time asset-generation' + 'investor demos' specifics down to a bare skills line, or run the exact wording past counsel. Reference Dreamable settlement §3/§5/§8/§10.
 - [ ] [#bndq] [recommended] Confirm MonsterRodHolders attribution with Ron before using the resume/LinkedIn entry publicly
 - [ ] [#s75b] Add EFS experience entry to resume + LinkedIn (Workers/D1/R2/Hono/Cloudflare Access, loan origination platform)
 - [ ] [#vapk] Add MRH experience entry to resume + LinkedIn (WordPress/WooCommerce/Cloudflare CDN/security audit) — confirm attribution with Ron first

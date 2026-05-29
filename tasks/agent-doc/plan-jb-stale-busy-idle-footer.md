@@ -164,6 +164,37 @@ state the operator believes is idle.
 - Possibly `agent-doc-orchestration/src/route.rs` if the dispatch-side busy
   projection needs the same idle-direct-evidence repair before enqueue.
 
+## Implemented 2026-05-29 (both parts of the safe design)
+
+Shipped the two-part safe fix exactly as designed, keyed on the live captures above.
+
+- **Part 1 — Claude busy cue** (`harness.rs` `dispatch_blocker_reason`): a `claude`
+  branch scans the last 8 lines and returns `active claude turn` when it sees the
+  interrupt hint (`esc to interrupt`) or a working spinner with an elapsed-seconds
+  timer (`claude_active_turn_busy` / `is_claude_working_spinner_line` requiring a
+  spinner glyph + `…` gerund + `(<N>s` timer). `live_pane_prompt_ready` already
+  checks `has_busy_cue` first, so a live turn fails closed before any composer
+  inference.
+- **Part 2 — ignorable static Claude chrome** (`harness.rs` `is_ignorable_output_line`):
+  a `claude` arm marks only the static model/context status line ignorable, keyed
+  on the `ctx:N%` indicator (`is_claude_status_chrome_line`) — never the spinner,
+  `❯`, or `⏵⏵`. With the busy cue in place, `last_prompt_candidate` then resolves a
+  genuinely-idle pane to the `⏵⏵`/`❯` composer even when the status line is last
+  (the question-1 state).
+
+Tests: `harness.rs` — `claude_busy_pane_spinner_is_a_busy_cue`,
+`claude_esc_to_interrupt_is_a_busy_cue`, `claude_idle_pane_has_no_busy_cue`,
+`claude_status_chrome_line_is_ignorable_but_composer_is_not`,
+`last_prompt_candidate_skips_claude_status_line_to_composer`,
+`claude_idle_pane_resolves_to_ready_composer`; `session_actor_cmd.rs` —
+`live_pane_prompt_ready_accepts_idle_claude_composer`,
+`live_pane_prompt_ready_rejects_busy_claude_turn`,
+`live_pane_prompt_ready_accepts_idle_claude_when_status_line_is_last`. `make check`
+green except the unrelated pre-existing `#queue-head-consume-on-topic-id-regression`.
+
+Acceptance 1+2 met. Still open: acceptance 3 (live JB replay) → `#run-agent-doc-stale-busy-replay`;
+the route-error "busy vs still starting" wording → `#route-busy-vs-starting-wording`.
+
 ## Related
 
 - `#run-agent-doc-stale-busy-replay`, `#snrun` — live-replay regressions

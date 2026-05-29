@@ -591,7 +591,11 @@ fn is_zero(value: &usize) -> bool {
 }
 
 fn normalized_content_hash(content: &str) -> String {
-    crate::ops_log::content_hash(&crate::git::normalize_transient_agent_doc_markers(content))
+    // Neutralizes transient markers AND the independently-maintained agent:queue
+    // component so response-replay / stale-lock recovery stays stable across
+    // queue-maintenance churn (#adoc-queue-ipc-buffer-divergence #4). Must match
+    // repair.rs's compare-side normalization exactly.
+    crate::ops_log::content_hash(&crate::git::normalize_for_replay_hash(content))
 }
 
 fn normalize_pending_id(id: &str) -> String {

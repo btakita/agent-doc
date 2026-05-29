@@ -344,7 +344,12 @@ fn head_already_matches_current_doc(file: &Path, doc_content: &str) -> Result<bo
 }
 
 fn normalized_content_hash(content: &str) -> String {
-    crate::ops_log::content_hash(&crate::git::normalize_transient_agent_doc_markers(content))
+    // Compare-side normalization for stale-cycle replay matching. Neutralizes
+    // transient markers AND the agent:queue component so queue-maintenance churn
+    // alone does not block recovery of an already-materialized response
+    // (#adoc-queue-ipc-buffer-divergence #4). Must match cycle_state.rs's
+    // store-side normalization exactly.
+    crate::ops_log::content_hash(&crate::git::normalize_for_replay_hash(content))
 }
 
 fn preflight_cycle_age_secs(state: &crate::cycle_state::CycleState) -> u64 {
@@ -2700,6 +2705,70 @@ mod tests {
         assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
         assert_eq!(state.last_event, "repair_preflight_committed_historical");
         assert_eq!(snapshot::load(&doc).unwrap().as_deref(), Some(updated));
+    }
+
+    #[test]
+    fn recover_repairs_stale_preflight_cycle_despite_queue_only_churn() {
+        // #adoc-queue-ipc-buffer-divergence root cause #4: a committed cycle
+        // whose only working-tree drift since preflight start is queue-component
+        // churn (auto strip + queue_active toggle from queue maintenance) must
+        // still recover via the normalized replay-hash match instead of staying
+        // wedged in PreflightStarted (the recurring stuck_captured_cycle symptom).
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("test.md");
+        let base = concat!(
+            "---\nagent_doc_format: template\nagent_doc_session: test\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n",
+            "done\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "preset #spec-test\n- do [#qchurn]\n",
+            "<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, base).unwrap();
+        snapshot::save(&doc, base).unwrap();
+        init_git_repo(root, &doc);
+        let state = crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
+
+        // Only the queue churned (halt: auto stripped + queue_active cleared +
+        // body drained). The exchange/response is byte-identical. Commit it so
+        // HEAD matches the working tree (the committed steady state).
+        let churned = concat!(
+            "---\nagent_doc_format: template\nagent_doc_session: test\nqueue_active: false\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n",
+            "done\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, churned).unwrap();
+        snapshot::save(&doc, churned).unwrap();
+        ProcessCommand::new("git")
+            .current_dir(root)
+            .args(["add", "test.md"])
+            .status()
+            .unwrap();
+        ProcessCommand::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "queue churn", "--no-verify"])
+            .status()
+            .unwrap();
+
+        let repaired = run(&doc).unwrap();
+        assert_eq!(
+            repaired,
+            RepairOutcome::StalePreflightLockRepaired,
+            "queue-only churn must not block stale-lock recovery"
+        );
+
+        let after = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(after.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(after.cycle_id, state.cycle_id);
     }
 
     #[test]

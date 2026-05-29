@@ -554,6 +554,54 @@ pub fn normalize_transient_agent_doc_markers(content: &str) -> String {
     strip_guard_markers(&strip_head_markers(&strip_boundary_markers(content)))
 }
 
+/// Replace the `agent:queue` component (opening-tag attributes + body) with a
+/// canonical empty placeholder.
+///
+/// The queue is rewritten by preflight queue-maintenance on essentially every
+/// cycle (activation toggles, `auto` strip, head strike, dedup, IPC-buffer
+/// merge artifacts) independently of the response body, which always targets
+/// `exchange`/`output`. Neutralizing it before hashing keeps response-replay /
+/// stale-lock recovery stable across queue churn (#adoc-queue-ipc-buffer-divergence
+/// root cause #4: the capture-replay guard must validate the response body, not
+/// a whole-document hash that queue-component churn invalidates).
+fn neutralize_queue_component(content: &str) -> String {
+    let Ok(components) = crate::component::parse(content) else {
+        return content.to_string();
+    };
+    let Some(queue) = components.iter().find(|c| c.name == "queue") else {
+        return content.to_string();
+    };
+    let mut out = String::with_capacity(content.len());
+    out.push_str(&content[..queue.open_start]);
+    out.push_str("<!-- agent:queue -->\n<!-- /agent:queue -->");
+    out.push_str(&content[queue.close_end..]);
+    out
+}
+
+/// Drop the `queue_active:` frontmatter line, which queue maintenance toggles
+/// in lockstep with the `agent:queue` component and is likewise independent of
+/// the response body. Only used for replay-hash normalization, never persisted.
+fn strip_queue_active_frontmatter(content: &str) -> String {
+    content
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("queue_active:"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Normalization used for response-replay / stale-cycle hash matching.
+///
+/// Builds on [`normalize_transient_agent_doc_markers`] (boundary/`(HEAD)`/guard
+/// markers) and additionally neutralizes the `agent:queue` component **and** the
+/// `queue_active:` frontmatter flag so that independent queue-maintenance churn
+/// does not invalidate the match. Used by both `cycle_state` (store side) and
+/// `repair` (compare side) so the two always normalize identically.
+pub fn normalize_for_replay_hash(content: &str) -> String {
+    normalize_transient_agent_doc_markers(&strip_queue_active_frontmatter(
+        &neutralize_queue_component(content),
+    ))
+}
+
 fn is_response_heading_line(trimmed: &str) -> bool {
     trimmed.starts_with("### Re:")
         || trimmed.starts_with("#### Re:")
@@ -3295,6 +3343,45 @@ fn chrono_timestamp() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn normalize_for_replay_hash_neutralizes_queue_churn() {
+        // #adoc-queue-ipc-buffer-divergence root cause #4: queue-maintenance
+        // churn (auto strip + activation toggle + drain) must not change the
+        // replay-hash normalization, because the response body lives in
+        // `exchange`, not `queue`.
+        let with_active_queue = concat!(
+            "---\nagent_doc_format: template\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: topic — gpt-5\nResponse body.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "preset #spec-test\n- do [#a]\n",
+            "<!-- /agent:queue -->\n"
+        );
+        // Same response; queue halted/drained (the post-maintenance shape).
+        let with_drained_queue = concat!(
+            "---\nagent_doc_format: template\nqueue_active: false\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: topic — gpt-5\nResponse body.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n"
+        );
+        assert_eq!(
+            normalize_for_replay_hash(with_active_queue),
+            normalize_for_replay_hash(with_drained_queue),
+            "queue-only churn must not change the replay normalization"
+        );
+
+        // A genuine response-body change still registers as different.
+        let with_changed_response = with_active_queue.replace("Response body.", "Different body.");
+        assert_ne!(
+            normalize_for_replay_hash(with_active_queue),
+            normalize_for_replay_hash(&with_changed_response),
+            "a real response-body change must still change the replay normalization"
+        );
+    }
 
     fn init_repo(repo: &Path) {
         Command::new("git")

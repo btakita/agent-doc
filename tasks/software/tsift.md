@@ -13,12 +13,24 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: tru
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
+[agent-doc sync] malformed frontmatter during resolve_file.
+
+sync resolve_file frontmatter: invalid YAML frontmatter in tasks/software/tsift.md: invalid YAML frontmatter in tasks/software/tsift.md: queue_active: invalid type: string "tru", expected a boolean at line 15 column 15
+
+Frontmatter excerpt:
+  14 |   '#spec-test-commit-push': update spec + tests. commit + push
+> 15 | queue_active: tru
+     |               ^
+
+Fix the frontmatter between the opening and closing --- markers, then rerun the command.
+
+Fix the frontmatter between the opening and closing --- markers, then rerun the command.
 <!-- /agent:status -->
 
 ## Spec
@@ -107,7 +119,7 @@ Fields promoted to `pub` (they're constructed at ~40 sites in lib.rs; alternativ
 - Superproject HEAD: `0fcf36cb1` (pushed).
 
 **Confidence:** high. **Escalation:** none. Next queue head is `do [#cli-extract-tagpath-helpers]` (Phase 1a-iii).
-<!-- agent:boundary:7f6f9404 -->
+<!-- agent:boundary:f99a9841 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -116,7 +128,7 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#cli-extract-output]~
 - do [#cli-extract-output-envelope]

@@ -691,6 +691,26 @@ pub const fn actor_can_queue_optimistically(state: ActorDispatchState) -> bool {
     matches!(state, ActorDispatchState::Busy)
 }
 
+/// Direct pane evidence repairs a stale busy projection (#snrun).
+///
+/// When the authoritative actor is projected `Busy` but the live pane proves a
+/// dispatch-ready prompt in the current generation (`prompt_ready`), it is not
+/// actually mid-turn — the busy/lease projection is stale. Callers promote it to
+/// `Ready` so a dispatch-only route dispatches to the proven-ready pane instead
+/// of queuing the prompt into `agent:queue auto`.
+///
+/// A `Busy` projection WITHOUT a proven ready prompt is left untouched and fails
+/// closed (queues), per the direct-evidence rule (idle direct evidence repairs a
+/// stale busy projection; busy direct evidence stays fail-closed). `prompt_ready`
+/// for a `Busy` actor is only ever true when the live pane capture matched a
+/// harness dispatch-ready prompt, so this never dispatches into a running turn.
+pub const fn busy_projection_repaired_by_ready_prompt(
+    actor_state: ActorDispatchState,
+    prompt_ready: bool,
+) -> bool {
+    matches!(actor_state, ActorDispatchState::Busy) && prompt_ready
+}
+
 pub const fn actor_waiting_input_recoverable(state: ActorDispatchState) -> bool {
     matches!(state, ActorDispatchState::WaitingInput)
 }
@@ -903,6 +923,60 @@ mod tests {
         });
 
         assert_eq!(outcome.decision, RouteDecision::ReuseReady);
+    }
+
+    #[test]
+    fn busy_projection_repaired_only_with_proven_ready_prompt() {
+        // #snrun: a Busy projection + proven live ready prompt is a stale busy
+        // projection → repair to Ready and dispatch. Busy without a proven ready
+        // prompt is genuinely busy → leave it (fail closed / queue).
+        assert!(
+            busy_projection_repaired_by_ready_prompt(ActorDispatchState::Busy, true),
+            "busy + proven ready prompt is a stale projection to repair"
+        );
+        assert!(
+            !busy_projection_repaired_by_ready_prompt(ActorDispatchState::Busy, false),
+            "busy without a proven ready prompt must not be repaired (stays fail-closed)"
+        );
+        // Non-busy states are never repaired through this path.
+        for state in [
+            ActorDispatchState::Ready,
+            ActorDispatchState::Starting,
+            ActorDispatchState::WaitingInput,
+            ActorDispatchState::Blocked,
+            ActorDispatchState::Closed,
+            ActorDispatchState::Missing,
+        ] {
+            assert!(
+                !busy_projection_repaired_by_ready_prompt(state, true),
+                "only Busy is repaired by this rule; {state:?} must not be"
+            );
+        }
+    }
+
+    #[test]
+    fn repaired_busy_actor_dispatches_directly_in_dispatch_only_mode() {
+        // After the route promotes a stale-busy actor to Ready (the repair), the
+        // pure decision + classification flow dispatches to the proven-ready pane
+        // instead of queuing — the end state the #snrun fix produces.
+        let outcome = decide_authoritative_reopen(RoutedReopenFacts {
+            actor_state: ActorDispatchState::Ready,
+            prompt_ready: true,
+            has_prompt_bearing_work: true,
+            mode: ReopenMode::DispatchOnly,
+            degraded_authority: false,
+            dispatch_eligible: true,
+        });
+        assert_eq!(outcome.decision, RouteDecision::ReuseReady);
+        assert_eq!(
+            classify_authoritative_actor_dispatch_action(AuthoritativeActorDispatchActionFacts {
+                mode: ReopenMode::DispatchOnly,
+                actor_state: ActorDispatchState::Ready,
+                has_prompt_bearing_work: true,
+                reopen_decision: outcome.decision,
+            }),
+            AuthoritativeActorDispatchAction::DispatchOnlyDirectPane
+        );
     }
 
     #[test]

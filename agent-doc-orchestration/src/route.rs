@@ -161,7 +161,7 @@ use crate::flow::routed_reopen::{
     accepted_only_dispatch_start_log_message, accepted_only_dispatch_start_refusal_message,
     actor_dispatch_blocker_reason, actor_recovery_hint,
     authoritative_actor_dispatch_guard_reason as flow_authoritative_actor_dispatch_guard_reason,
-    authoritative_actor_ready_retry_budget,
+    authoritative_actor_ready_retry_budget, busy_projection_repaired_by_ready_prompt,
     busy_existing_pane_auto_fix_outcome as flow_busy_existing_pane_auto_fix_outcome,
     can_use_degraded_authoritative_actor, classify_authoritative_actor_dispatch_action,
     classify_authoritative_prompt_ready_barrier, classify_dispatch_start_proof,
@@ -3765,6 +3765,34 @@ fn route_via_authoritative_actor(
 
     let prompt_ready = actor_state == crate::session_actor::ActorState::Ready
         || current_generation_ready_prompt_proven(tmux, &actor, harness);
+
+    // Direct pane evidence repairs a stale busy projection (#snrun). The actor
+    // was projected Busy, but the live pane proves a dispatch-ready prompt in the
+    // current generation — it is not actually mid-turn. Promote it to Ready so a
+    // dispatch-only route dispatches to the proven-ready pane instead of queuing
+    // the prompt into `agent:queue auto`. A Busy projection without a proven
+    // ready prompt is left as-is and still fails closed (queues), per the
+    // direct-evidence rule: idle direct evidence repairs stale busy; busy direct
+    // evidence stays fail-closed.
+    if busy_projection_repaired_by_ready_prompt(actor_dispatch_state(actor_state), prompt_ready) {
+        eprintln!(
+            "[route] authoritative actor for {} projected busy but the live pane proves a dispatch-ready prompt (generation {}); repairing stale busy projection to ready and dispatching instead of queuing",
+            file.display(),
+            actor.record.generation
+        );
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_authoritative_actor_busy_projection_repaired_by_ready_prompt file={} pane={} generation={} prior_state={}",
+                file.display(),
+                dispatch_pane,
+                actor.record.generation,
+                actor_state.as_str()
+            ),
+        );
+        actor_state = crate::session_actor::ActorState::Ready;
+    }
+
     let reopen_mode = if dispatch_only {
         ReopenMode::DispatchOnly
     } else {

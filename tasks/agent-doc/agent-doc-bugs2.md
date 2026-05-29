@@ -167,7 +167,38 @@ The original report's footer `22.4K (11%) ctrl+p commands` does **not** match re
 A capture taken **at the moment route refuses**, in the state you believe is idle: `tmux capture-pane -p -t %33` (or the offending pane). If it shows `⏵⏵ … (shift+tab to cycle)` while route still says not-ready, that's a real bug and I'll fix + test it. If it shows the `· Gerund…` spinner / `· N shell`, the pane was busy and the error is correct — in which case the real ask is probably a longer startup wait or clearer wording, which I can do on confirmation.
 
 The queue is still paused on `#jb-stale-busy-idle-footer` (same root area). Want me to fold this into that item, or skip it and continue the queue?
-<!-- agent:boundary:22af1614 -->
+❯ agent-doc on resume.md is having the IPC corrupt document issue and duplicate content issue when I type in a prompt.
+
+### Re: resume.md IPC corruption + duplicate-while-typing — diagnosed, need the dup shape before a safe fix — opus-4-8
+
+First, the reassuring part: **`resume.md` is currently clean on disk** — 16 well-formed `### Re:` blocks, one boundary, one exchange close, no git drift. The binary guards (`content_ours` snapshot + `already_applied` handling) recovered it; no persisted corruption right now.
+
+#### Live mechanism — confirmed from `resume.md` ops log
+
+This is the tracked `#prompt-duplicated-while-typing` editor race, and it's firing:
+
+- `mid_turn_cycle_rotation … action=fresh_cycle` — a cycle committed but the incoming response heading was absent from HEAD.
+- `ipc_socket_already_applied_skip_file_fallback` — the JB plugin's live buffer already held the response.
+- `session_check INTERRUPTED … committed … but the document has uncommitted exchange changes … prompt_target: "Please expand on the Confidential AI Startup…"` — a new prompt was being typed **into the buffer while a cycle was in flight**.
+
+No route-owned `agent-doc` process is running for `resume.md` — it's driven through the JB plugin's IPC listener, and my reinstalled `0.34.0` binary is fresh. So this is the **plugin-side** `PatchWatcher` `normalize + setText` double-count (synthesized boundary-aware exchange patch ∪ live post-boundary keystrokes), exactly the L2 hypothesis in `tasks/agent-doc/plan-prompt-duplicated-while-typing.md`. The plugin `0.2.137` I built this session does **not** touch this path, so installing it won't fix it.
+
+#### Why I'm not blind-fixing it
+
+The plan's own status is "mechanism unconfirmed." This is the single most corruption-prone path in the system, and a wrong cross-language change (or an over-eager dedup) could **delete real content**. I won't ship a speculative fix to the live-typing path.
+
+#### Safest path — two options, your call
+
+1. **Confirm + fix deterministically (preferred).** I write a deterministic `PatchWatcherTest` that drives the apply path against a buffer with uncommitted post-boundary keystrokes + a synthesized exchange patch, and assert the typed prompt survives **exactly once**. If it reproduces, I've confirmed L2 and implement the safe half of Option A — an idempotent dedup of an *exact consecutive duplicate* post-boundary prompt run **before** `setText` (reuse `dedupe.rs` via FFI; can only remove an exact dup, never create or delete unique text) — plus the Rust-side change to exclude live post-boundary text from the synthesized patch. Then build the plugin for you to install + verify live.
+2. **You hand me the dup shape now.** Paste (or screenshot) the duplicated region from the editor, and tell me whether it persisted to disk or was editor-only. That tells me if the dup is an exact adjacent run (dedup-safe) vs interleaved (needs the structural L1 fix), so I implement the right one the first time.
+
+#### Immediate protection meanwhile
+
+- Avoid typing a new prompt into `resume.md` **while a cycle is in flight** (during write-back / before the `### Re:` lands) — that's the exact race window.
+- If you see a dup in the buffer, `git checkout tasks/resume.md` restores the clean committed copy (HEAD is clean now).
+
+Want me to go with **option 1** (build the repro test + safe fix now) — say "go" — or paste the dup shape for **option 2**? The queue is still paused on `#jb-stale-busy-idle-footer`.
+<!-- agent:boundary:4dadd673 -->
 <!-- /agent:exchange --> 
 ###
 <!--

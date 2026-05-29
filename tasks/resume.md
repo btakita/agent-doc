@@ -138,7 +138,31 @@ From these three engagements, new additions worth surfacing:
 - **WooCommerce, Cloudflare CDN** (from MRH)
 - **Fintech / Loan Origination** (domain — EFS)
 - **Security Auditing** (WordPress — MRH)
-<!-- agent:boundary:558a01c2 -->
+
+### Re: Leave company blank for Dreamable? — sonnet-4-6
+
+Yes — legally fine per the agreement. Nothing in the settlement prohibits omitting the company name or listing it as "Confidential." The confidentiality clause (§5) covers *their business information*, not the existence of the engagement. You're free to describe your own skills in generic terms.
+
+**Practical options:**
+
+**Option A — "Confidential client" framing**
+```
+Confidential AI Startup — Software Development Consultant (Apr–May 2026)
+• AI/ML systems engineering, Rust; short-term engagement; all work product IP assigned to client.
+```
+This is a recognized resume/LinkedIn convention for NDA-covered roles. LinkedIn accepts any company name string — type "Confidential" in the company field.
+
+**Option B — Skills-forward, no employer named**
+```
+Independent Contractor — AI/Systems Engineering (Apr–May 2026)
+• Rust, AI/ML — [brief generic description of skill area, no product details]
+```
+Appears under your own name as a contractor period; no company entry needed.
+
+**Practical note on LinkedIn:** LinkedIn expects a company name for each experience entry. "Confidential" or "Private Company" in the company field works fine — recruiters see it routinely for NDA engagements. If you add a public description, keep it to skill/tech-category level (e.g., "AI infrastructure development in Rust") without business-domain specifics.
+
+**Recommended:** Given it was only 7 weeks and the work can't be shown, Option A with minimal description is cleaner than a gap. Or skip it entirely and let tsift (your own IP, same period) carry the narrative for that time.
+<!-- agent:boundary:6e9e331e -->
 <!-- /agent:exchange -->
 ###
 <!--

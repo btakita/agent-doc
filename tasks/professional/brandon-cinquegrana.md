@@ -88,7 +88,30 @@ One question back: were any of these equity/founder roles, or were all three cli
 
 ❯ Please transcribe + diarize the call with brandon-cinquegrana.
 ❯ [phone_20260528-140602_2144332110.m4a](../../mail/contacts/brandon-cinquegrana/recordings/phone_20260528-140602_2144332110.m4a)
-<!-- agent:boundary:06b08394 -->
+
+### Re: Transcribe + diarize the Brandon Cinquegrana call — opus-4-8
+
+Done → `mail/contacts/brandon-cinquegrana/recordings/phone_20260528-140602_2144332110.transcript.md` (18:36, 312 segments, GPU Whisper large-v3-turbo + pyannote chunked diarization). Left uncommitted in the working tree, same as the other contact artifacts.
+
+**Diarization caveat:** full-audio diarization detected 0 speakers; the chunked (600s) pass recovered 2, but the labels are unreliable. The first ~10 minutes collapsed into a single **Brian** block that actually contains both voices, and several short turns in the back half are swapped (the team-size and rate answers tagged *Brian* are Brandon's). Treat speaker tags as approximate — I can do a manual attribution pass if you need clean labels.
+
+**What the call was:** Brandon is recruiting for **Equal Experts** (Whisper mangled it to "EagleXworth" / "Equal Iceberg") — a UK software consultancy building out its North-American network (~200–300 consultants across US/Canada/LatAm vs. a few thousand in the UK). He's sourcing senior / principal back-end & full-stack engineers. He's an ex-Google recruiter now contracting for them through his own LLC.
+
+**Key facts:**
+
+- **Rate:** $120–150/hr to the engineer; a margin (not 2×) added for the client.
+- **Process:** send resume via LinkedIn → take-home assignment (~2 hrs of work, 14-day window) → technical-team review → pairing interview → join the network + Slack.
+- **Pipeline:** two projects starting ~June staffing senior back-end engineers; engagements run 12 weeks–2 years; teams start at 3–4 and can grow past 10. No obligation to take every project offered.
+- **Your action item:** send Brandon your resume via LinkedIn (you said this evening). Added to the backlog as `#brandon-resume`.
+
+**This answers my open question from the last cycle.** On the call you classified all three for Brandon yourself:
+
+- **Dreamable** — "kind of a full-time role… for a couple of months," now ended.
+- **EquityFundingSource** — a "smaller client" (the commercial-real-estate portal build), not your own venture.
+- **monsterrodholders** — the other smaller client (retail, ~$200K/yr).
+
+So none are founder/equity roles — all three belong **under the consulting umbrella**, with Dreamable as the most prominent entry (longest, near-full-time) and EFS / MRH as concurrent client bullets. That resolves the equityfundingsource question: client build → umbrella bullet, not a standalone company.
+<!-- agent:boundary:eb2732a8 -->
 <!-- /agent:exchange -->
 ###
 <!--

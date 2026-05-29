@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -247,7 +247,38 @@ Committing your queue edits and clearing the recurring snapshot/boundary drift. 
 Current orchestration crate: 4 modules (`ipc_socket`, `env`, `fs_util`, `secret_redact`). `#yybc`/`#adcr` behind `#bz6s` remain strike candidates (both effectively closed).
 
 Plan: tasks/agent-doc/plan-agent-doc-orchestration-extraction.md
-<!-- agent:boundary:bbd38963 -->
+
+### Re: continue #bz6s — increment 3: project_config_io + config — opus-4-7
+
+You re-activated the queue (`queue_active: true`), so I picked up the next Direction-A increment. Two more modules moved to `agent-doc-orchestration`.
+
+#### What landed
+
+Submodule `60df7f9c` on `20260422/codex-agent-backend`, pushed. Superproject `289022bd2` on `main`, pushed.
+
+- **`project_config_io`** — the `&Path`/`std::fs` project-config wrappers. Its only `crate::project_config` reference was a doc comment, so it depends solely on `agent_doc_core::project_config` (+ `anyhow`/`toml`). Cleanly movable.
+- **`config`** — rewrote its references: `agent_doc::model_tier` → `agent_doc_core::model_tier`, `crate::frontmatter` → `agent_doc_core::frontmatter`, and the `project_tmux_session`/`update`/`clear` re-exports now come from `crate::project_config_io` (sibling in orchestration).
+- Added `serde` + `toml` to the orchestration manifest. Shims in `main.rs` (bin) + `lib.rs` (`project_config_io`). Main's `project_config.rs` shim keeps re-exporting the io wrappers (now from orchestration); `#[allow(unused_imports)]` covers the tmux helpers that are consumed cross-crate via `crate::config::*`.
+
+Orchestration now holds **6 modules**: `ipc_socket`, `env`, `fs_util`, `secret_redact`, `project_config_io`, `config`.
+
+#### Verification
+
+- Build (debug + release) green; `clippy -- -D warnings` clean.
+- Orchestration tests: **52** (+12: config 7 + project_config_io 5).
+- main lib **65** (−5), bin **2,220** (−12) — no coverage lost.
+- `nm -D`: **39** FFI symbols still export. Both binaries refreshed.
+
+#### Next increment (dependency order)
+
+The `sessions`/`supervisor` closure: `input_diag`, `harness`, `project_controller`, `session_actor`, `startup_miss`, `test_support`, `prompt`, `ops_log`, then `snapshot` (which depends on `git`, pulling the cluster). After that the cluster itself (`cycle_state`/`capture`/`repair`/`git`/`route`/`sync`/`start`).
+
+**Heads-up on session size:** the exchange is at ~222 lines (accretion "warn"). When you're at a stopping point, consider `/agent-doc compact tasks/agent-doc/open-code.md` to archive the older turns before continuing.
+
+Plan: tasks/agent-doc/plan-agent-doc-orchestration-extraction.md
+
+**Not invoking `/loop`** — advancing one safe increment per invocation. Re-activate (`queue_active: true`) or say `continue` for the next.
+<!-- agent:boundary:f9f3be13 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -268,7 +299,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#77v6]~
 - ~do [#ysv9]~
 - ~do [#bz6s]~
-- do [#bz6s]
+- ~do [#bz6s]~
 - do [#yybc]
 - do [#adcr]
 <!-- /agent:queue -->

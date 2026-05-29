@@ -124,6 +124,45 @@ Before adopting ack-content, timeout current-file content, or CRDT merge output 
 - VS Code:
   - same proof and full-content rejection using `TextDocument.version`
 
+## Implemented 2026-05-29 (Phase-1 instrumentation, since the bug is not reliably reproducible)
+
+The user cannot reliably reproduce the corruption, so rather than ship a speculative
+editor fix we instrumented every whole-buffer mutation/adoption seam so the **next**
+real occurrence is captured automatically. Audit first confirmed the binary-side
+fail-closed guards are already comprehensive and wired on both transports
+(`guard_ipc_snapshot_adoption_against_live_prompt_drift` /
+`..._against_prompt_duplication` at the socket and file IPC adoption paths in
+`write.rs`), and they demonstrably fail closed.
+
+What landed:
+
+- **Binary (`write.rs`):** added `log_ipc_snapshot_adoption_allowed`, called after the
+  two guards on both the socket and file IPC paths. Previously only *blocked*
+  adoptions logged; *allowed* adoptions were silent. Now every adoption emits either
+  `ipc_snapshot_adoption_blocked` (existing) or `ipc_snapshot_adoption_allowed`
+  (new) with `snap_source`, snapshot/content_ours len+hash, and an independent
+  `drift_recheck` / `dup_growth_recheck` — a non-benign re-check on an *allowed* line
+  flags a guard-coverage gap. Rust unit tests:
+  `ipc_snapshot_adoption_allowed_logs_benign_recheck`,
+  `ipc_snapshot_adoption_allowed_is_silent_when_blocked`.
+- **JetBrains (`PatchWatcher.kt`, v0.2.135):** added `documentMutationDiagnosticUtil`
+  + `postBoundaryExchangeRegionUtil` + `documentMutationContentHashUtil`, logged at
+  every editor-visible `setText` site (`applyPatch.component`, `repositionBoundary`).
+  Each line records op, patch_id, transport, pre/post fingerprint, mod-stamp, idle
+  state, and the **post-boundary user-region length pre vs post** with a
+  `user_region_changed` flag — the direct duplication/deletion signal. Kotlin tests:
+  `DocumentMutationDiagnosticTest`.
+
+How to capture the packet now: reproduce in IntelliJ (type a prompt during a
+closeout); when corruption appears, `idea.log` shows the `[patch-watcher]
+document-mutation … user_region_changed=true` line for the offending `setText`, and
+`.agent-doc/logs/ops.log` shows the paired `ipc_snapshot_adoption_(allowed|blocked)`
+line with the content shape. That pinpoints the transport + payload to fix, which
+then drives the Phase-2 SimWorld regression and the real fix.
+
+Status: instrumentation only — no behavioral fix yet. Item stays gated pending a
+captured packet.
+
 ## Acceptance criteria
 
 1. Repro from Phase 1 no longer corrupts the editor-visible document.

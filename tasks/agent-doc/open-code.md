@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -95,12 +95,12 @@ Phase C done — the seam is complete and the build-isolation goal is met. `#ado
 - `cargo build --release` + `cargo install --path .` succeeded; both binaries current.
 
 Follow-up: `make check` does not run orchestration's isolated suite (separate pre-existing gap) — captured in backlog.
-<!-- agent:boundary:daf7cefb -->
+<!-- agent:boundary:e0d90e72 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#adoc-sqlite-isolation]~
 - ~do [#adoc-sqlite-seam]~

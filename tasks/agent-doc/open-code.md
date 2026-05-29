@@ -95,7 +95,7 @@ Phase C done — the seam is complete and the build-isolation goal is met. `#ado
 - `cargo build --release` + `cargo install --path .` succeeded; both binaries current.
 
 Follow-up: `make check` does not run orchestration's isolated suite (separate pre-existing gap) — captured in backlog.
-<!-- agent:boundary:acdb8a8e -->
+<!-- agent:boundary:daf7cefb -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -110,6 +110,7 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#adoc-make-check-orch-tests] [recommended] make check (cargo nextest --all-targets) does not run agent-doc-orchestration's isolated test suite (1844 tests incl. project_controller/session_actor persistence) — they only run via explicit cargo test -p agent-doc-orchestration. Wire the orchestration test target into the make check gate. (filetime dev-dep + test_support::ScopedCurrentDir were added in the sqlite-seam phase C to make that target compile again.)
 - [ ] [#adoc-orch-shim-cleanup] Finish the migration: rewrite CLI-shell crate::X call sites to agent_doc_orchestration::X and delete the pub use shims in agent-doc/src/{lib,main}.rs. Mechanical/low-risk polish, not a true crate split. Plan's optional final step.
 <!-- /agent:backlog -->
 

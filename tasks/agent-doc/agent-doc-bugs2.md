@@ -265,7 +265,44 @@ New tests (all fail pre-fix): `append_patch_dedupes_midblock_typing_snapshot` (t
 2. `resume.md` on disk is still corrupted (the duplicated tail). Say the word and I'll `git checkout tasks/resume.md` to restore the clean committed copy, or you can keep it as evidence.
 
 The queue is still paused on `#jb-stale-busy-idle-footer`.
-<!-- agent:boundary:b99f76f3 -->
+❯ The IPC corruption issue happened in this document and /home/brian/work/btakita/agent-loop/tasks/professional/brandon-cinquegrana.md.
+
+❯ The duplicate prompt issue happened on this document.
+
+### Re: where the IPC corruption + duplicate-prompt hit — opus-4-8
+
+Investigated both classes against the diagnostics and git history. Findings, then the one thing that unblocks the real fix.
+
+#### Two distinct bugs, confirmed
+
+1. **Duplicate prompt while typing** (this doc) — that's the dedup race I fixed last cycle (submodule `31027bc3`, pointer `3d8770020`, cdylib live). It should no longer recur here; please confirm next time you type a prompt mid-cycle into `agent-doc-bugs2.md`.
+2. **Full-document IPC corruption** (this doc + `brandon-cinquegrana.md`) — the more severe `#ipcfullprompt` class: full-buffer duplicate/deletion while typing a live prompt. Different mechanism, different fix.
+
+#### What the evidence says about the IPC corruption
+
+- **The binary is not the culprit.** Every `ipc_snapshot_adoption` for both docs in `.agent-doc/logs/ops.log` is `blocked` with `reason=live_prompt_drift_after_preflight`, and the `allowed` lines show `drift_recheck=false dup_growth_recheck=0`. The binary-side guards are firing and failing closed exactly as designed.
+- **The corruption is editor-side** — a `PatchWatcher.setText` that replaces the visible buffer, which bypasses the binary's snapshot-adoption guards. The smoking gun: brandon commit `822a9369e` (17:07) committed a **full `### Re: Recent projects` response deletion** (−45 lines). Good news: it was recovered — that response is present again at `brandon-cinquegrana.md:53`, so **no permanent data loss** in these cases.
+- **Why it isn't fixed yet:** the plan gates on capturing the real editor packet. The v0.2.135 instrumentation that would capture it (`documentMutationDiagnosticUtil … user_region_changed=true`) only writes to `idea.log` when `#com.github.btakita.agentdoc` debug logging is enabled — and it's **off**, so none of these occurrences were captured.
+
+#### The mis-filing (important)
+
+`#ipcfullprompt-recur` is sitting in `tasks/agent-doc-bugs2.done.md` with the text *"Re-open and implement"* — it was archived as done while still unfixed, the second time this exact bug was prematurely closed (the first was `#ipcfullprompt` on 2026-05-26). I've re-opened it as **`#ipcfullprompt-recur2`** at the top of the active backlog with the full investigation above.
+
+#### Your move — to actually fix it
+
+The bug is "not reliably reproducible," so the next step is to capture one real packet. Two paths:
+
+- **(a) Quick, no code:** enable plugin debug logging now — IDEA → `Help > Diagnostic Tools > Debug Log Settings` → add `#com.github.btakita.agentdoc`. Next time it corrupts, `idea.log` records the offending `setText` (transport + payload + `user_region_changed`), and I implement the targeted editor fix + SimWorld regression from that.
+- **(b) Default-on capture (I implement):** forward the editor corruption signal to `.agent-doc/logs/ops.log` and add a binary preflight detector for the `ipcfullprompt` shape (a deleted/duplicated `### Re:` block vs prior HEAD that no cycle authored), so capture no longer depends on a manual opt-in. Detection-only, binary-side — no speculative change to the corruption-prone apply path.
+
+I recommend doing **both**: turn on (a) right now so we don't lose the next occurrence, and let me build (b) so it's permanent. Say which and I'll proceed.
+
+#### Housekeeping
+
+This session has grown large (exchange 242 lines / 7 response sections; preflight flags accretion `block`). Good moment to `agent-doc compact tasks/agent-doc/agent-doc-bugs2.md --commit` and reset — your call. The queue is still paused on `#jb-stale-busy-idle-footer`.
+
+This re-opens an unfixed item rather than completing it, so the pending-done guard does not apply here.
+<!-- agent:boundary:e81d58f9 -->
 <!-- /agent:exchange --> 
 ###
 <!--

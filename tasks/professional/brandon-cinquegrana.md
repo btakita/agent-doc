@@ -165,7 +165,18 @@ Built → `resume/BrianTakita-equal-experts.pdf` (4 pages). Open: `file:///home/
 - **Length:** 4 pages. Fine for a 20-year senior/principal consultant a recruiter is vetting, but if you'd rather a tight 2-pager I can add a `[sections]` trim (drop Career Highlights or the pre-2014 roles) and rebuild.
 - **Uncommitted:** the new profile, the `data.toml` edit, and the PDF are uncommitted in the `resume/` submodule. Say the word and I'll commit them there + bump the submodule pointer.
 - This covers `#brandon-resume`'s artifact; I left that item open since sending it to Brandon is still pending. Added `#resume-data-toml-sync` to track the source-drift cleanup.
-<!-- agent:boundary:08ee3851 -->
+❯ In the Independent Consulting, place the "Confidential AI Startup" as the first item.
+
+### Re: Put Confidential AI Startup first in Independent Consulting — opus-4-8
+
+Done. Reordered the accomplishments in the `Independent Consulting` entry in `data.toml` and rebuilt. The section now reads:
+
+1. **Confidential AI Startup** — real-time AI inference/streaming pipelines, agent-harness tooling, investor demos
+2. **Equity Funding Source** — full-stack loan-origination platform on Cloudflare's edge stack
+3. **MonsterRodHolders.com** — WooCommerce e-commerce consulting
+
+PDF rebuilt → `resume/BrianTakita-equal-experts.pdf` (order verified). Still uncommitted in the `resume/` submodule along with the earlier changes — ready to commit + bump the pointer whenever you give the word.
+<!-- agent:boundary:709a41ae -->
 <!-- /agent:exchange -->
 ###
 <!--

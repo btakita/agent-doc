@@ -32,10 +32,10 @@ release: check
 test:
 	@set -e; \
 	if command -v cargo-nextest >/dev/null 2>&1; then \
-		$(CARGO_CLEAN_ENV) cargo nextest run --all-targets; \
-		$(CARGO_CLEAN_ENV) cargo test --doc; \
+		$(CARGO_CLEAN_ENV) cargo nextest run --workspace --all-targets; \
+		$(CARGO_CLEAN_ENV) cargo test --workspace --doc; \
 	else \
-		$(CARGO_CLEAN_ENV) cargo test --all-targets -- --test-threads="$(TEST_THREADS)"; \
+		$(CARGO_CLEAN_ENV) cargo test --workspace --all-targets -- --test-threads="$(TEST_THREADS)"; \
 	fi
 
 # Wider deterministic simulator budget. Kept outside normal cargo test via

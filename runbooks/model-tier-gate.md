@@ -30,6 +30,7 @@ Preflight composes these into `effective_tier`, plus optional `required_tier` (w
 |----------|-----------|------|
 | `claude-opus-4-6` | opus-4-6 | high |
 | `claude-opus-4-7` | opus-4-7 | high |
+| `claude-opus-4-8` | opus-4-8 | high |
 | `claude-sonnet-4-6` | sonnet-4-6 | med |
 | `claude-haiku-4-5-20251001` | haiku-4-5 | low |
 

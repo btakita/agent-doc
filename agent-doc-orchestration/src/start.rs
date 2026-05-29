@@ -3743,7 +3743,7 @@ mod tests {
         let harness = crate::harness::HarnessConfig::claude();
         let args = build_base_args_for_test(&fm, &harness);
         assert!(args.contains(&"--model".to_string()));
-        assert!(args.contains(&"claude-opus-4-7".to_string()));
+        assert!(args.contains(&"claude-opus-4-8".to_string()));
         assert!(args.contains(&"--dangerously-skip-permissions".to_string()));
     }
 
@@ -3759,7 +3759,7 @@ mod tests {
         // Should use the explicit --model from claude_args, not inject from claude_model
         assert!(args.contains(&"sonnet".to_string()));
         assert!(!args.contains(&"claude-opus-4-6".to_string()));
-        assert!(!args.contains(&"claude-opus-4-7".to_string()));
+        assert!(!args.contains(&"claude-opus-4-8".to_string()));
     }
 
     #[test]

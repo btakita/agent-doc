@@ -36,7 +36,7 @@
 //! - `tier_from_str_invalid`: unknown strings return `Err`.
 //! - `harness_detection_default`: with no env vars set, `detect_harness()` returns `"default"`.
 //! - `resolve_builtin_claude_code`: `resolve_tier_to_model(Tier::High, "claude-code", &Config::default())`
-//!   returns `Some("claude-opus-4-7")`.
+//!   returns `Some("claude-opus-4-8")`.
 //! - `resolve_unknown_harness_uses_default`: an unknown harness falls through to the
 //!   `"default"` built-in map.
 //! - `tier_from_model_name_roundtrip`: `tier_from_model_name("opus", "claude-code", ...)`
@@ -47,7 +47,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
-const CLAUDE_CODE_OPUS_MODEL: &str = "claude-opus-4-7";
+const CLAUDE_CODE_OPUS_MODEL: &str = "claude-opus-4-8";
 
 /// Harness-agnostic model complexity tier.
 ///
@@ -710,7 +710,7 @@ mod tests {
         let cfg = ModelConfig::default();
         assert_eq!(
             resolve_tier_to_model(Tier::High, "claude-code", &cfg).as_deref(),
-            Some("claude-opus-4-7")
+            Some("claude-opus-4-8")
         );
         assert_eq!(
             resolve_tier_to_model(Tier::Med, "claude-code", &cfg).as_deref(),
@@ -773,7 +773,7 @@ mod tests {
             Some(Tier::High)
         );
         assert_eq!(
-            tier_from_model_name("claude-opus-4-7", "claude-code", &cfg),
+            tier_from_model_name("claude-opus-4-8", "claude-code", &cfg),
             Some(Tier::High)
         );
         assert_eq!(
@@ -792,7 +792,7 @@ mod tests {
         let cfg = ModelConfig::default();
         let (tier, name) = parse_model_arg("high", "claude-code", &cfg).unwrap();
         assert_eq!(tier, Tier::High);
-        assert_eq!(name, "claude-opus-4-7");
+        assert_eq!(name, "claude-opus-4-8");
     }
 
     #[test]
@@ -800,7 +800,7 @@ mod tests {
         let cfg = ModelConfig::default();
         let (tier, name) = parse_model_arg("opus", "claude-code", &cfg).unwrap();
         assert_eq!(tier, Tier::High);
-        assert_eq!(name, "claude-opus-4-7");
+        assert_eq!(name, "claude-opus-4-8");
     }
 
     #[test]
@@ -808,7 +808,7 @@ mod tests {
         let cfg = ModelConfig::default();
         assert_eq!(
             canonical_model_name("opus", "claude-code", &cfg),
-            "claude-opus-4-7"
+            "claude-opus-4-8"
         );
         assert_eq!(canonical_model_name("opus", "codex", &cfg), "opus");
     }
@@ -991,7 +991,7 @@ mod tests {
         let cfg = ModelConfig::default();
         let diff = "@@ -1,3 +1,4 @@\n context\n+/model opus\n+real edit\n";
         let result = scan_model_switch(diff, "claude-code", &cfg);
-        assert_eq!(result.model_switch.as_deref(), Some("claude-opus-4-7"));
+        assert_eq!(result.model_switch.as_deref(), Some("claude-opus-4-8"));
         assert_eq!(result.model_switch_tier, Some(Tier::High));
         assert!(!result.stripped_diff.contains("/model opus"));
         assert!(result.stripped_diff.contains("real edit"));
@@ -1003,7 +1003,7 @@ mod tests {
         let diff = "+/model high\n+other line\n";
         let result = scan_model_switch(diff, "claude-code", &cfg);
         assert_eq!(result.model_switch_tier, Some(Tier::High));
-        assert_eq!(result.model_switch.as_deref(), Some("claude-opus-4-7"));
+        assert_eq!(result.model_switch.as_deref(), Some("claude-opus-4-8"));
         assert!(!result.stripped_diff.contains("/model high"));
     }
 
@@ -1069,7 +1069,7 @@ mod tests {
         let cfg = ModelConfig::default();
         let diff = "+/model opus\n+/model haiku\n";
         let result = scan_model_switch(diff, "claude-code", &cfg);
-        assert_eq!(result.model_switch.as_deref(), Some("claude-opus-4-7"));
+        assert_eq!(result.model_switch.as_deref(), Some("claude-opus-4-8"));
         // Both lines stripped.
         assert!(!result.stripped_diff.contains("/model"));
     }

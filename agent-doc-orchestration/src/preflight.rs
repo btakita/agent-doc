@@ -8359,7 +8359,7 @@ mod tests {
     fn resolve_agent_model_expands_claude_code_opus_alias() {
         let cfg = agent_doc_core::model_tier::ModelConfig::default();
         let result = resolve_agent_model(Some("opus"), "claude-code", &cfg);
-        assert_eq!(result, Some("opus-4-7".to_string()));
+        assert_eq!(result, Some("opus-4-8".to_string()));
     }
 
     #[test]

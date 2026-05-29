@@ -123,7 +123,26 @@ The trigger is the **interaction**: a binary-synthesized boundary-aware exchange
 #### What that means for the fix
 
 The cure has to land in the **plugin** (`PatchWatcher.kt`) and/or the synthesis side, and it needs a **plugin rebuild + reinstall** — a cdylib `lib-install` alone won't touch the Kotlin `setText` path. That's exactly why I need the `idea.log` transport/payload packet: to pin down which transport (socket vs file IPC, patch vs reposition vs normalize) the plugin mishandled, so the editor-side fix is targeted rather than speculative on the most corruption-prone path. Enable `#com.github.btakita.agentdoc` debug logging and reproduce once more, and I can write that fix.
-<!-- agent:boundary:37bc45a2 -->
+❯ Should a new plugin be installed?
+
+### Re: Should a new plugin be installed? — opus-4-8
+
+No — not for anything shipped this session.
+
+#### Why no reinstall is needed now
+
+I changed **no `.kt` files** this session. Every fix (the typing-snapshot dedup, the forensic detectors, the Claude busy-cue) lives in the **binary** (`cargo install`ed) and the **cdylib** (`lib-install`ed) — both are current (built 18:44 today). The installed plugin loads the cdylib **by path and hot-reloads it by mtime**, so even an already-installed plugin picks up these fixes on its next FFI call. No FFI signatures changed, so there's no ABI mismatch with the existing install.
+
+I also checked: there are **no stale long-running `agent-doc` processes** running right now, so nothing is pinned to an old binary.
+
+#### Why the brandon capture didn't auto-fire (the real reason)
+
+Not a stale plugin — the **detector didn't yet cover the scaffold-duplication shape**. That gap is what I closed this cycle (`detect_duplicated_scaffold`). So the *next* reproduction will auto-capture to `ops.log` + `.agent-doc/logs/ipcfullprompt/` with the current binary/cdylib — no reinstall required.
+
+#### When a new plugin *will* be required
+
+The eventual **cure** for `#ipcfullprompt-recur2` — the actual `PatchWatcher.setText` change in the Kotlin plugin — *will* need a plugin rebuild and reinstall (bump `pluginVersion` past the current `0.2.137`; IntelliJ dedupes same-version installs, so the version must change). But I haven't written that yet — it's gated on the `idea.log` transport packet. So: nothing to install today; a fresh signed plugin only once I implement the editor-side fix.
+<!-- agent:boundary:9a573f98 -->
 <!-- /agent:exchange --> 
 ###
 <!--

@@ -87,10 +87,59 @@ So there is **no existing IPC seam** to converge a queue tag-attribute / frontma
 #### Noted
 
 Your new backlog item `#prompt-duplicated-while-typing` is captured. It is not the queue head this cycle, so I have not acted on it; the referenced `plan-prompt-duplicated-while-typing.md` does not exist yet. Queue it (or send `#agent-doc-bug`) when you want the plan written and the PatchWatcher double-apply race investigated.
-<!-- agent:boundary:bc9850cf -->
+JB `Run Agent Doc` error
+```
+resync: stash pane %21 is registered in its own project root — skipping kill
+resync: stash pane %2 is registered in its own project root — skipping kill
+resync: stash pane %20 is registered in its own project root — skipping kill
+resync: stash pane %3 is registered in its own project root — skipping kill
+resync: stash pane %4 is registered in its own project root — skipping kill
+[route] debounce OK — file idle for 0.9s and typing indicator idle
+[route] target tmux session: 0
+[route] authoritative actor generation 233 for tasks/monsterrodholders.md is busy on pane %19; queued pending dispatch "Do Option A. #spec-test-commit-push-deploy" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
+```
+#spec-test-build-install-commit-push
+
+### Re: JB `Run Agent Doc` queued instead of dispatching (actor wasn't really busy) — opus-4-8
+
+Fixed the routing bug you confirmed: the actor was reported busy but wasn't, so the dispatch got queued instead of run. Deferring the queue head (`#adoc-queue-ipc-buffer-divergence` / #2) per your call.
+
+#### Root cause
+
+The log line — `authoritative actor generation 233 ... is busy on pane %19; queued pending dispatch ... in agent:queue auto ... instead of injecting a duplicate trigger` — is the *correct* response to a genuinely-busy actor. The defect was upstream: a **stale busy projection**. In `decide_authoritative_reopen`, a dispatch-only reroute against a `Busy` actor went straight to `FailClosed` (→ queue) **without consulting the live pane**. So when the actor had actually finished its turn and the pane was showing a dispatch-ready prompt, the stale `busy` lease/projection still won and your prompt was queued instead of dispatched.
+
+#### Fix
+
+When the actor is projected `Busy` but `current_generation_ready_prompt_proven` shows a dispatch-ready prompt on the current generation's pane, route now treats the busy projection as stale, promotes it to `Ready`, and dispatches via direct pane submit. This extends the direct-evidence rule the router **already** applies to `starting` actors (a proven ready prompt promotes to ready) to the `busy` case. A `Busy` projection **without** a proven ready prompt is left untouched and still fails closed (queues) — busy direct evidence stays fail-closed; only idle direct evidence repairs. So this never dispatches into a real running turn.
+
+- New pure predicate `busy_projection_repaired_by_ready_prompt` (`flow/routed_reopen.rs`), applied in `route.rs` before dispatch-action classification, logged via `ops_log` (`route_authoritative_actor_busy_projection_repaired_by_ready_prompt`).
+- Tests: `busy_projection_repaired_only_with_proven_ready_prompt`, `repaired_busy_actor_dispatches_directly_in_dispatch_only_mode`.
+- Spec: `specs/08-session-routing.md` § Authoritative actor dispatch.
+- `make check` green, both binaries installed, submodule `89c99c79` + superproject `7f92c1fcd` pushed, CI green.
+
+This is squarely the "active-turn busy collision vs stale projection" sub-part of the open `#snrun` review item. I added a follow-up backlog item for a **live JB replay regression** (the fix is unit-tested on the pure decision functions; a live SimWorld/tmux-ci replay would lock it in) and noted the still-open `#snrun` rescued-stash proof-miss distinction.
+
+#### Deferred
+
+The queue head (#2 — the IPC-buffer divergence needing a plugin protocol extension) stays open and untouched, per your "defer #2 for now". **Restart the route-owned `agent-doc` process** so both this routing fix and the earlier #4 replay-hash fix take effect on the live session.
+<!-- agent:boundary:50b0c12b -->
 <!-- /agent:exchange -->
 ###
 <!--
+Switch claude_model: opus to defer to Claude Code's definition of opus...which is currently Opus 4.8.
+#spec-test-build-install-commit-push
+---
+```
+resync: stash pane %21 is registered in its own project root — skipping kill
+resync: stash pane %2 is registered in its own project root — skipping kill
+resync: stash pane %4 is registered in its own project root — skipping kill
+resync: stash pane %20 is registered in its own project root — skipping kill
+resync: stash pane %3 is registered in its own project root — skipping kill
+[route] debounce OK — file idle for 0.5s and typing indicator idle
+[route] target tmux session: 0
+[route] authoritative actor generation 233 for tasks/monsterrodholders.md is busy on pane %19; queued pending dispatch "complete [#nsbfrun]. #spec-test-commit-push" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
+```
+---
 JB `Run Agent Doc` error
 ```
 resync: stash pane %19 is registered in its own project root — skipping kill
@@ -124,6 +173,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#adoc-queue-ipc-drift]~
+- do [#adoc-queue-ipc-buffer-divergence]
 - do [#duplicate-response-after-commit]
 - do [#pending-add-append-not-prepend]
 - do [#queue-strike-on-halt]
@@ -133,7 +183,9 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#adoc-queue-ipc-buffer-divergence] Durable fix for the remaining #adoc-queue-ipc-drift root causes #2 + #4. #2: the IPC working buffer re-adds `auto` / diverges from the committed inactive snapshot because halt + queue-maintenance writes land on disk while the live IDE buffer wins on its next flush — push the queue-shape change (strip auto, clear queue_active, deduped body) through the IPC listener so the editor buffer converges instead of only writing the file. #4: decouple stuck_captured_cycle from queue-component churn. Needs a deterministic live-IPC-listener repro harness (SimWorld) first. Plan: tasks/agent-doc/plan-queue-ipc-drift.md § Still open.
+- [ ] [#run-agent-doc-stale-busy-replay] Follow-up to the #snrun stale-busy-projection fix (submodule 89c99c79): the dispatch-only busy-vs-stale repair is covered by unit tests on the pure decision functions; add a live JB Run Agent Doc replay regression (SimWorld or tmux-ci) exercising a stale busy actor projection + proven ready prompt and asserting dispatch instead of agent:queue auto enqueue. Also still open in #snrun: distinguishing rescued-stash accepted-only proof misses. Plan: tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md.
+- [ ] [#adoc-queue-ipc-buffer-divergence] Root cause #4 FIXED (submodule 729f7bc2): response-replay / stale-cycle hash matching now neutralizes the agent:queue component (tag + body) and the queue_active frontmatter, so queue-maintenance churn no longer wedges a committed cycle as stuck_captured_cycle. REMAINING #2 (live IDE buffer re-adds auto / diverges from committed inactive snapshot): blocker found — ipc_socket::send_patch carries component CONTENT only and cannot converge a queue opening-tag attribute (auto) or the queue_active frontmatter; try_ipc_full_content is disabled and rejects template docs, so no IPC seam exists yet. Needs a plugin protocol extension (PatchWatcher.kt + FFI) to converge queue tag + frontmatter to the editor buffer, plus a deterministic live-IPC-listener repro harness (SimWorld). Plan: tasks/agent-doc/plan-queue-ipc-drift.md.
+- [ ] [#prompt-duplicated-while-typing] User prompt duplicated in the live editor while typing — in-progress prompt text appears twice in the buffer during/after typing, before any new agent-doc cycle. Distinct from #duplicate-response-after-commit (response body) and #adoc-queue-ipc-drift (queue/snapshot loop). Suspected: PatchWatcher.kt normalize+setText (lines 774/801) double-counts post-boundary keystrokes against the try_ipc() boundary-aware synthesized exchange patch payload; await_idle debounce narrows but does not close the race. Plan: tasks/agent-doc/plan-prompt-duplicated-while-typing.md (recommend Option A — single-source post-boundary user region + idempotent apply).
 - [ ] [#duplicate-response-after-commit] Late-IPC reposition signal re-inserts already-committed response body into working tree, wrapped in duplicate boundary markers. Symptom: next preflight interrupts with "direct response patchback without agent-doc cycle"; agent-doc write --commit returns "empty response — nothing to write"; only manual Edit-based dedup recovers. Repro: tasks/dreamable/separation.md cycle after commit 231eafc83 on 2026-05-28. Plan: tasks/agent-doc/plan-duplicate-response-after-commit.md (recommend Option A — both detect over-application in session-check and make IPC reposition idempotent).
 - [ ] [#pending-add-append-not-prepend] `--pending-add` appends new items below the previous CLI arg within the same finalize cycle, contradicting SKILL.md "Pending capture rule" ("Put new items at the beginning of agent:backlog"). Repro: tasks/agent-doc/open-code.md commit f94e7851c — agent added wave-4, wave-3, wave-2, wave-1 expecting wave-1 on top per SKILL.md; actual backlog was wave-4 on top (pure CLI-arg order). User flagged it as bug; agent had to issue --pending-reorder. Plan: tasks/agent-doc/plan-pending-add-prepend-semantics.md (recommend Option A — strict prepend, drop the implicit adjacency heuristic).
 - [ ] [#queue-strike-on-halt] Queue head consumed on halt/refusal response. write.rs:1233-1242 + response_explicitly_targets_queue_head (write.rs:2481) treat any `### Re: <head-id> <suffix>` heading as completion signal even when body explicitly says "backlog left intact" + passes no --done/--pending-gate. Repro: tasks/agent-doc/open-code.md cycle 619af4d0b struck [#d97v] after halt response. Plan: tasks/agent-doc/plan-queue-strike-on-halt-response.md (recommend Option A — require explicit completion signal).

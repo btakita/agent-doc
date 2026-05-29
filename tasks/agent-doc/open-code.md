@@ -104,6 +104,7 @@ Follow-up: `make check` does not run orchestration's isolated suite (separate pr
 preset #spec-test-build-install-commit-push
 - ~do [#adoc-sqlite-isolation]~
 - ~do [#adoc-sqlite-seam]~
+- do [#adoc-make-check-orch-tests]
 - do [#adoc-orch-shim-cleanup]
 <!-- /agent:queue -->
 

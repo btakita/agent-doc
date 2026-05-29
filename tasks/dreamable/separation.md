@@ -179,7 +179,69 @@ I already signed the contract. Am I screwed if robert-ross doesn't pay? I'm very
 **Recommended next move.** Send the friendly status check (step 1) this week. Set a calendar reminder for 14 days from the signed Effective Date. If nothing by then, move to step 3 (your own demand letter), not step 4 yet — the certified-mail demand alone usually triggers payment from a counterparty who was just being lazy about wire timing. Hold the lawyer letter as the visible next step if step 3 fails.
 
 **Not legal advice.** This is a structural collection-strategy read. Confirm the small-claims-vs-arbitration question and any state-specific demand-letter requirements with a CA or CT attorney before filing anything. The lawyer-referral consult is worth the $35.
-<!-- agent:boundary:2912a2b3 -->
+With the non-disparagement clause, can I say anything in public if robert-ross does not pay?
+
+### Re: Non-disparagement and public statements if Rob doesn't pay — opus-4-7
+
+**Short answer.** Truthful factual statements about an unpaid debt are *probably* not disparagement, but §8 is drafted broadly enough that anything beyond bare facts is risky — and even bare facts can prompt Rob to claim breach and force you to defend, which costs more than the $5k. The credible *threat* of public truthful statements is a far better lever than the statement itself.
+
+**What §8 actually covers**
+
+Settlement non-disparagement clauses generally prohibit *disparaging* statements — that's a term of art meaning statements that hold the other party up to ridicule, contempt, or scorn, or that injure their reputation through falsehood or opinion-as-fact. Pull the exact wording:
+
+- If §8 says *"no disparaging statements"* — narrower. Truthful, neutral factual statements are usually safe.
+- If §8 says *"no negative statements"* or *"no statements that would damage reputation"* — broader. Even truthful facts can violate it because "no negative statements" sweeps in things that are negative but not technically disparaging.
+- If §8 has a *"truthful response to factual inquiries"* carve-out — that's an explicit safe harbor for answering direct questions (as opposed to volunteering information publicly).
+- Almost all such clauses explicitly carve out *truthful testimony in legal proceedings* and *responses to subpoenas* — that's the standard wording in this one too.
+
+Without seeing the exact §8 text, I can't tell you which bucket you're in. **Read it before relying on any of the below.**
+
+**What's safe to say (probably) even under broad §8**
+
+- Statements made *in* a legal proceeding (demand letter, arbitration filing, court complaint) — protected by litigation privilege in California and most jurisdictions. The complaint itself becomes a public document and stating "Dreamable owes me $5,000 under a signed settlement and has not paid as of [date]" inside the complaint is not a §8 breach.
+- Truthful responses to direct, unsolicited factual inquiries from third parties — *if* the clause has a factual-inquiry carve-out. "Did you get paid?" → "No, not yet" is harder to attack than a Twitter post.
+- Statements to your own legal counsel or accountant — privileged communications, not "public."
+
+**What's risky even if true**
+
+- Public social-media posts naming Dreamable as a non-payer, even if 100% factual. Why: §8 typically covers *all* public statements, not just false ones, and a court asked to interpret "disparaging" against a small-dollar plaintiff will often read it broadly.
+- Targeted statements to specific third parties Rob has commercial relationships with (potential investors, customers, employees, partners) — these look like tortious interference even if the §8 question is debatable.
+- Anything with adjectives, motive attribution, or characterizations: "Rob screwed me", "Dreamable is dishonest", "they cheated me out of $5k". These are clearly disparagement regardless of underlying truth.
+
+**What Rob can do if he claims §8 breach**
+
+- Initiate JAMS arbitration in SF County under §10 (cost-prohibitive for him too, but he has more resources than you).
+- Seek injunctive relief in court — a TRO to take down a post pending arbitration. These are sometimes granted on $1k–$5k bond.
+- Counterclaim for damages if you file your own collection action — which converts your simple breach claim into a two-sided dispute and dramatically raises your defense costs.
+
+The asymmetry that hurts you on collection (cost to enforce > $5k) also hurts him on §8 enforcement — but if you're cash-constrained, *you* feel the cost more.
+
+**The material-breach defense — exists but weak**
+
+California contract law generally allows a party to suspend its own performance when the other side commits a material breach. So in theory: Rob's non-payment is a material breach of §2, therefore your §8 obligation is suspended.
+
+In practice this is fact-intensive: the court has to decide whether non-payment was *material* (probably yes for the entire $5k, ambiguous for a delay), whether you gave reasonable notice and cure opportunity, and whether your §8 statements were *proportionate* to the breach. You'd need a lawyer to argue this, and the arbitration costs to litigate it exceed the $5k anyway.
+
+**Better strategic use: the threat in the demand letter**
+
+This is the part most worth your time. In the formal demand letter (escalation step 3 or step 4 from the prior response), include a clause like:
+
+> *"Consultant reserves all rights, including the right to make truthful factual statements regarding the unpaid Settlement Payment in any forum permitted by law, including but not limited to legal proceedings, communications with regulatory authorities, and responses to factual inquiries from third parties. Section 8 of the Settlement does not prohibit truthful factual statements regarding Company's performance under the Settlement."*
+
+This does two things:
+
+1. Signals that you've thought about the §8 question and have a position on it — Rob can no longer assume you'll stay silent because of §8.
+2. Frames any future statement as *truthful factual* rather than *disparaging*, which puts the burden on him to argue the broader reading of §8.
+
+**Recommended posture**
+
+- **Don't post publicly about Rob or Dreamable for now.** The §8 risk is real and the upside is small; public posts rarely produce payment, they produce litigation.
+- **Use the §8 carve-outs you do have**: file a JAMS demand or court complaint when you're ready, and let the public-record nature of that filing do the work.
+- **Hold the truthful-public-statement card as a credible threat in the demand letter, not as an action**. Most of the leverage from "I could say this in public" comes from Rob believing you might, not from you actually doing it.
+- **If Rob ever attacks your reputation or says anything negative about you in public** — that's a §8 breach by him, which gives you both a damages claim and a stronger defense to any future §8 claim against you. Don't bait him, but document anything he says.
+
+**Not legal advice.** §8 enforceability against truthful statements is genuinely contested in California (some courts narrow non-disparagement clauses on public-policy grounds, others enforce them strictly). If you're seriously considering any public statement, get the actual §8 language in front of a CA-licensed attorney for a 30-minute consult before posting anything. The $35 referral consult covers this.
+<!-- agent:boundary:21cd97ca -->
 <!-- /agent:exchange -->
 
 ## Queue

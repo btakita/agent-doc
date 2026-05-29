@@ -13,24 +13,12 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: tru
+queue_active: true
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
-[agent-doc sync] malformed frontmatter during resolve_file.
-
-sync resolve_file frontmatter: invalid YAML frontmatter in tasks/software/tsift.md: invalid YAML frontmatter in tasks/software/tsift.md: queue_active: invalid type: string "tru", expected a boolean at line 15 column 15
-
-Frontmatter excerpt:
-  14 |   '#spec-test-commit-push': update spec + tests. commit + push
-> 15 | queue_active: tru
-     |               ^
-
-Fix the frontmatter between the opening and closing --- markers, then rerun the command.
-
-Fix the frontmatter between the opening and closing --- markers, then rerun the command.
 <!-- /agent:status -->
 
 ## Spec
@@ -119,7 +107,8 @@ Fields promoted to `pub` (they're constructed at ~40 sites in lib.rs; alternativ
 - Superproject HEAD: `0fcf36cb1` (pushed).
 
 **Confidence:** high. **Escalation:** none. Next queue head is `do [#cli-extract-tagpath-helpers]` (Phase 1a-iii).
-<!-- agent:boundary:a2636a5b -->
+What are #next-steps? Please order the queue and backlog by priority.
+<!-- agent:boundary:8ca641b4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -144,14 +133,14 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#cli-extract-tagpath-helpers] Phase 1a-iii — extract TagpathSearchOpts + TagpathAnnotationDiagnostic + CommunityMemberAmbiguityDiagnostic + annotate_hits_with_tagpath + annotate_stored_symbols_with_tagpath + annotate_stored_edges_with_tagpath + annotate_communities_with_tagpath + annotate_path_nodes_with_tagpath (~700 LOC) into packages/tsift-cli/src/output/tagpath.rs. Sits below the graph/community cmd cluster but moves cleanly because the annotate functions are already pub.
 - [ ] [#cli-extract-cli-types] Phase 1b — lift clap CLI types (Cli, Commands, GraphDbQuery, output format enums) out of lib.rs into packages/tsift-cli/src/cli.rs. Pure mechanical lift; no logic change.
 - [ ] [#cli-cluster-index-search] Phase 2 — move cmd_index + cmd_search bodies into packages/tsift-cli/src/commands/index_search.rs (re-exported from lib.rs). Smallest cluster, validates the per-command pattern before larger ones.
 - [ ] [#cli-cluster-graph] Phase 2 — move cmd_graph + cmd_communities + cmd_path + cmd_explain + cmd_traverse bodies into packages/tsift-cli/src/commands/graph.rs.
-- [ ] [#cli-cluster-digests] Phase 2 — move cmd_diff_digest + cmd_log_digest + cmd_test_digest + cmd_metric_digest + cmd_session_digest + cmd_session_cost + cmd_session_review + cmd_context_pack bodies into packages/tsift-cli/src/commands/digests.rs. Depends on tsift-digest and tsift-session landing first.
+- [ ] [#cli-extract-tagpath-helpers] Phase 1a-iii — extract TagpathSearchOpts + TagpathAnnotationDiagnostic + CommunityMemberAmbiguityDiagnostic + annotate_hits_with_tagpath + annotate_stored_symbols_with_tagpath + annotate_stored_edges_with_tagpath + annotate_communities_with_tagpath + annotate_path_nodes_with_tagpath (~700 LOC) into packages/tsift-cli/src/output/tagpath.rs. Sits below the graph/community cmd cluster but moves cleanly because the annotate functions are already pub.
 - [ ] [#cli-cluster-quality] Phase 2 — move cmd_audit + cmd_audit_tagpath + cmd_lint + cmd_perf_gate bodies into packages/tsift-cli/src/commands/quality.rs.
 - [ ] [#cli-cluster-summarize] Phase 2 — move cmd_summarize body (and helpers) into packages/tsift-cli/src/commands/summarize.rs.
 - [ ] [#cli-cluster-infra] Phase 2 — move cmd_init + cmd_status + cmd_locks + cmd_sql + cmd_route + cmd_rewrite + cmd_convex_sync + cmd_graph_db_* + cmd_edit bodies into packages/tsift-cli/src/commands/infra.rs.
+- [ ] [#cli-cluster-digests] Phase 2 — move cmd_diff_digest + cmd_log_digest + cmd_test_digest + cmd_metric_digest + cmd_session_digest + cmd_session_cost + cmd_session_review + cmd_context_pack bodies into packages/tsift-cli/src/commands/digests.rs. Depends on tsift-digest and tsift-session landing first.
 - [ ] [#npm-auth-setup] Configure NPM_TOKEN secret + TSIFT_ENABLE_NPM_PUBLISH=true variable in GitHub repo settings
 - [ ] [#npm-publish-verify] After auth configured, tag release and verify publish-opencode-plugin CI job succeeds and opencode-tsift appears on npmjs.org
 - [ ] [#full-e2e-verify] In fresh project: opencode plugin opencode-tsift && opencode then /tsift-status. On success mark #e2e-install done.

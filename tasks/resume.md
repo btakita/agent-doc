@@ -314,7 +314,40 @@ I followed the existing freelance bullet pattern (bold company prefix), matching
 **Not committed.** The change is staged in the `resume/` repo (its own git remote, `btakita/resume`) but not committed or pushed, since you asked me to *create* the role, not deploy it. Tell me `commit + push` when you've reviewed it.
 
 **One flag:** the MonsterRodHolders bullet is in now, but I'd confirm attribution with Ron before this goes live publicly (LinkedIn/published PDF) — added a backlog reminder.
-<!-- agent:boundary:b750d68e -->
+❯ Add Google Ads to monsterrodholders.com.
+
+### Re: Google Ads work in src/boost-client (monsterrodholders) — opus-4-8
+
+Investigated `src/boost-client` (read-only). The Google Ads work is substantial and lives under the monsterrodholders site, not here. Summary of what's done vs. still open:
+
+#### Done
+
+- **Order attribution** (`#gadsglk`, deployed) — every WooCommerce order now captures `gclid`, `utm_*`, and `_gcl_aw` as order meta via `mrh-google-ads.php` v1.3/v1.4. This is the click→revenue join key.
+- **Root-caused the "$1 conversions" problem** — the canonical issue was that **Google for WooCommerce was never installed**; the flat $1 came from the codeless gtag action `1069392929`. GfW orphaned actions `7058230965`/`7058446455` recorded 0.
+- **GfW v3.7.0 deployed + Merchant Center `5768131521` connected** (May 29).
+- **`#nsvaltag` (keystone, done)** — configured the canonical Purchase conversion tag in GTM-MWKP3BR8 to send dynamic `value`/`currency`/`transaction_id` from the dataLayer.
+- **Google Ads API confirmed working** (`#gadsapiver`) against production customer `1189088403` on v21/v20 — Basic access effectively already granted.
+- **New MCC `900-767-5798`** created for the manager-level developer token.
+- **Shopping-waste RCA** — $284 (19%) of $1,481 wasted; 21 of 34 products had clicks + 0 sales. Paused an over-spending campaign, blocked zero-sale search terms.
+- **`scripts/google-ads-conversion-backfill.mjs`** — ConversionAdjustment uploader (v18→v21, dual-identifier, 55-day window).
+- **Budget guardrail** (`#adsbudget`) — hold $50–75/day until tracking is trustworthy.
+
+#### In review / open (tracked in `boost-client/tasks/monsterrodholders.md`)
+
+- `#gfwconnect` — finish GfW onboarding: select the **existing** MC `5768131521` (a new one orphans the feed), link Ads `1189088403`, enable conversion tracking. Blocked by `#gfwhandshake`.
+- `#gadsconsolidate` [in review] — keep one GfW dynamic-value purchase action as Primary, demote the rest; repoint the `passage` conversion-action so `#nsbfrun` restatements stop getting rejected (`CANNOT_RESTATE…DEFAULT_VALUE`).
+- `#nsvalfix` [in review] — set the canonical Purchase action to "use different values" with an AOV fallback.
+- `#nbsearch` / `#bidstrat` — rebuild non-brand search (phrase/exact) and move to Maximize Conversion Value → Target ROAS once tracking is clean.
+
+**Bottom line:** the foundation (attribution, real per-order value, GfW + Merchant Center, API access) is in place; what remains is operator-side Ads-UI consolidation and verifying a real (non-$1) conversion records end-to-end.
+
+---
+
+**Two process notes:**
+
+1. This is the **resume** session doc, but the work is in `boost-client`. Those Google Ads items already live in `boost-client/tasks/monsterrodholders.md` — that's where any continuation should be driven (`agent-doc boost-client/tasks/monsterrodholders.md`), so the backlog stays with the project.
+2. This exchange is now 257 lines / 9 cycles (accretion **block** level). Recommend `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/resume.md --commit` before the next resume topic.
+<!-- agent:boundary:ced8dade -->
 <!-- /agent:exchange -->
 ###
 <!--

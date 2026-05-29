@@ -372,7 +372,39 @@ One note on the new analytics/Ads skills (GTM, Google Ads, Merchant Center, Conv
 ---
 
 **Reminder:** this exchange is now 290 lines / 9 cycles (accretion **block**). Worth running `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/resume.md --commit` before the next topic.
-<!-- agent:boundary:5dc1784c -->
+❯ Show skills that I used for the Independent Consulting.
+
+### Re: Skills per Independent Consulting client — opus-4-8
+
+Here's the skill mapping for each engagement, drawn from the actual work:
+
+#### Equity Funding Source — *full-stack fintech, Cloudflare edge*
+- **Platform/edge:** Cloudflare Workers, D1, R2, Cloudflare Access (one-time PIN auth), Wrangler
+- **Backend:** Hono, TypeScript, REST
+- **Frontend:** React, TypeScript
+- **Email:** Resend
+- **Design work:** OCR / document-intelligence pipeline architecture
+- **Domain:** Fintech, Loan Origination, multi-role auth (admin/borrower/broker/investor)
+
+#### MonsterRodHolders.com — *e-commerce, WordPress, marketing analytics*
+- **CMS/commerce:** WordPress, WooCommerce, PHP (mu-plugin development)
+- **Infra/ops:** Docker Compose, Liquidweb VPS, Cloudflare CDN, Cloudflare WAF/security rules, Imunify firewall RCA
+- **Analytics/Ads:** Google Tag Manager, Google Analytics 4, Google Ads, Google Merchant Center, Google Ads API (Node.js), Conversion Tracking, GTM4WP
+- **SEO/perf:** Technical SEO, Schema.org / Structured Data, Web Performance Optimization, Lighthouse
+- **Integrations:** ShipStation; PayPal failure RCA
+- **Security:** account-compromise forensics, remediation
+
+#### Confidential AI Startup — *real-time AI systems*
+- **Core:** Rust, Python, TypeScript
+- **Realtime media:** LiveKit, WebRTC, real-time asset generation
+- **Tooling:** code / agent-harness analysis
+
+---
+
+**Resume placement note:** the Independent Consulting entry currently lists per-client skills inline in each bullet (EFS bullet ends with the Cloudflare stack, etc.). The breakdown above is the fuller inventory — let me know if you want me to expand the resume bullets to include more of these per client, or keep them concise as-is.
+
+**Reminder (now louder):** 315 lines / 10 cycles, **block** accretion. Strongly recommend `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/resume.md --commit` before continuing.
+<!-- agent:boundary:bce0e8fd -->
 <!-- /agent:exchange -->
 ###
 <!--

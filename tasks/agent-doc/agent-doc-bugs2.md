@@ -30,115 +30,15 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260529-071750.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260529-075713.md`*
 
 Compacted content:
-- Archived 3 response topic(s): do [#adoc-queue-ipc-drift]; do [#adoc-queue-ipc-buffer-divergence]; JB `Run Agent Doc` queued instead of dispatching (actor wasn't really busy)
+- Archived 3 response topic(s): order the queue and backlog by priority; Switch `claude_model: opus` to defer to Claude Code's opus (now Opus 4.8); do [#opus-alias-version-drift]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-order the queue and backlog by priority
-
-### Re: order the queue and backlog by priority — opus-4-7
-
-Reordered both lists by severity (data corruption → workflow correctness → polish/coverage).
-
-**Backlog top → bottom:**
-
-1. `#prompt-duplicated-while-typing` — live editor input is being corrupted/duplicated as the user types. Active data-loss class on the user-facing side of the IPC seam.
-2. `#duplicate-response-after-commit` — late IPC reposition re-inserts the already-committed response body in the working tree. Requires manual `Edit`-based dedup to recover. Data corruption on the agent side.
-3. `#adoc-queue-ipc-buffer-divergence` — live IDE buffer diverges from the committed inactive snapshot. Blocker identified (IPC carries content only, not tag attrs / frontmatter); needs plugin protocol extension.
-4. `#queue-strike-on-halt` — queue head wrongly struck on halt/refusal responses. Correctness bug that silently consumes scheduled work.
-5. `#pending-add-append-not-prepend` — `--pending-add` violates the SKILL.md "front of list" contract. Workflow contract violation, manually recoverable.
-6. `#next-steps-backlog-capture` — `#next-steps` recommendations don't auto-add to backlog. Automation enforcement gap (`session-check` doesn't enforce planning `expect_add`).
-7. `#run-agent-doc-stale-busy-replay` — follow-up test coverage for an already-shipped fix. Lowest urgency.
-
-**Queue top → bottom (active items, struck `#adoc-queue-ipc-drift` moved to bottom):**
-
-1. `do [#duplicate-response-after-commit]`
-2. `do [#adoc-queue-ipc-buffer-divergence]`
-3. `do [#queue-strike-on-halt]`
-4. `do [#pending-add-append-not-prepend]`
-5. `do [#next-steps-backlog-capture]`
-
-Note: `#prompt-duplicated-while-typing` and `#run-agent-doc-stale-busy-replay` are not in the queue — only in the backlog — so the queue's effective top is `#duplicate-response-after-commit` (the highest-priority item that is queued).
-
-Top of backlog: `#prompt-duplicated-while-typing`.
-Switch claude_model: opus to defer to Claude Code's definition of opus...which is currently Opus 4.8.
-#spec-test-build-install-commit-push
-
-### Re: Switch `claude_model: opus` to defer to Claude Code's opus (now Opus 4.8) — opus-4-8
-
-Fixed. `opus` now resolves to **`claude-opus-4-8`** everywhere it matters.
-
-**Root cause:** `CLAUDE_CODE_OPUS_MODEL` in `agent-doc-core/src/model_tier.rs` was pinned to `claude-opus-4-7`. That one constant is the single source of truth feeding three paths:
-
-- the Claude Code `opus` alias (`claude_code_model_alias`) → launch `--model` injection in `start.rs`
-- the built-in Claude Code **high** tier slot
-- `### Re:` attribution via `resolve_agent_model` → `short_model_name` (`claude-opus-4-8` → `opus-4-8`)
-
-So `claude_model: opus` was launching and attributing as 4-7 even though Claude Code's current opus is 4.8.
-
-**Change (submodule `a2aea7b5`, on branch `20260422/codex-agent-backend`):**
-- Bumped the constant `claude-opus-4-7` → `claude-opus-4-8` — propagates to alias, high tier, launch, and attribution from one line.
-- Updated the lockstep tests: `model_tier.rs` (`resolve_builtin_claude_code`, `tier_from_model_name_builtin`, `parse_model_arg_*`, `canonical_model_name_expands_*`, `scan_model_switch_*`), `start.rs` (`model_injected_from_claude_model_frontmatter`), `preflight.rs` (`resolve_agent_model_expands_claude_code_opus_alias`).
-- **Spec:** `SPEC.md` and `specs/02-document-format.md` "current Claude Code opus id" lines; added a `claude-opus-4-8` row to `runbooks/model-tier-gate.md`.
-
-**Verification:**
-- `make check` (clippy + full workspace tests) — green.
-- `cargo install --path .` + `cargo build --release` — both binaries rebuilt (`.bin/agent-doc` → release, `~/.cargo/bin/agent-doc` → install).
-- `agent-doc skill install --harness claude` — re-rendered installed skill/runbook surfaces.
-- **End-to-end:** `agent-doc preflight` on this doc now reports `agent_model = opus-4-8` (was `opus-4-7`) from the unchanged `claude_model: opus` frontmatter. This response is attributed `— opus-4-8` accordingly.
-
-**Committed + pushed:** submodule `a2aea7b5` (pushed to `origin/20260422/codex-agent-backend`); superproject `12fed421a` bumps the pointer + installed runbook (pushed to `origin/main`). Kept orthogonal install-regen churn (an unrelated `baseline-drift` catalog entry in the bundled SKILL.md, other regenerated runbooks) out of these commits.
-
-Also folded in the queue/backlog priority reorder from the prior cycle — it had been left uncommitted by an IPC-proof miss on that finalize, so it commits with this cycle.
-
-One follow-up filed to backlog (`#opus-alias-version-drift`, recommended): the constant still has to be hand-bumped per Claude Code opus release — worth deriving at runtime or gating in the release checklist.
-❯ do [#opus-alias-version-drift]. #spec-test-build-install-commit-push
-
-### Re: do [#opus-alias-version-drift] — defer `opus` to Claude Code (no pinned version) — opus-4-8
-
-Done. agent-doc no longer stores any concrete opus version — the staleness class is eliminated at the source rather than re-bumped.
-
-**Mechanism.** `claude --model` accepts `opus` as "an alias for the latest model" (confirmed from `claude --help`). So instead of expanding `opus` → `claude-opus-4-8` internally, agent-doc now defers to Claude Code at both seams:
-
-- **Launch** — `claude_model: opus` / `/model opus` / high-tier now emit `--model opus` verbatim. Claude Code resolves its own current latest opus. Can't lag a release.
-- **Attribution** — `resolve_agent_model` returns `None` for the bare `opus` alias, so the running skill self-stamps its real model identity (this response is `opus-4-8`, self-stamped — not from a constant). Pinned concrete ids (`claude_model: claude-opus-4-8`) still stamp their short name.
-- **Tier** — new `is_claude_code_opus()` classifies the `opus` alias *and* any concrete `claude-opus-*` id as High, so pinned versions still gate correctly.
-
-The `CLAUDE_CODE_OPUS_MODEL` constant is **removed entirely** — there is no longer a version to hand-bump.
-
-```mermaid
-flowchart LR
-  FM["claude_model: opus"] --> R{canonical_model_name}
-  R -->|bare alias| L["launch: --model opus"]
-  L --> CC["Claude Code resolves<br/>current latest opus"]
-  R -->|bare alias| A{resolve_agent_model}
-  A -->|None| SS["skill self-stamps<br/>real identity → opus-4-8"]
-  FM2["claude_model: claude-opus-4-8<br/>(pinned)"] -->|passes through| A
-  A -->|Some| ST["stamp opus-4-8"]
-```
-
-**Verification.**
-- `make check` (clippy + full workspace tests) — green. New tests: `canonical_model_name_defers_claude_code_opus_alias`, `tier_from_model_name_classifies_concrete_and_deferred_opus_as_high`, `resolve_agent_model_defers_claude_code_opus_alias`, `resolve_agent_model_stamps_pinned_concrete_opus`; updated `scan_model_switch_*`, `parse_model_arg_*`, `resolve_builtin_claude_code`, `model_injected_from_claude_model_frontmatter`.
-- `cargo install --path .` + `cargo build --release` — both binaries rebuilt.
-- **End-to-end:** `agent-doc preflight` on this doc (`claude_model: opus`) now reports `agent_model = None` (was `opus-4-8`), and the launch path emits `--model opus`. Tier gating still classifies opus as High.
-
-**Committed + pushed:** submodule `1c5a8bc3` → `origin/20260422/codex-agent-backend`; superproject `d8be0c1d1` (pointer + installed runbook) → `origin/main`. Backlog item `#opus-alias-version-drift` marked done. Orthogonal install-regen churn left out of the commits as before.
-<!-- agent:boundary:fdcab8c7 -->
+<!-- agent:boundary:e6c1353b -->
 <!-- /agent:exchange -->
 ###
 <!--
-```
-resync: stash pane %21 is registered in its own project root — skipping kill
-resync: stash pane %2 is registered in its own project root — skipping kill
-resync: stash pane %4 is registered in its own project root — skipping kill
-resync: stash pane %20 is registered in its own project root — skipping kill
-resync: stash pane %3 is registered in its own project root — skipping kill
-[route] debounce OK — file idle for 0.5s and typing indicator idle
-[route] target tmux session: 0
-[route] authoritative actor generation 233 for tasks/monsterrodholders.md is busy on pane %19; queued pending dispatch "complete [#nsbfrun]. #spec-test-commit-push" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
-```
----
 JB `Run Agent Doc` error
 ```
 resync: stash pane %19 is registered in its own project root — skipping kill

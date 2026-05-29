@@ -569,6 +569,88 @@ pub fn mark_discarded(file: &Path) -> Result<()> {
     update_active_state(file, CaptureState::Discarded)
 }
 
+/// `#stale-capture-after-compaction-blocks-route`: discard the capture sidecars
+/// whose response body was just archived out of the live document by `compact`.
+///
+/// Compaction is the authority that decided to archive those responses, so a
+/// capture whose `response_body` is contained in `archived_text` (intact or
+/// after prompt-prefix normalization) is provably terminal — the response was
+/// committed before and is now intentionally gone from the document. Discarding
+/// it prevents a later `route` drain / [`validate_replay`] from fail-closing
+/// with "captured response baseline no longer matches current document" (which
+/// otherwise forces a manual `reset --from-current --preserve-session`).
+///
+/// Containment against the *archived* text — not mere absence from the current
+/// document — is the safe discriminator: a never-applied / genuinely pending
+/// capture's response would not appear in the committed content being archived,
+/// so it is left untouched. Returns the number of captures discarded.
+pub fn discard_captures_for_archived_responses(file: &Path, archived_text: &str) -> Result<usize> {
+    if archived_text.trim().is_empty() {
+        return Ok(0);
+    }
+    let canonical = file.canonicalize()?;
+    let hash = crate::snapshot::doc_hash(&canonical)?;
+    let project_root = crate::snapshot::find_project_root(&canonical)
+        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+    let dir = project_root.join(".agent-doc/captures").join(hash);
+    if !dir.exists() {
+        return Ok(0);
+    }
+
+    let mut discarded = 0usize;
+    for entry in std::fs::read_dir(&dir)
+        .with_context(|| format!("failed to read capture directory {}", dir.display()))?
+    {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.ends_with(".partial.json") || !name.ends_with(".json") {
+            continue;
+        }
+        let content = std::fs::read_to_string(entry.path())
+            .with_context(|| format!("failed to read capture {}", entry.path().display()))?;
+        let mut record: CaptureRecord = serde_json::from_str(&content)
+            .with_context(|| format!("failed to parse capture {}", entry.path().display()))?;
+        if record.state == CaptureState::Discarded || record.response_body.trim().is_empty() {
+            continue;
+        }
+        let response_archived =
+            crate::repair::response_already_applied(archived_text, &record.response_body)
+                || crate::repair::response_already_applied_after_prefix_strip(
+                    archived_text,
+                    &record.response_body,
+                );
+        if !response_archived {
+            continue;
+        }
+        if record.discarded_at.is_none() {
+            record.discarded_at = Some(now_secs());
+        }
+        record.state = CaptureState::Discarded;
+        record.updated_at = now_secs();
+        write_record(file, &record)?;
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "capture_discarded_for_archived_response file={} capture_id={}",
+                file.display(),
+                record.capture_id
+            ),
+        );
+        discarded += 1;
+    }
+    if discarded > 0 {
+        eprintln!(
+            "[compact] discarded {} stale capture sidecar(s) for archived response(s) in {}",
+            discarded,
+            file.display()
+        );
+    }
+    Ok(discarded)
+}
+
 fn update_active_state(file: &Path, state: CaptureState) -> Result<()> {
     let Some(mut record) = load_active(file)? else {
         return Ok(());
@@ -855,6 +937,47 @@ mod tests {
         assert!(
             log.contains("reason=cycle_closed"),
             "same-cycle abandoned state should be reported as a closed cycle:\n{log}"
+        );
+    }
+
+    #[test]
+    fn discard_captures_for_archived_responses_discards_only_archived() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        std::fs::write(&doc, "body").unwrap();
+        crate::snapshot::save(&doc, "body").unwrap();
+        crate::cycle_state::start_preflight(&doc, Some("body"), Some("body")).unwrap();
+
+        // Capture A — a committed response that compaction is about to archive.
+        let archived = capture_response(&doc, "### Re: old — opus-4-8\n\nArchived answer A.\n")
+            .unwrap();
+        // Capture B — a distinct response NOT in the archive (e.g. still pending).
+        let mut live = archived.clone();
+        live.capture_id = "cycle-live-distinct".to_string();
+        live.cycle_id = "cycle-live-distinct".to_string();
+        live.response_body = "### Re: new — opus-4-8\n\nLive answer B.\n".to_string();
+        live.state = CaptureState::Captured;
+        live.discarded_at = None;
+        write_record(&doc, &live).unwrap();
+
+        let archived_text = "Preamble.\n### Re: old — opus-4-8\n\nArchived answer A.\nmore archive\n";
+        let discarded = discard_captures_for_archived_responses(&doc, archived_text).unwrap();
+        assert_eq!(discarded, 1, "only the archived capture should be discarded");
+
+        assert_eq!(
+            load_by_id(&doc, &archived.capture_id).unwrap().unwrap().state,
+            CaptureState::Discarded,
+        );
+        assert_eq!(
+            load_by_id(&doc, &live.capture_id).unwrap().unwrap().state,
+            CaptureState::Captured,
+            "a capture whose response was not archived must be left intact",
+        );
+
+        // Idempotent: a second pass discards nothing new.
+        assert_eq!(
+            discard_captures_for_archived_responses(&doc, archived_text).unwrap(),
+            0,
         );
     }
 

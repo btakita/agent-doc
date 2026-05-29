@@ -191,6 +191,7 @@ pub fn run(
         }
 
         apply_compacted_document(file, &compacted, &compacted, &content, false)?;
+        discard_archived_captures(file, &archive_content);
 
         eprintln!(
             "[compact] Archived {} exchange(s) to {}",
@@ -231,6 +232,19 @@ fn closeout_compact_with_commit(file: &Path) -> Result<()> {
         "[compact] note: --commit persists only the compacted document state now in HEAD; any later console explanation still needs its own `agent-doc finalize` or `agent-doc write --commit` cycle to land in `exchange`"
     );
     Ok(())
+}
+
+/// `#stale-capture-after-compaction-blocks-route`: best-effort discard of the
+/// capture sidecars whose response body was just archived. Never fails the
+/// compaction — a discard error is logged and ignored.
+fn discard_archived_captures(file: &Path, archived_text: &str) {
+    if let Err(e) = crate::capture::discard_captures_for_archived_responses(file, archived_text) {
+        eprintln!(
+            "[compact] warning: failed to discard captures for archived responses in {}: {}",
+            file.display(),
+            e
+        );
+    }
 }
 
 fn apply_compacted_document(
@@ -335,6 +349,7 @@ fn run_component_compact(
         snapshot_compacted = reconciled;
     }
     apply_compacted_document(file, &compacted, &snapshot_compacted, content, is_crdt)?;
+    discard_archived_captures(file, &archive_content);
 
     let line_count = archive_content.lines().count();
     eprintln!(
@@ -460,6 +475,7 @@ fn run_component_compact_partial(
         snapshot_compacted = reconciled;
     }
     apply_compacted_document(file, &compacted, &snapshot_compacted, content, is_crdt)?;
+    discard_archived_captures(file, &archive_body);
 
     eprintln!(
         "[compact] Archived {} topic(s) from component '{}' to {}",

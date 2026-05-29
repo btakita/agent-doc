@@ -619,14 +619,40 @@ Per the settlement:
 - It doesn't name the product, the technology behind the demos, or any business plan. "I delivered investor-facing demos under tight timelines" is a statement about how you worked, not about Dreamable's trade secrets.
 
 **The one caveat:** keep it generic. Safe: *"delivered investor-facing demos under tight timelines."* Riskier: pairing it back with *what* the demos showed (e.g., "demos of real-time avatar generation") — that recombines into product disclosure. As long as "investor demos" stands alone without describing the demo content, it's fine.
-
+4
 **Resulting bullet:**
 ```
 • Confidential AI Startup — Real-time AI systems engineering: built agent-harness analysis tooling and delivered investor-facing demos under tight timelines. Rust, Python, TypeScript, LiveKit, WebRTC.
 ```
 
 That keeps the "ships fast for a startup, trusted with investor-facing work" signal — which is good resume signal — while dropping the asset-generation phrase that pointed at their product. The backlog item still stands if you want counsel to bless the final wording.
-<!-- agent:boundary:9da6fe02 -->
+Can I make the asset generation description more generic? Can I add Copilotkit?
+
+### Re: Genericize asset-generation + add CopilotKit — opus-4-8
+
+*(Treating the stray "4" edit as incidental — flag me if it meant something.)*
+
+#### Making asset-generation more generic
+
+Yes. The fix is to describe the *engineering* (inference + streaming) rather than the *product* (asset generation). More generic = safer, because it no longer points at what Dreamable's product does. Options, least → most distanced from their product:
+
+- `real-time generative-AI pipelines` — still says "generative," mild risk
+- `real-time AI inference + streaming pipelines` — **recommended**; describes the systems work, not the output
+- `low-latency model inference and media streaming` — most generic, pure infrastructure framing
+
+Any of these is safer than "asset-generation." I'd use the middle one — it's accurate, recognizable to engineers, and product-neutral.
+
+#### Adding CopilotKit
+
+Yes — CopilotKit is a public open-source framework (React/TypeScript for building in-app AI copilots), so it's a generic skill claim like LiveKit, with no confidentiality issue. Only add it if you actually used it; if so, it slots into the stack.
+
+#### Updated bullet
+```
+• Confidential AI Startup — Real-time AI systems engineering: built real-time AI inference + streaming pipelines and agent-harness analysis tooling, and delivered investor-facing demos under tight timelines. Stack: Rust, Python, TypeScript, LiveKit, WebRTC, CopilotKit.
+```
+
+And add **CopilotKit** to your resume `## Skills` list and the LinkedIn skill set when you do the next resume edit. Same counsel-review backlog item covers final wording sign-off.
+<!-- agent:boundary:c4056d83 -->
 <!-- /agent:exchange -->
 ###
 <!--

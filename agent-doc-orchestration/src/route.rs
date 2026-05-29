@@ -2056,6 +2056,26 @@ fn dispatch_only_starting_pane_recovery_timeout(harness: Option<&HarnessConfig>)
     .timeout
 }
 
+/// #route-busy-vs-starting-wording: word the authoritative-actor `FailClosed`
+/// wait context. When the live pane shows a harness busy cue the actor is busy
+/// on an active turn, not cold-starting, so the "(waited Ns for X startup)"
+/// phrasing is misleading. `busy_cue` is the harness-specific reason from
+/// [`HarnessConfig::dispatch_blocker_reason`] (e.g. `active claude turn`); `None`
+/// keeps the cold-startup timeout wording.
+fn failclosed_wait_context(
+    harness: &HarnessConfig,
+    busy_cue: Option<&str>,
+    startup_secs: u64,
+) -> String {
+    match busy_cue {
+        Some(cue) => format!(
+            "the pane is busy on an active {} turn ({}), not cold-starting",
+            harness.binary, cue
+        ),
+        None => format!("waited {}s for {} startup", startup_secs, harness.binary),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum StartingPaneRecoveryTarget {
     SamePane,
@@ -3954,14 +3974,28 @@ fn route_via_authoritative_actor(
             } else {
                 ""
             };
+            // #route-busy-vs-starting-wording: the default "(waited Ns for X
+            // startup)" wording mis-reads a pane that is busy on an active harness
+            // turn (e.g. a live Claude turn showing the working spinner / interrupt
+            // hint) as a stuck cold start. Probe the live pane for a harness busy
+            // cue and word the wait context as a busy active turn when present.
+            // Best-effort: a capture failure falls back to the cold-start wording.
+            let busy_cue = tmux
+                .capture_pane(&dispatch_pane, Some(80))
+                .ok()
+                .and_then(|content| harness.dispatch_blocker_reason(&content));
+            let wait_context = failclosed_wait_context(
+                harness,
+                busy_cue.as_deref(),
+                dispatch_only_starting_pane_recovery_timeout(Some(harness)).as_secs(),
+            );
             anyhow::bail!(
-                "authoritative actor generation {} for {} owns pane {} but route will not inject a new trigger because {} (waited {}s for {} startup){}. {}",
+                "authoritative actor generation {} for {} owns pane {} but route will not inject a new trigger because {} ({}){}. {}",
                 actor.record.generation,
                 file.display(),
                 dispatch_pane,
                 reason,
-                dispatch_only_starting_pane_recovery_timeout(Some(harness)).as_secs(),
-                harness.binary,
+                wait_context,
                 rescue_context,
                 authoritative_actor_dispatch_recovery_hint(actor_state, file)
             );

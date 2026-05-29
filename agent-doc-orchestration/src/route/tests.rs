@@ -10417,3 +10417,20 @@ fn wait_for_ready_override_guard_sets_and_restores_thread_local() {
     // Outer dropped — back to unset baseline.
     assert_eq!(wait_for_ready_override(), None);
 }
+
+// #route-busy-vs-starting-wording: the FailClosed wait context distinguishes a
+// pane busy on an active harness turn from a genuine cold startup timeout.
+#[test]
+fn failclosed_wait_context_distinguishes_busy_turn_from_cold_startup() {
+    let claude = crate::harness::HarnessConfig::claude();
+    // No busy cue → cold-startup timeout wording (unchanged behavior).
+    assert_eq!(
+        failclosed_wait_context(&claude, None, 12),
+        "waited 12s for claude startup"
+    );
+    // A live busy cue → the pane is busy on an active turn, not cold-starting.
+    assert_eq!(
+        failclosed_wait_context(&claude, Some("active claude turn"), 12),
+        "the pane is busy on an active claude turn (active claude turn), not cold-starting"
+    );
+}

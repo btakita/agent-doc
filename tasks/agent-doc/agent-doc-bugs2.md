@@ -76,7 +76,29 @@ This converges the **queue tag + frontmatter** class deterministically: once the
 #### Gated on live verification
 
 Marked `[/]` (review-gated), not done. The deterministic seam is proven, but the **live** cross-language proof needs: (1) install the signed `agent-doc-jetbrains-0.2.137-signed.zip`, (2) restart the route-owned `agent-doc` process so it loads the new binary (the old PID keeps the pre-fix binary), then (3) confirm a real IDE-owned session no longer re-diverges after a consume→halt cycle without a raw `git checkout`.
-<!-- agent:boundary:8e99cd40 -->
+
+### Re: do [#queue-strike-on-halt] — require explicit completion signal — opus-4-8
+
+Fixed: the queue head is no longer struck on a halt/refusal response. Committed to the submodule (`baa44a37`), pointer bumped (`3620741b5`), pushed. Marked `--done`.
+
+#### The bug
+
+`agent-doc finalize` consumed the queue head whenever any `### Re:` heading in the response named the head id — even a halt response that explicitly said "backlog left intact" and passed no `--done`/`--pending-gate`. The heading-match heuristic could not tell "I completed #id" from "I'm refusing #id and explaining why." Repro: `open-code.md` cycle `619af4d0b` struck `[#d97v]` after a halt.
+
+#### Fix (Option A for the CLI path, Option D for the Codex path)
+
+- **CLI `finalize` / `write --commit`:** removed the heading-match consumption fallback. Consuming the active queue head now requires an **explicit completion signal** — a closeout flag naming the head id (`--done`, `--pending-gate`, or `--pending-edit "<id>=…"`) — or a genuine fresh operator prompt-target / `do queue` trigger in the cycle diff. New `queue_head_has_explicit_completion_signal` drives this. A halt with no flag now leaves the head queued.
+  - Note: this is exactly why the auto-queue still advances correctly — completing work with `--done` (or gating with `--pending-gate`, as the previous item did) is the signal. Forgetting the flag now leaves the head in place (visible via preflight) instead of silently striking it.
+- **Codex Stop-hook path** (no closeout CLI flags, so it must read the response): narrowed `response_topic_matches_queue_head` to an **exact** topic match. `### Re: do [#id]` still consumes a clean completion; `### Re: #id halt` / `### Re: #id deferred` no longer do.
+
+#### Verification
+
+- `make check` green. New coverage: `explicit_signal_*` (halt-no-flag → no consume; `--done`/`--pending-gate`/`--pending-edit` → consume; wrong-id → no consume; inactive-queue → no consume) and `heading_topic_matches_head_exactly_only` in `write.rs`; SimWorld `halt_response_does_not_strike_queue_head_but_done_flag_does` exercises the multi-item interaction end-to-end (halt heading doesn't target the head; `--done` strikes `#alpha`, leaving `#beta`). Both binaries rebuilt + installed. Spec: `specs/07-orchestration-commands.md` + `SPEC.md`; `VERSIONS.md` updated.
+
+#### Follow-up
+
+The Codex exact-heading narrowing is conservative (it errs toward *not* consuming, which is the safe direction), but it means a Codex auto-loop completion with a descriptive heading won't auto-advance. Queued a `[recommended]` backlog item to add SKILL guidance for Codex auto-loop heading titling and live-verify Codex queue advancement — that behavioral path can't be proven from this Claude Code session.
+<!-- agent:boundary:18887731 -->
 <!-- /agent:exchange --> 
 ###
 <!--
@@ -104,7 +126,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#exchange-prompt-dropped-on-merge]~
 - ~do [#cancel-orphans-preflight-cycle]~
 - ~do [#adoc-queue-ipc-buffer-divergence]~
-- do [#queue-strike-on-halt]
+- ~do [#queue-strike-on-halt]~
 - do [#jb-stale-busy-idle-footer]
 - do [#pending-add-append-not-prepend]
 - do [#next-steps-backlog-capture]
@@ -115,9 +137,9 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#codex-queue-head-exact-heading-guidance] [recommended] After #queue-strike-on-halt narrowed the Codex Stop-hook heading-match to exact-topic only, a Codex auto-loop completion with a descriptive heading (### Re: <descriptive topic>) no longer auto-consumes the queue head — only an exact ### Re: do [#id] heading does. Add SKILL.md / harness-invocation guidance telling Codex auto-loop completions to title the response heading exactly with the queue head prompt (or emit an explicit done signal), and live-verify a Codex auto-queue still advances across items. Plan: tasks/agent-doc/plan-queue-strike-on-halt-response.md.
 - [ ] [#backlog-auto-marker-misfire] The 'auto' attribute on the agent:backlog marker (queue-only attribute) misfired an auto-run that destructively rewrote the backlog — minted new IDs wrapping 'do [#...]' stubs of already-done items; user reported original task text lost and recovery needed git/sidecar archaeology. Fix: reject 'auto'/unknown attrs on agent:backlog (warn, no mutation); auto-loop must trigger only from the queue 'auto' attribute; never rewrite committed backlog item text in an auto-run. Plan: tasks/agent-doc/plan-backlog-auto-marker-misfire.md. DO NOT IMPLEMENT.
 - [ ] [#jb-load-tmux-window-verify] [recommended] Live-verify the new JB Load Tmux Window action (plugin 0.2.136): install the signed zip, confirm it autostarts/loads the tmux pane for a focused doc whose pane is not up (e.g. corky.md). If the autostart sync genuinely fails to spawn the pane in that case (vs. by-design passive open), capture the route/sync logs as a separate autostart bug.
-- [ ] [#queue-strike-on-halt] Queue head consumed on halt/refusal response. write.rs:1233-1242 + response_explicitly_targets_queue_head (write.rs:2481) treat any `### Re: <head-id> <suffix>` heading as completion signal even when body explicitly says "backlog left intact" + passes no --done/--pending-gate. Repro: tasks/agent-doc/open-code.md cycle 619af4d0b struck [#d97v] after halt response. Plan: tasks/agent-doc/plan-queue-strike-on-halt-response.md (recommend Option A — require explicit completion signal).
 - [ ] [#jb-stale-busy-idle-footer] Three JB Run Agent Doc / Clear Session Context reports queue-instead-of-dispatch or block Clear while the live pane footer shows a Claude Code idle composer: monsterrodholders.md (actor gen 233, pane %19), equityfundingsource.md (gen 35, pane %3), tsift.md (pane %21, footer 22.4K (11%) ctrl+p commands). The tsift.md case is the strongest stale-busy candidate — Clear was blocked though the footer indicates idle. Fix: route.rs / session_actor_cmd.rs busy projection should treat the Claude Code idle-composer footer (ctrl+p commands / context % used) as idle direct evidence to repair a stale busy actor/lease projection before queuing or blocking, mirroring the existing OpenCode context % used idle-composer rule. Relates to #run-agent-doc-stale-busy-replay and #snrun (plan tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md).
 - [ ] [#pending-add-append-not-prepend] `--pending-add` appends new items below the previous CLI arg within the same finalize cycle, contradicting SKILL.md "Pending capture rule" ("Put new items at the beginning of agent:backlog"). Repro: tasks/agent-doc/open-code.md commit f94e7851c — agent added wave-4, wave-3, wave-2, wave-1 expecting wave-1 on top per SKILL.md; actual backlog was wave-4 on top (pure CLI-arg order). User flagged it as bug; agent had to issue --pending-reorder. Plan: tasks/agent-doc/plan-pending-add-prepend-semantics.md (recommend Option A — strict prepend, drop the implicit adjacency heuristic).
 - [ ] [#next-steps-backlog-capture] Agent responses containing #next-steps recommendations do not auto-add items to backlog when prompt preset is present. Agent must manually call `--pending-add` but the planning output `pending_mutations: expect_add` is not enforced by session-check `pending_done_guard`.

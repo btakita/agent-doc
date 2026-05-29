@@ -95,7 +95,7 @@ Phase C done — the seam is complete and the build-isolation goal is met. `#ado
 - `cargo build --release` + `cargo install --path .` succeeded; both binaries current.
 
 Follow-up: `make check` does not run orchestration's isolated suite (separate pre-existing gap) — captured in backlog.
-<!-- agent:boundary:e0d90e72 -->
+<!-- agent:boundary:3482e3ed -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -104,7 +104,6 @@ Follow-up: `make check` does not run orchestration's isolated suite (separate pr
 preset #spec-test-build-install-commit-push
 - ~do [#adoc-sqlite-isolation]~
 - ~do [#adoc-sqlite-seam]~
-- do [#adoc-make-check-orch-tests]
 - do [#adoc-orch-shim-cleanup]
 <!-- /agent:queue -->
 

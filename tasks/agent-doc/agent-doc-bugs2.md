@@ -35,23 +35,72 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 3 response topic(s): order the queue and backlog by priority; Switch `claude_model: opus` to defer to Claude Code's opus (now Opus 4.8); do [#opus-alias-version-drift]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:e6c1353b -->
-<!-- /agent:exchange -->
-###
-<!--
-JB `Run Agent Doc` error
+❯ JB Plugin error
+```
+resync: stash pane %21 is registered in its own project root — skipping kill
+resync: stash pane %2 is registered in its own project root — skipping kill
+resync: stash pane %4 is registered in its own project root — skipping kill
+resync: stash pane %20 is registered in its own project root — skipping kill
+resync: stash pane %3 is registered in its own project root — skipping kill
+[route] debounce OK — file idle for 0.5s and typing indicator idle
+[route] target tmux session: 0
+[route] authoritative actor generation 233 for tasks/monsterrodholders.md is busy on pane %19; queued pending dispatch "complete [#nsbfrun]. #spec-test-commit-push" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
+```
+❯ #next-steps
+❯ ---
+❯ JB `Run Agent Doc` error
 ```
 resync: stash pane %19 is registered in its own project root — skipping kill
 [route] debounce OK — file idle for 13.7s and typing indicator idle
 [route] target tmux session: 0
 [route] authoritative actor generation 35 for tasks/professional/equityfundingsource.md is busy on pane %3; queued pending dispatch "re [#2z8r]: How can we allow custom addresses?" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
 ```
----
-JB `Run Agent Doc` on tsift.md error:
+❯ #next-steps
+❯ ---
+❯ JB `Run Agent Doc` on tsift.md error:
 ```
 Session is still running for tasks/software/tsift.md. Pane %21 is busy (agent-doc). Wait for the turn to finish, then retry Clear Session Context. Use Refresh and retry if the pane has returned to an idle prompt, or Interrupt and clear to discard the running turn. Latest pane output: 22.4K (11%) ctrl+p commands
 ```
----
+❯ #next-steps
+
+### Re: #next-steps for the three JB Run Agent Doc / Clear errors — opus-4-8
+
+Triaged the three reports — they are **not** all the same severity, and two of them are arguably correct behavior surfaced badly.
+
+| Report | Doc / pane | What happened | Verdict |
+|--------|-----------|---------------|---------|
+| 1 | monsterrodholders.md, gen 233, %19 | actor busy → queued dispatch instead of duplicate trigger | **correct** busy-queuing; only the "error" framing is wrong |
+| 2 | equityfundingsource.md, gen 35, %3 | same — busy → queued | **correct** busy-queuing |
+| 3 | tsift.md, %21, footer `22.4K (11%) ctrl+p commands` | Clear Session Context blocked as "busy" while footer shows an **idle composer** | **likely bug** — stale busy projection |
+
+The signal that ties them together: the live pane footer. `ctrl+p commands` / `context … % used` is the Claude Code **idle composer** chrome — the same shape that, for OpenCode, the spec already treats as an idle composer ("an otherwise chrome-only `context … % used` status footer counts as an idle composer"). Claude Code has no equivalent rule yet, so a pane sitting at an idle prompt can still be projected busy.
+
+**Two follow-ups filed (priority-ordered):**
+
+1. `#jb-stale-busy-idle-footer` — the real bug. `route.rs` / `session_actor_cmd.rs` busy projection should treat the Claude Code idle-composer footer as idle direct evidence to repair a stale busy actor/lease projection before queuing or blocking Clear. Mirrors the existing OpenCode footer rule and the existing invariant "idle direct evidence can repair stale busy actor/lease projection." Placed in the routing cluster, above the test-coverage item.
+2. `#jb-busy-queue-ux-feedback` `[recommended]` — reports 1 & 2 are correct queuing; the plugin should present "queued behind a busy turn" as informational, not dump a route/resync log as an "error." Lowest priority (UX polish).
+
+Both relate to the existing `#run-agent-doc-stale-busy-replay` (backlog) and `#snrun` (review) — the stale-busy-projection work whose plan is `tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md`. The idle-footer detection is a concrete root-cause angle to fold into that plan.
+
+Note: the `#spec-test-commit-push` token in the first report is inside the quoted route log (`"complete [#nsbfrun]. #spec-test-commit-push"`), not a directive — not executed this turn.
+
+**Backlog is now in priority order** (data-loss → corruption → silent-work-loss → routing correctness → contract → automation/test → UX):
+
+1. **`#prompt-duplicated-while-typing`** ← top
+2. `#duplicate-response-after-commit`
+3. `#adoc-queue-ipc-buffer-divergence`
+4. `#queue-strike-on-halt`
+5. `#jb-stale-busy-idle-footer`
+6. `#pending-add-append-not-prepend`
+7. `#next-steps-backlog-capture`
+8. `#run-agent-doc-stale-busy-replay`
+9. `#jb-busy-queue-ux-feedback` `[recommended]`
+
+**Top of backlog: `#prompt-duplicated-while-typing`** (live-editor data duplication — highest severity).
+<!-- agent:boundary:5299522d -->
+<!-- /agent:exchange -->
+###
+<!--
 The completed queue item was not removed from the queue. #mermaid
 #spec-test-build-install-commit-push
 ---
@@ -87,9 +136,11 @@ preset #spec-test-build-install-commit-push
 - [ ] [#duplicate-response-after-commit] Late-IPC reposition signal re-inserts already-committed response body into working tree, wrapped in duplicate boundary markers. Symptom: next preflight interrupts with "direct response patchback without agent-doc cycle"; agent-doc write --commit returns "empty response — nothing to write"; only manual Edit-based dedup recovers. Repro: tasks/dreamable/separation.md cycle after commit 231eafc83 on 2026-05-28. Plan: tasks/agent-doc/plan-duplicate-response-after-commit.md (recommend Option A — both detect over-application in session-check and make IPC reposition idempotent).
 - [ ] [#adoc-queue-ipc-buffer-divergence] Root cause #4 FIXED (submodule 729f7bc2): response-replay / stale-cycle hash matching now neutralizes the agent:queue component (tag + body) and the queue_active frontmatter, so queue-maintenance churn no longer wedges a committed cycle as stuck_captured_cycle. REMAINING #2 (live IDE buffer re-adds auto / diverges from committed inactive snapshot): blocker found — ipc_socket::send_patch carries component CONTENT only and cannot converge a queue opening-tag attribute (auto) or the queue_active frontmatter; try_ipc_full_content is disabled and rejects template docs, so no IPC seam exists yet. Needs a plugin protocol extension (PatchWatcher.kt + FFI) to converge queue tag + frontmatter to the editor buffer, plus a deterministic live-IPC-listener repro harness (SimWorld). Plan: tasks/agent-doc/plan-queue-ipc-drift.md.
 - [ ] [#queue-strike-on-halt] Queue head consumed on halt/refusal response. write.rs:1233-1242 + response_explicitly_targets_queue_head (write.rs:2481) treat any `### Re: <head-id> <suffix>` heading as completion signal even when body explicitly says "backlog left intact" + passes no --done/--pending-gate. Repro: tasks/agent-doc/open-code.md cycle 619af4d0b struck [#d97v] after halt response. Plan: tasks/agent-doc/plan-queue-strike-on-halt-response.md (recommend Option A — require explicit completion signal).
+- [ ] [#jb-stale-busy-idle-footer] Three JB Run Agent Doc / Clear Session Context reports queue-instead-of-dispatch or block Clear while the live pane footer shows a Claude Code idle composer: monsterrodholders.md (actor gen 233, pane %19), equityfundingsource.md (gen 35, pane %3), tsift.md (pane %21, footer 22.4K (11%) ctrl+p commands). The tsift.md case is the strongest stale-busy candidate — Clear was blocked though the footer indicates idle. Fix: route.rs / session_actor_cmd.rs busy projection should treat the Claude Code idle-composer footer (ctrl+p commands / context % used) as idle direct evidence to repair a stale busy actor/lease projection before queuing or blocking, mirroring the existing OpenCode context % used idle-composer rule. Relates to #run-agent-doc-stale-busy-replay and #snrun (plan tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md).
 - [ ] [#pending-add-append-not-prepend] `--pending-add` appends new items below the previous CLI arg within the same finalize cycle, contradicting SKILL.md "Pending capture rule" ("Put new items at the beginning of agent:backlog"). Repro: tasks/agent-doc/open-code.md commit f94e7851c — agent added wave-4, wave-3, wave-2, wave-1 expecting wave-1 on top per SKILL.md; actual backlog was wave-4 on top (pure CLI-arg order). User flagged it as bug; agent had to issue --pending-reorder. Plan: tasks/agent-doc/plan-pending-add-prepend-semantics.md (recommend Option A — strict prepend, drop the implicit adjacency heuristic).
 - [ ] [#next-steps-backlog-capture] Agent responses containing #next-steps recommendations do not auto-add items to backlog when prompt preset is present. Agent must manually call `--pending-add` but the planning output `pending_mutations: expect_add` is not enforced by session-check `pending_done_guard`.
 - [ ] [#run-agent-doc-stale-busy-replay] Follow-up to the #snrun stale-busy-projection fix (submodule 89c99c79): the dispatch-only busy-vs-stale repair is covered by unit tests on the pure decision functions; add a live JB Run Agent Doc replay regression (SimWorld or tmux-ci) exercising a stale busy actor projection + proven ready prompt and asserting dispatch instead of agent:queue auto enqueue. Also still open in #snrun: distinguishing rescued-stash accepted-only proof misses. Plan: tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md.
+- [ ] [#jb-busy-queue-ux-feedback] [recommended] When the authoritative actor is genuinely busy, JB Run Agent Doc correctly queues the dispatch in agent:queue auto instead of injecting a duplicate trigger (monsterrodholders.md, equityfundingsource.md reports), but the plugin surfaces the route/resync log dump as an error. Present queued-behind-a-busy-turn as an informational notification distinct from real failures so expected busy-queuing does not read as a plugin error.
 <!-- /agent:backlog -->
 
 ## Review

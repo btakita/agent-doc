@@ -463,6 +463,13 @@ enum Commands {
         /// Path to the session document
         file: PathBuf,
     },
+    /// Reclaim an orphaned cycle after an explicit run cancel: abandon an empty
+    /// `preflight_started` cycle (no response capture) so the next dispatch can
+    /// start fresh immediately instead of waiting for the staleness window.
+    Cancel {
+        /// Path to the session document
+        file: PathBuf,
+    },
     /// Claim a document for the current tmux pane
     Claim {
         /// Path to the session document
@@ -1669,6 +1676,20 @@ fn main() -> anyhow::Result<()> {
         }
         Commands::Commit { file } => agent_doc_orchestration::git::commit(&file).map(|_| ()),
         Commands::Dedupe { file } => agent_doc_orchestration::dedupe::run(&file),
+        Commands::Cancel { file } => {
+            match agent_doc_orchestration::repair::cancel_preflight_cycle(&file)? {
+                agent_doc_orchestration::repair::CancelOutcome::Abandoned => {
+                    println!("[cancel] abandoned orphaned preflight_started cycle; next dispatch starts fresh");
+                }
+                agent_doc_orchestration::repair::CancelOutcome::NoOpenCycle => {
+                    println!("[cancel] no open cycle to reclaim");
+                }
+                agent_doc_orchestration::repair::CancelOutcome::Protected => {
+                    println!("[cancel] open cycle owns real work (advanced past preflight or has a response capture); left intact");
+                }
+            }
+            Ok(())
+        }
         Commands::Claim {
             file,
             position,

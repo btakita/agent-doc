@@ -242,3 +242,11 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
 - Also deletes the stale queued patch file so a plugin restart cannot replay the removed duplicate.
 - The normal template write/finalize path runs the same consecutive-response dedupe before saving snapshots, CRDT state, disk content, or sidecar-normalization guarded disk repair. `session-check` fails closed if a duplicate survives closeout instead of reporting success.
 - Stream IPC timeout closeout also removes the queued fallback patch after its local write and commit succeed, so `dedupe` is not required as a second cleanup commit for that timeout shape.
+
+## cancel
+
+`agent-doc cancel <FILE>`
+
+- `#cancel-orphans-preflight-cycle`: explicit run-cancel reclaim. When the user cancels an in-progress run, the orphaned cycle otherwise blocks the next `Run Agent Doc` until the `STALE_EMPTY_PREFLIGHT_TTL_SECS` (60s) staleness window elapses. `cancel` abandons that cycle immediately so the next dispatch starts fresh.
+- Fail-safe: it abandons the open cycle **only** when it is still `preflight_started` **and** owns no response capture. A cycle that advanced past preflight (`response_captured` / `write_applied` / `committed`) or already captured a response is left intact, so a cancel can never discard real in-flight work. Logs `cancel_preflight_cycle_abandoned` on abandon.
+- Exposed to editor plugins via the `agent_doc_cancel_preflight_cycle(file_path) -> i32` FFI export (1 = abandoned, 0 = nothing reclaimed / protected, -1 = error). The JB "cancel run" action is the thin reporter that calls it; the abandon decision is the pure binary `repair::cancel_preflight_cycle` function. Plan: `tasks/agent-doc/plan-cancel-orphans-preflight-cycle.md`.

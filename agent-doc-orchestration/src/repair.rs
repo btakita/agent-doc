@@ -320,6 +320,68 @@ pub const EMPTY_PREFLIGHT_STARTED_NO_CAPTURE_ERROR: &str =
     "empty preflight_started cycle has no response capture";
 pub const STALE_EMPTY_PREFLIGHT_TTL_SECS: u64 = 60;
 
+/// Outcome of an explicit run-cancel reclaim ([`cancel_preflight_cycle`]).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CancelOutcome {
+    /// An empty `preflight_started` cycle with no response capture was
+    /// abandoned so the next dispatch can start a fresh cycle immediately.
+    Abandoned,
+    /// Nothing to reclaim — no open cycle for this document.
+    NoOpenCycle,
+    /// The open cycle is protected: it advanced past `preflight_started` or it
+    /// already owns a response capture, so an explicit cancel must NOT discard
+    /// it (that would risk dropping real work). Reclaim waits for the normal
+    /// closeout / staleness path instead.
+    Protected,
+}
+
+/// `#cancel-orphans-preflight-cycle`: explicit run-cancel reclaim.
+///
+/// When the user cancels an in-progress run, the JB plugin (thin reporter)
+/// calls this so the orphaned `preflight_started` cycle is abandoned *now*
+/// instead of blocking the next `Run Agent Doc` until the
+/// [`STALE_EMPTY_PREFLIGHT_TTL_SECS`] window elapses. The abandon decision is a
+/// pure, fail-safe `cycle_state` operation: it only abandons an open cycle that
+/// is still `preflight_started` **and** owns no response capture. Any cycle
+/// that advanced past preflight or already captured a response is left intact
+/// (`Protected`) so a cancel can never discard real in-flight work.
+pub fn cancel_preflight_cycle(file: &Path) -> Result<CancelOutcome> {
+    let Some(state) = crate::cycle_state::load(file)? else {
+        return Ok(CancelOutcome::NoOpenCycle);
+    };
+    if !state.is_open() {
+        return Ok(CancelOutcome::NoOpenCycle);
+    }
+    if !matches!(state.phase, crate::cycle_state::CyclePhase::PreflightStarted) {
+        return Ok(CancelOutcome::Protected);
+    }
+    if crate::capture::load_by_id(file, &state.cycle_id)?.is_some() {
+        return Ok(CancelOutcome::Protected);
+    }
+    let snapshot_content = crate::snapshot::load(file)?;
+    let file_content = std::fs::read_to_string(file).ok();
+    crate::cycle_state::mark_abandoned(
+        file,
+        "cancel_preflight_cycle_abandoned",
+        snapshot_content.as_deref(),
+        file_content.as_deref(),
+    )?;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "cancel_preflight_cycle_abandoned file={} cycle_id={}",
+            file.display(),
+            state.cycle_id
+        ),
+    );
+    eprintln!(
+        "[cancel] abandoned empty preflight_started cycle {} for {} on explicit run cancel; next dispatch starts fresh",
+        state.cycle_id,
+        file.display()
+    );
+    Ok(CancelOutcome::Abandoned)
+}
+
 fn agent_owned_visible_response_is_adoptable(
     file: &Path,
     state: Option<&crate::cycle_state::CycleState>,
@@ -1678,6 +1740,70 @@ mod tests {
         let doc = dir.path().join("test.md");
         std::fs::write(&doc, "# Doc\n\n## User\n\nHello\n").unwrap();
         assert_eq!(run(&doc).unwrap(), RepairOutcome::Noop);
+    }
+
+    #[test]
+    fn cancel_preflight_cycle_abandons_empty_preflight_immediately() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let content = "# Doc\n\n## User\n\nDo the thing\n";
+        std::fs::write(&doc, content).unwrap();
+        // Fresh empty preflight_started cycle (no capture), age irrelevant.
+        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+
+        assert_eq!(
+            cancel_preflight_cycle(&doc).unwrap(),
+            CancelOutcome::Abandoned
+        );
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Abandoned);
+    }
+
+    #[test]
+    fn cancel_preflight_cycle_protects_cycle_with_capture() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let content = "# Doc\n\n## User\n\nDo the thing\n";
+        std::fs::write(&doc, content).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        // A response capture exists for this cycle → cancel must not discard it.
+        crate::capture::capture_response(&doc, "### Re: do — opus-4-8\n\nDone.\n").unwrap();
+
+        assert_eq!(
+            cancel_preflight_cycle(&doc).unwrap(),
+            CancelOutcome::Protected
+        );
+        assert!(
+            crate::cycle_state::load(&doc).unwrap().unwrap().is_open(),
+            "a cycle that owns a capture must stay open after cancel"
+        );
+    }
+
+    #[test]
+    fn cancel_preflight_cycle_protects_advanced_cycle() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let content = "# Doc\n\n## User\n\nDo the thing\n";
+        std::fs::write(&doc, content).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        crate::cycle_state::mark_write_applied(&doc, "write_applied", Some(content), Some(content))
+            .unwrap();
+
+        assert_eq!(
+            cancel_preflight_cycle(&doc).unwrap(),
+            CancelOutcome::Protected
+        );
+    }
+
+    #[test]
+    fn cancel_preflight_cycle_noop_without_open_cycle() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        std::fs::write(&doc, "# Doc\n\nNothing\n").unwrap();
+        assert_eq!(
+            cancel_preflight_cycle(&doc).unwrap(),
+            CancelOutcome::NoOpenCycle
+        );
     }
 
     #[test]

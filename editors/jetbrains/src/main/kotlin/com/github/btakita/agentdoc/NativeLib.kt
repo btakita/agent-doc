@@ -158,6 +158,15 @@ interface AgentDocLib : Library {
     /** Return the number of files tracked in the debounce state. */
     fun agent_doc_tracked_count(): Int
 
+    /**
+     * Explicit run-cancel reclaim (#cancel-orphans-preflight-cycle): abandon an
+     * orphaned empty `preflight_started` cycle (no response capture) so the next
+     * Run Agent Doc starts fresh immediately. Returns 1 if abandoned, 0 if
+     * nothing reclaimed (no open cycle / protected), -1 on error. Fail-safe in
+     * the binary: a cycle with real work is left intact.
+     */
+    fun agent_doc_cancel_preflight_cycle(file_path: String): Int
+
     /** Try to acquire the sync lock. Returns true if acquired. */
     fun agent_doc_sync_try_lock(): Boolean
 

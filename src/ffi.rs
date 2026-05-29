@@ -150,6 +150,36 @@ pub extern "C" fn agent_doc_tracked_count() -> u32 {
     agent_doc_orchestration::debounce::tracked_count() as u32
 }
 
+/// `#cancel-orphans-preflight-cycle`: explicit run-cancel reclaim seam.
+///
+/// The JB plugin's "cancel run" action calls this so an orphaned, empty
+/// `preflight_started` cycle (no response capture) is abandoned immediately and
+/// the next `Run Agent Doc` starts fresh instead of waiting for the staleness
+/// window. The abandon decision is fail-safe in the binary: a cycle that
+/// advanced past preflight or already owns a response capture is left intact.
+///
+/// Returns `1` if a cycle was abandoned, `0` if nothing was reclaimed
+/// (no open cycle, or the cycle is protected), and `-1` on error.
+///
+/// # Safety
+///
+/// `file_path` must be a valid, NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_cancel_preflight_cycle(file_path: *const c_char) -> i32 {
+    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+    match agent_doc_orchestration::repair::cancel_preflight_cycle(std::path::Path::new(path)) {
+        Ok(agent_doc_orchestration::repair::CancelOutcome::Abandoned) => 1,
+        Ok(_) => 0,
+        Err(e) => {
+            eprintln!("[ffi] agent_doc_cancel_preflight_cycle failed for {path}: {e}");
+            -1
+        }
+    }
+}
+
 /// Non-blocking idle check — returns `true` if no `document_changed` event
 /// within `debounce_ms`.
 ///

@@ -76,7 +76,9 @@ pub mod git;
 pub mod git_sibling;
 pub mod harness;
 pub mod harness_prompt;
-pub mod heuristics;
+// Relocated to `agent-doc-core` (#bz6s follow-up #adoc-pure-to-core — pure,
+// zero-dep). Re-exported so `crate::heuristics::*` call sites resolve unchanged.
+pub use agent_doc_core::heuristics;
 pub mod hooks;
 pub mod lint_gate;
 pub mod pending;
@@ -88,7 +90,8 @@ pub mod prompt_context;
 pub mod prompt_contract;
 pub mod queue;
 pub mod repair;
-pub mod replay_guard;
+// Relocated to `agent-doc-core` (#adoc-pure-to-core — only uses core::template).
+pub use agent_doc_core::replay_guard;
 pub mod response_toc;
 pub mod resync;
 pub mod route;

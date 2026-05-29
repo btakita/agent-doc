@@ -16,10 +16,12 @@ pub mod crdt;
 pub mod diff;
 pub mod ffi;
 pub mod frontmatter;
+pub mod heuristics;
 pub mod id;
 pub mod model_tier;
 pub mod pending;
 pub mod project_config;
+pub mod replay_guard;
 pub mod syntax;
 pub mod template;
 

@@ -441,7 +441,59 @@ The mitigations to make it safe:
 You're not stuck silent. The OSS portfolio is the strongest move and is risk-free. Generic skill claims about realtime voice-agent interfaces are also fine. The specific phrasing you asked about — "dynamic displays for realtime voice agents" — is on the safe-ish side as a skill claim but borderline if it functions as a fingerprint for Dreamable in your industry. Broaden the framing slightly and you're clearly in the safe zone.
 
 **Not legal advice.** §5 confidentiality scope and what counts as "indirect identification" are jurisdiction- and clause-specific. Worth confirming the exact phrasing with a CA-licensed attorney before posting publicly — same 30-minute referral consult.
-<!-- agent:boundary:24500ee9 -->
+❯ Re the agreement, is there any default of when the $5k must be paid?
+
+### Re: Default payment date for the $5k — opus-4-7
+
+**Short answer.** The agreement's §2 summary in my earlier read didn't note a specific payment date. If §2 truly has no date (re-check the actual text), California contract law fills the gap with a *"reasonable time"* default — generally interpreted as 30 days from the Effective Date for settlement payments. You can also fix a specific due date *now* by sending a written demand, which under CA law shortens the implicit window to whatever cure period you specify.
+
+**Step one: re-read §2 carefully**
+
+Before relying on the default rule, look at §2 word-for-word. Payment timing in settlement agreements often hides in one of these phrases:
+
+- *"within ten (10) business days of the Effective Date"* — explicit, common.
+- *"promptly upon execution"* — ambiguous but typically interpreted as 10–30 days.
+- *"upon execution"* — strict; payment is due simultaneously with signing.
+- *"within thirty (30) days of full execution by both parties"* — common, easy to enforce.
+- *"as set forth in Exhibit [X]"* — check any payment-instructions exhibit at the back.
+
+Also check the **Recitals** and any **Definitions** section for "Effective Date" — that's the date the clock starts. It's usually the latest signature date, but some agreements define it as a specific calendar date or "the date this Agreement is fully executed by all parties."
+
+If you can paste §2's literal text into the next prompt, I can give you a definitive read. Don't rely on my earlier summary — it captured the substance ("$5,000 as full and final settlement") but I didn't flag whether timing language was present or absent.
+
+**If §2 truly has no payment date — the CA default**
+
+**California Civil Code §1657**: *"If no time is specified for the performance of an act required to be performed, a reasonable time is allowed."*
+
+What's "reasonable time" for a $5k settlement payment in California?
+
+- **No bright-line rule.** Courts decide based on context: nature of obligation, customary practice, parties' relationship, and any communications setting expectations.
+- **Industry custom: ~30 days from Effective Date.** Settlement payments in California consulting/employment contexts are typically expected within 30 days of execution — matches normal AP/wire cycles. Some authorities (and many practicing attorneys) treat 30 days as the presumptive reasonable-time benchmark.
+- **Outer bound: ~60 days.** Beyond 60 days without payment, a CA court would almost certainly find Rob in breach unless he can point to a specific reason for the delay agreed to in advance.
+- **Inner bound: ~10 days.** Hard to argue payment was due faster than this without explicit language, given wire processing times.
+
+**The "on demand" alternative**
+
+If §2 is silent on timing, you also have the option to treat the obligation as **due on demand** under CA Civ. Code §1657 read together with §1488 (delivery of money obligations). Sending a formal written demand that specifies a payment date converts the open-ended "reasonable time" into a fixed deadline. If Rob doesn't pay by the date in your demand, he's in clear breach as of that date.
+
+**Best move right now**
+
+Three steps, in order:
+
+1. **Re-read §2 and the Effective Date definition.** Confirm whether timing is specified. If yes, use that date. If no, proceed to step 2.
+2. **Identify the Effective Date.** Usually the last signature date — yours, if Rob counter-signed before you. Pull the signed PDF metadata or SignRequest confirmation to confirm.
+3. **Send the friendly status check (step 1 from the earlier ladder) referencing the Effective Date.** Something like: *"Hi Rob — confirming the Settlement Payment timing under §2. The Effective Date was [date]. Please let me know when you expect the $5k wire to land. Thanks."* This either gets you a date or starts the clock for the formal demand letter.
+
+If §2 is genuinely silent and you want to lock in a hard deadline now, the demand letter (step 3 from earlier) can specify a date: *"Pursuant to §2 and California Civil Code §1657, Consultant demands payment of the $5,000 Settlement Payment within ten (10) business days of receipt of this letter. Failure to pay by [date] will constitute a material breach of the Agreement."*
+
+**Practical recommendation**
+
+- If §2 specifies a date and it has passed: you're already in breach territory — move to step 3 (your demand letter) or step 4 (lawyer demand letter) from earlier.
+- If §2 specifies a date in the future: wait until it passes, then escalate.
+- If §2 is silent: the Effective Date + 30 days is the safest assumed deadline. Send the friendly check before that date; if no movement by Effective Date + 30, send the demand letter specifying a 10-business-day cure window.
+
+**Not legal advice.** "Reasonable time" under §1657 is a fact-specific judicial determination, not a fixed number. The Effective Date interpretation and the on-demand framing are settled CA law but the specific application to your facts deserves the same 30-minute referral consult before you send anything in writing. Paste §2 verbatim in your next prompt if you'd like a definitive read.
+<!-- agent:boundary:15b7dd74 -->
 <!-- /agent:exchange -->
 
 ## Queue

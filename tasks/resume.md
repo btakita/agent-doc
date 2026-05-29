@@ -90,6 +90,8 @@ Better angle: your **Prior Inventions from the same period are yours**. Per the 
 
 Recommendation: if the Dreamable entry adds little signal (7 weeks, settled, can't describe the work), omit it from the resume and LinkedIn Experience, and let tsift + homebrew-tap appear under Open Source / Tools.
 
+Can I leave the company blank and give a general description of what I did?
+
 ---
 
 #### Monsterrodholders — What to Show
@@ -162,7 +164,7 @@ Appears under your own name as a contractor period; no company entry needed.
 **Practical note on LinkedIn:** LinkedIn expects a company name for each experience entry. "Confidential" or "Private Company" in the company field works fine — recruiters see it routinely for NDA engagements. If you add a public description, keep it to skill/tech-category level (e.g., "AI infrastructure development in Rust") without business-domain specifics.
 
 **Recommended:** Given it was only 7 weeks and the work can't be shown, Option A with minimal description is cleaner than a gap. Or skip it entirely and let tsift (your own IP, same period) carry the narrative for that time.
-<!-- agent:boundary:6e9e331e -->
+<!-- agent:boundary:2bd79937 -->
 <!-- /agent:exchange -->
 ###
 <!--

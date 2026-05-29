@@ -1075,7 +1075,88 @@ Your leverage in this dispute comes from the **public-record cost to Dreamable**
 - Your best strategic position is to *file in court* (not JAMS) and use the public-record threat to motivate Rob to settle before any arbitration question gets adjudicated.
 
 **Not legal advice.** Arbitration-clause enforcement vs small-claims jurisdiction is genuinely contested in CA case law and shifts often. Confirm current rules with a CA-licensed attorney in the same 30-minute referral consult.
-<!-- agent:boundary:40256d95 -->
+❯ Would JAMS-fees-exceed-claim apply if JAMS is $1750 to file and the damages are $5000?
+
+### Re: Unconscionability when JAMS fees don't strictly exceed the claim — opus-4-7
+
+**Good catch — I was sloppy with that framing.** $1,750 filing fee on a $5k claim is 35% of recovery, which is brutal but doesn't strictly *exceed* the claim. The accurate unconscionability argument is that **total JAMS costs** (filing + arbitrator hourly + administrative fees + your own attorneys' fees, all non-recoverable under §10's each-side-pays-own structure) are *prohibitively expensive relative to the claim*. Filing fee alone isn't the whole story.
+
+**Actual JAMS cost structure for a $5k claim**
+
+JAMS publishes its fee schedule at jamsadr.com. As of 2025/2026, for non-consumer arbitrations:
+
+| Cost component | Approx. amount |
+|---|---|
+| Initial filing fee (parties combined) | $1,750 |
+| Case management fee | $400–$1,750 |
+| Arbitrator hourly rate | $500–$1,200/hour |
+| Typical hearing length (motion + 1-day hearing) | 4–12 arbitrator hours |
+| Half of arbitrator costs (each side) | $1,000–$7,200 |
+| Your own attorney (if you hire one) | $2,000–$10,000 |
+| **Your all-in cost estimate** | **$5,000–$15,000+** |
+
+So your $5k recovery costs you somewhere between $5,000 and $15,000 to obtain through JAMS, depending on arbitrator choice, case length, and whether you hire counsel. Net: **you lose money even if you win.** That's the actual unconscionability point.
+
+**The legal test (Armendariz line)**
+
+California courts evaluating unconscionability of arbitration clauses look at total costs, not just filing fees:
+
+- **Armendariz v. Foundation Health Psychcare Services, 24 Cal. 4th 83 (2000)** — established that arbitration clauses are unconscionable if they impose *forum fees* on the employee/consumer that they wouldn't bear in court.
+- **Gentry v. Superior Court** (later partially overturned by Iskanian but still relevant for the cost analysis) — courts examine "prohibitive cost" relative to the disputed amount.
+- **Sanchez v. Valencia Holding Co., 61 Cal. 4th 899 (2015)** — confirmed cost-based unconscionability remains viable post-Armendariz.
+
+The standard isn't "fees exceed claim." It's whether the cost structure makes the forum **functionally unavailable** for a claim of this size. A 35% filing fee + 100%+ all-in cost satisfies this in many cases — but it's a judicial discretion call, not a bright-line rule.
+
+**JAMS's own minimum-standards safety net (may apply)**
+
+JAMS publishes **Consumer Arbitration Minimum Standards** (and analogous **Employment Arbitration Minimum Standards**) that cap the *consumer/employee's* fee at $250 in qualifying cases. If JAMS classifies your dispute as a consumer or employment arbitration:
+
+- Your filing fee drops to $250.
+- Dreamable bears the remaining fees.
+- This eliminates much of the unconscionability concern.
+
+Whether your dispute qualifies depends on classification:
+
+- **Consumer Standards**: apply when the contract is a consumer agreement (defined fairly broadly). A consultant-services arrangement with Dreamable as the buyer probably doesn't qualify as consumer because *you* are the seller of services.
+- **Employment Standards**: apply when the arbitration arises from an employment relationship. Your engagement was nominally consulting/contractor, but if Dreamable misclassified you as a contractor when you should have been an employee, the Employment Standards might apply on the underlying-relationship theory. The Settlement framing treats this as a consulting engagement, though.
+
+The most likely classification is **non-consumer commercial arbitration**, which means **JAMS's normal fee schedule applies** (the $1,750 you cited). The minimum-standards safety net probably doesn't help you.
+
+But: when you file the JAMS demand, **JAMS itself decides the initial classification**. Frame the dispute as arising from a misclassified employment relationship (with the Settlement preserving the underlying Consulting Agreement as the operative agreement) and JAMS may apply the Employment Standards on its own, dropping your filing fee to $250 and shifting the rest to Dreamable. This is a real lever worth trying.
+
+**Refined unconscionability argument**
+
+Even if JAMS doesn't apply Employment Standards, the unconscionability argument in court is:
+
+1. **Forum fees alone** ($1,750 filing + at least $1,000 arbitrator share) represent ~55% of the claim. Filing fees of this magnitude have been held unconscionable in *Patterson v. ITT Consumer Financial Corp.* and similar cases for small-dollar claims.
+2. **Each-side-pays-own-fees** structure (§10 of the Settlement) means you cannot recover your attorneys' fees even if you prevail — converting a $5k claim into a net-negative pursuit.
+3. **JAMS in SF County for a CT-based plaintiff** adds travel and venue costs that wouldn't apply in your home forum.
+4. **No clear consumer/employment safety net** because the engagement was framed as consulting.
+5. **Cumulative effect**: forum is functionally unavailable to pursue the claim. This is the Armendariz "prohibitive cost" standard.
+
+This argument might survive judicial scrutiny. It's not slam-dunk — courts give arbitration clauses substantial deference under the Federal Arbitration Act — but it's a viable argument.
+
+**Revised strategic recommendation**
+
+I overstated "JAMS fees exceed the claim" earlier. More accurate framing:
+
+- **JAMS economics are bad for you but not legally impossible.** Going through JAMS to recover $5k is plausibly net-negative but not strictly prohibitive.
+- **The unconscionability argument is viable but requires litigation effort** to establish. Whether it succeeds depends on the specific judge and the cost showing you make.
+- **JAMS Employment Minimum Standards are a real lever** if you can frame the underlying relationship as employment-like. Worth trying when you file.
+- **The CCP §1281.97 fee-default route remains the cleanest path.** Force Dreamable to advance fees, default if they don't, switch to court with fee-shifting.
+
+**Realistic best move**
+
+Don't lead with unconscionability. Lead with:
+
+1. **§1281.97 fee-default**: file JAMS, force Dreamable to pay its share, capitalize on its default to elect court.
+2. **JAMS Employment Standards request**: in your initial filing, characterize the dispute as arising from a misclassified employment relationship and request the Employment Standards apply ($250 cap on your fee).
+3. **Settle before any of this**: the threat of JAMS (which costs Dreamable $5k–$10k to defend even if it wins) combined with the threat of public-record court filing if §1281.97 triggers is the real leverage. Most settlements happen here, before fees are paid.
+
+**Apology for the imprecise framing earlier.** The unconscionability point is real but more nuanced than "fees exceed claim." Total economics make the forum functionally unavailable for a $5k claim, but courts don't always agree, and a clean cost showing requires effort.
+
+**Not legal advice.** JAMS classification decisions and Armendariz cost-unconscionability standards are fact-specific and change with case law. The 30-minute CA attorney consult should cover both the §1281.97 mechanic and whether your dispute plausibly qualifies for JAMS Employment Minimum Standards.
+<!-- agent:boundary:99010aca -->
 <!-- /agent:exchange -->
 
 ## Queue

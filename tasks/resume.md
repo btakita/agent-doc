@@ -404,7 +404,51 @@ Here's the skill mapping for each engagement, drawn from the actual work:
 **Resume placement note:** the Independent Consulting entry currently lists per-client skills inline in each bullet (EFS bullet ends with the Cloudflare stack, etc.). The breakdown above is the fuller inventory — let me know if you want me to expand the resume bullets to include more of these per client, or keep them concise as-is.
 
 **Reminder (now louder):** 315 lines / 10 cycles, **block** accretion. Strongly recommend `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/resume.md --commit` before continuing.
-<!-- agent:boundary:bce0e8fd -->
+❯ Give me the skill list that I can put into the LinkedIn job.
+
+### Re: LinkedIn skill list for the Independent Consulting role — opus-4-8
+
+Paste-ready, combined across all three clients and deduplicated. I used LinkedIn's canonical skill names so they map to recognized/endorsable tags:
+
+```
+Cloudflare Workers
+Cloudflare
+Serverless Architecture
+Full-Stack Development
+TypeScript
+Rust (Programming Language)
+Python (Programming Language)
+React.js
+Hono
+Node.js
+REST APIs
+WebRTC
+Real-Time Communication
+WordPress
+WooCommerce
+PHP
+Docker
+Content Delivery Network (CDN)
+Web Performance Optimization
+Search Engine Optimization (SEO)
+Google Tag Manager
+Google Analytics
+Google Ads
+Google Merchant Center
+Conversion Rate Optimization
+E-Commerce
+Fintech
+Cloud Computing
+```
+
+**LinkedIn mechanics:** a position can have many associated skills, but it only *displays* up to 5 pinned ones. Pin the 5 that best match your target roles — for AI/edge-engineering roles I'd pin: **Cloudflare Workers, Full-Stack Development, TypeScript, Rust (Programming Language), Serverless Architecture**. The rest still count toward endorsements and search.
+
+If you're targeting more marketing/e-commerce roles instead, pin: **WooCommerce, Google Ads, Conversion Rate Optimization, Search Engine Optimization (SEO), WordPress**.
+
+---
+
+**Compaction:** still at **block** (347 lines / 11 cycles). When you're done pasting, `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/resume.md --commit` will reset the exchange.
+<!-- agent:boundary:2a331d3d -->
 <!-- /agent:exchange -->
 ###
 <!--

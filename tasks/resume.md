@@ -509,7 +509,29 @@ Building production systems across fintech, e-commerce, and real-time AI.
 ```
 
 Same MonsterRodHolders attribution caveat applies before publishing (already on the backlog).
-<!-- agent:boundary:4a9667fb -->
+❯ Please expand on the Confidential AI Startup. Include Realtime asset generation and investor demos.
+
+### Re: Expand the Confidential AI Startup bullet — opus-4-8
+
+Expanded, kept at the capability level (what *you* did) so it stays clear of the confidentiality clause — no product name, customer, or architecture specifics:
+
+```
+• Confidential AI Startup — Real-time AI systems engineering. Built real-time asset-generation pipelines (audio/visual content generated and streamed live) and delivered investor-facing demos under tight timelines, turning prototype capabilities into reliable live demonstrations. Stack: Rust, Python, TypeScript, LiveKit, WebRTC.
+```
+
+If you want it a touch shorter for the position description:
+
+```
+• Confidential AI Startup — Real-time AI systems engineering: built real-time asset-generation pipelines and delivered live investor demos under tight timelines. Rust, Python, TypeScript, LiveKit, WebRTC.
+```
+
+#### Why this stays safe
+
+- **"real-time asset-generation pipelines"** — a capability/skill, not their product.
+- **"investor-facing demos under tight timelines"** — describes *your* delivery work and the working conditions; it doesn't disclose what the product does, who the investors are, or any business plan.
+
+What I deliberately left out (would cross into §5 business info): the specific product, the use case, named investors, funding details, or the system architecture. If you want any of those in, that's your call as the party to the agreement — but I'd keep them out of a public profile.
+<!-- agent:boundary:7862854e -->
 <!-- /agent:exchange -->
 ###
 <!--

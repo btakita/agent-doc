@@ -1296,6 +1296,24 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         )?;
     }
 
+    // #queue-head-consume-on-topic-id-regression: a *synthetic/preset* queue head
+    // (a preset expansion or a natural-language prompt carrying a trailing
+    // `#preset` id, not a bare `do [#id]` directive) is completed by the response
+    // itself, so a finalize response heading that resolves to EXACTLY the head id
+    // — for example `### Re: #spec-test-build-install-commit-push` — is a genuine
+    // completion signal and advances the auto-queue. Bare `do [#id]` directives
+    // still require an explicit closeout flag (handled above) so halt/refusal
+    // responses cannot silently strike them (#queue-strike-on-halt), and a heading
+    // topic carrying trailing modifiers (`#id halt`, `#id deferred`) never counts
+    // for either head shape.
+    if write_result.is_ok()
+        && !queue_consumption_allowed
+        && let Some(capture) = crate::capture::load_active(file)?
+    {
+        queue_consumption_allowed =
+            response_targets_synthetic_queue_head_id(file, &capture.response_body)?;
+    }
+
     // Phase 3c: consume queue prompt after all other strict closeout gates
     // have passed so a rejected closeout cannot advance the queue early.
     if write_result.is_ok() {
@@ -2587,13 +2605,81 @@ fn response_heading_topic(line: &str) -> Option<&str> {
 }
 
 fn response_topic_matches_queue_head(topic: &str, queue_head: &str) -> bool {
-    // Exact topic match only (#queue-strike-on-halt). A heading topic that merely
-    // contains the head id with trailing modifiers — `### Re: #id halt`,
-    // `### Re: #id deferred` — must NOT count as completion; only a topic that
-    // resolves to exactly the queue head prompt does. This is the sole remaining
-    // heading-based consumption signal, used by the Codex Stop-hook auto-close
-    // path, which has no closeout CLI flags to express completion explicitly.
-    queue_prompt_text_matches(topic, queue_head)
+    // Used by the Codex Stop-hook auto-close path, which has no closeout CLI flags
+    // to express completion explicitly. Two completion shapes count:
+    //  1. An exact topic match (`### Re: do [#foo]` vs head `do [#foo]`).
+    //  2. A topic that resolves to EXACTLY the head id (`### Re: #fix1` vs head
+    //     `do #fix1`) — the Codex auto-loop titles a clean completion with the
+    //     head's `#id` (#queue-head-consume-on-topic-id-regression).
+    // A heading topic that merely contains the head id with trailing modifiers —
+    // `### Re: #id halt`, `### Re: #id deferred` — must NOT count as completion
+    // (#queue-strike-on-halt); `topic_resolves_to_exact_id` rejects those.
+    if queue_prompt_text_matches(topic, queue_head) {
+        return true;
+    }
+    queue_prompt_done_id(queue_head)
+        .is_some_and(|head_id| topic_resolves_to_exact_id(topic, &head_id))
+}
+
+/// True when this cycle's captured response heading targets EXACTLY the active
+/// queue head's id and that head is a *synthetic/preset* prompt rather than a
+/// bare `do [#id]` directive (#queue-head-consume-on-topic-id-regression).
+///
+/// Synthetic queue prompts — a preset expansion or a natural-language prompt
+/// carrying a trailing `#preset` id — are completed by the response itself, so a
+/// `### Re: #<id>` heading that resolves to exactly that id is a genuine
+/// completion signal. Bare `do [#id]` directives still require an explicit
+/// closeout flag (#queue-strike-on-halt) because a halt/refusal response names
+/// the head to explain why it is *not* being done. A heading topic that merely
+/// contains the id with trailing modifiers — `#id halt`, `#id deferred` — never
+/// counts, for either head shape.
+fn response_targets_synthetic_queue_head_id(file: &Path, response: &str) -> Result<bool> {
+    let content =
+        std::fs::read_to_string(file).context("queue consume guard: failed to read document")?;
+    let Some(queue_head) = active_queue_head_text(&content)? else {
+        return Ok(false);
+    };
+    if queue_head_is_bare_do_directive(&queue_head) {
+        return Ok(false);
+    }
+    let Some(head_id) = queue_prompt_done_id(&queue_head) else {
+        return Ok(false);
+    };
+    Ok(response
+        .lines()
+        .filter_map(response_heading_topic)
+        .any(|topic| topic_resolves_to_exact_id(topic, &head_id)))
+}
+
+/// A queue head that is just a `do [#id]` / `do #id` directive — the `do` verb
+/// plus the id (with optional bracket sugar) and nothing else. These follow the
+/// strike-on-halt explicit-flag rule rather than heading-based consumption.
+fn queue_head_is_bare_do_directive(queue_head: &str) -> bool {
+    let norm = normalize_queue_prompt_text(queue_head);
+    let Some(rest) = norm.strip_prefix("do ") else {
+        return false;
+    };
+    matches!(
+        rest.strip_prefix('#'),
+        Some(id)
+            if !id.is_empty()
+                && id
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+    )
+}
+
+/// True when `topic` resolves to exactly `#<head_id>` (optionally `do `-prefixed
+/// or `[#id]` bracketed) with no trailing modifiers. Case-insensitive; `head_id`
+/// is already normalized lowercase by [`queue_prompt_done_id`].
+fn topic_resolves_to_exact_id(topic: &str, head_id: &str) -> bool {
+    let norm = topic.trim().trim_start_matches('❯').trim();
+    let norm = norm.strip_prefix("do ").unwrap_or(norm).trim();
+    let inner = norm
+        .strip_prefix("[#")
+        .and_then(|rest| rest.strip_suffix(']'))
+        .or_else(|| norm.strip_prefix('#'));
+    matches!(inner, Some(id) if id.eq_ignore_ascii_case(head_id))
 }
 
 fn queue_prompt_done_id(text: &str) -> Option<String> {
@@ -11849,12 +11935,45 @@ mod tests {
     }
 
     #[test]
-    fn heading_topic_matches_head_exactly_only() {
-        // Codex Stop-hook path: exact-topic match only — halt/modifier headings
-        // must not count as completion (#queue-strike-on-halt).
+    fn heading_topic_matches_head_exactly_or_by_exact_id() {
+        // Codex Stop-hook path: exact-topic match, or a topic that resolves to
+        // EXACTLY the head id (#queue-head-consume-on-topic-id-regression).
         assert!(response_topic_matches_queue_head("do [#foo]", "do [#foo]"));
+        assert!(response_topic_matches_queue_head("#fix1", "do #fix1"));
+        assert!(response_topic_matches_queue_head("#foo", "do [#foo]"));
+        // Halt/modifier headings must NOT count as completion (#queue-strike-on-halt).
         assert!(!response_topic_matches_queue_head("#foo halt", "do [#foo]"));
         assert!(!response_topic_matches_queue_head("#foo deferred", "do [#foo]"));
+    }
+
+    #[test]
+    fn bare_do_directive_detection() {
+        // Queue parser strips the `- ` bullet, so heads arrive as `do [#id]`.
+        assert!(queue_head_is_bare_do_directive("do [#foo]"));
+        assert!(queue_head_is_bare_do_directive("do #foo"));
+        // A synthetic/preset prompt carrying a trailing `#preset` id is NOT a
+        // bare directive.
+        assert!(!queue_head_is_bare_do_directive(
+            "JB Run Agent Doc on tsift.md add the prompt into agent:queue.\n#spec-test-build-install-commit-push"
+        ));
+        // A bare preset id on its own line is also not a `do` directive.
+        assert!(!queue_head_is_bare_do_directive(
+            "#spec-test-build-install-commit-push"
+        ));
+    }
+
+    #[test]
+    fn topic_resolves_to_exact_id_rejects_modifiers() {
+        assert!(topic_resolves_to_exact_id(
+            "#spec-test-build-install-commit-push",
+            "spec-test-build-install-commit-push"
+        ));
+        assert!(topic_resolves_to_exact_id("do [#foo]", "foo"));
+        assert!(topic_resolves_to_exact_id("#Foo", "foo")); // case-insensitive
+        // Trailing modifiers (#queue-strike-on-halt) must never resolve to the id.
+        assert!(!topic_resolves_to_exact_id("#foo halt", "foo"));
+        assert!(!topic_resolves_to_exact_id("#foo deferred", "foo"));
+        assert!(!topic_resolves_to_exact_id("#other", "foo"));
     }
 
     fn patch_with_heading(heading: &str) -> crate::template::PatchBlock {

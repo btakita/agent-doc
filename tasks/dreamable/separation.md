@@ -989,7 +989,93 @@ No, every call doesn't need *new express* consent if you can establish implied c
 3. **Proceed with the $5k collection using only the Settlement document and written communications.** The recording is not necessary for collection, and using it adds risk worth more than the $5k.
 
 **Not legal advice — and the same urgency from the prior turn applies.** §632 implied-consent law is genuinely fact-intensive, and the $5k statutory-damages exposure under §637.2 makes the 30-minute CA attorney consult ($35) the highest-ROI legal spend available to you. Bring the specific facts (call medium, prior consent context, platform used, what was said when) to that consult.
-<!-- agent:boundary:d606db29 -->
+❯ If a sf small claims court sees the agreement is under JAMS, will it likely dismiss the case? Can I contest the dismissal?
+❯ Will the JAMS case be public record?
+
+### Re: Small claims + JAMS dismissal risk + JAMS public record — opus-4-7
+
+Three sub-questions. The third one is the most strategically important.
+
+#### 1. Will SF small claims dismiss for the JAMS clause?
+
+**Probably not sua sponte (on its own).** Small-claims courts in California are deliberately structured as accessible forums, and the court generally won't dismiss a case for an arbitration clause unless the *defendant* affirmatively raises it via motion to compel.
+
+What actually happens in practice:
+
+- **You file.** Court accepts the filing, schedules a hearing.
+- **Court serves Rob.** Service via certified mail or personal service.
+- **Rob's options:**
+  - (a) **Pay** — most likely outcome at this point, given the asymmetric reputational cost.
+  - (b) **Ignore** — you get default judgment for $5k + costs.
+  - (c) **File a motion to compel arbitration** — possible but expensive. Filing a motion to compel in CA small claims requires legal work; Rob would need to hire counsel (small-claims parties cannot be represented by counsel *at the hearing*, but motions filed before the hearing can be attorney-drafted). The legal cost typically exceeds $5k.
+  - (d) **Appear and contest on the merits** — accepts small-claims jurisdiction, waives any arbitration argument.
+
+Even if Rob files a motion to compel, California courts have several reasons to deny it in small claims:
+
+- **CCP §1281.95** preserves small-claims jurisdiction in many consumer/employment contexts.
+- **Unconscionability under Armendariz** — JAMS-fees-exceed-claim-amount is a classic substantive-unconscionability fact pattern. The court can decline to enforce.
+- **Waiver by delay** — if Rob doesn't move to compel promptly, he waives the arbitration defense.
+- **Public policy of accessible small-claims forum** (CCP §116.220) — CA courts have repeatedly held that arbitration clauses cannot eliminate small-claims jurisdiction for amounts within the statutory cap.
+
+**Realistic odds**: ~70–80% the small-claims case proceeds without arbitration challenge. ~15–20% Rob files a motion to compel and the court grants it (you'd then refile in JAMS). ~5–10% court dismisses sua sponte.
+
+#### 2. Can you contest a dismissal?
+
+**Yes — multiple paths.**
+
+- **Motion for reconsideration in small claims.** Available within a short window (typically 10 days) after dismissal. Brief, no-cost filing. Argue the court misapplied §116.220 or that JAMS-fees-exceed-claim renders the arbitration clause unconscionable.
+- **Appeal.** Small-claims plaintiffs in CA have *no* right of appeal from an adverse ruling — only defendants do. So if you lose at small claims, you can't appeal. This is the main risk of starting in small claims.
+- **Refile in CA Superior Court limited civil** ($25k jurisdiction). Pay the higher filing fee (~$370), get full procedural rights including attorney representation, and if you lose to a motion to compel, you can appeal that ruling. This is the cleaner path if you actually want to litigate the arbitration question.
+- **Initiate JAMS and use §1281.97 fee-default mechanism.** If small claims is dismissed in favor of JAMS, file JAMS, force Rob to pay his share of fees, and if he defaults within 30 days, elect to withdraw from arbitration and proceed in court under §1281.97 with fee-shifting against Rob.
+
+**Practical:** if small claims dismisses, the easiest contest is refile in CA Superior Court limited civil with a written opposition to any motion to compel — better procedural protections, right of appeal, and fee-shifting available if you win.
+
+#### 3. Will the JAMS case be public record?
+
+**No — JAMS arbitrations are private. This is strategically significant.**
+
+- **JAMS itself is a private dispute resolution organization.** Filings, hearings, and awards are NOT public records and do not appear on any court docket.
+- **The arbitration award is private by default.** JAMS rules treat the proceedings as confidential between the parties.
+- **Hearings are not open to the public.** Held in JAMS offices or via Zoom, not in a courthouse.
+- **No searchable docket entry.** Nothing for due-diligence searches to find.
+
+**The exception: enforcement requires court confirmation**
+
+If you win at JAMS and Rob refuses to pay the award, you'd have to file a **petition to confirm the arbitration award** in CA Superior Court (CCP §1285 et seq.). At that point:
+
+- The petition becomes part of the court's public record.
+- The arbitration award attaches as an exhibit.
+- The court docket entry — "Brian Takita v. Dreamable, Inc. — Petition to Confirm Arbitration Award" — is searchable.
+
+So the *win* eventually becomes public if Rob refuses to pay it. But the *filing* and the *process* are private throughout.
+
+**Strategic implication — this is the key takeaway**
+
+Your leverage in this dispute comes from the **public-record cost to Dreamable**. JAMS specifically defeats that leverage by keeping everything private. This is almost certainly why §10 was drafted with JAMS as the forum — to give Dreamable a confidential dispute mechanism.
+
+**Comparison of forums by public-record leverage:**
+
+| Forum | Filing public? | Hearing public? | Outcome public? | Leverage for you |
+|---|---|---|---|---|
+| **SF small claims** | Yes | Yes | Yes (judgment) | High |
+| **CA Superior limited civil** | Yes | Yes | Yes (judgment) | High |
+| **JAMS arbitration** | No | No | No (until confirmation) | Low — private |
+| **JAMS award confirmation in court** | Yes (after JAMS) | Yes | Yes (judgment) | High but delayed |
+
+**This means:**
+
+- **If Rob doesn't pay**, the path that best preserves your public-record leverage is to file in CA Superior limited civil and litigate the arbitration-clause question rather than yield to JAMS up front.
+- **If you're forced into JAMS** (via successful motion to compel), don't view it as defeat — you still get §1281.97 fee-default leverage, and the eventual award (if you win) becomes public on confirmation.
+- **Rob's preferred outcome is JAMS** because it's private. Your preferred outcome is court because it's public. This asymmetry is your strongest negotiating point in pre-filing settlement: "I'll dismiss the small-claims filing and skip JAMS entirely if you wire the $5k by [date]."
+
+**Bottom line**
+
+- Small claims will probably proceed, but contestable if dismissed; if dismissed and you can't contest, refile in CA Superior limited civil.
+- JAMS is private — which is bad for your leverage, not good.
+- Your best strategic position is to *file in court* (not JAMS) and use the public-record threat to motivate Rob to settle before any arbitration question gets adjudicated.
+
+**Not legal advice.** Arbitration-clause enforcement vs small-claims jurisdiction is genuinely contested in CA case law and shifts often. Confirm current rules with a CA-licensed attorney in the same 30-minute referral consult.
+<!-- agent:boundary:40256d95 -->
 <!-- /agent:exchange -->
 
 ## Queue

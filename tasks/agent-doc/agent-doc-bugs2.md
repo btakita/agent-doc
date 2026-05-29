@@ -128,7 +128,46 @@ With those two strings I can implement + unit-test both halves deterministically
 #### Queue status
 
 This is a real blocker requiring your input, so I'm **pausing the auto-loop** here instead of spinning on it. The queue still has 4 items behind this one (`#pending-add-append-not-prepend`, `#next-steps-backlog-capture`, `#run-agent-doc-stale-busy-replay`, `#jb-busy-queue-ux-feedback`). Tell me to **skip this item** (I'll gate/strike it and continue the queue), or paste the captures and I'll implement it now.
-<!-- agent:boundary:58395921 -->
+❯ JB `Run Agent Doc` error
+```
+resync: stash pane %28 is registered in its own project root — skipping kill
+resync: stash pane %32 is registered in its own project root — skipping kill
+[route] debounce OK — file idle for 15.3s and typing indicator idle
+[route] target tmux session: 0
+Error: authoritative actor generation 3 for tasks/resume.md owns pane %33 but route will not inject a new trigger because the authoritative actor is still starting (waited 10s for claude startup). Wait for the pane to show a dispatch-ready prompt (`prompt_ready=true`), then rerun `agent-doc tasks/resume.md`. If the pane stays stuck, restart the owner with `agent-doc start tasks/resume.md`.
+```
+❯ #spec-test-build-install-commit-push
+
+### Re: JB Run Agent Doc "still starting" route error — verified, likely correct behavior — opus-4-8
+
+I traced this and captured the **live** panes rather than guess — and it's the same subsystem as the queue head `#jb-stale-busy-idle-footer`, with a useful correction. I'm **not** running the `#spec-test-build-install-commit-push` preset because I could not confirm a bug to fix; doing so would mean shipping a speculative change to behavior that appears correct.
+
+#### What the error is
+
+The message comes from `route.rs` (`AuthoritativeActorDispatchAction::FailClosed`). Route promotes a `starting` authoritative actor only after `ready_prompt_candidate(pane)` proves a dispatch-ready prompt; for `tasks/resume.md` pane `%33` it didn't within the startup wait, so it failed closed and told you to wait for `prompt_ready=true` or restart. That is the documented "starting actor reroutes are prompt-gated" invariant.
+
+#### Live ground truth (captured this session)
+
+`ready_prompt_candidate` → `last_prompt_candidate` + `is_dispatch_ready_prompt_line`. Real captures:
+
+- **Idle** Claude (panes `%8`, `%22`) — last line `⏵⏵ bypass permissions on (shift+tab to cycle)` → **already detected as ready**.
+- **Busy** Claude (`%33`, `tasks/resume.md`, captured mid-turn) — shows `· Roosting… (14s · ↓ 487 tokens · …)` and the bottom line is `⏵⏵ bypass permissions on · 1 shell` (no `(shift+tab to cycle)`) → correctly **not** ready. The `❯` composer is present in *both* states, so it can't be the discriminator.
+
+So the idle/busy distinction Claude renders (`(shift+tab to cycle)` vs `· N shell`) is **already** classified correctly. Pane `%33` was genuinely busy/starting when route refused — the fail-closed was correct, not a detection bug.
+
+#### Correction to the `#jb-stale-busy-idle-footer` plan
+
+The original report's footer `22.4K (11%) ctrl+p commands` does **not** match real Claude rendering — `ctrl+p commands` is an OpenCode marker, so that pane was likely OpenCode (already handled) or the description was inaccurate. I rewrote `tasks/agent-doc/plan-jb-stale-busy-idle-footer.md` (committed `18ca8d245`) with the real captures and narrowed the open questions to two:
+
+1. Is there a Claude state where the **status** line (`Opus … ctx:N% …`) is the last meaningful line instead of the `⏵⏵ …` line? In every capture the `⏵⏵` line was last, so this never triggered. If it can, marking only that status line ignorable is a safe fix.
+2. Error **wording**: a pane busy on an active turn still reads as "still starting". Queued `[#route-busy-vs-starting-wording]` for that (UX-only, low priority).
+
+#### What I need to turn this into a fix
+
+A capture taken **at the moment route refuses**, in the state you believe is idle: `tmux capture-pane -p -t %33` (or the offending pane). If it shows `⏵⏵ … (shift+tab to cycle)` while route still says not-ready, that's a real bug and I'll fix + test it. If it shows the `· Gerund…` spinner / `· N shell`, the pane was busy and the error is correct — in which case the real ask is probably a longer startup wait or clearer wording, which I can do on confirmation.
+
+The queue is still paused on `#jb-stale-busy-idle-footer` (same root area). Want me to fold this into that item, or skip it and continue the queue?
+<!-- agent:boundary:22af1614 -->
 <!-- /agent:exchange --> 
 ###
 <!--
@@ -167,6 +206,7 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#route-busy-vs-starting-wording] [recommended] route.rs starting-actor FailClosed reports 'still starting (waited Ns for claude startup)' even when the pane is busy on an active turn (live capture: pane %33 showed '· Roosting… (Ns · …)' spinner + '⏵⏵ … · N shell'). Distinguish 'busy on an active turn' from 'cold starting' in the error via a Claude busy-cue on the active-turn spinner. Fragile (random gerund; 'esc to interrupt' vs 'thinking with high effort') — UX-only, low priority. Ground truth + analysis: tasks/agent-doc/plan-jb-stale-busy-idle-footer.md.
 - [ ] [#codex-queue-head-exact-heading-guidance] [recommended] After #queue-strike-on-halt narrowed the Codex Stop-hook heading-match to exact-topic only, a Codex auto-loop completion with a descriptive heading (### Re: <descriptive topic>) no longer auto-consumes the queue head — only an exact ### Re: do [#id] heading does. Add SKILL.md / harness-invocation guidance telling Codex auto-loop completions to title the response heading exactly with the queue head prompt (or emit an explicit done signal), and live-verify a Codex auto-queue still advances across items. Plan: tasks/agent-doc/plan-queue-strike-on-halt-response.md.
 - [ ] [#backlog-auto-marker-misfire] The 'auto' attribute on the agent:backlog marker (queue-only attribute) misfired an auto-run that destructively rewrote the backlog — minted new IDs wrapping 'do [#...]' stubs of already-done items; user reported original task text lost and recovery needed git/sidecar archaeology. Fix: reject 'auto'/unknown attrs on agent:backlog (warn, no mutation); auto-loop must trigger only from the queue 'auto' attribute; never rewrite committed backlog item text in an auto-run. Plan: tasks/agent-doc/plan-backlog-auto-marker-misfire.md. DO NOT IMPLEMENT.
 - [ ] [#jb-load-tmux-window-verify] [recommended] Live-verify the new JB Load Tmux Window action (plugin 0.2.136): install the signed zip, confirm it autostarts/loads the tmux pane for a focused doc whose pane is not up (e.g. corky.md). If the autostart sync genuinely fails to spawn the pane in that case (vs. by-design passive open), capture the route/sync logs as a separate autostart bug.

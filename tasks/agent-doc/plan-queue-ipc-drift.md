@@ -68,6 +68,30 @@ Three subsystems interact badly when a doc is owned by a live
    should validate the response body against the exchange/HEAD response content,
    not a whole-snapshot hash that queue-component churn invalidates.
 
+## Progress (2026-05-29)
+
+- **`enqueue_route_dispatch_prompt` exonerated.** A repro test mirroring the exact
+  live queue shape (`preset` + 2 `Completed` residue + 1 live prompt under `auto`,
+  re-dispatching the live head) confirms it does **not** duplicate
+  (`route_enqueue_dispatch_prompt_no_dup_with_completed_residue_and_live_head`).
+  So the duplicate `do [#adoc-orch-shim-cleanup]` is **not** an enqueue bug — it is
+  a **CRDT / 3-way merge artifact** of the divergent IPC-buffer vs snapshot queue
+  body (consistent with root cause #2).
+- **Mitigation landed (converges + caps the symptom):** `queue::dedup_live_prompts`
+  collapses duplicate live `Prompt` entries (two identical live prompts is never
+  valid), wired into `preflight::run_queue_maintenance` *before* activation/strike.
+  Preflight now collapses any merge-duplicated head and is **idempotent** after
+  dedup, so the drift no longer grows on each cycle. Tests:
+  `dedup_live_prompts_*` (queue), `preflight_collapses_duplicate_live_queue_prompt`.
+
+### Still open (root cause — needs the repro harness)
+
+- The **merge divergence itself** (why the IPC buffer re-activates `auto` + a
+  duplicate vs the committed inactive snapshot) is not yet fixed — dedup caps the
+  damage but doesn't stop the divergence. Still needs items #2/#4 above.
+- A **running pre-fix `start --route-owned` process** keeps the old binary; it must
+  be restarted for any fix to take effect on a live session.
+
 ## Acceptance
 
 - Repro test red before, green after.

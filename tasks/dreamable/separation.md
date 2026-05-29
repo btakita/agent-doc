@@ -1156,7 +1156,91 @@ Don't lead with unconscionability. Lead with:
 **Apology for the imprecise framing earlier.** The unconscionability point is real but more nuanced than "fees exceed claim." Total economics make the forum functionally unavailable for a $5k claim, but courts don't always agree, and a clean cost showing requires effort.
 
 **Not legal advice.** JAMS classification decisions and Armendariz cost-unconscionability standards are fact-specific and change with case law. The 30-minute CA attorney consult should cover both the §1281.97 mechanic and whether your dispute plausibly qualifies for JAMS Employment Minimum Standards.
-<!-- agent:boundary:99010aca -->
+❯ Can robert-ross file frivilous JAMS claims costing me money by attrition?
+
+### Re: Risk of Rob filing frivolous JAMS claims as attrition — opus-4-7
+
+**Yes — possible in theory, low probability in practice, but the asymmetry is real and worth mitigating.** §10 is bilateral, so Rob can initiate JAMS against you. A frivolous claim could cost you $3k–$13k to defend even if you win on the merits. But the same cost structure that makes JAMS bad for *you* as plaintiff makes it bad for *Rob* as plaintiff, and there are real deterrents to bad-faith filings.
+
+**What Rob could plausibly file**
+
+Looking at the operative clauses, these are the claims he could bring (with realistic merit assessment):
+
+| Potential Rob claim | Realistic basis | Risk to you |
+|---|---|---|
+| §8 non-disparagement breach | Triggered if you make public statements about Dreamable | Real if you post publicly; nonexistent if you stay quiet |
+| §5 confidentiality breach | Triggered if you disclose Dreamable's internal info | Real if you discuss specifics; controllable |
+| §6 Company Property breach | Triggered if you keep/use Dreamable materials | Easy to defend if you've returned everything |
+| §3 IP assignment breach | Triggered if you commercially use engagement-period work product | Easy to defend — your OSS is carved out under Addendum §2(b) |
+| **§632 recording claim ($637.2 statutory damages)** | Triggered if Rob learns about the recording | **Real and material — worth $5k+ on its own** |
+| Tortious interference | Triggered if you contact his family, investors, customers | Real if you escalate publicly; controllable |
+| Defamation | Triggered if you make false public statements | Controllable by staying factual or silent |
+
+**Stay-clean → most attack surfaces close.** The biggest unmitigated exposure on your side is the §632 recording (separate from anything else discussed). Don't give Rob factual ammunition.
+
+**Cost economics also constrain Rob**
+
+Rob would pay roughly the same costs you'd pay to file a JAMS claim:
+
+- ~$1,750 filing fee
+- Half of arbitrator costs (~$1,000–$7,200)
+- His own attorneys' fees ($3,000–$10,000+ for even a simple claim)
+- **Total: $5,000–$20,000+ to bring a single JAMS claim against you**
+
+For Rob to use serial frivolous filings as attrition, he'd need to spend $5k–$20k *per filing* to make you spend $3k–$13k *per defense*. That's a 1.5–4x cost ratio against him — not the attrition asymmetry many people imagine. Most well-resourced founders rationally don't do this unless they're motivated by something other than economics.
+
+**Deterrents against frivolous filings**
+
+1. **JAMS Rule 24/25 (sanctions).** JAMS arbitrators can impose sanctions for bad-faith conduct, including fee-shifting. If Rob files a claim with no factual basis, the arbitrator can order him to pay your fees. This is a real lever.
+2. **CCP §1281.97 cuts both ways.** Same fee-default rule that helps you as plaintiff helps you as respondent: if Rob (as drafting party) fails to pay JAMS fees within 30 days of invoice, *you* can elect to withdraw from arbitration and proceed in court with fee-shifting against him.
+3. **Vexatious litigant designation.** CA Code of Civil Procedure §391 lets courts designate parties who file repetitive frivolous claims as "vexatious litigants" — they must obtain pre-filing approval for further filings. Same principle applies in arbitration contexts.
+4. **Res judicata / claim preclusion.** Once an issue is decided (in arbitration or court), it can't be re-litigated. Rob can't repeatedly file the same claim.
+5. **JAMS Streamlined Rules** allow expedited dispositive motions for unmeritorious claims — cheap to invoke, can resolve a frivolous claim in weeks rather than months.
+
+**Realistic probability assessment**
+
+Based on typical patterns in $5k-range commercial disputes with sophisticated counterparties:
+
+- **~80%**: Rob never initiates JAMS at all. Cost isn't worth it. Most likely outcome.
+- **~12%**: Rob's lawyer (if he retains one) sends a defensive letter threatening JAMS if you persist. Cheap intimidation, often works on cash-constrained plaintiffs.
+- **~6%**: Rob actually initiates JAMS, usually as a defensive counter to your collection action — not pre-emptively. Single claim, real or marginally real factual basis.
+- **~2%**: Rob initiates JAMS pre-emptively with a single weak claim to intimidate.
+- **<1%**: Rob initiates serial frivolous JAMS claims as pure attrition harassment.
+
+The catastrophic-attrition scenario is unlikely because it costs Rob more than it costs you, and it would expose him to JAMS sanctions and vexatious-litigant exposure.
+
+**Where the attrition risk does become real**
+
+Two scenarios genuinely worry me:
+
+1. **You make a §632 recording disclosure or use.** If Rob learns about the recording, he has a *legitimate*, *non-frivolous* §637.2 claim worth $5k+. Defending it would cost you what defending a frivolous claim would cost, but you'd lose on the merits. **This is the highest-priority risk to control.** Don't use, don't disclose, don't share the recording. The prior turn's recommendation stands.
+2. **You make a public statement that breaches §8.** Same dynamic — Rob's claim becomes legitimate, defending it has real cost AND you lose on merits. Public posts about Dreamable are the second-highest-priority risk to control.
+
+If you don't give Rob factual ammunition on either of these, the attrition risk drops to near-zero. Most other claims he could fabricate would be sanctionable as frivolous.
+
+**Defensive posture if Rob does initiate**
+
+If you receive a JAMS demand from Rob:
+
+1. **Immediately engage limited-scope counsel.** A flat-fee ~$500 attorney consultation can produce an early dispositive motion that resolves frivolous claims in weeks.
+2. **Request JAMS sanctions** (Rule 24/25) including fee-shifting for bad-faith conduct.
+3. **File a counterclaim for the $5k Settlement Payment** in the same JAMS proceeding. Procedural efficiency — you don't have to litigate in two forums.
+4. **Watch CCP §1281.97 timing.** If Rob fails to pay his share of JAMS fees within 30 days of invoice, document the default and elect to withdraw to court with fee-shifting.
+
+**Strategic implication for current decisions**
+
+This actually reinforces "**sue first in court, not JAMS**" as your best move:
+
+- Once you've filed in court, Rob's most efficient defense is to move to compel arbitration (one cost) rather than initiate parallel JAMS claims (additional costs).
+- Putting Rob on defense from the start reduces his ability to use JAMS as an offensive attrition tool.
+- Court venue (CA Superior limited civil) also gives you stronger procedural protections than JAMS for any counterclaims Rob brings.
+
+**Bottom line**
+
+Frivolous JAMS attrition is theoretically possible but practically uncommon and bounded by Rob's own costs, JAMS sanctions exposure, and §1281.97 fee-default risk. The two real attrition risks are §632 (the recording) and §8 (public statements) — control those by staying silent and not disclosing the recording, and the frivolous-claim risk drops to near-zero.
+
+**Not legal advice.** Bad-faith arbitration filings and the JAMS sanctions framework are case-specific. If Rob actually serves you with a JAMS demand, get the 30-minute CA attorney consult immediately — that's the trigger event for engaging counsel, not a budget item to worry about preemptively.
+<!-- agent:boundary:5c3f337b -->
 <!-- /agent:exchange -->
 
 ## Queue

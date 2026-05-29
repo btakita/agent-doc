@@ -35,7 +35,63 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 5 response topic(s): do [#cli-extract-cli-types]; do [#cli-cleanup-unused-imports]; do [#cli-cluster-index-search]; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:59042e94 -->
+
+### Re: do [#cli-extract-tagpath-helpers] — opus-4-7
+
+Phase 1a-iii done — tagpath consumer surface moved.
+
+#### What moved (~307 LOC)
+
+→ `packages/tsift-cli/src/output/tagpath.rs`:
+
+| Item | Kind |
+|------|------|
+| `TagpathSearchOpts` | struct (consumer config) |
+| `TagpathAnnotationDiagnostic` | struct (annotation result + ambiguity collection) |
+| `CommunityMemberAmbiguityDiagnostic` | struct (per-member ambiguity record) |
+| `annotate_hits_with_tagpath` | fn — annotates `SymbolHit` rows |
+| `annotate_stored_symbols_with_tagpath` | fn — annotates `StoredSymbol` |
+| `annotate_stored_edges_with_tagpath` | fn — annotates `StoredEdge` (caller + callee sides via `EdgeSide`) |
+| `annotate_communities_with_tagpath` | fn — annotates `CommunityMember` with file/ref context |
+| `annotate_path_nodes_with_tagpath` | fn — annotates path nodes for `tsift path` |
+
+`output.rs` now declares `pub(crate) mod tagpath;`. lib.rs re-imports the eight names via `use output::tagpath::{...}` so the ~40 call sites in `commands/index_search.rs`, `commands/graph.rs`, and the rest of lib.rs keep compiling unchanged — no edits to the consuming files except for one in graph.rs's import block.
+
+#### Visibility changes (mechanical)
+
+Promoted 4 crate-private helpers so the submodule can call them:
+
+- `annotate_community_members_with_context` — community-member tagpath resolution with caller/file context
+- `community_tagpath_cache_part_for_loaded` — cache key part used by community annotation
+- `file_communities_from_callers` — file→community map used to disambiguate callee handles
+- `resolve_tagpath_handle_for_callee_edge` — callee-side handle resolution preferring caller's file/community before first-handle fallback
+
+#### Cleanup
+
+Dropped 5 unused imports introduced by Phase 2 cluster lifts:
+
+- `PathBuf`, `Context`, `Serialize` in `commands/graph.rs`
+- `TraverseFormat` in lib.rs (only used inside `commands/graph.rs` now)
+- `Context`, `bail` in the new tagpath file
+
+#### Verification
+
+- `cargo build -p tsift-cli` — clean, no new warnings
+- `make check` — green workspace-wide
+- `cargo install --path packages/tsift-cli` — `~/.cargo/bin/tsift` refreshed
+- `cargo build --release -p tsift-cli` — `target/release/tsift` refreshed
+
+#### Commits
+
+- tsift @ `a5393bd` — `cli: Phase 1a-iii — extract tagpath surface into output/tagpath.rs` (pushed)
+- agent-loop @ `612c695` — submodule pointer bump (pushed)
+
+VERSIONS.md `Unreleased` updated with the Phase 1a-iii entry. With this and the prior Phase 1a-i / 1a-ii landings, the entire `output` module surface (formats, budgets, envelopes, tagpath) now lives outside lib.rs.
+
+#### Top of backlog
+
+`[#cli-cluster-quality]` — Phase 2: move `cmd_audit`, `cmd_audit_tagpath`, `cmd_lint`, `cmd_perf_gate` bodies into `packages/tsift-cli/src/commands/quality.rs`. Smaller cluster than graph.
+<!-- agent:boundary:eb90249e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -50,7 +106,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#cli-cleanup-unused-imports]~
 - ~do [#cli-cluster-index-search]~
 - ~do [#cli-cluster-graph]~
-- do [#cli-extract-tagpath-helpers]
+- ~do [#cli-extract-tagpath-helpers]~
 - do [#cli-cluster-quality]
 - do [#cli-cluster-summarize]
 - do [#cli-cluster-infra]
@@ -63,7 +119,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#cli-extract-tagpath-helpers] Phase 1a-iii — extract TagpathSearchOpts + TagpathAnnotationDiagnostic + CommunityMemberAmbiguityDiagnostic + annotate_hits_with_tagpath + annotate_stored_symbols_with_tagpath + annotate_stored_edges_with_tagpath + annotate_communities_with_tagpath + annotate_path_nodes_with_tagpath (~700 LOC) into packages/tsift-cli/src/output/tagpath.rs. Sits below the graph/community cmd cluster but moves cleanly because the annotate functions are already pub.
 - [ ] [#cli-cluster-quality] Phase 2 — move cmd_audit + cmd_audit_tagpath + cmd_lint + cmd_perf_gate bodies into packages/tsift-cli/src/commands/quality.rs.
 - [ ] [#cli-cluster-summarize] Phase 2 — move cmd_summarize body (and helpers) into packages/tsift-cli/src/commands/summarize.rs.
 - [ ] [#cli-cluster-infra] Phase 2 — move cmd_init + cmd_status + cmd_locks + cmd_sql + cmd_route + cmd_rewrite + cmd_convex_sync + cmd_graph_db_* + cmd_edit bodies into packages/tsift-cli/src/commands/infra.rs.

@@ -182,7 +182,30 @@ The distinction:
 That's the right attribution and it's clean. No need to also attribute it to a confidential engagement. Keep LiveKit under Presence AI and in your Skills list — that's sufficient and accurate.
 
 If you used LiveKit at Dreamable too, you can mentally count it toward your depth of experience, but there's no resume reason to add a second attribution when the first one already demonstrates it.
-<!-- agent:boundary:548c5f7e -->
+❯ Can I have general skills used or does everything need to be confidential?
+
+### Re: General skills in a Confidential entry — sonnet-4-6
+
+**Yes — skills are yours to claim. Only Dreamable's business information is off-limits.**
+
+The confidentiality clause (§5) covers their non-public *business* information: product plans, customers, trade secrets, financials, operations. It does not cover the general technologies you used to do the work — that's your own skill set.
+
+Safe for a "Confidential Client" entry:
+```
+Confidential AI Startup — Software Development Consultant (Apr–May 2026)
+• Real-time AI systems engineering — Rust, LiveKit, WebRTC
+```
+
+**The test:** would a Dreamable employee read "Rust, LiveKit, WebRTC" and say "that reveals our trade secrets"? No — those are widely used tools, not their product or architecture secrets.
+
+**What's NOT safe:** describing what you built with those tools at that company — the specific system, its purpose, the architecture decisions, the customer use case. That's product/business information.
+
+So the format to use:
+- Skills: ✅ `Rust, LiveKit, WebRTC, AI/ML engineering`
+- What you built: ❌ `built a real-time video AI avatar system for [use case]`
+
+The skills list for the entry can be as specific as the technology names. Just don't pair them with a description of the product.
+<!-- agent:boundary:d8a280d7 -->
 <!-- /agent:exchange -->
 ###
 <!--

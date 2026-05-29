@@ -77,7 +77,37 @@ VERSIONS.md `Unreleased` updated. Marked `[#split-sim-world]` **done**.
 #### Top of backlog
 
 Next actionable: **`[#split-tsift-digest]`** — extract `diff_digest` + `log_digest` + `metric_digest` + `test_digest` into a `tsift-digest` crate. Low-risk: `tsift-cli` already calls these as `tsift::diff_digest::*`, so crate + root re-export keeps callers compiling. Then `#split-tsift-search` → `#demote-root-tsift`; the npm chain (`#npm-auth-setup` →) stays externally blocked on your GitHub repo-settings access.
-<!-- agent:boundary:b7999beb -->
+### Re: dispatch #spec-test-build-install-commit-push → do [#split-tsift-digest] / [#split-tsift-search] / [#demote-root-tsift] — opus-4-8
+
+All three crate splits done, sequentially (digest → search → demote-root, respecting the demote dependency), each with spec + tests updated, build + install, commit + push, and CI green. The root `tsift` crate is now a thin re-export shim.
+
+Note: your queued `do [#…]` items were auto-struck by preflight as `source=review_gated` (each id existed both as an open `[ ]` backlog item *and* a gated `[/]` review proposal; the queue resolver keyed on the gated copy and halted). I confirmed with you and ran them as the actionable backlog work.
+
+#### 1. `#split-tsift-digest` → `packages/tsift-digest`
+
+Moved `diff_digest` + `log_digest` + `metric_digest` + `test_digest` (~3.7k LOC) out of root `tsift/src/`. Root re-exports `pub use tsift_digest::{diff_digest, log_digest, metric_digest, test_digest};`. Rewrote crate-internal imports: `crate::graph` → `tsift_graph`, `crate::lang::Lang` → `tsift_graph::lang::Lang`, `crate::lint`/`crate::runtime_churn` → `tsift_quality::{lint,runtime_churn}`, `crate::summarize::{SummaryDb,Summary}` → `tsift_summarize::summarize::{…}`. tsift `6144fcd`, CI `26624750805` ✓.
+
+#### 2. `#split-tsift-search` → `packages/tsift-search`
+
+Moved `sift` (lexical adapter) + `impact` (change-impact) + `tagpath_adapter` (`summarize` already in tsift-summarize). Root re-exports `pub use tsift_search::{impact, sift, tagpath_adapter};`. `sift`/`tagpath_adapter` were self-contained; `impact` rewired to `tsift_index`/`tsift_digest`/`tsift_graph`/`tsift_quality`/`tsift_summarize`. `impact::is_import_line` gates per-`Lang` arms on `lang-*`, so tsift-search defines the full `lang-*` set forwarding to tsift-graph, and root forwards `lang-* → tsift-search/lang-*`. tsift `417bb80`, CI `26625103762` ✓.
+
+#### 3. `#demote-root-tsift` → root is now a thin shim
+
+Extracted the last real module, `status` (~2.07k LOC, backs `tsift status` + `tsift locks`), into `packages/tsift-status`; root re-exports `pub use tsift_status::status;`. **Root `tsift/src/` now holds only `lib.rs` + five one-line re-export shims** (`graph`, `lang`, `resolution`, `substrate`, `libsql_backend`). Since root has no code of its own, I **pruned all external crate deps** (anyhow, clap, rusqlite, serde, tree-sitter, tagpath, …) + unused `tsift-core`/`tsift-algorithms`; root keeps only the `tsift-*` path deps it re-exports + optional `tsift-libsql`. Relocated `examples/dump_ast.rs` → `packages/tsift-graph/examples/`. Verified default + `--features backend-libsql` builds and the `cargo install` binary. tsift `2c75eb3`, CI `26625522294` ✓.
+
+#### Verification (each split)
+
+- `make check` green every time (clippy `-D warnings`, `cargo test --workspace`, opencode npm dry-run)
+- Workspace tests held at **993 passed** throughout — 34 → 36 → 38 → 40 suites as each crate's lib+doctest binaries were added; the per-module tests moved with their code, so the total never dropped
+- both binaries refreshed each cycle (`tsift --version` → `0.1.62`); smoke-tested `diff-digest`, `search`, `status` via the re-exports
+- agent-loop submodule pointers bumped + pushed each split (`0c3b02797`, `ba891cf3b`, `f8d65122a`)
+
+#### Backlog status
+
+`#split-tsift-digest`, `#split-tsift-search`, `#demote-root-tsift` → **done**. The per-command CLI split (`#split-tsift-cli-subcommands`) was effectively completed earlier this session and stays as the gated review record (not marking it done unilaterally — say the word). Remaining backlog is the **OpenCode npm publish chain** (`#npm-auth-setup` → `#npm-publish-verify` → `#full-e2e-verify`), still externally blocked on your GitHub repo-settings access (`NPM_TOKEN` secret + `TSIFT_ENABLE_NPM_PUBLISH=true`) — **not** completed here. **Top of backlog: `#npm-auth-setup`** (blocked — needs you).
+
+The whole crate-extraction arc is now complete: root `tsift` went from a ~39k-LOC monolith to a thin re-export shim over focused `tsift-*` workspace crates.
+<!-- agent:boundary:f8fa5552 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -86,19 +116,16 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 dispatch #spec-test-build-install-commit-push
-- do [#split-tsift-digest]
-- do [#split-tsift-search]
-- do [#demote-root-tsift]
+- ~do [#split-tsift-digest]~
+- ~do [#split-tsift-search]~
+- ~do [#demote-root-tsift]~
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#split-tsift-digest] Extract diff_digest + log_digest + metric_digest + test_digest (src/, ~3.7k LOC) into a new tsift-digest crate. tsift-cli already calls these as tsift::diff_digest::* etc., so crate + root re-export keeps callers compiling. (promoted from agent:review)
-- [ ] [#split-tsift-search] Extract sift + impact + tagpath_adapter (src/) into a new tsift-search crate (summarize already in tsift-summarize). Depends on tsift-index + tsift-graph (both exist). (promoted from agent:review)
-- [ ] [#demote-root-tsift] After the sim-world/digest/search splits land, demote root tsift to a thin re-export shim (or remove lib.rs); verify cargo install tsift consumers keep working. (promoted from agent:review)
 - [ ] [#npm-auth-setup] Configure NPM_TOKEN secret + TSIFT_ENABLE_NPM_PUBLISH=true variable in GitHub repo settings
 - [ ] [#npm-publish-verify] After auth configured, tag release and verify publish-opencode-plugin CI job succeeds and opencode-tsift appears on npmjs.org
 - [ ] [#full-e2e-verify] In fresh project: opencode plugin opencode-tsift && opencode then /tsift-status. On success mark #e2e-install done.
@@ -108,9 +135,6 @@ dispatch #spec-test-build-install-commit-push
 
 <!-- agent:review -->
 - [/] [#split-tsift-cli-subcommands] [recommended] tsift-cli is ~39k LOC in a single lib.rs — propose per-command module split (cmd_search, cmd_index, cmd_graph, cmd_explain, etc.) once root tsift is drained, to make command surface independently testable
-- [/] [#demote-root-tsift] After all module splits land, demote root tsift crate to a thin re-export shim (or remove lib.rs entirely) — leave only the workspace root + binary metadata; verify external consumers (cargo install tsift) keep working
-- [/] [#split-tsift-search] Extract sift + summarize + impact + tagpath_adapter (~3.2k LOC) into tsift-search crate — depends on tsift-index + tsift-graph; covers search ranking, AST-aware summaries, impact analysis, and tagpath annotation surface
-- [/] [#split-tsift-digest] Extract diff_digest + log_digest + metric_digest + test_digest (~3.7k LOC) into tsift-digest crate — high-cohesion emitter group with shared serialization, schema versioning, and pruning patterns; minimal cross-deps
 - [/] [#full-e2e-verify] In fresh project: opencode plugin opencode-tsift && opencode then /tsift-status. On success mark #e2e-install done.
 - [/] [#npm-publish-verify] After auth configured, tag release and verify publish-opencode-plugin CI job succeeds and opencode-tsift appears on npmjs.org
 - [/] [#npm-auth-setup] Configure NPM_TOKEN secret + TSIFT_ENABLE_NPM_PUBLISH=true variable in GitHub repo settings

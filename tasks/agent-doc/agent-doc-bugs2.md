@@ -30,100 +30,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260529-155930.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260529-164012.md`*
 
 Compacted content:
-- Archived 2 response topic(s): do [#duplicate-response-after-commit]; do [#duplicate-response-after-commit]
+- Archived 2 response topic(s): do [#exchange-prompt-dropped-on-merge]; JB cancel→Run Agent Doc error + IPC corruption while typing
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: do [#exchange-prompt-dropped-on-merge] — opus-4-8
-
-Implemented Option A's detectable-guard half: user-authored exchange prompts dropped during an IPC content_ours merge now **fail closed** instead of vanishing silently. Branch `20260422/codex-agent-backend`, submodule `04835d05`, superproject `fc45ff2ab`.
-
-#### Root cause (same drift family)
-
-When a user types a prompt into `agent:exchange` while the IDE holds `ipc.sock`, the IPC ack can carry a stale `content_ours` buffer that predates the prompt. The existing `live_prompt_drift_after_preflight` guard adopts `content_ours` (snapshot stays at `content_ours` by design), and the editor then converges its buffer to `content_ours` and re-saves disk — overwriting the user's prompt. A **post-commit disk diff cannot win that race**, so closeout reported success and the prompt was gone (assistant kept saying "nothing changed").
-
-#### Fix (binary-side, race-immune)
-
-The key insight: capture the evidence **at adoption time**, when the divergent candidate still carries the prompt — not from disk after the editor may have overwritten it.
-
-- `cycle_state.dropped_exchange_prompts` + `record_`/`clear_` helpers — persists the dropped prompt line(s).
-- `write::dropped_prompt_lines_after_content_ours` — scoped to the `agent:exchange` component only (queue/backlog/scratch drift is legitimately preserved for the next cycle, not lost) and to prompt-target lines; recorded at the `live_prompt_drift_after_preflight` adoption point (ops-log `dropped_exchange_prompt_recorded`).
-- `session_check::check_dropped_exchange_prompt_guard` — interrupts when a recorded dropped prompt is still missing from committed HEAD; clears the marker once the prompt reaches HEAD. Reads persisted evidence, so it is immune to the editor-overwrite race.
-- Spec: `07-closeout-commands.md` dropped exchange-prompt guard contract.
-
-##### Where it fits in the lifecycle
-
-```mermaid
-flowchart TD
-    A[user types prompt into agent:exchange<br/>IDE holds ipc.sock] --> B[IPC ack = stale content_ours<br/>predates the prompt]
-    B --> C[live_prompt_drift guard adopts content_ours]
-    C --> D[record dropped prompt in cycle_state<br/>NEW: evidence captured here]
-    D --> E[commit content_ours]
-    E --> F{editor overwrites disk<br/>via buffer convergence?}
-    F -->|yes race| G[disk prompt gone]
-    F -->|no| G2[disk prompt survives]
-    G --> H[session-check dropped_prompt_guard<br/>reads persisted evidence -> FAIL CLOSED]
-    G2 --> H
-    H --> I[operator re-adds prompt; next cycle answers it]
-    style D fill:#cce5cc
-    style H fill:#cce5cc
-    style G fill:#f8d7da
-```
-
-#### Scope honesty
-
-This makes the data-loss class **detectable and loud** — it can no longer slip through as a silent success. The *source-level prevention* (converging the editor buffer to the merged disk content so the prompt is never overwritten) is the heavier plugin-protocol work, shared with `#adoc-queue-ipc-buffer-divergence` (next queue item). I scoped the guard tightly to prompt-target lines inside `agent:exchange` so the existing "preserve live queue/scratch drift in the working tree" behavior (covered by integration tests) is unaffected.
-
-#### Verification
-
-- New tests: `cycle_state` record/clear, `write` extraction (exchange-scoped + content_ours-owned), 2 `session_check` (fail-closed + clear-on-resolve) — all green; FlowCore guard budget bumped 15→16.
-- `make check` (clippy + full suite + sim-medium + version-sync): green (exit 0); the two `live_ipc_race_integration` tests that preserve queue/scratch drift still pass.
-- Built `cargo build --release` + `cargo install --path .`.
-- Pushed.
-
-**Gated**, not closed: detectable guard is complete and tested; the source-level prevention is the shared plugin-protocol work. Queue continues to `#adoc-queue-ipc-buffer-divergence`.
-JB error when canceling a run then calling `Run Agent Doc` again.
-```
-resync: stash pane %3 is registered in its own project root — skipping kill
-resync: stash pane %2 is registered in its own project root — skipping kill
-resync: stash pane %21 is registered in its own project root — skipping kill
-resync: stash pane %8 is registered in its own project root — skipping kill
-resync: stash pane %27 is registered in its own project root — skipping kill
-resync: stash pane %20 is registered in its own project root — skipping kill
-[route] debounce OK — file idle for 0.7s and typing indicator idle
-[route] target tmux session: 0
-Error: authoritative actor generation 2 for tasks/monsterrodholders/mrh-project.md owns pane %30 but route could not drain the active closeout before dispatch: empty preflight_started cycle has no response capture for tasks/monsterrodholders/mrh-project.md: previous cycle `cycle-1780071335102` is still `preflight_started`, the live document has unresolved prompt_target: Do step 3...the warm intro + 4-5 headline wins + "full breakdown attached"., and no response exists to replay. The cycle is only 24s old; wait until it is stale or restart the harness pane and rerun `agent-doc tasks/monsterrodholders/mrh-project.md` (or use `agent-doc start tasks/monsterrodholders/mrh-project.md` from a fresh pane) so the prompt is handled by a new response cycle.
-```
-As I was typing in this into the comment below the exchange component, the IPC document corruption + duplicate line issues occurred.
-#spec-test-build-install-commit-push
-
-### Re: JB cancel→Run Agent Doc error + IPC corruption while typing — opus-4-8
-
-Triaged your live report. It's two distinct things, and the binary actually behaved correctly on the part that printed the scary error — so I've captured the genuinely actionable bug rather than churn a half-baked fix into the delicate route/cancel path. (No items completed this cycle — IDs below are cross-references only.)
-
-#### 1. The JB route error — correct fail-closed, poor UX
-
-The dumped error is for a **different document** (`tasks/monsterrodholders/mrh-project.md`), and it's the route **correctly refusing to dispatch** over an in-flight cycle: a previous `cycle-1780071335102` is still `preflight_started` (24s old) with an unresolved prompt and no response to replay. Refusing to drain an active closeout is the intended behavior, and it even prints a recovery hint.
-
-The real bug is narrower: you **canceled** that run, but an explicit cancel does not abandon the orphaned `preflight_started` cycle — so the next `Run Agent Doc` is blocked until the staleness window elapses. The binary can't tell "user canceled, reclaim now" from "still running, wait." Captured as a new backlog item with a plan (recommend Option A: the JB cancel action emits a signal that abandons a no-capture `preflight_started` cycle so re-dispatch is immediate). This is distinct from the stale-**busy** actor/lease items, which concern the busy projection rather than per-document `cycle_state`.
-
-#### 2. IPC corruption + duplicate line while typing into the comment
-
-That's the prompt-duplicated-while-typing family recurring (it's in Review): the plugin's `PatchWatcher` double-counts post-boundary keystrokes against the synthesized exchange patch while you type. It's plugin-side (Kotlin), shared root with the IPC-buffer-divergence work.
-
-Notably, **this cycle's own closeout did not corrupt your note**: the binary hit the same `live_prompt_drift_after_preflight` path, adopted `content_ours`, committed my response to HEAD, and left your typed note intact in the working tree (verified: my response appears exactly once, session-check OK). That's the data-loss class the two fixes I just shipped now make detectable / fail-closed.
-
-#### What I did
-
-- Captured the cancel-orphans-cycle bug (plan: `tasks/agent-doc/plan-cancel-orphans-preflight-cycle.md`, committed `7ffcc6116`) and added it to the backlog.
-- Did **not** code a fix this cycle: part 1 is mostly correct behavior plus an editor-cancel-signal seam (plugin work), and part 2 is the already-tracked plugin-side typing duplication. Neither is a safe one-shot binary edit without the chosen seam.
-
-#### Queue status
-
-Two items already shipped this session. The queue head is now the IPC-buffer-divergence plugin-protocol work — which is exactly the root cause behind both the typing-corruption and the cancel-signal seam. Say the word and I'll take it next.
-<!-- agent:boundary:3e869d7f -->
+<!-- agent:boundary:9ffafdde -->
 <!-- /agent:exchange --> 
 ###
 <!--
@@ -156,6 +68,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#prompt-duplicated-while-typing]~
 - ~do [#duplicate-response-after-commit]~
 - ~do [#exchange-prompt-dropped-on-merge]~
+- do [#cancel-orphans-preflight-cycle]
 - do [#adoc-queue-ipc-buffer-divergence]
 - do [#queue-strike-on-halt]
 - do [#jb-stale-busy-idle-footer]

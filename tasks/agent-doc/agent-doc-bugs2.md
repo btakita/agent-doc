@@ -93,7 +93,38 @@ So `claude_model: opus` was launching and attributing as 4-7 even though Claude 
 Also folded in the queue/backlog priority reorder from the prior cycle — it had been left uncommitted by an IPC-proof miss on that finalize, so it commits with this cycle.
 
 One follow-up filed to backlog (`#opus-alias-version-drift`, recommended): the constant still has to be hand-bumped per Claude Code opus release — worth deriving at runtime or gating in the release checklist.
-<!-- agent:boundary:81caa660 -->
+❯ do [#opus-alias-version-drift]. #spec-test-build-install-commit-push
+
+### Re: do [#opus-alias-version-drift] — defer `opus` to Claude Code (no pinned version) — opus-4-8
+
+Done. agent-doc no longer stores any concrete opus version — the staleness class is eliminated at the source rather than re-bumped.
+
+**Mechanism.** `claude --model` accepts `opus` as "an alias for the latest model" (confirmed from `claude --help`). So instead of expanding `opus` → `claude-opus-4-8` internally, agent-doc now defers to Claude Code at both seams:
+
+- **Launch** — `claude_model: opus` / `/model opus` / high-tier now emit `--model opus` verbatim. Claude Code resolves its own current latest opus. Can't lag a release.
+- **Attribution** — `resolve_agent_model` returns `None` for the bare `opus` alias, so the running skill self-stamps its real model identity (this response is `opus-4-8`, self-stamped — not from a constant). Pinned concrete ids (`claude_model: claude-opus-4-8`) still stamp their short name.
+- **Tier** — new `is_claude_code_opus()` classifies the `opus` alias *and* any concrete `claude-opus-*` id as High, so pinned versions still gate correctly.
+
+The `CLAUDE_CODE_OPUS_MODEL` constant is **removed entirely** — there is no longer a version to hand-bump.
+
+```mermaid
+flowchart LR
+  FM["claude_model: opus"] --> R{canonical_model_name}
+  R -->|bare alias| L["launch: --model opus"]
+  L --> CC["Claude Code resolves<br/>current latest opus"]
+  R -->|bare alias| A{resolve_agent_model}
+  A -->|None| SS["skill self-stamps<br/>real identity → opus-4-8"]
+  FM2["claude_model: claude-opus-4-8<br/>(pinned)"] -->|passes through| A
+  A -->|Some| ST["stamp opus-4-8"]
+```
+
+**Verification.**
+- `make check` (clippy + full workspace tests) — green. New tests: `canonical_model_name_defers_claude_code_opus_alias`, `tier_from_model_name_classifies_concrete_and_deferred_opus_as_high`, `resolve_agent_model_defers_claude_code_opus_alias`, `resolve_agent_model_stamps_pinned_concrete_opus`; updated `scan_model_switch_*`, `parse_model_arg_*`, `resolve_builtin_claude_code`, `model_injected_from_claude_model_frontmatter`.
+- `cargo install --path .` + `cargo build --release` — both binaries rebuilt.
+- **End-to-end:** `agent-doc preflight` on this doc (`claude_model: opus`) now reports `agent_model = None` (was `opus-4-8`), and the launch path emits `--model opus`. Tier gating still classifies opus as High.
+
+**Committed + pushed:** submodule `1c5a8bc3` → `origin/20260422/codex-agent-backend`; superproject `d8be0c1d1` (pointer + installed runbook) → `origin/main`. Backlog item `#opus-alias-version-drift` marked done. Orthogonal install-regen churn left out of the commits as before.
+<!-- agent:boundary:fdcab8c7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -152,7 +183,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#opus-alias-version-drift] [recommended] CLAUDE_CODE_OPUS_MODEL (agent-doc-core/src/model_tier.rs:50) is a hardcoded versioned constant that must be hand-bumped each time Claude Code redefines opus (just moved 4-7 → 4-8). Consider deriving the current Claude Code opus id at runtime (e.g. probe the harness / env) so claude_model:opus attribution + launch never silently lag a release, or at minimum add a release-checklist gate. Low urgency: the constant is documented as the intended single source of truth.
 - [ ] [#prompt-duplicated-while-typing] User prompt duplicated in the live editor while typing — in-progress prompt text appears twice in the buffer during/after typing, before any new agent-doc cycle. Distinct from #duplicate-response-after-commit (response body) and #adoc-queue-ipc-drift (queue/snapshot loop). Suspected: PatchWatcher.kt normalize+setText (lines 774/801) double-counts post-boundary keystrokes against the try_ipc() boundary-aware synthesized exchange patch payload; await_idle debounce narrows but does not close the race. Plan: tasks/agent-doc/plan-prompt-duplicated-while-typing.md (recommend Option A — single-source post-boundary user region + idempotent apply).
 - [ ] [#duplicate-response-after-commit] Late-IPC reposition signal re-inserts already-committed response body into working tree, wrapped in duplicate boundary markers. Symptom: next preflight interrupts with "direct response patchback without agent-doc cycle"; agent-doc write --commit returns "empty response — nothing to write"; only manual Edit-based dedup recovers. Repro: tasks/dreamable/separation.md cycle after commit 231eafc83 on 2026-05-28. Plan: tasks/agent-doc/plan-duplicate-response-after-commit.md (recommend Option A — both detect over-application in session-check and make IPC reposition idempotent).
 - [ ] [#adoc-queue-ipc-buffer-divergence] Root cause #4 FIXED (submodule 729f7bc2): response-replay / stale-cycle hash matching now neutralizes the agent:queue component (tag + body) and the queue_active frontmatter, so queue-maintenance churn no longer wedges a committed cycle as stuck_captured_cycle. REMAINING #2 (live IDE buffer re-adds auto / diverges from committed inactive snapshot): blocker found — ipc_socket::send_patch carries component CONTENT only and cannot converge a queue opening-tag attribute (auto) or the queue_active frontmatter; try_ipc_full_content is disabled and rejects template docs, so no IPC seam exists yet. Needs a plugin protocol extension (PatchWatcher.kt + FFI) to converge queue tag + frontmatter to the editor buffer, plus a deterministic live-IPC-listener repro harness (SimWorld). Plan: tasks/agent-doc/plan-queue-ipc-drift.md.

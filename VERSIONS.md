@@ -6,6 +6,22 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Queue head no longer struck on halt/refusal responses (`#queue-strike-on-halt`).**
+  Consuming the active `agent:queue` head now requires an explicit completion
+  signal. The CLI `finalize` / `write --commit` path requires a closeout flag —
+  `--done`, `--pending-gate`, or `--pending-edit "<id>=…"` — naming the head id
+  (or a genuine fresh operator prompt-target / `do queue` trigger); the old
+  "`### Re:` heading mentions the head → consume" heuristic is removed, so a halt
+  response that explains why the item should stay open no longer silently strikes
+  it. The Codex Stop-hook auto-close path (no closeout CLI flags) still consumes
+  from a heading but only on an exact topic match (`### Re: do [#id]`), never on a
+  modified heading like `### Re: #id halt`. New `queue_head_has_explicit_completion_signal`
+  in `write.rs`; `response_topic_matches_queue_head` narrowed to exact-match.
+  Coverage: `explicit_signal_*` + `heading_topic_matches_head_exactly_only`
+  (write.rs) and `halt_response_does_not_strike_queue_head_but_done_flag_does`
+  (sim_world.rs). Spec: `07-orchestration-commands.md` + `SPEC.md`. Plan:
+  `tasks/agent-doc/plan-queue-strike-on-halt-response.md`.
+
 - **Queue/IPC buffer convergence seam (`#adoc-queue-ipc-buffer-divergence`,
   root cause #2).** Queue maintenance now converges a live route-owned editor
   buffer to the committed inactive queue shape after a halt/drain. Previously a

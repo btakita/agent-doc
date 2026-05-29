@@ -2690,6 +2690,64 @@ fn ipc_snapshot_guard_blocks_live_queue_drift_after_preflight() {
     );
 }
 
+// -------- #queue-strike-on-halt: a halt/refusal response must not strike the
+// active auto-queue head; only an explicit closeout flag advances it. The Codex
+// Stop-hook heading path is exact-match only. See
+// tasks/agent-doc/plan-queue-strike-on-halt-response.md.
+
+#[test]
+fn halt_response_does_not_strike_queue_head_but_done_flag_does() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc/locks")).unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_format: template\n",
+        "agent_doc_write: crdt\n",
+        "queue_active: true\n",
+        "---\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue auto -->\n",
+        "- do [#alpha]\n",
+        "- do [#beta]\n",
+        "<!-- /agent:queue -->\n",
+    );
+    std::fs::write(&doc, content).unwrap();
+    agent_doc_orchestration::snapshot::save(&doc, content).unwrap();
+
+    // A halt response that names the head with a trailing modifier must NOT
+    // register as targeting the head (exact-topic match only).
+    let halt = "### Re: do [#alpha] halt — opus-4-8\n\nBacklog left intact; not executing.\n";
+    assert!(
+        !agent_doc_orchestration::write::response_explicitly_targets_active_queue_head(&doc, halt)
+            .unwrap(),
+        "halt heading must not target the queue head"
+    );
+    // An exact-topic heading still registers, preserving the Codex auto-loop on a
+    // clean completion that titles the response with the head prompt verbatim.
+    let exact = "### Re: do [#alpha] — opus-4-8\n\nDone.\n";
+    assert!(
+        agent_doc_orchestration::write::response_explicitly_targets_active_queue_head(&doc, exact)
+            .unwrap(),
+        "exact-topic heading should still target the queue head"
+    );
+
+    // An explicit --done strikes the head, leaving #beta as the next head.
+    let outcome = agent_doc_orchestration::write::consume_queue_prompts_for_done_ids_with_outcome(
+        &doc,
+        &["alpha".to_string()],
+    )
+    .unwrap()
+    .expect("explicit --done should consume the queue head");
+    assert_eq!(outcome.consumed_count, 1);
+    assert_eq!(outcome.remaining, 1);
+    let after = std::fs::read_to_string(&doc).unwrap();
+    assert!(after.contains("- ~do [#alpha]~"), "alpha struck:\n{after}");
+    assert!(after.contains("- do [#beta]"), "beta remains the head:\n{after}");
+}
+
 // -------- #adoc-bdauc-simworld: deterministic SimWorld coverage for baseline
 // drift after a manual user commit. See
 // tasks/agent-doc/plan-baseline-drift-after-user-commit.md.

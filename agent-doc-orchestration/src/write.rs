@@ -1278,15 +1278,22 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         crate::lint_gate::run(file, options.lint_override)?;
     }
 
-    if write_result.is_ok()
-        && !queue_consumption_allowed
-        && let Some(capture) = crate::capture::load_active(file)?
-        && response_explicitly_targets_active_queue_head(file, &capture.response_body)?
-    {
-        eprintln!(
-            "[queue] response heading explicitly targets active queue head; allowing consumption"
-        );
-        queue_consumption_allowed = true;
+    // A `### Re:` heading that merely names the active queue head is NOT a
+    // completion signal (#queue-strike-on-halt): a halt/refusal response names
+    // the head to explain why it is *not* being done. Queue-head consumption
+    // requires an explicit closeout flag — `--done`, `--pending-gate`, or
+    // `--pending-edit "<id>=…"` — that names the head id.
+    // `should_consume_queue_prompt_for_write` already covers `--done` and genuine
+    // operator prompt-target / `do queue` triggers; this adds the gate/edit
+    // completion signals so a gated or edited head still advances the auto-queue,
+    // replacing the old heading-match heuristic that silently struck halts.
+    if write_result.is_ok() && !queue_consumption_allowed {
+        queue_consumption_allowed = queue_head_has_explicit_completion_signal(
+            &current_content,
+            &options.pending_done,
+            &options.pending_gate,
+            &options.pending_edit,
+        )?;
     }
 
     // Phase 3c: consume queue prompt after all other strict closeout gates
@@ -2494,6 +2501,40 @@ fn active_queue_head_text(content: &str) -> Result<Option<String>> {
     Ok(crate::queue::first_prompt(&entries).map(|prompt| prompt.text.clone()))
 }
 
+/// True when a closeout flag in this cycle explicitly names the active queue
+/// head's `#id` — `--done`, `--pending-gate`, or `--pending-edit "<id>=…"`.
+///
+/// This is the explicit completion signal that authorizes queue-head consumption
+/// (#queue-strike-on-halt). A `### Re:` heading that merely mentions the head id
+/// is not a completion signal — a halt/refusal response names the head to explain
+/// why it is *not* being completed — so consumption is driven by an explicit
+/// closeout flag, never by heading text. `--pending-edit` counts because the
+/// agent rewrote the item's tracked text as part of resolving it.
+fn queue_head_has_explicit_completion_signal(
+    content: &str,
+    pending_done: &[String],
+    pending_gate: &[String],
+    pending_edit: &[String],
+) -> Result<bool> {
+    let Some(queue_head) = active_queue_head_text(content)? else {
+        return Ok(false);
+    };
+    let Some(head_id) = queue_prompt_done_id(&queue_head) else {
+        return Ok(false);
+    };
+    // `--done`/`--pending-gate` entries are bare ids; `--pending-edit` entries are
+    // `"<id>=new text"`, so take the id segment before `=`.
+    let names_head = |raw: &str| {
+        let id = raw.split_once('=').map(|(id, _)| id).unwrap_or(raw);
+        normalize_done_id(id) == head_id
+    };
+    Ok(pending_done
+        .iter()
+        .chain(pending_gate.iter())
+        .chain(pending_edit.iter())
+        .any(|raw| names_head(raw)))
+}
+
 fn queue_head_matches_done_ids(content: &str, done_ids: &[String]) -> Result<bool> {
     if done_ids.is_empty() {
         return Ok(false);
@@ -2546,14 +2587,13 @@ fn response_heading_topic(line: &str) -> Option<&str> {
 }
 
 fn response_topic_matches_queue_head(topic: &str, queue_head: &str) -> bool {
-    if queue_prompt_text_matches(topic, queue_head) {
-        return true;
-    }
-    let Some(head_id) = queue_prompt_done_id(queue_head) else {
-        return false;
-    };
-    queue_prompt_done_id(topic).is_some_and(|topic_id| topic_id == head_id)
-        || normalize_done_id(topic.trim().strip_prefix("do ").unwrap_or(topic).trim()) == head_id
+    // Exact topic match only (#queue-strike-on-halt). A heading topic that merely
+    // contains the head id with trailing modifiers — `### Re: #id halt`,
+    // `### Re: #id deferred` — must NOT count as completion; only a topic that
+    // resolves to exactly the queue head prompt does. This is the sole remaining
+    // heading-based consumption signal, used by the Codex Stop-hook auto-close
+    // path, which has no closeout CLI flags to express completion explicitly.
+    queue_prompt_text_matches(topic, queue_head)
 }
 
 fn queue_prompt_done_id(text: &str) -> Option<String> {
@@ -11621,6 +11661,101 @@ mod tests {
     use std::fs::OpenOptions;
     use std::time::Duration;
     use tempfile::TempDir;
+
+    // #queue-strike-on-halt: queue head consumption requires an explicit
+    // closeout flag, not a `### Re:` heading that merely names the head.
+    const HALT_QUEUE_DOC: &str = concat!(
+        "---\n",
+        "queue_active: true\n",
+        "---\n\n",
+        "<!-- agent:queue auto -->\n",
+        "- do [#foo]\n",
+        "- do [#bar]\n",
+        "<!-- /agent:queue -->\n",
+    );
+
+    #[test]
+    fn explicit_signal_halt_without_flag_does_not_consume() {
+        // (a) Halt response, no --done/--pending-gate/--pending-edit → no consume.
+        assert!(
+            !queue_head_has_explicit_completion_signal(HALT_QUEUE_DOC, &[], &[], &[]).unwrap()
+        );
+    }
+
+    #[test]
+    fn explicit_signal_done_flag_consumes() {
+        // (b) --done naming the head → consume. (c) also covers no-heading + --done.
+        assert!(
+            queue_head_has_explicit_completion_signal(
+                HALT_QUEUE_DOC,
+                &["foo".to_string()],
+                &[],
+                &[],
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn explicit_signal_gate_and_edit_flags_consume() {
+        assert!(
+            queue_head_has_explicit_completion_signal(
+                HALT_QUEUE_DOC,
+                &[],
+                &["foo".to_string()],
+                &[],
+            )
+            .unwrap(),
+            "--pending-gate naming the head is a completion signal"
+        );
+        assert!(
+            queue_head_has_explicit_completion_signal(
+                HALT_QUEUE_DOC,
+                &[],
+                &[],
+                &["foo=rewritten text".to_string()],
+            )
+            .unwrap(),
+            "--pending-edit naming the head is a completion signal"
+        );
+    }
+
+    #[test]
+    fn explicit_signal_flag_for_other_id_does_not_consume() {
+        assert!(
+            !queue_head_has_explicit_completion_signal(
+                HALT_QUEUE_DOC,
+                &["bar".to_string()],
+                &["baz".to_string()],
+                &["qux=text".to_string()],
+            )
+            .unwrap(),
+            "flags for non-head ids must not consume the head"
+        );
+    }
+
+    #[test]
+    fn explicit_signal_none_when_queue_inactive() {
+        let inactive = HALT_QUEUE_DOC.replace("queue_active: true", "queue_active: false");
+        assert!(
+            !queue_head_has_explicit_completion_signal(
+                &inactive,
+                &["foo".to_string()],
+                &[],
+                &[],
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn heading_topic_matches_head_exactly_only() {
+        // Codex Stop-hook path: exact-topic match only — halt/modifier headings
+        // must not count as completion (#queue-strike-on-halt).
+        assert!(response_topic_matches_queue_head("do [#foo]", "do [#foo]"));
+        assert!(!response_topic_matches_queue_head("#foo halt", "do [#foo]"));
+        assert!(!response_topic_matches_queue_head("#foo deferred", "do [#foo]"));
+    }
 
     fn patch_with_heading(heading: &str) -> crate::template::PatchBlock {
         crate::template::PatchBlock::new("exchange", format!("{heading}\n\nbody line one\n"))

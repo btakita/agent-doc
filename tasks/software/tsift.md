@@ -211,7 +211,49 @@ I left `#split-sim-world` **open** in the backlog (not started) pending your pic
 
 Which option?
 do A
-<!-- agent:boundary:f67635b7 -->
+
+### Re: do A — #split-sim-world via Option A (test-harness crate) — opus-4-8
+
+Done, committed, pushed, CI green. Option A re-homed the SimWorld harness as a test-harness crate **and** fixed the dead-test bug — which turned out to have a third root cause and a wider blast radius than the investigation surfaced.
+
+#### What landed → `packages/tsift-sim-world`
+
+A new workspace crate whose `src/lib.rs` carries **no production surface** — the deterministic seeded-corpus + named-edge-trace tests live in `tests/sim_world.rs`, with `tsift` + `tsift-cli` as **dev-dependencies**. Dev-deps don't form a lib cycle, so root `tsift` does not (and cannot) re-export it. `src/sim_world.rs` is deleted (git tracked it as a rename).
+
+#### Three root causes the harness had silently rotted on
+
+The investigation found two; building it surfaced a third:
+
+1. **No `mod sim_world`** anywhere → never compiled. (known)
+2. **`crate::rewrite_command`** now lives in `tsift-cli` as `pub(crate)` → unreachable from root. (known) → **promoted `tsift_cli::rewrite_command` to `pub`.**
+3. **`session_digest::extract_prompt_targets_from_text_block`** became `#[cfg(test)] pub(crate)` in `tsift-session` after the session split → invisible cross-crate, so the harness couldn't compile even as a sibling. **(new)** → added a **`test-support` feature** to `tsift-session` that re-exposes it as `pub` (`#[cfg(any(test, feature = "test-support"))]`), enabled by `tsift-sim-world`'s dev-dependency. No production bloat — the feature is off in every non-harness build.
+
+This confirms the review item's literal "root `tsift` re-exports via `pub use`" framing was **impossible** (cycle), and Option A's dev-dependency shape is the only form that both extracts and re-activates it.
+
+#### The wider blast radius — `make check` wasn't running these tests at all
+
+The harness was dead because `make check`'s `test:` target ran **bare `cargo test`** = root `tsift` package only (56 tests). It never ran `tsift-cli`'s 479 tests, the 3 sim tests, or `tsift-resolution`'s suite. **Switched `test:` → `cargo test --workspace`.**
+
+That immediately caught **one more stranded dead test**: `tsift-resolution/src/scoring.rs` used `GraphFreshness` without importing it. The irony — a prior `#cli-cleanup-unused-imports` cycle had *removed* that import as "unused" precisely because the test never compiled under root-only `cargo test`. Re-added `use tsift_core::GraphFreshness`. The whole class is now guarded going forward.
+
+#### Verification
+
+- `cargo test --workspace` — **993 passed across 34 suites** (was effectively 56 reaching CI before)
+- `make check` — green (clippy `-D warnings` clean, workspace tests, opencode npm dry-run); confirmed `Running tests/sim_world.rs` now executes
+- `cargo install --path packages/tsift-cli` + `cargo build --release -p tsift-cli` — both binaries refreshed; `tsift --version` → `0.1.62`
+- **CI green** — run `26623438920`, both `clippy + test` and `live Convex graph acceptance` jobs succeeded (CI runs `make ci-full` → the same `cargo test --workspace` path)
+
+#### Commits
+
+- tsift @ `7f0e1c6` — `#split-sim-world` (pushed)
+- agent-loop @ `2eed5dbdb` — submodule pointer bump (pushed)
+
+VERSIONS.md `Unreleased` updated. Marked `[#split-sim-world]` **done**.
+
+#### Top of backlog
+
+Next actionable: **`[#split-tsift-digest]`** — extract `diff_digest` + `log_digest` + `metric_digest` + `test_digest` into a `tsift-digest` crate. Low-risk: `tsift-cli` already calls these as `tsift::diff_digest::*`, so crate + root re-export keeps callers compiling. Then `#split-tsift-search` → `#demote-root-tsift`; the npm chain (`#npm-auth-setup` →) stays externally blocked on your GitHub repo-settings access.
+<!-- agent:boundary:1ca4cec4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -227,7 +269,6 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#split-sim-world] Extract sim_world (~390 LOC, src/sim_world.rs) into a new tsift-sim-world crate — smallest/most-isolated module, validates the crate-extraction pattern; root tsift re-exports via pub use. (promoted from agent:review)
 - [ ] [#split-tsift-digest] Extract diff_digest + log_digest + metric_digest + test_digest (src/, ~3.7k LOC) into a new tsift-digest crate. tsift-cli already calls these as tsift::diff_digest::* etc., so crate + root re-export keeps callers compiling. (promoted from agent:review)
 - [ ] [#split-tsift-search] Extract sift + impact + tagpath_adapter (src/) into a new tsift-search crate (summarize already in tsift-summarize). Depends on tsift-index + tsift-graph (both exist). (promoted from agent:review)
 - [ ] [#demote-root-tsift] After the sim-world/digest/search splits land, demote root tsift to a thin re-export shim (or remove lib.rs); verify cargo install tsift consumers keep working. (promoted from agent:review)

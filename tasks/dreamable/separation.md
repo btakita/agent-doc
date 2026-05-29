@@ -493,7 +493,51 @@ If §2 is genuinely silent and you want to lock in a hard deadline now, the dema
 - If §2 is silent: the Effective Date + 30 days is the safest assumed deadline. Send the friendly check before that date; if no movement by Effective Date + 30, send the demand letter specifying a 10-business-day cure window.
 
 **Not legal advice.** "Reasonable time" under §1657 is a fact-specific judicial determination, not a fixed number. The Effective Date interpretation and the on-demand framing are settled CA law but the specific application to your facts deserves the same 30-minute referral consult before you send anything in writing. Paste §2 verbatim in your next prompt if you'd like a definitive read.
-<!-- agent:boundary:15b7dd74 -->
+❯ It will cost me $300-500 per letter?
+
+### Re: Actual cost breakdown — opus-4-7
+
+**No — sorry, I was unclear.** Only one step in the ladder costs $200–$500, and only if the earlier free steps fail. Most $5k debts resolve before you spend a dollar on legal fees. The realistic worst-case spend before recovery is well under $50.
+
+**Per-step actual cost**
+
+| Step | What | Who writes it | Cost |
+|---|---|---|---|
+| 1 | Friendly status check via email or text | You | $0 |
+| 2 | Polite written reminder (email) | You | $0 |
+| 3 | Formal demand letter (certified mail) | You | ~$8 certified mail + $0 letter |
+| 4 | Attorney demand letter on letterhead | Lawyer | $200–$500 flat fee, **one time only** |
+| 5 | Small-claims filing (if §10 carve-out applies) | You | ~$95 (CT) or ~$75 (CA) |
+| 6 | JAMS arbitration | You | $1,750+ filing fee (last resort) |
+
+**Steps 1–3 are free** (excluding certified-mail postage). You write them yourself using free online templates — the demand-letter format is boilerplate. Step 4 only happens if steps 1–3 don't produce payment, and even then it's a one-time $200–$500 spend, not per letter.
+
+**Cheaper-than-attorney options for step 4**
+
+If you want a more authoritative letter than you can write yourself but don't want to pay $500:
+
+- **Law school clinics (free).** UConn, Quinnipiac, Yale, and Stamford-area law schools run small-claims and contracts clinics that take simple debt-collection cases pro bono. Email the clinic intake address; many will draft and send a demand letter on student-attorney letterhead at no charge. Same legal-weight signal as a paid attorney letter.
+- **LegalZoom / Rocket Lawyer flat-fee demand letter (~$50–$100).** Online demand-letter products produce letters on attorney letterhead. Less personalized than a real attorney consult, but the recipient can't tell the difference at first read. Solid step-3.5 option.
+- **Connecticut Statewide Legal Services (free if income-qualifying).** 1-800-453-3320. They take small-dollar contract disputes for low-income clients.
+- **CA State Bar Lawyer Referral Service ($35 for 30-min consult).** Some referral attorneys will draft a one-page demand for free or low cost after the consult if the case is simple enough.
+
+**Realistic budget**
+
+- **Most likely path to payment**: Step 1 (free) or Step 2 (free) succeeds. Total spend: $0.
+- **Backup path**: Step 3 (your own certified-mail demand). Total spend: ~$10.
+- **Persistent-Rob path**: Step 3 fails → Step 4 (law school clinic, free; or LegalZoom, $75). Total spend: $0–$85.
+- **Worst case before forum**: All informal steps fail → small claims filing ($75–$95). Total spend: ~$100.
+
+**ROI**
+
+Even worst-case ($100 spend to recover $5,000) is a 50x return on out-of-pocket cost. The earlier scenarios are 100x–infinity. The escalation ladder is structured specifically so the *expensive* steps only fire if the *free* steps don't work — and the free steps work most of the time.
+
+**Bottom line**
+
+Don't let the $200–$500 number block you from starting the process. Send the free friendly check (step 1) this week. The $200–$500 is a worst-case spend that arrives only after multiple cheaper steps have already failed, and even then there are free alternatives via law school clinics. The most likely outcome is that you spend $0 to $10 and Rob pays.
+
+**Not legal advice.** Cost estimates above are based on typical market rates as of late 2025/early 2026 and may vary by region.
+<!-- agent:boundary:69e0fc68 -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -13,14 +13,12 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
-
-OpenCode npm package path code-complete and pushed. #gopencode-install and #gopencode gated on npm registry auth to publish opencode-tsift. 5 of 7 backlog items completed: integration tests, permission docs, transcript verify, smoke session, README expansion.
 <!-- /agent:status -->
 
 ## Spec
@@ -37,7 +35,7 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 12 response topic(s): #next-steps for crate split; do [#split-sim-world]; do [#split-tsift-digest]; 9 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:099197d7 -->
+<!-- agent:boundary:d5168e7b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +44,7 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - do [#cli-extract-output]
 - do [#cli-extract-cli-types]

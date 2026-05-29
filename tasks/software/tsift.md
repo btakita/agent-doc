@@ -35,7 +35,48 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 2 response topic(s): do [#cli-extract-output]; do [#cli-extract-output-envelope]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:3f3e4d80 -->
+### Re: do [#cli-extract-cli-types] — opus-4-7
+
+Phase 1b done. Mechanical lift of the clap CLI surface out of `packages/tsift-cli/src/lib.rs` (38,260 LOC after) into a new `packages/tsift-cli/src/cli.rs` (999 LOC):
+
+- `Cli` struct + `Commands` enum (~770 LOC across 40 subcommands)
+- `GraphDbQuery` subcommand enum (~150 LOC across 15 variants)
+- `TraverseFormat`, `DispatchTraceFormat`, `SemanticRelatedKind`, `GraphDbBackend` `ValueEnum`s
+
+Lib.rs now does `mod cli; use cli::{...}` and the `use clap::...` line drops to just `clap::Parser` (needed for `Cli::parse()`). Visibility on every field/variant promoted to `pub` so the ~130 `Commands::*` / `GraphDbQuery::*` dispatch arms, two `Cli::parse_from` test helpers, and the main `Cli::parse()` entry all keep compiling unchanged.
+
+Intentionally left in `lib.rs`: `GraphDbExperimentalBackend` + `GraphDbBackendPromotionGate` + their `impl` block (business logic for `backend-eval`, not parser surface).
+
+#### Verification
+
+- `cargo build -p tsift-cli` — clean, no new warnings (the two pre-existing `GraphFreshness` / `DEFAULT_BUDGET_*` unused-import warnings are unchanged; verified via `git stash` round-trip).
+- `cargo test -p tsift-cli --lib` — 298 passed
+- `cargo test -p tsift-cli --test exit_code` — 129 passed
+- `cargo install --path packages/tsift-cli` — replaces `~/.cargo/bin/tsift` for tmux-spawned sessions
+- `cargo build --release -p tsift-cli` — refreshes `target/release/tsift` for the `.bin/...` symlink path
+- `tsift --version` → `tsift 0.1.62`, `tsift index --help` renders all flags correctly
+
+#### make check status
+
+`make check` is red, but **all 7 failures are pre-existing** — confirmed by stashing my changes and re-running:
+
+- `unused import: GraphFreshness` (in tsift-cli lib.rs)
+- `tsift-resolution`: 1 clippy error (`if`-collapse)
+- `tsift-algorithms`: 6 clippy errors (too-many-args, complex-type, `or_insert_with`)
+
+Not blockers for this mechanical lift; recorded as `[#cli-cleanup-unused-imports]` in the backlog.
+
+#### Commits
+
+- tsift @ `52e7cd1` — `cli: Phase 1b — extract clap CLI types into packages/tsift-cli/src/cli.rs` (pushed to `btakita/tsift` main)
+- agent-loop @ `9c5dbd1` — submodule pointer bump (pushed)
+
+VERSIONS.md `Unreleased` updated with the Phase 1b entry.
+
+#### Top of backlog
+
+`[#cli-cluster-index-search]` — Phase 2: move `cmd_index` + `cmd_search` bodies into `packages/tsift-cli/src/commands/index_search.rs`. Smallest cluster, validates the per-command pattern before larger ones.
+<!-- agent:boundary:f87e5e81 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +87,7 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#cli-extract-cli-types]
+- ~do [#cli-extract-cli-types]~
 - do [#cli-cluster-index-search]
 - do [#cli-cluster-graph]
 - do [#cli-extract-tagpath-helpers]
@@ -62,7 +103,7 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#cli-extract-cli-types] Phase 1b — lift clap CLI types (Cli, Commands, GraphDbQuery, output format enums) out of lib.rs into packages/tsift-cli/src/cli.rs. Pure mechanical lift; no logic change.
+- [ ] [#cli-cleanup-unused-imports] [recommended] Drop the pre-existing `GraphFreshness` + `DEFAULT_BUDGET_*` unused-import warnings in packages/tsift-cli/src/lib.rs. `make check` runs clippy with -D warnings, so these (plus the 5 pre-existing clippy errors in tsift-algorithms/tsift-resolution) keep the workspace check red. Confirmed pre-existing via stash test — not caused by Phase 1b.
 - [ ] [#cli-cluster-index-search] Phase 2 — move cmd_index + cmd_search bodies into packages/tsift-cli/src/commands/index_search.rs (re-exported from lib.rs). Smallest cluster, validates the per-command pattern before larger ones.
 - [ ] [#cli-cluster-graph] Phase 2 — move cmd_graph + cmd_communities + cmd_path + cmd_explain + cmd_traverse bodies into packages/tsift-cli/src/commands/graph.rs.
 - [ ] [#cli-extract-tagpath-helpers] Phase 1a-iii — extract TagpathSearchOpts + TagpathAnnotationDiagnostic + CommunityMemberAmbiguityDiagnostic + annotate_hits_with_tagpath + annotate_stored_symbols_with_tagpath + annotate_stored_edges_with_tagpath + annotate_communities_with_tagpath + annotate_path_nodes_with_tagpath (~700 LOC) into packages/tsift-cli/src/output/tagpath.rs. Sits below the graph/community cmd cluster but moves cleanly because the annotate functions are already pub.

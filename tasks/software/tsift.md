@@ -171,7 +171,28 @@ Top of the current `agent:backlog`: **`[#npm-auth-setup]`** — but it's externa
 #### Re: the duplication bug (filed)
 
 Symptom matches this session's recurring `live_prompt_drift_after_preflight` / `mid-turn cycle rotation` / `already_applied` IPC diagnostics. Hypothesis (unproven, flagged as such in the plan): the editor-side normalize+`setText` in `PatchWatcher` re-incorporates post-boundary keystrokes that the Rust-side `try_ipc()` boundary-aware synthesized exchange patch *also* carries, so `setText(result)` writes the typed prompt twice; the `await_idle` debounce narrows but doesn't close the race. Recommended fix (Option A): make the post-boundary user region single-source (editor buffer authoritative; exclude live user text from the synthesized patch) + idempotent apply keyed on (patch_id, user-region-hash) — which would also harden the two related IPC-duplication bugs.
-<!-- agent:boundary:1247c3d9 -->
+❯ Add #next-steps to complete review items.
+### Re: Add #next-steps to complete review items. — opus-4-8
+
+Added the actionable next-steps to `agent:backlog`, promoted from the gated `agent:review` proposals and ordered by priority (lowest-risk/unblocking first, externally-blocked last).
+
+**Backlog now (priority order):**
+
+1. **`[#split-sim-world]`** ← top — extract `src/sim_world.rs` (~390 LOC) into `tsift-sim-world`. Smallest/most-isolated; validates the crate-extraction pattern.
+2. `[#split-tsift-digest]` — extract `diff_digest`+`log_digest`+`metric_digest`+`test_digest` into `tsift-digest`. Low-risk: `tsift-cli` already calls these as `tsift::diff_digest::*`, so crate + root re-export keeps callers compiling.
+3. `[#split-tsift-search]` — extract `sift`+`impact`+`tagpath_adapter` into `tsift-search` (`summarize` already in `tsift-summarize`). Deps `tsift-index`+`tsift-graph` exist.
+4. `[#demote-root-tsift]` — after the three splits land, demote root `tsift` to a thin re-export shim; verify `cargo install tsift`.
+5. `[#npm-auth-setup]` — **externally blocked** (needs your GitHub repo-settings access: `NPM_TOKEN` secret + `TSIFT_ENABLE_NPM_PUBLISH=true`).
+6. `[#npm-publish-verify]` — blocked on #5.
+7. `[#full-e2e-verify]` — blocked on #5/#6.
+
+**Top of backlog: `#split-sim-world`.**
+
+Notes:
+- The four crate-split items remain in `agent:review` as the proposal record; I added active backlog entries (same ids) tagged "promoted from agent:review".
+- `[#split-tsift-cli-subcommands]` is effectively done (this session's Phase 1/2 modularization of `tsift-cli/lib.rs`) — I did not add a backlog item for it and left it gated in `agent:review`; say the word and I'll mark that review item done.
+- Track A (#1–#4) is agent-actionable now; want me to start on `#split-sim-world`?
+<!-- agent:boundary:354c8f0e -->
 <!-- /agent:exchange -->
 ###
 <!--

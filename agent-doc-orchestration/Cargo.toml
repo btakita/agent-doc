@@ -50,9 +50,14 @@ libc = "0.2"
 portable-pty = "0.8"
 alacritty_terminal = "0.26"
 signal-hook = "0.3"
-rusqlite = { version = "0.32", features = ["bundled"] }
 tagpath = { version = "0.11.1", default-features = false }
 tiny_http = { version = "0.12", default-features = false, features = ["ssl-rustls"] }
 
 [dev-dependencies]
 tempfile = "3"
+filetime = "0.2"
+# Controller-state tests open `agent-doc-sqlite`'s state DB directly to assert
+# the schema/rows the `state_store` seam writes. The SQLite layer itself lives
+# in `agent-doc-sqlite`; this dev-only dependency keeps those tests compiling
+# without pulling `rusqlite` into orchestration's normal build graph.
+rusqlite = { version = "0.32", features = ["bundled"] }

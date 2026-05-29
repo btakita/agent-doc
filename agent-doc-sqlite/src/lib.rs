@@ -7,5 +7,13 @@
 //!
 //! Members:
 //! - `archive_index` — derived sqlite index over compacted-turn markdown archives.
+//! - `state_store` — project-controller actor/lease/dispatch/diagnostic/layout
+//!   SQLite state plus the storage and status types those queries use.
 
 pub mod archive_index;
+pub mod state_store;
+
+pub use state_store::{
+    ActorLastTransition, ActorRecord, ActorState, ActorTransitionStatus, DispatchAttemptStatus,
+    ProjectionDiagnosticStatus, SessionOperatorStatus, SupervisorLeaseStatus,
+};

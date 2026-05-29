@@ -85,6 +85,7 @@ dependencies = [
  "alacritty_terminal",
  "anyhow",
  "clap",
+ "filetime",
  "fs2",
  "hex",
  "htmd",

@@ -31,7 +31,6 @@
 //! - `record_session_start_persists_authoritative_record`
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,62 +51,12 @@ pub struct OwnershipTransitionEvent<'a> {
     pub new_window: Option<&'a str>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ActorState {
-    Starting,
-    Ready,
-    Busy,
-    WaitingInput,
-    Closed,
-    Blocked,
-}
-
-impl ActorState {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Starting => "starting",
-            Self::Ready => "ready",
-            Self::Busy => "busy",
-            Self::WaitingInput => "waiting_input",
-            Self::Closed => "closed",
-            Self::Blocked => "blocked",
-        }
-    }
-
-    pub fn parse(raw: &str) -> Option<Self> {
-        match raw {
-            "starting" => Some(Self::Starting),
-            "ready" => Some(Self::Ready),
-            "busy" => Some(Self::Busy),
-            "waiting_input" => Some(Self::WaitingInput),
-            "closed" => Some(Self::Closed),
-            "blocked" => Some(Self::Blocked),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ActorLastTransition {
-    pub caller: String,
-    pub reason: String,
-    pub timestamp: u64,
-    pub prior_generation: u64,
-    pub new_generation: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ActorRecord {
-    pub document_id: String,
-    pub session_id: String,
-    pub generation: u64,
-    pub pane_id: String,
-    pub window_id: String,
-    pub harness: String,
-    pub state: ActorState,
-    pub last_transition: ActorLastTransition,
-}
+// The durable storage types live in `agent-doc-sqlite` (the only crate that
+// links the bundled SQLite C build). They are re-exported here so every
+// existing `crate::session_actor::{ActorState, ActorRecord, ActorLastTransition}`
+// call site stays unchanged. `OwnershipGeneration`, `OwnershipTransitionEvent`,
+// and the lifecycle logic below operate on these re-exported types.
+pub use agent_doc_sqlite::state_store::{ActorLastTransition, ActorRecord, ActorState};
 
 type ActorStore = std::collections::BTreeMap<String, ActorRecord>;
 

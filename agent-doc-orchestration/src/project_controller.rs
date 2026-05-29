@@ -4,15 +4,30 @@
 //! generation changes, lifecycle reports, and routed dispatch acceptance.
 //! `sessions.json` and tmux state remain projections and layout inputs.
 
+use agent_doc_sqlite::state_store;
 use anyhow::{Context, Result};
 use fs2::FileExt;
 use interprocess::local_socket::{
     GenericFilePath, ListenerNonblockingMode, ListenerOptions, ToFsName,
     traits::{Listener as _, Stream as _},
 };
-use rusqlite::{Connection, OptionalExtension, params};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+
+// The SQLite state layer (the only `rusqlite::Connection` surface) lives in
+// `agent-doc-sqlite::state_store`. The status types are re-exported here so the
+// IPC/serde call sites that name `project_controller::SessionOperatorStatus`,
+// etc. stay unchanged, and the helpers used by the SQL-glue functions below are
+// imported by their original names.
+pub use state_store::{
+    ActorTransitionStatus, DispatchAttemptStatus, ProjectionDiagnosticStatus,
+    SessionOperatorStatus, SupervisorLeaseStatus, state_db_path,
+};
+use state_store::{
+    Connection, insert_projection_diagnostic, load_actor_record_from_db, load_actor_store_from_db,
+    load_layout_state_from_db, load_session_operator_status_from_db, load_supervisor_lease_from_db,
+    open_state_db, store_layout_state_in_db, timestamp_secs,
+};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::{OsStr, OsString};
 use std::fs::{File, OpenOptions};
@@ -27,7 +42,6 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const SOCKET_FILE: &str = "controller.sock";
 const STATE_FILE: &str = "controller-state.json";
-const STATE_DB_FILE: &str = "state.db";
 const ACTOR_PROJECTION_FILE: &str = "session-actors.json";
 const LAYOUT_PROJECTION_FILE: &str = "last_layout.json";
 const DEFAULT_LAYOUT_SCOPE: &str = "default";
@@ -206,53 +220,11 @@ pub struct DispatchAuthorization {
     pub accepted_stage: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ActorTransitionStatus {
-    pub prior_generation: u64,
-    pub new_generation: u64,
-    pub caller: String,
-    pub reason: String,
-    pub old_pane: Option<String>,
-    pub new_pane: String,
-    pub old_window: Option<String>,
-    pub new_window: Option<String>,
-    pub timestamp: u64,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SupervisorLeaseStatus {
-    pub generation: u64,
-    pub supervisor_pid: Option<u32>,
-    pub supervisor_socket: Option<String>,
-    pub last_heartbeat: Option<u64>,
-    pub runtime_state: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DispatchAttemptStatus {
-    pub generation: u64,
-    pub command_kind: String,
-    pub accepted_stage: Option<String>,
-    pub failed_stage: Option<String>,
-    pub diagnostic_payload: Option<String>,
-    pub timestamp: u64,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProjectionDiagnosticStatus {
-    pub projection: String,
-    pub message: String,
-    pub timestamp: u64,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SessionOperatorStatus {
-    pub record: Option<crate::session_actor::ActorRecord>,
-    pub transitions: Vec<ActorTransitionStatus>,
-    pub supervisor_lease: Option<SupervisorLeaseStatus>,
-    pub dispatch_attempts: Vec<DispatchAttemptStatus>,
-    pub projection_diagnostics: Vec<ProjectionDiagnosticStatus>,
-}
+// `ActorTransitionStatus`, `SupervisorLeaseStatus`, `DispatchAttemptStatus`,
+// `ProjectionDiagnosticStatus`, and `SessionOperatorStatus` now live in
+// `agent-doc-sqlite::state_store` (they depend on the storage types stored
+// there) and are re-exported at the top of this module so the IPC/serde call
+// sites stay unchanged.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -328,10 +300,6 @@ pub fn socket_path(project_root: &Path) -> PathBuf {
 
 pub fn state_path(project_root: &Path) -> PathBuf {
     project_root.join(".agent-doc").join(STATE_FILE)
-}
-
-pub fn state_db_path(project_root: &Path) -> PathBuf {
-    project_root.join(".agent-doc").join(STATE_DB_FILE)
 }
 
 fn actor_projection_path(project_root: &Path) -> PathBuf {
@@ -499,335 +467,26 @@ fn write_bootstrap_state(bootstrap: &ControllerBootstrap) -> Result<()> {
     Ok(())
 }
 
-fn open_state_db(project_root: &Path) -> Result<Connection> {
-    let path = state_db_path(project_root);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let conn =
-        Connection::open(&path).with_context(|| format!("failed to open {}", path.display()))?;
-    initialize_state_db(&conn)?;
-    Ok(conn)
-}
+// The SQLite connection layer (`open_state_db`, `initialize_state_db`,
+// `sqlite_i64`/`sqlite_u64`, `timestamp_secs`, `actor_record_from_row`, the
+// `load_*_from_db` readers, `insert_actor_transition`, `upsert_actor_document`,
+// `insert_projection_diagnostic`, and the layout-state helpers) now lives in
+// `agent-doc-sqlite::state_store` and is imported at the top of this module.
+// The functions below remain in orchestration because they stitch the SQL
+// primitives together with ops-log, projection, and bootstrap glue.
 
-fn initialize_state_db(conn: &Connection) -> Result<()> {
-    conn.execute_batch(
-        r#"
-        PRAGMA foreign_keys = ON;
-
-        CREATE TABLE IF NOT EXISTS documents (
-            document_id TEXT PRIMARY KEY,
-            canonical_path TEXT NOT NULL,
-            session_id TEXT NOT NULL,
-            generation INTEGER NOT NULL,
-            pane_id TEXT NOT NULL,
-            window_id TEXT NOT NULL,
-            harness_id TEXT NOT NULL,
-            actor_state TEXT NOT NULL,
-            launch_mode TEXT,
-            controller_epoch INTEGER,
-            last_transition_id INTEGER
-        );
-
-        CREATE TABLE IF NOT EXISTS actor_transitions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            document_id TEXT NOT NULL,
-            prior_generation INTEGER NOT NULL,
-            new_generation INTEGER NOT NULL,
-            caller TEXT NOT NULL,
-            reason TEXT NOT NULL,
-            old_pane TEXT,
-            new_pane TEXT NOT NULL,
-            old_window TEXT,
-            new_window TEXT,
-            timestamp INTEGER NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS supervisor_leases (
-            document_id TEXT NOT NULL,
-            generation INTEGER NOT NULL,
-            supervisor_pid INTEGER,
-            supervisor_socket TEXT,
-            last_heartbeat INTEGER,
-            runtime_state TEXT,
-            PRIMARY KEY (document_id, generation)
-        );
-
-        CREATE TABLE IF NOT EXISTS dispatch_attempts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            document_id TEXT NOT NULL,
-            generation INTEGER NOT NULL,
-            command_kind TEXT NOT NULL,
-            accepted_stage TEXT,
-            failed_stage TEXT,
-            diagnostic_payload TEXT,
-            timestamp INTEGER NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS projection_diagnostics (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            projection TEXT NOT NULL,
-            document_id TEXT NOT NULL,
-            message TEXT NOT NULL,
-            timestamp INTEGER NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS layout_states (
-            scope TEXT PRIMARY KEY,
-            columns_json TEXT NOT NULL,
-            updated_at INTEGER NOT NULL
-        );
-        "#,
-    )?;
-    Ok(())
-}
-
-fn sqlite_i64(value: u64, name: &str) -> Result<i64> {
-    i64::try_from(value).with_context(|| format!("{name} is too large for sqlite INTEGER"))
-}
-
-fn sqlite_u64(value: i64, name: &str) -> Result<u64> {
-    u64::try_from(value).with_context(|| format!("{name} is negative in sqlite state"))
-}
-
-fn timestamp_secs() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-}
-
-fn actor_record_from_row(
-    row: &rusqlite::Row<'_>,
-) -> rusqlite::Result<crate::session_actor::ActorRecord> {
-    let actor_state: String = row.get("actor_state")?;
-    let state = crate::session_actor::ActorState::parse(&actor_state)
-        .ok_or_else(|| rusqlite::Error::InvalidQuery)?;
-    let generation: i64 = row.get("generation")?;
-    let transition_prior: i64 = row.get("prior_generation")?;
-    let transition_new: i64 = row.get("new_generation")?;
-    let transition_timestamp: i64 = row.get("timestamp")?;
-    Ok(crate::session_actor::ActorRecord {
-        document_id: row.get("document_id")?,
-        session_id: row.get("session_id")?,
-        generation: sqlite_u64(generation, "generation")
-            .map_err(|_| rusqlite::Error::InvalidQuery)?,
-        pane_id: row.get("pane_id")?,
-        window_id: row.get("window_id")?,
-        harness: row.get("harness_id")?,
-        state,
-        last_transition: crate::session_actor::ActorLastTransition {
-            caller: row.get("caller")?,
-            reason: row.get("reason")?,
-            timestamp: sqlite_u64(transition_timestamp, "transition timestamp")
-                .map_err(|_| rusqlite::Error::InvalidQuery)?,
-            prior_generation: sqlite_u64(transition_prior, "transition prior_generation")
-                .map_err(|_| rusqlite::Error::InvalidQuery)?,
-            new_generation: sqlite_u64(transition_new, "transition new_generation")
-                .map_err(|_| rusqlite::Error::InvalidQuery)?,
-        },
-    })
-}
-
-fn load_actor_record_from_db(
-    conn: &Connection,
-    document_id: &str,
-) -> Result<Option<crate::session_actor::ActorRecord>> {
-    conn.query_row(
-        r#"
-        SELECT
-            d.document_id,
-            d.session_id,
-            d.generation,
-            d.pane_id,
-            d.window_id,
-            d.harness_id,
-            d.actor_state,
-            t.caller,
-            t.reason,
-            t.timestamp,
-            t.prior_generation,
-            t.new_generation
-        FROM documents d
-        JOIN actor_transitions t ON t.id = d.last_transition_id
-        WHERE d.document_id = ?1
-        "#,
-        params![document_id],
-        actor_record_from_row,
-    )
-    .optional()
-    .context("failed to load actor record from controller state")
-}
-
-fn load_actor_transitions_from_db(
-    conn: &Connection,
-    document_id: &str,
-) -> Result<Vec<ActorTransitionStatus>> {
-    let mut stmt = conn.prepare(
-        r#"
-        SELECT
-            prior_generation,
-            new_generation,
-            caller,
-            reason,
-            old_pane,
-            new_pane,
-            old_window,
-            new_window,
-            timestamp
-        FROM actor_transitions
-        WHERE document_id = ?1
-        ORDER BY id
-        "#,
-    )?;
-    let mut transitions = Vec::new();
-    for row in stmt.query_map(params![document_id], |row| {
-        let prior_generation: i64 = row.get("prior_generation")?;
-        let new_generation: i64 = row.get("new_generation")?;
-        let timestamp: i64 = row.get("timestamp")?;
-        Ok(ActorTransitionStatus {
-            prior_generation: sqlite_u64(prior_generation, "transition prior_generation")
-                .map_err(|_| rusqlite::Error::InvalidQuery)?,
-            new_generation: sqlite_u64(new_generation, "transition new_generation")
-                .map_err(|_| rusqlite::Error::InvalidQuery)?,
-            caller: row.get("caller")?,
-            reason: row.get("reason")?,
-            old_pane: row.get("old_pane")?,
-            new_pane: row.get("new_pane")?,
-            old_window: row.get("old_window")?,
-            new_window: row.get("new_window")?,
-            timestamp: sqlite_u64(timestamp, "transition timestamp")
-                .map_err(|_| rusqlite::Error::InvalidQuery)?,
-        })
-    })? {
-        transitions.push(row?);
-    }
-    Ok(transitions)
-}
-
-fn load_supervisor_lease_from_db(
-    conn: &Connection,
-    document_id: &str,
-    generation: u64,
-) -> Result<Option<SupervisorLeaseStatus>> {
-    conn.query_row(
-        r#"
-        SELECT
-            generation,
-            supervisor_pid,
-            supervisor_socket,
-            last_heartbeat,
-            runtime_state
-        FROM supervisor_leases
-        WHERE document_id = ?1 AND generation = ?2
-        "#,
-        params![document_id, sqlite_i64(generation, "generation")?],
-        |row| {
-            let generation: i64 = row.get("generation")?;
-            let supervisor_pid: Option<i64> = row.get("supervisor_pid")?;
-            let last_heartbeat: Option<i64> = row.get("last_heartbeat")?;
-            Ok(SupervisorLeaseStatus {
-                generation: sqlite_u64(generation, "supervisor lease generation")
-                    .map_err(|_| rusqlite::Error::InvalidQuery)?,
-                supervisor_pid: supervisor_pid.and_then(|pid| u32::try_from(pid).ok()),
-                supervisor_socket: row.get("supervisor_socket")?,
-                last_heartbeat: last_heartbeat
-                    .map(|value| sqlite_u64(value, "supervisor last heartbeat"))
-                    .transpose()
-                    .map_err(|_| rusqlite::Error::InvalidQuery)?,
-                runtime_state: row.get("runtime_state")?,
-            })
-        },
-    )
-    .optional()
-    .context("failed to load supervisor lease from controller state")
-}
-
-fn load_dispatch_attempts_from_db(
-    conn: &Connection,
-    document_id: &str,
-) -> Result<Vec<DispatchAttemptStatus>> {
-    let mut stmt = conn.prepare(
-        r#"
-        SELECT
-            generation,
-            command_kind,
-            accepted_stage,
-            failed_stage,
-            diagnostic_payload,
-            timestamp
-        FROM dispatch_attempts
-        WHERE document_id = ?1
-        ORDER BY id DESC
-        LIMIT 10
-        "#,
-    )?;
-    let mut attempts = Vec::new();
-    for row in stmt.query_map(params![document_id], |row| {
-        let generation: i64 = row.get("generation")?;
-        let timestamp: i64 = row.get("timestamp")?;
-        Ok(DispatchAttemptStatus {
-            generation: sqlite_u64(generation, "dispatch generation")
-                .map_err(|_| rusqlite::Error::InvalidQuery)?,
-            command_kind: row.get("command_kind")?,
-            accepted_stage: row.get("accepted_stage")?,
-            failed_stage: row.get("failed_stage")?,
-            diagnostic_payload: row.get("diagnostic_payload")?,
-            timestamp: sqlite_u64(timestamp, "dispatch timestamp")
-                .map_err(|_| rusqlite::Error::InvalidQuery)?,
-        })
-    })? {
-        attempts.push(row?);
-    }
-    attempts.reverse();
-    Ok(attempts)
-}
-
-fn load_projection_diagnostics_from_db(
-    conn: &Connection,
-    document_id: &str,
-) -> Result<Vec<ProjectionDiagnosticStatus>> {
-    let mut stmt = conn.prepare(
-        r#"
-        SELECT projection, message, timestamp
-        FROM projection_diagnostics
-        WHERE document_id = ?1
-        ORDER BY id DESC
-        LIMIT 10
-        "#,
-    )?;
-    let mut diagnostics = Vec::new();
-    for row in stmt.query_map(params![document_id], |row| {
-        let timestamp: i64 = row.get("timestamp")?;
-        Ok(ProjectionDiagnosticStatus {
-            projection: row.get("projection")?,
-            message: row.get("message")?,
-            timestamp: sqlite_u64(timestamp, "projection diagnostic timestamp")
-                .map_err(|_| rusqlite::Error::InvalidQuery)?,
-        })
-    })? {
-        diagnostics.push(row?);
-    }
-    diagnostics.reverse();
-    Ok(diagnostics)
-}
-
-fn load_session_operator_status_from_db(
-    conn: &Connection,
-    document_id: &str,
-) -> Result<SessionOperatorStatus> {
-    let record = load_actor_record_from_db(conn, document_id)?;
-    let supervisor_lease = match &record {
-        Some(record) => load_supervisor_lease_from_db(conn, document_id, record.generation)?,
-        None => None,
-    };
-    Ok(SessionOperatorStatus {
-        record,
-        transitions: load_actor_transitions_from_db(conn, document_id)?,
-        supervisor_lease,
-        dispatch_attempts: load_dispatch_attempts_from_db(conn, document_id)?,
-        projection_diagnostics: load_projection_diagnostics_from_db(conn, document_id)?,
-    })
+/// Compute the lifted bootstrap tendril for `upsert_actor_document`:
+/// `(launch_mode_short_string, controller_epoch)` derived from `read_bootstrap`.
+fn actor_document_bootstrap_columns(project_root: &Path) -> Result<(Option<String>, Option<i64>)> {
+    let bootstrap = read_bootstrap(project_root).ok().flatten();
+    let launch_mode = bootstrap
+        .as_ref()
+        .map(|state| state.launch_mode.as_str().to_string());
+    let controller_epoch = bootstrap
+        .as_ref()
+        .map(|state| state_store::sqlite_i64(state.bootstrap_epoch, "bootstrap_epoch"))
+        .transpose()?;
+    Ok((launch_mode, controller_epoch))
 }
 
 fn legacy_actor_projection(
@@ -842,115 +501,21 @@ fn legacy_actor_projection(
     Ok(Some(store))
 }
 
+/// Migrate a legacy `session-actors.json` projection into empty sqlite state.
+///
+/// Glue: the count gate and JSON load stay in orchestration (the `.json`
+/// read goes through `crate::fs_util`); the actual transition+document
+/// transaction lives in `state_store`, fed the lifted `read_bootstrap`
+/// `launch_mode`/`controller_epoch` tendril.
 fn migrate_legacy_actor_projection(project_root: &Path, conn: &mut Connection) -> Result<()> {
-    let count: i64 = conn.query_row("SELECT COUNT(*) FROM documents", [], |row| row.get(0))?;
-    if count > 0 {
+    if !state_store::actor_documents_empty(conn)? {
         return Ok(());
     }
     let Some(store) = legacy_actor_projection(project_root)? else {
         return Ok(());
     };
-    let tx = conn.transaction()?;
-    for record in store.values() {
-        let transition_id = insert_actor_transition(&tx, None, record)?;
-        upsert_actor_document(project_root, &tx, record, transition_id)?;
-    }
-    tx.commit()?;
-    Ok(())
-}
-
-fn insert_actor_transition(
-    conn: &Connection,
-    previous: Option<&crate::session_actor::ActorRecord>,
-    record: &crate::session_actor::ActorRecord,
-) -> Result<i64> {
-    conn.execute(
-        r#"
-        INSERT INTO actor_transitions (
-            document_id,
-            prior_generation,
-            new_generation,
-            caller,
-            reason,
-            old_pane,
-            new_pane,
-            old_window,
-            new_window,
-            timestamp
-        )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
-        "#,
-        params![
-            record.document_id,
-            sqlite_i64(record.last_transition.prior_generation, "prior_generation")?,
-            sqlite_i64(record.last_transition.new_generation, "new_generation")?,
-            record.last_transition.caller,
-            record.last_transition.reason,
-            previous.map(|prior| prior.pane_id.as_str()),
-            record.pane_id,
-            previous.map(|prior| prior.window_id.as_str()),
-            record.window_id,
-            sqlite_i64(record.last_transition.timestamp, "transition timestamp")?,
-        ],
-    )?;
-    Ok(conn.last_insert_rowid())
-}
-
-fn upsert_actor_document(
-    project_root: &Path,
-    conn: &Connection,
-    record: &crate::session_actor::ActorRecord,
-    transition_id: i64,
-) -> Result<()> {
-    let bootstrap = read_bootstrap(project_root).ok().flatten();
-    conn.execute(
-        r#"
-        INSERT INTO documents (
-            document_id,
-            canonical_path,
-            session_id,
-            generation,
-            pane_id,
-            window_id,
-            harness_id,
-            actor_state,
-            launch_mode,
-            controller_epoch,
-            last_transition_id
-        )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
-        ON CONFLICT(document_id) DO UPDATE SET
-            canonical_path = excluded.canonical_path,
-            session_id = excluded.session_id,
-            generation = excluded.generation,
-            pane_id = excluded.pane_id,
-            window_id = excluded.window_id,
-            harness_id = excluded.harness_id,
-            actor_state = excluded.actor_state,
-            launch_mode = excluded.launch_mode,
-            controller_epoch = excluded.controller_epoch,
-            last_transition_id = excluded.last_transition_id
-        "#,
-        params![
-            record.document_id,
-            record.document_id,
-            record.session_id,
-            sqlite_i64(record.generation, "generation")?,
-            record.pane_id,
-            record.window_id,
-            record.harness,
-            record.state.as_str(),
-            bootstrap
-                .as_ref()
-                .map(|state| state.launch_mode.as_str().to_string()),
-            bootstrap
-                .as_ref()
-                .map(|state| sqlite_i64(state.bootstrap_epoch, "bootstrap_epoch"))
-                .transpose()?,
-            transition_id,
-        ],
-    )?;
-    Ok(())
+    let (launch_mode, controller_epoch) = actor_document_bootstrap_columns(project_root)?;
+    state_store::migrate_actor_store_tx(conn, &store, launch_mode, controller_epoch)
 }
 
 fn upsert_supervisor_lease(
@@ -961,33 +526,13 @@ fn upsert_supervisor_lease(
     runtime_state: &str,
 ) -> Result<()> {
     let conn = open_state_db(project_root)?;
-    conn.execute(
-        r#"
-        INSERT INTO supervisor_leases (
-            document_id,
-            generation,
-            supervisor_pid,
-            supervisor_socket,
-            last_heartbeat,
-            runtime_state
-        )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-        ON CONFLICT(document_id, generation) DO UPDATE SET
-            supervisor_pid = COALESCE(excluded.supervisor_pid, supervisor_leases.supervisor_pid),
-            supervisor_socket = COALESCE(excluded.supervisor_socket, supervisor_leases.supervisor_socket),
-            last_heartbeat = excluded.last_heartbeat,
-            runtime_state = excluded.runtime_state
-        "#,
-        params![
-            record.document_id,
-            sqlite_i64(record.generation, "generation")?,
-            supervisor_pid.map(i64::from),
-            supervisor_socket,
-            sqlite_i64(timestamp_secs(), "supervisor heartbeat timestamp")?,
-            runtime_state,
-        ],
-    )?;
-    Ok(())
+    state_store::upsert_supervisor_lease_in_db(
+        &conn,
+        record,
+        supervisor_pid,
+        supervisor_socket,
+        runtime_state,
+    )
 }
 
 fn insert_dispatch_attempt_record(
@@ -1000,30 +545,15 @@ fn insert_dispatch_attempt_record(
     diagnostic_payload: &str,
 ) -> Result<()> {
     let conn = open_state_db(project_root)?;
-    conn.execute(
-        r#"
-        INSERT INTO dispatch_attempts (
-            document_id,
-            generation,
-            command_kind,
-            accepted_stage,
-            failed_stage,
-            diagnostic_payload,
-            timestamp
-        )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-        "#,
-        params![
-            document_id,
-            sqlite_i64(generation, "generation")?,
-            command_kind,
-            accepted_stage,
-            failed_stage,
-            diagnostic_payload,
-            sqlite_i64(timestamp_secs(), "dispatch attempt timestamp")?,
-        ],
-    )?;
-    Ok(())
+    state_store::insert_dispatch_attempt_in_db(
+        &conn,
+        document_id,
+        generation,
+        command_kind,
+        accepted_stage,
+        failed_stage,
+        diagnostic_payload,
+    )
 }
 
 pub fn load_actor_store(
@@ -1031,32 +561,7 @@ pub fn load_actor_store(
 ) -> Result<BTreeMap<String, crate::session_actor::ActorRecord>> {
     let mut conn = open_state_db(project_root)?;
     migrate_legacy_actor_projection(project_root, &mut conn)?;
-    let mut stmt = conn.prepare(
-        r#"
-        SELECT
-            d.document_id,
-            d.session_id,
-            d.generation,
-            d.pane_id,
-            d.window_id,
-            d.harness_id,
-            d.actor_state,
-            t.caller,
-            t.reason,
-            t.timestamp,
-            t.prior_generation,
-            t.new_generation
-        FROM documents d
-        JOIN actor_transitions t ON t.id = d.last_transition_id
-        ORDER BY d.document_id
-        "#,
-    )?;
-    let mut store = BTreeMap::new();
-    for row in stmt.query_map([], actor_record_from_row)? {
-        let record = row?;
-        store.insert(record.document_id.clone(), record);
-    }
-    Ok(store)
+    load_actor_store_from_db(&conn)
 }
 
 pub fn load_actor_record(
@@ -1075,33 +580,14 @@ pub fn store_actor_record(
 ) -> Result<crate::session_actor::ActorRecord> {
     let mut conn = open_state_db(project_root)?;
     migrate_legacy_actor_projection(project_root, &mut conn)?;
-    let tx = conn.transaction()?;
-    let previous = load_actor_record_from_db(&tx, &record.document_id)?;
-    let prior_generation = previous
-        .as_ref()
-        .map(|prior| prior.generation)
-        .unwrap_or(record.last_transition.prior_generation);
-    if let Some(expected) = expected_prior_generation
-        && prior_generation != expected
-    {
-        anyhow::bail!(
-            "controller actor generation compare-and-swap failed for {}: expected {}, found {}",
-            record.document_id,
-            expected,
-            prior_generation
-        );
-    }
-    if record.generation < prior_generation {
-        anyhow::bail!(
-            "controller actor generation regression for {}: attempted {}, current {}",
-            record.document_id,
-            record.generation,
-            prior_generation
-        );
-    }
-    let transition_id = insert_actor_transition(&tx, previous.as_ref(), record)?;
-    upsert_actor_document(project_root, &tx, record, transition_id)?;
-    tx.commit()?;
+    let (launch_mode, controller_epoch) = actor_document_bootstrap_columns(project_root)?;
+    state_store::store_actor_record_tx(
+        &mut conn,
+        expected_prior_generation,
+        record,
+        launch_mode,
+        controller_epoch,
+    )?;
 
     if let Err(err) = emit_actor_projection(project_root) {
         record_projection_diagnostic(
@@ -1234,69 +720,8 @@ fn emit_actor_projection(project_root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn insert_projection_diagnostic(
-    conn: &Connection,
-    projection: &str,
-    document_id: &str,
-    message: &str,
-) -> Result<()> {
-    conn.execute(
-        r#"
-        INSERT INTO projection_diagnostics (projection, document_id, message, timestamp)
-        VALUES (?1, ?2, ?3, ?4)
-        "#,
-        params![
-            projection,
-            document_id,
-            message,
-            sqlite_i64(timestamp_secs(), "projection diagnostic timestamp")?
-        ],
-    )?;
-    Ok(())
-}
-
-fn load_layout_state_from_db(conn: &Connection, scope: &str) -> Result<Vec<String>> {
-    let raw: Option<String> = conn
-        .query_row(
-            "SELECT columns_json FROM layout_states WHERE scope = ?1",
-            params![scope],
-            |row| row.get(0),
-        )
-        .optional()?;
-    match raw {
-        Some(raw) => serde_json::from_str(&raw).context("failed to parse layout state from sqlite"),
-        None => Ok(Vec::new()),
-    }
-}
-
-fn store_layout_state_in_db(conn: &Connection, scope: &str, columns: &[String]) -> Result<()> {
-    let columns_json = serde_json::to_string(columns)?;
-    conn.execute(
-        r#"
-        INSERT INTO layout_states (scope, columns_json, updated_at)
-        VALUES (?1, ?2, ?3)
-        ON CONFLICT(scope) DO UPDATE SET
-            columns_json = excluded.columns_json,
-            updated_at = excluded.updated_at
-        "#,
-        params![
-            scope,
-            columns_json,
-            sqlite_i64(timestamp_secs(), "layout state timestamp")?
-        ],
-    )?;
-    Ok(())
-}
-
 fn migrate_legacy_layout_projection(project_root: &Path, conn: &Connection) -> Result<()> {
-    let exists: Option<i64> = conn
-        .query_row(
-            "SELECT 1 FROM layout_states WHERE scope = ?1",
-            params![DEFAULT_LAYOUT_SCOPE],
-            |row| row.get(0),
-        )
-        .optional()?;
-    if exists.is_some() {
+    if state_store::layout_scope_exists(conn, DEFAULT_LAYOUT_SCOPE)? {
         return Ok(());
     }
 
@@ -3036,6 +2461,11 @@ pub fn run_shutdown(root: Option<&Path>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // `rusqlite` is a dev-dependency: these tests open the controller state DB
+    // directly to assert the schema/rows the seam writes. `Connection` is the
+    // `state_store` re-export already in scope via `super::*`.
+    use agent_doc_sqlite::state_store::{load_actor_transitions_from_db, sqlite_i64};
+    use rusqlite::params;
     use std::collections::BTreeMap;
 
     #[test]

@@ -193,6 +193,48 @@ pub fn send_patch(
     }
 }
 
+/// Send a queue-tag + frontmatter convergence patch to the plugin.
+///
+/// After queue maintenance halts/drains an auto-queue, the corrected shape is
+/// written to disk + snapshot, but a live route-owned editor buffer keeps its
+/// own working copy and would overwrite that disk write on its next flush —
+/// re-adding `auto` to the `<!-- agent:queue auto -->` opening tag and the
+/// `queue_active:` frontmatter, regenerating the snapshot/HEAD drift loop on
+/// every preflight (`#adoc-queue-ipc-buffer-divergence`). A content-only patch
+/// cannot converge an opening-tag attribute or frontmatter, so this message
+/// carries `queue_auto` (the desired state of the queue tag's `auto` attribute,
+/// applied via the `agent_doc_converge_queue_auto` FFI seam) alongside the
+/// `frontmatter` field (`queue_active: …`, applied via the existing
+/// frontmatter-merge seam). No component patches are sent; component bodies are
+/// converged by the normal disk write + editor reload.
+pub fn send_queue_convergence(
+    project_root: &Path,
+    file: &str,
+    queue_auto: bool,
+    frontmatter_yaml: Option<&str>,
+) -> Result<bool> {
+    let message = serde_json::json!({
+        "type": "patch",
+        "file": file,
+        "patches": [],
+        "unmatched": "",
+        "frontmatter": frontmatter_yaml,
+        "queue_auto": queue_auto,
+    });
+
+    match send_message(project_root, &message) {
+        Ok(Some(ack)) => {
+            eprintln!("[ipc-socket] queue convergence sent, ack: {}", ack);
+            Ok(true)
+        }
+        Ok(None) => {
+            eprintln!("[ipc-socket] queue convergence sent, no ack");
+            Ok(true)
+        }
+        Err(e) => Err(e),
+    }
+}
+
 /// Send a reposition boundary message.
 ///
 /// When `preserve_head` is true, the plugin should use

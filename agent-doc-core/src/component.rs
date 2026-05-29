@@ -358,6 +358,65 @@ impl Component {
     }
 }
 
+/// Converge the `agent:queue` opening-tag `auto` attribute to `want_auto`.
+///
+/// A content patch (the only editor-visible IPC seam for template documents)
+/// replaces a component's *body* between its markers — it cannot add or remove
+/// an attribute on the `<!-- agent:queue auto -->` opening tag. After a queue
+/// halt strips `auto` on disk, a live route-owned editor buffer that still shows
+/// `<!-- agent:queue auto -->` re-diverges from the committed inactive snapshot on
+/// its next flush, regenerating the snapshot/HEAD drift loop on every preflight
+/// (`#adoc-queue-ipc-buffer-divergence`). Editor plugins call this (via the
+/// `agent_doc_converge_queue_auto` FFI export) to converge the live buffer's queue
+/// tag to the committed shape.
+///
+/// Returns `Some(new_doc)` when the tag changed, `None` when there is no `queue`
+/// component or the tag already matches `want_auto`. Other opening-tag attributes
+/// (e.g. `patch=append`) are preserved.
+pub fn converge_queue_auto(doc: &str, want_auto: bool) -> Option<String> {
+    let components = parse(doc).ok()?;
+    let queue = components.iter().find(|c| c.name == "queue")?;
+    let raw_tag = &doc[queue.open_start..queue.open_end];
+    let new_tag = set_auto_in_queue_tag(raw_tag, want_auto);
+    if new_tag == *raw_tag {
+        return None;
+    }
+    let mut result = String::with_capacity(doc.len());
+    result.push_str(&doc[..queue.open_start]);
+    result.push_str(&new_tag);
+    result.push_str(&doc[queue.open_end..]);
+    Some(result)
+}
+
+/// Rebuild an `agent:queue` opening tag with the `auto` attribute present or
+/// absent per `want_auto`, preserving every other token (the `agent:queue` name,
+/// `patch=…`, etc.) and any trailing whitespace/newline after `-->`.
+fn set_auto_in_queue_tag(tag: &str, want_auto: bool) -> String {
+    let Some(close_idx) = tag.find("-->") else {
+        return tag.to_string();
+    };
+    let core = &tag[..close_idx + 3];
+    let tail = &tag[close_idx + 3..];
+    let inner = core
+        .trim_start_matches("<!--")
+        .trim_end_matches("-->")
+        .trim();
+    let mut tokens: Vec<&str> = inner.split_whitespace().collect();
+    let has_auto = tokens.contains(&"auto");
+    if want_auto == has_auto {
+        return tag.to_string();
+    }
+    if want_auto {
+        // Insert `auto` right after the `agent:queue` name token so it stays the
+        // first attribute (matches how route/queue activation writes the tag).
+        let insert_at = if tokens.is_empty() { 0 } else { 1 };
+        tokens.insert(insert_at, "auto");
+    } else {
+        tokens.retain(|t| *t != "auto");
+    }
+    format!("<!-- {} -->{}", tokens.join(" "), tail)
+}
+
 /// Valid name: `[a-zA-Z0-9][a-zA-Z0-9-]*`
 fn is_valid_name(name: &str) -> bool {
     if name.is_empty() {
@@ -1702,5 +1761,49 @@ Fix applied to skip non-agent <!-- sequences.
         let doc = "<!-- agent:backlog -->\n- item\n<!-- /agent:backlog -->\n";
         let result = strip_backlog_patch_attr(doc);
         assert_eq!(result, doc);
+    }
+
+    #[test]
+    fn converge_queue_auto_strips_auto() {
+        let doc = "<!-- agent:queue auto -->\n- do [#x]\n<!-- /agent:queue -->\n";
+        let result = converge_queue_auto(doc, false).expect("tag changed");
+        assert_eq!(
+            result,
+            "<!-- agent:queue -->\n- do [#x]\n<!-- /agent:queue -->\n"
+        );
+    }
+
+    #[test]
+    fn converge_queue_auto_adds_auto() {
+        let doc = "<!-- agent:queue -->\n- do [#x]\n<!-- /agent:queue -->\n";
+        let result = converge_queue_auto(doc, true).expect("tag changed");
+        assert_eq!(
+            result,
+            "<!-- agent:queue auto -->\n- do [#x]\n<!-- /agent:queue -->\n"
+        );
+    }
+
+    #[test]
+    fn converge_queue_auto_preserves_other_attrs() {
+        let doc = "<!-- agent:queue auto patch=append -->\n- do [#x]\n<!-- /agent:queue -->\n";
+        let result = converge_queue_auto(doc, false).expect("tag changed");
+        assert_eq!(
+            result,
+            "<!-- agent:queue patch=append -->\n- do [#x]\n<!-- /agent:queue -->\n"
+        );
+    }
+
+    #[test]
+    fn converge_queue_auto_noop_when_already_matching() {
+        let active = "<!-- agent:queue auto -->\n- do [#x]\n<!-- /agent:queue -->\n";
+        assert_eq!(converge_queue_auto(active, true), None);
+        let inactive = "<!-- agent:queue -->\n- do [#x]\n<!-- /agent:queue -->\n";
+        assert_eq!(converge_queue_auto(inactive, false), None);
+    }
+
+    #[test]
+    fn converge_queue_auto_none_without_queue_component() {
+        let doc = "<!-- agent:exchange -->\nhi\n<!-- /agent:exchange -->\n";
+        assert_eq!(converge_queue_auto(doc, false), None);
     }
 }

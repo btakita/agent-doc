@@ -276,6 +276,40 @@ pub unsafe extern "C" fn agent_doc_merge_frontmatter(
     }
 }
 
+/// Converge the `agent:queue` opening-tag `auto` attribute to `want_auto`.
+///
+/// A content patch replaces only a component's body, so it cannot add or remove
+/// the `auto` attribute on the `<!-- agent:queue auto -->` opening tag. Editor
+/// plugins call this to converge a live route-owned buffer's queue tag to the
+/// committed inactive shape after a queue halt (`#adoc-queue-ipc-buffer-divergence`),
+/// pairing with the `queue_active` frontmatter merge that the same convergence
+/// patch carries. Returns the (possibly unchanged) document via [`FfiPatchResult`];
+/// an absent `queue` component or an already-converged tag returns the input
+/// unchanged so the editor's normal no-op path applies.
+///
+/// `want_auto` is a C int (nonzero = ensure `auto`, zero = strip `auto`) rather
+/// than a C `bool` so the JNA/FFI boundary stays on the reliable 32-bit-int ABI.
+///
+/// # Safety
+///
+/// `doc` must be a valid, NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_converge_queue_auto(
+    doc: *const c_char,
+    want_auto: std::os::raw::c_int,
+) -> FfiPatchResult {
+    let doc_str = match unsafe { CStr::from_ptr(doc) }.to_str() {
+        Ok(s) => s,
+        Err(e) => return ffi_patch_err(&format!("invalid doc UTF-8: {e}")),
+    };
+    let converged = component::converge_queue_auto(doc_str, want_auto != 0)
+        .unwrap_or_else(|| doc_str.to_string());
+    FfiPatchResult {
+        text: CString::new(converged).unwrap_or_default().into_raw(),
+        error: ptr::null_mut(),
+    }
+}
+
 /// Normalize/fail-close template structure before editor-visible IPC writes.
 ///
 /// Safe duplicate scaffold shells are repaired. Ambiguous duplicate scaffold

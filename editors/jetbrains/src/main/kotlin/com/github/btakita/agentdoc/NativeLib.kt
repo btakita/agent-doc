@@ -97,6 +97,17 @@ interface AgentDocLib : Library {
     ): FfiPatchResult.ByValue
 
     /**
+     * Converge the `agent:queue` opening-tag `auto` attribute.
+     * `want_auto` is a C int (nonzero = ensure `auto`, zero = strip `auto`); a
+     * content patch cannot change an opening-tag attribute, so this is the
+     * convergence seam for #adoc-queue-ipc-buffer-divergence.
+     */
+    fun agent_doc_converge_queue_auto(
+        doc: String,
+        want_auto: Int,
+    ): FfiPatchResult.ByValue
+
+    /**
      * Reposition boundary marker to end of exchange component.
      * Removes all stale boundaries and inserts a single fresh 8-char one.
      * Strips transient (HEAD) markers.
@@ -676,6 +687,29 @@ object NativePatching {
             if (result.text == null) return null
             val text = result.text!!.getString(0)
             return text
+        } finally {
+            lib.agent_doc_free_string(result.text)
+        }
+    }
+
+    /**
+     * Converge the `agent:queue` opening-tag `auto` attribute to [wantAuto] using
+     * the native library. Returns the updated document (unchanged if there is no
+     * queue component or the tag already matches), or null if FFI is
+     * unavailable/errors. See #adoc-queue-ipc-buffer-divergence.
+     */
+    fun convergeQueueAuto(doc: String, wantAuto: Boolean): String? {
+        val lib = AgentDocLib.get() ?: return null
+        val result = lib.agent_doc_converge_queue_auto(doc, if (wantAuto) 1 else 0)
+        try {
+            if (result.error != null) {
+                val error = result.error!!.getString(0)
+                LOG.warn("[native] converge_queue_auto error: $error")
+                lib.agent_doc_free_string(result.error)
+                return null
+            }
+            if (result.text == null) return null
+            return result.text!!.getString(0)
         } finally {
             lib.agent_doc_free_string(result.text)
         }

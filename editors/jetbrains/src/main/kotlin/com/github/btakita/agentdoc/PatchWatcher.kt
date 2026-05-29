@@ -748,6 +748,14 @@ class PatchWatcher(private val project: Project) : Disposable {
                 ?: applyFrontmatterPatchKotlin(result, patch.frontmatter)
         }
 
+        // Converge the queue opening-tag `auto` attribute if requested. A content
+        // patch cannot change an opening-tag attribute, so this is the only seam
+        // that converges a live buffer's queue tag after a halt
+        // (#adoc-queue-ipc-buffer-divergence).
+        if (patch.queueAuto != null) {
+            result = NativePatching.convergeQueueAuto(result, patch.queueAuto) ?: result
+        }
+
         for (p in patch.patches) {
             val effectiveBoundaryId = if (p.ensureBoundary && p.boundaryId == null) {
                 findBoundaryInComponent(result, p.component)
@@ -930,6 +938,12 @@ class PatchWatcher(private val project: Project) : Disposable {
             if (!patch.frontmatter.isNullOrBlank()) {
                 result = NativePatching.mergeFrontmatter(result, patch.frontmatter)
                     ?: applyFrontmatterPatchKotlin(result, patch.frontmatter)
+            }
+
+            // Converge the queue opening-tag `auto` attribute if requested
+            // (#adoc-queue-ipc-buffer-divergence).
+            if (patch.queueAuto != null) {
+                result = NativePatching.convergeQueueAuto(result, patch.queueAuto) ?: result
             }
 
             for (p in patch.patches) {
@@ -1404,6 +1418,14 @@ data class IpcPatch(
     /** Historical source-buffer proof for disabled fullContent payloads. */
     val expectedContentHash: String? = null,
     val expectedContentLen: Int? = null,
+    /**
+     * Desired state of the `agent:queue` opening-tag `auto` attribute for queue
+     * convergence patches (`#adoc-queue-ipc-buffer-divergence`). `null` means the
+     * patch does not converge the queue tag; `true`/`false` converge the live
+     * buffer's tag via the `agent_doc_converge_queue_auto` FFI seam — a content
+     * patch alone cannot add/remove an opening-tag attribute.
+     */
+    val queueAuto: Boolean? = null,
 )
 
 data class ComponentPatch(
@@ -1889,6 +1911,7 @@ fun parsePatchJson(json: String): IpcPatch? {
         val patchId = root.get("patch_id")?.asString
         val expectedContentHash = root.get("expected_content_hash")?.asString
         val expectedContentLen = root.get("expected_content_len")?.asInt
+        val queueAuto = root.get("queue_auto")?.let { if (it.isJsonNull) null else it.asBoolean }
         return IpcPatch(
             file,
             patches,
@@ -1902,6 +1925,7 @@ fun parsePatchJson(json: String): IpcPatch? {
             patchId,
             expectedContentHash,
             expectedContentLen,
+            queueAuto,
         )
     } catch (e: Exception) {
         return null

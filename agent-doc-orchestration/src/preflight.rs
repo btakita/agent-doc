@@ -2817,6 +2817,7 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
             // Persist to file + snapshot
             std::fs::write(file, &current_content)
                 .with_context(|| format!("queue halt: failed to write {}", file.display()))?;
+            converge_live_buffer_queue_shape(file, &current_content, project_root.as_deref());
             if let Ok(Some(snap)) = snapshot::load(file) {
                 let mut new_snap = snap.clone();
                 if let Ok(sc) = crate::component::parse(&new_snap)
@@ -2912,6 +2913,7 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
                 }
                 std::fs::write(file, &current_content)
                     .with_context(|| format!("queue halt: failed to write {}", file.display()))?;
+                converge_live_buffer_queue_shape(file, &current_content, project_root.as_deref());
                 // Update snapshot
                 if let Ok(Some(snap2)) = snapshot::load(file) {
                     let mut ns = snap2.clone();
@@ -3038,6 +3040,7 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
     if mutated {
         std::fs::write(file, &current_content)
             .with_context(|| format!("failed to write queue updates to {}", file.display()))?;
+        converge_live_buffer_queue_shape(file, &current_content, project_root.as_deref());
     }
 
     // Persist snapshot mutations. For newly activated queues, sync the queue
@@ -3149,6 +3152,58 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
         queue_halted: None,
         warnings: queue_warnings,
     })
+}
+
+/// Converge a live route-owned editor buffer to the queue shape just written to
+/// `file` by queue maintenance.
+///
+/// Queue maintenance writes the corrected queue body, opening-tag `auto`
+/// attribute, and `queue_active:` frontmatter to disk + snapshot. When a live
+/// IPC listener owns the document it keeps its own working buffer; without this
+/// push it overwrites the disk write on its next flush — re-adding `auto` and
+/// `queue_active: true` — and the snapshot/HEAD drift regenerates on every
+/// preflight (`#adoc-queue-ipc-buffer-divergence`). A content-only IPC patch
+/// cannot converge an opening-tag attribute or frontmatter, so we send the
+/// dedicated convergence message carrying the desired `auto` state plus the
+/// `queue_active` frontmatter. Best-effort: a missing listener or send failure
+/// is logged, never fatal — the disk/snapshot write remains the source of truth.
+fn converge_live_buffer_queue_shape(file: &Path, content: &str, project_root: Option<&Path>) {
+    let Some(root) = project_root else {
+        return;
+    };
+    if !crate::ipc_socket::is_listener_active(root) {
+        return;
+    }
+    let want_auto = match crate::component::parse(content) {
+        Ok(comps) => comps
+            .iter()
+            .find(|c| c.name == "queue")
+            .map(|q| crate::queue::has_auto_attr(&q.attrs))
+            .unwrap_or(false),
+        Err(e) => {
+            eprintln!("[preflight] queue: live convergence skipped — component parse failed: {e}");
+            return;
+        }
+    };
+    let queue_active = frontmatter::parse(content)
+        .ok()
+        .and_then(|(fm, _)| fm.queue_active)
+        .unwrap_or(false);
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let fm_yaml = format!("queue_active: {queue_active}");
+    match crate::ipc_socket::send_queue_convergence(
+        root,
+        &canonical.to_string_lossy(),
+        want_auto,
+        Some(&fm_yaml),
+    ) {
+        Ok(_) => eprintln!(
+            "[preflight] queue: converged live editor buffer (auto={want_auto}, queue_active={queue_active})"
+        ),
+        Err(e) => {
+            eprintln!("[preflight] queue: live buffer convergence send failed (non-fatal): {e}")
+        }
+    }
 }
 
 /// True when the current inactive-queue entry set differs from the queue body
@@ -4533,6 +4588,106 @@ mod tests {
         let consumed = std::fs::read_to_string(&doc).unwrap();
         assert!(consumed.contains("- ~do [#newhead]~"));
         assert!(consumed.contains("- do [#nexthead]"));
+    }
+
+    #[test]
+    fn queue_maintenance_converges_live_ipc_buffer_on_item_modified_halt() {
+        // SimWorld repro for #adoc-queue-ipc-buffer-divergence (root cause #2):
+        // a live route-owned IPC listener owns the document. When an
+        // already-active auto-queue's head prompt changes between cycles, queue
+        // maintenance halts (item_modified), strips `auto`, and clears
+        // `queue_active` on disk + snapshot. Without convergence the live editor
+        // buffer would re-add `auto`/`queue_active: true` on its next flush and
+        // the snapshot/HEAD drift loop regenerates every preflight. This test
+        // proves maintenance pushes a queue-tag + frontmatter convergence message
+        // to the listener, and that a follow-up maintenance pass is idempotent
+        // (no second divergence, no second convergence send).
+        use std::sync::{Arc, Mutex};
+
+        let dir = setup_project();
+        let root = dir.path().canonicalize().unwrap();
+        let doc = root.join("session.md");
+
+        let received: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let received_clone = received.clone();
+        let listener_root = root.clone();
+        let server = std::thread::spawn(move || {
+            crate::ipc_socket::start_listener(&listener_root, move |msg| {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(msg) {
+                    received_clone.lock().unwrap().push(v);
+                }
+                Some(serde_json::json!({"type": "ack", "status": "ok"}).to_string())
+            })
+            .ok();
+        });
+        std::thread::sleep(std::time::Duration::from_millis(150));
+
+        let snapshot_content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#oldhead]\n",
+            "- do [#nexthead]\n",
+            "<!-- /agent:queue -->\n"
+        );
+        let current_content = snapshot_content.replace("- do [#oldhead]", "- do [#newhead]");
+        std::fs::write(&doc, &current_content).unwrap();
+        snapshot::save(&doc, snapshot_content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        assert_eq!(state.queue_halted, Some("item_modified".into()));
+        assert_eq!(state.queue_active, Some(false));
+
+        // Disk converged to the inactive shape.
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(updated.contains("<!-- agent:queue -->"));
+        assert!(!updated.contains("agent:queue auto"));
+        assert!(updated.contains("queue_active: false"));
+
+        // Listener received exactly one queue convergence message carrying the
+        // queue-tag + frontmatter shape that a content-only patch cannot deliver.
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        {
+            let msgs = received.lock().unwrap();
+            let convergences: Vec<&serde_json::Value> = msgs
+                .iter()
+                .filter(|m| m.get("queue_auto").is_some())
+                .collect();
+            assert_eq!(
+                convergences.len(),
+                1,
+                "expected exactly one queue convergence message, got: {msgs:?}"
+            );
+            let conv = convergences[0];
+            assert_eq!(conv["queue_auto"], serde_json::json!(false));
+            assert_eq!(conv["frontmatter"], serde_json::json!("queue_active: false"));
+        }
+
+        // Idempotency: a follow-up maintenance pass on the converged document
+        // mutates nothing and sends no further convergence.
+        let state2 = run_queue_maintenance(&doc, None).unwrap();
+        assert_eq!(state2.queue_halted, None);
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        {
+            let msgs = received.lock().unwrap();
+            let convergences = msgs.iter().filter(|m| m.get("queue_auto").is_some()).count();
+            assert_eq!(
+                convergences, 1,
+                "follow-up maintenance must not re-diverge / re-send convergence"
+            );
+        }
+
+        let _ = std::fs::remove_file(crate::ipc_socket::socket_path(&root));
+        drop(server);
     }
 
     #[test]

@@ -6,6 +6,25 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Queue/IPC buffer convergence seam (`#adoc-queue-ipc-buffer-divergence`,
+  root cause #2).** Queue maintenance now converges a live route-owned editor
+  buffer to the committed inactive queue shape after a halt/drain. Previously a
+  content-only IPC patch could not change the `<!-- agent:queue auto -->`
+  opening-tag attribute or the `queue_active:` frontmatter, so a live IDE buffer
+  re-added `auto`/`queue_active: true` on its next flush and the snapshot/HEAD
+  drift loop regenerated on every preflight. New `agent_doc_converge_queue_auto`
+  FFI export (`agent-doc-core`, takes a C int for a stable JNA ABI) rewrites the
+  queue opening-tag attribute; `ipc_socket::send_queue_convergence` carries the
+  desired `queue_auto` state plus the `queue_active` frontmatter; preflight's
+  `run_queue_maintenance` pushes the convergence through the listener after each
+  halt/drain disk write (best-effort, non-fatal). JetBrains `PatchWatcher`
+  parses `queue_auto` and applies it via `NativePatching.convergeQueueAuto` in
+  both the Document-API and VFS apply paths (plugin `0.2.137`). Deterministic
+  SimWorld repro: `queue_maintenance_converges_live_ipc_buffer_on_item_modified_halt`
+  starts a simulated IPC listener, halts an active auto-queue, and asserts a
+  single convergence message + idempotent follow-up. Plan:
+  `tasks/agent-doc/plan-queue-ipc-drift.md`.
+
 - **`agent-doc-core` v0.1.0 published to crates.io.** The pure document data
   layer (`#adcr` extraction: component parsing, frontmatter, template, CRDT,
   pending, diff classification, model tier, syntax, and the full pure C-ABI FFI

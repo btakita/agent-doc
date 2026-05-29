@@ -588,7 +588,79 @@ This is the strongest non-attorney pressure point you have:
 Yes, public — and that's a feature for your collection strategy, not a downside. The public-record nature is precisely why small-claims filing often triggers immediate payment from a stalling counterparty: it costs Rob $75 in your court fee + permanent public record. Stay quiet about the filing on social media after you file; let the docket be the leverage on its own.
 
 **Not legal advice.** Specific docket visibility, indexing speed, and third-party aggregation policies vary by jurisdiction and shift over time. Confirm publication mechanics with the specific court clerk when you file.
-<!-- agent:boundary:87490ca1 -->
+❯ When is the soonest that I can file to small claims?
+
+### Re: Earliest small-claims filing date — opus-4-7
+
+**Short answer.** You can file the day after the payment deadline in §2 has passed *and* you've made a pre-filing demand (required in CA, customary in CT). The realistic earliest filing date is **Effective Date + ~30 days + 10-business-day demand cure ≈ Effective Date + ~40 calendar days** if §2 is silent on timing. If §2 specifies a payment date, you can file the day after that date passes (still want a demand letter for the paper trail, but it's not strictly required if §2 has a hard deadline).
+
+**Three blockers to filing**
+
+1. **Ripeness — the breach must have actually occurred.** You can't sue before payment is overdue. This depends on §2's payment timing (see prior turn).
+2. **CA pre-filing demand requirement.** CA Code of Civil Procedure §116.320(b)(3) requires the plaintiff to declare under penalty of perjury that they "have asked the defendant to pay" before filing. This can be a phone call, email, text, or letter — but you have to be able to attest to it. No specific waiting period is required by the statute, but courts expect a reasonable cure window before filing.
+3. **Arbitration clause defense.** §10's JAMS arbitration clause may give Rob grounds to file a motion to compel arbitration. CA courts increasingly carve out small-claims jurisdiction (CCP §116.220 public-policy override), but it's not a settled bright-line rule. Be prepared to defend the small-claims jurisdiction if Rob lawyers up.
+
+**Earliest filing timeline**
+
+If §2 specifies a date (e.g., "within 30 days of Effective Date"):
+
+- Day 0: Settlement Effective Date.
+- Day 1: Send friendly status check (covers CA §116.320 demand requirement).
+- Day 31: Payment overdue. You can file the next day.
+- **Earliest filing: Day 32.** Practically, wait through a 10-business-day demand-letter cure (Day 45) for cleaner paper trail.
+
+If §2 is silent on timing:
+
+- Day 0: Settlement Effective Date.
+- Day 1: Send friendly status check.
+- Day 25–30: Send formal demand letter with 10-business-day cure (Civ. Code §1657 "reasonable time" + demand fixes deadline).
+- Day ~45: Cure period expires.
+- **Earliest filing: Day ~45.**
+
+If §2 specifies a date that has already passed (e.g., signed yesterday and §2 says "due on execution"):
+
+- **You can file today.** But still send a same-day written demand letter so the §116.320 attestation is unambiguous. Filing same-day-as-demand is unusual and looks aggressive to a judge; better to give 5–10 business days even when not strictly required.
+
+**Practical filing logistics**
+
+**California (SF County, the §10 forum):**
+
+- Form: SC-100 (Plaintiff's Claim and ORDER to Go to Small Claims Court). Available at courts.ca.gov.
+- Filing fee: $30 for claims up to $1,500, $50 for $1,500–$5,000, $75 for $5,000–$10,000. Your $5k claim = $50 fee.
+- E-filing: SF Superior Court has online filing via CourtConnect. ~1 business day to process.
+- Service: SF County allows certified mail by clerk (free) or personal service. Certified-mail service is typical for small business defendants with a registered address.
+- Hearing: Typically scheduled 30–70 days from filing.
+- Defendant must be physically located in CA or have a place of business in CA for CA small-claims jurisdiction. Dreamable's SF address handles this.
+
+**Connecticut (your home jurisdiction):**
+
+- Form: JD-CV-40 (Small Claims Writ and Notice of Suit). judicial.ct.gov has the form.
+- Filing fee: $95.
+- E-filing: judicial.ct.gov supports e-filing for small claims in most courts.
+- Service: Typically by certified mail through the court or by state marshal (~$50–$60).
+- Jurisdiction issue: CT small claims requires the defendant to do business in CT, own property in CT, or have committed a tort in CT. Dreamable (SF-based) probably doesn't qualify — *which means CT small claims is likely foreclosed even before the §10 arbitration issue arises*. Filing CT and getting bounced wastes the fee and ~30 days.
+
+**Recommended path**
+
+- **File in CA, SF County small claims.** It's both your strongest jurisdictional case (Dreamable is there) and aligns with §10's California forum, which weakens Rob's motion-to-compel arbitration argument since at least the forum matches.
+- **Make the §116.320 demand explicit and dated.** Two written communications (friendly check + demand letter) before filing build a clean record. Even a single email asking for payment satisfies the statute, but two creates a stronger record.
+- **Don't rush.** A judge looking at the case wants to see good-faith pre-filing communication. Filing 5 days after the breach with one polite email looks aggressive; filing 30 days after with two written demands looks reasonable.
+
+**The "right now" question**
+
+If §2 already specifies a payment date that passed, you've already sent some form of demand (text, email, etc.), and you want to file now: **you can file today**. The §116.320 attestation needs only that you "have asked" the defendant to pay — it doesn't require a waiting period after asking. The friendly check from the prior cycle's escalation ladder counts.
+
+That said, the realistic move is: send the friendly check today, set a reminder for 10–14 days from now, and file SF small claims at that point if nothing's happened. That timing produces both (a) a defensible record for the judge and (b) the maximum opportunity for Rob to just pay before filing.
+
+**Practical recommendation**
+
+1. **Today**: Send the friendly check. Email or text, ~3 sentences, reference §2.
+2. **Today or tomorrow**: Re-read §2 and identify the payment deadline. Calendar it.
+3. **10–14 days after the friendly check (and after the §2 deadline if applicable)**: Send the formal demand letter with a 10-business-day cure window via certified mail.
+4. **At the end of the cure window**: File SF small claims if unpaid. Earliest realistic filing: somewhere between Effective Date + ~30 days (if §2 has tight timing) and Effective Date + ~45 days (if §2 is silent).
+
+**Not legal advice.** §116.320 has been amended several times — confirm the current pre-filing demand specifics with the SF Superior Court self-help center (free) before you file. They walk litigants through the form and timing at no cost.
+<!-- agent:boundary:f54efc28 -->
 <!-- /agent:exchange -->
 
 ## Queue

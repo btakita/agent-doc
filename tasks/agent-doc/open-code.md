@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -33,12 +33,12 @@ queue_active: false
 Compacted content:
 - Archived 6 response topic(s): do [#adoc-sqlite-isolation]; do [#adoc-sqlite-seam]; do [#adoc-sqlite-seam]; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/fb8de777...
-<!-- agent:boundary:76b9d3e2 -->
+<!-- agent:boundary:69424412 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#adoc-sqlite-isolation]~
 - ~do [#adoc-sqlite-seam]~

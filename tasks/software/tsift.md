@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -81,7 +81,33 @@ After both land, `#cli-extract-output` is fully resolved. I marked `#cli-extract
 **Confidence:** high — workspace test sweep green, install verified.
 
 **Escalation:** none. The next queue item is `do [#cli-extract-cli-types]` (Phase 1b — lift clap CLI types). Independent of Phase 1a-ii / 1a-iii; safe to run next.
-<!-- agent:boundary:a8632ac6 -->
+
+### Re: do [#cli-extract-output-envelope] — opus-4-7
+
+
+**Done.** Phase 1a-ii landed at `ff332c8`.
+
+Rolled back the in-flight Phase 1b draft (cli.rs creation + lib.rs imports) when you re-queued the deferred items; respecting the new order.
+
+**Moved into `packages/tsift-cli/src/output.rs`:**
+- `ToolEnvelopeMetric`
+- `ToolEnvelopeSummary`
+- `ToolEnvelope<'a, T: Serialize>`
+- `TranscriptArtifactRef`
+
+Fields promoted to `pub` (they're constructed at ~40 sites in lib.rs; alternative would be a `new()` constructor per type). Module doc comment updated.
+
+**Commands run:**
+- `cargo build --release` — clean.
+- `cargo test --release --no-fail-fast --workspace` — **990 passed across 31 suites**.
+- `cargo install --path packages/tsift-cli` — `tsift 0.1.62` installed.
+
+**Repo state:**
+- tsift submodule HEAD: `ff332c8` (pushed).
+- Superproject HEAD: `0fcf36cb1` (pushed).
+
+**Confidence:** high. **Escalation:** none. Next queue head is `do [#cli-extract-tagpath-helpers]` (Phase 1a-iii).
+<!-- agent:boundary:7f6f9404 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -90,9 +116,11 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#cli-extract-output]~
+- do [#cli-extract-output-envelope]
+- do [#cli-extract-tagpath-helpers]
 - do [#cli-extract-cli-types]
 - do [#cli-cluster-index-search]
 - do [#cli-cluster-graph]
@@ -105,7 +133,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#cli-extract-output-envelope] Phase 1a-ii — extract ToolEnvelope + ToolEnvelopeMetric + ToolEnvelopeSummary + TranscriptArtifactRef into packages/tsift-cli/src/output.rs. Pure struct relocation, plus a use output::* update in lib.rs at all envelope construction sites.
 - [ ] [#cli-extract-tagpath-helpers] Phase 1a-iii — extract TagpathSearchOpts + TagpathAnnotationDiagnostic + CommunityMemberAmbiguityDiagnostic + annotate_hits_with_tagpath + annotate_stored_symbols_with_tagpath + annotate_stored_edges_with_tagpath + annotate_communities_with_tagpath + annotate_path_nodes_with_tagpath (~700 LOC) into packages/tsift-cli/src/output/tagpath.rs. Sits below the graph/community cmd cluster but moves cleanly because the annotate functions are already pub.
 - [ ] [#cli-extract-cli-types] Phase 1b — lift clap CLI types (Cli, Commands, GraphDbQuery, output format enums) out of lib.rs into packages/tsift-cli/src/cli.rs. Pure mechanical lift; no logic change.
 - [ ] [#cli-cluster-index-search] Phase 2 — move cmd_index + cmd_search bodies into packages/tsift-cli/src/commands/index_search.rs (re-exported from lib.rs). Smallest cluster, validates the per-command pattern before larger ones.

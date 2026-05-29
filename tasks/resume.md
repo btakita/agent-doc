@@ -222,7 +222,25 @@ Skills: Rust, Python, TypeScript, LiveKit, WebRTC, realtime asset generation
 ```
 
 That's clean, accurate, and reveals nothing about their product or business. The key is you're describing *your* capabilities, not their system.
-<!-- agent:boundary:1dd644ad -->
+❯ Code/Harness analysis?
+
+### Re: Code/Harness analysis as a skill — sonnet-4-6
+
+Yes — same rule. "Code analysis" and "agent harness analysis/development" are capability descriptors, not Dreamable's business information.
+
+Safe to add:
+
+```
+Confidential AI Startup — Software Development Consultant (Apr–May 2026)
+Skills: Rust, Python, TypeScript, LiveKit, WebRTC, realtime asset generation, code analysis, agent harness development
+```
+
+The pattern holds for any skill you want to add: if it describes *what you can do*, it's yours to claim. Only the *what you built for them* is off limits.
+
+---
+
+**Note:** The exchange has grown to 165 lines across 5 response sections. Would you like to compact it? Run `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/resume.md --commit` to archive and reset.
+<!-- agent:boundary:20d95477 -->
 <!-- /agent:exchange -->
 ###
 <!--

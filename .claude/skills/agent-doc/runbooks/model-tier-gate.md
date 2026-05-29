@@ -28,13 +28,14 @@ Preflight composes these into `effective_tier`, plus optional `required_tier` (w
 
 | Model ID | Short name | Tier |
 |----------|-----------|------|
+| `opus` (deferred alias) | self-stamped by runner | high |
 | `claude-opus-4-6` | opus-4-6 | high |
 | `claude-opus-4-7` | opus-4-7 | high |
 | `claude-opus-4-8` | opus-4-8 | high |
 | `claude-sonnet-4-6` | sonnet-4-6 | med |
 | `claude-haiku-4-5-20251001` | haiku-4-5 | low |
 
-agent-doc template-mode sessions require `high` tier as a floor. Models below `high` may skip mandatory steps (write, commit, pending mutations) at lower effort levels.
+The Claude Code `opus` alias is deferred: agent-doc emits `--model opus` (Claude Code resolves its current latest opus) and never pins a version, so any concrete `claude-opus-*` id classifies `high` and attribution is self-stamped by the running agent. agent-doc template-mode sessions require `high` tier as a floor. Models below `high` may skip mandatory steps (write, commit, pending mutations) at lower effort levels.
 
 ## Notes
 

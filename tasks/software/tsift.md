@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -111,7 +111,105 @@ VERSIONS.md `Unreleased` updated with the `#cli-cleanup-unused-imports` entry.
 #### Top of backlog
 
 `[#cli-cluster-index-search]` — Phase 2: move `cmd_index` + `cmd_search` bodies into `packages/tsift-cli/src/commands/index_search.rs`. Smallest cluster, validates the per-command pattern before the larger graph/quality/infra/digests clusters.
-<!-- agent:boundary:36e3255f -->
+
+### Re: do [#cli-cluster-index-search] — opus-4-7
+
+Phase 2 done — first per-command cluster lifted out of `lib.rs`.
+
+#### What moved
+
+Four functions (~800 LOC total) → `packages/tsift-cli/src/commands/index_search.rs`:
+
+- `cmd_index` (~296 LOC) — `tsift index` dispatch incl. `--workspace`/`--submodule` fan-out, `--check`/`--rebuild`/`--prune` modes, json/compact/human renderers
+- `cmd_search` (38 LOC) — thin default-budget wrapper, now `#[cfg(test)]`-gated in lib.rs since production paths call `cmd_search_with_budget` directly
+- `cmd_search_with_budget` (~440 LOC) — the real `tsift search` engine: precheck/degraded-mode handling, scoped/federated dispatch, tagpath annotation, budget reporting, all output formats
+- `cmd_search_worker` (24 LOC) — hidden `__search-worker` subcommand that writes a single sift result envelope to disk
+
+Also introduced `packages/tsift-cli/src/commands.rs` as the parent module so the remaining clusters (graph, quality, summarize, infra, digests) can land alongside without rework.
+
+#### Visibility changes (mechanical)
+
+Promoted 30 crate-private helpers to `pub(crate)` so the child module can call them:
+
+| Group | Helpers |
+|-------|---------|
+| Index | `run_index_update`, `relativize_index_summary`, `to_json_schema` |
+| Strategy / precheck | `resolve_search_strategy`, `precheck_search_indexes`, `degraded_search_mode`, `emit_degraded_search_note`, `maybe_apply_search_post_precheck_test_hooks` (×2 cfg pair), `maybe_apply_search_worker_test_hooks` |
+| Federated | `federated_symbol_search`, `federated_exact_search`, `federated_sift_search` |
+| Relativization | `relativize`, `relativize_symbol_hits`, `relativize_json_paths` |
+| Search runners | `run_exact_search_with_timeout`, `run_search_with_timeout`, `run_sift_search` |
+| Budget / envelope | `build_search_budget_report`, `build_search_budget_follow_up`, `print_search_budget_human`, `print_json_or_envelope`, `envelope_metric`, `inject_tagpath_stale_into_json` |
+| Rendering | `should_collapse_search_hits`, `group_search_hits`, `compact_snippet`, `format_score`, `abbreviate_match_type`, `abbreviate_kind` |
+
+Plus `DegradedSearchMode` enum → `pub(crate)`. No bodies changed.
+
+#### Verification
+
+- `cargo build -p tsift-cli` — clean, no new warnings
+- `cargo test -p tsift-cli` — **479 passed across 7 suites** (up from 298 lib + 129 integration = 427 the previous cycle; new suites picked up are unit tests under the moved file path)
+- `make check` — green workspace-wide (clippy `-D warnings`, cargo test, opencode-tsift npm publish dry-run)
+- `cargo install --path packages/tsift-cli` — `~/.cargo/bin/tsift` refreshed
+- `cargo build --release -p tsift-cli` — `target/release/tsift` refreshed
+
+#### Commits
+
+- tsift @ `a69eefc` — `cli: Phase 2 — extract index+search command cluster into commands/index_search.rs` (pushed)
+- agent-loop @ `4eceda5` — submodule pointer bump (pushed)
+
+VERSIONS.md `Unreleased` updated with the `#cli-cluster-index-search` entry.
+
+#### Pattern validated
+
+This phase confirms the per-command-cluster pattern works at scale before tackling the larger groups: bodies move verbatim, helpers get `pub(crate)`, and the dispatch arms in `lib.rs::run()` keep referencing the same names through the import. Remaining Phase 2 clusters can follow the same recipe.
+
+#### Top of backlog
+
+`[#cli-cluster-graph]` — Phase 2: move `cmd_graph`, `cmd_communities`, `cmd_path`, `cmd_explain`, `cmd_explain_with_budget`, and `cmd_traverse` bodies into `packages/tsift-cli/src/commands/graph.rs`. Larger cluster (~6 functions); same recipe as this one.
+
+### Re: do [#cli-cluster-index-search] — opus-4-7
+
+Phase 2 done — first per-command cluster lifted out of `lib.rs`.
+
+#### What moved
+
+Four functions (~800 LOC total) → `packages/tsift-cli/src/commands/index_search.rs`:
+
+- `cmd_index` (~296 LOC) — `tsift index` dispatch incl. `--workspace`/`--submodule` fan-out, `--check`/`--rebuild`/`--prune` modes, json/compact/human renderers
+- `cmd_search` (38 LOC) — thin default-budget wrapper, now `#[cfg(test)]`-gated in lib.rs since production paths call `cmd_search_with_budget` directly
+- `cmd_search_with_budget` (~440 LOC) — the real `tsift search` engine: precheck/degraded-mode handling, scoped/federated dispatch, tagpath annotation, budget reporting, all output formats
+- `cmd_search_worker` (24 LOC) — hidden `__search-worker` subcommand that writes a single sift result envelope to disk
+
+Also introduced `packages/tsift-cli/src/commands.rs` as the parent module so the remaining clusters (graph, quality, summarize, infra, digests) can land alongside without rework.
+
+#### Visibility changes (mechanical)
+
+Promoted 30 crate-private helpers to `pub(crate)` so the child module can call them: index helpers (`run_index_update`, `relativize_index_summary`, `to_json_schema`), search-strategy/precheck helpers (`resolve_search_strategy`, `precheck_search_indexes`, `degraded_search_mode`, `emit_degraded_search_note`, `maybe_apply_search_*_test_hooks`), federated search (`federated_symbol_search`, `federated_exact_search`, `federated_sift_search`), relativization (`relativize`, `relativize_symbol_hits`, `relativize_json_paths`), search runners (`run_exact_search_with_timeout`, `run_search_with_timeout`, `run_sift_search`), budget/envelope (`build_search_budget_report`, `build_search_budget_follow_up`, `print_search_budget_human`, `print_json_or_envelope`, `envelope_metric`, `inject_tagpath_stale_into_json`), and rendering (`should_collapse_search_hits`, `group_search_hits`, `compact_snippet`, `format_score`, `abbreviate_match_type`, `abbreviate_kind`).
+
+`DegradedSearchMode` enum also promoted to `pub(crate)`. No bodies changed.
+
+#### Verification
+
+- `cargo build -p tsift-cli` — clean, no new warnings
+- `cargo test -p tsift-cli` — **479 passed across 7 suites**
+- `make check` — green workspace-wide (clippy `-D warnings`, cargo test, opencode-tsift npm publish dry-run)
+- `cargo install --path packages/tsift-cli` — `~/.cargo/bin/tsift` refreshed
+- `cargo build --release -p tsift-cli` — `target/release/tsift` refreshed
+
+#### Commits
+
+- tsift @ `a69eefc` — `cli: Phase 2 — extract index+search command cluster into commands/index_search.rs` (pushed)
+- agent-loop @ `4eceda5` — submodule pointer bump (pushed)
+
+VERSIONS.md `Unreleased` updated with the Phase 2 entry.
+
+#### Pattern validated
+
+This confirms the per-command-cluster pattern works at scale before tackling the larger groups: bodies move verbatim, helpers get `pub(crate)`, and the dispatch arms in `lib.rs::run()` keep referencing the same names through the import. Remaining Phase 2 clusters follow the same recipe.
+
+#### Top of backlog
+
+`[#cli-cluster-graph]` — Phase 2: move `cmd_graph`, `cmd_communities`, `cmd_path`, `cmd_explain`, `cmd_explain_with_budget`, and `cmd_traverse` bodies into `packages/tsift-cli/src/commands/graph.rs`. Larger cluster (~6 functions); same recipe as this one.
+<!-- agent:boundary:34ef7b93 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -120,11 +218,11 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#cli-extract-cli-types]~
-- do [#cli-cleanup-unused-imports]
-- do [#cli-cluster-index-search]
+- ~do [#cli-cleanup-unused-imports]~
+- ~do [#cli-cluster-index-search]~
 - do [#cli-cluster-graph]
 - do [#cli-extract-tagpath-helpers]
 - do [#cli-cluster-quality]
@@ -139,7 +237,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#cli-cluster-index-search] Phase 2 — move cmd_index + cmd_search bodies into packages/tsift-cli/src/commands/index_search.rs (re-exported from lib.rs). Smallest cluster, validates the per-command pattern before larger ones.
 - [ ] [#cli-cluster-graph] Phase 2 — move cmd_graph + cmd_communities + cmd_path + cmd_explain + cmd_traverse bodies into packages/tsift-cli/src/commands/graph.rs.
 - [ ] [#cli-extract-tagpath-helpers] Phase 1a-iii — extract TagpathSearchOpts + TagpathAnnotationDiagnostic + CommunityMemberAmbiguityDiagnostic + annotate_hits_with_tagpath + annotate_stored_symbols_with_tagpath + annotate_stored_edges_with_tagpath + annotate_communities_with_tagpath + annotate_path_nodes_with_tagpath (~700 LOC) into packages/tsift-cli/src/output/tagpath.rs. Sits below the graph/community cmd cluster but moves cleanly because the annotate functions are already pub.
 - [ ] [#cli-cluster-quality] Phase 2 — move cmd_audit + cmd_audit_tagpath + cmd_lint + cmd_perf_gate bodies into packages/tsift-cli/src/commands/quality.rs.

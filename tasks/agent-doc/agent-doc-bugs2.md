@@ -198,7 +198,31 @@ The plan's own status is "mechanism unconfirmed." This is the single most corrup
 - If you see a dup in the buffer, `git checkout tasks/resume.md` restores the clean committed copy (HEAD is clean now).
 
 Want me to go with **option 1** (build the repro test + safe fix now) — say "go" — or paste the dup shape for **option 2**? The queue is still paused on `#jb-stale-busy-idle-footer`.
-<!-- agent:boundary:4dadd673 -->
+❯ go
+
+### Re: go — fixed a confirmed dedup gap behind the duplicate-while-typing — opus-4-8
+
+Found and fixed a concrete, deterministic mechanism (committed submodule `2a6f60e5`, pointer `0a7e30dcd`, pushed). The prior static analysis on this item had asserted "editor append is dedup-guarded" — but that guard had a real gap it missed. This is a **partial** fix: `#prompt-duplicated-while-typing` stays gated in review for the structural remainder below.
+
+#### Confirmed mechanism (shared core, deterministic)
+
+The append dedup `component::append_patch_already_present` compares through `normalize_append_patch_content`, which stripped boundary markers and `(HEAD)` markers **but not the `❯ ` user-prompt prefix**. The exchange prompt-normalization adds `❯ ` to user lines, so a synthesized boundary-aware exchange patch and the live buffer can differ by exactly that prefix → the `contains` check missed the duplicate (asymmetric: a bare buffer doesn't contain the `❯ `-prefixed patch) → the prompt re-appended. Now reproduced in a unit test.
+
+#### Fix
+
+`normalize_append_patch_content` now strips a leading `❯ `/`❯` per line (`strip_user_prompt_prefix`), making dedup prefix-agnostic and symmetric. The `❯` glyph is presentation, not content, so it can never collapse a genuinely distinct prompt. Tests (all fail pre-fix): `append_patch_already_present_ignores_user_prompt_prefix`, `append_patch_distinct_prompts_not_deduped`, `append_with_caret_does_not_duplicate_prefixed_prompt`. `make check` green.
+
+#### It's already live in your editor — no plugin reinstall
+
+The JB plugin loads the cdylib by path (`agent-doc lib-path`) and **hot-reloads on mtime change**. I rebuilt + `cargo install`ed both binaries and ran `agent-doc lib-install`, so `~/.cargo/bin/libagent_doc.so` now carries the fix. The plugin's mtime-changed reload picks it up on its next FFI call — no plugin zip reinstall needed (no `.kt` changed).
+
+#### What this does and doesn't cover
+
+- **Covered:** the prefix-mismatch duplication (the most common shape — synthesized patch prefixed, buffer not, or vice versa).
+- **Still open:** the structural buffer-snapshot race — the synthesized patch carries the buffer at T1 while you keep typing to T2, so the de-prefixed texts no longer match as a substring. That needs the L1 change (exclude live post-boundary user text from the synthesized patch) and a captured live trace. The item stays gated for that remainder.
+
+Please type a prompt into `resume.md` again (the old repro: during an in-flight cycle) and tell me if it still duplicates. If it does, grab the buffer snapshot and I'll go after the L1 structural race next. The queue is still paused on `#jb-stale-busy-idle-footer`.
+<!-- agent:boundary:80671c45 -->
 <!-- /agent:exchange --> 
 ###
 <!--

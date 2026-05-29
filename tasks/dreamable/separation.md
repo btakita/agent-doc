@@ -858,7 +858,69 @@ If Rob has actually threatened suicide and is in genuine crisis:
 This sequence handles the safety concern with appropriate seriousness, removes you from the position of pressuring someone in crisis, and preserves your collection rights through the corporate entity.
 
 **Not legal advice.** Capacity-to-contract defenses are fact-intensive and the §38/§39/§810 standards can shift in case law. If Rob actually asserts capacity as a defense, get a CA attorney involved — same 30-minute referral consult covers the question. And separately, if you're concerned about Rob's safety, **the wellness check is the right call regardless of any legal calculation**.
-<!-- agent:boundary:cf9d63d3 -->
+❯ I have a recorded call. He did not consent. Can I use the transcript as admisible evidence?
+
+### Re: Recorded call without consent — do not use, urgent — opus-4-7
+
+**Stop. This is the most important answer in this thread.**
+
+If you recorded a phone call with Rob without his consent and either of you was in California at the time, that recording was almost certainly **illegal** under California Penal Code §632, which is a **two-party consent** statute. The recording itself, the transcript, and your possession of it now potentially expose **you** to criminal liability and civil damages that exceed the $5k you're trying to collect. Do not use it, do not disclose it, do not transcribe it for filing.
+
+**The legal exposure**
+
+- **California is a two-party (all-party) consent state.** CA Penal Code §632 makes it a misdemeanor — and in some cases a felony — to record any "confidential communication" without the consent of all parties.
+- **Interstate calls follow California's rule when one party is in California.** This is settled CA Supreme Court law: *Kearney v. Salomon Smith Barney*, 39 Cal. 4th 95 (2006). Even though you're in CT (a one-party consent state) and may have believed CT law governed, California courts apply California law to interstate recordings involving a California party. Federal law (18 U.S.C. §2511, one-party consent) does not preempt state law that's *stricter*.
+- **Criminal exposure**: §632 is a misdemeanor punishable by fines up to $2,500 and/or up to one year in county jail per violation.
+- **Civil exposure**: Penal Code §637.2 gives Rob (the recorded party) a **statutory cause of action for $5,000 per violation** in damages, plus actual damages and attorneys' fees. Rob could sue you for the recording and recover more than the $5k he owes you — *and* potentially get the §7 mutual release set aside on the theory that you're now in a separate dispute outside the engagement scope.
+- **A business call about the $5k Settlement payment is a "confidential communication"** under §632 — the parties had a reasonable expectation of privacy in a private phone call between two known parties about a private contract. This is well-established.
+
+**Admissibility**
+
+- **California courts generally exclude illegally-obtained §632 recordings from evidence.** Evidence Code §1567/§1568 and case law treat them as inadmissible in civil proceedings.
+- **Small-claims courts have relaxed evidence rules** but still typically exclude illegally-obtained recordings — and a judge who learns you made the recording may consider it bad faith.
+- **Federal court could in theory admit a one-party-consent recording**, but you're heading to CA Superior Court or JAMS, both of which apply CA evidence law.
+- **Even disclosure of the existence of the recording can be a separate §632 violation** under §632(d), which prohibits using or disclosing the recording. So even *mentioning* in a demand letter that you have a recording exposes you further.
+
+**What this means right now**
+
+1. **Don't transcribe the recording for evidentiary use.** Don't paste it into a demand letter, court filing, or arbitration submission.
+2. **Don't disclose having the recording to Rob or his counsel.** Doing so triggers Rob's awareness of his §632 claim against you and could prompt him to sue defensively.
+3. **Don't share the recording with anyone — including friends, advisors, or AI tools that store the content.** Each new disclosure is potentially a separate §632 violation.
+4. **Don't delete it yet either.** Deletion of evidence in anticipation of litigation can be spoliation. Preserve it, but lock it down. Don't make new copies. Don't email it. Keep it in one location only.
+5. **Consult a CA-licensed attorney before doing anything else.** This is genuinely the situation where the 30-minute lawyer referral consult is worth its weight. Specifically ask: "I have a recording made without consent, parties were in [CT/CA]. What's my exposure under §632 and what should I do with the file?"
+
+**What you can use as evidence instead**
+
+You don't need the recording to collect $5k. The Settlement itself is the evidence:
+
+- **The signed Settlement Agreement** (PDF from SignRequest) — this is your primary evidence. It contains §2 (the payment obligation), Rob's signature, the Effective Date.
+- **The SignRequest audit trail** — timestamped record of both signatures, IP addresses, email confirmations. Highly persuasive.
+- **Your written communications** — emails, texts, demand letters. Admissible.
+- **Your own contemporaneous notes** of what Rob said. If you wrote down what was said during or shortly after the call, the *notes* are admissible (not as recording but as your present-sense impression or recollection).
+- **Your own testimony** about conversations. You can testify from memory about what Rob said in calls — that's lawful. You just can't reference or use the recording as the source.
+
+**About the suicide threat (if Rob made one in the call)**
+
+The wellness-check guidance from the prior turn still applies. The narrow lawful-purpose exception to §632 (Penal Code §633.5 — recording for the purpose of "obtaining evidence reasonably believed to relate to commission of a felony" or certain crimes including threats) may apply to threats of violence including suicide threats, but this is **narrow, fact-specific, and not something to bet on without a CA attorney's blessing**.
+
+If a suicide threat was made:
+
+- **You can describe what was said to law enforcement during a wellness-check call.** That's not "using the recording" — it's reporting a safety concern based on your firsthand knowledge.
+- **Police may ask if you have a recording.** Be truthful but consult an attorney before handing it over. There's a separate doctrine that recordings made to document threats of violence can sometimes be lawful under §633.5, but the application is narrow and you don't want to volunteer the recording without legal advice.
+
+**Concrete next steps**
+
+1. **Today**: Stop using or copying the recording. Lock it in one secure location. Don't mention it in any communication.
+2. **This week**: Use the CA State Bar Lawyer Referral Service for a 30-minute consult. Ask specifically about §632/§637.2 exposure and whether §633.5 might apply.
+3. **For the $5k collection**: Proceed with the demand-letter ladder and small-claims plan using only the Settlement document and your written communications. Do not reference the recording in any way.
+4. **If the suicide threat was real**: Still do the wellness check. You don't need the recording for the wellness check — your firsthand recollection of what was said is sufficient for police to act.
+
+**Bottom line**
+
+The recording is more likely to cost you than help you. Use the Settlement and written record only. Get a CA attorney's read on the §632 exposure before doing anything with the file.
+
+**Not legal advice — and this one really does need an attorney.** The interaction between §632, §637.2, §633.5, and interstate-call jurisprudence is complex, and the financial exposure here is genuinely larger than the $5k you're trying to recover. The 30-minute consult is the single highest-ROI legal spend in this entire thread.
+<!-- agent:boundary:ef845ac3 -->
 <!-- /agent:exchange -->
 
 ## Queue

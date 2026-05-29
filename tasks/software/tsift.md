@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -464,7 +464,7 @@ Replace it with 8 sequential backlog items (`#cli-extract-output`, `#cli-extract
 3. If you confirm phases, say "stage the 8 CLI backlog items" and I'll add them.
 
 **Reminder, fifth time:** session document is huge. `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/software/tsift.md --commit` before the next substantive cycle, please. The exchange replays cost more tokens each cycle.
-<!-- agent:boundary:10aecc78 -->
+<!-- agent:boundary:874d2f1a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -473,7 +473,7 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#split-sim-world]~
 - ~do [#split-tsift-digest]~

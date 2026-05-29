@@ -88,110 +88,12 @@ prompt_presets:
 <!-- agent:exchange mode=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc180ec90ce4bbb9c2bdb013766843d9a8224cac4431150341ae259853-20260521-055654.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc180ec90ce4bbb9c2bdb013766843d9a8224cac4431150341ae259853-20260529-165848.md`*
 
 Compacted content:
-- Archived 1 response topic(s): doc upload Drive OAuth
+- Archived 4 response topic(s): sheets scope blocker; Gmail URL refetch; Gmail URL selected-message refetch; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc...
-❯ do [#sheets-scope]. #spec-test-build-install-commit-push
-### Re: sheets scope blocker — gpt-5
-
-I could not start `#sheets-scope` because the planning gate failed closed before repository work. The blocker was required `tsift` graph evidence collection timing out for:
-
-```bash
-tsift graph-db --path /home/brian/work/btakita/agent-loop/tasks/software/corky.md --json evidence sheets --depth 3 --limit 8
-```
-
-No code, spec, or test files were changed. I did not run build/install, commit, or push for Corky. The `#sheets-scope` backlog item remains open because implementation did not begin.
-Please add a feature to lookup a gmail url (https://mail.google.com/mail/u/0/#search/philip/FMfcgzQgLsCwhwtlQXPkzpdLhKhzPdNv) directly from a url and convert to markdown via the cli as a tool call.
-
-❯ #spec-test-build-install-commit-push
-### Re: Gmail URL refetch — gpt-5
-
-Implemented Corky support for `corky sync refetch TARGET`, where `TARGET` can now be a Gmail API thread ID, Gmail API message ID, or a Gmail web URL like `https://mail.google.com/mail/u/0/#search/query/FMfc...`. The command extracts selected-message tokens from Gmail fragments such as `#inbox/...` and `#search/query/...`, also accepts `th=` query URLs, tries the Gmail Threads API first, falls back through the Messages API to resolve the containing thread, and then reuses the existing refetch merge path to write the conversation markdown.
-
-Changed paths:
-- `src/corky/SPEC.md`
-- `src/corky/src/cli.rs`
-- `src/corky/src/main.rs`
-- `src/corky/src/sync/gmail_api_sync.rs`
-- `src/corky/src/sync/mod.rs`
-- `src/corky/tests/test_cli.rs`
-
-Verification completed:
-- `cargo test parse_refetch_target`
-- `cargo test test_cli_sync_refetch_help_mentions_gmail_url`
-- `make check`
-- `make build`
-- `make install` (installed with `transcribe-cuda` after GPU detection)
-- `corky --version`
-- `corky sync refetch --help`
-- `git diff --check`
-- GitHub CI inspection: latest Corky `CI` run `26209510559` on `main` completed successfully. Corky has no `tmux-ci`/`tmux-test` target or workflow to inspect.
-
-Commits:
-- Corky repo: `7549276 feat: support Gmail URL refetch`, pushed to `origin/main`.
-- Parent agent-loop repo: `fc190ee01 chore: update corky submodule`, committed locally; parent push follows this document closeout per the session closeout order.
-
-No escalation was needed. Confidence: high.
-❯ Look at the session for /home/brian/work/btakita/agent-loop/tasks/recruit/acadian-asset-management.md
-❯ The prompt I used caused corky to do an entire `corky sync account`. The latest feature should only fetch the single email from the url.
-❯ #spec-test-build-install-commit-push
-### Re: Gmail URL selected-message refetch — gpt-5
-
-I updated Corky so `corky sync refetch TARGET` keeps raw Gmail API IDs on the existing full-thread refetch path, but treats Gmail web URLs as precise selected-message lookups. URL targets now call a selected-message resolver that fetches `messages/{id}` and converts exactly that email; if the URL token only resolves to a multi-message thread, Corky fails closed with an explicit error instead of silently importing the whole thread. This avoids using `corky sync account` for the Acadian-style prompt and avoids broad account syncing for a Gmail URL lookup.
-
-Changed paths:
-- `AGENTS.md`
-- `README.md`
-- `SPEC.md`
-- `src/cli.rs`
-- `src/sync/gmail_api_sync.rs`
-- `src/sync/mod.rs`
-- `tests/test_cli.rs`
-
-Verification completed:
-- `cargo test parse_refetch_target`
-- `cargo test test_cli_sync_refetch_help_mentions_gmail_url`
-- `make precommit` (clippy, full test suite, `audit-docs`)
-- `make build`
-- `make install` (installed with `transcribe-cuda` after GPU detection)
-- `corky --version`
-- `corky sync refetch --help`
-- `git diff --check`
-- GitHub CI: Corky `CI` run `26261569252` on `main` completed successfully in 5m25s. Corky has no `tmux-ci`/`tmux-test` target or workflow; repo search only found the session `tmux_session` metadata and the `tmux-router` dependency entry.
-
-Commits:
-- Corky repo: `162b58b fix: limit Gmail URL refetch to selected message`, pushed to `origin/main`.
-- Parent agent-loop repo: `3229d09e4 chore: update corky submodule`, committed locally; parent push follows this document closeout per the session closeout order.
-
-No escalation was needed. Confidence: high.
-❯ release + publish
-### Re: release + publish — gpt-5
-
-I could not release or publish Corky yet because the repo is still set to version `0.28.2`, and that version is already published everywhere checked:
-
-- Git tag: `v0.28.2` exists.
-- GitHub release: `corky v0.28.2` exists and is marked latest.
-- crates.io: `corky = "0.28.2"` is the published version.
-- PyPI: latest `corky` version is `0.28.2`.
-
-Corky `HEAD` is `v0.28.2-12-g162b58b`, so there is unreleased work on `main`, but `AGENTS.md` explicitly says not to bump versions automatically. I did not tag, publish to crates.io, run the PyPI workflow, create a GitHub release, or push anything for this prompt. To continue, specify the next release version or bump `Cargo.toml` and `pyproject.toml` yourself, then rerun `release + publish`.
-
-Commands run:
-- `agent-doc --version`
-- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/software/corky.md`
-- `agent-doc read /home/brian/work/btakita/agent-loop/tasks/software/corky.md`
-- `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/software/corky.md`
-- `git -C src/corky status --short --branch`
-- `git -C src/corky tag --list 'v*' --sort=-v:refname`
-- `git -C src/corky describe --tags --always --dirty`
-- `gh -R btakita/corky release list --limit 10`
-- `cargo search corky --limit 5`
-- `uvx --from packaging python -c "...pypi corky json..."`
-
-Changed paths: none. Verification/build/publish: not run because the release version is blocked before mutation. Escalation: none. Confidence: high.
-<!-- agent:boundary:86db302a -->
+<!-- agent:boundary:ebb7d21d -->
 <!-- /agent:exchange -->
 ###
 <!--

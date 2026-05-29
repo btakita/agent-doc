@@ -163,6 +163,38 @@ then drives the Phase-2 SimWorld regression and the real fix.
 Status: instrumentation only — no behavioral fix yet. Item stays gated pending a
 captured packet.
 
+## Root cause found + fixed 2026-05-29 (the instrumentation paid off)
+
+The v0.2.135 instrumentation captured the real cause of "agent-doc ate the prompt
+`go`" on `monsterrodholders.md` — and it was **not** a PatchWatcher `setText` or the
+IPC snapshot adoption (those guards fired and recovered correctly). idea.log line:
+
+```
+[route] removed duplicate answered prompt tail after exchange boundary in tasks/monsterrodholders.md
+```
+
+The binary **route path** (`route.rs::scrub_duplicate_prompt_comments_for_route` →
+`template::remove_duplicate_answered_exchange_prompt_tail`) deletes a post-boundary
+prompt tail when it text-matches an earlier answered prompt block. Because
+`normalize_duplicate_exchange_prompt_line` strips the `❯` marker before comparing,
+a freshly-typed `go` (unprefixed) matched a previously-answered `❯ go` and was
+deleted — silent data loss of a live prompt. `go`/`yes`/`continue` are exactly the
+common short prompts that recur, so this fired often.
+
+**Fix (committed):** `duplicate_exchange_tail_prompt_lines` now requires every tail
+line to carry the `❯ ` answered-form marker before it can be treated as removable
+replay residue. The marker is added only by the answer/normalize cycle, never by a
+user typing a fresh prompt, so it is the ownership proof the plan's constraints
+demand. A bare unprefixed post-boundary prompt is always preserved and dispatched.
+Tests: `remove_duplicate_answered_tail_{scrubs_prefixed_replay_residue,
+preserves_unprefixed_live_prompt}` (core), `route_preserves_unprefixed_live_prompt_
+matching_an_answered_prompt` (route), plus the updated prefixed-residue fixtures in
+the route/preflight/normalize tests.
+
+This resolves the prompt-deletion symptom. The binary IPC-snapshot guards already
+fail-closed + recover for the structural facets (stray `###`, stuck capture), and
+the v0.2.135 diagnostics remain in place to catch any residual whole-buffer path.
+
 ## Acceptance criteria
 
 1. Repro from Phase 1 no longer corrupts the editor-visible document.

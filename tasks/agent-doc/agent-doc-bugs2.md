@@ -77,7 +77,22 @@ Did Option 2 with the additional logging you asked for. Since the corruption isn
 **Committed + pushed:** submodule `be0d5297` → `origin/20260422/codex-agent-backend`; superproject `cf64e89e6` (pointer + plan) → `origin/main`. **Install the v0.2.135 JB plugin** (`editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.135-signed.zip`) to get the editor-side diagnostics live.
 
 **Why gated, not done:** this is instrumentation, not a behavioral fix — acceptance needs a captured packet + the resulting SimWorld regression. Reproduce once with the new logging and share `idea.log` + `ops.log`, and I'll land the real fix against the proven path.
-<!-- agent:boundary:df7f0c8b -->
+❯ I upgraded the JB plugin.
+
+### Re: I upgraded the JB plugin — diagnostics are live — opus-4-8
+
+Good — v0.2.135 means the editor-side instrumentation is now active, and a responsive IPC plugin should also clear the editor-buffer-vs-disk closeout blocker we kept hitting (this cycle committing cleanly is the proof).
+
+**What's now capturing**, with no further action from you:
+- **Editor (`idea.log`):** every visible `setText` logs `[patch-watcher] document-mutation op=… patch_id=… transport=… pre=… post=… user_region_changed=…`. `user_region_changed=true` on a `repositionBoundary`/`applyPatch.component` line is the direct prompt-duplication/deletion signal.
+- **Binary (`.agent-doc/logs/ops.log`):** every IPC snapshot adoption now logs `ipc_snapshot_adoption_allowed` or `ipc_snapshot_adoption_blocked` with `snap_source` + len/hash + `drift_recheck`/`dup_growth_recheck`.
+
+**When `#ipcfullprompt-recur` (or the prompt-duplication sibling) next fires:** grab the `[patch-watcher] document-mutation … user_region_changed=true` line from `idea.log` plus the paired `ipc_snapshot_adoption_*` line from `ops.log` for the same patch_id, and send them over. That pins the transport + payload, and I'll land the real fix + a frozen SimWorld regression against the proven path.
+
+To confirm the editor diagnostics are wired, you can enable debug logging for the category if needed: **Help → Diagnostic Tools → Debug Log Settings →** add `#com.github.btakita.agentdoc`. The `document-mutation` lines log at INFO so they should appear in `idea.log` regardless.
+
+Both gated items (`#ipcfullprompt-recur`, `#prompt-duplicated-while-typing`) stay parked until a captured packet arrives.
+<!-- agent:boundary:89267f60 -->
 <!-- /agent:exchange -->
 ###
 <!--

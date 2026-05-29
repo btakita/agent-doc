@@ -64,7 +64,40 @@ The plan's live captures showed the common idle/busy cases were already distingu
 Gated, not done: acceptance 1+2 (unit coverage) are met and the fix is live, but acceptance 3 — a **live JB replay** proving a stale-busy-projected idle Claude pane now dispatches instead of enqueuing — is owned by `#run-agent-doc-stale-busy-replay`. The route-error "busy on an active turn" vs "still starting" wording remains `#route-busy-vs-starting-wording`. Reopen `#jb-stale-busy-idle-footer` only if a live replay shows a residual misclassification.
 
 The other pending items referenced above are mentioned for context only; none are completed this cycle.
-<!-- agent:boundary:42141372 -->
+❯ re: [#ipcfullprompt-recur2]. The issue was reproduced at /home/brian/work/btakita/agent-loop/tasks/professional/brandon-cinquegrana.md
+❯ #spec-test-build-install-commit-push
+
+### Re: [#ipcfullprompt-recur2] reproduced at brandon — full-tail scaffold capture — opus-4-8
+
+The brandon reproduction is the captured packet — and it exposed a real gap in my detector, which I've now closed (spec → test → build → install → commit → push).
+
+#### What the reproduction showed
+
+The corruption at `brandon-cinquegrana.md` was the **full-tail duplication** shape: you typed `Is the issue still happening? / Can it be re…`, and the editor copied the entire post-exchange scaffold (`agent:exchange` close + Queue + Backlog + Icebox) **around** your in-progress prompt, leaving **two** exchange close markers with the prompt split across the divergence (`Can it be re` → `Can it be rep11ro`).
+
+#### Why my detector missed it (and the fix)
+
+Last cycle's detector keyed only on deleted/duplicated `### Re:` **response blocks**. This shape duplicates the structural **scaffold**, not a response heading — so it slipped through, and no `ipcfullprompt_corruption_suspected` line fired.
+
+Fixed: new `detect_duplicated_scaffold` (submodule `dcf20f33`, pointer `597ec5b19`, pushed) flags any canonical structural marker (exchange/queue/backlog/icebox opens+closes) that appears **more than once on its own line** (inline prose mentions don't count). The `write.rs` IPC-adoption hook now runs it alongside the response-block check, with **no baseline required** — so the next occurrence auto-captures to `ops.log` + `.agent-doc/logs/ipcfullprompt/`.
+
+#### The captured packet + recovery
+
+- **Preserved** the corrupted buffer + clean baseline at `.agent-doc/logs/ipcfullprompt/manual-20260529-brandon-{candidate,baseline}.md` (the detector didn't auto-fire live because the running route-owned process predates the fix and the shape was uncovered — both now addressed).
+- **Restored** `brandon-cinquegrana.md` to HEAD (the corruption was uncommitted — the binary's fail-closed guards kept it out of HEAD). Note: brandon's live editor buffer may still show corruption until it reloads from disk.
+
+#### Verification
+
+- **Tests** (all green): core `detect_duplicated_scaffold_flags_two_exchange_close_markers` (the brandon shape), `_clean_doc_has_no_findings`, `_ignores_inline_marker_mentions`; orchestration `ipcfullprompt_scaffold_duplication_logged_without_baseline`.
+- `make check` clippy-clean; only red is the pre-existing `#queue-head-consume-on-topic-id-regression`.
+- Built `--release` + `cargo install` + `lib-install`; pushed submodule + pointer.
+
+#### Still open (the cure, not just capture)
+
+Detection/capture is now comprehensive (response-block **and** scaffold). The remaining work is **prevention** — stopping `PatchWatcher.setText` from producing the duplication. That needs the editor transport/payload packet from `idea.log`, which requires enabling `#com.github.btakita.agentdoc` debug logging (IDEA → Help → Diagnostic Tools → Debug Log Settings). Turn that on and reproduce once more, and I'll implement the targeted editor fix + SimWorld regression from the exact packet. `#ipcfullprompt-recur2` stays open for that.
+
+This item tracks an unfixed bug (prevention pending); only the capture sub-deliverable advanced this cycle, so the pending-done guard does not apply.
+<!-- agent:boundary:eabc24eb -->
 <!-- /agent:exchange --> 
 ###
 <!--
@@ -103,7 +136,7 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#ipcfullprompt-recur2] CAPTURE IMPLEMENTED (submodule 5ba20b7c, pointer 432c4e341, pushed): default-on forensic detector — agent_doc_core::ipc_corruption::detect_response_block_corruption + write.rs socket/file IPC-adoption hooks log ipcfullprompt_corruption_suspected to .agent-doc/logs/ops.log and preserve baseline+candidate under .agent-doc/logs/ipcfullprompt/ when a prior-committed ### Re: block is deleted/duplicated in the live editor buffer. Detection-only (never changes adoption); ignores new headings + (HEAD) annotation. No manual debug opt-in. STILL OPEN — the actual editor-side PatchWatcher.setText FIX awaits a real captured packet from the next occurrence. Binary IPC-snapshot guards already verified fail-closed. Plan: tasks/agent-doc/plan-full-document-ipc-corruption-typing-prompt.md.
+- [ ] [#ipcfullprompt-recur2] CAPTURE IMPLEMENTED + EXTENDED. (1) Default-on forensic detector (submodule 5ba20b7c): detect_response_block_corruption + write.rs IPC-adoption hooks → .agent-doc/logs/ops.log + .agent-doc/logs/ipcfullprompt/. (2) Extended for the full-tail scaffold-duplication shape (submodule dcf20f33, pointer 597ec5b19): detect_duplicated_scaffold flags any canonical structural marker (>1 on its own line) — reproduced live at brandon-cinquegrana.md (two agent:exchange close markers around an in-progress prompt 'Can it be re' / 'Can it be rep11ro'; the response-block detector missed it; preserved at .agent-doc/logs/ipcfullprompt/manual-20260529-brandon-{baseline,candidate}.md; working tree restored to HEAD). Binary IPC guards verified fail-closed — corruption stayed uncommitted. STILL OPEN: editor-side PatchWatcher.setText PREVENTION needs the transport/payload packet from idea.log (enable #com.github.btakita.agentdoc debug logging); detection/capture is now comprehensive (response-block + scaffold). Plan: tasks/agent-doc/plan-full-document-ipc-corruption-typing-prompt.md.
 - [ ] [#queue-head-consume-on-topic-id-regression] CI + make check RED on main (run 26662056181; reproduces at clean HEAD 2a6f60e5 with zero working-tree changes; CI was green on run 26653786056 so it went red recently): tests/finalize_integration.rs::finalize_consumes_synthetic_queue_prompt_when_response_topic_targets_head_id FAILS. A finalize response heading '### Re: #spec-test-build-install-commit-push' that targets queue head preset id #spec-test-build-install-commit-push logs '[queue] skipped consumption because the active prompt did not target the queue head' instead of '[queue] consumed'; head not drained, queue_active stays true. Pre-existing, separate from #prompt-duplicated-while-typing. Bisect the commit that turned it red and restore response-topic-targets-head-id consumption.
 - [ ] [#route-busy-vs-starting-wording] [recommended] route.rs starting-actor FailClosed reports 'still starting (waited Ns for claude startup)' even when the pane is busy on an active turn (live capture: pane %33 showed '· Roosting… (Ns · …)' spinner + '⏵⏵ … · N shell'). Distinguish 'busy on an active turn' from 'cold starting' in the error via a Claude busy-cue on the active-turn spinner. Fragile (random gerund; 'esc to interrupt' vs 'thinking with high effort') — UX-only, low priority. Ground truth + analysis: tasks/agent-doc/plan-jb-stale-busy-idle-footer.md.
 - [ ] [#codex-queue-head-exact-heading-guidance] [recommended] After #queue-strike-on-halt narrowed the Codex Stop-hook heading-match to exact-topic only, a Codex auto-loop completion with a descriptive heading (### Re: <descriptive topic>) no longer auto-consumes the queue head — only an exact ### Re: do [#id] heading does. Add SKILL.md / harness-invocation guidance telling Codex auto-loop completions to title the response heading exactly with the queue head prompt (or emit an explicit done signal), and live-verify a Codex auto-queue still advances across items. Plan: tasks/agent-doc/plan-queue-strike-on-halt-response.md.

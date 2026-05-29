@@ -62,12 +62,35 @@ The route's refusal to dispatch over an in-flight cycle is *correct* — the dan
 #### Remaining (gated)
 
 The JB "cancel run" action wiring (call the FFI on cancel) + plugin version bump, build, and live verification are the thin plugin half — they need a live IDE session (manual-testing gate), so I'm gating this rather than closing. The binary seam it depends on is done and tested.
-<!-- agent:boundary:6d601c9d -->
+❯ When I opened corky.md in JB, a tmux pane did not autoload. I also need a way from the JB plugin to load the tmux window.
+❯ #spec-test-build-install-commit-push
+
+### Re: corky.md tmux autoload + a way to load the tmux window — opus-4-8
+
+Two parts: a diagnosis and a new action. Shipped the action; the "autoload" part is mostly by-design. Plugin `0.2.136`, submodule `28b2644b`, superproject `662484fea`.
+
+#### Why corky.md didn't autoload a pane (by design)
+
+Opening or selecting a document fires only the **passive** `agent-doc sync --no-autostart` path (`EditorTabSyncListener`). That path deliberately does **not** spawn panes — the spec guards against "attach-first pane growth," so following a tab selection must never cold-start a tmux pane behind your back. So a freshly-opened doc whose pane isn't already up won't autoload one. That's intended, not a regression.
+
+`Sync Tmux Layout` *does* run the autostart path, but it's framed as full-layout reconciliation, not a targeted "load this doc's window."
+
+#### New: `Load Tmux Window` action
+
+- `AgentDoc.LoadTmuxWindow` — Tools menu, editor popup, and the Agent Doc popup; bound to **Ctrl+Shift+Alt+W**.
+- Runs the proven autostart layout-sync path for the focused doc so the pane is created and the harness started via the normal `route` auto-start.
+- It deliberately does **not** call `agent-doc start` directly — that runs the harness as a blocking child in a restart loop, which is wrong to invoke from a plugin thread. (That's the binary command behind a real terminal session, not an editor-thread call.)
+- `pluginVersion` 0.2.135 → 0.2.136; both unsigned + signed zips built (`make bump-plugin`); JB Kotlin tests green (incl. the new enable-gate + popup-membership test); spec updated.
+
+#### Install + verify (your step)
+
+Install `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.136-signed.zip` (Settings → Plugins → ⚙ → Install from Disk; if classes changed structurally, uninstall → restart → install → restart). Then open a doc whose pane isn't up and invoke **Load Tmux Window**. I captured `#jb-load-tmux-window-verify` to track that live check — and if the autostart sync genuinely fails to spawn the pane there (vs. the by-design passive open), that's a separate autostart bug and I'll want the route/sync logs.
+
+Queue head remains `#adoc-queue-ipc-buffer-divergence` (the heavier plugin-protocol work) — say the word and I'll take it.
+<!-- agent:boundary:ad3a28c7 -->
 <!-- /agent:exchange --> 
 ###
 <!--
-When I opened corky.md in JB, a se
----
 JB `Run Agent Doc` error
 ```
 [route] debounce OK — file idle for 0.5s and typing indicator idle

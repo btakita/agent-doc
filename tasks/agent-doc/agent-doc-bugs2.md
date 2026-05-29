@@ -35,10 +35,41 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 1 response topic(s): #next-steps for the three JB Run Agent Doc / Clear errors
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:dba20c84 -->
+❯ do [#ipcfullprompt-recur]. #spec-test-build-install-commit-push
+### Re: do [#prompt-duplicated-while-typing] — investigation (gated, not a speculative fix) — opus-4-8
+
+I will not ship a fabricated fix for this one. I did a full static root-cause pass and **ruled out every obvious duplicator** — the native pipeline cannot double a post-boundary prompt on its own:
+
+| Suspected path | Verdict from code |
+|----------------|-------------------|
+| Native boundary reposition (`template.rs`) | **idempotent** — `remove_all_boundaries()` then re-append one marker; can't duplicate |
+| Rust synthesis (`build_ipc_patches_json`, write.rs) | dedup-guarded; synthesizes *agent* content, skips if already present |
+| Editor append (`applyComponentPatchNative`) | `appendPatchAlreadyPresentUtil` + `patchReplayAlreadyPresentUtil` short-circuit re-delivery |
+| Disk-vs-buffer reposition source (`shouldPreferCommittedDiskContentForRepositionUtil`) | prefers disk **only** when normalized editor==disk, so it won't drop/recompute over freshly-typed post-boundary text |
+| EDT apply race | `EditorApplyProof(content, modStamp)` re-checked inside `WriteCommandAction`, rejects mid-apply edits |
+
+**Conclusion:** this is a live EDT-timing race (a patch computed against a buffer snapshot whose `normalizeExchangePrefixes` re-incorporates the typed prompt, overlapping another in-flight apply/reposition for the same cycle within a window the modStamp proof doesn't distinguish). It is **not** reproducible through the deterministic native pipeline, so I can't write a trustworthy regression test or a confirmed fix from static analysis alone.
+
+Per the project's own gates — *no hallucinating under uncertainty*, *manual testing gate*, *verify live system after fix* — the right move is to **capture the race before fixing it**, not to ship a speculative collapse-guard that may never fire or may eat legitimate content.
+
+**Ironically, this very turn reproduced the contention live:** my `finalize` hit `IPC timeout (2s) → CRDT merge → visible write deferred → exit 75` while you were typing `#ipcfullprompt-recur` into the buffer. Same IPC-contention-during-typing window, captured in the runtime log.
+
+**Done this turn:**
+- Ruled-out paths + sharpened hypothesis recorded in `tasks/agent-doc/plan-prompt-duplicated-while-typing.md` (commit `c1b6080b6`).
+- Concrete next step set: temporary `PatchWatcher` instrumentation logging `patch_id` + pre/post post-boundary user-region on every `setText`, reproduce in IntelliJ while typing during an in-flight write-back, freeze the captured trace into a deterministic test, then implement Option A against the proven path.
+
+**Why gated, not done:** no code fix landed — a safe fix needs the live capture above (instrumentation requires a running IntelliJ session I can't drive headless). `#prompt-duplicated-while-typing` is gated so the queue won't re-attempt it as a fresh `do`. `#ipcfullprompt-recur` (your new backlog item, left open) is the closely-related full-document-IPC-corruption recurrence — same IPC-during-typing root family; both should be tackled together with the instrumentation-first approach.
+<!-- agent:boundary:5d768dc1 -->
 <!-- /agent:exchange -->
 ###
 <!--
+JB `Run Agent Doc` error
+```
+[route] debounce OK — file idle for 0.5s and typing indicator idle
+[route] target tmux session: 0
+Error: authoritative actor generation 204 for tasks/agent-doc/agent-doc-bugs2.md owns pane %8 but route could not drain the active closeout before dispatch: captured response baseline no longer matches current document for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md. Rebuild sidecars without clearing session state: `agent-doc reset --from-current --preserve-session /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
+```
+---
 The completed queue item was not removed from the queue. #mermaid
 #spec-test-build-install-commit-push
 ---
@@ -58,7 +89,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
-- do [#prompt-duplicated-while-typing]
+- ~do [#prompt-duplicated-while-typing]~
 - do [#duplicate-response-after-commit]
 - do [#adoc-queue-ipc-buffer-divergence]
 - do [#queue-strike-on-halt]
@@ -72,7 +103,7 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#prompt-duplicated-while-typing] User prompt duplicated in the live editor while typing — in-progress prompt text appears twice in the buffer during/after typing, before any new agent-doc cycle. Distinct from #duplicate-response-after-commit (response body) and #adoc-queue-ipc-drift (queue/snapshot loop). Suspected: PatchWatcher.kt normalize+setText (lines 774/801) double-counts post-boundary keystrokes against the try_ipc() boundary-aware synthesized exchange patch payload; await_idle debounce narrows but does not close the race. Plan: tasks/agent-doc/plan-prompt-duplicated-while-typing.md (recommend Option A — single-source post-boundary user region + idempotent apply).
+- [ ] [#ipcfullprompt-recur] agent-doc-bug RECURRED on 0.34.0: full-document IPC corruption while typing a live prompt into tasks/professional/brandon-cinquegrana.md (stray ### below /agent:exchange + orphaned stuck_captured_cycle 1863-byte capture; preflight auto-recovered — moved stale boundary, repaired prompt prefixes, no response lost). [#ipcfullprompt] was prematurely moved to tasks/agent-doc-bugs2.done.md on 2026-05-26 while still plan-only/unfixed. Re-open and implement. Plan: tasks/agent-doc/plan-full-document-ipc-corruption-typing-prompt.md
 - [ ] [#duplicate-response-after-commit] Late-IPC reposition signal re-inserts already-committed response body into working tree, wrapped in duplicate boundary markers. Symptom: next preflight interrupts with "direct response patchback without agent-doc cycle"; agent-doc write --commit returns "empty response — nothing to write"; only manual Edit-based dedup recovers. Repro: tasks/dreamable/separation.md cycle after commit 231eafc83 on 2026-05-28. Plan: tasks/agent-doc/plan-duplicate-response-after-commit.md (recommend Option A — both detect over-application in session-check and make IPC reposition idempotent).
 - [ ] [#adoc-queue-ipc-buffer-divergence] Root cause #4 FIXED (submodule 729f7bc2): response-replay / stale-cycle hash matching now neutralizes the agent:queue component (tag + body) and the queue_active frontmatter, so queue-maintenance churn no longer wedges a committed cycle as stuck_captured_cycle. REMAINING #2 (live IDE buffer re-adds auto / diverges from committed inactive snapshot): blocker found — ipc_socket::send_patch carries component CONTENT only and cannot converge a queue opening-tag attribute (auto) or the queue_active frontmatter; try_ipc_full_content is disabled and rejects template docs, so no IPC seam exists yet. Needs a plugin protocol extension (PatchWatcher.kt + FFI) to converge queue tag + frontmatter to the editor buffer, plus a deterministic live-IPC-listener repro harness (SimWorld). Plan: tasks/agent-doc/plan-queue-ipc-drift.md.
 - [ ] [#queue-strike-on-halt] Queue head consumed on halt/refusal response. write.rs:1233-1242 + response_explicitly_targets_queue_head (write.rs:2481) treat any `### Re: <head-id> <suffix>` heading as completion signal even when body explicitly says "backlog left intact" + passes no --done/--pending-gate. Repro: tasks/agent-doc/open-code.md cycle 619af4d0b struck [#d97v] after halt response. Plan: tasks/agent-doc/plan-queue-strike-on-halt-response.md (recommend Option A — require explicit completion signal).
@@ -86,6 +117,7 @@ preset #spec-test-build-install-commit-push
 ## Review
  
 <!-- agent:review -->
+- [/] [#prompt-duplicated-while-typing] User prompt duplicated in the live editor while typing — in-progress prompt text appears twice in the buffer during/after typing, before any new agent-doc cycle. Distinct from #duplicate-response-after-commit (response body) and #adoc-queue-ipc-drift (queue/snapshot loop). Suspected: PatchWatcher.kt normalize+setText (lines 774/801) double-counts post-boundary keystrokes against the try_ipc() boundary-aware synthesized exchange patch payload; await_idle debounce narrows but does not close the race. Plan: tasks/agent-doc/plan-prompt-duplicated-while-typing.md (recommend Option A — single-source post-boundary user region + idempotent apply).
 - [/] [#queue-auto-no-continue] Queue auto trigger does not continue after finalize session-check warning about pending shadow items. Steps to reproduce: (1) Session document with queue_active=true, queue_trigger=auto, and multiple queued items. (2) finalize --stream completes cycle but session-check issues pending shadow warning for items outside live agent:backlog. (3) Queue consumes head item but auto trigger does not fire for next item. (4) agent-doc write --commit with --done reaps the item, queue reports 9 remaining but auto continues stop. Expected: queue auto should continue to next item after successful closeout. Actual: queue stops after first item. Session: tasks/software/tsift.md. agent-doc version: 0.34.0. The pending shadow warnings about items appearing both inside and outside agent:backlog may be blocking the auto-continue path.
 - [/] [#snrun] [recommended] Implement tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md: make JB Run Agent Doc distinguish rescued-stash accepted-only proof misses, active-turn busy collisions, and stale starting projections; add route/plugin regressions plus live replay evidence.
 <!-- /agent:review -->

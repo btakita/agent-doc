@@ -128,7 +128,30 @@ resync: stash pane %28 is registered in its own project root — skipping kill
 [perf] commit total: 10ms
 Error: authoritative actor generation 204 for tasks/agent-doc/agent-doc-bugs2.md owns pane %8 but route could not drain the active closeout before dispatch: [session-check] INTERRUPTED: cycle `cycle-1780074863050` is `committed` (repair_preflight_stale_lock), but the document still has unresolved prompt-bearing user changes with no new agent-doc cycle started: prompt_target: do [#stale-capture-after-compaction-blocks-route]. #spec-test-build-install-commit-push
 ```
-<!-- agent:boundary:e2461960 -->
+### Re: do [#stale-capture-after-compaction-blocks-route] — opus-4-8
+
+Done — compaction now discards its own captures, so the baseline-mismatch error you kept hitting won't recur after compaction. Pure binary fix, deterministically tested. Submodule `a9434777`, superproject `033356349`.
+
+#### The fix (plan Option A)
+
+- `capture::discard_captures_for_archived_responses(file, archived_text)` — marks `Discarded` every capture whose `response_body` is contained in the archived text (intact or after prompt-prefix normalization); logs `capture_discarded_for_archived_response`. **Containment against the archived text** (not mere absence from the current doc) is the safe discriminator, so a never-applied / genuinely pending capture is never touched. Idempotent.
+- `compact.rs` — best-effort `discard_archived_captures` wired after all three archive+apply sites (exchange-pair, full component, partial component). It never fails the compaction.
+- Result: after compaction there's no stale active capture for the route's drain to trip over, so `validate_replay` no longer fail-closes with "captured response baseline no longer matches current document."
+
+#### Verification
+
+- New test: discards only the archived capture, leaves a non-archived one intact, idempotent on a second pass.
+- `make check` (clippy + full suite + sim-medium + version-sync): green.
+- Built `cargo build --release` + `cargo install --path .`.
+
+#### One caveat + the second error you pasted
+
+This fix is forward-looking: it stops *future* compactions from orphaning captures. The stale capture already left by this session's earlier compaction isn't retroactively cleaned, so if a `Run Agent Doc` still trips on it, the safe one-time unblock remains `agent-doc reset --from-current --preserve-session tasks/agent-doc/agent-doc-bugs2.md`.
+
+Your second pasted error (`repaired stale preflight_started cycle … could not drain the active closeout before dispatch: [session-check] …`) is the route correctly fail-closing because unanswered follow-up prompts had accumulated — its own hint is "run `agent-doc` to answer it," which is exactly this turn. It's self-resolving and in the same drain/follow-up family; no separate fix needed right now.
+
+Queue head remains `#adoc-queue-ipc-buffer-divergence` (the heavier plugin-protocol work). Say the word and I'll take it.
+<!-- agent:boundary:c006a04a -->
 <!-- /agent:exchange --> 
 ###
 <!--
@@ -168,7 +191,6 @@ preset #spec-test-build-install-commit-push
 
 <!-- agent:backlog -->
 - [ ] [#backlog-auto-marker-misfire] The 'auto' attribute on the agent:backlog marker (queue-only attribute) misfired an auto-run that destructively rewrote the backlog — minted new IDs wrapping 'do [#...]' stubs of already-done items; user reported original task text lost and recovery needed git/sidecar archaeology. Fix: reject 'auto'/unknown attrs on agent:backlog (warn, no mutation); auto-loop must trigger only from the queue 'auto' attribute; never rewrite committed backlog item text in an auto-run. Plan: tasks/agent-doc/plan-backlog-auto-marker-misfire.md. DO NOT IMPLEMENT.
-- [ ] [#stale-capture-after-compaction-blocks-route] Run Agent Doc fails closed with 'captured response baseline no longer matches current document' (manual reset --from-current --preserve-session) when a stale capture sidecar references a response that compaction already archived out of the doc. validate_replay correctly bails (can't tell compacted-vs-lost). Plan: tasks/agent-doc/plan-stale-capture-after-compaction-blocks-route.md (recommend Option A — compaction discards its own captures). Reported 2026-05-29.
 - [ ] [#jb-load-tmux-window-verify] [recommended] Live-verify the new JB Load Tmux Window action (plugin 0.2.136): install the signed zip, confirm it autostarts/loads the tmux pane for a focused doc whose pane is not up (e.g. corky.md). If the autostart sync genuinely fails to spawn the pane in that case (vs. by-design passive open), capture the route/sync logs as a separate autostart bug.
 - [ ] [#adoc-queue-ipc-buffer-divergence] Root cause #4 FIXED (submodule 729f7bc2): response-replay / stale-cycle hash matching now neutralizes the agent:queue component (tag + body) and the queue_active frontmatter, so queue-maintenance churn no longer wedges a committed cycle as stuck_captured_cycle. REMAINING #2 (live IDE buffer re-adds auto / diverges from committed inactive snapshot): blocker found — ipc_socket::send_patch carries component CONTENT only and cannot converge a queue opening-tag attribute (auto) or the queue_active frontmatter; try_ipc_full_content is disabled and rejects template docs, so no IPC seam exists yet. Needs a plugin protocol extension (PatchWatcher.kt + FFI) to converge queue tag + frontmatter to the editor buffer, plus a deterministic live-IPC-listener repro harness (SimWorld). Plan: tasks/agent-doc/plan-queue-ipc-drift.md.
 - [ ] [#queue-strike-on-halt] Queue head consumed on halt/refusal response. write.rs:1233-1242 + response_explicitly_targets_queue_head (write.rs:2481) treat any `### Re: <head-id> <suffix>` heading as completion signal even when body explicitly says "backlog left intact" + passes no --done/--pending-gate. Repro: tasks/agent-doc/open-code.md cycle 619af4d0b struck [#d97v] after halt response. Plan: tasks/agent-doc/plan-queue-strike-on-halt-response.md (recommend Option A — require explicit completion signal).

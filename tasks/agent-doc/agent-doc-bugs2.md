@@ -84,7 +84,46 @@ This makes the data-loss class **detectable and loud** — it can no longer slip
 - Pushed.
 
 **Gated**, not closed: detectable guard is complete and tested; the source-level prevention is the shared plugin-protocol work. Queue continues to `#adoc-queue-ipc-buffer-divergence`.
-<!-- agent:boundary:a2b3c1cb -->
+JB error when canceling a run then calling `Run Agent Doc` again.
+```
+resync: stash pane %3 is registered in its own project root — skipping kill
+resync: stash pane %2 is registered in its own project root — skipping kill
+resync: stash pane %21 is registered in its own project root — skipping kill
+resync: stash pane %8 is registered in its own project root — skipping kill
+resync: stash pane %27 is registered in its own project root — skipping kill
+resync: stash pane %20 is registered in its own project root — skipping kill
+[route] debounce OK — file idle for 0.7s and typing indicator idle
+[route] target tmux session: 0
+Error: authoritative actor generation 2 for tasks/monsterrodholders/mrh-project.md owns pane %30 but route could not drain the active closeout before dispatch: empty preflight_started cycle has no response capture for tasks/monsterrodholders/mrh-project.md: previous cycle `cycle-1780071335102` is still `preflight_started`, the live document has unresolved prompt_target: Do step 3...the warm intro + 4-5 headline wins + "full breakdown attached"., and no response exists to replay. The cycle is only 24s old; wait until it is stale or restart the harness pane and rerun `agent-doc tasks/monsterrodholders/mrh-project.md` (or use `agent-doc start tasks/monsterrodholders/mrh-project.md` from a fresh pane) so the prompt is handled by a new response cycle.
+```
+As I was typing in this into the comment below the exchange component, the IPC document corruption + duplicate line issues occurred.
+#spec-test-build-install-commit-push
+
+### Re: JB cancel→Run Agent Doc error + IPC corruption while typing — opus-4-8
+
+Triaged your live report. It's two distinct things, and the binary actually behaved correctly on the part that printed the scary error — so I've captured the genuinely actionable bug rather than churn a half-baked fix into the delicate route/cancel path. (No items completed this cycle — IDs below are cross-references only.)
+
+#### 1. The JB route error — correct fail-closed, poor UX
+
+The dumped error is for a **different document** (`tasks/monsterrodholders/mrh-project.md`), and it's the route **correctly refusing to dispatch** over an in-flight cycle: a previous `cycle-1780071335102` is still `preflight_started` (24s old) with an unresolved prompt and no response to replay. Refusing to drain an active closeout is the intended behavior, and it even prints a recovery hint.
+
+The real bug is narrower: you **canceled** that run, but an explicit cancel does not abandon the orphaned `preflight_started` cycle — so the next `Run Agent Doc` is blocked until the staleness window elapses. The binary can't tell "user canceled, reclaim now" from "still running, wait." Captured as a new backlog item with a plan (recommend Option A: the JB cancel action emits a signal that abandons a no-capture `preflight_started` cycle so re-dispatch is immediate). This is distinct from the stale-**busy** actor/lease items, which concern the busy projection rather than per-document `cycle_state`.
+
+#### 2. IPC corruption + duplicate line while typing into the comment
+
+That's the prompt-duplicated-while-typing family recurring (it's in Review): the plugin's `PatchWatcher` double-counts post-boundary keystrokes against the synthesized exchange patch while you type. It's plugin-side (Kotlin), shared root with the IPC-buffer-divergence work.
+
+Notably, **this cycle's own closeout did not corrupt your note**: the binary hit the same `live_prompt_drift_after_preflight` path, adopted `content_ours`, committed my response to HEAD, and left your typed note intact in the working tree (verified: my response appears exactly once, session-check OK). That's the data-loss class the two fixes I just shipped now make detectable / fail-closed.
+
+#### What I did
+
+- Captured the cancel-orphans-cycle bug (plan: `tasks/agent-doc/plan-cancel-orphans-preflight-cycle.md`, committed `7ffcc6116`) and added it to the backlog.
+- Did **not** code a fix this cycle: part 1 is mostly correct behavior plus an editor-cancel-signal seam (plugin work), and part 2 is the already-tracked plugin-side typing duplication. Neither is a safe one-shot binary edit without the chosen seam.
+
+#### Queue status
+
+Two items already shipped this session. The queue head is now the IPC-buffer-divergence plugin-protocol work — which is exactly the root cause behind both the typing-corruption and the cancel-signal seam. Say the word and I'll take it next.
+<!-- agent:boundary:3e869d7f -->
 <!-- /agent:exchange --> 
 ###
 <!--
@@ -112,7 +151,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 #spec-test-build-install-commit-push
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#prompt-duplicated-while-typing]~
 - ~do [#duplicate-response-after-commit]~
@@ -129,7 +168,7 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#exchange-prompt-dropped-on-merge] User-authored exchange prompt (observed: "go") silently dropped during an IPC content_ours merge while the IDE held ipc.sock — never reaches snapshot/HEAD, assistant never responds, next preflight reports no_changes. Same drift family as #adoc-queue-ipc-buffer-divergence / #duplicate-response-after-commit but the victim is user input. Repro 2026-05-29 on src/boost-client/tasks/monsterrodholders.md (dropped the "go" authorizing #gfwconnect; assistant replied "nothing changed" for two cycles). Plan: tasks/agent-doc/plan-exchange-prompt-dropped-on-merge.md (recommend Option A — union user prompt lines / fail closed + add dropped_prompt_guard to session-check).
+- [ ] [#cancel-orphans-preflight-cycle] Canceling a run then invoking Run Agent Doc fails closed because the explicit cancel does not abandon the orphaned preflight_started cycle (route waits for staleness). Distinct from the stale-busy actor/lease items: this is per-document cycle_state left open by cancel. Plan: tasks/agent-doc/plan-cancel-orphans-preflight-cycle.md (recommend Option A — JB cancel emits a signal that abandons the no-capture preflight_started cycle). Reported 2026-05-29.
 - [ ] [#adoc-queue-ipc-buffer-divergence] Root cause #4 FIXED (submodule 729f7bc2): response-replay / stale-cycle hash matching now neutralizes the agent:queue component (tag + body) and the queue_active frontmatter, so queue-maintenance churn no longer wedges a committed cycle as stuck_captured_cycle. REMAINING #2 (live IDE buffer re-adds auto / diverges from committed inactive snapshot): blocker found — ipc_socket::send_patch carries component CONTENT only and cannot converge a queue opening-tag attribute (auto) or the queue_active frontmatter; try_ipc_full_content is disabled and rejects template docs, so no IPC seam exists yet. Needs a plugin protocol extension (PatchWatcher.kt + FFI) to converge queue tag + frontmatter to the editor buffer, plus a deterministic live-IPC-listener repro harness (SimWorld). Plan: tasks/agent-doc/plan-queue-ipc-drift.md.
 - [ ] [#queue-strike-on-halt] Queue head consumed on halt/refusal response. write.rs:1233-1242 + response_explicitly_targets_queue_head (write.rs:2481) treat any `### Re: <head-id> <suffix>` heading as completion signal even when body explicitly says "backlog left intact" + passes no --done/--pending-gate. Repro: tasks/agent-doc/open-code.md cycle 619af4d0b struck [#d97v] after halt response. Plan: tasks/agent-doc/plan-queue-strike-on-halt-response.md (recommend Option A — require explicit completion signal).
 - [ ] [#jb-stale-busy-idle-footer] Three JB Run Agent Doc / Clear Session Context reports queue-instead-of-dispatch or block Clear while the live pane footer shows a Claude Code idle composer: monsterrodholders.md (actor gen 233, pane %19), equityfundingsource.md (gen 35, pane %3), tsift.md (pane %21, footer 22.4K (11%) ctrl+p commands). The tsift.md case is the strongest stale-busy candidate — Clear was blocked though the footer indicates idle. Fix: route.rs / session_actor_cmd.rs busy projection should treat the Claude Code idle-composer footer (ctrl+p commands / context % used) as idle direct evidence to repair a stale busy actor/lease projection before queuing or blocking, mirroring the existing OpenCode context % used idle-composer rule. Relates to #run-agent-doc-stale-busy-replay and #snrun (plan tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md).
@@ -142,6 +181,7 @@ preset #spec-test-build-install-commit-push
 ## Review
  
 <!-- agent:review -->
+- [/] [#exchange-prompt-dropped-on-merge] User-authored exchange prompt (observed: "go") silently dropped during an IPC content_ours merge while the IDE held ipc.sock — never reaches snapshot/HEAD, assistant never responds, next preflight reports no_changes. Same drift family as #adoc-queue-ipc-buffer-divergence / #duplicate-response-after-commit but the victim is user input. Repro 2026-05-29 on src/boost-client/tasks/monsterrodholders.md (dropped the "go" authorizing #gfwconnect; assistant replied "nothing changed" for two cycles). Plan: tasks/agent-doc/plan-exchange-prompt-dropped-on-merge.md (recommend Option A — union user prompt lines / fail closed + add dropped_prompt_guard to session-check).
 - [/] [#duplicate-response-after-commit] Late-IPC reposition signal re-inserts already-committed response body into working tree, wrapped in duplicate boundary markers. Symptom: next preflight interrupts with "direct response patchback without agent-doc cycle"; agent-doc write --commit returns "empty response — nothing to write"; only manual Edit-based dedup recovers. Repro: tasks/dreamable/separation.md cycle after commit 231eafc83 on 2026-05-28. Plan: tasks/agent-doc/plan-duplicate-response-after-commit.md (recommend Option A — both detect over-application in session-check and make IPC reposition idempotent).
 - [/] [#prompt-duplicated-while-typing] User prompt duplicated in the live editor while typing — in-progress prompt text appears twice in the buffer during/after typing, before any new agent-doc cycle. Distinct from #duplicate-response-after-commit (response body) and #adoc-queue-ipc-drift (queue/snapshot loop). Suspected: PatchWatcher.kt normalize+setText (lines 774/801) double-counts post-boundary keystrokes against the try_ipc() boundary-aware synthesized exchange patch payload; await_idle debounce narrows but does not close the race. Plan: tasks/agent-doc/plan-prompt-duplicated-while-typing.md (recommend Option A — single-source post-boundary user region + idempotent apply).
 - [/] [#queue-auto-no-continue] Queue auto trigger does not continue after finalize session-check warning about pending shadow items. Steps to reproduce: (1) Session document with queue_active=true, queue_trigger=auto, and multiple queued items. (2) finalize --stream completes cycle but session-check issues pending shadow warning for items outside live agent:backlog. (3) Queue consumes head item but auto trigger does not fire for next item. (4) agent-doc write --commit with --done reaps the item, queue reports 9 remaining but auto continues stop. Expected: queue auto should continue to next item after successful closeout. Actual: queue stops after first item. Session: tasks/software/tsift.md. agent-doc version: 0.34.0. The pending shadow warnings about items appearing both inside and outside agent:backlog may be blocking the auto-continue path.

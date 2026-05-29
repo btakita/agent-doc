@@ -35,7 +35,56 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 3 response topic(s): do [#cli-extract-tagpath-helpers]; do [#cli-cluster-quality]; do [#cli-cluster-summarize]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:5c505772 -->
+
+### Re: do [#cli-cluster-infra] — opus-4-8
+
+Phase 2 cluster #5 done — the largest and most entangled cluster.
+
+#### What moved (15 functions, ~1371 LOC) → `packages/tsift-cli/src/commands/infra.rs`
+
+- `cmd_route` — model-tier classification
+- `cmd_edit` — atomic batch file edits
+- `cmd_convex_sync` — Convex nodes/edges sync planning + transport
+- `cmd_graph_db_status` / `cmd_graph_db_refresh` / `cmd_graph_db_doctor` / `cmd_graph_db_drift` / `cmd_graph_db_compact` / `cmd_graph_db_backend_eval` / `cmd_graph_db` — the full graph-db operator surface (`backend_eval` alone is ~423 LOC)
+- `cmd_status` / `cmd_locks` — session health + lock diagnostics
+- `cmd_init` — project setup
+- `cmd_sql` — SQLite introspection
+- `cmd_rewrite` — shell→tsift rewrite
+
+lib.rs re-imports the 9 top-level entry points; the six `cmd_graph_db_*` sub-handlers are called internally from `cmd_graph_db`, so only `cmd_graph_db` crosses the module boundary.
+
+#### Approach: compiler-driven promotion
+
+This cluster is far more coupled than the prior ones (51 distinct method calls, 15 private types, several with impl blocks). Rather than hand-trace every dependency, I moved the bodies and let `cargo build` enumerate every private symbol needing `pub(crate)` — iterating until clean. Promoted:
+
+- **~59 helper fns** (graph-db operator/backend-eval/convex helpers, edit-plan, status-fix, sql helpers)
+- **15 private types** — `ConvexHttpTransport`, `ConvexSyncOptions`, `EditBatch`/`EditResult`/`EditStatus`, the `GraphDbBackendEval*` family, `GraphDb{Compaction,Doctor,Drift,Evidence}*`, `GraphDbExperimentalBackend`, `GraphDbRefreshSummary`
+- **5 `GRAPH_*` consts**
+
+Helpers and the `GraphDbExperimentalBackend` business-logic impl **stay in lib.rs** — they're shared with the still-resident conflict-matrix / dispatch-trace / dependency-dag evidence commands. Only the cmd bodies moved.
+
+#### One subtlety worth recording
+
+`cargo fix` (run to clean unused imports) stripped `GraphDbBackend` + `TraverseFormat` from lib.rs's non-test cli import — correct for the non-test build, but the `#[cfg(test)]` module still references those enum variants. `cargo fix --lib` doesn't analyze test cfg, so the lib built clean while `cargo test -p tsift-cli` broke with E0433. Restored them as a `#[cfg(test)]`-only import. Caught because I run `cargo test -p tsift-cli` explicitly — note that `make check`'s `cargo test` only exercises the root `tsift` package (56 tests), not the tsift-cli package's 479, though clippy `--all-targets` does compile them.
+
+#### Verification
+
+- `cargo build -p tsift-cli` — clean (only the 9 pre-existing non-test `dead_code` warnings, which are live under test cfg)
+- `cargo test -p tsift-cli` — **479 passed across 7 suites**
+- `make check` — green (clippy `--all-targets -D warnings`, cargo test, opencode npm dry-run)
+- `cargo install --path packages/tsift-cli` + `cargo build --release -p tsift-cli` — both binaries refreshed; `tsift --version` → `0.1.62`
+
+#### Commits
+
+- tsift @ `5834ac5` — `cli: Phase 2 — extract infra command cluster into commands/infra.rs` (pushed)
+- agent-loop @ `0e6bf04` — submodule pointer bump (pushed)
+
+VERSIONS.md `Unreleased` updated. lib.rs now ~34.2k LOC — down from ~39.2k at Phase 1a-i kickoff (~5k LOC / 13% drained across the split).
+
+#### Top of backlog
+
+`[#cli-cluster-digests]` — Phase 2 (final cluster): move `cmd_diff_digest`, `cmd_log_digest`, `cmd_test_digest`, `cmd_metric_digest`, `cmd_session_digest`, `cmd_session_cost`, `cmd_session_review`, `cmd_context_pack` bodies into `packages/tsift-cli/src/commands/digests.rs`. The backlog notes this depends on `tsift-digest` and `tsift-session` crates landing first — both already extracted (per VERSIONS `#split-tsift-session` / digest history), so the cmd bodies should lift cleanly.
+<!-- agent:boundary:d9a749e1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -53,7 +102,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#cli-extract-tagpath-helpers]~
 - ~do [#cli-cluster-quality]~
 - ~do [#cli-cluster-summarize]~
-- do [#cli-cluster-infra]
+- ~do [#cli-cluster-infra]~
 - do [#cli-cluster-digests]
 - do [#npm-auth-setup]
 - do [#npm-publish-verify]
@@ -63,7 +112,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#cli-cluster-infra] Phase 2 — move cmd_init + cmd_status + cmd_locks + cmd_sql + cmd_route + cmd_rewrite + cmd_convex_sync + cmd_graph_db_* + cmd_edit bodies into packages/tsift-cli/src/commands/infra.rs.
 - [ ] [#cli-cluster-digests] Phase 2 — move cmd_diff_digest + cmd_log_digest + cmd_test_digest + cmd_metric_digest + cmd_session_digest + cmd_session_cost + cmd_session_review + cmd_context_pack bodies into packages/tsift-cli/src/commands/digests.rs. Depends on tsift-digest and tsift-session landing first.
 - [ ] [#npm-auth-setup] Configure NPM_TOKEN secret + TSIFT_ENABLE_NPM_PUBLISH=true variable in GitHub repo settings
 - [ ] [#npm-publish-verify] After auth configured, tag release and verify publish-opencode-plugin CI job succeeds and opencode-tsift appears on npmjs.org

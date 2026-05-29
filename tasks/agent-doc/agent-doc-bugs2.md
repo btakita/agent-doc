@@ -142,7 +142,30 @@ Not a stale plugin — the **detector didn't yet cover the scaffold-duplication 
 #### When a new plugin *will* be required
 
 The eventual **cure** for `#ipcfullprompt-recur2` — the actual `PatchWatcher.setText` change in the Kotlin plugin — *will* need a plugin rebuild and reinstall (bump `pluginVersion` past the current `0.2.137`; IntelliJ dedupes same-version installs, so the version must change). But I haven't written that yet — it's gated on the `idea.log` transport packet. So: nothing to install today; a fresh signed plugin only once I implement the editor-side fix.
-<!-- agent:boundary:9a573f98 -->
+❯ Is [#ipcfullprompt-recur2] complete? Can we mark as done?
+
+### Re: Is [#ipcfullprompt-recur2] complete? Can we mark as done? — opus-4-8
+
+No — not done. I'd push back on closing it, because the bug it tracks (the corruption) still reproduces.
+
+#### What's done vs. not
+
+- **Done — capture/detection.** Both shapes are now caught and auto-preserved: response-block delete/duplicate *and* the full-tail scaffold duplication. That sub-deliverable is genuinely finished.
+- **Not done — prevention/cure.** Nothing yet stops `PatchWatcher.setText` from producing the duplication. The corruption can still happen on your next live-typed prompt; we'd just *capture* it now. The editor-side fix isn't written (it's gated on the `idea.log` transport packet).
+
+#### Why I won't mark it done
+
+This exact bug has already been prematurely archived **twice** — `#ipcfullprompt` (2026-05-26) and `#ipcfullprompt-recur` (2026-05-29), both moved to the done archive while still unfixed, which is why `-recur2` exists. Marking it done now while the corruption still reproduces would be the third time, and it would falsely signal the bug is fixed. Per the item's own intent, it stays open until prevention lands and is live-verified.
+
+#### The clean way to record the finished part
+
+If you want closure on the completed work without losing the open bug, I can **split** it:
+
+- Open a focused **`#ipcfullprompt-capture`** as **done** — the forensic detection/preservation that shipped this session (verifiable, finished).
+- Keep **`#ipcfullprompt-recur2`** open, narrowed to the **cure only** (the `PatchWatcher.setText` prevention + SimWorld regression), gated on the editor packet.
+
+Say the word and I'll do that split. Otherwise `#ipcfullprompt-recur2` stays open as-is. Either way, I'm not marking the corruption fixed while it can still occur.
+<!-- agent:boundary:8a54e4be -->
 <!-- /agent:exchange --> 
 ###
 <!--
@@ -165,13 +188,10 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
-- ~do [#prompt-duplicated-while-typing]~
-- ~do [#duplicate-response-after-commit]~
-- ~do [#exchange-prompt-dropped-on-merge]~
-- ~do [#cancel-orphans-preflight-cycle]~
-- ~do [#adoc-queue-ipc-buffer-divergence]~
-- ~do [#queue-strike-on-halt]~
-- ~do [#jb-stale-busy-idle-footer]~
+- do [#queue-head-consume-on-topic-id-regression]
+- do [#route-busy-vs-starting-wording]
+- do [#codex-queue-head-exact-heading-guidance]
+- do [#backlog-auto-marker-misfire]
 - do [#pending-add-append-not-prepend]
 - do [#next-steps-backlog-capture]
 - do [#run-agent-doc-stale-busy-replay]

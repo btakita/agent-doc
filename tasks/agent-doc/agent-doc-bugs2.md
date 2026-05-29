@@ -97,7 +97,33 @@ Fixed: new `detect_duplicated_scaffold` (submodule `dcf20f33`, pointer `597ec5b1
 Detection/capture is now comprehensive (response-block **and** scaffold). The remaining work is **prevention** — stopping `PatchWatcher.setText` from producing the duplication. That needs the editor transport/payload packet from `idea.log`, which requires enabling `#com.github.btakita.agentdoc` debug logging (IDEA → Help → Diagnostic Tools → Debug Log Settings). Turn that on and reproduce once more, and I'll implement the targeted editor fix + SimWorld regression from the exact packet. `#ipcfullprompt-recur2` stays open for that.
 
 This item tracks an unfixed bug (prevention pending); only the capture sub-deliverable advanced this cycle, so the pending-done guard does not apply.
-<!-- agent:boundary:eabc24eb -->
+❯ Was this a plugin issue?
+
+### Re: Was this a plugin issue? — opus-4-8
+
+Yes — fundamentally it's an **editor-plugin** issue, not a CLI/binary one.
+
+#### Where the corruption is produced
+
+The duplication is written by the JetBrains plugin's `PatchWatcher.setText` — it computes a full-document `result` and replaces the live buffer with it. In the brandon capture, that `result` contained the post-exchange scaffold twice (two `agent:exchange` close markers around your in-progress prompt). That `setText` is the corrupting write.
+
+#### Why it's *not* a binary/CLI issue
+
+The `agent-doc` binary that sends patches and owns the commit is clean here: every `ipc_snapshot_adoption` for these docs logged `outcome=blocked` (live-prompt-drift fail-closed), and the corruption stayed **uncommitted** — HEAD was never poisoned. So the CLI's guards did their job; the damage was in the editor's visible buffer/disk, which the binary can only detect after the fact (that's what the forensic detector now does).
+
+#### The nuance worth knowing
+
+It's the plugin's **apply path**, which is part Kotlin and part shared-Rust:
+
+- `PatchWatcher.kt` (Kotlin) owns the `setText` and the normalize step.
+- But it calls the shared cdylib via FFI for the actual transforms (`applyComponentPatchWithBoundary`, `repositionBoundaryToEnd`, `normalizeTemplateStructure`).
+
+The trigger is the **interaction**: a binary-synthesized boundary-aware exchange patch that carries your live post-boundary prompt, plus the plugin's normalize + `setText` re-incorporating that same text = the tail gets written twice (the plan's L1∪L2 double-count).
+
+#### What that means for the fix
+
+The cure has to land in the **plugin** (`PatchWatcher.kt`) and/or the synthesis side, and it needs a **plugin rebuild + reinstall** — a cdylib `lib-install` alone won't touch the Kotlin `setText` path. That's exactly why I need the `idea.log` transport/payload packet: to pin down which transport (socket vs file IPC, patch vs reposition vs normalize) the plugin mishandled, so the editor-side fix is targeted rather than speculative on the most corruption-prone path. Enable `#com.github.btakita.agentdoc` debug logging and reproduce once more, and I can write that fix.
+<!-- agent:boundary:37bc45a2 -->
 <!-- /agent:exchange --> 
 ###
 <!--

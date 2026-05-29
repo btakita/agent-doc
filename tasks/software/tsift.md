@@ -192,7 +192,25 @@ Notes:
 - The four crate-split items remain in `agent:review` as the proposal record; I added active backlog entries (same ids) tagged "promoted from agent:review".
 - `[#split-tsift-cli-subcommands]` is effectively done (this session's Phase 1/2 modularization of `tsift-cli/lib.rs`) — I did not add a backlog item for it and left it gated in `agent:review`; say the word and I'll mark that review item done.
 - Track A (#1–#4) is agent-actionable now; want me to start on `#split-sim-world`?
-<!-- agent:boundary:354c8f0e -->
+❯ yes
+### Re: yes (start #split-sim-world) — opus-4-8
+
+Stopped before implementing — investigation found the review item rests on a **stale premise**, and the naive form would break the build. Two blockers:
+
+**1. `sim_world.rs` is currently orphaned dead code.** There is no `mod sim_world` declaration anywhere (`src/lib.rs`, `main.rs`, Cargo targets, `include!`, `build.rs` — all checked). The module isn't compiled, and its three SimWorld tests (`sim_world_fast_seed_corpus_*`, `sim_world_medium_seed_corpus_*`, `sim_world_named_edge_trace_*`) are **not registered in any test binary** (`cargo test -p tsift --lib -- --list` shows none). It was silently de-wired when its dependencies moved out of root `tsift` during the earlier crate splits. So "the SimWorld coverage" the CI-review rule references isn't actually running.
+
+**2. The "root tsift re-exports" framing creates a dependency cycle.** `sim_world.rs` imports `crate::{init, rewrite_command, session_digest, status}` — `status` + `rewrite_command` still live in root `tsift`. A `tsift-sim-world` **lib** crate that root `tsift` re-exports would be `tsift → tsift-sim-world → tsift` — a cycle cargo rejects.
+
+#### Options (your call — I recommend A)
+
+- **A (recommended): re-home as a test-harness crate.** Create `tsift-sim-world` as a crate whose SimWorld harness depends on `tsift` (+ `tsift-index`, `tsift-session`) as a **dev-dependency**, with the tests in it. Dev-deps don't form a lib cycle, root `tsift` does **not** re-export it, and `make check` runs it via `cargo test -p tsift-sim-world`. This both extracts it *and* fixes the dead-test bug. Closest to the review item's intent, minus the (impossible) re-export.
+- **B: re-wire in place first, extract later.** Add `#[cfg(test)] mod sim_world;` to root `tsift/src/lib.rs` to re-activate the tests where they are; defer the crate move until `status`/`rewrite_command` are themselves extracted (which is really the `#demote-root-tsift` endgame). Lower churn, keeps the cycle question for later.
+- **C: delete the orphan.** Only if SimWorld is obsolete — but the project's CI-review rule explicitly values SimWorld coverage, so I doubt it.
+
+I left `#split-sim-world` **open** in the backlog (not started) pending your pick. Note the dead-test finding is arguably its own bug worth tracking regardless of which option — the harness silently stopped running.
+
+Which option?
+<!-- agent:boundary:4b785980 -->
 <!-- /agent:exchange -->
 ###
 <!--

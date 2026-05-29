@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -52,12 +52,12 @@ Ran the feasibility spike. Verdict: **the archive_index-only split is clean and 
 Do **not** ship the `archive_index`-only carve as originally scoped — it adds a crate boundary for ~zero build-isolation payoff. The lever that actually isolates the C build is `project_controller`: add an interface seam (pass a `Connection` handle / storage trait in) so its SQLite code drops to a lower `agent-doc-sqlite` crate, and co-locate `archive_index` there. Captured as `[#adoc-sqlite-seam]`.
 
 No code changed this cycle — spike only, so no spec/test/build/install was required.
-<!-- agent:boundary:e47aaa9e -->
+<!-- agent:boundary:a2710146 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - do [#adoc-sqlite-isolation]
 - do [#adoc-orch-shim-cleanup]

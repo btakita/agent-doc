@@ -76,22 +76,71 @@ The fix therefore **must** also give Claude a busy cue so the first guard
 Ordering safety: part 1 guarantees a busy turn fails the `has_busy_cue` guard first,
 so part 2 can only surface the composer for panes with no active-turn marker.
 
-## BLOCKER — needs live ground truth before implementing
+## Ground truth — live captures (2026-05-29, this Claude Code session)
 
-This is exactly the live-tmux / pane-UI class the project gates behind real
-captures + `make tmux-ci` + the live-replay item `#run-agent-doc-stale-busy-replay`.
-Two strings must come from real captures (a wrong matcher here false-idles a busy
-turn — a serious regression that dispatches/clears into a live Claude turn):
+Captured real Claude Code panes (`tmux capture-pane -p`). This **corrects** the
+report's footer description (`22.4K (11%) ctrl+p commands` does NOT match Claude
+rendering — `ctrl+p commands` is an OpenCode marker; that pane was likely OpenCode
+or the description is inaccurate).
 
-- **The exact Claude idle footer/status line(s)** to mark ignorable. The report's
-  `22.4K (11%) ctrl+p commands` is ambiguous (`ctrl+p commands` is an OpenCode
-  marker), so the literal Claude footer text for the running CLI version must be
-  captured, not guessed.
-- **The exact Claude busy/active-turn line** (`esc to interrupt` + spinner glyph /
-  timer shape) to anchor the new busy cue.
+**Idle Claude (panes %8 Opus, %22 Sonnet) — last meaningful lines:**
+```
+────────…────────
+❯
+────────…────────
+  Opus 4.8 ctx:40% ~/work/btakita/agent-loop main brian@cachyos-x8664
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+```
+The last meaningful line is `⏵⏵ bypass permissions on (shift+tab to cycle)`, which
+`is_dispatch_ready_prompt_line` **already** matches → `ready_prompt_candidate`
+returns ready. So the common idle case is already detected correctly.
 
-Capture from the reported panes (`tmux capture-pane -p -t %21` etc.) or any live
-Claude Code session in both idle and mid-turn states.
+**Busy Claude (pane %33, `tasks/resume.md`, mid-turn):**
+```
+· Roosting… (14s · ↓ 487 tokens · thinking with high effort)   <- active-turn spinner
+────────…────────
+❯
+────────…────────
+  Opus 4.8 (1M context) ctx:23% ~/…/agent-loop/resume main brian@cachyos-x8664
+  ⏵⏵ bypass permissions on · 1 shell                            <- NO "(shift+tab to cycle)"
+```
+During an active turn the bottom permissions line becomes `⏵⏵ bypass permissions on
+· N shell` (no `(shift+tab to cycle)`), which `is_dispatch_ready_prompt_line` does
+NOT match → `ready_prompt_candidate` returns not-ready. So the busy case is also
+classified correctly today. **Critically, the `❯ ` composer is present in BOTH idle
+and busy**, confirming a footer-skip-to-composer fix would false-idle a busy turn.
+
+## Revised analysis
+
+The common idle/busy Claude cases are **already** classified correctly by the
+existing `(shift+tab to cycle)` / `· N shell` distinction in the bottom permissions
+line. The `tasks/resume.md` "still starting" route error (pane %33) is therefore
+most likely **correct fail-closed behavior** — the pane was genuinely busy/starting
+and not at a dispatch-ready prompt within the wait window.
+
+Two narrower, still-open questions need targeted captures before any code change:
+
+1. **Is there a Claude state where the last meaningful line is the status line
+   (`Opus … ctx:N% …`) rather than the `⏵⏵ …` permissions line?** In every capture
+   the `⏵⏵` line was last (below the status line), so the status line never became
+   the candidate. If some config/state drops the `⏵⏵` line, the status line would
+   become last → false not-ready, fixable by marking only the `Opus … ctx:N% …`
+   status line ignorable (safe: skipping it surfaces the `⏵⏵` line, not `❯`).
+2. **Error-wording accuracy:** when a pane is busy on an *active turn* (spinner
+   present) rather than cold-starting, the route error still says "still starting
+   (waited Ns for claude startup)". Distinguishing "busy on an active turn" from
+   "still starting" needs a Claude busy cue keyed on the active-turn spinner
+   (`· <Gerund>… (<N>s · …)`), which is fragile (random gerund, variable suffix —
+   `esc to interrupt` vs `thinking with high effort`). Lower priority; UX-only.
+
+## BLOCKER — confirm the real failure mode before coding
+
+A code change is only justified once we have a capture proving a *misclassification*
+(an idle pane showing `⏵⏵ … (shift+tab to cycle)` while route still refuses, or a
+state where the status line is the last candidate). Without that, the existing
+behavior is correct and any change risks false-idle. Capture needed: `tmux
+capture-pane -p -t <pane>` at the moment route reports the actor not ready, in the
+state the operator believes is idle.
 
 ## Acceptance
 

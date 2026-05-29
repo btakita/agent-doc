@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -84,7 +84,62 @@ VERSIONS.md `Unreleased` updated. lib.rs now ~34.2k LOC — down from ~39.2k at 
 #### Top of backlog
 
 `[#cli-cluster-digests]` — Phase 2 (final cluster): move `cmd_diff_digest`, `cmd_log_digest`, `cmd_test_digest`, `cmd_metric_digest`, `cmd_session_digest`, `cmd_session_cost`, `cmd_session_review`, `cmd_context_pack` bodies into `packages/tsift-cli/src/commands/digests.rs`. The backlog notes this depends on `tsift-digest` and `tsift-session` crates landing first — both already extracted (per VERSIONS `#split-tsift-session` / digest history), so the cmd bodies should lift cleanly.
-<!-- agent:boundary:d9a749e1 -->
+### Re: do [#cli-cluster-digests] — opus-4-8
+
+Phase 2 cluster #6 done — **the per-command-cluster split is complete.**
+
+#### What moved (9 functions, ~1347 LOC) → `packages/tsift-cli/src/commands/digests.rs`
+
+- `cmd_diff_digest` — code-aware worktree/staged/revision diff digest
+- `cmd_test_digest` / `cmd_log_digest` — grouped test-failure / verbose-log digests
+- `cmd_context_pack` — composes session-review + diff + test/log digests into one handoff pack
+- `cmd_metric_digest` — repeated metric-run deltas + news tables
+- `cmd_session_digest` / `cmd_session_cost` — transcript prompt/command/cost digests
+- `cmd_session_review` (test-only wrapper) + `cmd_session_review_with_budget` (production engine) — cross-harness aggregate review
+
+lib.rs re-imports the production entry points; `cmd_session_review_with_budget` is the real engine (the thin `#[allow(dead_code)]` `cmd_session_review` wrapper stays in digests.rs, not re-imported — same pattern as `cmd_search`/`cmd_explain`).
+
+The backlog noted this cluster "depends on `tsift-digest` and `tsift-session` landing first" — both already extracted in prior cycles, so the cmd bodies lifted cleanly (they call `tsift::diff_digest::*`, `tsift::metric_digest::*`, `tsift::session_*::*` as fully-qualified library paths).
+
+#### Visibility changes (mechanical)
+
+Promoted 16 helper fns to `pub(crate)` (diff-digest label helpers, metric-digest gate/trend labels, `render_{test,log}_digest_from_input`, the session-review/context-pack budget-report builders + human printers, `format_compact_count`) plus the `MetricDigestOptions` struct.
+
+**Trap avoided:** a naive symbol scan flagged `report` and `edges` as private items to promote — they're actually JavaScript `const` declarations inside embedded HTML-viz string literals (graph-data / trace-data). Blindly running the `const` promotion would have corrupted those string contents. Excluded them.
+
+#### Verification
+
+- `cargo build -p tsift-cli` — clean, no new warnings
+- `cargo test -p tsift-cli` — **479 passed across 7 suites**
+- `make check` — green
+- `cargo install --path packages/tsift-cli` + `cargo build --release -p tsift-cli` — both binaries refreshed; `tsift --version` → `0.1.62`
+
+#### Commits
+
+- tsift @ `9175c04` — `cli: Phase 2 — extract digests command cluster into commands/digests.rs` (pushed)
+- agent-loop @ `794fa65` — submodule pointer bump (pushed)
+
+#### Split complete — final shape
+
+Every `cmd_*` body now lives in a focused module:
+
+| Module | LOC |
+|--------|-----|
+| `commands/infra.rs` | 1491 |
+| `commands/digests.rs` | 1381 |
+| `commands/graph.rs` | 969 |
+| `commands/index_search.rs` | 824 |
+| `commands/quality.rs` | 424 |
+| `commands/summarize.rs` | 293 |
+| `output/tagpath.rs` | 321 |
+| **total extracted** | **~5.7k LOC** |
+
+`lib.rs` is now **32,828 LOC** — down from **39,246** at the Phase 1a-i kickoff (**~6.4k LOC / 16% drained**). What remains in lib.rs is the shared helper/type substrate (graph-db evidence helpers, backend-eval business logic, the still-resident `cmd_conflict_matrix` / `cmd_dispatch_trace` / `cmd_dependency_dag` / `cmd_semantic_related` / `cmd_source_read` / `cmd_workflow` / `cmd_digest_runner` commands, plus the large test module).
+
+#### Backlog status
+
+All six CLI-split clusters plus `#cli-extract-{cli-types,tagpath-helpers}` are done. The remaining open backlog items (`#npm-auth-setup`, `#npm-publish-verify`, `#full-e2e-verify`) are the OpenCode-plugin npm publish track — a separate workstream gated on GitHub repo-settings access (NPM_TOKEN secret + `TSIFT_ENABLE_NPM_PUBLISH` variable), which you pruned from the active queue this cycle. They stay open; no remaining queued work.
+<!-- agent:boundary:15ac0d09 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -93,26 +148,12 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~do [#cli-extract-cli-types]~
-- ~do [#cli-cleanup-unused-imports]~
-- ~do [#cli-cluster-index-search]~
-- ~do [#cli-cluster-graph]~
-- ~do [#cli-extract-tagpath-helpers]~
-- ~do [#cli-cluster-quality]~
-- ~do [#cli-cluster-summarize]~
-- ~do [#cli-cluster-infra]~
-- do [#cli-cluster-digests]
-- do [#npm-auth-setup]
-- do [#npm-publish-verify]
-- do [#full-e2e-verify]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#cli-cluster-digests] Phase 2 — move cmd_diff_digest + cmd_log_digest + cmd_test_digest + cmd_metric_digest + cmd_session_digest + cmd_session_cost + cmd_session_review + cmd_context_pack bodies into packages/tsift-cli/src/commands/digests.rs. Depends on tsift-digest and tsift-session landing first.
 - [ ] [#npm-auth-setup] Configure NPM_TOKEN secret + TSIFT_ENABLE_NPM_PUBLISH=true variable in GitHub repo settings
 - [ ] [#npm-publish-verify] After auth configured, tag release and verify publish-opencode-plugin CI job succeeds and opencode-tsift appears on npmjs.org
 - [ ] [#full-e2e-verify] In fresh project: opencode plugin opencode-tsift && opencode then /tsift-status. On success mark #e2e-install done.

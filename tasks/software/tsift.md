@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -210,7 +210,8 @@ Stopped before implementing — investigation found the review item rests on a *
 I left `#split-sim-world` **open** in the backlog (not started) pending your pick. Note the dead-test finding is arguably its own bug worth tracking regardless of which option — the harness silently stopped running.
 
 Which option?
-<!-- agent:boundary:4b785980 -->
+do A
+<!-- agent:boundary:f67635b7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -219,7 +220,8 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+- do A
 <!-- /agent:queue -->
 
 ## Backlog

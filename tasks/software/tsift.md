@@ -464,7 +464,37 @@ Replace it with 8 sequential backlog items (`#cli-extract-output`, `#cli-extract
 3. If you confirm phases, say "stage the 8 CLI backlog items" and I'll add them.
 
 **Reminder, fifth time:** session document is huge. `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/software/tsift.md --commit` before the next substantive cycle, please. The exchange replays cost more tokens each cycle.
-<!-- agent:boundary:874d2f1a -->
+Phased approach. add to backlog
+
+### Re: Phased approach — opus-4-7
+
+
+Confirmed. Staged 8 backlog items (Phase 1a, 1b, 6 Phase-2 clusters) at the top of the backlog in execution order.
+
+**Order after this update** (top → bottom):
+
+```
+#cli-extract-output         Phase 1a
+#cli-extract-cli-types      Phase 1b
+#cli-cluster-index-search   Phase 2 — validates the per-command pattern
+#cli-cluster-graph          Phase 2
+#cli-cluster-digests        Phase 2 — needs tsift-digest + tsift-session first
+#cli-cluster-quality        Phase 2
+#cli-cluster-summarize      Phase 2
+#cli-cluster-infra          Phase 2 — includes status, can absorb the status.rs move
+```
+
+**Sequencing recommendation still stands.** You did not address the digest/search/status/sim-world/demote-root question, so I'm reading "Phased approach" as confirming the phased CLI split but leaving the cross-item ordering open. My recommendation is:
+
+1. Land the root-drain crates first (`#split-tsift-digest`, `#split-tsift-search`, `status.rs` placement, `#split-sim-world` resolution, `#demote-root-tsift`) — they're in review/gated; ungate when ready.
+2. Then run the CLI phases in the staged order above.
+
+Reasoning: `#cli-cluster-digests` rewrites calls to `tsift::diff_digest::*` etc. If you do the CLI split first, those call sites get rewritten now and then again when the root crates land. One-pass is cheaper.
+
+If you'd rather start the CLI split immediately, the safe entry is `#cli-extract-output` — it touches no module that's still moving.
+
+**To resume work next cycle, queue one directive:** e.g., `do [#cli-extract-output]` or `do [#split-tsift-digest]`. The auto-loop will fire from there.
+<!-- agent:boundary:6f553120 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -484,12 +514,20 @@ preset #spec-test-build-install-commit-push
 - ~do [#split-tsift-search]~
 - ~do [#demote-root-tsift]~
 - ~do [#split-tsift-summarize]~
-- do [#split-tsift-cli-subcommands]
+- ~do [#split-tsift-cli-subcommands]~
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#cli-extract-output] Phase 1a — extract tsift-cli shared output infra (ToolEnvelope, ResponseBudget, output-format enums, tagpath annotation helpers) into packages/tsift-cli/src/output/. Visibility-only move; binary tests stay green.
+- [ ] [#cli-extract-cli-types] Phase 1b — lift clap CLI types (Cli, Commands, GraphDbQuery, output format enums) out of lib.rs into packages/tsift-cli/src/cli.rs. Pure mechanical lift; no logic change.
+- [ ] [#cli-cluster-index-search] Phase 2 — move cmd_index + cmd_search bodies into packages/tsift-cli/src/commands/index_search.rs (re-exported from lib.rs). Smallest cluster, validates the per-command pattern before larger ones.
+- [ ] [#cli-cluster-graph] Phase 2 — move cmd_graph + cmd_communities + cmd_path + cmd_explain + cmd_traverse bodies into packages/tsift-cli/src/commands/graph.rs.
+- [ ] [#cli-cluster-digests] Phase 2 — move cmd_diff_digest + cmd_log_digest + cmd_test_digest + cmd_metric_digest + cmd_session_digest + cmd_session_cost + cmd_session_review + cmd_context_pack bodies into packages/tsift-cli/src/commands/digests.rs. Depends on tsift-digest and tsift-session landing first.
+- [ ] [#cli-cluster-quality] Phase 2 — move cmd_audit + cmd_audit_tagpath + cmd_lint + cmd_perf_gate bodies into packages/tsift-cli/src/commands/quality.rs.
+- [ ] [#cli-cluster-summarize] Phase 2 — move cmd_summarize body (and helpers) into packages/tsift-cli/src/commands/summarize.rs.
+- [ ] [#cli-cluster-infra] Phase 2 — move cmd_init + cmd_status + cmd_locks + cmd_sql + cmd_route + cmd_rewrite + cmd_convex_sync + cmd_graph_db_* + cmd_edit bodies into packages/tsift-cli/src/commands/infra.rs.
 - [ ] [#npm-auth-setup] Configure NPM_TOKEN secret + TSIFT_ENABLE_NPM_PUBLISH=true variable in GitHub repo settings
 - [ ] [#npm-publish-verify] After auth configured, tag release and verify publish-opencode-plugin CI job succeeds and opencode-tsift appears on npmjs.org
 - [ ] [#full-e2e-verify] In fresh project: opencode plugin opencode-tsift && opencode then /tsift-status. On success mark #e2e-install done.

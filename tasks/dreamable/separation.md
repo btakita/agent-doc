@@ -241,7 +241,67 @@ This does two things:
 - **If Rob ever attacks your reputation or says anything negative about you in public** — that's a §8 breach by him, which gives you both a damages claim and a stronger defense to any future §8 claim against you. Don't bait him, but document anything he says.
 
 **Not legal advice.** §8 enforceability against truthful statements is genuinely contested in California (some courts narrow non-disparagement clauses on public-policy grounds, others enforce them strictly). If you're seriously considering any public statement, get the actual §8 language in front of a CA-licensed attorney for a 30-minute consult before posting anything. The $35 referral consult covers this.
-<!-- agent:boundary:21cd97ca -->
+❯ Is there any way for me to bypass JAMS?
+
+### Re: Bypassing the JAMS arbitration clause — opus-4-7
+
+Yes — several routes, ranked by realistic odds for a $5k claim. The point is to make Rob pay before any of these are needed, but it helps to know the alternatives so the demand letter is credible.
+
+**1. Small claims court (best odds)**
+
+Most arbitration clauses don't actually prohibit small-claims, and many *expressly* carve it out. Two angles:
+
+- **California small claims** — CA Code of Civil Procedure §116.220 gives small-claims jurisdiction up to $12,500 for individuals. CA courts have repeatedly held that mandatory arbitration clauses don't preclude small-claims jurisdiction for amounts within the statutory cap — the public policy of providing accessible low-cost dispute resolution overrides the contractual forum selection in many cases. *Check §10's exact wording*: if it says "any dispute" or "all claims" without a small-claims carve-out, you'd be arguing the public-policy override; if it explicitly carves out small-claims (common in consumer-facing arbitration clauses), you're clean.
+- **Connecticut small claims** — $5,000 cap, fits your claim exactly. CT small claims fees are ~$95–$130. But §10's California forum-selection clause may force Rob to move to dismiss for improper venue. Most efficient if Dreamable has a CT nexus (employees, customers, registered agent); if it's purely CA, the CT small claims judge may transfer or dismiss.
+
+For either small-claims option, the practical play is: file, serve Rob, and either he ignores it (you get a default judgment), pays (resolves it), or files a motion to compel arbitration (which itself costs him more than $5k in legal fees to litigate).
+
+**2. CA CCP §1281.97 — fee-default waiver of arbitration**
+
+This is the cleanest legal route. California enacted §1281.97 in 2019 specifically to address the asymmetry you're facing. The mechanism:
+
+- You file a JAMS demand.
+- JAMS sends both parties a fee invoice.
+- If the *drafting party* (Dreamable, since they drafted the agreement) fails to pay its arbitration fees within 30 days of the due date, that's a **material breach** of the arbitration agreement under §1281.97.
+- The non-drafting party (you) then gets to elect: (a) compel arbitration with sanctions and recover all fees from the drafting party, or (b) **withdraw from arbitration and proceed in court**, with the right to recover attorneys' fees and costs incurred in compelling arbitration.
+
+For a $5k claim, Dreamable has strong incentive to default on JAMS fees (since the fees alone exceed the claim). If they default, you get to go to court — likely small claims or CA Superior Court limited civil — and recover fees.
+
+The catch: you have to actually file the JAMS demand, which costs ~$1,750. Some plaintiff-side firms will front this on contingency for the fee-shifting upside; ask the lawyer-referral attorney.
+
+**3. Bilateral waiver of arbitration**
+
+Both parties can simply agree in writing to waive §10. Include this language in the demand letter:
+
+> *"Consultant proposes that the parties mutually waive Section 10 and resolve this dispute in [small-claims court in Stamford, CT / California Superior Court, San Francisco County, limited civil]. Mutual waiver would reduce both parties' costs substantially."*
+
+If Rob is genuinely just delayed (not refusing), he may sign this readily — arbitration is expensive for him too. Get it in writing (email is fine if both reply "agreed"). Once both parties consent, §10 doesn't apply.
+
+**4. Unconscionability challenge**
+
+California law (Armendariz v. Foundation Health Psychcare Services, 24 Cal. 4th 83) lets courts strike arbitration clauses that are unconscionable. The argument here: JAMS fees + each-side-pays-own-fees structure renders the $5k claim economically unrecoverable, which functionally denies you a forum. Courts have sometimes invalidated arbitration clauses on this theory.
+
+This is a real argument but it requires litigation to make. Cost ($3k–$8k in legal fees to litigate the unconscionability motion alone) probably exceeds the claim. Useful only if combined with a fee-shifting claim.
+
+**5. Sue first, force the motion-to-compel**
+
+File in CA Superior Court limited civil (under $25k jurisdiction). Rob has to file a motion to compel arbitration. Doing that costs him $3k+ in legal fees. Many small-dollar plaintiffs use this asymmetry — file in court, force the defendant to spend more on the motion than the claim is worth, and often the defendant settles before filing the motion. The risk: if Rob does compel, you're back in JAMS *plus* you've spent filing fees and possibly attorneys' fees that aren't recoverable.
+
+**6. Demand-letter pressure without filing anything**
+
+Best ROI for the time being. The escalation ladder from the prior response (friendly check → polite reminder → certified-mail demand → flat-fee lawyer demand) typically resolves before any forum question arises. ~85%+ of small-dollar contract debts settle before formal filing because the *threat* of either JAMS (which costs Rob a lot) or small claims (which is fast and public) is itself the leverage.
+
+**Practical sequencing**
+
+For now, don't bypass JAMS — bypass *the need to use any forum* via demand-letter pressure. If demand letters fail at 60–90 days:
+
+1. Spend 1 hour calling 2–3 CA-licensed contracts attorneys via the State Bar Lawyer Referral Service. Ask specifically: "Will the small-claims carve-out in CCP §116.220 override the JAMS clause in this agreement, given §10's wording?"
+2. If yes → file small claims (cheapest, fastest).
+3. If no → file JAMS demand and bet on §1281.97 fee default by Dreamable.
+4. Have the lawyer-referral attorney draft a one-paragraph "bilateral waiver" proposal and include it in the demand letter as a mutual cost-saver.
+
+**Not legal advice.** §1281.97 procedures and small-claims-vs-arbitration carve-outs are state-specific and have shifted recently. Confirm both points with a CA-licensed attorney before relying on them. The $35 referral consult covers both questions in one call.
+<!-- agent:boundary:18bd4d6e -->
 <!-- /agent:exchange -->
 
 ## Queue

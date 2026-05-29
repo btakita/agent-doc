@@ -240,7 +240,49 @@ The pattern holds for any skill you want to add: if it describes *what you can d
 ---
 
 **Note:** The exchange has grown to 165 lines across 5 response sections. Would you like to compact it? Run `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/resume.md --commit` to archive and reset.
-<!-- agent:boundary:20d95477 -->
+❯ Should I consolidate all work into a single entry or have 3 separate jobs?
+
+### Re: 1 consolidated entry vs 3 separate — sonnet-4-6
+
+**3 separate entries** — for LinkedIn. **Consolidated section** — for resume.
+
+#### LinkedIn: 3 separate
+
+LinkedIn shows each entry independently with its own date range and company name. Three entries in 2026 reads as active/in-demand, not fragmented. Keeping them separate makes each searchable by company name and tech.
+
+```
+Equity Funding Source — Software Engineer (2026–present)
+  Cloudflare Workers · D1 · R2 · React · TypeScript · Hono · Cloudflare Access · Resend
+
+MonsterRodHolders.com — Freelance E-commerce Consultant (2026)
+  WordPress · WooCommerce · Cloudflare CDN · Google Analytics · competitive analysis
+
+Confidential AI Startup — Software Development Consultant (Apr–May 2026)
+  Rust · Python · TypeScript · LiveKit · WebRTC · realtime asset generation
+```
+
+EFS is the anchor — give it the most detail. Dreamable stays brief with just skills (no description needed).
+
+#### Resume: single consulting section
+
+Resume format is more flexible. A "**Independent Consulting (2026)**" section with 3 sub-entries lets you control emphasis and prevents the Dreamable entry from looking like a gap-filler:
+
+```
+Independent Consulting                                           2026
+
+  Equity Funding Source — Software Engineer
+    • [full bullets]
+
+  MonsterRodHolders.com — E-commerce & WordPress Consultant
+    • [3-4 bullets]
+
+  Confidential AI Startup — Software Development Consultant (Apr–May 2026)
+    Skills: Rust, Python, TypeScript, LiveKit, WebRTC, realtime asset generation,
+            code/harness analysis
+```
+
+This groups them visually as one "consulting period" while still distinguishing each client. EFS leads since it's the strongest.
+<!-- agent:boundary:2e2b95b8 -->
 <!-- /agent:exchange -->
 ###
 <!--

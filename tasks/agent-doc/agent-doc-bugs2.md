@@ -35,8 +35,57 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 2 response topic(s): do [#duplicate-response-after-commit]; do [#duplicate-response-after-commit]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:1b0ac6c4 -->
-<!-- /agent:exchange -->
+
+### Re: do [#exchange-prompt-dropped-on-merge] — opus-4-8
+
+Implemented Option A's detectable-guard half: user-authored exchange prompts dropped during an IPC content_ours merge now **fail closed** instead of vanishing silently. Branch `20260422/codex-agent-backend`, submodule `04835d05`, superproject `fc45ff2ab`.
+
+#### Root cause (same drift family)
+
+When a user types a prompt into `agent:exchange` while the IDE holds `ipc.sock`, the IPC ack can carry a stale `content_ours` buffer that predates the prompt. The existing `live_prompt_drift_after_preflight` guard adopts `content_ours` (snapshot stays at `content_ours` by design), and the editor then converges its buffer to `content_ours` and re-saves disk — overwriting the user's prompt. A **post-commit disk diff cannot win that race**, so closeout reported success and the prompt was gone (assistant kept saying "nothing changed").
+
+#### Fix (binary-side, race-immune)
+
+The key insight: capture the evidence **at adoption time**, when the divergent candidate still carries the prompt — not from disk after the editor may have overwritten it.
+
+- `cycle_state.dropped_exchange_prompts` + `record_`/`clear_` helpers — persists the dropped prompt line(s).
+- `write::dropped_prompt_lines_after_content_ours` — scoped to the `agent:exchange` component only (queue/backlog/scratch drift is legitimately preserved for the next cycle, not lost) and to prompt-target lines; recorded at the `live_prompt_drift_after_preflight` adoption point (ops-log `dropped_exchange_prompt_recorded`).
+- `session_check::check_dropped_exchange_prompt_guard` — interrupts when a recorded dropped prompt is still missing from committed HEAD; clears the marker once the prompt reaches HEAD. Reads persisted evidence, so it is immune to the editor-overwrite race.
+- Spec: `07-closeout-commands.md` dropped exchange-prompt guard contract.
+
+##### Where it fits in the lifecycle
+
+```mermaid
+flowchart TD
+    A[user types prompt into agent:exchange<br/>IDE holds ipc.sock] --> B[IPC ack = stale content_ours<br/>predates the prompt]
+    B --> C[live_prompt_drift guard adopts content_ours]
+    C --> D[record dropped prompt in cycle_state<br/>NEW: evidence captured here]
+    D --> E[commit content_ours]
+    E --> F{editor overwrites disk<br/>via buffer convergence?}
+    F -->|yes race| G[disk prompt gone]
+    F -->|no| G2[disk prompt survives]
+    G --> H[session-check dropped_prompt_guard<br/>reads persisted evidence -> FAIL CLOSED]
+    G2 --> H
+    H --> I[operator re-adds prompt; next cycle answers it]
+    style D fill:#cce5cc
+    style H fill:#cce5cc
+    style G fill:#f8d7da
+```
+
+#### Scope honesty
+
+This makes the data-loss class **detectable and loud** — it can no longer slip through as a silent success. The *source-level prevention* (converging the editor buffer to the merged disk content so the prompt is never overwritten) is the heavier plugin-protocol work, shared with `#adoc-queue-ipc-buffer-divergence` (next queue item). I scoped the guard tightly to prompt-target lines inside `agent:exchange` so the existing "preserve live queue/scratch drift in the working tree" behavior (covered by integration tests) is unaffected.
+
+#### Verification
+
+- New tests: `cycle_state` record/clear, `write` extraction (exchange-scoped + content_ours-owned), 2 `session_check` (fail-closed + clear-on-resolve) — all green; FlowCore guard budget bumped 15→16.
+- `make check` (clippy + full suite + sim-medium + version-sync): green (exit 0); the two `live_ipc_race_integration` tests that preserve queue/scratch drift still pass.
+- Built `cargo build --release` + `cargo install --path .`.
+- Pushed.
+
+**Gated**, not closed: detectable guard is complete and tested; the source-level prevention is the shared plugin-protocol work. Queue continues to `#adoc-queue-ipc-buffer-divergence`.
+<!-- agent:boundary:a2b3c1cb -->
+<!-- /agent:exchange --> 
 ###
 <!--
 JB `Run Agent Doc` error
@@ -67,7 +116,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 preset #spec-test-build-install-commit-push
 - ~do [#prompt-duplicated-while-typing]~
 - ~do [#duplicate-response-after-commit]~
-- do [#exchange-prompt-dropped-on-merge]
+- ~do [#exchange-prompt-dropped-on-merge]~
 - do [#adoc-queue-ipc-buffer-divergence]
 - do [#queue-strike-on-halt]
 - do [#jb-stale-busy-idle-footer]

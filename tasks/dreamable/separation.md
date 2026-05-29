@@ -713,7 +713,69 @@ The instinct ("if he doesn't pay, the deal's off") is intuitive but legally wron
 **Could you ever rescind successfully?** Theoretically yes, if Rob refuses to pay for many months, makes clear he never intends to pay, and you act promptly to seek rescission. But by that point you've spent more on litigation than the $5k recovery, and you've gambled away the certainty of a simple breach win. Not recommended.
 
 **Not legal advice.** Rescission of executed settlements is a fact-intensive area of CA contract law with shifting case-law standards. Confirm with a CA-licensed attorney before electing rescission over breach-of-contract damages. The 30-minute referral consult is enough to cover this question definitively.
-<!-- agent:boundary:f5aa4f2e -->
+❯ If a small claims court is dismissed, will the filing still be public record?
+
+### Re: Public record persistence after dismissal — opus-4-7
+
+**Yes — dismissed filings remain public record by default.** The docket entry persists regardless of outcome (dismissed, settled, judgment, default). What changes is the *content* of the record, not its existence. This is mostly a feature for your collection leverage, not a downside — for you specifically.
+
+**What the public record shows after dismissal**
+
+- **Case caption** (your name as plaintiff, "Dreamable, Inc." as defendant) — permanent.
+- **Filing date** — permanent.
+- **Case number** — permanent.
+- **Dismissal date and basis** — added after dismissal.
+- **No judgment on the merits** — there's no public ruling about who was right; the record just shows the case was filed and dropped.
+
+**Two types of dismissal, different signals**
+
+- **Dismissed without prejudice** — most common when the underlying dispute resolves via settlement or voluntary withdrawal. The plaintiff retains the right to refile. Reads as "they worked it out" or "plaintiff dropped it." Mild signal.
+- **Dismissed with prejudice** — case is permanently closed. Often signals settlement (because plaintiff agrees not to refile in exchange for payment). Slightly stronger signal that something resolved.
+- **Dismissed by court** (sua sponte, for lack of jurisdiction, etc.) — signals the plaintiff filed in the wrong forum or had a procedural problem. This is the worst-looking outcome for you, which is why getting the §10 arbitration-clause question right *before* filing matters.
+
+**Sealing options (limited)**
+
+CA permits motions to seal under California Rules of Court 2.550–2.551, but the standard is high: you'd need to show an "overriding interest" that outweighs the strong presumption of public access. Routine civil contract disputes essentially never qualify. Don't plan around sealing.
+
+A more practical option: in some counties, after a long period of inactivity (often 5–10 years), the physical case file is archived and only basic docket metadata remains searchable. The case still exists in records but is harder to find in detail.
+
+**Third-party aggregator persistence**
+
+UniCourt, Trellis, CourtListener, etc. scrape court dockets and republish them. Their data is often stale and *doesn't always update* when the underlying case is dismissed. A case dismissed in court may continue to appear on aggregator sites as "active" or "filed" for months or years. Some aggregators offer takedown requests for resolved cases, but they're inconsistent.
+
+**Asymmetric impact**
+
+For your specific situation, the persistence of the dismissed record actually favors you:
+
+- **Brian Takita as plaintiff** — being plaintiff in a contract dispute is essentially zero reputational cost. People don't run "is this person a frequent litigant" checks on consultants. Even if they do, one dismissed small-claims filing reads as "had a payment dispute, resolved it." Neutral or favorable.
+- **Dreamable, Inc. as defendant** — being a defendant in a contract dispute *does* matter for VC due diligence, lender checks, and acquisition diligence. The dismissal doesn't fully erase that; the existence of the filing is itself a data point. Even a dismissed-without-prejudice case shows up as "unpaid debt dispute" in due-diligence reports.
+
+This asymmetry is precisely the leverage of filing in the first place: **Rob bears more reputational cost from the filing than you do, regardless of outcome.**
+
+**The leverage flow this enables**
+
+1. You file.
+2. Docket entry becomes public immediately or within a few days.
+3. Rob's lawyer (if any) realizes the docket entry is now permanent in Dreamable's diligence record.
+4. Rob has a strong incentive to settle quickly — paying you the $5k doesn't erase the filing, but a clean dismissal-with-prejudice-pursuant-to-settlement reads better than a default judgment or a contested dismissal.
+5. You voluntarily dismiss after payment. Total public record: case filed, dismissed within X weeks. Underlying merits: never adjudicated.
+
+This is the standard small-claims settlement choreography. Rob's lawyer almost certainly understands it.
+
+**Voluntary dismissal mechanics**
+
+If Rob pays before the hearing:
+
+- File a **Request for Dismissal (CIV-110 in CA)** with the court. Mark dismissal type — "without prejudice" if you want flexibility to refile, "with prejudice" if you've reached final settlement.
+- No hearing or court approval needed for plaintiff-side dismissal before the defendant has filed an answer.
+- The docket reflects the dismissal within a few days.
+
+**Practical recommendation**
+
+Don't worry about the public record persisting after dismissal — it's expected, it benefits you more than it hurts you, and the leverage from the filing itself is the main point. If you settle and Rob asks you to dismiss with prejudice, that's standard and reasonable. If Rob asks you to seal the record, that's an unusual ask and not something you should agree to without consideration (he's asking for value beyond just paying you the $5k).
+
+**Not legal advice.** Specific docket retention policies, sealing standards, and third-party aggregator behavior vary by jurisdiction. Confirm SF Superior Court's current docket-retention policy with the clerk if you have specific concerns about long-term searchability.
+<!-- agent:boundary:791dc077 -->
 <!-- /agent:exchange -->
 
 ## Queue

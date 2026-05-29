@@ -124,7 +124,19 @@ Implemented a targeted, tested fix for the most damaging symptom and narrowed th
 **Action needed:** the running route-owned process (PID 138671) is a pre-fix binary and will keep re-injecting divergence until restarted; the dedup now caps the damage, but restart that process/session to run the new build.
 
 Separately: confirmed `#adoc-make-check-orch-tests` is still open — `make check` lacks `--workspace`, so it never runs the 1848 orchestration tests (the Phase C compile-fix only made them runnable via `cargo test -p`).
-<!-- agent:boundary:cb1dcd54 -->
+
+### Re: do [#adoc-make-check-orch-tests] — opus-4-7
+
+Done. `make check` now runs the full workspace.
+
+**Root cause:** the `Makefile` `test` target ran `cargo test --all-targets` (and the nextest path) **without `--workspace`**, so the gate only tested the root `agent-doc` package — `--all-targets` selects target *types*, not workspace *members*. Orchestration (1850), `agent-doc-core`, and `agent-doc-sqlite` (648) never ran in the gate.
+
+**Fix (submodule `f3d56b69`, superproject `7bfccd584`, pushed):** added `--workspace` to all three cargo invocations in the `test` target (nextest run, doc tests, cargo-test fallback).
+
+**Verification:** `cargo test --workspace --all-targets` → **3173 passed / 0 failed** (orchestration 1850 incl. project_controller/session_actor/queue, core+sqlite 648, root 436, the now-passing `test_cli` 66, integration suites). `make check` exits 0 (clippy `-D warnings` clean). Both binaries rebuilt + installed to HEAD.
+
+**Note:** the submodule pointer bump also incorporates the parallel-session commit `b3dd9598` (scope `inactive_queue_residue` to genuine edits — root cause #1 of the drift). With `--workspace` the previously-"pre-existing" codex test (`codex_bare_run_inside_owning_pane_fails_before_nested_dispatch`) also passes now (its isolation fix rode in on `b3dd9598`), so the gate has **no** waived failures.
+<!-- agent:boundary:3480ebb2 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -139,7 +151,7 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#adoc-make-check-orch-tests] [recommended] make check (cargo nextest --all-targets) does not run agent-doc-orchestration's isolated test suite (1844 tests incl. project_controller/session_actor persistence) — they only run via explicit cargo test -p agent-doc-orchestration. Wire the orchestration test target into the make check gate. (filetime dev-dep + test_support::ScopedCurrentDir were added in the sqlite-seam phase C to make that target compile again.)
+- [x] [#adoc-make-check-orch-tests] [recommended] make check (cargo nextest --all-targets) does not run agent-doc-orchestration's isolated test suite (1844 tests incl. project_controller/session_actor persistence) — they only run via explicit cargo test -p agent-doc-orchestration. Wire the orchestration test target into the make check gate. (filetime dev-dep + test_support::ScopedCurrentDir were added in the sqlite-seam phase C to make that target compile again.)
 - [ ] [#adoc-orch-shim-cleanup] Finish the migration: rewrite CLI-shell crate::X call sites to agent_doc_orchestration::X and delete the pub use shims in agent-doc/src/{lib,main}.rs. Mechanical/low-risk polish, not a true crate split. Plan's optional final step.
 <!-- /agent:backlog -->
 

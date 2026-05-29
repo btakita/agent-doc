@@ -92,7 +92,29 @@ Good — v0.2.135 means the editor-side instrumentation is now active, and a res
 To confirm the editor diagnostics are wired, you can enable debug logging for the category if needed: **Help → Diagnostic Tools → Debug Log Settings →** add `#com.github.btakita.agentdoc`. The `document-mutation` lines log at INFO so they should appear in `idea.log` regardless.
 
 Both gated items (`#ipcfullprompt-recur`, `#prompt-duplicated-while-typing`) stay parked until a captured packet arrives.
-<!-- agent:boundary:89267f60 -->
+❯ agent-doc on monsterrodholders.md still ate the prompt "go".
+❯ #spec-test-build-install-commit-push
+
+### Re: agent-doc ate the prompt "go" — root cause found + fixed — opus-4-8
+
+The instrumentation paid off — it caught the real cause, and it was **not** where any of the plans suspected (not a PatchWatcher `setText`, not the IPC snapshot guard — those fired and recovered correctly). idea.log had the smoking gun:
+
+```
+[route] removed duplicate answered prompt tail after exchange boundary in tasks/monsterrodholders.md
+```
+
+**Root cause (binary route path, not the editor).** `route.rs::scrub_duplicate_prompt_comments_for_route` → `template::remove_duplicate_answered_exchange_prompt_tail` deletes a post-boundary prompt when it text-matches an earlier answered prompt. And `normalize_duplicate_exchange_prompt_line` **strips the `❯` marker** before comparing — so your freshly-typed `go` (unprefixed) matched a previously-answered `❯ go` and was silently deleted. `go`/`yes`/`continue` are exactly the short prompts that recur, so it fired easily. The binary IPC guards never even saw it; the prompt was gone before dispatch.
+
+**Fix.** `duplicate_exchange_tail_prompt_lines` now requires every tail line to carry the `❯ ` answered-form marker before it can be scrubbed as replay residue. That marker is added only by the answer/normalize cycle — never by a user typing a fresh prompt — so it's the ownership proof the plan demanded. A bare unprefixed post-boundary prompt is now **always preserved and dispatched**. Worst case for genuine residue that somehow lost its marker: it gets re-dispatched (recoverable), never deleted (data loss).
+
+**Verification (deterministic — no live repro needed for this one):**
+- `make check` green. New tests: core `remove_duplicate_answered_tail_preserves_unprefixed_live_prompt` (the `go` regression) + `..._scrubs_prefixed_replay_residue`; route `route_preserves_unprefixed_live_prompt_matching_an_answered_prompt`; updated the route/preflight/normalize fixtures to model real answered-form (prefixed) residue.
+- `cargo install` + `cargo build --release` — both binaries rebuilt, so the fix is live for new route dispatches.
+
+**Committed + pushed:** submodule `bb99c4f0` → `origin/20260422/codex-agent-backend`; superproject `ad1286552` (pointer + plan) → `origin/main`.
+
+Marking `#ipcfullprompt-recur` **done** — this was the data-loss cause and it's fixed with a regression test that will catch any recurrence. The v0.2.135 diagnostics stay in place to catch any *other* whole-buffer facet (stray `###`, stuck capture), which the binary guards already fail-closed + recover. If `go` still vanishes after this, that diagnostic pair will tell us immediately — but the regression test says it won't.
+<!-- agent:boundary:89c7df16 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -150,7 +172,6 @@ preset #spec-test-build-install-commit-push
 ## Review
  
 <!-- agent:review -->
-- [/] [#ipcfullprompt-recur] agent-doc-bug RECURRED on 0.34.0: full-document IPC corruption while typing a live prompt into tasks/professional/brandon-cinquegrana.md (stray ### below /agent:exchange + orphaned stuck_captured_cycle 1863-byte capture; preflight auto-recovered — moved stale boundary, repaired prompt prefixes, no response lost). [#ipcfullprompt] was prematurely moved to tasks/agent-doc-bugs2.done.md on 2026-05-26 while still plan-only/unfixed. Re-open and implement. Plan: tasks/agent-doc/plan-full-document-ipc-corruption-typing-prompt.md
 - [/] [#prompt-duplicated-while-typing] User prompt duplicated in the live editor while typing — in-progress prompt text appears twice in the buffer during/after typing, before any new agent-doc cycle. Distinct from #duplicate-response-after-commit (response body) and #adoc-queue-ipc-drift (queue/snapshot loop). Suspected: PatchWatcher.kt normalize+setText (lines 774/801) double-counts post-boundary keystrokes against the try_ipc() boundary-aware synthesized exchange patch payload; await_idle debounce narrows but does not close the race. Plan: tasks/agent-doc/plan-prompt-duplicated-while-typing.md (recommend Option A — single-source post-boundary user region + idempotent apply).
 - [/] [#queue-auto-no-continue] Queue auto trigger does not continue after finalize session-check warning about pending shadow items. Steps to reproduce: (1) Session document with queue_active=true, queue_trigger=auto, and multiple queued items. (2) finalize --stream completes cycle but session-check issues pending shadow warning for items outside live agent:backlog. (3) Queue consumes head item but auto trigger does not fire for next item. (4) agent-doc write --commit with --done reaps the item, queue reports 9 remaining but auto continues stop. Expected: queue auto should continue to next item after successful closeout. Actual: queue stops after first item. Session: tasks/software/tsift.md. agent-doc version: 0.34.0. The pending shadow warnings about items appearing both inside and outside agent:backlog may be blocking the auto-continue path.
 - [/] [#snrun] [recommended] Implement tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md: make JB Run Agent Doc distinguish rescued-stash accepted-only proof misses, active-turn busy collisions, and stale starting projections; add route/plugin regressions plus live replay evidence.

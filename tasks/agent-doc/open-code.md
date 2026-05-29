@@ -95,7 +95,19 @@ Phase C done — the seam is complete and the build-isolation goal is met. `#ado
 - `cargo build --release` + `cargo install --path .` succeeded; both binaries current.
 
 Follow-up: `make check` does not run orchestration's isolated suite (separate pre-existing gap) — captured in backlog.
-<!-- agent:boundary:3482e3ed -->
+
+### Re: fix the queue-drift bug — opus-4-7
+
+Diagnosed the recurring drift and filed it for a deliberate fix rather than a speculative patch on critical session code.
+
+**Root cause:** a background `agent-doc start --route-owned tasks/agent-doc/open-code.md` process (PID 138671) + controller hold an **IPC working buffer** for this doc. When the auto-queue halted (`item_modified`) with a live item still queued, the buffer's queue state (re-activated + an extra mirrored item) diverged from the committed snapshot/HEAD and never reconciled — so every preflight re-surfaced a 1-line queue diff + recurring `stuck_captured_cycle` + `inactive_queue_residue`, with no user edit. `agent-doc commit` and raw `git commit` both regenerated it; only `git checkout` (discarding the stale buffer) broke the loop. Tree is now stable (`preflight` → `no_changes`).
+
+**Filed (per the `#agent-doc-bug` flow):**
+- Bug `#adoc-queue-ipc-drift` → `tasks/agent-doc/agent-doc-bugs2.md` backlog (commit `a4df1f2e0`).
+- Fix plan → `tasks/agent-doc/plan-queue-ipc-drift.md` (commit, with root-cause analysis + a required deterministic repro harness + fix direction: reconcile the IPC buffer to the committed queue shape after maintenance/commit; don't strand live residue when a queue halts; decouple `stuck_captured_cycle` from queue-component churn).
+
+**Why no code change this turn:** the bug spans IPC-buffer ↔ snapshot ↔ queue-halt ↔ capture-ledger reconciliation. It is not deterministically reproducible from a clean state (it needed a cross-turn stale IPC buffer), so a blind patch on this critical path risks worse regressions. The plan builds the repro first. The immediate symptom is already resolved.
+<!-- agent:boundary:10174e0a -->
 <!-- /agent:exchange -->
 
 ## Queue

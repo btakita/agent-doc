@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -253,7 +253,7 @@ VERSIONS.md `Unreleased` updated. Marked `[#split-sim-world]` **done**.
 #### Top of backlog
 
 Next actionable: **`[#split-tsift-digest]`** — extract `diff_digest` + `log_digest` + `metric_digest` + `test_digest` into a `tsift-digest` crate. Low-risk: `tsift-cli` already calls these as `tsift::diff_digest::*`, so crate + root re-export keeps callers compiling. Then `#split-tsift-search` → `#demote-root-tsift`; the npm chain (`#npm-auth-setup` →) stays externally blocked on your GitHub repo-settings access.
-<!-- agent:boundary:1ca4cec4 -->
+<!-- agent:boundary:768105e4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -262,8 +262,7 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue auto -->
-- do A
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog
@@ -284,7 +283,6 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 - [/] [#demote-root-tsift] After all module splits land, demote root tsift crate to a thin re-export shim (or remove lib.rs entirely) — leave only the workspace root + binary metadata; verify external consumers (cargo install tsift) keep working
 - [/] [#split-tsift-search] Extract sift + summarize + impact + tagpath_adapter (~3.2k LOC) into tsift-search crate — depends on tsift-index + tsift-graph; covers search ranking, AST-aware summaries, impact analysis, and tagpath annotation surface
 - [/] [#split-tsift-digest] Extract diff_digest + log_digest + metric_digest + test_digest (~3.7k LOC) into tsift-digest crate — high-cohesion emitter group with shared serialization, schema versioning, and pruning patterns; minimal cross-deps
-- [/] [#split-sim-world] Extract sim_world (~390 LOC) into tsift-sim-world crate — smallest, most isolated module; low-risk pattern validation for the remaining splits; keeps sim/test helpers out of the prod-path tree
 - [/] [#full-e2e-verify] In fresh project: opencode plugin opencode-tsift && opencode then /tsift-status. On success mark #e2e-install done.
 - [/] [#npm-publish-verify] After auth configured, tag release and verify publish-opencode-plugin CI job succeeds and opencode-tsift appears on npmjs.org
 - [/] [#npm-auth-setup] Configure NPM_TOKEN secret + TSIFT_ENABLE_NPM_PUBLISH=true variable in GitHub repo settings

@@ -149,7 +149,7 @@ Logged queue auto-continue failure as `#queue-auto-no-continue`.
 **Hypothesis**: The `session-check` interrupt path (`INTERRUPTED: open backlog item(s) exist only outside live agent:backlog`) may prevent the auto-queue continuation signal from reaching the harness, even after the blocking item is resolved by `--done`.
 
 **Reproduction artifacts**: `tasks/software/tsift.md` at commit `7ca3b93bf`, agent-doc `0.34.0`.
-<!-- agent:boundary:5a2fd5e9 -->
+<!-- agent:boundary:1685f01e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -181,8 +181,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#pending-add-append-not-prepend] `--pending-add` appends new items below the previous CLI arg within the same finalize cycle, contradicting SKILL.md "Pending capture rule" ("Put new items at the beginning of agent:backlog"). Repro: tasks/agent-doc/open-code.md commit f94e7851c — agent added wave-4, wave-3, wave-2, wave-1 expecting wave-1 on top per SKILL.md; actual backlog was wave-4 on top (pure CLI-arg order). User flagged it as bug; agent had to issue --pending-reorder. Plan: tasks/agent-doc/plan-pending-add-prepend-semantics.md (recommend Option A — strict prepend, drop the implicit adjacency heuristic).
-- [ ] [#queue-strike-on-halt] Queue head consumed on halt/refusal response. write.rs:1233-1242 + response_explicitly_targets_queue_head (write.rs:2481) treat any `### Re: <head-id> <suffix>` heading as completion signal even when body explicitly says "backlog left intact" + passes no --done/--pending-gate. Repro: tasks/agent-doc/open-code.md cycle 619af4d0b struck [#d97v] after halt response. Plan: tasks/agent-doc/plan-queue-strike-on-halt-response.md (recommend Option A — require explicit completion signal).
 - [ ] [#next-steps-backlog-capture] Agent responses containing #next-steps recommendations do not auto-add items to backlog when prompt preset is present. Agent must manually call `--pending-add` but the planning output `pending_mutations: expect_add` is not enforced by session-check `pending_done_guard`.
 <!-- /agent:backlog -->
 

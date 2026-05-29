@@ -58,7 +58,23 @@ Commits: submodule `53416ebc`, superproject pointer `5ce8cd69d`. Marking `#bz6s`
 
 - The `pub use` shims in `agent-doc` are still in place (they're cheap and correct). The plan's optional final polish — rewriting call sites from `crate::X` to `agent_doc_orchestration::X` and deleting the shims — is **not** required by the acceptance criteria; flag it as a separate low-priority cleanup if you ever want it.
 - Queue still has `do [#yybc]` (FFI-relocation pattern tracking) and `do [#adcr]` (note: `agent-doc-core` is already extracted/published — `#adcr` looks already-satisfied; worth verifying before running).
-<!-- agent:boundary:91b34c89 -->
+
+### Re: do [#yybc] — FFI-relocation pattern documented — opus-4-7
+
+
+Done. `#yybc` was a tracking item — captured the proven pure-FFI-relocation pattern in a durable doc so future relocations don't rediscover it.
+
+**Landed:** `docs/development/ffi-relocation.md` (+ `SUMMARY.md` TOC entry under Development). It documents:
+
+- **The trap:** moving an `#[no_mangle] extern "C"` fn into `agent-doc-core` and re-exporting via `pub use agent_doc_core::ffi::*` compiles fine, but the static linker strips the re-exported symbol from the single `libagent_doc.{so,dylib,dll}` export table because nothing in the cdylib crate references it — editor plugins then can't resolve it at runtime.
+- **The fix:** a never-called `force_link_core_ffi_symbols()` in `src/ffi.rs` that names each relocated symbol with its exact `extern "C"` type, keeping them in the cdylib's compilation unit.
+- **The gate:** `nm -D libagent_doc.so | grep -c ' T agent_doc_'` must not drop after any FFI-touching move — the same gate this whole `#bz6s` extraction ran each wave.
+- Provenance: validated across `#k9e1`/`#epv5`/`#vb8h`/`#e130` (POC moved `agent_doc_free_string` + `agent_doc_free_state`).
+
+Docs-only change — no code/tests/build/instruction surfaces touched, so `make check` (green at Wave 5) is unaffected. Commits: submodule `af85d681`, superproject pointer `c4aa883bf`. Marked `#yybc` done.
+
+**Queue now:** only `do [#adcr]` remains. I'm **not** closing `#adcr` this cycle (you directed `do [#yybc]`, not `#adcr`) — but flagging that `#adcr` ("Extract agent-doc-core crate") looks **already satisfied**: core exists, is published 0.1.0, and the whole 3-layer stack sits on it. Tell me "strike adcr" to mark it done, or "do [#adcr]" if you want me to formally verify-and-close it.
+<!-- agent:boundary:43834549 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -66,14 +82,13 @@ Commits: submodule `53416ebc`, superproject pointer `5ce8cd69d`. Marking `#bz6s`
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#bz6s]~
-- do [#yybc]
+- ~do [#yybc]~
 - do [#adcr]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#yybc] #k9e1-ffi-mem POC follow-up: track the proven pattern (pub use agent_doc_core::ffi::* + force_link_core_ffi_symbols reference function in main) for future pure FFI relocations. POC moved agent_doc_free_string + agent_doc_free_state; nm verification confirmed symbols still in libagent_doc.so export table.
 - [ ] [#adcr] Extract agent-doc-core crate (~17K lines) — enables fast-compiling FFI/editor-plugin target independent of orchestration layer
 <!-- /agent:backlog -->
 

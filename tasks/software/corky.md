@@ -2,7 +2,7 @@
 agent_doc_session: 584ef929-37ee-47f6-b3d8-d4266ad31ee9
 agent_doc_format: template
 agent_doc_write: crdt
-agent: codex
+agent: claude
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 claude_model: opus
@@ -93,7 +93,28 @@ prompt_presets:
 Compacted content:
 - Archived 4 response topic(s): sheets scope blocker; Gmail URL refetch; Gmail URL selected-message refetch; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc...
-<!-- agent:boundary:ebb7d21d -->
+❯ do [#h465]. #spec-test-build-install-commit-push
+
+### Re: do #h465 — push gmail-api draft drops attachments — opus-4-8
+
+Fixed and shipped. Root cause was narrower than the original "silent multipart/alternative" framing, so I reproduced it before touching code.
+
+**What I found (reproduced, not assumed):**
+- `compose_email` already builds correct `multipart/mixed` with attachment parts, and the push path (`push_to_drafts_via_gmail_api`) just base64-encodes `email.formatted()` — so with an **absolute** attachment path, a pushed gmail-api draft is already `multipart/mixed`. A throwaway repro confirmed `HAS_MIXED=true`.
+- The real, reproducible defect: `attachments:` paths were passed to the MIME builder **verbatim**, while `images:` are anchored to the draft file's directory via `resolve_media_path`. A draft with a relative attachment (the natural convention, matching `images:`) pushed from any other cwd hit `Attachment not found: report.pdf` and the attachment never landed. Repro panicked exactly there before the fix.
+
+**Fix (`src/draft/mod.rs`, `src/draft/send.rs`):**
+- Resolve `attachments:` relative to the draft directory, same as `images:`, across every transport — IMAP draft, SMTP send, Gmail API `drafts.create` push, and `messages.send`. `resolve_media_path` is now `pub(crate)` and shared by both modules.
+- Console "Attach:" print and the `--json` `attachment_paths` now report resolved paths.
+
+**Regression tests (the bug report's explicit ask):**
+- `test_push_path_relative_attachment_lands_in_mixed_mime` — draft references its attachment by bare filename next to the draft; replicates the push path's resolve→compose→`formatted()` and asserts `multipart/mixed`, `Content-Disposition: attachment`, and the filename appears as a part.
+- `test_send_path_resolves_relative_attachment` — locks the shared draft-relative anchor.
+
+**Verification:** `make check` green (clippy `-D warnings` clean, all tests; the 2 new tests pass — draft suite 42→44). `corky audit-docs` flagged docs only by mtime (every doc is older than the just-edited `mod.rs`), no content drift; SPEC.md §5.5 updated to document draft-relative attachment resolution. Built `make release-gpu` (CUDA) → `.bin/corky` and `make install` (transcribe-cuda) → `~/.cargo/bin/corky`; both report `0.28.2`. Committed `467097f` and pushed `origin main`. No version bump (per repo policy — versions are bumped explicitly).
+
+CI run `26651427617` is in progress on `467097f`; local full-suite verification already passed.
+<!-- agent:boundary:d2114ef3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -104,7 +125,6 @@ Please give me a report the performance
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#h465] draft push on gmail-api accounts silently DROPS attachments. Repro (corky 0.28.2): draft with 'attachments:' frontmatter + 'account' = gmail-api provider, run 'corky draft push <file>' — it prints 'Attach: N file(s)' but the created Gmail draft is multipart/alternative with NO attachment parts (verify: GET /users/me/drafts/<id>?format=full → payload.mimeType, parts). The 'draft send' path (src/draft/send.rs) builds multipart/mixed with attachments correctly; the push/drafts.create path (push_to_drafts_via_gmail_api in src/draft/mod.rs) does not include them despite compose_email receiving the attachment list. Fix: ensure push uses the same multipart/mixed builder as send so attachments land in drafts.create; add a regression test asserting a pushed gmail-api draft's MIME is multipart/mixed with the expected part filenames. Workaround in use: build the MIME + POST drafts.create directly via the Gmail API.
 - [/] [#pypi-trusted-publisher] Configure PyPI trusted publishing for btakita/corky workflow .github/workflows/pypi.yml with environment pypi. Repo workflow is configured and pushed in Corky commit feb074e; PyPI run 26195923707 now builds all artifacts but is blocked by PyPI invalid-publisher until the project has a trusted publisher matching repo:btakita/corky:environment:pypi.
 <!-- /agent:backlog -->
 
@@ -122,4 +142,5 @@ Please give me a report the performance
 - 2026-05-20 [#release-status-cleanup] Reconcile the Corky session/status notes after v0.28.2: mark crates.io publish complete, note v0.28.1 as superseded, and keep PyPI as the remaining publish blocker.
 - 2026-05-20 [#doc-upload-drive-oauth] Implement corky doc upload with Google Drive OAuth design, upload behavior, docs, and tests.
 - 2026-05-21 [#sheets-scope] [recommended] `corky sheets` OAuth scope handling. `corky sheets read` and `corky sheets write` share the same OAuth client + token cache, but `read` only requests `spreadsheets.readonly` and `write` then fails with HTTP 403 `ACCESS_TOKEN_SCOPE_INSUFFICIENT` because the cached token lacks the write scope. Observed 2026-05-21 attempting to update the Velvet Thunder MVP worksheet (`1k52arliMCqbe40_CHWUCinV59EACIoYTG1gVMvnlKrA Wed 5/20/26!K3:L3`) via `corky sheets write` — the write API call surfaced the scope error mid-operation rather than re-auth'ing first. Fix options, ranked: (a) request the full `spreadsheets` scope upfront on any first-time `sheets *` auth (single broader prompt, no UX regression since read+write are paired in this workflow); (b) detect `ACCESS_TOKEN_SCOPE_INSUFFICIENT` from the write API and auto-trigger a re-auth flow with the missing scope; (c) add `corky sheets reauth --scope write` command + a clear "your token is read-only; re-auth needed" error message. Workaround for now: delete `~/.config/corky/...token...` and rerun `corky sheets write` (will prompt for fresh OAuth — verify it requests `spreadsheets` not `spreadsheets.readonly`).
+- 2026-05-29 [#h465] draft push on gmail-api accounts silently DROPS attachments. Repro (corky 0.28.2): draft with 'attachments:' frontmatter + 'account' = gmail-api provider, run 'corky draft push <file>' — it prints 'Attach: N file(s)' but the created Gmail draft is multipart/alternative with NO attachment parts (verify: GET /users/me/drafts/<id>?format=full → payload.mimeType, parts). The 'draft send' path (src/draft/send.rs) builds multipart/mixed with attachments correctly; the push/drafts.create path (push_to_drafts_via_gmail_api in src/draft/mod.rs) does not include them despite compose_email receiving the attachment list. Fix: ensure push uses the same multipart/mixed builder as send so attachments land in drafts.create; add a regression test asserting a pushed gmail-api draft's MIME is multipart/mixed with the expected part filenames. Workaround in use: build the MIME + POST drafts.create directly via the Gmail API.
 <!-- /agent:done -->

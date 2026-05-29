@@ -52,7 +52,27 @@ Ran the feasibility spike. Verdict: **the archive_index-only split is clean and 
 Do **not** ship the `archive_index`-only carve as originally scoped — it adds a crate boundary for ~zero build-isolation payoff. The lever that actually isolates the C build is `project_controller`: add an interface seam (pass a `Connection` handle / storage trait in) so its SQLite code drops to a lower `agent-doc-sqlite` crate, and co-locate `archive_index` there. Captured as `[#adoc-sqlite-seam]`.
 
 No code changed this cycle — spike only, so no spec/test/build/install was required.
-<!-- agent:boundary:31487251 -->
+### Re: do [#adoc-sqlite-seam] — opus-4-7
+
+Implemented the **foundation** of the seam and landed it green. Being precise about what's done vs. what isn't: **build isolation is not yet achieved** — that needs Phase C, which is a larger, regression-sensitive refactor of cluster-central code. `#adoc-sqlite-seam` stays **open**.
+
+#### Done this cycle — Phase A+B (submodule `0bae9a72`, superproject `0e77d0e6f`, pushed)
+
+- **Phase A (cycle break):** moved `parse_topic_sections` / `parse_topic_sections_with_tail` / `TopicSections` (pure text parsing) out of orchestration's `compact.rs` into a new `agent_doc_core::topic` module. This is the prerequisite that lets `archive_index` leave orchestration without a `compact ↔ archive_index` crate cycle.
+- **Phase B (new crate):** created `agent-doc-sqlite` (depends only on `agent-doc-core` + `rusqlite`/bundled), moved `archive_index.rs` into it, repointed its `frontmatter::parse` to core. Orchestration now does `pub use agent_doc_sqlite::archive_index`, so every existing call site (`compact`, `response_toc`, CLI `main`) is unchanged. Added to workspace members.
+
+#### Why this alone doesn't meet the goal
+
+`rusqlite` was a direct dep of orchestration through **two** consumers. I moved one (`archive_index`); `project_controller` is the other and still pulls `rusqlite` into orchestration's graph, so the bundled-SQLite C build is **not** yet isolated from orchestration recompiles.
+
+#### Phase C — the remaining (substantive) work
+
+Investigation showed `session_actor` delegates **all** persistence to `project_controller`'s DB functions, but those handlers interleave SQL with `ops_log`, `session_actor`, and projection logic. So Phase C isn't a wholesale move — it's surgically extracting ~15 SQL functions into a `StateDb` seam in `agent-doc-sqlite`, moving the storage types down, repointing `session_actor` + `handle_*`, and dropping `rusqlite` from orchestration's normal deps (dev-dep for the ~10 DB tests). Refined into the backlog item. I scoped it precisely rather than rush a risky refactor of the session/dispatch lifecycle into a broken state on a dog-fooded tool.
+
+#### Verification
+
+`cargo build` full workspace green; core+sqlite tests **652 passed**; `cargo build --release` + `cargo install --path .` both succeeded (binaries current). `make check` is clean **except** one pre-existing failure — `codex_bare_run_inside_owning_pane_fails_before_nested_dispatch` (`run_integration.rs`), a codex/tmux-dispatch test that touches none of the relocated code. I confirmed it fails on clean HEAD with my changes stashed, so it is **not** a regression from this work.
+<!-- agent:boundary:af4e2aa8 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -60,14 +80,14 @@ No code changed this cycle — spike only, so no spec/test/build/install was req
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#adoc-sqlite-isolation]~
-- do [#adoc-sqlite-seam]
+- ~do [#adoc-sqlite-seam]~
 - do [#adoc-orch-shim-cleanup]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#adoc-sqlite-seam] [recommended] The real build-isolation lever is project_controller, not archive_index. Introduce an interface seam: pass a rusqlite Connection handle (or a small storage trait) into project_controller so its SQLite-touching code can move to a lower agent-doc-sqlite crate, removing rusqlite from agent-doc-orchestration's direct dep graph. Co-locate archive_index in that crate. Prereq cycle-break: move compact::parse_topic_sections (pure text fn) down to agent-doc-core, since archive_index calls it while compact calls archive_index::index_archive — crates can't be cyclic. Only this split actually isolates the bundled-SQLite C build from orchestration recompiles.
+- [ ] [#adoc-sqlite-seam] [recommended] Build-isolation seam — remove rusqlite from agent-doc-orchestration. PHASE A+B DONE (submodule commit 0bae9a72): agent-doc-sqlite crate created; archive_index relocated into it; compact↔archive_index cycle broken by moving parse_topic_sections → agent_doc_core::topic. PHASE C REMAINING (the actual isolation): project_controller (cluster-central) still keeps rusqlite, so orchestration still links libsqlite3-sys. Surgically extract its ~15 SQL functions (open_state_db/schema + actor/lease/dispatch/layout/projection store) into a StateDb seam in agent-doc-sqlite; move storage types (ActorRecord/ActorState/ActorLastTransition) down + re-export; repoint session_actor + handle_* call sites; drop rusqlite from orchestration normal deps (dev-dep for the ~10 DB tests, or move them). Only Phase C isolates the bundled-SQLite C build from orchestration recompiles.
 - [ ] [#adoc-orch-shim-cleanup] Finish the migration: rewrite CLI-shell crate::X call sites to agent_doc_orchestration::X and delete the pub use shims in agent-doc/src/{lib,main}.rs. Mechanical/low-risk polish, not a true crate split. Plan's optional final step.
 <!-- /agent:backlog -->
 

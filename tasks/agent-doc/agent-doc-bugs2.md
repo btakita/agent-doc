@@ -35,7 +35,48 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 4 response topic(s): do [#cancel-orphans-preflight-cycle]; corky.md tmux autoload + a way to load the tmux window; Run Agent Doc baseline-mismatch error; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:e4187987 -->
+
+### Re: do [#adoc-queue-ipc-buffer-divergence] — converge live editor buffer (root cause #2) — opus-4-8
+
+Implemented the cross-language convergence seam that closes root cause #2 of the queue/IPC drift loop — the live IDE buffer re-adding `auto` / diverging from the committed inactive snapshot. Committed to the submodule (`c483080a`), pointer bumped (`4703f9788`), pushed.
+
+#### Why a content patch could not fix it
+
+After a queue halt/drain, maintenance writes the corrected shape to disk + snapshot: queue body, the `&lt;!-- agent:queue auto --&gt;` → `&lt;!-- agent:queue --&gt;` opening tag, and `queue_active: false`. But a live route-owned IPC listener keeps its own editor buffer, and the only editor-visible IPC seam for template docs (`send_patch`) replaces a component **body** — it cannot touch an opening-tag *attribute* or frontmatter. So the buffer re-asserted `auto`/`queue_active: true` on its next flush and the snapshot/HEAD diff regenerated on every preflight.
+
+```mermaid
+sequenceDiagram
+    participant IDE as IDE buffer (auto)
+    participant PF as preflight queue-maint
+    participant Disk as disk + snapshot
+    Note over PF,Disk: before fix — divergence loop
+    PF->>Disk: halt: strip auto, queue_active:false
+    IDE->>Disk: next flush re-asserts auto / queue_active:true
+    PF->>PF: re-diff every cycle (stuck_captured_cycle)
+    Note over PF,IDE: after fix — convergence
+    PF->>Disk: halt: strip auto, queue_active:false
+    PF->>IDE: send_queue_convergence(queue_auto:false, queue_active:false)
+    IDE->>IDE: convergeQueueAuto + mergeFrontmatter (FFI)
+    IDE->>Disk: next flush writes the converged shape
+    PF->>PF: follow-up preflight = no_changes (idempotent)
+```
+
+#### What landed (`#spec-test-build-install-commit-push`)
+
+- **Core (`agent-doc-core`):** `component::converge_queue_auto(doc, want_auto)` rewrites the queue opening-tag `auto` attribute (preserving other attrs); exported as `agent_doc_converge_queue_auto` (takes a **C int**, not C `bool`, so the JNA boundary stays on the reliable 32-bit-int ABI). No-op on an absent/already-matching tag.
+- **Orchestration:** `ipc_socket::send_queue_convergence` carries `queue_auto` + the `queue_active` frontmatter; `preflight::run_queue_maintenance` pushes it through an active listener after each halt/drain disk write — best-effort, never fatal (disk/snapshot stays the source of truth).
+- **JetBrains plugin 0.2.137:** `PatchWatcher` parses `queue_auto` and applies it via `NativePatching.convergeQueueAuto` in both the Document-API and VFS apply paths.
+- **Tests:** deterministic SimWorld repro `queue_maintenance_converges_live_ipc_buffer_on_item_modified_halt` (simulated IPC listener → halt → asserts one convergence message + idempotent follow-up) and `ParsePatchJsonQueueAutoTest` (4 cases). `make check` green; core/orchestration lib suites green; plugin test suite green.
+- **Build/install:** `cargo build --release` + `cargo install --path .` (both binaries); `agent_doc_converge_queue_auto` confirmed present in the release cdylib. Spec `07-orchestration-commands.md` updated; `VERSIONS.md` entry added.
+
+#### Can we mathematically eliminate the corruption?
+
+This converges the **queue tag + frontmatter** class deterministically: once the listener applies the convergence the buffer and disk agree, and a follow-up preflight is provably `no_changes` (the SimWorld test asserts exactly this). It does **not** by itself eliminate *all* full-document IPC corruption — the dropped-exchange-prompt-on-merge and duplicate-response-after-commit cases are separate divergence families, each with their own session-check guards and still-open prevention work. Full elimination needs every editor-visible mutation to flow through one converging seam rather than a stale-buffer re-assert; that is the remaining direction tracked across those items.
+
+#### Gated on live verification
+
+Marked `[/]` (review-gated), not done. The deterministic seam is proven, but the **live** cross-language proof needs: (1) install the signed `agent-doc-jetbrains-0.2.137-signed.zip`, (2) restart the route-owned `agent-doc` process so it loads the new binary (the old PID keeps the pre-fix binary), then (3) confirm a real IDE-owned session no longer re-diverges after a consume→halt cycle without a raw `git checkout`.
+<!-- agent:boundary:8e99cd40 -->
 <!-- /agent:exchange --> 
 ###
 <!--
@@ -62,7 +103,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#duplicate-response-after-commit]~
 - ~do [#exchange-prompt-dropped-on-merge]~
 - ~do [#cancel-orphans-preflight-cycle]~
-- do [#adoc-queue-ipc-buffer-divergence]
+- ~do [#adoc-queue-ipc-buffer-divergence]~
 - do [#queue-strike-on-halt]
 - do [#jb-stale-busy-idle-footer]
 - do [#pending-add-append-not-prepend]
@@ -76,7 +117,6 @@ preset #spec-test-build-install-commit-push
 <!-- agent:backlog -->
 - [ ] [#backlog-auto-marker-misfire] The 'auto' attribute on the agent:backlog marker (queue-only attribute) misfired an auto-run that destructively rewrote the backlog — minted new IDs wrapping 'do [#...]' stubs of already-done items; user reported original task text lost and recovery needed git/sidecar archaeology. Fix: reject 'auto'/unknown attrs on agent:backlog (warn, no mutation); auto-loop must trigger only from the queue 'auto' attribute; never rewrite committed backlog item text in an auto-run. Plan: tasks/agent-doc/plan-backlog-auto-marker-misfire.md. DO NOT IMPLEMENT.
 - [ ] [#jb-load-tmux-window-verify] [recommended] Live-verify the new JB Load Tmux Window action (plugin 0.2.136): install the signed zip, confirm it autostarts/loads the tmux pane for a focused doc whose pane is not up (e.g. corky.md). If the autostart sync genuinely fails to spawn the pane in that case (vs. by-design passive open), capture the route/sync logs as a separate autostart bug.
-- [ ] [#adoc-queue-ipc-buffer-divergence] Root cause #4 FIXED (submodule 729f7bc2): response-replay / stale-cycle hash matching now neutralizes the agent:queue component (tag + body) and the queue_active frontmatter, so queue-maintenance churn no longer wedges a committed cycle as stuck_captured_cycle. REMAINING #2 (live IDE buffer re-adds auto / diverges from committed inactive snapshot): blocker found — ipc_socket::send_patch carries component CONTENT only and cannot converge a queue opening-tag attribute (auto) or the queue_active frontmatter; try_ipc_full_content is disabled and rejects template docs, so no IPC seam exists yet. Needs a plugin protocol extension (PatchWatcher.kt + FFI) to converge queue tag + frontmatter to the editor buffer, plus a deterministic live-IPC-listener repro harness (SimWorld). Plan: tasks/agent-doc/plan-queue-ipc-drift.md.
 - [ ] [#queue-strike-on-halt] Queue head consumed on halt/refusal response. write.rs:1233-1242 + response_explicitly_targets_queue_head (write.rs:2481) treat any `### Re: <head-id> <suffix>` heading as completion signal even when body explicitly says "backlog left intact" + passes no --done/--pending-gate. Repro: tasks/agent-doc/open-code.md cycle 619af4d0b struck [#d97v] after halt response. Plan: tasks/agent-doc/plan-queue-strike-on-halt-response.md (recommend Option A — require explicit completion signal).
 - [ ] [#jb-stale-busy-idle-footer] Three JB Run Agent Doc / Clear Session Context reports queue-instead-of-dispatch or block Clear while the live pane footer shows a Claude Code idle composer: monsterrodholders.md (actor gen 233, pane %19), equityfundingsource.md (gen 35, pane %3), tsift.md (pane %21, footer 22.4K (11%) ctrl+p commands). The tsift.md case is the strongest stale-busy candidate — Clear was blocked though the footer indicates idle. Fix: route.rs / session_actor_cmd.rs busy projection should treat the Claude Code idle-composer footer (ctrl+p commands / context % used) as idle direct evidence to repair a stale busy actor/lease projection before queuing or blocking, mirroring the existing OpenCode context % used idle-composer rule. Relates to #run-agent-doc-stale-busy-replay and #snrun (plan tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md).
 - [ ] [#pending-add-append-not-prepend] `--pending-add` appends new items below the previous CLI arg within the same finalize cycle, contradicting SKILL.md "Pending capture rule" ("Put new items at the beginning of agent:backlog"). Repro: tasks/agent-doc/open-code.md commit f94e7851c — agent added wave-4, wave-3, wave-2, wave-1 expecting wave-1 on top per SKILL.md; actual backlog was wave-4 on top (pure CLI-arg order). User flagged it as bug; agent had to issue --pending-reorder. Plan: tasks/agent-doc/plan-pending-add-prepend-semantics.md (recommend Option A — strict prepend, drop the implicit adjacency heuristic).
@@ -88,6 +128,7 @@ preset #spec-test-build-install-commit-push
 ## Review
  
 <!-- agent:review -->
+- [/] [#adoc-queue-ipc-buffer-divergence] Root cause #2 IMPLEMENTED (submodule c483080a; pointer 4703f9788): live editor-buffer convergence after queue halt/drain. New core fn component::converge_queue_auto + agent_doc_converge_queue_auto FFI (C-int ABI for stable JNA); ipc_socket::send_queue_convergence carries queue_auto opening-tag state + queue_active frontmatter; preflight run_queue_maintenance pushes convergence through an active IPC listener after each halt/drain disk write (best-effort, non-fatal). JB plugin 0.2.137 parses queue_auto and applies via NativePatching.convergeQueueAuto in Document-API + VFS paths. Deterministic SimWorld repro queue_maintenance_converges_live_ipc_buffer_on_item_modified_halt + Kotlin ParsePatchJsonQueueAutoTest; make check green; both binaries built+installed (symbol verified in release cdylib); spec 07-orchestration-commands updated. GATED on live verification: install signed plugin 0.2.137, restart the route-owned agent-doc process to load the new binary, then confirm a real IDE-owned session no longer re-diverges (no recurring agent:queue diff / stuck_captured_cycle / inactive_queue_residue) after a consume->halt cycle without a raw git checkout. Plan: tasks/agent-doc/plan-queue-ipc-drift.md.
 - [/] [#cancel-orphans-preflight-cycle] Canceling a run then invoking Run Agent Doc fails closed because the explicit cancel does not abandon the orphaned preflight_started cycle (route waits for staleness). Distinct from the stale-busy actor/lease items: this is per-document cycle_state left open by cancel. Plan: tasks/agent-doc/plan-cancel-orphans-preflight-cycle.md (recommend Option A — JB cancel emits a signal that abandons the no-capture preflight_started cycle). Reported 2026-05-29.
 - [/] [#exchange-prompt-dropped-on-merge] User-authored exchange prompt (observed: "go") silently dropped during an IPC content_ours merge while the IDE held ipc.sock — never reaches snapshot/HEAD, assistant never responds, next preflight reports no_changes. Same drift family as #adoc-queue-ipc-buffer-divergence / #duplicate-response-after-commit but the victim is user input. Repro 2026-05-29 on src/boost-client/tasks/monsterrodholders.md (dropped the "go" authorizing #gfwconnect; assistant replied "nothing changed" for two cycles). Plan: tasks/agent-doc/plan-exchange-prompt-dropped-on-merge.md (recommend Option A — union user prompt lines / fail closed + add dropped_prompt_guard to session-check).
 - [/] [#duplicate-response-after-commit] Late-IPC reposition signal re-inserts already-committed response body into working tree, wrapped in duplicate boundary markers. Symptom: next preflight interrupts with "direct response patchback without agent-doc cycle"; agent-doc write --commit returns "empty response — nothing to write"; only manual Edit-based dedup recovers. Repro: tasks/dreamable/separation.md cycle after commit 231eafc83 on 2026-05-28. Plan: tasks/agent-doc/plan-duplicate-response-after-commit.md (recommend Option A — both detect over-application in session-check and make IPC reposition idempotent).

@@ -23,6 +23,7 @@
 
 - [Building](development/building.md)
 - [Conventions](development/conventions.md)
+- [FFI Relocation Pattern](development/ffi-relocation.md)
 
 # Reference
 

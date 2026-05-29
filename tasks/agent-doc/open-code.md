@@ -55,24 +55,67 @@ Also closed **`#adcr`** (extract `agent-doc-core`) — it was already satisfied 
 Splitting the tmux/PTY/route/sync/git cluster into separate crates — the cycle entanglement that drove Direction A still applies; you'd be back to breaking `route↔sync`/`git↔cycle_state`. The build-time win there is better pursued via the `#adoc-sqlite-isolation` seam (isolate the heaviest *dep*, not the entangled modules).
 
 Want me to start with `#adoc-pure-to-core` (the clean one) or run the `#adoc-sqlite-isolation` feasibility spike first?
-<!-- agent:boundary:b31de174 -->
+
+### Re: do [#adoc-pure-to-core] — heuristics + replay_guard relocated to core — opus-4-7
+
+You queued `do [#adoc-pure-to-core]` at the head (answering last cycle's question — start with the clean one), so I did it.
+
+#### What landed
+
+- **`heuristics` → `agent-doc-core`** — pure recommendation-detection logic, zero crate/external deps. Trivially core-able.
+- **`replay_guard` → `agent-doc-core`** — uses only `template::parse_patches`, which lives in `agent_doc_core::template`, so `crate::template::parse_patches` resolves intra-core after the move (no rewrite).
+- `agent-doc-orchestration` re-exports both via `pub use agent_doc_core::{heuristics, replay_guard}`, so its call sites (`write`, `session_check`, `codex_hook`, `repair`) compile unchanged. Their tests moved with them — **core suite 620 → 645**.
+
+#### Verification
+
+- `make check` green (clippy + full suite) modulo the pre-existing live-tmux `codex_bare_run` test. Core: 645 passed.
+- `cargo build --release` green; `nm -D libagent_doc.so` — full 39-symbol FFI surface intact.
+- Commits: submodule `e6c25016`, superproject pointer `08faa1e3b`. `#adoc-pure-to-core` marked done.
+
+This shrinks the 340-dep orchestration crate by two pure modules (moving them to the fast-building leaf). It's a small, clean win — the audit confirmed the other candidates (`dedupe`/`callback`/`editor_route_errors`) are blocked by `snapshot → git` I/O and can't follow.
+
+#### Queue remaining
+
+`do [#adoc-sqlite-isolation]` `[recommended]` (feasibility spike on isolating rusqlite/bundled-SQLite — the high-value, uncertain-feasibility one) and `do [#adoc-orch-shim-cleanup]` (mechanical polish). Say the word for the sqlite spike, or I can take the shim cleanup if you'd rather bank a safe one.
+
+### Re: do [#adoc-pure-to-core] — heuristics + replay_guard relocated to core — opus-4-7
+
+You queued `do [#adoc-pure-to-core]` at the head (answering last cycle's question — start with the clean one), so I did it. (Also fixed the queue tag: `&lt;!-- agent:queue done --&gt;` had a malformed attribute — `done` isn't a valid queue mode, only `auto` is — so I reset it to the default `&lt;!-- agent:queue --&gt;`.)
+
+#### What landed
+
+- **`heuristics` → `agent-doc-core`** — pure recommendation-detection logic, zero crate/external deps.
+- **`replay_guard` → `agent-doc-core`** — uses only `template::parse_patches`, which lives in `agent_doc_core::template`, so `crate::template::parse_patches` resolves intra-core after the move (no rewrite).
+- `agent-doc-orchestration` re-exports both via `pub use agent_doc_core::{heuristics, replay_guard}`, so its call sites (`write`, `session_check`, `codex_hook`, `repair`) compile unchanged. Their tests moved with them — **core suite 620 → 645**.
+
+#### Verification
+
+- `make check` green (clippy + full suite) modulo the pre-existing live-tmux `codex_bare_run` test. Core: 645 passed.
+- `cargo build --release` green; `nm -D libagent_doc.so` — full 39-symbol FFI surface intact.
+- Commits: submodule `e6c25016`, superproject pointer `08faa1e3b`. `#adoc-pure-to-core` marked done.
+
+Shrinks the 340-dep orchestration crate by two pure modules. The audit confirmed the other candidates (`dedupe`/`callback`/`editor_route_errors`) are blocked by `snapshot → git` I/O and can't follow.
+
+#### Queue remaining
+
+`do [#adoc-sqlite-isolation]` `[recommended]` (the high-value, uncertain-feasibility rusqlite-isolation spike) and `do [#adoc-orch-shim-cleanup]` (mechanical polish). Say the word for the sqlite spike, or I can bank the safe shim cleanup.
+<!-- agent:boundary:3ab9af25 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
-- ~do [#bz6s]~
-- ~do [#yybc]~
-- ~do [#adcr]~
+- do [#adoc-pure-to-core]
+- do [#adoc-sqlite-isolation]
+- do [#adoc-orch-shim-cleanup]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#adoc-orch-shim-cleanup] Finish the migration: rewrite CLI-shell crate::X call sites to agent_doc_orchestration::X and delete the pub use shims in agent-doc/src/{lib,main}.rs. Mechanical/low-risk polish, not a true crate split. Plan's optional final step.
 - [ ] [#adoc-sqlite-isolation] [recommended] Feasibility spike: carve archive_index (+ rusqlite/bundled-SQLite, the slowest build dep) into its own crate to isolate the C build from agent-doc-orchestration recompiles. Blocker to investigate first: project_controller ALSO uses rusqlite and is cluster-central, so this likely needs an interface seam (pass a DB handle/trait in) before the split is clean. Spike before committing.
-- [ ] [#adoc-pure-to-core] Relocate genuinely-pure orchestration modules down to agent-doc-core (fast-building leaf layer). Confirmed-clean candidates: heuristics (zero crate/external deps) and replay_guard (only crate::template, which is core-backed). Audit the rest (dedupe/callback/editor_route_errors are blocked by snapshot->git I/O). Clean low-risk module splits; shrinks the 340-dep orchestration crate.
+- [ ] [#adoc-orch-shim-cleanup] Finish the migration: rewrite CLI-shell crate::X call sites to agent_doc_orchestration::X and delete the pub use shims in agent-doc/src/{lib,main}.rs. Mechanical/low-risk polish, not a true crate split. Plan's optional final step.
 <!-- /agent:backlog -->
 
 ## Icebox

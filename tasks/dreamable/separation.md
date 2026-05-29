@@ -71,10 +71,10 @@ Drafted at [`tasks/dreamable/addendum-engagement-period-projects.md`](addendum-e
 
 **Public repositories (github.com/btakita), created after April 6, 2026:**
 
-| Repository | Created | License | Description |
-|---|---|---|---|
-| [tsift](https://github.com/btakita/tsift) | 2026-04-17 | MIT | Token-efficient CLI plugin for Claude Code — Sift-powered search + native tool routing |
-| [homebrew-tap](https://github.com/btakita/homebrew-tap) | 2026-05-05 | tap metadata (no proprietary content) | Homebrew tap for your CLI tools |
+❯ | Repository | Created | License | Description                                                                                           |
+❯ |---|---|---|-------------------------------------------------------------------------------------------------------|
+❯ | [tsift](https://github.com/btakita/tsift) | 2026-04-17 | MIT | Token-efficient CLI plugin for Claude Code/Codex/OpenCode — Sift-powered search + native tool routing |
+❯ | [homebrew-tap](https://github.com/btakita/homebrew-tap) | 2026-05-05 | tap metadata (no proprietary content) | Homebrew tap for your CLI tools                                                                       |
 
 **Private repositories:** the document includes a single summary line covering the 3 private repos created during the window (`session-share`, `boost-client`, `monsterrodholders-dev` — described categorically, not enumerated, consistent with the original Exhibit A's blanket clause for private repos).
 
@@ -84,7 +84,7 @@ Drafted at [`tasks/dreamable/addendum-engagement-period-projects.md`](addendum-e
 2. **Keep on file** as your own contemporaneous record if you'd rather not re-open the document with Rob. The Addendum's §2(b) carve-out already protects the public OSS projects categorically; this just removes ambiguity if it's ever questioned.
 
 I'd lean toward option 1 — five minutes of friction now prevents an IP-claim gray area later, and it's consistent with how the original Addendum framed Prior Inventions.
-
+❯ Please create a document to upload to the agreement. Are my projects created after signing protected?
 ### Re: Uploadable document + post-signing protection — opus-4-7
 
 **PDF for SignRequest upload**
@@ -114,6 +114,7 @@ What does survive past signing:
 **One thing to check before signing.** Re-read the original Consulting Agreement (§6, §7, and any "Restrictive Covenants" / "Non-Solicitation" section) for any post-termination restrictions on competing work or soliciting Dreamable's customers/employees. The Settlement preserves the Consulting Agreement by reference in §11, so any post-termination clauses there still apply. The Settlement itself doesn't add new post-signing restrictions on your work — just confidentiality and non-disparagement.
 
 **Bottom line.** Once signed, you're free to build whatever you want — open-source, private, commercial, competing tools — provided you (a) don't reuse Dreamable confidential information and (b) don't make disparaging statements about Dreamable. Existing carve-outs from the Addendum continue to apply, and §3's broad assignment language is contained to the April 6 – May 26 window.
+❯ What happens if robert-ross significantly delays the payment? Is the agreement in effect?
 
 ### Re: Payment delay and contract effectiveness — opus-4-7
 
@@ -145,7 +146,40 @@ The cleanest fix is to make payment a condition precedent or use simultaneous ex
 **Recommendation.** Given the JAMS-in-SF venue + each-side-pays-own-fees structure, the $5k is effectively unenforceable through the contract's own dispute mechanism if Rob delays. Insist on **Option A** (payment on or before signing). It's a one-line edit, it costs Rob nothing if he intends to pay, and it removes the asymmetry entirely. If he resists Option A, fall back to **Option C** so you retain leverage.
 
 **Not legal advice.** This is a structural read of the document. Before signing or making changes, run the options past a CA-licensed employment/contracts attorney — at minimum a 30-minute paid consult. The §1542 waiver alone is worth that fee.
-<!-- agent:boundary:c0996192 -->
+I already signed the contract. Am I screwed if robert-ross doesn't pay? I'm very short on money.
+
+### Re: Already signed — collection path if Rob delays — opus-4-7
+
+**Not screwed.** You have a clean breach-of-contract claim for the $5,000. Rob counter-signed, you signed — the §2 payment obligation is now a debt he owes you. The §7 mutual release does not extinguish his obligation to pay; it releases *other* claims arising from the engagement (unpaid-wages, IP disputes, etc.). The payment owed under §2 is the consideration for the release, not part of what was released.
+
+**The practical reality.** At $5k, the formal dispute mechanism in §10 (JAMS arbitration in SF, each side pays own fees) costs more to invoke than the claim is worth. That asymmetry doesn't mean you can't collect — it means leverage happens *before* arbitration, not through it. Most counterparties pay after a credible demand because the alternative (lawyer fees, time, reputational cost, having an unpaid-debt judgment hanging over them) exceeds $5k for them too.
+
+**Escalation ladder — lowest cost first**
+
+1. **Friendly status check (this week).** One-line email or text: *"Hey Rob — confirming the $5k Settlement Payment timing per §2. Can you let me know the wire date?"* No threat. Just a date. Sets the clock and creates a record. ~80% of delays resolve here.
+2. **Polite written reminder (after 1–2 weeks if no response).** Email referencing the signed document and §2, attach the signed PDF or SignRequest confirmation, name a specific date you expect payment. Still no lawyer language. Keep it businesslike.
+3. **Formal demand letter (after 30 days unpaid).** Certified mail + email. Cite §2, identify the specific breach, give a 10-business-day cure window, state your intent to pursue all available remedies if not cured. Templates are free online; you can write this yourself. The certified-mail receipt is itself useful evidence.
+4. **Lawyer demand letter (~$200–$500 flat fee).** Same content as step 3 but on attorney letterhead. This shifts Rob's expected cost dramatically — now he's calculating his own legal time to respond. Many small-firm CA contracts attorneys will send a flat-fee demand for under $500. **This is usually the inflection point.** A demand letter from counsel against a $5k debt resolves in days, not months, in most cases.
+5. **Online reputation / informal pressure.** Truthful, non-disparaging statements about an unpaid debt are *not* covered by §8 non-disparagement; disparagement requires falsity or opinion-as-fact. "Dreamable owes me $5,000 under a signed settlement agreement and has not paid as of [date]" is a factual statement. Use sparingly — generally only as a credible *future* threat in the demand letter, not as an actual public step, since the optics can backfire and a court may read it less charitably than you would.
+6. **JAMS arbitration (last resort).** $1,750+ filing fee, months of process, you pay your own attorney. Cost-prohibitive for $5k. Only useful if Rob ignores everything else *and* you'd settle for an arbitration award you can record as a judgment for future collection (e.g., if Dreamable later raises a round and you can garnish).
+7. **Small-claims (probably foreclosed).** CA small-claims caps at $12,500 for individuals — but §10's arbitration clause likely bars it. Worth one phone call to a CA-licensed attorney to confirm; some courts decline to enforce arbitration clauses for small-dollar consumer/employment disputes.
+
+**Cheap legal help if you need it**
+
+- **California State Bar Lawyer Referral Service** — referrals to attorneys offering 30-minute consults for $35–$50. Use this to confirm the arbitration-clause-vs-small-claims question and to vet the demand letter approach. https://www.calbar.ca.gov/Public/Need-Legal-Help/Lawyer-Referral-Service
+- **Connecticut Bar Association** (you're CT-based) — has a similar low-cost referral. They can also tell you whether to use CT or CA counsel given the §10 California forum selection.
+- **Law-school small-business / contracts clinics** — some accept clients for small-dollar contract collection at no cost. Yale, UConn, Quinnipiac all have clinics in CT.
+- **r/legaladvice / r/legaladvicecanada** for sanity checks — not authoritative but useful for ruling out obvious mistakes.
+
+**On the money pressure.** Two practical thoughts, not legal advice:
+
+- Don't spend money you don't have to chase the $5k. The escalation ladder above maxes out at ~$500 (the flat-fee demand letter), and you don't have to reach that step unless steps 1–3 fail.
+- The §7 release does not affect your right to use **§9 (Patent/Copyright Assistance)** as leverage if Rob ever needs your cooperation to secure IP rights for the engagement-period work. His obligation under §9 is bidirectional with §2 in the sense that uncured material breach by him weakens any obligation you have to assist. Don't refuse cooperation outright if asked (that creates its own claim against you), but document the unpaid debt before responding.
+
+**Recommended next move.** Send the friendly status check (step 1) this week. Set a calendar reminder for 14 days from the signed Effective Date. If nothing by then, move to step 3 (your own demand letter), not step 4 yet — the certified-mail demand alone usually triggers payment from a counterparty who was just being lazy about wire timing. Hold the lawyer letter as the visible next step if step 3 fails.
+
+**Not legal advice.** This is a structural collection-strategy read. Confirm the small-claims-vs-arbitration question and any state-specific demand-letter requirements with a CA or CT attorney before filing anything. The lawyer-referral consult is worth the $35.
+<!-- agent:boundary:2912a2b3 -->
 <!-- /agent:exchange -->
 
 ## Queue

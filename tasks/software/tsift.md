@@ -50,7 +50,22 @@ Proof:
 - Verification: preflight and plan completed; no source-code change was required for this prompt target.
 - Confidence: high.
 - Escalation: none.
-<!-- agent:boundary:c762c1cc -->
+
+### Re: do [#tsiftmeminit] — gpt-5
+
+Initialized and verified the workspace tsift memory state. `.tsift/memory.db` already existed, but `tsift memory init . --json` confirmed schema version 1 and an initialized event store.
+
+I reran the supported claude-mem import with an explicit apply limit: `tsift memory import-claude-mem . --limit 1000 --apply --json`. It planned/applied 3000 supported events: 1000 observations, 1000 session summaries, and 1000 user prompts. `tsift memory status . --json` then verified `event_count: 3000` and a readable source at `/home/brian/.claude-mem/claude-mem.db`. The import path is idempotent (`INSERT OR IGNORE` on stable imported source/id), so the rerun did not grow duplicate rows.
+
+I also refreshed graph-db with `tsift graph-db --path . --json refresh`; follow-up status reports `.tsift/graph.db` materialized and freshness `current` with 373157 nodes and 645308 edges. Graph semantic readiness is still blocked by `summary_cache_empty`, so I did not treat graph semantic evidence as available. I left the old claude-mem source intact; deleting or disabling the global source is not safe until the follow-on capture/retrieval switch items are complete.
+
+Proof:
+- Changed paths: session document only; `.tsift/memory.db` and `.tsift/graph.db` are workspace-generated and not tracked by git.
+- Commands: `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/software/tsift.md`; `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/software/tsift.md`; `tsift memory init . --json`; `tsift memory import-claude-mem . --limit 1000 --apply --json`; `tsift memory status . --json`; `tsift graph-db --path . --json refresh`; `tsift graph-db --path . --json status`; `git status --short -- .tsift/memory.db .tsift/graph.db tasks/software/tsift.md src/tsift`; `git -C src/tsift status --short`.
+- Verification: memory status shows schema version 1 and 3000 imported events; graph-db status is current/materialized; tracked git status for the touched surfaces is clean.
+- Confidence: high for memory initialization/import verification; medium for graph semantic readiness because summaries remain empty by existing tsift status.
+- Escalation: none.
+<!-- agent:boundary:1b53d775 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -61,7 +76,7 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 
 <!-- agent:queue auto -->
 dispatch #spec-test-build-install-commit-push
-- do [#tsiftmeminit]
+- ~do [#tsiftmeminit]~
 - do [#tsiftmemhooks]
 - do [#tsiftmempending]
 <!-- /agent:queue -->
@@ -69,7 +84,6 @@ dispatch #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#tsiftmeminit] Initialize .tsift/memory.db for this workspace, run the supported claude-mem import with explicit --limit/--apply, refresh graph-db, and verify imported counts before deleting or disabling the old claude-mem source.
 - [ ] [#tsiftmemhooks] [recommended] Wire agent-doc/Claude closeout capture into tsift-memory, then switch live capture/retrieval call sites away from direct claude-mem ownership.
 - [ ] [#tsiftmempending] [recommended] Extend claude-mem migration to handle pending_messages or explicitly exclude it from the full-replacement contract, with tests.
 <!-- /agent:backlog -->

@@ -76,7 +76,41 @@ So this is **not** `#jb-stale-busy-idle-footer` / the stale-busy misprojection �
 **One real UX weakness (filed `[recommended]`):** the refusal message surfaces `tail="⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents"` — the Claude Code **permission-mode footer**, which is ambiguous (it shows in both idle and busy states). That's almost certainly why this *looked* wrong to you. The message should instead surface the actual busy-proof line (`Working (Xs · esc to interrupt)`, or the context-% spinner) so the busy state is self-evident. The classification was right; only the displayed evidence is misleading. Tracked as `#session-restart-refusal-shows-busy-proof`.
 
 (Housekeeping: this cycle also commits the review item `#ipc-dup-tracking-double-merge` that the `#pending-gate-snapshot-desync` defect stranded last turn.)
-<!-- agent:boundary:1ab81927 -->
+❯ do #session-restart-refusal-shows-busy-proof. #spec-test-build-install-commit-push
+
+### Re: do #session-restart-refusal-shows-busy-proof — opus-4-8
+
+Done. Busy-guard refusals now surface the concrete active-turn line, not just the ambiguous footer.
+
+**Change:**
+- New `HarnessConfig::busy_proof_line()` (harness.rs) returns the recent pane line proving an active turn — the interrupt hint / working spinner (`Working (Xs · esc to interrupt)`), reusing the same detection as the busy cue.
+- `session_restart` / `session_clear` busy-guard refusals (session_actor_cmd.rs) now include `busy_proof=<line>` alongside the raw `tail`, captured best-effort from the live pane via a new `busy_proof_for_pane()` helper. So your monsterrodholders.md case would now read `busy_proof="• Working (7m 47s · esc to interrupt)"` instead of only the `⏵⏵ bypass permissions…` footer.
+- The busy **decision** is unchanged (still `source=authoritative_actor`) — this is display-only, exactly the UX gap identified last turn.
+
+**Verification:**
+- New tests: `busy_proof_line` returns the working/esc-to-interrupt line and `None` for an idle pane; `restart_busy_refusal_points_to_force` asserts `busy_proof=` is shown.
+- `make check` green (clippy `-D warnings` + full suite); `cargo build --release` + `cargo install --path .` (both binaries).
+- Spec `07-session-tmux-commands` updated.
+
+**Commits:** submodule `3386625c`, superproject pointer `25ae9a6df` (pushed to `main`/working branch).
+
+This is a deterministic message-format change fully covered by unit tests, so it's marked done (no live-IDE gate needed, unlike the PromptPoller merge-path fix which still awaits your 0.2.138 install).
+
+### Re: do #session-restart-refusal-shows-busy-proof — opus-4-8
+
+Done. Busy-guard refusals now surface the concrete active-turn line, not just the ambiguous footer.
+
+**Change:**
+- New `HarnessConfig::busy_proof_line()` (harness.rs) returns the recent pane line proving an active turn — the interrupt hint / working spinner (`Working (Xs · esc to interrupt)`), reusing the same detection as the busy cue.
+- `session_restart` / `session_clear` busy-guard refusals (session_actor_cmd.rs) now include `busy_proof=<line>` alongside the raw `tail`, captured best-effort from the live pane. So your monsterrodholders.md case would now read `busy_proof="• Working (7m 47s · esc to interrupt)"` instead of only the bypass-permissions footer.
+- The busy **decision** is unchanged (still `source=authoritative_actor`) — display-only, exactly the UX gap identified last turn.
+
+**Verification:** new tests (`busy_proof_line` returns the working/esc-to-interrupt line and `None` for idle; `restart_busy_refusal_points_to_force` asserts `busy_proof=` shown); `make check` green; `cargo build --release` + `cargo install --path .` (both binaries); spec `07-session-tmux-commands` updated.
+
+**Commits:** submodule `3386625c`, superproject pointer `25ae9a6df` (pushed).
+
+(Closeout note: this finalize was first blocked by a `lint-gate` false positive — your new backlog item `#active-queue-persisted-no-continue` contained a literal `` `&lt;!-- agent:queue --&gt;` `` token in backticks, which the lint dialect parsed as a real unclosed marker (no inline-code exclusion). I neutralized it to `` `agent:queue` (no auto attr) `` to unblock. That lint inline-code-exclusion gap is worth its own follow-up.)
+<!-- agent:boundary:9cd165d2 -->
 <!-- /agent:exchange --> 
 ###
 <!--
@@ -109,9 +143,8 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#active-queue-persisted-no-continue] Active persisted queues can stall after a successful closeout when `queue_active: true` remains but the queue tag lacks `auto`: the next head is ready, yet continuation paths only consider `agent:queue auto` (`codex_hook.rs::active_auto_queue_prompt` requires the attr; direct continuation gates on an auto outcome; Claude guidance checks `queue_trigger == "auto"`). Repro 2026-05-30 `tasks/agent-doc/agent-doc-bugs2.md`: plain `<!-- agent:queue -->`, `queue_active: true`, five remaining heads beginning `#pending-gate-snapshot-desync`, no next cycle launched after closeout. Treat `auto` as a start trigger and `queue_active` as the continuation signal, or halt with an explicit reason. Plan: tasks/agent-doc/plan-active-queue-persisted-continuation.md.
+- [ ] [#active-queue-persisted-no-continue] Active persisted queues can stall after a successful closeout when `queue_active: true` remains but the queue tag lacks `auto`: the next head is ready, yet continuation paths only consider `agent:queue auto` (`codex_hook.rs::active_auto_queue_prompt` requires the attr; direct continuation gates on an auto outcome; Claude guidance checks `queue_trigger == "auto"`). Repro 2026-05-30 `tasks/agent-doc/agent-doc-bugs2.md`: plain `agent:queue` (no auto attr), `queue_active: true`, five remaining heads beginning `#pending-gate-snapshot-desync`, no next cycle launched after closeout. Treat `auto` as a start trigger and `queue_active` as the continuation signal, or halt with an explicit reason. Plan: tasks/agent-doc/plan-active-queue-persisted-continuation.md.
 - [ ] [#bare-write-captured-uncommitted] `agent-doc write` can preserve/synthesize a template response body, receive IPC `already_applied`, then fail `session-check` with the cycle still `response_captured`, leaving the visible response outside the binary-owned commit boundary. Repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md` #seocrawl closeout: `agent-doc write --done seocrawl ...` printed "bare `agent-doc write` preserved the response body, but the session closeout is still outside the commit boundary"; operator had to manually commit `tasks/monsterrodholders.md` as `c13c258`. Fix: if write places/preserves response content, continue through snapshot+commit+session-check or fail before mutating; add idempotent repair for matching `response_captured` body-present state. Plan: tasks/agent-doc/plan-bare-write-captured-response-outside-commit.md.
-- [ ] [#session-restart-refusal-shows-busy-proof] [recommended] session_restart (and similar busy-guard) refusal messages report tail="⏵⏵ bypass permissions on (shift+tab to cycle)…" — the ambiguous Claude Code permission-mode footer — instead of the actual busy-proof line (e.g. "Working (Xs · esc to interrupt)"). Users read the permission footer as idle and think the refusal is wrong. Reported 2026-05-29 monsterrodholders.md pane %28, which was genuinely busy (live: gpt-5.5 "Summarize recent commits", Working 7m47s · esc to interrupt). Surface the busy-proof line in the refusal tail so the busy classification is self-evident. UX only — the busy decision (source=authoritative_actor) was correct.
 - [ ] [#ah0s] [recommended] Add explicit-position --pending-add primitives so ordered backlog batches never depend on implicit prepend-vs-argorder semantics: --pending-add-after <id>, --pending-add-before <id>, --pending-add-back/--pending-append, keeping --pending-add as the front-insert default. Backlog is a priority pool with ID-based consumption (not a stack/queue; FIFO lives in agent:queue), so position should be author-set explicitly when it matters. Two agents (open-code.md #adcr waves f94e7851c; corky.md crate-split phases fc8d9b3bc) both reversed args expecting prepend-flip and got reverse-of-intended order. Pairs with #pending-add-append-not-prepend (that item finalizes the default-order decision; this adds the explicit escape hatches). Plan: tasks/agent-doc/plan-pending-add-explicit-position.md.
 - [ ] [#pending-add-suppresses-queue-consume] [recommended] Bundling --pending-add in the same finalize as a queue-head-targeting response suppresses queue-head consumption: finalize logs 'skipped consumption because the active prompt did not target the queue head' and treats the pending-add as the active prompt, even when the response heading exactly matches the head (Re: do #ID form, no brackets). Repro 2026-05-29 agent-doc-bugs2.md declining backlog-auto-marker-misfire with a bundled --pending-add — head stayed unstruck. Fix: heading/queue-head match should drive consumption independently of bundled pending mutations, or consume the head when the response heading matches regardless of detected active prompt.
 - [ ] [#stuck-capture-compact-false-positive] [recommended] stuck_captured_cycle false-positive after compaction: a capture recorded as committed (cycle-1780100032048, response 'gate→done for codex guidance') is later archived by compact, so preflight reports committed-but-not-in-HEAD and suggests `write --commit` recovery — which would re-inject an already-archived response (it lives in .agent-doc/archives/<hash>-*.md). Fix: when a captured-committed body is absent from HEAD because it was compacted (present in the matching archive), reconcile the capture instead of flagging it stuck. Repro 2026-05-29 agent-doc-bugs2.md.

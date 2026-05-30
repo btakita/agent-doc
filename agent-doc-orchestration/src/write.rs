@@ -2516,18 +2516,22 @@ fn should_consume_queue_prompt_for_write(
     current_content: &str,
     done_ids: &[String],
 ) -> Result<bool> {
+    // An explicit `--done` naming the queue head authorizes consumption
+    // regardless of any pending mutations bundled into the same diff
+    // (#pending-add-suppresses-queue-consume). Check it FIRST so a bundled
+    // `--pending-add` cannot make the diff-based check below emit a misleading
+    // "active prompt differs from queue head" diagnostic for a turn that does
+    // in fact complete the head.
+    if queue_head_matches_done_ids(current_content, done_ids)? {
+        return Ok(true);
+    }
     let Some(base) = baseline else {
-        return queue_head_matches_done_ids(current_content, done_ids);
+        return Ok(false);
     };
     let base_norm = crate::diff::strip_comments(&strip_boundary_for_dedup(base));
     let current_norm = crate::diff::strip_comments(&strip_boundary_for_dedup(current_content));
     let diff_text = crate::diff::unified_diff_from_contents(&base_norm, &current_norm);
-    let allowed =
-        should_consume_queue_prompt_for_diff_content(file, current_content, diff_text.as_deref())?;
-    if allowed {
-        return Ok(true);
-    }
-    queue_head_matches_done_ids(current_content, done_ids)
+    should_consume_queue_prompt_for_diff_content(file, current_content, diff_text.as_deref())
 }
 
 fn should_consume_queue_prompt_for_diff_content(
@@ -2561,14 +2565,23 @@ fn should_consume_queue_prompt_for_diff_content(
         return Ok(true);
     }
 
-    eprintln!(
-        "[queue] active prompt differs from queue head for {}; prompt_changes={:?} queue_head={:?}",
-        file.display(),
-        prompt_changes
-            .iter()
-            .map(|change| change.text.as_str())
-            .collect::<Vec<_>>(),
-        queue_head
+    // Not a user-facing failure on its own: the caller still has explicit
+    // completion-signal fallbacks (`--done`/`--pending-gate`/`--pending-edit`,
+    // synthetic-head heading match). Only the caller's final "skipped
+    // consumption" line is the authoritative skip signal, so record this detail
+    // to ops_log instead of stderr to avoid a false-alarm during a turn that
+    // ultimately consumes the head (#pending-add-suppresses-queue-consume).
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "queue_diff_active_prompt_differs file={} prompt_changes={:?} queue_head={:?}",
+            file.display(),
+            prompt_changes
+                .iter()
+                .map(|change| change.text.as_str())
+                .collect::<Vec<_>>(),
+            queue_head
+        ),
     );
     Ok(false)
 }
@@ -12005,6 +12018,49 @@ mod tests {
                 &[],
             )
             .unwrap()
+        );
+    }
+
+    #[test]
+    fn done_head_consumes_despite_bundled_pending_add() {
+        // #pending-add-suppresses-queue-consume: a finalize that completes the
+        // queue head with --done must still consume it even when --pending-add
+        // added a new backlog item in the same diff. The bundled add makes the
+        // diff-based "active prompt" check return false, but the explicit --done
+        // short-circuit authorizes consumption regardless.
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let baseline = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#foo] head work\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#foo]\n- do [#bar]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        // Current = baseline + a bundled --pending-add backlog item (the diff
+        // shape that used to suppress consumption).
+        let current = baseline.replace(
+            "- [ ] [#foo] head work\n",
+            "- [ ] [#newitem] bundled follow-up\n- [ ] [#foo] head work\n",
+        );
+        std::fs::write(&doc, &current).unwrap();
+        assert!(
+            should_consume_queue_prompt_for_write(
+                &doc,
+                Some(baseline),
+                &current,
+                &["foo".to_string()],
+            )
+            .unwrap(),
+            "--done naming the head must consume despite a bundled --pending-add"
+        );
+        // Without an explicit completion flag, the bare do[#id] head is NOT
+        // consumed by the diff alone (#queue-strike-on-halt).
+        assert!(
+            !should_consume_queue_prompt_for_write(&doc, Some(baseline), &current, &[]).unwrap(),
+            "bare do[#id] head needs an explicit completion flag"
         );
     }
 

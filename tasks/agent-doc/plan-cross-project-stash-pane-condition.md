@@ -77,14 +77,39 @@ cross-project condition is hit.
   the accumulation contributing factor so the shared stash does not grow unbounded. Independent
   of A–C; pairs with `gc.rs`.
 
-## Recommendation
+## Recommendation (superseded — see Implemented)
 
-Pursue **A** (nested-root session isolation) as the true fix, with **D** as an independent
-hygiene follow-up. **C** alone is insufficient because the user explicitly rejected a
-UX-only/suppression framing. Confirm the desired session model (one shared session with
-partitioned stash vs. per-root sessions) before implementing, since both change visible tmux
-layout behavior and need regression coverage in `resync`/`sync` SimWorld tests plus the
-session/tmux command spec.
+Original recommendation was **A + D**. After the user weighed the UX cost of separate sessions
+(`prefix+s` session switching, IDE focus following sessions), the choice moved to **B + C + D**,
+then to **C** after reading the sweep code.
+
+## Implemented (2026-05-30)
+
+Reading the full stash sweep changed the picture — the only correct, non-redundant change is **C**:
+
+- **A — not implemented.** Per-root sessions fragment the single-session workflow (you'd switch
+  sessions to reach a submodule's pane, and IDE focus would have to follow). The user moved off it.
+- **B — not implemented (unnecessary / mildly harmful).** Hiding a non-focused foreign-root pane
+  in the shared stash is *correct* layout behavior. Not stashing it (or a separate stash window)
+  would either clutter the focused view or add cross-root rescue complexity for no visible benefit
+  — the user never sees stash windows.
+- **D — already implemented.** `resync.rs` step 8 (`purge_unregistered_stash_panes_bulk_*`,
+  ~line 1352) already reaps truly-orphaned agent panes (unregistered, no owned file, no live
+  supervisor, not cross-project) in non-passive mode. The nine `agent-loop` `agent-doc` panes
+  observed in `0:stash` survive because they are *legitimate* live/registered sessions, not
+  orphans — there is nothing safe to reap. An optional **TTL-prune of long-idle stash sessions**
+  remains a possible future opt-in, but it is destructive and needs live verification, so it is
+  not auto-enabled.
+- **C — implemented.** The benign cross-project preservation event
+  (`registered in its own project root — skipping kill`) was routed from `eprintln!` (stderr,
+  which the JB plugin renders as an error) to `ops_log` telemetry at all three sweep sites
+  (windowed / bulk / non-stash, `resync.rs`). The skip behavior is unchanged; only genuine
+  failures (e.g. failed `kill-pane`) remain on stderr. Spec: `specs/08-session-routing.md`
+  multi-root truth-table note. This aligns with the existing principle that diagnostics belong
+  in logs, not the stderr stream that pollutes prompt detection / the IDE error surface.
+
+The residual IDE-side concern — the plugin rendering *any* route/resync stderr as an error — is
+tracked under `#jb-busy-queue-ux-feedback` (classify benign info vs. real failures).
 
 ## Verification (when implemented)
 

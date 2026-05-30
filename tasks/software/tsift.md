@@ -57,7 +57,17 @@ Practical answer: use `tsift-memory` as the new first-party memory substrate, mi
 
 Proof: changed paths: none by hand; document response/backlog only through `agent-doc finalize`. Verification commands: `tsift memory status ... --json`, `tsift memory import-claude-mem ... --json`, and full dry-run with `--limit 40000`. Escalation: none. Confidence: high for current supported migration behavior, medium for full replacement until the live hook and pending-message gaps are closed.
 #next-steps
-<!-- agent:boundary:a2e0390b -->
+
+### Re: tsift-memory initialization — gpt-5
+
+That status line is the key operational distinction: `tsift-memory` is implemented, and the old `claude-mem` source is readable, but this workspace has not created `.tsift/memory.db` yet. So no supported `claude-mem` rows have actually been copied into the first-party tsift memory store here.
+
+The next concrete migration step is to initialize the target DB, run the supported import with an explicit high limit and `--apply`, refresh graph-db, then compare status/counts. Keep `claude-mem` and Chroma read-only for compatibility until `pending_messages` import/exclusion and live closeout capture are handled.
+
+I added `#tsiftmeminit` to the top of the backlog. Current top backlog item: `#tsiftmeminit`.
+
+Proof: changed paths: `tasks/software/tsift.md` through `agent-doc finalize` only. Commands: `tsift status`, `tsift status --fix`, `agent-doc preflight tasks/software/tsift.md`, `agent-doc plan tasks/software/tsift.md`, `tsift memory status /home/brian/work/btakita/agent-loop --json`. Verification: read-only status confirmed `initialized:false`, readable `claude-mem`, present Chroma, and next commands include `tsift memory init`, `import-claude-mem --apply`, and graph refresh. Escalation: none. Confidence: high.
+<!-- agent:boundary:d5ce8d8f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -72,6 +82,7 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#tsiftmeminit] Initialize .tsift/memory.db for this workspace, run the supported claude-mem import with explicit --limit/--apply, refresh graph-db, and verify imported counts before deleting or disabling the old claude-mem source.
 - [ ] [#tsiftmemhooks] [recommended] Wire agent-doc/Claude closeout capture into tsift-memory, then switch live capture/retrieval call sites away from direct claude-mem ownership.
 - [ ] [#tsiftmempending] [recommended] Extend claude-mem migration to handle pending_messages or explicitly exclude it from the full-replacement contract, with tests.
 <!-- /agent:backlog -->

@@ -95,6 +95,33 @@ fn snapshot_path(root: &Path, doc: &Path) -> PathBuf {
         .join(format!("{}.md", doc_hash(doc)))
 }
 
+/// Recreate the precondition the empty-stdin `write --commit` adoption path
+/// repairs: an agent response visible in the working tree that HEAD and the
+/// snapshot do not yet have (an IPC/editor partial patchback written straight to
+/// disk), with no cycle_state.
+///
+/// Bare `agent-doc write` no longer strands a placed response — it escalates to
+/// the commit boundary (#bare-write-captured-uncommitted) — so this setup places
+/// the response on disk directly instead of via a bare write that used to leave
+/// the cycle open. `committed` is the content currently at HEAD; the response is
+/// inserted at the exchange tail and the snapshot is written without it (drift).
+fn place_uncommitted_visible_response(
+    root: &Path,
+    doc: &Path,
+    committed: &str,
+    response_block: &str,
+) {
+    let with_response = committed.replacen(
+        "<!-- /agent:exchange -->",
+        &format!("{response_block}\n<!-- /agent:exchange -->"),
+        1,
+    );
+    fs::write(doc, &with_response).unwrap();
+    let snap = snapshot_path(root, doc);
+    fs::create_dir_all(snap.parent().unwrap()).unwrap();
+    fs::write(&snap, committed).unwrap();
+}
+
 fn cycle_state_path(root: &Path, doc: &Path) -> PathBuf {
     root.join(".agent-doc/state/cycles")
         .join(format!("{}.json", doc_hash(doc)))
@@ -122,15 +149,6 @@ fn head_blob(root: &Path) -> String {
         .output()
         .unwrap();
     String::from_utf8_lossy(&output.stdout).into_owned()
-}
-
-fn only_snapshot_file(root: &Path) -> PathBuf {
-    let entries = fs::read_dir(root.join(".agent-doc/snapshots"))
-        .unwrap()
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap();
-    assert_eq!(entries.len(), 1, "expected exactly one snapshot file");
-    entries[0].path()
 }
 
 fn enable_strict_pending_capture(doc: &Path) {
@@ -492,7 +510,11 @@ fn malformed_patchback_is_rejected_instead_of_appended_as_unmatched() {
 }
 
 #[test]
-fn bare_write_stream_on_session_doc_fails_closed_after_write_applied() {
+fn bare_write_stream_on_session_doc_escalates_to_commit_when_response_placed() {
+    // #bare-write-captured-uncommitted: a bare `agent-doc write` that places a
+    // response body on a session document must not strand the visible response
+    // outside the commit boundary. It escalates to the same write+commit boundary
+    // as `write --commit` instead of failing with the cycle left open.
     let (tmp, doc) = setup_session_stream_doc();
     init_git_repo(tmp.path(), &doc);
 
@@ -503,24 +525,26 @@ fn bare_write_stream_on_session_doc_fails_closed_after_write_applied() {
             "<!-- patch:exchange -->\n### Re: repair — gpt-5\nbody\n<!-- /patch:exchange -->\n",
         )
         .assert()
-        .failure();
+        .success();
 
     let stderr = String::from_utf8_lossy(&assert_result.get_output().stderr);
     assert!(
-        stderr.contains("outside the commit boundary"),
-        "stderr should explain the open closeout boundary, got: {stderr}"
-    );
-    assert!(
-        stderr.contains("write_applied"),
-        "stderr should surface the open cycle phase, got: {stderr}"
-    );
-    assert!(
-        stderr.contains("synthetic-"),
-        "stderr should preserve the synthetic-cycle evidence, got: {stderr}"
+        stderr.contains("escalating to the commit boundary")
+            && stderr.contains("#bare-write-captured-uncommitted"),
+        "stderr should explain the bare-write commit escalation, got: {stderr}"
     );
 
-    let content = fs::read_to_string(&doc).unwrap();
-    assert!(content.contains("### Re: repair — gpt-5"));
+    // The response is committed to HEAD, not stranded in the working tree.
+    let head = ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["show", "HEAD:session.md"])
+        .output()
+        .unwrap();
+    let head_blob = String::from_utf8_lossy(&head.stdout);
+    assert!(
+        head_blob.contains("### Re: repair — gpt-5"),
+        "the placed response should be committed to HEAD, got: {head_blob}"
+    );
 
     let cycles_dir = tmp.path().join(".agent-doc/state/cycles");
     let cycle_path = fs::read_dir(&cycles_dir)
@@ -531,20 +555,11 @@ fn bare_write_stream_on_session_doc_fails_closed_after_write_applied() {
         .path();
     let cycle_json = fs::read_to_string(&cycle_path).unwrap();
     assert!(
-        cycle_json.contains("\"phase\": \"write_applied\""),
-        "cycle should remain open at write_applied after bare write, got: {cycle_json}"
-    );
-    assert!(
-        cycle_json.contains("\"cycle_id\": \"synthetic-"),
-        "cycle should record the synthetic provenance, got: {cycle_json}"
+        cycle_json.contains("\"phase\": \"committed\""),
+        "cycle should reach committed after the escalated bare write, got: {cycle_json}"
     );
 
-    agent_doc()
-        .current_dir(tmp.path())
-        .args(["commit", doc.to_str().unwrap()])
-        .assert()
-        .success();
-
+    // session-check is clean with no further manual commit needed.
     agent_doc()
         .current_dir(tmp.path())
         .args(["session-check", doc.to_str().unwrap()])
@@ -558,17 +573,7 @@ fn write_commit_empty_stdin_adopts_visible_agent_owned_partial_patchback() {
     init_git_repo(tmp.path(), &doc);
     let original = fs::read_to_string(&doc).unwrap();
 
-    agent_doc()
-        .current_dir(tmp.path())
-        .args(["write", doc.to_str().unwrap(), "--stream"])
-        .write_stdin(
-            "<!-- patch:exchange -->\n### Re: repair — gpt-5\nbody\n<!-- /patch:exchange -->\n",
-        )
-        .assert()
-        .failure();
-
-    let snapshot = only_snapshot_file(tmp.path());
-    fs::write(&snapshot, original).unwrap();
+    place_uncommitted_visible_response(tmp.path(), &doc, &original, "### Re: repair — gpt-5\nbody");
 
     agent_doc()
         .current_dir(tmp.path())
@@ -605,17 +610,12 @@ fn write_commit_empty_stdin_repair_preserves_post_exchange_scratch_comment() {
     fs::write(&doc, &original).unwrap();
     init_git_repo(tmp.path(), &doc);
 
-    agent_doc()
-        .current_dir(tmp.path())
-        .args(["write", doc.to_str().unwrap(), "--stream"])
-        .write_stdin(
-            "<!-- patch:exchange -->\n### Re: repair comment ownership — gpt-5\nbody\n<!-- /patch:exchange -->\n",
-        )
-        .assert()
-        .failure();
-
-    let snapshot = only_snapshot_file(tmp.path());
-    fs::write(&snapshot, &original).unwrap();
+    place_uncommitted_visible_response(
+        tmp.path(),
+        &doc,
+        &original,
+        "### Re: repair comment ownership — gpt-5\nbody",
+    );
 
     agent_doc()
         .current_dir(tmp.path())
@@ -659,17 +659,12 @@ fn write_commit_empty_stdin_repair_preserves_active_auto_queue_without_done() {
     fs::write(&doc, &original).unwrap();
     init_git_repo(tmp.path(), &doc);
 
-    agent_doc()
-        .current_dir(tmp.path())
-        .args(["write", doc.to_str().unwrap(), "--stream"])
-        .write_stdin(
-            "<!-- patch:exchange -->\n### Re: #next-steps — gpt-5\nbody\n<!-- /patch:exchange -->\n",
-        )
-        .assert()
-        .failure();
-
-    let snapshot = only_snapshot_file(tmp.path());
-    fs::write(&snapshot, &original).unwrap();
+    place_uncommitted_visible_response(
+        tmp.path(),
+        &doc,
+        &original,
+        "### Re: #next-steps — gpt-5\nbody",
+    );
 
     agent_doc()
         .current_dir(tmp.path())

@@ -1050,6 +1050,41 @@ fn guard_no_exchange_compaction_request_between(
     guard_no_exchange_compaction_request_for_diff(file, &diff_text)
 }
 
+/// `#bare-write-captured-uncommitted`: true when a bare `agent-doc write` placed
+/// or preserved an assistant response body this cycle that HEAD does not yet have.
+/// Such a write must cross the same commit boundary as `write --commit` instead of
+/// stranding the visible response outside the binary-owned closeout.
+///
+/// Two confirmations, both required:
+/// 1. The cycle is still open at `response_captured`/`write_applied` — a response
+///    placement phase reached by this write (terminal/preflight-only states are
+///    excluded). This covers both the captured path and the synthetic-cycle stream
+///    path that only marks `write_applied` without a durable capture.
+/// 2. The working tree carries an assistant response heading that HEAD does not —
+///    the content-level proof that a response is genuinely uncommitted, so a
+///    pending/status-only bare write (no response placed) is never force-committed.
+fn bare_write_placed_response_body(file: &Path) -> Result<bool> {
+    let Some(state) = crate::cycle_state::load(file)? else {
+        return Ok(false);
+    };
+    if !state.is_open() {
+        return Ok(false);
+    }
+    if !matches!(
+        state.phase,
+        crate::cycle_state::CyclePhase::ResponseCaptured
+            | crate::cycle_state::CyclePhase::WriteApplied
+    ) {
+        return Ok(false);
+    }
+    let current = std::fs::read_to_string(file)
+        .context("failed to read document for bare-write response-body detection")?;
+    let Some(head) = crate::git::show_head(file)? else {
+        return Ok(false);
+    };
+    Ok(crate::session_check::detect_bypassed_response_write_between(&head, &current).is_some())
+}
+
 pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<()> {
     let file = options.file.as_path();
 
@@ -1098,7 +1133,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
             "--commit-sibling requires --commit (or `agent-doc finalize`); the sibling trailer URL needs the session-document commit sha"
         );
     }
-    let commit_mode = resolve_commit_mode(file, commit_mode, options.pending_only)?;
+    let mut commit_mode = resolve_commit_mode(file, commit_mode, options.pending_only)?;
     if commit_mode == CommitMode::Required && !crate::git::is_in_git_repo(file) {
         if is_session_document(file)? {
             anyhow::bail!(
@@ -1257,6 +1292,41 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         }
     };
 
+    // #bare-write-captured-uncommitted: a bare `agent-doc write` (CommitMode::None)
+    // that placed or preserved an assistant response body on a session document must
+    // finish the same write+commit boundary as `write --commit`. IPC `already_applied`
+    // proves content placement, not closeout — the response is now visible, so escalate
+    // to the commit boundary BEFORE the commit-mode-gated phases (queue consumption,
+    // pending gates, commit) instead of stranding the cycle at `response_captured`.
+    // `recover_missing_commit_boundary` only repairs responses already in HEAD; a
+    // genuinely-uncommitted placed body has no other recovery path, so we must commit.
+    if write_result.is_ok()
+        && commit_mode == CommitMode::None
+        && is_session_document(file)?
+        && bare_write_placed_response_body(file)?
+    {
+        if crate::git::is_in_git_repo(file) {
+            eprintln!(
+                "[write] bare write placed a response body on session document {}; escalating to the commit boundary (#bare-write-captured-uncommitted)",
+                file.display()
+            );
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "bare_write_escalated_to_commit file={} reason=response_body_placed",
+                    file.display()
+                ),
+            );
+            commit_mode = CommitMode::Required;
+        } else {
+            anyhow::bail!(
+                "bare `agent-doc write` placed a response body on {} but the document is not in a git repository, so the cycle cannot reach a committed state. Move it into a git repo and rerun with `agent-doc write --commit {}`.",
+                file.display(),
+                file.display()
+            );
+        }
+    }
+
     if write_result.is_ok() {
         run_closeout_pending_maintenance(file, commit_mode)?;
     }
@@ -1359,11 +1429,15 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     } else {
         Ok(())
     };
+    // A response-bearing bare write on a session document is escalated to the commit
+    // boundary above (#bare-write-captured-uncommitted), so reaching here with
+    // CommitMode::None means the write placed no response body. Any open cycle now is
+    // a pre-existing interrupted closeout, not content this write stranded.
     let bare_session_write_result =
         if write_result.is_ok() && commit_mode == CommitMode::None && is_session_document(file)? {
             crate::session_check::enforce_clean_closeout(file).context(
-                "bare `agent-doc write` preserved the response body, but the session closeout \
-             is still outside the commit boundary",
+                "bare `agent-doc write` did not place a response body, but the session \
+             document still has an open cycle outside the commit boundary",
             )
         } else {
             Ok(())

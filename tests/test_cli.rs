@@ -246,7 +246,9 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         ("agent-doc-orchestration/src/route.rs", "reason=") => 10,
         ("agent-doc-orchestration/src/session_check.rs", "guard_") => 16,
         ("agent-doc-orchestration/src/write.rs", "guard_") => 70,
-        ("agent-doc-orchestration/src/write.rs", "reason=") => 25,
+        // +1 for the audited `bare_write_escalated_to_commit ... reason=response_body_placed`
+        // ops_log diagnostic on the #bare-write-captured-uncommitted escalation path.
+        ("agent-doc-orchestration/src/write.rs", "reason=") => 26,
         _ => 0,
     }
 }

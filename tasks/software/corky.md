@@ -88,41 +88,12 @@ prompt_presets:
 <!-- agent:exchange mode=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc180ec90ce4bbb9c2bdb013766843d9a8224cac4431150341ae259853-20260530-013743.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc180ec90ce4bbb9c2bdb013766843d9a8224cac4431150341ae259853-20260530-015631.md`*
 
 Compacted content:
-- Archived 1 response topic(s): do #h465
+- Archived 1 response topic(s): next-steps to split out crates in corky
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc...
-❯ What are #next-steps to split out crates in corky?
-
-### Re: next-steps to split out crates in corky — opus-4-8
-
-corky today is a single ~32k-LOC crate (`src/lib.rs` re-exports 30 modules), 41 deps, one bin. The build I just ran took 2m36s — nearly all of it `whisper-rs-sys` + CUDA. That number is the headline: the biggest payoff from splitting isn't independent publishing, it's **build-time isolation** of the native/GPU toolchain plus enforced module boundaries.
-
-I measured the coupling before recommending a sequence (`grep crate::` across modules):
-
-- **`transcribe/`** is the cleanest seam in the codebase — it imports only `crate::config::corky_config`, and the *only* caller is `main.rs`. It also owns every heavy optional dep (whisper-rs, pyannote-rs, ort, symphonia, rubato, hound) behind the `transcribe`/`transcribe-cuda`/`transcribe-metal`/`diarize` features.
-- **`filter::gmail_auth`** is the shared OAuth/token store that the Google cluster (`doc`, `cal`, `gsc`, `tasks`) and `social` all depend on — so it has to land in the foundation crate, not in `corky-mail`.
-- The Google cluster also has minor cross-edges (`doc`→`social`, everything→`util`/`resolve`/`config`/`oauth_loopback`), so those domain extractions come last.
-
-#### Recommended sequence (lowest-risk → highest)
-
-**Phase 1 — workspace scaffold.** Add `[workspace]`; keep `corky` as the sole member (still lib+bin). No code moves. This is just the container and lets you move one module at a time afterward without a big-bang refactor.
-
-**Phase 2 — extract `corky-transcribe` (do this first).** Highest ROI, lowest coupling. Move `transcribe/` + its deps into a feature-gated crate; re-export the feature flags from the parent (`corky/transcribe-cuda = ["corky-transcribe/cuda"]`). Result: `cargo build` of everything except transcription drops from minutes to seconds, and only the bin (or whoever opts in) pulls the CUDA toolchain. **Trap to plan for:** moving a module to a sibling crate hides its `#[cfg(test)]` items from the parent's test binaries — use a `test-support` cargo feature for runtime short-circuits and keep crate-local fixture copies (this bit us before in the agent-doc extraction).
-
-**Phase 3 — extract `corky-core`.** The shared foundation: `config`, `accounts`, `resolve`, `oauth_loopback`, `filter::gmail_auth` (token store), `file_store`, `util`, `app_config`, `desktop_notify`. Everything else will depend on this. Critically, the `tokens.json` / `.sync-state.json` accessors must live here so all domain crates share one locked, atomic-write store.
-
-**Phase 4+ — domain crates on top of core.** `corky-google` (doc/cal/gsc/tasks), then `corky-mail` (sync/draft/mailbox/filter/contact/search/topics/label — the largest, 5.3k LOC in sync alone), then `corky-social`. Finally slim `corky` to a thin CLI (`cli.rs` 1.4k + `main.rs` dispatch + doctor/schedule/watch/upgrade) depending on the library crates.
-
-#### Decisions to make before starting
-
-- **Publish scope.** You don't need to publish each member to crates.io. Mark workspace members `publish = false` and publish only the `corky` bin — you keep the compile isolation without quadrupling release ceremony (otherwise each release means `cargo publish` in dependency order + lockstep version bumps across all crates).
-- **PyPI/maturin packaging** targets the bin crate — `pyproject.toml` and `.github/workflows/pypi.yml` must keep pointing at the workspace root bin, and config templates / skill files / `install.sh` ship with the bin, so don't relocate those into library crates.
-- **Sequencing guard:** land Phase 1+2 and ship a release before touching core/domain splits — that proves the workspace + feature re-export plumbing on the easy case before you move the load-bearing modules.
-
-Queued the four phases as `[recommended]` backlog items so they're tracked without committing you to the work.
-<!-- agent:boundary:32b60d70 -->
+<!-- agent:boundary:aeaacb86 -->
 <!-- /agent:exchange -->
 ###
 <!--

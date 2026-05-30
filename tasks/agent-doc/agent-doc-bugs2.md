@@ -35,7 +35,21 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 2 response topic(s): do #pending-gate-snapshot-desync; JB Run Agent Doc failed (repeat succeeded)
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:ec592708 -->
+### Re: do #codex-auto-queue-live-verify — opus-4-8
+
+Closing this verify item on a **negative live result**, not a pass. You ran a real Codex auto-queue and it **stalled in `monsterrodholders.md`** — which is the answer the verify item existed to obtain ("run a real Codex auto-queue and confirm whether a descriptive-heading completion advances"). It does not advance; it stops.
+
+**Why done, not passing:** this is an observational task — execute a live auto-queue and record what happens. We now have a definitive observation (stall), and the failure is already captured downstream with plans, so there is no remaining work hanging on this ID:
+
+- **`#codex-auto-queue-stalled-final-gate`** (stays open) — the explicit failed-proof capture: after a completed/deployed head the doc still had a live persisted queue, an `auto` attr, and a ready next head, but Codex emitted a normal final answer instead of continuing or blocking. Fix direction: a binary-owned durable "queue continuation required" final gate that successful closeout writes when a ready auto-queue head remains, plus a Codex Stop/session-check strict mode that blocks final answers even when transient hook session state is missing or a manual/recovery closeout path was used. Plan: `tasks/agent-doc/plan-codex-auto-queue-stalled-final-gate.md`.
+- **`#active-queue-persisted-no-continue`** (stays open) — the adjacent root cause: continuation paths only consider an `auto`-attributed queue (`codex_hook.rs::active_auto_queue_prompt` requires the attr), so a persisted live queue with a ready head can stall. Fix: treat `auto` as a start trigger and persisted-active as the continuation signal, or halt with an explicit reason. Plan: `tasks/agent-doc/plan-active-queue-persisted-continuation.md`.
+
+Marking advance-confirmation as still-open would just shadow those two; the proof they need is "Codex continues after the gate lands," which belongs to those IDs once their fix ships — not to a standing verify item.
+
+**On the preflight `stuck_captured_cycle` warning (cycle-1780111236991, 2071 bytes):** left untouched on purpose. That body — the `do #pending-gate-snapshot-desync` response — was compacted into `.agent-doc/archives/483039e7…-20260530-035140.md`, so it is committed-but-absent-from-HEAD only because compaction archived it. Running the suggested `write --commit` would re-inject an already-archived response. This is exactly the false positive already tracked as **`#stuck-capture-compact-false-positive`** (reconcile a compacted capture instead of flagging it stuck). No recovery action this cycle.
+
+No code changed, so no suite/CI leg this turn — this is a verification-closeout, with the live finding routed to the two fix IDs above.
+<!-- agent:boundary:1e66306f -->
 <!-- /agent:exchange --> 
 ###
 <!--
@@ -59,7 +73,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#pending-gate-snapshot-desync]~
-- do [#codex-auto-queue-live-verify]. auto-queue in monsterrodholders.md stalled
+- ~do [#codex-auto-queue-live-verify]. auto-queue in monsterrodholders.md stalled~
 - do [#drained-done-queue-clear]
 - do [#finalize-retry-ipc-response-duplication]
 - do [#pending-add-append-not-prepend]
@@ -80,7 +94,6 @@ preset #spec-test-build-install-commit-push
 - [ ] [#ah0s] [recommended] Add explicit-position --pending-add primitives so ordered backlog batches never depend on implicit prepend-vs-argorder semantics: --pending-add-after <id>, --pending-add-before <id>, --pending-add-back/--pending-append, keeping --pending-add as the front-insert default. Backlog is a priority pool with ID-based consumption (not a stack/queue; FIFO lives in agent:queue), so position should be author-set explicitly when it matters. Two agents (open-code.md #adcr waves f94e7851c; corky.md crate-split phases fc8d9b3bc) both reversed args expecting prepend-flip and got reverse-of-intended order. Pairs with #pending-add-append-not-prepend (that item finalizes the default-order decision; this adds the explicit escape hatches). Plan: tasks/agent-doc/plan-pending-add-explicit-position.md.
 - [ ] [#pending-add-suppresses-queue-consume] [recommended] Bundling --pending-add in the same finalize as a queue-head-targeting response suppresses queue-head consumption: finalize logs 'skipped consumption because the active prompt did not target the queue head' and treats the pending-add as the active prompt, even when the response heading exactly matches the head (Re: do #ID form, no brackets). Repro 2026-05-29 agent-doc-bugs2.md declining backlog-auto-marker-misfire with a bundled --pending-add — head stayed unstruck. Fix: heading/queue-head match should drive consumption independently of bundled pending mutations, or consume the head when the response heading matches regardless of detected active prompt.
 - [ ] [#stuck-capture-compact-false-positive] [recommended] stuck_captured_cycle false-positive after compaction: a capture recorded as committed (cycle-1780100032048, response 'gate→done for codex guidance') is later archived by compact, so preflight reports committed-but-not-in-HEAD and suggests `write --commit` recovery — which would re-inject an already-archived response (it lives in .agent-doc/archives/<hash>-*.md). Fix: when a captured-committed body is absent from HEAD because it was compacted (present in the matching archive), reconcile the capture instead of flagging it stuck. Repro 2026-05-29 agent-doc-bugs2.md.
-- [ ] [#codex-auto-queue-live-verify] [recommended] Live-verify a Codex auto-queue advances across items with the new harness-invocation heading-discipline guidance: run a real Codex auto-queue and confirm a descriptive-heading completion advances once the agent titles the heading exactly with the head (### Re: do [#id] / ### Re: #id) or passes --done. Needs a live Codex session.
 - [ ] [#ipcfullprompt-recur2] CURE ONLY (capture/detection split out to #ipcfullprompt-capture, done). Editor-side PatchWatcher.setText PREVENTION: stop the live editor buffer from producing full-document/full-tail duplication or deletion while a prompt is being typed. Gated on the transport/payload packet from idea.log (enable #com.github.btakita.agentdoc debug logging) to pin the exact setText call shape. Add a SimWorld/Kotlin regression for the prevention once the fix lands; bump pluginVersion past 0.2.137 and reinstall the signed plugin. Stays open until prevention lands and is live-verified. Plan: tasks/agent-doc/plan-full-document-ipc-corruption-typing-prompt.md.
 - [ ] [#pending-add-append-not-prepend] `--pending-add` appends new items below the previous CLI arg within the same finalize cycle, contradicting SKILL.md "Pending capture rule" ("Put new items at the beginning of agent:backlog"). Repro: tasks/agent-doc/open-code.md commit f94e7851c — agent added wave-4, wave-3, wave-2, wave-1 expecting wave-1 on top per SKILL.md; actual backlog was wave-4 on top (pure CLI-arg order). User flagged it as bug; agent had to issue --pending-reorder. Plan: tasks/agent-doc/plan-pending-add-prepend-semantics.md (recommend Option A — strict prepend, drop the implicit adjacency heuristic).
 - [ ] [#next-steps-backlog-capture] Agent responses containing #next-steps recommendations do not auto-add items to backlog when prompt preset is present. Agent must manually call `--pending-add` but the planning output `pending_mutations: expect_add` is not enforced by session-check `pending_done_guard`.

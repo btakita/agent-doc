@@ -88,6 +88,20 @@ Proof:
 - Verification: preflight and plan completed after reclaim; no source-code change was made in this repair cycle.
 - Confidence: high for queue-state normalization; source-code verification belongs to the already-committed authoritative `#closeout-repair-churn` cycle.
 - Escalation: none.
+Done. Triaged the two JB `Run Agent Doc` reports you pasted and committed the response (`2a1634d69`); session-check is clean and the auto-loop stayed off (`queue_active: false`).
+
+**Triage conclusion — both reports show correct behavior, no new bug:**
+
+1. The busy-actor enqueues (`gen 96 tsift.md`, `gen 241 monsterrodholders.md` queuing `"deploy"` / `"do [#next-steps-2]"`) are the **intended** path — route enqueues into `agent:queue auto` instead of injecting a duplicate trigger.
+2. `stash pane %8 ... hosts live supervisor b26b9957-…` is **this document's own session** — resync correctly refused to reap our live pane.
+3. The `registered in its own project root — skipping kill` lines are correct nested-root stash preservation.
+
+**The only real defect is presentation:** the plugin renders these benign route/resync log dumps as an *error*. That's already tracked as `#jb-busy-queue-ux-feedback` (notification reclassification), with `#cross-project-stash-pane-condition` and `#stash-session-ttl-prune` covering the shared-session/stash-accumulation angle. No new backlog item was warranted — the evidence maps onto existing `[recommended]` items.
+
+I followed the binary's contract for the turn (`plan` → `task_class: prompt_response`, `repo_actions: []`, `handoff: none`), so no source change. Two things to flag:
+
+- The log blocks are sitting in `agent:queue` as free-text (preflight warned `unexpected content in agent:queue`). I left them rather than silently rewrite the queue. **Say the word and I'll relocate them into the `#jb-busy-queue-ux-feedback` evidence trail and clean the queue** — worth doing before you re-activate the queue, since free-text will choke queue-auto parsing.
+- To actually fix the UX, re-activate the queue or tell me `do [#jb-busy-queue-ux-feedback]` — that's a JetBrains/VS Code plugin notification-classification change.
 
 ### Re: JB Run Agent Doc busy-queue reports — opus-4-8
 
@@ -115,7 +129,7 @@ Proof:
 - Verification: triage only — no source change this turn; `plan` returned `repo_actions: []`, `handoff: none`.
 - Confidence: high — logs show intended busy then enqueue and correct stash-preservation; defect is UX classification, already tracked.
 - Escalation: none.
-<!-- agent:boundary:17acc4e6 -->
+<!-- agent:boundary:4ba3b305 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->

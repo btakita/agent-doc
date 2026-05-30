@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -100,7 +100,12 @@ Commands and verification: same inspection evidence as above; focused `cargo tes
 
 Confidence: high on current reachability/wiring. Escalation: none.
 
-<!-- agent:boundary:4ab08ea7 -->
+### Re: queue closeout for #tsift-dormant-crates — gpt-5
+
+Queue closeout only: the functionality question is answered above, and the tracked backlog item remains open with the same text via `--pending-edit` so the implementation decision is still tracked.
+
+Changed paths: session document only. Verification remains the focused passing crate test noted above. Escalation: none.
+<!-- agent:boundary:490641dd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -109,8 +114,7 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue auto -->
-- re [#tsift-dormant-crates]: Is there functionality in tsift-tokensave and tsift-algorithms that should be used?
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

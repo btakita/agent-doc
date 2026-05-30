@@ -985,8 +985,27 @@ class PatchWatcher(private val project: Project) : Disposable {
             }
 
             if (result != content) {
+                var wrote = false
                 ApplicationManager.getApplication().runWriteAction {
+                    // Re-read disk immediately before the whole-buffer write. `result`
+                    // was computed from `content` captured at the top of this apply; if
+                    // disk changed since (file opened + typed into, or another writer),
+                    // fail closed instead of clobbering the newer bytes
+                    // (#ipcfullprompt-recur2). The binary retries from the patch file.
+                    val currentDisk = try {
+                        String(targetFile.contentsToByteArray(), targetFile.charset)
+                    } catch (_: Exception) {
+                        content
+                    }
+                    if (!vfsDiskContentStillCurrentUtil(content, currentDisk)) {
+                        LOG.warn("[patch-watcher] stale disk content before VFS write for ${patch.file}; rejecting patch_id ${patch.patchId}")
+                        return@runWriteAction
+                    }
                     targetFile.setBinaryContent(result.toByteArray(targetFile.charset))
+                    wrote = true
+                }
+                if (!wrote) {
+                    return false
                 }
                 LOG.info("VFS patch applied to ${patch.file} (${result.length - content.length} chars changed)")
             } else {
@@ -1446,6 +1465,24 @@ internal fun editorApplyProofStillCurrentUtil(
     currentModificationStamp: Long,
 ): Boolean =
     proof.modificationStamp == currentModificationStamp && proof.content == currentContent
+
+/**
+ * VFS-path analog of [editorApplyProofStillCurrentUtil] (#ipcfullprompt-recur2).
+ *
+ * The VFS write path ([PatchWatcher.applyPatchViaVfs]) computes the patched
+ * result from a disk read taken at the start of the apply, then writes the whole
+ * buffer back via `setBinaryContent`. There is no editor `Document` and therefore
+ * no `modificationStamp`, so the guard re-reads disk immediately before the write
+ * and confirms it still matches the bytes the result was computed from. If disk
+ * changed underneath us (the file was opened + typed into, or another writer ran),
+ * the whole-buffer write must fail closed rather than clobber the newer content —
+ * leaving the patch file in place for the binary to retry. Returns true when the
+ * current disk content still matches the bytes the patch was computed against.
+ */
+internal fun vfsDiskContentStillCurrentUtil(
+    contentAtComputeTime: String,
+    currentDiskContent: String,
+): Boolean = contentAtComputeTime == currentDiskContent
 
 internal fun sha256HexUtf8(content: String): String =
     MessageDigest.getInstance("SHA-256")

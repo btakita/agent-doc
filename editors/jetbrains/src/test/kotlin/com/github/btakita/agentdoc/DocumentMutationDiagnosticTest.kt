@@ -83,4 +83,26 @@ typed prompt only
             documentMutationContentHashUtil("same"),
         )
     }
+
+    // #ipcfullprompt-recur2 — VFS whole-buffer write must re-validate disk
+    // immediately before writing, the not-open-file analog of the editor
+    // apply-proof. A disk change between compute and write fails closed.
+
+    @Test
+    fun `vfs guard allows write when disk is unchanged since compute`() {
+        val computedFrom = withBoundary
+        val diskNow = withBoundary
+        assertTrue(vfsDiskContentStillCurrentUtil(computedFrom, diskNow))
+    }
+
+    @Test
+    fun `vfs guard rejects write when disk changed under us`() {
+        val computedFrom = withBoundary
+        // The file was opened and a fresh prompt typed after the patch was computed.
+        val diskNow = withBoundary.replace("do the next thing", "do the next thing now")
+        assertFalse(
+            "stale-disk whole-buffer write must fail closed",
+            vfsDiskContentStillCurrentUtil(computedFrom, diskNow),
+        )
+    }
 }

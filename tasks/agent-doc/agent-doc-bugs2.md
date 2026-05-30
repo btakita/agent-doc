@@ -73,7 +73,17 @@ Fixed and committed (submodule `6b5a6b4d`). The authoritative-actor `FailClosed`
 Extracted `failclosed_wait_context` as a pure helper with unit coverage for both branches. `make check` green, both binaries rebuilt+installed, submodule pushed, superproject pointer bumped (`a992ae098`). No spec change — the fail-closed contract is unchanged and the wording isn't specced at that granularity.
 
 (Persistence note: the first finalize hit a transient unresponsive IPC listener + a ~25-min-stale live-buffer record; recovered by resetting the partial state, clearing the stale record, and re-finalizing via `--force-disk`.)
-<!-- agent:boundary:14ca0f6f -->
+
+### Re: do [#codex-queue-head-exact-heading-guidance] — opus-4-8
+
+Guidance shipped (submodule `65ea6ee4`); **gated**, not done, because the item also asks to live-verify a Codex auto-queue advances across items — that needs a live Codex session I can't drive headless.
+
+**What shipped:** a new `runbooks/harness-invocation.md` Codex bullet — **Auto-queue heading discipline**. When a Codex auto-loop turn completes the active `agent:queue auto` head, the Stop-hook auto-consume fires only on an explicit completion signal: either pass `--done`/`--pending-gate`/`--pending-edit` naming the head id, or title the response heading **exactly** with the queue head (`### Re: do [#id]` for a do-directive head, or `### Re: #id` for a preset/synthetic head — the exact-id consumption I restored in `#queue-head-consume-on-topic-id-regression`). A descriptive `### Re: <topic>` heading does **not** auto-consume, so the queue stalls and the hook fails closed on the next non-advancing repeat; trailing modifiers (`#id halt`/`#id deferred`) never consume (`#queue-strike-on-halt`).
+
+`make check` green, binary rebuilt+installed, installed Claude runbook synced, submodule pushed, superproject pointer bumped (`a03d8a768`).
+
+**Still gated on:** a live Codex auto-queue run confirming a descriptive-heading completion now advances when the agent follows the new guidance (or pass `--done`). Headless can't exercise the Codex Stop hook end-to-end.
+<!-- agent:boundary:9e3a9e7d -->
 <!-- /agent:exchange --> 
 ###
 <!--
@@ -99,7 +109,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#jb-load-tmux-window-verify]~
 - ~do [#queue-head-consume-on-topic-id-regression]~
 - ~do [#route-busy-vs-starting-wording]~
-- do [#codex-queue-head-exact-heading-guidance]
+- ~do [#codex-queue-head-exact-heading-guidance]~
 - do [#backlog-auto-marker-misfire]
 - do [#pending-add-append-not-prepend]
 - do [#next-steps-backlog-capture]

@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -273,7 +273,34 @@ Verification:
 
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:358e3f6d -->
+
+### Re: do [#tsift-summary-extract-gate] — gpt-5
+
+Completed `#tsift-summary-extract-gate`.
+
+Changed `src/tsift` so semantic readiness is now a graph effectiveness gate for the surfaces that depend on cached semantic rows:
+- `graph-db related --json` now includes a `readiness` object and envelope next commands with the exact standalone `tsift summarize --extract <scope>` command plus the required graph refresh command.
+- `context-pack.graph_orchestration` now includes the same readiness gate and carries the summary-extract and graph-refresh commands in `follow_up_commands` before semantic neighborhoods are trusted.
+- The graph orchestration contract fixture and `SPEC.md` now document the readiness field.
+
+Verification passed:
+- `cargo test -p tsift-cli graph_db_related_reports_summary_extract_gate_when_summary_cache_empty`
+- `cargo test -p tsift-cli context_pack_records_graph_orchestration_observability`
+- `cargo test -p tsift-cli --test graph_db_conformance graph_db_related_json_reports_summary_extract_readiness_gate`
+- `cargo test -p tsift-cli --test graph_db_conformance graph_orchestration_contract_fixture_matches_live_reports`
+- `cargo test -p tsift-cli`
+- `cargo clippy --workspace --all-targets -- -D warnings`
+- `make check`
+- `cargo install --path . --force`
+- `cargo fmt --all -- --check`
+- `git diff --check`
+
+Pushed commits:
+- `src/tsift`: `f7019d7` (`feat: gate semantic graph readiness`)
+- root submodule pointer: `6aae142` (`chore: update tsift submodule`)
+
+GitHub CI passed for run `26694480302`: `live Convex graph acceptance` in 2m2s and `clippy + test` in 6m0s. The only CI annotations were the expected Node 20 action deprecation and missing `TSIFT_LIVE_CONVEX_GRAPH_URL` note. There is no separate tmux-test workflow in this repo; `gh workflow list` shows `CI` and `Release`.
+<!-- agent:boundary:47444baa -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -282,20 +309,12 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~do [#tsift-memory-crate-plugin]~
-- ~do [#tsift-memory-budget-guard]~
-- ~do [#tsift-claude-mem-adapter]~
-- ~do [#tsift-neighborhood-token-budget]~
-- ~do [#tsift-memory-eval-harness]~
-- do [#tsift-summary-extract-gate]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#tsift-summary-extract-gate] Promote missing summary cache from reminder to graph effectiveness gate: context-pack/graph-db related should provide the exact summarize --extract and graph refresh commands required before semantic neighborhoods are trusted.
 <!-- /agent:backlog -->
 
 ## Review

@@ -1550,46 +1550,86 @@ fn open_tracked_work_ids(file: &Path) -> Result<Vec<String>> {
 }
 
 fn response_clearly_completes_pending_id(response_text: &str, id: &str) -> bool {
-    let lines: Vec<String> = response_text
-        .lines()
-        .map(|line| line.trim().to_ascii_lowercase())
-        .filter(|line| !line.is_empty())
-        .collect();
-    if lines.is_empty() {
+    // Completion is signalled by a response HEADING whose topic RESOLVES to
+    // exactly this id — never by a bare prose citation of `#id` in the body
+    // (#pending-done-guard-false-positive). Mentioning a related/residual open id
+    // in prose (e.g. "relates to #foo", "fixed alongside #bar") is a reference,
+    // not a completion claim; the old prose-window heuristic read those as
+    // completions and forced retry-with-suppression cycles. A heading match plus
+    // a completion marker still distinguishes a real completion from a
+    // halt/refusal response that merely names the head (#queue-strike-on-halt).
+    if !response_heading_resolves_to_pending_id(response_text, id) {
         return false;
     }
+    contains_completion_marker(&response_text.to_ascii_lowercase())
+}
 
-    let needle = format!("#{}", id.to_ascii_lowercase());
-    let all_text = lines.join("\n");
-    if contains_completion_marker(&all_text)
-        && lines
-            .iter()
-            .any(|line| response_do_heading_mentions_pending_id(line, &needle))
-    {
-        return true;
-    }
-
-    for idx in 0..lines.len() {
-        if !lines[idx].contains(&needle) {
+/// True when some `### Re:` response heading's topic resolves to `#id`. A
+/// batch `do [#a] [#b] …` directive heading resolves to every bracketed id; a
+/// titled `#id descriptive text` heading resolves only to its LEADING id (the
+/// trailing words are prose). A heading that merely contains `#id` later in
+/// descriptive prose — and any `#id` cited in the response BODY — never
+/// resolves to it. This mirrors the exact-id queue-consume matching.
+fn response_heading_resolves_to_pending_id(response_text: &str, id: &str) -> bool {
+    let id_lower = id.to_ascii_lowercase();
+    for raw in response_text.lines() {
+        let line = raw.trim().to_ascii_lowercase();
+        let Some(after) = line.strip_prefix('#') else {
             continue;
-        }
-        let end = (idx + 5).min(lines.len());
-        let window = lines[idx..end].join("\n");
-        if contains_completion_marker(&window) {
+        };
+        let heading = after.trim_start_matches('#').trim_start();
+        let Some(topic) = heading.strip_prefix("re:") else {
+            continue;
+        };
+        let topic = topic.split(" — ").next().unwrap_or(topic).trim();
+        if let Some(do_list) = topic.strip_prefix("do ") {
+            // Batch do-directive: every bracketed `[#id]` is a completion target.
+            let bracket_ids = extract_bracket_ids(do_list);
+            if !bracket_ids.is_empty() {
+                if bracket_ids.iter().any(|b| b == &id_lower) {
+                    return true;
+                }
+                continue;
+            }
+            // No brackets — a single `do #id` form; leading id only.
+            if leading_hash_id(do_list).as_deref() == Some(id_lower.as_str()) {
+                return true;
+            }
+        } else if leading_hash_id(topic).as_deref() == Some(id_lower.as_str()) {
             return true;
         }
     }
     false
 }
 
-fn response_do_heading_mentions_pending_id(line: &str, needle: &str) -> bool {
-    let Some(stripped) = line.strip_prefix('#') else {
-        return false;
-    };
-    let heading = stripped.trim_start_matches('#').trim_start();
-    heading.starts_with("re:")
-        && heading.contains(needle)
-        && (heading.contains("do ") || heading.contains("do [") || heading.contains("do #"))
+/// The leading `#id` token of `text` (optionally `[`-wrapped), or `None`.
+fn leading_hash_id(text: &str) -> Option<String> {
+    let t = text.strip_prefix('[').unwrap_or(text);
+    let rest = t.strip_prefix('#')?;
+    let id: String = rest
+        .chars()
+        .take_while(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+        .collect();
+    (!id.is_empty()).then_some(id)
+}
+
+/// All `[#id]` bracketed ids appearing in `text`, in order.
+fn extract_bracket_ids(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = text;
+    while let Some(pos) = rest.find("[#") {
+        let after = &rest[pos + 2..];
+        let id: String = after
+            .chars()
+            .take_while(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+            .collect();
+        let consumed = id.len();
+        if !id.is_empty() {
+            out.push(id);
+        }
+        rest = &after[consumed..];
+    }
+    out
 }
 
 fn contains_completion_marker(text: &str) -> bool {
@@ -4942,6 +4982,34 @@ Body\n\
         let report = inspect_with_warnings(&doc).unwrap();
         assert!(matches!(report.status, SessionCheckStatus::Ok(_)));
         assert!(report.warnings.is_empty());
+    }
+
+    #[test]
+    fn session_check_pending_done_ignores_prose_citation_of_open_id() {
+        // #pending-done-guard-false-positive: a response that COMPLETES the head
+        // (heading resolves to #cur) but merely CITES another open id (#other) in
+        // prose with nearby completion words must NOT demand `--done #other`.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_committed_capture_with_pending(
+            tmp.path(),
+            None,
+            "### Re: do #cur — gpt-5\n\nImplemented and committed the fix. Relates to #other, which was fixed in a prior cycle and stays gated.\nVerification:\n- cargo test\n",
+            false,
+            Some("- [ ] [#cur] current head\n- [ ] [#other] cited-but-not-completed item\n"),
+            &["cur"],
+        );
+
+        let report = inspect_with_warnings(&doc).unwrap();
+        assert!(
+            matches!(report.status, SessionCheckStatus::Ok(_)),
+            "prose citation of #other must not trip the done guard: {:?}",
+            report.status
+        );
+        assert!(
+            report.warnings.is_empty(),
+            "no done-guard warning expected for a merely-cited id: {:?}",
+            report.warnings
+        );
     }
 
     #[test]

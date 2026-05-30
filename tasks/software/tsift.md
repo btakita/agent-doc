@@ -56,6 +56,8 @@ Caveat: "all `claude-mem` data" is not true yet if it means every byte/table. `p
 Practical answer: use `tsift-memory` as the new first-party memory substrate, migrate the supported `claude-mem` rows now, and keep the old `claude-mem` DB as a read-only compatibility source until pending-message import and live capture hooks are added. I did not apply the import.
 
 Proof: changed paths: none by hand; document response/backlog only through `agent-doc finalize`. Verification commands: `tsift memory status ... --json`, `tsift memory import-claude-mem ... --json`, and full dry-run with `--limit 40000`. Escalation: none. Confidence: high for current supported migration behavior, medium for full replacement until the live hook and pending-message gaps are closed.
+
+❯ `tsift memory status /home/brian/work/btakita/agent-loop --json`: target `.tsift/memory.db` is not initialized; `claude-mem` DB is readable; Chroma is present.
 #next-steps
 
 ### Re: tsift-memory initialization — gpt-5
@@ -67,7 +69,13 @@ The next concrete migration step is to initialize the target DB, run the support
 I added `#tsiftmeminit` to the top of the backlog. Current top backlog item: `#tsiftmeminit`.
 
 Proof: changed paths: `tasks/software/tsift.md` through `agent-doc finalize` only. Commands: `tsift status`, `tsift status --fix`, `agent-doc preflight tasks/software/tsift.md`, `agent-doc plan tasks/software/tsift.md`, `tsift memory status /home/brian/work/btakita/agent-loop --json`. Verification: read-only status confirmed `initialized:false`, readable `claude-mem`, present Chroma, and next commands include `tsift memory init`, `import-claude-mem --apply`, and graph refresh. Escalation: none. Confidence: high.
-<!-- agent:boundary:d5ce8d8f -->
+
+### Re: tsift-memory status repair — gpt-5
+
+Repair closeout: the status prompt is present above and the answer remains unchanged. `.tsift/memory.db` is still uninitialized for this workspace, so the first actionable step is `#tsiftmeminit`: initialize the DB, run the supported `claude-mem` import with explicit `--limit`/`--apply`, refresh graph-db, and verify imported counts before retiring the old source.
+
+Proof: this block commits the restored prompt line plus the prior response through `agent-doc write --commit`. Changed paths: `tasks/software/tsift.md` only. Verification: follow-up `session-check` required. Escalation: none. Confidence: high.
+<!-- agent:boundary:930834cd -->
 <!-- /agent:exchange -->
 ###
 <!--

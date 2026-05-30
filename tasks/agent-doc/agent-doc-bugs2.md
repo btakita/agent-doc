@@ -65,8 +65,37 @@ None of these are failures. The reason the first line *reads* alarming is the JB
 **Why preserving it is correct:** killing a pane that is the live authoritative session of another project — just because it's parked in this project's stash window — would silently terminate that project's running agent. The guard exists precisely to prevent cross-project collateral kills, so it fails safe (skip + log) rather than reaping.
 
 If you'd rather not see it at all, the right move is the plugin-side notification classification in `#jb-busy-queue-ux-feedback`; I left the stderr line as-is since it's accurate operational evidence and the reaping logic/tests assert on it.
-<!-- agent:boundary:55d5f46b -->
-<!-- /agent:exchange --> 
+This is still a UX issue. Why did the condition surface in the first place? That is the bug.
+#spec-test-build-install-commit-push
+
+### Re: Why the cross-project stash condition surfaces — opus-4-8
+
+You're right that "it's by-design" wasn't the real answer. I pulled the **live** tmux topology and found the actual root cause — and it's not a resync logic error, it's a layout/session-model condition. Captured in `tasks/agent-doc/plan-cross-project-stash-pane-condition.md`; I'm deferring the code change because the fix is a session-model decision, not a one-line patch (details below).
+
+**What's actually in your tmux right now (session `0`):**
+
+```
+0 @4 agent-doc          ← active window
+0 @3 stash              ← ONE stash window holds:
+     %34 %31 %20 %33 %4 %36 %3 %35 %21   agent-doc  …/agent-loop            (superproject root)
+     %32                                 agent-doc  …/agent-loop/src/boost-client  (submodule root)
+```
+
+So `%32` lives in the **same session and the same stash window** as nine superproject panes — it's not off in another session. That rules out the server-wide `list-windows -a` scan as the cause here; the foreign pane genuinely sits in the current session's stash.
+
+**Why the condition exists (the real bug):** agent-doc resolves the target tmux session by **auto-detecting the current session** (`0`) whenever a root hasn't pinned one via `session set`. Both the **superproject** (`agent-loop`) and the **nested submodule** (`src/boost-client`) resolve to the *same* session `0`, so they share one session and one `stash` window. When the superproject syncs its layout, it stashes every pane that isn't part of *its* layout — including the live `boost-client` session pane `%32`. resync then inspects `%32`, sees it's registered in a different root, and preserves it (`skipping kill`). The message is the correct safety net; the condition underneath it is **nested project roots collapsing onto one shared tmux session + stash**.
+
+**Contributing factor:** nine superproject `agent-doc` panes are parked in that stash. The sweep never kills agent processes (`agent-doc`/`claude`/`node`) even when unregistered (`resync.rs:752`,`1277`), so stale agent-doc panes accumulate and the cross-project condition gets hit constantly.
+
+**Why I'm not committing a code fix this cycle (honest boundary):** the only changes that actually remove the condition are architectural and need your call on the session model:
+- **A — nested-root session isolation** (recommended): give a nested submodule root its own tmux session/stash so the superproject never stashes or re-scans it. Touches `start.rs`/`route.rs`/`sync.rs` + session config + a migration for already-shared sessions.
+- **B — per-root stash partitioning**: one session, but foreign-root panes stay in their own root's stash and are never pulled into the current sweep.
+- **C — out-of-scope skip**: when `current_root != pane_root`, `continue` *before* evaluating/logging instead of emitting `skipping kill`. Smallest, but it's close to the UX suppression you already rejected — only worth doing alongside A/B.
+- **D — reap stale unregistered agent-doc stash panes** after a proven-dead/TTL check (the accumulation factor); independent hygiene follow-up.
+
+Anything that just hides the message (C alone) is the "it's only UX" non-answer you pushed back on, so I don't want to ship that as *the* fix. Tell me which session model you want (per-root sessions vs. one session with partitioned stash) and I'll implement A (+D) with `make tmux-ci` regression coverage and the spec update. Queued as `#cross-project-stash-pane-condition`.
+<!-- agent:boundary:fc7af1e8 -->
+<!-- /agent:exchange -->
 ###
 <!--
 JB `Run Agent Doc`, then cancel run directly in the session, then JB `Clear Session Context`, then JB `Run Agent Doc`:
@@ -114,6 +143,8 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#cross-project-stash-pane-condition] [recommended] resync logs 'stash pane %N registered in its own project root — skipping kill' because nested project roots (superproject agent-loop + submodule src/boost-client) auto-detect the SAME tmux session 0 and share one stash window, so superproject sync stashes the submodule's live session pane and resync re-discovers it cross-project. Not a resync logic error (preservation is correct); root cause is the shared-session layout for nested roots. Live evidence + fix options (A nested-root session isolation [recommended], B per-root stash partitioning, C out-of-scope skip, D reap stale agent-doc stash panes) in tasks/agent-doc/plan-cross-project-stash-pane-condition.md. Needs a session-model design decision before implementing; deferred from blind code change.
+- [ ] [#codex-owned-pane-prompt-miss] [recommended] Codex-owned `agent-doc <FILE>` direct invocation from the same pane can abandon recursive dispatch without processing unresolved exchange prompts. Live repro 2026-05-30: `src/boost-client/tasks/monsterrodholders.md` contained `Please assist in placing GA4 Analytics credentials in passage.`, but the same-pane recursion guard refused dispatch and no response was written. Fix with earlier owner-pane self-invocation detection, unresolved-prompt preservation, and Codex guidance/final-gate recovery. Plan: tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md.
 - [ ] [#codex-route-busy-ctrl-g-opens-editor] [recommended] route.rs busy-pane reroute interrupt (route.rs ~6409) also sends C-g unconditionally to a busy Codex pane before the Escape+C-c fallback — same root cause as #codex-interrupt-clear-ctrl-g-opens-editor: C-g opens the external editor ($EDITOR/nvim) in the normal Codex composer. Gate it on a shell reverse-i-search/history-search capture like send_operator_interrupt_sequence now does (or skip C-g when the busy blocker is an active turn). Tracked separately from the operator interrupt-clear fix because a hard change here alters reroute semantics. Add a route SimWorld regression for the non-search composer case — the existing ctrl-g test (write_mock_busy_registered_agent_doc_recovers_on_ctrl_g) only models reverse-i-search recovery, which is why this regression slipped through.
 - [ ] [#prompt-preempts-auto-queue] [recommended] Unanswered exchange prompts must run before active `agent:queue auto` continuation, even when the prompt was accidentally baselined into the `.agent-doc` snapshot. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `What are #next-steps to complete review items?` was visible after the exchange boundary and duplicated in `agent:queue auto`, but the snapshot already contained the exchange prompt, so the next diff only saw queue bookkeeping and the prompt did not run. Fix: add snapshot-independent unresolved exchange prompt detection, make preflight/direct-run prefer it over queue synthetic diffs, prevent route queue snapshot recovery from absorbing unanswered exchange prompts, and defer Codex/Claude queue continuation while such a prompt exists. Plan: tasks/agent-doc/plan-prompt-preempts-auto-queue.md.
 - [ ] [#codex-final-response-not-written] [recommended] Codex final response was not written back into the session document after a manual/direct run on `src/boost-client/tasks/monsterrodholders.md` (reported 2026-05-30 after `#nsga4verify` work). Symptom: commits and pushes completed, but `agent:exchange` lacked the assistant close-out; the user had to request a manual document patch. Plan: reproduce with an owned-pane recursive/direct invocation path where `agent-doc` refuses direct recursion, the agent continues manually, and finalizes outside the normal `agent-doc write` capture; add a session-check/finalization guard that detects a completed turn with no new `agent:exchange` response body, then either forces `agent-doc write --commit` or fails closed with the exact recovery command. Regression should cover Codex final responses after fallback/manual handling and ensure the response body lands before the boundary and is included in the committed doc.

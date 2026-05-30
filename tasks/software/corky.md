@@ -1,17 +1,18 @@
 ---
 agent_doc_session: 584ef929-37ee-47f6-b3d8-d4266ad31ee9
+agent: codex
+claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
-agent: codex
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
-claude_model: opus
 prompt_presets:
   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md
   '#code-review': Please review corky codebase. Inspect the architecture and look for edge cases. Isolate concurrency issues and other workflow bugs. Let's find root causes to fix. '#follow-up-backlog'
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
-  "#spec-test-build-install-commit-push": update spec + tests. build + install for local testing. commit + push
-  "#spec-test-commit-push": update spec + tests. commit + push
+  '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
+  '#spec-test-commit-push': update spec + tests. commit + push
+queue_active: false
 ---
 
 ## Session History
@@ -129,7 +130,7 @@ Performance notes:
 - Core crate publish packaging is small and fast; dependent crate dry-runs must wait until predecessor internal crates exist in the crates.io index, and the SPEC now calls that out.
 
 Caveat: I also attempted the parent repo `make check` before committing the submodule pointer. It completed the shared crate checks and got deep into `src/agent-doc`, then hung in unrelated `agent_doc_orchestration` test execution after the suite reported `supervisor::ipc::tests::long_path_fallback_binds_successfully` running over 60 seconds. I terminated that parent-wide check and did not treat it as Corky evidence; the Corky verification above is complete and green.
-<!-- agent:boundary:f79590df -->
+<!-- agent:boundary:b2eeb576 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -140,11 +141,6 @@ Please give me a report the performance
 ## Queue
 
 <!-- agent:queue -->
-dispatch #spec-test-build-install-commit-push
-- do [#vbpm]
-- do [#69ge]
-- do [#0k50]
-- do [#5wnq]
 <!-- /agent:queue -->
 
 ## Backlog

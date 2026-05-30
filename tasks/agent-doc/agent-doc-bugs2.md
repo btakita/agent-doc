@@ -66,7 +66,6 @@ None of these are failures. The reason the first line *reads* alarming is the JB
 
 If you'd rather not see it at all, the right move is the plugin-side notification classification in `#jb-busy-queue-ux-feedback`; I left the stderr line as-is since it's accurate operational evidence and the reaping logic/tests assert on it.
 This is still a UX issue. Why did the condition surface in the first place? That is the bug.
-#spec-test-build-install-commit-push
 
 ### Re: Why the cross-project stash condition surfaces — opus-4-8
 
@@ -137,7 +136,37 @@ flowchart TD
     X -- "AFTER fix (C)" --> O["ops_log telemetry only"]
     O --> OK["IDE error surface stays clean"]
 ```
-<!-- agent:boundary:dd62d153 -->
+❯ How do we recover from the skip error state? How can we avoid getting into this state?
+
+### Re: Recovering from / avoiding the cross-project skip state — opus-4-8
+
+First, the honest reframe: **there is no broken or stuck state to recover from.** The "skip" (`registered in its own project root — skipping kill`) is a *correct* preservation decision, and the panes involved are healthy. The only thing that ever looked like an error was the log landing on stderr, which the IDE renders as a failure — and that's already fixed (C: it now goes to `ops_log`). So "recovery" is mostly "nothing is wrong," plus optional cleanup if the accumulated panes bother you.
+
+#### Recovering from the state you saw
+
+- **The displayed error:** cosmetic. With the updated binary installed (done), the cross-project skip no longer hits stderr, so it won't re-appear as an error from a fresh route/resync. A stale JB error notification from before the fix is just dismissable.
+- **The foreign pane (`%32`, `boost-client`):** needs nothing. It's a live, registered session; when you focus a `boost-client` doc, sync rescues it out of `0:stash` automatically.
+- **If you want to clean up the accumulated stash panes** (the ~9 in `0:stash`), in increasing force:
+  - `agent-doc resync` — dry-run; shows stale routing/session issues without touching anything.
+  - `agent-doc resync --fix` — reaps *truly orphaned* panes (dead, or unregistered with no live supervisor) and deregisters stale registry entries. It will **not** kill live registered sessions — by design.
+  - `agent-doc session doctor <FILE> --repair` — repairs one document's layout/session.
+  - `agent-doc gc` — clears stale `starting` controller actors / TTL-expired state.
+  - Per-doc discard: `agent-doc session clear <FILE>` (idle) or `agent-doc session interrupt-clear <FILE>` (explicit destructive discard).
+  - Nuclear: kill the tmux session; each doc cold-starts a fresh pane on next open.
+
+  The reason the nine persist is precisely that they're *live, registered* sessions (warm supervisors for docs you've worked) — the sweep deliberately never auto-kills those. They're not stuck; they're cached.
+
+#### Avoiding the state
+
+The "state" = nested roots (superproject + submodule) auto-detecting the **same** tmux session and sharing one `stash`. Options, by cost:
+
+- **Do nothing (recommended).** Post-C the condition is benign and invisible — the skip is correct and no longer reads as an error. Avoidance isn't really needed.
+- **Avoid the shared stash entirely:** pin distinct sessions per root with `agent-doc session set <name>` from each root. This is option **A** — you rejected it because it splits work across tmux sessions you'd switch between. Available if you ever want hard isolation for a specific root.
+- **Avoid accumulation:** periodic `agent-doc resync --fix` / `agent-doc gc`, or the new opt-in **`#stash-session-ttl-prune`** (queued) to auto-reap long-idle stash sessions past a TTL — destructive, so opt-in + live-verified.
+- **Avoid the error *perception* for the whole class:** the plugin-side fix in **`#jb-busy-queue-ux-feedback`** (classify benign route/resync info vs. real failures), which covers the sibling `skipping kill` lines C didn't touch.
+
+Net: nothing to recover, nothing you must avoid — the only real lever beyond what's shipped is the optional TTL-prune for tidiness, now captured.
+<!-- agent:boundary:0ecc07e7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -186,6 +215,7 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#stash-session-ttl-prune] [recommended] Optional opt-in hygiene to cap stash-session accumulation: reap agent-doc stash panes whose session has been idle in the stash beyond a configurable TTL. Distinct from the existing orphan reap (resync.rs step 8), which only kills unregistered + no-supervisor + no-owned-file panes; live registered/supervisor-backed sessions are correctly never auto-killed, which is why ~9 agent-loop agent-doc panes accumulate in the shared session-0 stash. Must be opt-in (frontmatter/.agent-doc config) + live-verified before enabling (destructive). Relates to #cross-project-stash-pane-condition and #jb-busy-queue-ux-feedback.
 - [ ] [#cross-project-stash-pane-condition] [recommended] resync logs 'stash pane %N registered in its own project root — skipping kill' because nested project roots (superproject agent-loop + submodule src/boost-client) auto-detect the SAME tmux session 0 and share one stash window, so superproject sync stashes the submodule's live session pane and resync re-discovers it cross-project. Not a resync logic error (preservation is correct); root cause is the shared-session layout for nested roots. Live evidence + fix options (A nested-root session isolation [recommended], B per-root stash partitioning, C out-of-scope skip, D reap stale agent-doc stash panes) in tasks/agent-doc/plan-cross-project-stash-pane-condition.md. Needs a session-model design decision before implementing; deferred from blind code change.
 - [ ] [#codex-owned-pane-prompt-miss] [recommended] Codex-owned `agent-doc <FILE>` direct invocation from the same pane can abandon recursive dispatch without processing unresolved exchange prompts. Live repro 2026-05-30: `src/boost-client/tasks/monsterrodholders.md` contained `Please assist in placing GA4 Analytics credentials in passage.`, but the same-pane recursion guard refused dispatch and no response was written. Fix with earlier owner-pane self-invocation detection, unresolved-prompt preservation, and Codex guidance/final-gate recovery. Plan: tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md.
 - [ ] [#codex-route-busy-ctrl-g-opens-editor] [recommended] route.rs busy-pane reroute interrupt (route.rs ~6409) also sends C-g unconditionally to a busy Codex pane before the Escape+C-c fallback — same root cause as #codex-interrupt-clear-ctrl-g-opens-editor: C-g opens the external editor ($EDITOR/nvim) in the normal Codex composer. Gate it on a shell reverse-i-search/history-search capture like send_operator_interrupt_sequence now does (or skip C-g when the busy blocker is an active turn). Tracked separately from the operator interrupt-clear fix because a hard change here alters reroute semantics. Add a route SimWorld regression for the non-search composer case — the existing ctrl-g test (write_mock_busy_registered_agent_doc_recovers_on_ctrl_g) only models reverse-i-search recovery, which is why this regression slipped through.

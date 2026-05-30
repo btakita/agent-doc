@@ -120,7 +120,17 @@ The sequencing matters. Right now `tsift-cli` still contains command routing, pr
 Recommended gate: after the per-command CLI split, extract only if the agent-doc pieces can expose a small API such as `session_digest`, `session_review`, `session_cost`, and `agent_doc_log` fixtures without depending on CLI output formatting. Keep budget/envelope rendering in `tsift-cli`; keep parsing, aggregation, guardrails, and fixtures in the extracted crate.
 
 No repo changes for this advisory response.
-<!-- agent:boundary:afd49265 -->
+
+### Re: tsift-agent-doc crate — gpt-5
+
+Yes eventually, but not before the `tsift-cli` command split.
+
+The boundary is plausible because `session-review`, `session-digest`, `session-cost`, agent-doc log parsing, closeout churn detection, and agent-doc fixtures now form a coherent domain. A `tsift-agent-doc` crate would make that domain easier to test and keep agent-doc semantics out of CLI command plumbing.
+
+The better sequence is: split `tsift-cli` by command first, then extract agent-doc parsing/aggregation once the CLI only formats and routes those results. Keep budget/envelope rendering in `tsift-cli`; move parsing, aggregation, guardrails, and fixtures only after their public API is small and stable.
+
+No repo changes for this advisory response.
+<!-- agent:boundary:2f21abc1 -->
 <!-- /agent:exchange -->
 ###
 <!--

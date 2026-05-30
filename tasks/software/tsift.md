@@ -139,7 +139,41 @@ Commands and verification:
 Escalation: none.
 
 Confidence: high for the spike boundary. This establishes the owned schema/API/CLI/plugin contract and a working `claude-mem` migration path; the remaining queue items should build the stricter budget guard, graph-db adapter, ranked neighborhood budgets, eval harness, and summary readiness gate on top of this substrate.
-<!-- agent:boundary:60409b95 -->
+
+### Re: do [#tsift-memory-budget-guard] — gpt-5
+
+Completed `#tsift-memory-budget-guard`.
+
+Implemented a fail-closed `tsift memory budget-guard` path in `src/tsift` so raw transcript/session/tool/log payloads are measured before handoff, blocked when they exceed the available prompt budget, and replaced with bounded retry plans plus digest/context commands. The guard now emits `blocked_split_required` reports with replacement strategies, source refs, chunk byte ranges for file retries, and safer inline placeholders for text retries.
+
+Changed and pushed:
+
+- `src/tsift` commit `7778af44987c1b7ac4d0a65bbd545bdcfe6e37b4` (`feat: add tsift memory budget guard`)
+- root submodule pointer commit `66ded9204` (`chore: update tsift submodule`)
+
+Key touched surfaces:
+
+- `packages/tsift-memory/src/lib.rs` and README: budget guard contract, report/replacement/chunk structures, token estimation, payload classification, split checks.
+- `packages/tsift-cli/src/commands/memory.rs` and parser tests: `tsift memory budget-guard` with `--text`, `--file`, `--byte-start`, `--byte-end`, `--source-ref`, `--payload-kind`, budget/reserve/chunk knobs, and JSON output.
+- `packages/opencode-tsift/commands/tsift-memory-guard.md`, installer defaults, and npm package tests: added the Opencode command surface.
+- `SPEC.md`: documented the new contract and fail-closed behavior.
+
+Verification passed:
+
+- `cargo fmt`
+- `tsift rewrite --run 'cargo test -p tsift-memory -p tsift-cli -p tsift-index'` (`tart-e0ac6695b1`)
+- CLI smoke for a small ready payload and an over-budget file payload with byte-range retry chunks
+- `tsift rewrite --run 'cargo clippy --workspace --all-targets -- -D warnings'` (`tart-799ab74940`)
+- `tsift --envelope __digest-runner --kind log --path . --shell-command 'make check'` (`tart-f0f371023c`)
+- `tsift rewrite --run 'cargo install --path . --force'` (`tart-250d7d9395`)
+- installed CLI smoke for `tsift memory budget-guard --text 'short payload' --budget-tokens 1000 --json`
+- `git diff --check`
+- GitHub Actions `main CI` run `26692805969` passed both `live Convex graph acceptance` and `clippy + test`
+
+CI annotations were non-blocking: GitHub's Node.js 20 action deprecation notice and the existing live Convex graph no-op annotation for missing `TSIFT_LIVE_CONVEX_GRAPH_URL`. I did not find a separate tmux-test workflow for this repo, so the CI evidence is the `main CI` run above. No escalation was required.
+
+Confidence: high.
+<!-- agent:boundary:53e2e374 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -151,7 +185,7 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#tsift-memory-crate-plugin]~
-- do [#tsift-memory-budget-guard]
+- ~do [#tsift-memory-budget-guard]~
 - do [#tsift-claude-mem-adapter]
 - do [#tsift-neighborhood-token-budget]
 - do [#tsift-memory-eval-harness]
@@ -161,7 +195,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#tsift-memory-budget-guard] Build a token-budget guard for observer/memory handoffs: estimate prompt size before model calls, split oversized tool responses and transcripts, replace raw logs with tsift session-digest/context-pack handles, and fail closed with retryable chunk plans instead of sending prompts that can only overflow.
 - [ ] [#tsift-claude-mem-adapter] Add a read-only claude-mem adapter for tsift graph-db: project claude-mem SQLite observations, session summaries, user prompts, and Chroma/vector handles as semantic/session/source nodes with stable ids so tsift can query existing memory without owning capture yet.
 - [ ] [#tsift-neighborhood-token-budget] Add token/usefulness budgets to graph-db related/neighborhood/evidence output: rank nodes and edges by semantic match, edge kind, depth, recency, and source-handle coverage; enforce per-kind quotas plus estimated-token caps; report dropped_by_budget diagnostics.
 - [ ] [#tsift-memory-eval-harness] Create a memory retrieval eval fixture from the Claude Code Insights report plus sampled claude-mem failures, comparing claude-mem API, tsift session-review/context-pack, and graph-db related on useful hits, output tokens, latency, and zero-output failure rate.

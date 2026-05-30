@@ -53,11 +53,7 @@ Done — and this was the desync I hit live three times this session (the strand
 **Commits:** submodule `ab074710`, superproject pointer `224f6088b` (pushed).
 
 This should retire the stranding I kept hitting: future `--review-add` / `--pending-gate` / `--pending-edit` will land in HEAD in the same cycle instead of needing manual recovery.
-<!-- agent:boundary:a56db8a3 -->
-<!-- /agent:exchange --> 
-###
-<!--
-JB `Run Agent Doc` failed. A repeat attempt succeeded.
+❯ JB `Run Agent Doc` failed. A repeat attempt succeeded.
 ```
 resync: stash pane %4 is registered in its own project root — skipping kill
 resync: stash pane %8 is registered in its own project root — skipping kill
@@ -86,7 +82,27 @@ resync: stash pane %3 is registered in its own project root — skipping kill
 [perf] commit total: 25ms
 Error: authoritative actor generation 238 for tasks/monsterrodholders.md owns pane %28 but route could not drain the active closeout before dispatch: [session-check] INTERRUPTED: document still contains completed tracked item(s) after closeout: #seocrawl, #seocat. Re-run preflight/repair so the reap is persisted through the snapshot + commit boundary
 ```
----
+❯ #spec-test-build-install-commit-push
+
+### Re: JB Run Agent Doc failed (repeat succeeded) — opus-4-8
+
+Diagnosed and fixed. monsterrodholders.md is now clean (the repeat reaped `#seocrawl`/`#seocat`), so this was transient — but the root cause is concrete.
+
+**Root cause:** the routed-dispatch drain (`drain_open_closeout_before_routed_dispatch`) ran `repair::repair`, whose completed-item reap sub-step **only handles the backlog**. Your `#seocrawl`/`#seocat` were completed `[x]` items in **review** (deployed SEO tasks), so the backlog-only reap was a no-op, the post-repair `session-check` still found them, and route bailed: *"could not drain the active closeout before dispatch."* Your manual repeat succeeded because a full `/agent-doc` preflight runs **all-surface** pending maintenance (backlog + review + icebox) and reaped them.
+
+**Fix:** the drain now runs the idempotent all-surface `run_pending_maintenance` first — backlog + review + icebox reap, plus the snapshot re-sync I shipped earlier this session (`#pending-gate-snapshot-desync`, `ab074710`) — so a completed item in any surface is drained on the first attempt, matching the successful repeat.
+
+**Verification:** new deterministic regression `drain_reaps_completed_review_item_across_all_surfaces`; `make check` green; `cargo build --release` + `cargo install` (both binaries); spec `08a-session-actor-contract` updated.
+
+**Commits:** submodule `b239988b`, superproject pointer `4c7b06b7f` (pushed).
+
+**Scope/honesty:** the fix targets exactly the reported `session-check` interruption. I did **not** construct a live IDE repro of the intermittent route timing, so I filed `#route-drain-all-surface-live-verify [recommended]`.
+
+(Closeout note: this commit used `--lint off` to bypass a lint **false positive** — two of your backlog items contain a literal `[#id]` token in prose, which the lint dialect parses as a real duplicate backlog id. I left your text intact rather than mangle it. The lint inline/prose-exclusion gap is worth its own fix.)
+<!-- agent:boundary:b81d8a62 -->
+<!-- /agent:exchange --> 
+###
+<!--
 The completed queue item was not removed from the queue. #mermaid
 #spec-test-build-install-commit-push
 ---
@@ -117,6 +133,7 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#route-drain-all-surface-live-verify] [recommended] Live-verify the route-drain all-surface reap (submodule b239988b / superproject 4c7b06b7f) resolves the JB Run Agent Doc "completed tracked item blocks dispatch" retry: with the installed binary, reproduce a closeout that leaves a completed [x] item in review or icebox on an IDE-owned doc, then run JB Run Agent Doc once and confirm it dispatches without a manual repeat. Also exercises the #pending-gate-snapshot-desync snapshot re-sync (ab074710) under the route path.
 - [ ] [#drained-done-queue-clear] Fully resolved agent:queue auto batches can remain as completed residue instead of clearing: Corky live repro left dispatch + all four do [#id] entries after --done closeout; follow-up preflight auto-struck them, halted as item_modified, and required manual commit repair. Fix preflight/finalize queue-drain ordering and pure queue-maintenance commit boundary. Plan: tasks/agent-doc/plan-drained-done-queue-clear.md.
 - [ ] [#codex-auto-queue-stalled-final-gate] Codex auto-queue final gate failed live: after `src/boost-client/tasks/monsterrodholders.md` completed/deployed `#seocat`, the document still had `queue_active: true`, `agent:queue auto`, and next head `do [#seopdp]`, but Codex sent a normal final answer instead of continuing/blocking. This is the failed live proof for `#codex-auto-queue-live-verify`. Fix by adding a binary-owned durable "queue continuation required" marker/final gate that successful closeout writes when a ready auto-queue head remains, and teach Codex Stop/session-check strict mode to block final answers even when transient hook session state is missing or the turn used a manual/recovery closeout path. Plan: tasks/agent-doc/plan-codex-auto-queue-stalled-final-gate.md.
 - [ ] [#active-queue-persisted-no-continue] Active persisted queues can stall after a successful closeout when `queue_active: true` remains but the queue tag lacks `auto`: the next head is ready, yet continuation paths only consider `agent:queue auto` (`codex_hook.rs::active_auto_queue_prompt` requires the attr; direct continuation gates on an auto outcome; Claude guidance checks `queue_trigger == "auto"`). Repro 2026-05-30 `tasks/agent-doc/agent-doc-bugs2.md`: plain `agent:queue` (no auto attr), `queue_active: true`, five remaining heads beginning `#pending-gate-snapshot-desync`, no next cycle launched after closeout. Treat `auto` as a start trigger and `queue_active` as the continuation signal, or halt with an explicit reason. Plan: tasks/agent-doc/plan-active-queue-persisted-continuation.md.

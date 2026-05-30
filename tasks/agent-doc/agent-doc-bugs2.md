@@ -73,7 +73,25 @@ Note: I chose **fail-closed-with-recovery-command** over auto-forcing `write --c
 ### Re: follow-up backlog capture — opus-4-8
 
 Recorded the recommended opportunistic follow-up `#codex-final-response-live-verify` (live Codex re-verification of the new guard) so the claim in the prior close-out is backed by a real backlog item. The guard itself and its deterministic regressions are already committed (`5019c725e`); this item only tracks the optional live-run confirmation.
-<!-- agent:boundary:37c9607c -->
+### Re: auto queue stalled (#agent-doc-bug) — opus-4-8
+
+Root-caused and fixed. The auto queue stalled because of a **preflight classification bug**, not just my stopping. (Cites `#ipcfullprompt-recur2` only as a related prior fix — it stays gated, not completed here.)
+
+#### Root cause
+When a cycle has no real user/document diff, preflight synthesizes the active queue head as the cycle prompt (`preflight.rs` ~2001). That synthetic head was being included in `user_intent_prompt_changes`. But the skill's auto-loop precondition is "continue only when `user_intent_prompt_changes` is empty (a real user prompt mid-loop takes precedence)." So the queue's own continuation head looked like a fresh user prompt every cycle → the precondition never held → the `auto` queue stalled after each item. Confirmed against the live binary: `user_intent: [{prompt_target: "do [#alpha]"}]` for a pure queue-continuation cycle.
+
+#### Fix (`bc2c902b`)
+`preflight.rs` now tracks `diff_from_queue_head_only` — true only when `diff_result.is_none()` before the queue head is synthesized. In that case `user_intent_prompt_changes` is emptied (it's queue continuation, not user intent). A real user prompt typed mid-queue keeps `diff_result` non-None, so it's still surfaced normally; user-added queue items are still filtered via `change_is_managed_state_only`. The head remains exposed through `queue_prompts`/`prompt_bearing_changes` so the cycle still has work.
+
+#### Verification
+- New CLI regression `test_preflight_active_auto_queue_head_is_not_user_intent` (reproduces the stall shape, asserts empty `user_intent_prompt_changes` + populated `queue_prompts`).
+- `make check` green (0 failures); no FlowCore token-budget change.
+- Both binaries rebuilt + installed; **live-verified** on the real binary and on this document — `user_intent_prompt_changes` is now empty for the active queue head.
+
+Also committed the two prior source fixes that had only been doc-committed: `#ipcfullprompt-recur2` VFS guard (`fe4e89ef`) and `#codex-final-response-not-written` session-check guard (`bc2c902b`).
+
+With this fixed, the `auto` queue (16 items remaining) can now self-continue.
+<!-- agent:boundary:60507ce7 -->
 <!-- /agent:exchange -->
 ###
 <!--

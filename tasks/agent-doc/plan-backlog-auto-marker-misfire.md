@@ -42,3 +42,15 @@ User intended to add `auto` to the **queue** to enable the auto-loop, but typed 
 - Assert `agent:backlog` with an `auto`/unknown attribute is rejected (warning, no mutation).
 - Assert the auto-loop does not start from a backlog `auto` attribute.
 - Assert an auto-run never replaces existing backlog item text.
+
+## Validation against current source (2026-05-29, v0.34.0 — static, read-only; no implementation)
+
+Validated the three hypotheses against the actual code. Result: the **data-loss path is already prevented**; only the defensive warn (proposed fix #1) remains genuinely unaddressed.
+
+- **Hypothesis #2 (auto-loop keys off `auto` wherever it appears) — DOES NOT HOLD.** Every one of the 14 production `has_auto_attr()` call sites (`run.rs`, `preflight.rs`, `route.rs`, `write.rs`, `codex_hook.rs`, `plan.rs`, `orchestrate.rs`) passes the attrs of a component resolved by `find(|c| c.name == "queue")` (or its snapshot equivalent). No path consults the `backlog` component's attrs for activation. The auto-loop is strictly queue-scoped.
+- **Hypothesis #3 (auto-run destructively rewrites the backlog / mints `do [#…]` stubs) — DOES NOT HOLD for backlog.** The ID-minting task-expansion path (`orchestrate.rs::queue_task_batch`) reads only the `queue` component and bails with "agent:queue is not active" unless the queue is active. There is no path where a `backlog` `auto` attribute drives a backlog rewrite. (Note: the reported corruption shape — `preset #…` line + `- [ ] [#minted] do [#oldid]` — matches the orchestration task-batch backlog write-back output, so the historical trigger was an orchestration write-back; the current code only sources that batch from `queue`.)
+- **Hypothesis #1 (marker-attr parser tolerates arbitrary/unknown attrs on `agent:backlog`) — HOLDS, still unaddressed.** `component::parse_attrs` (`agent-doc-core/src/component.rs:577`) splits any whitespace token into the attrs map with no per-component validation, rejection, or warning. So `<!-- agent:backlog auto -->` (and the `auot` typo) still parse silently — but the result is now **inert** because no consumer reads backlog attrs.
+
+**Net:** Against v0.34.0 the destructive misfire does not reproduce statically (queue-scoping prevents both activation and ID-minting). The remaining value of the planned fix is purely defensive UX: warn/reject on a misplaced `auto`/unknown attr on `agent:backlog` (proposed fix #1), and optionally the recovery snapshot (proposed fix #4).
+
+**Uncertainty / not proven:** This is a static read of current source only. The exact historical path that produced the original corruption was not pinned to a specific prior version/commit — it may already be closed by the queue-scoping (whether pre-existing or from the recent queue-auto convergence work), or it may have come from a path that has since changed. Confirming requires git archaeology of the orchestration write-back at the time of the report. Still **DO NOT IMPLEMENT** until authorized.

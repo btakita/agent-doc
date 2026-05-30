@@ -67,7 +67,28 @@ That is why `#tsift-dormant-crates` should stay open: the task is not just to de
 
 No code changed in this cycle.
 re [#tsift-dormant-crates]: Is there functionality in tsift-tokensave and tsift-algorithms that should be used?
-<!-- agent:boundary:23f17720 -->
+
+### Re: tsift-dormant-crates functionality — gpt-5
+
+Yes. There is useful functionality, but the two crates should be treated differently.
+
+`tsift-tokensave` is a real adapter, not an algorithm library. It can discover `.tokensave/tokensave.db`, open it read-only, query counts/kinds/files/nodes/edges, run FTS5 against `nodes_fts`, map tokensave rows into `GraphNode`/`GraphEdge`, and implement read-only `GraphStore` (`packages/tsift-tokensave/src/lib.rs:63`, `:210`, `:235`, `:318`). That should be used if tsift wants to consume existing Tokensave databases or offer an import/read-only backend. It should not be wired into normal tsift indexing by default unless `.tokensave/tokensave.db` is explicitly discovered or requested, because tsift already owns its AST/index/graph-db projection path.
+
+`tsift-algorithms` has reusable graph-analysis pieces: SCC, graph health score, dead-code reachability, and module coupling (`packages/tsift-algorithms/src/lib.rs:1`). The best candidates to use are `tarjan_scc` for cycle diagnostics / dependency DAG validation and `coupling_analysis` for architecture reports. `detect_dead_code` is only safe after tsift has a precise entry-point model; otherwise it will over-report. `composite_health_score` needs hardening before exposure: its cycle DFS currently recurses on `v.max(w)` rather than the neighbor, which is suspicious (`packages/tsift-algorithms/src/health.rs:97`), and its reachability pass is all-pairs BFS, so it belongs behind bounded/reporting workflows.
+
+Current wiring is inconsistent: `tsift-cli` declares `tsift-algorithms` (`packages/tsift-cli/Cargo.toml:34`), but source search found no production calls to the exported functions. `tsift-tokensave` has no reverse dependency at all. The `#tsift-dormant-crates` backlog item remains open; the next code task should either wire explicit CLI/graph-db surfaces for these crates, or remove/park the dependency/spec claims so the workspace graph stops implying features that are not reachable.
+
+Changed paths: none in `src/tsift`.
+
+Commands: `tsift status --fix` in root and `src/tsift`; `agent-doc preflight/read/plan`; source and search inspection; `cargo tree --workspace -i tsift-tokensave`; `cargo tree --workspace -i tsift-algorithms`; `tsift --envelope __digest-runner --kind test --path . --shell-command 'cargo test -p tsift-tokensave -p tsift-algorithms'`.
+
+Verification: focused crate tests passed (`exit_code=0`, artifact `tart-cca0a38e2f`).
+
+Confidence: high on current reachability/wiring; medium on product direction because it depends on whether Tokensave compatibility is still a goal.
+
+Escalation: none.
+
+<!-- agent:boundary:bf1b9980 -->
 <!-- /agent:exchange -->
 ###
 <!--

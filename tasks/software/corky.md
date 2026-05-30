@@ -94,7 +94,46 @@ queue_active: false
 Compacted content:
 - Archived 1 response topic(s): corky crate split
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc...
-<!-- agent:boundary:a63d968b -->
+Register the GCP App with Google so I don't get the unsafe menu.
+
+### Re: GCP OAuth app verification — gpt-5
+
+I could not register the Google-side app from this shell. `gcloud` is not installed here, and Google OAuth app verification has to be submitted in Google Cloud Console by a project owner/editor with access to the project that owns Corky's OAuth client. I did not modify the Cloud project.
+
+What matters for the unsafe/unverified screen: Google says apps that request sensitive or restricted OAuth scopes can show the unverified-app warning until the app has been reviewed, and the warning can also appear when requested scopes are missing from the consent-screen configuration. Personal/testing use can continue by clicking through, but it does not remove the warning. Sources: [Unverified apps](https://support.google.com/googleapi/answer/7454865?hl=en), [Sensitive scope verification](https://developers.google.com/identity/protocols/oauth2/production-readiness/sensitive-scope-verification), and [OAuth verification requirements](https://support.google.com/cloud/answer/13464321?hl=en).
+
+For Corky, the Google client needs verification/registration for the scopes it can request. I checked the code and docs; the built-in Google path uses Gmail, Drive, Docs, Sheets, Chat, Tasks, and People/Contacts scopes. At minimum, make sure the Google Auth Platform **Data Access** page declares the exact scopes Corky requests, including:
+
+- `https://www.googleapis.com/auth/gmail.readonly`
+- `https://www.googleapis.com/auth/gmail.compose`
+- `https://www.googleapis.com/auth/gmail.settings.basic`
+- `https://www.googleapis.com/auth/gmail.labels`
+- `https://www.googleapis.com/auth/drive.file`
+- `https://www.googleapis.com/auth/drive.readonly`
+- `https://www.googleapis.com/auth/documents`
+- `https://www.googleapis.com/auth/spreadsheets.readonly`
+- `https://www.googleapis.com/auth/spreadsheets`
+- `https://www.googleapis.com/auth/contacts`
+- `https://www.googleapis.com/auth/chat.messages`
+- `https://www.googleapis.com/auth/tasks`
+
+Concrete Cloud Console path:
+
+1. Select the project that owns Corky's built-in OAuth client. The session notes mention project number `873280095295`; confirm it against the OAuth client ID prefix from `pass corky/gcp/client_id`.
+2. Go to **Google Auth Platform → Branding**. Set app name `Corky`, support email, developer contact, homepage URL, privacy policy URL, and terms URL.
+3. Use a verified domain you own for the homepage and policy pages. Corky already has source docs at `src/corky/docs/reference/privacy-policy.md` and `src/corky/docs/reference/terms-of-service.md`, but Google expects the public URLs to be hosted under the verified app domain.
+4. Go to **Audience**. Move to production/public only if the goal is to remove the warning for arbitrary Google users. Keep testing only for a small personal/test-user flow where clicking through is acceptable.
+5. Go to **Data Access**. Add every scope Corky requests and provide per-scope justifications. For example, `gmail.readonly` is for syncing mail into local files; `gmail.compose` is for draft creation/sending; Drive/Docs/Sheets scopes are for document upload/read/write workflows; `contacts` is for People API contact push/delete.
+6. Submit verification. Expect Google to ask for a demo video showing the OAuth flow and each sensitive/restricted scope in use.
+
+Local proof:
+
+- Changed paths: none.
+- Commands run: `agent-doc --version`, `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `tsift status --fix`, targeted `rg`/`sed` reads, and `gcloud auth list` / `gcloud config get-value project`.
+- Verification: no code verification was needed because no repo files changed. The Google Cloud check was blocked because `gcloud` exits `127` here.
+- Confidence: high that verification is the required path to remove the unsafe/unverified screen; medium on the project number until you confirm it from the client ID.
+- Escalation: none.
+<!-- agent:boundary:410f693e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -116,16 +155,4 @@ Please give me a report the performance
 ## Completed / Reaped
 
 <!-- agent:done archive=tasks/software/corky.done.md -->
-- 2026-05-12 [#tokenstore-delete-preservation] [recommended] Make TokenStore saves deletion-safe so stale writers cannot restore tokens cleared by another process
-- 2026-05-12 [#watch-gmail-history-notify] [recommended] Teach watch to count Gmail API last_history_id movement and fire mailbox sync and desktop notifications for gmail-api accounts
-- 2026-05-12 [#oauth-callback-url-decode] [recommended] URL-decode OAuth callback params before state comparison and token exchange
-- 2026-05-20 [#google-docs-sheets-integration] Add Google Docs/Sheets integration for Corky: required OAuth scopes, read/write Google Docs, read Google Sheets, docs, and tests.
-- 2026-05-20 [#google-workspace-doc-types] Implement broad Google Workspace document type support beyond Sheets: detect Drive MIME types and route Google Docs, Sheets, Slides, Forms/Drawings, PDFs, and common Office files through appropriate read/export/write/upload behavior, with spec updates, docs, tests, build/install, commit, and push.
-- 2026-05-20 [#enable-drive-api-corky-oauth] Enable Google Drive API for Corky's configured Gmail OAuth project 873280095295, then rerun the live Google Workspace Drive CRUD matrix for brian.takita@gmail.com.
-- 2026-05-20 [#enable-docs-api-corky-oauth] Enable Google Docs API for Corky's configured Gmail OAuth project 873280095295, then rerun Google Docs read/write live tests for brian.takita@gmail.com.
-- 2026-05-20 [#75d8] [recommended] Add the missing Corky PyPI 0.28.2 Linux x86_64 and macOS x86_64 wheels after fixing the tag workflow build failures (OpenSSL/manylinux Linux and MACOSX_DEPLOYMENT_TARGET macOS).
-- 2026-05-20 [#release-status-cleanup] Reconcile the Corky session/status notes after v0.28.2: mark crates.io publish complete, note v0.28.1 as superseded, and keep PyPI as the remaining publish blocker.
-- 2026-05-20 [#doc-upload-drive-oauth] Implement corky doc upload with Google Drive OAuth design, upload behavior, docs, and tests.
-- 2026-05-21 [#sheets-scope] [recommended] `corky sheets` OAuth scope handling. `corky sheets read` and `corky sheets write` share the same OAuth client + token cache, but `read` only requests `spreadsheets.readonly` and `write` then fails with HTTP 403 `ACCESS_TOKEN_SCOPE_INSUFFICIENT` because the cached token lacks the write scope. Observed 2026-05-21 attempting to update the Velvet Thunder MVP worksheet (`1k52arliMCqbe40_CHWUCinV59EACIoYTG1gVMvnlKrA Wed 5/20/26!K3:L3`) via `corky sheets write` — the write API call surfaced the scope error mid-operation rather than re-auth'ing first. Fix options, ranked: (a) request the full `spreadsheets` scope upfront on any first-time `sheets *` auth (single broader prompt, no UX regression since read+write are paired in this workflow); (b) detect `ACCESS_TOKEN_SCOPE_INSUFFICIENT` from the write API and auto-trigger a re-auth flow with the missing scope; (c) add `corky sheets reauth --scope write` command + a clear "your token is read-only; re-auth needed" error message. Workaround for now: delete `~/.config/corky/...token...` and rerun `corky sheets write` (will prompt for fresh OAuth — verify it requests `spreadsheets` not `spreadsheets.readonly`).
-- 2026-05-29 [#h465] draft push on gmail-api accounts silently DROPS attachments. Repro (corky 0.28.2): draft with 'attachments:' frontmatter + 'account' = gmail-api provider, run 'corky draft push <file>' — it prints 'Attach: N file(s)' but the created Gmail draft is multipart/alternative with NO attachment parts (verify: GET /users/me/drafts/<id>?format=full → payload.mimeType, parts). The 'draft send' path (src/draft/send.rs) builds multipart/mixed with attachments correctly; the push/drafts.create path (push_to_drafts_via_gmail_api in src/draft/mod.rs) does not include them despite compose_email receiving the attachment list. Fix: ensure push uses the same multipart/mixed builder as send so attachments land in drafts.create; add a regression test asserting a pushed gmail-api draft's MIME is multipart/mixed with the expected part filenames. Workaround in use: build the MIME + POST drafts.create directly via the Gmail API.
 <!-- /agent:done -->

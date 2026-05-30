@@ -91,11 +91,37 @@ When a cycle has no real user/document diff, preflight synthesizes the active qu
 Also committed the two prior source fixes that had only been doc-committed: `#ipcfullprompt-recur2` VFS guard (`fe4e89ef`) and `#codex-final-response-not-written` session-check guard (`bc2c902b`).
 
 With this fixed, the `auto` queue (16 items remaining) can now self-continue.
-<!-- agent:boundary:b693ebf4 -->
+
+### Re: tsift multi-crate integration — opus-4-8
+
+**Yes, tsift is properly integrated with the multi-crate architecture** — and I refreshed it. `tsift status` showed all three workspace members tracked alongside the root binary crate:
+- `agent-doc-core`, `agent-doc-sqlite`, `agent-doc-orchestration` (the `[workspace] members`), plus the `agent-doc` root package — 328 files tracked total.
+
+The only issue was **staleness**, not integration: 11 files were stale (`preflight.rs`, `session_check.rs`, `write.rs`, `test_cli.rs`, `PatchWatcher.kt`, etc. — my edits this session). I ran `tsift index .` (the actual refresh command; `tsift status` recommends it — there is no separate `tsift update` subcommand). Status is now `fresh (328 files tracked, 0s ago)`.
+
+Note: I left the `- Is tsift properly integrated…` line you added to `agent:queue`. It's free text (no `do [#id]`), so the queue parser treats it as an annotation and skips it for prompt-head resolution — it won't be dispatched. There's no CLI primitive to strike a non-`#id` queue line, so you can delete that line manually when convenient.
+
+### Re: do #pending-add-suppresses-queue-consume — opus-4-8
+
+Done (committed `33fe9927`). The **core suppression was already resolved** by prior work: `queue_head_matches_done_ids` / `queue_head_has_explicit_completion_signal` already let a `--done`/`--pending-gate`/`--pending-edit` naming the head consume it regardless of a bundled `--pending-add`. Verified empirically — `finalize --done h1 --pending-add "…"` strikes the head (`~do [#h1]~`).
+
+The item's *alternate* proposal (heading-match should drive consumption) is intentionally **superseded by `#queue-strike-on-halt`**: a bare `do [#id]` head must require an explicit completion flag so a halt/refusal response that merely names the head can't silently strike it.
+
+What I fixed (residual): the diff-based check printed a misleading `[queue] active prompt differs from queue head` line to **stderr even when consumption then succeeded** via the `--done` fallback — it read as a failure (I saw it fire repeatedly this session on successful closeouts). Now `should_consume_queue_prompt_for_write` checks the explicit `--done` short-circuit **first**, and the inner diff diagnostic is demoted from stderr to `ops_log` so only the caller's authoritative `[queue] skipped consumption` line (printed only when consumption is *definitively* skipped after all fallbacks) is user-facing.
+
+Regression: `done_head_consumes_despite_bundled_pending_add` (proves `--done` + bundled `--pending-add` consumes the head, and a bare head without a flag does not). `make check` green; both binaries rebuilt + installed.
+<!-- agent:boundary:fbe78a27 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Verify [#ipcfullprompt-recur2]
+---
+JB `Run Agent Doc` error:
+```
+[route] debounce OK — file idle for 4.3s and typing indicator idle
+[route] target tmux session: 0
+[route] authoritative actor generation 241 for tasks/monsterrodholders.md is busy on pane %40; queued pending dispatch "do [#next-steps-2]. #spec-test-commit-push-deploy" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
+```
 ---
 JB `Run Agent Doc`, then cancel run directly in the session, then JB `Clear Session Context`, then JB `Run Agent Doc`:
 ```
@@ -129,7 +155,8 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 preset #spec-test-build-install-commit-push
 - ~do [#ipcfullprompt-recur2]~
 - ~do [#codex-final-response-not-written]~
-- do [#pending-add-suppresses-queue-consume]
+- ~do [#pending-add-suppresses-queue-consume]~
+- Is tsift properly integrated into multi-crate architecture? If not, run tsift update.
 - do [#pending-done-guard-false-positive]
 - do [#queue-user-edit-overwrite]
 - do [#prompt-preempts-auto-queue]
@@ -155,7 +182,6 @@ preset #spec-test-build-install-commit-push
 - [ ] [#codex-final-response-live-verify] [recommended] Opportunistic live re-verification of the #codex-final-response-not-written guard: do a real Codex direct/manual run that commits side-effect work, confirm session-check (via the .codex Stop hook) fails closed with the 'no assistant response body was captured' message + 'agent-doc write --commit' recovery when no ### Re: close-out was written, and that a normal Codex turn with a response stays OK. Guard + deterministic regressions already landed (session_check.rs check_committed_without_response_body_guard).
 - [ ] [#queue-user-edit-overwrite] [recommended] User-authored agent:queue edits can be silently overwritten/deleted by write/reset/commit queue convergence. Live repro 2026-05-30 boost-client monsterrodholders.md: user added do [#gscaccess] at queue head; agent-doc repeatedly removed/reverted it during closeout/snapshot repair. Fix by tracking queue edit provenance/epochs, preserving explicit queue edits unless the current response consumes that exact head, and failing closed on stale IPC/snapshot queue rewrites. Plan: tasks/agent-doc/plan-user-queue-edit-preservation.md.
 - [ ] [#pending-done-guard-false-positive] [recommended] finalize/write pending_done_guard fires a FALSE POSITIVE when the response merely REFERENCES an open backlog id in prose (e.g. mentioning #jb-busy-queue-ux-feedback as a related/residual item) — it reads the citation as a completion claim and demands --done, forcing a retry with  suppression. Hit 3x in one session (2026-05-30) and independently flagged as a top agent-doc finalize friction in the Claude Code usage report (2026-05-28..30: 'a false-positive done-guard, requiring multiple retry cycles'). Fix: only fire when the response heading/topic RESOLVES to the id (completion), per the exact-id queue-consume matching in specs/07-orchestration-commands.md — not when the body merely cites it. Relates to #pending-add-suppresses-queue-consume.
-- [ ] [#pending-add-suppresses-queue-consume] [recommended] Bundling --pending-add in the same finalize as a queue-head-targeting response suppresses queue-head consumption: finalize logs 'skipped consumption because the active prompt did not target the queue head' and treats the pending-add as the active prompt, even when the response heading exactly matches the head (Re: do #ID form, no brackets). Repro 2026-05-29 agent-doc-bugs2.md declining backlog-auto-marker-misfire with a bundled --pending-add — head stayed unstruck. Fix: heading/queue-head match should drive consumption independently of bundled pending mutations, or consume the head when the response heading matches regardless of detected active prompt.
 - [ ] [#stuck-capture-compact-false-positive] [recommended] stuck_captured_cycle false-positive after compaction: a capture recorded as committed (cycle-1780100032048, response 'gate→done for codex guidance') is later archived by compact, so preflight reports committed-but-not-in-HEAD and suggests `write --commit` recovery — which would re-inject an already-archived response (it lives in .agent-doc/archives/<hash>-*.md). Fix: when a captured-committed body is absent from HEAD because it was compacted (present in the matching archive), reconcile the capture instead of flagging it stuck. Repro 2026-05-29 agent-doc-bugs2.md.
 - [ ] [#prompt-preempts-auto-queue] [recommended] Unanswered exchange prompts must run before active `agent:queue auto` continuation, even when the prompt was accidentally baselined into the `.agent-doc` snapshot. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `What are #next-steps to complete review items?` was visible after the exchange boundary and duplicated in `agent:queue auto`, but the snapshot already contained the exchange prompt, so the next diff only saw queue bookkeeping and the prompt did not run. Fix: add snapshot-independent unresolved exchange prompt detection, make preflight/direct-run prefer it over queue synthetic diffs, prevent route queue snapshot recovery from absorbing unanswered exchange prompts, and defer Codex/Claude queue continuation while such a prompt exists. Plan: tasks/agent-doc/plan-prompt-preempts-auto-queue.md.
 - [ ] [#codex-owned-pane-prompt-miss] [recommended] Codex-owned `agent-doc <FILE>` direct invocation from the same pane can abandon recursive dispatch without processing unresolved exchange prompts. Live repro 2026-05-30: `src/boost-client/tasks/monsterrodholders.md` contained `Please assist in placing GA4 Analytics credentials in passage.`, but the same-pane recursion guard refused dispatch and no response was written. Fix with earlier owner-pane self-invocation detection, unresolved-prompt preservation, and Codex guidance/final-gate recovery. Plan: tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md.

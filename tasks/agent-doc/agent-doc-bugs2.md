@@ -30,158 +30,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260530-144208.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260530-160233.md`*
 
 Compacted content:
-- Archived 4 response topic(s): do [#bare-write-captured-uncommitted]; do [#hj7s]; JB Restart Supervisor live-verify; 1 more
+- Archived 6 response topic(s): Why "registered in its own project root" occurred; Why the cross-project stash condition surfaces; Cross-project resync workflow bug; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ JB `Run Agent Doc` on an idle session. Why did `registered in its own project root` occur?
-```
-resync: stash pane %32 is registered in its own project root — skipping kill
-[route] debounce OK — file idle for 0.5s and typing indicator idle
-[route] target tmux session: 0
-[route] authoritative actor generation 96 for tasks/software/tsift.md is busy on pane %36; queued pending dispatch "re [#tsift-dormant-crates]: Is there functionality in tsift-tokensave and tsift-algorithms that should be used?" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
-```
-❯ #spec-test-build-install-commit-push
-
-### Re: Why "registered in its own project root" occurred — opus-4-8
-
-That line is **expected, by-design output — not an error and not a bug.** Nothing in the binary needs fixing, so this cycle has no spec/test/build/commit change; here's the why.
-
-**What it is.** When JB `Run Agent Doc` runs, it triggers a `resync` of the tmux session for the *current* project root. resync sweeps stash-window panes (and dead/unregistered agent panes) to reap idle leftovers. Before killing any candidate it runs a cross-project safety check (`resync.rs:771`, `1303`, `1793`):
-
-1. Is the pane in the **current** project root's registry? → leave it.
-2. Otherwise, does the pane belong to a **different** project root — i.e. is it registered in *that* root's `.agent-doc/sessions.json`? → **skip kill** and log `registered in its own project root`.
-
-So pane `%32` is a live agent-doc pane owned by another project root (a submodule or sibling repo with its own `sessions.json`), currently parked in this session's stash window. From the agent-loop superproject's point of view it isn't in *its* registry, but it *is* the authoritative pane of its own project — so resync correctly refuses to kill it.
-
-**Why it appeared now.** You ran `Run Agent Doc` on `tasks/software/tsift.md` (agent-loop root). The log sequence is three separate, independent steps:
-- `resync: … registered in its own project root — skipping kill` → the cross-project preservation above (benign).
-- `debounce OK` / `target tmux session: 0` → route proceeding normally.
-- `authoritative actor generation 96 … is busy on pane %36 … queued pending dispatch … in agent:queue auto` → the tsift.md actor was mid-turn, so the dispatch was correctly queued instead of double-injected.
-
-None of these are failures. The reason the first line *reads* alarming is the JB plugin dumps the whole route/resync stderr stream as if it were an error — which is exactly the open item **`#jb-busy-queue-ux-feedback`** (present benign route/resync info as informational, distinct from real failures). I extended that item with this concrete example.
-
-**Why preserving it is correct:** killing a pane that is the live authoritative session of another project — just because it's parked in this project's stash window — would silently terminate that project's running agent. The guard exists precisely to prevent cross-project collateral kills, so it fails safe (skip + log) rather than reaping.
-
-If you'd rather not see it at all, the right move is the plugin-side notification classification in `#jb-busy-queue-ux-feedback`; I left the stderr line as-is since it's accurate operational evidence and the reaping logic/tests assert on it.
-This is still a UX issue. Why did the condition surface in the first place? That is the bug.
-
-### Re: Why the cross-project stash condition surfaces — opus-4-8
-
-You're right that "it's by-design" wasn't the real answer. I pulled the **live** tmux topology and found the actual root cause — and it's not a resync logic error, it's a layout/session-model condition. Captured in `tasks/agent-doc/plan-cross-project-stash-pane-condition.md`; I'm deferring the code change because the fix is a session-model decision, not a one-line patch (details below).
-
-**What's actually in your tmux right now (session `0`):**
-
-```
-0 @4 agent-doc          ← active window
-0 @3 stash              ← ONE stash window holds:
-     %34 %31 %20 %33 %4 %36 %3 %35 %21   agent-doc  …/agent-loop            (superproject root)
-     %32                                 agent-doc  …/agent-loop/src/boost-client  (submodule root)
-```
-
-So `%32` lives in the **same session and the same stash window** as nine superproject panes — it's not off in another session. That rules out the server-wide `list-windows -a` scan as the cause here; the foreign pane genuinely sits in the current session's stash.
-
-**Why the condition exists (the real bug):** agent-doc resolves the target tmux session by **auto-detecting the current session** (`0`) whenever a root hasn't pinned one via `session set`. Both the **superproject** (`agent-loop`) and the **nested submodule** (`src/boost-client`) resolve to the *same* session `0`, so they share one session and one `stash` window. When the superproject syncs its layout, it stashes every pane that isn't part of *its* layout — including the live `boost-client` session pane `%32`. resync then inspects `%32`, sees it's registered in a different root, and preserves it (`skipping kill`). The message is the correct safety net; the condition underneath it is **nested project roots collapsing onto one shared tmux session + stash**.
-
-**Contributing factor:** nine superproject `agent-doc` panes are parked in that stash. The sweep never kills agent processes (`agent-doc`/`claude`/`node`) even when unregistered (`resync.rs:752`,`1277`), so stale agent-doc panes accumulate and the cross-project condition gets hit constantly.
-
-**Why I'm not committing a code fix this cycle (honest boundary):** the only changes that actually remove the condition are architectural and need your call on the session model:
-- **A — nested-root session isolation** (recommended): give a nested submodule root its own tmux session/stash so the superproject never stashes or re-scans it. Touches `start.rs`/`route.rs`/`sync.rs` + session config + a migration for already-shared sessions.
-- **B — per-root stash partitioning**: one session, but foreign-root panes stay in their own root's stash and are never pulled into the current sweep.
-- **C — out-of-scope skip**: when `current_root != pane_root`, `continue` *before* evaluating/logging instead of emitting `skipping kill`. Smallest, but it's close to the UX suppression you already rejected — only worth doing alongside A/B.
-- **D — reap stale unregistered agent-doc stash panes** after a proven-dead/TTL check (the accumulation factor); independent hygiene follow-up.
-
-Anything that just hides the message (C alone) is the "it's only UX" non-answer you pushed back on, so I don't want to ship that as *the* fix. Tell me which session model you want (per-root sessions vs. one session with partitioned stash) and I'll implement A (+D) with `make tmux-ci` regression coverage and the spec update. Queued as `#cross-project-stash-pane-condition`.
-do: Describe how you fixed the workflow bug. Write the previous response and this response into the document. #mermaid
-
-### Re: Cross-project resync workflow bug — fix outcome — opus-4-8
-
-(Reproducing the prior chat outcome into the document for the record.)
-
-**What shipped: C only.** Routed the benign cross-project event (`registered in its own project root — skipping kill`) off **stderr** → **ops_log** telemetry at all three resync sweep sites (windowed / bulk / non-stash). Skip behavior unchanged; only real failures (e.g. failed `kill-pane`) stay on stderr. This stops JB `Run Agent Doc` from rendering that benign line as an error.
-
-- Submodule `bec30c5e` (`agent-doc`), superproject pointer `3de7bf97c`.
-- `cargo test -p agent-doc-orchestration` and `make check` both exit 0 (digest-confirmed, 0 failures); both binaries built + installed; spec `08-session-routing.md` updated.
-
-**B and D evaporated once I read the full sweep code:**
-- **D was already implemented** — `resync.rs` step 8 (`purge_unregistered_stash_panes_bulk_*`, ~line 1352) already reaps truly-orphaned agent panes (unregistered + no owned file + no live supervisor + not cross-project). The nine `agent-loop` panes in `0:stash` survive because they are *legitimate live/registered sessions*, not orphans — nothing safe to auto-reap.
-- **B was unnecessary / mildly harmful** — hiding a non-focused foreign-root pane in the shared stash is *correct* layout behavior; not-stashing it would clutter the focused view. My earlier "C alone = suppression" framing was wrong: there is no logic bug under the log, so routing the benign event off the error stream **is** the correct fix.
-
-**Residual:** the broader "JB renders any route/resync stderr as an error" stays under `#jb-busy-queue-ux-feedback`. An optional TTL-prune of long-idle stash sessions is a future opt-in (destructive → needs live verification).
-
-### Re: How the workflow bug was fixed — opus-4-8
-
-**The bug (in the agent-doc workflow):** running JB `Run Agent Doc` on a superproject document made the route/resync workflow emit `resync: stash pane %N is registered in its own project root — skipping kill` to **stderr**, and the IDE plugin renders the route/resync stderr stream as an **error** — so a correct, benign housekeeping decision looked like a failure mid-workflow.
-
-**Root cause (not a logic error):** nested project roots (the `agent-loop` superproject and its `src/boost-client` submodule) both auto-detect the *same* attached tmux session (`0`) and share one `stash` window. When the superproject's sync arranges its layout, it stashes the submodule's live session pane; resync then inspects that pane, correctly **preserves** it (it's the registered, live pane of a different root), and logged that decision. The preservation is right — the only defect was emitting benign telemetry onto the stderr channel the workflow treats as errors.
-
-**The fix (C):** at all three resync sweep sites, the cross-project-preservation branch now writes to `ops_log` (`.agent-doc/logs/ops.log`) instead of `eprintln!`. The `continue`/skip behavior is identical; genuine failures (a failed `kill-pane`) still go to stderr. This matches the repo's standing principle that *diagnostics belong in logs, not the stderr stream that pollutes prompt detection and the IDE error surface*.
-
-Why B/D were not needed: the foreign pane *should* be hidden in the shared stash (B unnecessary), and orphaned agent panes are *already* reaped by the sweep's step 8 — the panes you saw are live sessions, not leaks (D already present).
-
-```mermaid
-flowchart TD
-    A["JB Run Agent Doc on superproject doc"] --> B["sync arranges layout in shared tmux session 0"]
-    B --> C["submodule pane %32 moved into 0:stash"]
-    C --> D["resync sweeps 0:stash"]
-    D --> E{"pane registered in CURRENT root?"}
-    E -- yes --> F["leave it (skip)"]
-    E -- no --> G{"registered in its OWN, different root?"}
-    G -- "no: truly orphaned" --> H["step 8 reaps it (D: already implemented)"]
-    G -- "yes: live cross-project session" --> P["PRESERVE — correct, skip kill"]
-    P --> X{"how is the decision logged?"}
-    X -- "BEFORE fix" --> S["eprintln → stderr"]
-    S --> ERR["JB renders route/resync stderr as ERROR"]
-    X -- "AFTER fix (C)" --> O["ops_log telemetry only"]
-    O --> OK["IDE error surface stays clean"]
-```
-❯ How do we recover from the skip error state? How can we avoid getting into this state?
-
-### Re: Recovering from / avoiding the cross-project skip state — opus-4-8
-
-First, the honest reframe: **there is no broken or stuck state to recover from.** The "skip" (`registered in its own project root — skipping kill`) is a *correct* preservation decision, and the panes involved are healthy. The only thing that ever looked like an error was the log landing on stderr, which the IDE renders as a failure — and that's already fixed (C: it now goes to `ops_log`). So "recovery" is mostly "nothing is wrong," plus optional cleanup if the accumulated panes bother you.
-
-#### Recovering from the state you saw
-
-- **The displayed error:** cosmetic. With the updated binary installed (done), the cross-project skip no longer hits stderr, so it won't re-appear as an error from a fresh route/resync. A stale JB error notification from before the fix is just dismissable.
-- **The foreign pane (`%32`, `boost-client`):** needs nothing. It's a live, registered session; when you focus a `boost-client` doc, sync rescues it out of `0:stash` automatically.
-- **If you want to clean up the accumulated stash panes** (the ~9 in `0:stash`), in increasing force:
-  - `agent-doc resync` — dry-run; shows stale routing/session issues without touching anything.
-  - `agent-doc resync --fix` — reaps *truly orphaned* panes (dead, or unregistered with no live supervisor) and deregisters stale registry entries. It will **not** kill live registered sessions — by design.
-  - `agent-doc session doctor <FILE> --repair` — repairs one document's layout/session.
-  - `agent-doc gc` — clears stale `starting` controller actors / TTL-expired state.
-  - Per-doc discard: `agent-doc session clear <FILE>` (idle) or `agent-doc session interrupt-clear <FILE>` (explicit destructive discard).
-  - Nuclear: kill the tmux session; each doc cold-starts a fresh pane on next open.
-
-  The reason the nine persist is precisely that they're *live, registered* sessions (warm supervisors for docs you've worked) — the sweep deliberately never auto-kills those. They're not stuck; they're cached.
-
-#### Avoiding the state
-
-The "state" = nested roots (superproject + submodule) auto-detecting the **same** tmux session and sharing one `stash`. Options, by cost:
-
-- **Do nothing (recommended).** Post-C the condition is benign and invisible — the skip is correct and no longer reads as an error. Avoidance isn't really needed.
-- **Avoid the shared stash entirely:** pin distinct sessions per root with `agent-doc session set <name>` from each root. This is option **A** — you rejected it because it splits work across tmux sessions you'd switch between. Available if you ever want hard isolation for a specific root.
-- **Avoid accumulation:** periodic `agent-doc resync --fix` / `agent-doc gc`, or the new opt-in **`#stash-session-ttl-prune`** (queued) to auto-reap long-idle stash sessions past a TTL — destructive, so opt-in + live-verified.
-- **Avoid the error *perception* for the whole class:** the plugin-side fix in **`#jb-busy-queue-ux-feedback`** (classify benign route/resync info vs. real failures), which covers the sibling `skipping kill` lines C didn't touch.
-
-Net: nothing to recover, nothing you must avoid — the only real lever beyond what's shipped is the optional TTL-prune for tidiness, now captured.
-Please add #next-steps to add `agent-doc resync --fix` / `agent-doc gc` as a Plugin command that is accessible from the agent-doc plugin menu.
-
-### Re: #next-steps — plugin cleanup command + backlog reprioritized — opus-4-8
-
-**Added** `#plugin-cleanup-menu-command` [recommended]: expose `agent-doc resync --fix` ("Resync / Fix Sessions") and `agent-doc gc` ("GC Stale Sessions") as agent-doc plugin-menu actions in JetBrains + VS Code, so the recovery steps from the last answer are reachable from the IDE instead of a terminal. Thin event-reporter pattern — the plugin shells the existing CLI/FFI; no new cleanup logic lives in the plugin (consistent with the FFI-first rule). It pairs with `#stash-session-ttl-prune` (automatic hygiene) and `#jb-busy-queue-ux-feedback` (notification classification).
-
-**Priority pass:** recent adds had floated convenience items to the top (the prior top was `#stash-session-ttl-prune`, an opt-in nicety). I reordered into three tiers:
-
-1. **Correctness / data-loss** — `#codex-final-response-not-written`, `#ipcfullprompt-recur2`, `#prompt-preempts-auto-queue`, `#codex-owned-pane-prompt-miss`, `#pending-add-suppresses-queue-consume`, `#stuck-capture-compact-false-positive`, `#codex-route-busy-ctrl-g-opens-editor`.
-2. **Live-verify of shipped work** — `#cross-project-stash-pane-condition` (C is code-complete, awaiting your live confirm), `#route-drain-all-surface-live-verify`, `#run-agent-doc-stale-busy-replay`.
-3. **Convenience / UX / opt-in / dev-ergonomics** — `#jb-busy-queue-ux-feedback`, `#plugin-cleanup-menu-command`, `#stash-session-ttl-prune`, `#next-steps-backlog-capture`, `#ah0s`.
-
-**Top of the backlog: `#codex-final-response-not-written`** — a Codex final response not landing in the document is unrecoverable assistant-output loss, so it ranks above the IPC-corruption-while-typing item (which has git recovery) and the queue/prompt-skip bugs.
-
-Adjust freely if your weighting differs (e.g., if the IDE-side items matter more to your day-to-day, bump tier 3 up) — I ordered correctness-first by default.
-<!-- agent:boundary:e560a377 -->
+<!-- agent:boundary:d281aa8b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -217,15 +71,21 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 preset #spec-test-build-install-commit-push
 - ~do [#bare-write-captured-uncommitted]~
 - ~do [#hj7s]~
-- do [#stash-session-ttl-prune]
+- do [#codex-final-response-not-written]
+- do [#ipcfullprompt-recur2]
 - do [#prompt-preempts-auto-queue]
-- do [#run-agent-doc-stale-busy-replay]
-- do [#jb-busy-queue-ux-feedback]
-- do [#next-steps-backlog-capture]
-- do [#ah0s] 
+- do [#codex-owned-pane-prompt-miss]
 - do [#pending-add-suppresses-queue-consume]
 - do [#stuck-capture-compact-false-positive]
-- do [#ipcfullprompt-recur2]
+- do [#codex-route-busy-ctrl-g-opens-editor]
+- do [#cross-project-stash-pane-condition]
+- do [#route-drain-all-surface-live-verify]
+- do [#run-agent-doc-stale-busy-replay]
+- do [#jb-busy-queue-ux-feedback]
+- do [#plugin-cleanup-menu-command]
+- do [#stash-session-ttl-prune]
+- do [#next-steps-backlog-capture]
+- do [#ah0s] 
 <!-- /agent:queue -->
 
 ## Backlog

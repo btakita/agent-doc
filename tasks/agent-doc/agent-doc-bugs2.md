@@ -30,87 +30,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260530-013546.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260530-022103.md`*
 
 Compacted content:
-- Archived 6 response topic(s): queue auto enabled; do [#jb-load-tmux-window-verify]; do [#queue-head-consume-on-topic-id-regression]; 3 more
+- Archived 5 response topic(s): do [#backlog-auto-marker-misfire]; Why is #backlog-auto-marker-misfire marked "DO NOT IMPLEMENT"?; Validate the fix for #backlog-auto-marker-misfire; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: do [#backlog-auto-marker-misfire] — opus-4-8
-
-**Skipping — not implemented.** This item and its plan (`tasks/agent-doc/plan-backlog-auto-marker-misfire.md`) both carry an explicit **DO NOT IMPLEMENT** marker, so I'm respecting the committed instruction rather than the queue directive. The queue head is consumed/struck without any code change.
-
-Notably, this surfaced via the `auto` queue-loop (`queue_trigger: auto`) — i.e. an auto-run pulled in a DO-NOT-IMPLEMENT item, which is exactly the failure *class* `#backlog-auto-marker-misfire` exists to prevent (auto attributes triggering work that shouldn't run). I'm **halting the auto-loop** here and handing control back; the four remaining queue items (`#pending-add-append-not-prepend`, `#next-steps-backlog-capture`, `#run-agent-doc-stale-busy-replay`, `#jb-busy-queue-ux-feedback`) stay queued for a deliberate re-trigger.
-
-Two side notes from this cycle:
-
-- The `stuck_captured_cycle` warning preflight raised is a **false positive**: capture `cycle-1780100032048` ("gate→done for codex guidance") was committed and then archived by compaction (`.agent-doc/archives/483039e7…-20260530-013546.md`), so it's correctly absent from HEAD. No recovery run — that would re-inject an already-archived response. Logged as a recommended backlog item (`#stuck-capture-compact-false-positive`).
-- The post-`/agent:exchange` HTML comment referencing `#mermaid` / `#spec-test-build-install-commit-push` / `#next-steps` is parked outside `agent:exchange`/`agent:queue`, so it's a non-executable note and was not run.
-❯ Why is [#backlog-auto-marker-misfire] marked as "DO NOT IMPLEMENT"?
-
-### Re: Why is #backlog-auto-marker-misfire marked "DO NOT IMPLEMENT"? — opus-4-8
-
-Because it was filed through the **`#agent-doc-bug` preset**, which is plan-only by definition. That preset (frontmatter) reads: *"Please create a plan for agent-doc to fix this issue. Add to the backlog of tasks/agent-doc/agent-doc-bugs2.md."* It never authorizes writing code — it produces a diagnosis, a plan file, and a backlog entry, and then stops.
-
-Concretely, three things put the marker there:
-
-1. **Provenance.** The item entered the backlog via `#agent-doc-bug` on 2026-05-29 13:25 (commit `69ccbc2ff`), originally filed from `boost-client/tasks/monsterrodholders/mrh-project.md`. The plan file header states it directly: *"Status: PLAN ONLY — do not implement. Filed via `#agent-doc-bug`."*
-
-2. **The fix isn't validated yet.** `plan-backlog-auto-marker-misfire.md` lists its root cause as *hypotheses* ("to confirm during implementation") and its remedy as *"decide during implementation."* Nobody has confirmed which path actually rewrote the backlog (marker-attr parser tolerating `auto`/`auot`, the auto-loop keying off any `auto` attribute, or the destructive backlog-rewrite path).
-
-3. **It's high-risk surface.** The fix touches marker-attribute parsing **and** backlog mutation — the same destructive-rewrite territory that caused the original data loss (minted IDs wrapping `do #…` stubs, original task text gone, recovery via git/sidecar archaeology). That's deliberately gated behind explicit go-ahead.
-
-So the marker means: *diagnosed and planned, but do not write code until you explicitly authorize it.* Standard lifecycle for any `#agent-doc-bug`-filed item — it stays `DO NOT IMPLEMENT` until you say "implement #backlog-auto-marker-misfire" (or similar) in the document or chat. You removing the queue's `auto` attribute this turn is consistent with keeping it parked.
-
-(Side note: this turn's `stuck_captured_cycle` warning is again a false positive — the cited body *is* in HEAD; the capture's recorded snapshot hash just went stale after the follow-up pending-only commit advanced HEAD. Same family as `#stuck-capture-compact-false-positive`; no recovery run.)
-❯ Please validate the fix for [#backlog-auto-marker-misfire].
-
-### Re: Validate the fix for #backlog-auto-marker-misfire — opus-4-8
-
-I read "validate the fix" as **validate the *proposed* fix in the plan** (no fix code exists — the item is `DO NOT IMPLEMENT`), so this is a static, read-only validation of the plan's three root-cause hypotheses against current v0.34.0 source. **I did not implement anything.** Findings are recorded in `plan-backlog-auto-marker-misfire.md` under a new "Validation against current source" section (committed `2fe0ca366`).
-
-**Verdict: the data-loss path is already prevented by queue-scoping; only the defensive warn remains genuinely open.**
-
-| Plan hypothesis | Holds in v0.34.0? | Evidence |
-|---|---|---|
-| #2 auto-loop keys off `auto` *wherever* it appears | **No** | All 14 production `has_auto_attr()` call sites pass attrs of a component resolved by `find(\|c\| c.name == "queue")` (run.rs, preflight.rs, route.rs, write.rs, codex_hook.rs, plan.rs, orchestrate.rs). No path reads the `backlog` component's attrs. |
-| #3 auto-run destructively rewrites the backlog | **No (for backlog)** | The ID-minting expansion (`orchestrate.rs::queue_task_batch`) reads only the `queue` component and bails unless the queue is active. Nothing lets a backlog `auto` attr drive a backlog rewrite. |
-| #1 marker parser tolerates unknown attrs on `agent:backlog` | **Yes — unaddressed** | `component::parse_attrs` (component.rs:577) accepts any token into the attrs map with no per-component validation/warning. `&lt;!-- agent:backlog auto --&gt;` (and the `auot` typo) still parse silently — but the result is now **inert** because no consumer reads backlog attrs. |
-
-**What this means:** Against current code the destructive misfire does **not** reproduce statically. The auto-loop and the `do [#…]`-stub ID-minting are both strictly queue-sourced, so an `auto`/`auot` on the backlog marker is silently accepted but does nothing. The only remaining value in the planned fix is **defensive UX** — warn/reject a misplaced `auto`/unknown attr on `agent:backlog` ("did you mean `agent:queue auto`?"), proposed fix #1, plus optionally the recovery snapshot (fix #4).
-
-**Honest uncertainty:** this is a static read of current source only. I could **not** pin the original corruption to a specific prior version/path — its shape (`preset #…` line + `- [ ] [#minted] do [#oldid]`) matches the orchestration task-batch *backlog write-back* output, so the historical trigger was an orchestration write-back that, in today's code, only sources from `queue`. Whether the queue-scoping that closes #2/#3 was pre-existing or landed with the recent queue-auto convergence work isn't proven without git archaeology of the orchestration write-back at report time.
-
-`#backlog-auto-marker-misfire` stays `DO NOT IMPLEMENT`. If you want the defensive warn (fix #1) actually built, say "implement #backlog-auto-marker-misfire" and I'll scope it to a parser-level warning with the regression tests the plan lists.
-❯ implement #backlog-auto-marker-misfire
-
-### Re: implement #backlog-auto-marker-misfire — opus-4-8
-
-Implemented the defensive fix, the only part the validation found genuinely open (#2 auto-loop scope and #3 backlog rewrite were already prevented by queue-scoping). **Marked done.**
-
-**Change** — a non-blocking `misplaced_component_attr` preflight warning (`agent-doc-orchestration/src/preflight.rs`):
-- Queue-only attr (`auto`) on a non-`queue` component → warns with `did you mean &lt;!-- agent:queue auto --&gt;?`
-- Unrecognized attribute key (the reported `auot` typo) on any component → warns `not a recognized component attribute`
-- The attribute is **never mutated** and never activates the auto-loop — the warning just makes the previously-silent misfire visible. Known keys allow-listed: `patch`, `mode`, `max_lines`, `archive`, `transfer-source`, `timestamp`, `broken`, plus queue-only `auto`.
-
-**Verification:**
-- 4 new tests: `auto`-on-backlog warns, `auot` typo warns, queue `auto` + known attrs do **not** warn, and a regression asserting backlog `auto` never activates the queue.
-- `make check` green (clippy `-D warnings` + full suite).
-- `cargo build --release` + `cargo install --path .` (both binaries refreshed).
-- **Live-verified**: ran the installed binary's `preflight` on a throwaway doc with `&lt;!-- agent:backlog auto --&gt;` → warning fired as expected.
-- Spec §2.4 (attribute validation) + §2.5 (queue-only `auto`) updated.
-
-**Commits:** submodule `fdc184f2` (code+spec+tests, pushed), superproject pointer `f88ca1951`, plan status → IMPLEMENTED `881d3656a` (all pushed to `main`).
-
-**Not implemented:** proposed fix #4 (pre-auto-run recovery snapshot) — deferred as unnecessary now that the misfire is both inert (queue-scoped) and surfaced (warning). Fixes #2/#3 needed no code change. If you want #4 anyway, say so and I'll file/scope it.
-❯ Add to icebox
-
-### Re: Add to icebox — opus-4-8
-
-Parked **fix #4** (the deferred pre-auto-run recovery snapshot from `#backlog-auto-marker-misfire`) in the icebox — that's the only open/deferrable item from the prior exchange, where I offered to file it. If you meant something else by "add to icebox," tell me and I'll swap it.
-
-Icebox entry: `#misfire-recovery-snapshot` — a `pre-auto-run` recovery snapshot/tag (mirroring how `compact` tags before mutating) so any future destructive auto-run misfire is recoverable without git/sidecar archaeology. Deferred (not backlog) because the misfire is now both **inert** (queue-scoped) and **surfaced** (the `misplaced_component_attr` warning); it only becomes worth doing if a new auto-run path can mutate the backlog in place.
-<!-- agent:boundary:f93f6d7d -->
+<!-- agent:boundary:ffe3a11b -->
 <!-- /agent:exchange --> 
 ###
 <!--

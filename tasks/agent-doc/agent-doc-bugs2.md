@@ -94,7 +94,50 @@ So `%32` lives in the **same session and the same stash window** as nine superpr
 - **D — reap stale unregistered agent-doc stash panes** after a proven-dead/TTL check (the accumulation factor); independent hygiene follow-up.
 
 Anything that just hides the message (C alone) is the "it's only UX" non-answer you pushed back on, so I don't want to ship that as *the* fix. Tell me which session model you want (per-root sessions vs. one session with partitioned stash) and I'll implement A (+D) with `make tmux-ci` regression coverage and the spec update. Queued as `#cross-project-stash-pane-condition`.
-<!-- agent:boundary:fc7af1e8 -->
+do: Describe how you fixed the workflow bug. Write the previous response and this response into the document. #mermaid
+
+### Re: Cross-project resync workflow bug — fix outcome — opus-4-8
+
+(Reproducing the prior chat outcome into the document for the record.)
+
+**What shipped: C only.** Routed the benign cross-project event (`registered in its own project root — skipping kill`) off **stderr** → **ops_log** telemetry at all three resync sweep sites (windowed / bulk / non-stash). Skip behavior unchanged; only real failures (e.g. failed `kill-pane`) stay on stderr. This stops JB `Run Agent Doc` from rendering that benign line as an error.
+
+- Submodule `bec30c5e` (`agent-doc`), superproject pointer `3de7bf97c`.
+- `cargo test -p agent-doc-orchestration` and `make check` both exit 0 (digest-confirmed, 0 failures); both binaries built + installed; spec `08-session-routing.md` updated.
+
+**B and D evaporated once I read the full sweep code:**
+- **D was already implemented** — `resync.rs` step 8 (`purge_unregistered_stash_panes_bulk_*`, ~line 1352) already reaps truly-orphaned agent panes (unregistered + no owned file + no live supervisor + not cross-project). The nine `agent-loop` panes in `0:stash` survive because they are *legitimate live/registered sessions*, not orphans — nothing safe to auto-reap.
+- **B was unnecessary / mildly harmful** — hiding a non-focused foreign-root pane in the shared stash is *correct* layout behavior; not-stashing it would clutter the focused view. My earlier "C alone = suppression" framing was wrong: there is no logic bug under the log, so routing the benign event off the error stream **is** the correct fix.
+
+**Residual:** the broader "JB renders any route/resync stderr as an error" stays under `#jb-busy-queue-ux-feedback`. An optional TTL-prune of long-idle stash sessions is a future opt-in (destructive → needs live verification).
+
+### Re: How the workflow bug was fixed — opus-4-8
+
+**The bug (in the agent-doc workflow):** running JB `Run Agent Doc` on a superproject document made the route/resync workflow emit `resync: stash pane %N is registered in its own project root — skipping kill` to **stderr**, and the IDE plugin renders the route/resync stderr stream as an **error** — so a correct, benign housekeeping decision looked like a failure mid-workflow.
+
+**Root cause (not a logic error):** nested project roots (the `agent-loop` superproject and its `src/boost-client` submodule) both auto-detect the *same* attached tmux session (`0`) and share one `stash` window. When the superproject's sync arranges its layout, it stashes the submodule's live session pane; resync then inspects that pane, correctly **preserves** it (it's the registered, live pane of a different root), and logged that decision. The preservation is right — the only defect was emitting benign telemetry onto the stderr channel the workflow treats as errors.
+
+**The fix (C):** at all three resync sweep sites, the cross-project-preservation branch now writes to `ops_log` (`.agent-doc/logs/ops.log`) instead of `eprintln!`. The `continue`/skip behavior is identical; genuine failures (a failed `kill-pane`) still go to stderr. This matches the repo's standing principle that *diagnostics belong in logs, not the stderr stream that pollutes prompt detection and the IDE error surface*.
+
+Why B/D were not needed: the foreign pane *should* be hidden in the shared stash (B unnecessary), and orphaned agent panes are *already* reaped by the sweep's step 8 — the panes you saw are live sessions, not leaks (D already present).
+
+```mermaid
+flowchart TD
+    A["JB Run Agent Doc on superproject doc"] --> B["sync arranges layout in shared tmux session 0"]
+    B --> C["submodule pane %32 moved into 0:stash"]
+    C --> D["resync sweeps 0:stash"]
+    D --> E{"pane registered in CURRENT root?"}
+    E -- yes --> F["leave it (skip)"]
+    E -- no --> G{"registered in its OWN, different root?"}
+    G -- "no: truly orphaned" --> H["step 8 reaps it (D: already implemented)"]
+    G -- "yes: live cross-project session" --> P["PRESERVE — correct, skip kill"]
+    P --> X{"how is the decision logged?"}
+    X -- "BEFORE fix" --> S["eprintln → stderr"]
+    S --> ERR["JB renders route/resync stderr as ERROR"]
+    X -- "AFTER fix (C)" --> O["ops_log telemetry only"]
+    O --> OK["IDE error surface stays clean"]
+```
+<!-- agent:boundary:dd62d153 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 
@@ -171,13 +171,13 @@ Updated [tasks/software/tagpath.md](/home/brian/work/btakita/agent-loop/tasks/so
 Top backlog item: `#tpcoreplan`.
 
 Closeout passed: `agent-doc session-check` ok. Committed as `8782ef5e5`. No code changed, so no project test suite was run.
-<!-- agent:boundary:feb102d0 -->
+<!-- agent:boundary:6401cb8c -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - do [#tpcoreplan]
 - do [#tpcoreextract]
@@ -188,7 +188,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [x] [#tpcoreplan] Create a concrete workspace split plan for a conservative tagpath-core extraction: public API inventory, dependency boundary, compatibility re-exports, and release impact.
 - [ ] [#tpcoreextract] Extract tagpath-core with parser, convention detection, alias, family, prose, query normalization, compression, and pure tests moved into the core crate.
 - [ ] [#tpcorefacade] Keep the tagpath crate as the existing CLI/library facade depending on tagpath-core; preserve binary behavior, public exports, and feature defaults.
 - [ ] [#tpcoreci] Add workspace CI, docs, and release checks for the split, including no-default-features, wasm, and crates.io publish ordering smoke tests.

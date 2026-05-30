@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -54,10 +54,38 @@ Implemented per `tasks/agent-doc/plan-bare-write-captured-response-outside-commi
 - The three `write_commit_empty_stdin_*` adoption tests reworked: they used a bare write as a setup shortcut to strand a response; that shortcut no longer strands, so they now stage the IPC-patchback precondition directly via `place_uncommitted_visible_response`. The adoption path they guard (`write --commit` empty-stdin adopts a visible uncommitted response) is unchanged and still verified.
 - FlowCore hot-path `reason=` budget for write.rs audited 25 → 26.
 - `make check` exit 0 and a direct `cargo test --workspace` both green (RTK masked an interim FlowCore-gate failure on the first run — caught via the authoritative log, fixed the budget, re-verified). Both binaries rebuilt + installed (02:22).
-<!-- agent:boundary:5f7a89f9 -->
+
+### Re: do [#hj7s] — opus-4-8
+
+You queued `#hj7s` and `#prompt-preempts-auto-queue` and chose **one per cycle**, so this cycle does `#hj7s`; the queue advances to `#prompt-preempts-auto-queue` next. (Preflight correctly halted the auto-continuation with `queue_halted: item_modified` because you edited the head.)
+
+**Approach (from your note):** the editor owning the pane is a *legitimate* state — Claude Code's `ctrl+g` edit-in-nvim. So the fix **refuses with a diagnostic and lets the operator close the editor manually** — it does not force-quit it (unlike interrupt-clear's `:qa!`) or SIGINT around it, and `--force` does not bypass it. Plan: `tasks/agent-doc/plan-hj7s-restart-editor-foreground-guard.md`.
+
+**Rust core (the actual bug fix — submodule `6544cf53`, pointer `011c6f81a`):**
+- `prepare_restart_live_busy_pane` now builds `live_pane_evidence` once and, **before** the force/non-force branch, refuses via `anyhow::bail!` when `terminal_editor_command` matches the pane's `current_command` (logs `session_restart_editor_holds_pane_refused`). Because it runs before the force branch, both `Restart` and `Interrupt and Restart` refuse cleanly — no more `C-c`/restart-typing into the editor buffer.
+- `restart_editor_holds_pane_refusal_message`: parseable header `session_restart refused for <file> because pane <pane> is held by editor <cmd>` + `source=`/`current_command=`/`tail=` fields + close-editor guidance (`:wq`), mirroring the busy/starting refusal convention.
+
+**JetBrains surfacing (`TerminalUtil.kt`, plugin `0.2.139`):**
+- `EditorHoldsPaneRestartRefusal` + `parseEditorHoldsPaneRestartRefusal` + `notifyEditorHoldsPaneRestartBlocked` (no "Interrupt and restart" action — `--force` won't bypass).
+- `runRestartSupervisorCommand` `onFailure` now runs for the force path too (it was `null`, so Interrupt-and-Restart refusals were **silent**); the editor refusal is checked first. Signed zip built.
+
+**Verification:** Rust `restart_editor_holds_pane_refusal_names_editor_and_close_guidance` + Kotlin parse/message tests; `make check` green (exit 0, no FAILED; FlowCore gate ok — `session_actor_cmd.rs` is not a budgeted hot-path file); JB `gradle test buildPlugin signPlugin` green (160 tests). Both Rust binaries rebuilt + installed (10:10).
+
+**Gated, not done:** the Rust guard is fully unit-tested and live in the binaries, but the JB notification needs live IDE verification (install signed `0.2.139`, open `ctrl+g` nvim in a Claude Code pane, click Interrupt-and-Restart, confirm the refusal notification appears and no keys reach the editor). Gated on that.
+
+**Follow-up:** `route.rs` busy-interrupt (`route.rs` ~6427) sends a raw `C-c` into the pane foreground in the reroute path — same shape, but a hard refusal there would change reroute semantics, so it's tracked separately rather than forced into this cycle.
+<!-- agent:boundary:0bd29182 -->
 <!-- /agent:exchange --> 
 ###
 <!--
+JB `Run Agent Doc`, then cancel run directly in the session, then JB `Clear Session Context`, then JB `Run Agent Doc`:
+```
+resync: stash pane %32 is registered in its own project root — skipping kill
+[route] debounce OK — file idle for 7.8s and typing indicator idle
+[route] target tmux session: 0
+[route] authoritative actor generation 96 for tasks/software/tsift.md is busy on pane %36; queued pending dispatch "What are #next-steps to extract tsift crates?" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
+```
+---
 The last run had a code fence stripped away by agent-doc.
 #spec-test-build-install-commit-push
 ---
@@ -78,14 +106,15 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 #spec-test-build-install-commit-push
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#bare-write-captured-uncommitted]~
+- do [#hj7s]
+- do [#prompt-preempts-auto-queue]
 - do [#run-agent-doc-stale-busy-replay]
 - do [#jb-busy-queue-ux-feedback]
 - do [#next-steps-backlog-capture]
-- do [#prompt-preempts-auto-queue]
-- do [#ah0s]
+- do [#ah0s] 
 - do [#pending-add-suppresses-queue-consume]
 - do [#stuck-capture-compact-false-positive]
 - do [#ipcfullprompt-recur2]
@@ -94,8 +123,8 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#hj7s] [recommended] JB `Restart Supervisor Process` / `Interrupt and Restart` lands its input in a non-shell foreground process when one owns the pane TTY. Live repro 2026-05-30: clicking `Interrupt and Restart` after Restart failed surfaced `vim`/`nvim` in the console — the raw `C-c` interrupt sent by `session_actor_cmd.rs:950/953` (and `route.rs:6427` for routed restart) goes to the pane's foreground process, not the supervisor. With vim/nvim foreground, `C-c` is a no-op and the follow-up restart command typing lands in normal-mode buffer. Fix: detect non-shell foreground (TIOCGPGRP -> tcgetpgrp -> process comm against an allow-list of supervisor/shell names) before issuing tmux send-keys for restart; if a non-shell editor/pager owns the TTY, refuse with an explicit "editor X holds the pane; close it before restart" diagnostic and surface that in the JB notification, OR target the supervisor process directly via SIGINT to its pgid instead of the pane's foreground pgid. Relates to #snrun stale-busy guards (different class — this is correct-pane, wrong-foreground-process). Plan: TBD.
 - [ ] [#prompt-preempts-auto-queue] [recommended] Unanswered exchange prompts must run before active `agent:queue auto` continuation, even when the prompt was accidentally baselined into the `.agent-doc` snapshot. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `What are #next-steps to complete review items?` was visible after the exchange boundary and duplicated in `agent:queue auto`, but the snapshot already contained the exchange prompt, so the next diff only saw queue bookkeeping and the prompt did not run. Fix: add snapshot-independent unresolved exchange prompt detection, make preflight/direct-run prefer it over queue synthetic diffs, prevent route queue snapshot recovery from absorbing unanswered exchange prompts, and defer Codex/Claude queue continuation while such a prompt exists. Plan: tasks/agent-doc/plan-prompt-preempts-auto-queue.md.
+- [ ] [#codex-final-response-not-written] [recommended] Codex final response was not written back into the session document after a manual/direct run on `src/boost-client/tasks/monsterrodholders.md` (reported 2026-05-30 after `#nsga4verify` work). Symptom: commits and pushes completed, but `agent:exchange` lacked the assistant close-out; the user had to request a manual document patch. Plan: reproduce with an owned-pane recursive/direct invocation path where `agent-doc` refuses direct recursion, the agent continues manually, and finalizes outside the normal `agent-doc write` capture; add a session-check/finalization guard that detects a completed turn with no new `agent:exchange` response body, then either forces `agent-doc write --commit` or fails closed with the exact recovery command. Regression should cover Codex final responses after fallback/manual handling and ensure the response body lands before the boundary and is included in the committed doc.
 - [ ] [#route-drain-all-surface-live-verify] [recommended] Live-verify the route-drain all-surface reap (submodule b239988b / superproject 4c7b06b7f) resolves the JB Run Agent Doc "completed tracked item blocks dispatch" retry: with the installed binary, reproduce a closeout that leaves a completed [x] item in review or icebox on an IDE-owned doc, then run JB Run Agent Doc once and confirm it dispatches without a manual repeat. Also exercises the #pending-gate-snapshot-desync snapshot re-sync (ab074710) under the route path.
 - [ ] [#ah0s] [recommended] Add explicit-position --pending-add primitives so ordered backlog batches never depend on implicit prepend-vs-argorder semantics: --pending-add-after <id>, --pending-add-before <id>, --pending-add-back/--pending-append, keeping --pending-add as the front-insert default. Backlog is a priority pool with ID-based consumption (not a stack/queue; FIFO lives in agent:queue), so position should be author-set explicitly when it matters. Two agents (open-code.md #adcr waves f94e7851c; corky.md crate-split phases fc8d9b3bc) both reversed args expecting prepend-flip and got reverse-of-intended order. Pairs with #pending-add-append-not-prepend (that item finalizes the default-order decision; this adds the explicit escape hatches). Plan: tasks/agent-doc/plan-pending-add-explicit-position.md.
 - [ ] [#pending-add-suppresses-queue-consume] [recommended] Bundling --pending-add in the same finalize as a queue-head-targeting response suppresses queue-head consumption: finalize logs 'skipped consumption because the active prompt did not target the queue head' and treats the pending-add as the active prompt, even when the response heading exactly matches the head (Re: do #ID form, no brackets). Repro 2026-05-29 agent-doc-bugs2.md declining backlog-auto-marker-misfire with a bundled --pending-add — head stayed unstruck. Fix: heading/queue-head match should drive consumption independently of bundled pending mutations, or consume the head when the response heading matches regardless of detected active prompt.
@@ -109,6 +138,7 @@ preset #spec-test-build-install-commit-push
 ## Review
  
 <!-- agent:review -->
+- [/] [#hj7s] [recommended] JB `Restart Supervisor Process` / `Interrupt and Restart` lands its input in a non-shell foreground process when one owns the pane TTY. Live repro 2026-05-30: clicking `Interrupt and Restart` after Restart failed surfaced `vim`/`nvim` in the console — the raw `C-c` interrupt sent by `session_actor_cmd.rs:950/953` (and `route.rs:6427` for routed restart) goes to the pane's foreground process, not the supervisor. With vim/nvim foreground, `C-c` is a no-op and the follow-up restart command typing lands in normal-mode buffer. Fix: detect non-shell foreground (TIOCGPGRP -> tcgetpgrp -> process comm against an allow-list of supervisor/shell names) before issuing tmux send-keys for restart; if a non-shell editor/pager owns the TTY, refuse with an explicit "editor X holds the pane; close it before restart" diagnostic and surface that in the JB notification, OR target the supervisor process directly via SIGINT to its pgid instead of the pane's foreground pgid. Relates to #snrun stale-busy guards (different class — this is correct-pane, wrong-foreground-process). Plan: TBD.
 - [/] [#finalize-retry-ipc-response-duplication] [recommended] Multi-retry finalize + live IPC duplicates the response and prefixes its body lines with the user-prompt marker. Live repro 2026-05-29 on agent-doc-bugs2.md: a closeout needing several finalize/write retries (lint-gate / session-check / live_prompt_drift re-runs) with the IDE IPC listener active and concurrent editing left a duplicated response block plus agent body lines wrongly prefixed (uncommitted; HEAD stayed clean; manual git checkout repaired). Fix direction: idempotent retry convergence on IPC already_applied, never prefix agent response body as a prompt, and repair/session-check auto-dedup. Relates to #prompt-duplicated-while-typing, #duplicate-response-after-commit, #ipc-dup-tracking-double-merge (plugin 0.2.138 not yet installed during repro). Plan: tasks/agent-doc/plan-finalize-retry-ipc-response-duplication.md.
 - [/] [#ipc-dup-tracking-double-merge] PromptPoller double-tracking fix (plugin 0.2.138, submodule 32fb0b98 / superproject d585a33de): addFile keyed trackedFiles by project-relative path while handlePollResults keyed by "$cwd:$file", double-tracking the same VirtualFile (live: corky.md, brandon-cinquegrana.md, agent-doc-bugs2.md; trackedFiles=13 vs ffiTracked=9). Two divergent baselines -> mergeOrReload ran twice per change = full-document duplication path. Fixed by keying both via trackingKey(VirtualFile.path); convergence test + AGENTS.md invariant. GATED on live verify: install signed 0.2.138, restart, confirm no recurring duplication (corky.md). Exact setText payload uncaptured (JB debug logging was OFF). Relates to #ipcfullprompt-recur2, #adoc-queue-ipc-buffer-divergence, #prompt-duplicated-while-typing.
 - [/] [#jb-load-tmux-window-verify] [recommended] Live-verify the new JB Load Tmux Window action (plugin 0.2.136): install the signed zip, confirm it autostarts/loads the tmux pane for a focused doc whose pane is not up (e.g. corky.md). If the autostart sync genuinely fails to spawn the pane in that case (vs. by-design passive open), capture the route/sync logs as a separate autostart bug.

@@ -97,7 +97,11 @@ Completion is now signalled **only** by a response *heading* whose topic **resol
 Covers both enforcement points — the pre-write gate (`precommit_pending_done_check`) and post-commit `session-check`, both via `detect_missing_pending_done_ids`. Regression `session_check_pending_done_ignores_prose_citation_of_open_id`; the existing heading-completion and batch-`do`-heading detections still pass. `make check` green; both binaries rebuilt + installed.
 
 Relates to `#pending-add-suppresses-queue-consume` (the sibling queue-consume vs bundled-mutation issue, already fixed) — cited here deliberately to exercise the fix.
-<!-- agent:boundary:d853ac7a -->
+
+### Re: strikethrough on completed free-text queue lines — opus-4-8
+
+Agreed, and now fixed — that exact expectation drove the free-text-queue-head-consume fix (`808ffcf7`). A free-text queue head with no id is now struck when the cycle answers it, so completed free-text lines get wrapped in `~…~` just like consumed `do [#id]` directives. The earlier tsift line is already struck in HEAD (`~Is tsift properly integrated…~`), and this note itself is being consumed/struck the same way now. No code change needed this cycle — acknowledging and clearing.
+<!-- agent:boundary:251cb76a -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -107,7 +111,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#pending-add-suppresses-queue-consume]~
 - ~Is tsift properly integrated into multi-crate architecture? If not, run tsift update.~
 - ~do [#pending-done-guard-false-positive]~
-- When "Is tsift properly integrated into multi-crate architecture? If not, run tsift update." was completed, it should have been wrapped in a strikethrough: "~Is tsift properly integrated into multi-crate architecture?~".
+- ~When "Is tsift properly integrated into multi-crate architecture? If not, run tsift update." was completed, it should have been wrapped in a strikethrough: "~Is tsift properly integrated into multi-crate architecture?~".~
 - do [#do-id-closeout-open-backlog]
 - do [#queue-user-edit-overwrite]
 - do [#prompt-preempts-auto-queue]

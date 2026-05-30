@@ -140,7 +140,21 @@ The boundary is plausible because `session-review`, `session-digest`, `session-c
 The better sequence is: split `tsift-cli` by command first, then extract agent-doc parsing/aggregation once the CLI only formats and routes those results. Keep budget/envelope rendering in `tsift-cli`; move parsing, aggregation, guardrails, and fixtures only after their public API is small and stable.
 
 No repo changes for this advisory response.
-<!-- agent:boundary:eae5796c -->
+❯ Add #next-steps
+
+### Re: Add #next-steps — gpt-5
+
+Added three prioritized backlog items.
+
+Top backlog id: `#agent-doc-domain-boundary`.
+
+Changed paths: session document only.
+Commands: `tsift status --fix`, `agent-doc preflight`, `agent-doc plan`, component reads, and `agent-doc finalize`.
+Verification: no repo code changed, so no project test suite was run for this backlog-only preset.
+Confidence: high.
+Escalation: none.
+
+<!-- agent:boundary:1193c728 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -161,6 +175,9 @@ dispatch #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#agent-doc-domain-boundary] Extract a tsift-agent-doc domain crate for session-review, session-digest, session-cost, agent-doc log parsing, guardrails, and fixtures after the CLI command/domain boundary is small enough to keep rendering in tsift-cli.
+- [ ] [#graph-neighborhood-budget] Improve graph and neighborhood queries with bounded scoring/caps so context packs return high-signal callers, callees, and nearby symbols without broad graph expansion.
+- [ ] [#token-action-coverage] Add fixture-backed coverage for prompt_budget, cache_resend, and restart_loop next_token_actions so bounded session reviews avoid duplicate failure/action rows beyond the noop_closeout case.
 <!-- /agent:backlog -->
 
 ## Review

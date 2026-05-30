@@ -36,6 +36,7 @@ Compacted content:
 - Archived 8 response topic(s): token savings, graph neighborhoods, and claude-mem; first-party memory crate/plugin; tsift-memory crate/plugin; 5 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
 ❯ Can we replace claude-mem with tsift-memory? Can we migrate all claude-mem data into tsift-memory?
+
 ### Re: claude-mem and tsift-memory — gpt-5
 
 Yes, but there are two meanings of "replace".
@@ -55,7 +56,8 @@ Caveat: "all `claude-mem` data" is not true yet if it means every byte/table. `p
 Practical answer: use `tsift-memory` as the new first-party memory substrate, migrate the supported `claude-mem` rows now, and keep the old `claude-mem` DB as a read-only compatibility source until pending-message import and live capture hooks are added. I did not apply the import.
 
 Proof: changed paths: none by hand; document response/backlog only through `agent-doc finalize`. Verification commands: `tsift memory status ... --json`, `tsift memory import-claude-mem ... --json`, and full dry-run with `--limit 40000`. Escalation: none. Confidence: high for current supported migration behavior, medium for full replacement until the live hook and pending-message gaps are closed.
-<!-- agent:boundary:61530c35 -->
+#next-steps
+<!-- agent:boundary:a2e0390b -->
 <!-- /agent:exchange -->
 ###
 <!--

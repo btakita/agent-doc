@@ -59,7 +59,24 @@ So the highest-leverage agent-doc work per the data is **finalize/write pipeline
 **Top of the backlog: `#ipcfullprompt-recur2`** — the document-corruption/duplication class is the most severe of the data-flagged finalize failures (it can require a raw `git checkout` to recover), so it outranks the high-frequency-but-low-severity done-guard quick win at #2.
 
 **Note (queue divergence):** you flipped `agent:queue` to `auto`, but its `do [#id]` list was frozen in the *previous* order, so the auto-drain would still start at `#codex-final-response-not-written`, not the new top. A real prompt (this one) took precedence so I did **not** auto-loop. Before resuming the drain, say the word and I'll regenerate the queue to match this new priority (or you can re-trigger it) — otherwise it'll execute stale-ordered. Two report items I did *not* turn into agent-doc backlog entries: the observer/claude-mem "Prompt is too long" failures and the Cloudflare token-scope stalls are outside agent-doc's scope.
-<!-- agent:boundary:770ce4c6 -->
+- Please add a `priority` attribute to `agent:backlog`, `agent:icebox`, `agent:queue` that will order the item list by priority. #next-steps
+- Please add a `queue=sync|append|prepend` attribute to `agent:backlog` and `agent:icebox`. `queue=sync` will replace the content of the `agent:queue` with a list to run each item id. `queue=append` will append the item ids that are not already in the `agent:queue`. `queue=prepend` will prepend the item ids that are not already in the `agent:queue`. `queue` can be used with `priority` to first prioritize the list then update the `agent:queue`. #next-steps
+
+### Re: #next-steps — priority + queue-sync component attributes — opus-4-8
+
+Both captured as backlog items — and they're well-aimed: they'd turn the last three cycles of *manual* `--pending-reorder` + hand-regenerating the queue into declarative component attributes.
+
+- **`#backlog-priority-attribute`** — a priority flag on `agent:backlog` / `agent:icebox` / `agent:queue` so the binary keeps the list in priority order instead of me running `--pending-reorder` each `#next-steps` pass.
+- **`#backlog-queue-sync-attribute`** — `queue=sync|append|prepend` on the backlog/icebox: `sync` replaces the queue with a `do [#id]` list, `append`/`prepend` add only ids not already queued — composable with the priority flag (prioritize, then sync). This is exactly the "regenerate the queue to the new priority" step I had to offer by hand last cycle.
+
+I placed both in the **ergonomics tier** (with `#ah0s`), below the data-flagged finalize-reliability bugs — they're tooling conveniences, not the duplication/done-guard reliability issues the usage report ranked first. They don't change the top.
+
+**Top of the backlog: `#ipcfullprompt-recur2`** (unchanged). I also see you moved `do [#ipcfullprompt-recur2]` to the `agent:queue` head by hand — that re-syncs the queue head to the new top.
+
+Process note: my first attempt at this write failed because the `#backlog-priority-attribute` item text I added literally contained an `agent:backlog` HTML-comment marker form, which the parser read as a nested unclosed component — a live instance of the "unclosed patch/marker" class the usage report flagged. I repaired the item text (no marker syntax in prose) and re-committed.
+
+These are captured as `#next-steps`, not implemented. Want me to start implementing — the top reliability item `#ipcfullprompt-recur2`, or these two ergonomics attributes (which make future reprioritization self-maintaining)?
+<!-- agent:boundary:6f5b4a3c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -93,8 +110,8 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#codex-final-response-not-written]
 - do [#ipcfullprompt-recur2]
+- do [#codex-final-response-not-written]
 - do [#prompt-preempts-auto-queue]
 - do [#codex-owned-pane-prompt-miss]
 - do [#pending-add-suppresses-queue-consume]
@@ -129,6 +146,8 @@ preset #spec-test-build-install-commit-push
 - [ ] [#stash-session-ttl-prune] [recommended] Optional opt-in hygiene to cap stash-session accumulation: reap agent-doc stash panes whose session has been idle in the stash beyond a configurable TTL. Distinct from the existing orphan reap (resync.rs step 8), which only kills unregistered + no-supervisor + no-owned-file panes; live registered/supervisor-backed sessions are correctly never auto-killed, which is why ~9 agent-loop agent-doc panes accumulate in the shared session-0 stash. Must be opt-in (frontmatter/.agent-doc config) + live-verified before enabling (destructive). Relates to #cross-project-stash-pane-condition and #jb-busy-queue-ux-feedback.
 - [ ] [#next-steps-backlog-capture] Agent responses containing #next-steps recommendations do not auto-add items to backlog when prompt preset is present. Agent must manually call `--pending-add` but the planning output `pending_mutations: expect_add` is not enforced by session-check `pending_done_guard`.
 - [ ] [#ah0s] [recommended] Add explicit-position --pending-add primitives so ordered backlog batches never depend on implicit prepend-vs-argorder semantics: --pending-add-after <id>, --pending-add-before <id>, --pending-add-back/--pending-append, keeping --pending-add as the front-insert default. Backlog is a priority pool with ID-based consumption (not a stack/queue; FIFO lives in agent:queue), so position should be author-set explicitly when it matters. Two agents (open-code.md #adcr waves f94e7851c; corky.md crate-split phases fc8d9b3bc) both reversed args expecting prepend-flip and got reverse-of-intended order. Pairs with #pending-add-append-not-prepend (that item finalizes the default-order decision; this adds the explicit escape hatches). Plan: tasks/agent-doc/plan-pending-add-explicit-position.md.
+- [ ] [#backlog-priority-attribute] [recommended] Add a priority attribute to agent:backlog / agent:icebox / agent:queue that orders the item list by priority (a component-level priority flag and/or per-item priority markers), so the binary maintains priority order instead of requiring manual --pending-reorder each cycle. Automates the by-hand reprioritization done in #next-steps cycles. Composable with #backlog-queue-sync-attribute; sibling of #ah0s (explicit-position primitives). Requested 2026-05-30.
+- [ ] [#backlog-queue-sync-attribute] [recommended] Add a queue=sync|append|prepend attribute to agent:backlog / agent:icebox: queue=sync replaces agent:queue content with a do [#id] list for every item; queue=append adds item ids not already in agent:queue; queue=prepend prepends them. Composable with #backlog-priority-attribute (prioritize first, then regenerate the queue), automating the manual 'regenerate the queue to the new priority' step that currently has to be done by hand after a reorder. Requested 2026-05-30.
 <!-- /agent:backlog -->
 
 ## Review

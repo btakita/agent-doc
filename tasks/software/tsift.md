@@ -88,7 +88,27 @@ Verification:
 - `make check` passed (`tart-bafabf8a37`)
 - `tsift status --fix` reports index fresh and instructions current
 - Latest GitHub Actions CI run `26651628506` is green with `clippy + test` and `live Convex graph acceptance`; there is no separate tmux-test job in that workflow.
-<!-- agent:boundary:e6c715b6 -->
+
+### Re: token closeout no-op dedupe — gpt-5
+
+Done for `#token-closeout-noop-dedupe`. Preflight had already auto-struck `#split-tsift-cli-subcommands` as review-gated/already resolved, so this cycle handled the no-op closeout item and recorded both closeouts as required by the pending-done guard.
+
+I changed bounded `session-review --next-context` preview assembly so guardrail-derived failure rows are omitted when a `next_token_actions` row already covers the same guardrail kind. The full session-review JSON still keeps the raw guardrail evidence and loop cluster data; the bounded handoff now emits a single actionable row for the `noop_closeout` family instead of both `fail guardrail:noop_closeout` and `token-action noop_closeout`.
+
+I added a fixture-backed regression at `fixtures/session-review/commit-already-current-churn.log` that exercises agent-doc log discovery, document-cycle `commit_already_current` dedupe, closeout churn loop clusters, and the bounded next-context token action output.
+
+Commits:
+- `61b6c9a` in `src/tsift`: `fix: collapse noop closeout guidance`
+- `960b14998` in the parent repo: `chore: update tsift submodule for closeout guidance`
+
+Verification:
+- `cargo test -p tsift-cli session_review_next_context_collapses_noop_closeout_guidance -- --nocapture` passed (`tart-5389a9e7aa`)
+- `cargo test -p tsift-cli session_review_next_context_budget_limits_lists` passed (`tart-939ee45fcd`)
+- `cargo test -p tsift-cli session_review` passed (`tart-8a6f518700`)
+- `cargo test -p tsift-session agent_doc_log_dedupes_document_cycle_runtime_events_by_cycle` passed (`tart-ff46fce060`)
+- `make check` passed after the final test adjustment (`tart-b94b8a176e`)
+- Latest GitHub Actions CI run `26651628506` is green with `clippy + test` and `live Convex graph acceptance`; there is no separate tmux-test job in that workflow.
+<!-- agent:boundary:e6bd1528 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -109,13 +129,11 @@ dispatch #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#token-closeout-noop-dedupe] [recommended] Reduce token waste from repeated agent-doc no-op closeouts by adding a fixture-backed session-review regression for commit_already_current churn and tightening the emitted guidance to one actionable row per cycle family.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
-- [/] [#split-tsift-cli-subcommands] [recommended] tsift-cli is ~39k LOC in a single lib.rs — propose per-command module split (cmd_search, cmd_index, cmd_graph, cmd_explain, etc.) once root tsift is drained, to make command surface independently testable
 - [/] [#full-e2e-verify] In fresh project: opencode plugin opencode-tsift && opencode then /tsift-status. On success mark #e2e-install done.
 - [/] [#npm-publish-verify] After auth configured, tag release and verify publish-opencode-plugin CI job succeeds and opencode-tsift appears on npmjs.org
 - [/] [#npm-auth-setup] Configure NPM_TOKEN secret + TSIFT_ENABLE_NPM_PUBLISH=true variable in GitHub repo settings

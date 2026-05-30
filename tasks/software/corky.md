@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Session History
@@ -133,7 +133,11 @@ Local proof:
 - Verification: no code verification was needed because no repo files changed. The Google Cloud check was blocked because `gcloud` exits `127` here.
 - Confidence: high that verification is the required path to remove the unsafe/unverified screen; medium on the project number until you confirm it from the client ID.
 - Escalation: none.
-<!-- agent:boundary:410f693e -->
+
+### Re: Register the GCP App with Google so I don't get the unsafe menu. — gpt-5
+
+Handled in the preceding response. I could not complete the Google-side registration from this shell because `gcloud` is unavailable here and Google requires a project owner/editor to submit OAuth app verification in Cloud Console. The actionable checklist above is the path to remove the unsafe/unverified warning; no local repo or Cloud project files were changed.
+<!-- agent:boundary:c079bfb7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -143,7 +147,8 @@ Please give me a report the performance
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+- Register the GCP App with Google so I don't get the unsafe menu.
 <!-- /agent:queue -->
 
 ## Backlog

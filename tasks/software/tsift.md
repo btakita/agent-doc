@@ -104,7 +104,42 @@ Commands used: `tsift status`, `tsift status --fix`, `agent-doc preflight`, and 
 Verification: document-analysis cycle only; no source verification required.
 
 Confidence: high. The important constraint is to keep `claude-mem` as an import source until tsift proves the new pipeline with measured retrieval and persistence results.
-<!-- agent:boundary:e587ea02 -->
+
+### Re: tsift-memory crate/plugin — gpt-5
+
+Implemented `#tsift-memory-crate-plugin` as a first-party tsift memory spike and marked the backlog item done.
+
+Changed paths:
+- `src/tsift` commit `191e76b9703b4ba951bf0599ef9041cec7e1d32f` (`feat: add first-party tsift memory crate`), pushed to `btakita/tsift main`.
+- Root superproject commit `11231e961` (`chore: update tsift submodule`), pushed to `btakita/agent-loop main`.
+- Main touched areas inside `src/tsift`: `packages/tsift-memory/`, `packages/tsift-cli/src/commands/memory.rs`, `packages/tsift-cli/src/cli.rs`, `packages/tsift-index/src/init.rs`, `packages/opencode-tsift/commands/tsift-memory-status.md`, `SPEC.md`, root reexports, and lock/workspace metadata.
+
+What changed:
+- Added a new `tsift-memory` crate with `.tsift/memory.db` schema versioning for memory events, summaries, artifacts, tool spans, embeddings, graph links, and import runs.
+- Added token-budgeted handoff planning so oversized memory/tool artifacts are split before model calls instead of becoming prompt-overflow failures.
+- Added agent-doc hook contract primitives for prompt targets, tool artifacts, response summaries, closeout proof, and session-check events.
+- Added provider-neutral graph projection primitives for `memory_session` and `memory_event` nodes.
+- Added a real `claude-mem` SQLite migration surface: `inspect_claude_mem` plus dry-run/apply import from `observations`, `session_summaries`, and `user_prompts`, while reporting adjacent Chroma availability.
+- Added CLI surfaces: `tsift memory status`, `init`, `import-claude-mem`, `handoff-plan`, and `query-plan`.
+- Added an OpenCode plugin shortcut `/tsift-memory-status` and kept `tsift init --opencode` and the npm package command set in sync.
+- Updated `SPEC.md` and root reexports so `tsift::memory` is part of the public package shape.
+
+Commands and verification:
+- `tsift rewrite --run 'cargo check --workspace'` passed.
+- `tsift rewrite --run 'cargo test -p tsift-memory -p tsift-cli -p tsift-index'` passed.
+- `cargo run -- memory status . --json` passed and detected the local `claude-mem` tables plus Chroma directory.
+- `cargo run -- memory handoff-plan 'short memory event' --budget-tokens 1000 --json` passed.
+- `cargo run -- memory import-claude-mem . --limit 2 --json` passed as a dry-run and planned six events.
+- `tsift rewrite --run 'cargo clippy --workspace --all-targets -- -D warnings'` passed.
+- `tsift --envelope __digest-runner --kind log --path . --shell-command 'make check'` passed. The digest flagged one expected-looking test-fixture `opening index db` line, but the command exit code was 0 and reported test groups passed.
+- `tsift rewrite --run 'cargo install --path . --force'` passed.
+- Installed `tsift memory status . --json` passed.
+- Latest GitHub Actions CI for `btakita/tsift` was successful: run `26691925937`, jobs `clippy + test` and `live Convex graph acceptance`. There is no separate `tmux-test` workflow/job in this repo.
+
+Escalation: none.
+
+Confidence: high for the spike boundary. This establishes the owned schema/API/CLI/plugin contract and a working `claude-mem` migration path; the remaining queue items should build the stricter budget guard, graph-db adapter, ranked neighborhood budgets, eval harness, and summary readiness gate on top of this substrate.
+<!-- agent:boundary:60409b95 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -115,7 +150,7 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#tsift-memory-crate-plugin]
+- ~do [#tsift-memory-crate-plugin]~
 - do [#tsift-memory-budget-guard]
 - do [#tsift-claude-mem-adapter]
 - do [#tsift-neighborhood-token-budget]

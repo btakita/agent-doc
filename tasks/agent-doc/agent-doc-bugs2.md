@@ -30,29 +30,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260530-205109.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260530-210909.md`*
 
 Compacted content:
-- Archived 4 response topic(s): do #prompt-preempts-auto-queue; continue; do #jb-compact-repair-left-uncommitted; 1 more
+- Archived 1 response topic(s): auto-add backlog tasks to ungate review items
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: auto-add backlog tasks to ungate review items — opus-4-8
-
-Implemented as the **on-demand command** you chose: `agent-doc review ungate-tasks <FILE>`. **Done** — fully implemented, tested, and live-verified. (This cycle built the capability; it created no actionable follow-up items of its own. )
-
-#### What landed
-
-- **`pending_cmd.rs`** — `add_ungate_tasks_for_review()` + `UngateTasksReport`. Scans `agent:review` for gated `[/]` items and adds one `[recommended] Ungate review item #<id> — validate and move to done` backlog task per item, so gated items aren't stranded in review. **Idempotent**: a review id already covered by an ungate task (its own generated text, or any backlog line naming ungate + the id) is skipped.
-- **`main.rs`** — new `Review` command with `ReviewAction::UngateTasks { file }`, routed to print the scan/add/skip summary.
-
-#### Verification
-
-- 2 unit tests: one ungate task per gated review item + idempotent re-run (skips already-tracked); no-op when no gated review items.
-- **Live CLI smoke test** on a scratch doc with two gated review items: `scanned review: 2`, `added 2`, then a re-run reported `added 0 / skipped 2`, with the backlog gaining two `[recommended] Ungate review item #… — validate and move to done` entries above the existing item.
-- `make check` green (clippy `-D warnings`); both binaries rebuilt + installed.
-
-Run `agent-doc review ungate-tasks <FILE>` whenever you want backlog follow-ups for the items gated into review this session. I deliberately did not wire it into `--pending-gate` (your on-demand choice), so there are no surprise backlog mutations.
-<!-- agent:boundary:5a2562d4 -->
+<!-- agent:boundary:c6b8f9f4 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->

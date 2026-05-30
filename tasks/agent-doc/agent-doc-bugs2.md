@@ -63,7 +63,26 @@ Concretely, three things put the marker there:
 So the marker means: *diagnosed and planned, but do not write code until you explicitly authorize it.* Standard lifecycle for any `#agent-doc-bug`-filed item — it stays `DO NOT IMPLEMENT` until you say "implement #backlog-auto-marker-misfire" (or similar) in the document or chat. You removing the queue's `auto` attribute this turn is consistent with keeping it parked.
 
 (Side note: this turn's `stuck_captured_cycle` warning is again a false positive — the cited body *is* in HEAD; the capture's recorded snapshot hash just went stale after the follow-up pending-only commit advanced HEAD. Same family as `#stuck-capture-compact-false-positive`; no recovery run.)
-<!-- agent:boundary:add1a1bf -->
+❯ Please validate the fix for [#backlog-auto-marker-misfire].
+
+### Re: Validate the fix for #backlog-auto-marker-misfire — opus-4-8
+
+I read "validate the fix" as **validate the *proposed* fix in the plan** (no fix code exists — the item is `DO NOT IMPLEMENT`), so this is a static, read-only validation of the plan's three root-cause hypotheses against current v0.34.0 source. **I did not implement anything.** Findings are recorded in `plan-backlog-auto-marker-misfire.md` under a new "Validation against current source" section (committed `2fe0ca366`).
+
+**Verdict: the data-loss path is already prevented by queue-scoping; only the defensive warn remains genuinely open.**
+
+| Plan hypothesis | Holds in v0.34.0? | Evidence |
+|---|---|---|
+| #2 auto-loop keys off `auto` *wherever* it appears | **No** | All 14 production `has_auto_attr()` call sites pass attrs of a component resolved by `find(\|c\| c.name == "queue")` (run.rs, preflight.rs, route.rs, write.rs, codex_hook.rs, plan.rs, orchestrate.rs). No path reads the `backlog` component's attrs. |
+| #3 auto-run destructively rewrites the backlog | **No (for backlog)** | The ID-minting expansion (`orchestrate.rs::queue_task_batch`) reads only the `queue` component and bails unless the queue is active. Nothing lets a backlog `auto` attr drive a backlog rewrite. |
+| #1 marker parser tolerates unknown attrs on `agent:backlog` | **Yes — unaddressed** | `component::parse_attrs` (component.rs:577) accepts any token into the attrs map with no per-component validation/warning. `&lt;!-- agent:backlog auto --&gt;` (and the `auot` typo) still parse silently — but the result is now **inert** because no consumer reads backlog attrs. |
+
+**What this means:** Against current code the destructive misfire does **not** reproduce statically. The auto-loop and the `do [#…]`-stub ID-minting are both strictly queue-sourced, so an `auto`/`auot` on the backlog marker is silently accepted but does nothing. The only remaining value in the planned fix is **defensive UX** — warn/reject a misplaced `auto`/unknown attr on `agent:backlog` ("did you mean `agent:queue auto`?"), proposed fix #1, plus optionally the recovery snapshot (fix #4).
+
+**Honest uncertainty:** this is a static read of current source only. I could **not** pin the original corruption to a specific prior version/path — its shape (`preset #…` line + `- [ ] [#minted] do [#oldid]`) matches the orchestration task-batch *backlog write-back* output, so the historical trigger was an orchestration write-back that, in today's code, only sources from `queue`. Whether the queue-scoping that closes #2/#3 was pre-existing or landed with the recent queue-auto convergence work isn't proven without git archaeology of the orchestration write-back at report time.
+
+`#backlog-auto-marker-misfire` stays `DO NOT IMPLEMENT`. If you want the defensive warn (fix #1) actually built, say "implement #backlog-auto-marker-misfire" and I'll scope it to a parser-level warning with the regression tests the plan lists.
+<!-- agent:boundary:239e09b3 -->
 <!-- /agent:exchange --> 
 ###
 <!--
@@ -101,6 +120,7 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#ah0s] [recommended] Add explicit-position --pending-add primitives so ordered backlog batches never depend on implicit prepend-vs-argorder semantics: --pending-add-after <id>, --pending-add-before <id>, --pending-add-back/--pending-append, keeping --pending-add as the front-insert default. Backlog is a priority pool with ID-based consumption (not a stack/queue; FIFO lives in agent:queue), so position should be author-set explicitly when it matters. Two agents (open-code.md #adcr waves f94e7851c; corky.md crate-split phases fc8d9b3bc) both reversed args expecting prepend-flip and got reverse-of-intended order. Pairs with #pending-add-append-not-prepend (that item finalizes the default-order decision; this adds the explicit escape hatches). Plan: tasks/agent-doc/plan-pending-add-explicit-position.md.
 - [ ] [#pending-add-suppresses-queue-consume] [recommended] Bundling --pending-add in the same finalize as a queue-head-targeting response suppresses queue-head consumption: finalize logs 'skipped consumption because the active prompt did not target the queue head' and treats the pending-add as the active prompt, even when the response heading exactly matches the head (Re: do #ID form, no brackets). Repro 2026-05-29 agent-doc-bugs2.md declining backlog-auto-marker-misfire with a bundled --pending-add — head stayed unstruck. Fix: heading/queue-head match should drive consumption independently of bundled pending mutations, or consume the head when the response heading matches regardless of detected active prompt.
 - [ ] [#stuck-capture-compact-false-positive] [recommended] stuck_captured_cycle false-positive after compaction: a capture recorded as committed (cycle-1780100032048, response 'gate→done for codex guidance') is later archived by compact, so preflight reports committed-but-not-in-HEAD and suggests `write --commit` recovery — which would re-inject an already-archived response (it lives in .agent-doc/archives/<hash>-*.md). Fix: when a captured-committed body is absent from HEAD because it was compacted (present in the matching archive), reconcile the capture instead of flagging it stuck. Repro 2026-05-29 agent-doc-bugs2.md.
 - [ ] [#pending-gate-snapshot-desync] `--pending-gate <id>` lands the gate ([/], moved to review) on the working-tree disk but NOT the committed snapshot when the IPC listener is dead and the write goes through the CRDT-merge / --force-disk path: the snapshot is saved from content_ours (baseline+response, item still [ ]) before the gate mutation, so commit sees snapshot==HEAD and leaves the gate uncommitted as post-commit local drift. Repro 2026-05-29 on agent-doc-bugs2.md finalizing the codex heading-guidance item; --done does NOT hit it (reap is captured pre-snapshot). Fix: apply pending gate/edit mutations before saving content_ours / the commit snapshot.

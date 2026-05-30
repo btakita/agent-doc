@@ -35,7 +35,37 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 2 response topic(s): Usage report → reprioritized agent-doc backlog; #next-steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:e955e272 -->
+### Re: do #ipcfullprompt-recur2 — opus-4-8
+
+Editor-side `PatchWatcher.setText` prevention is now comprehensive across **every** editor-visible whole-buffer write path. Closed the last gap; the item stays gated on live IntelliJ verification (which can't be driven headlessly). It is NOT marked done — `#ipcfullprompt-recur2` is gated in review, and `#ipc-dup-tracking-double-merge` is cited only as a related already-fixed cause.
+
+#### Already in place (audit)
+- **`fullContent` rejection on all transports** — socket patch, file patch, component apply, and VFS apply all reject any `fullContent` payload (plan Phase 5).
+- **Apply-proof re-check before every `Document.setText`** — both Document-API sites (`repositionBoundary`, `applyPatch.component`) capture `EditorApplyProof(text, modificationStamp)` and re-validate via `editorApplyProofStillCurrentUtil` inside the `WriteCommandAction`, immediately before `setText`; stale generation → reject + retry (plan Phase 3).
+- **Typing debounce** — `awaitIdleBeforeDocumentMutation` gates Document mutations behind FFI `await_idle`.
+- **Duplication root causes fixed** — `#ipc-dup-tracking-double-merge` (PromptPoller `trackingKey`) in 0.2.138; the binary prompt-tail-deletion cause in the route path.
+
+#### Landed this cycle (0.2.140)
+The one editor-visible whole-buffer write lacking an immediate-before-write guard was the **VFS path** (`applyPatchViaVfs` → `setBinaryContent`, for files not open in an editor). It computed `result` from a disk read taken at the top of the apply, then wrote the whole buffer back with no re-validation — a concurrent disk change could be clobbered.
+
+- Added `vfsDiskContentStillCurrentUtil` (not-open-file analog of `editorApplyProofStillCurrentUtil`).
+- `applyPatchViaVfs` now re-reads disk immediately before `setBinaryContent` inside the write action and **fails closed** (leaves the patch file for the binary to retry) when disk no longer matches the bytes the patch was computed from.
+- Deterministic Kotlin regressions in `DocumentMutationDiagnosticTest`: `vfs guard allows write when disk is unchanged` / `vfs guard rejects write when disk changed under us`.
+
+#### Verification
+- `./gradlew test` — green.
+- `./gradlew buildPlugin signPlugin` — `agent-doc-jetbrains-0.2.140-signed.zip` built (past the 0.2.137 gate).
+- `make check` (full Rust suite) — green, 0 failed (Rust untouched this cycle).
+- No Rust/FFI/cdylib change → no `cargo install` / `lib-install`; the deliverable is the signed plugin zip.
+
+#### Mermaid + "can we mathematically eliminate it?"
+On the earlier exchange questions: full elimination reduces to a single invariant — **every** whole-buffer write must re-validate its source bytes against the live target immediately before writing, under the same lock that performs the write. With this cycle that invariant now holds on all four PatchWatcher write paths (socket, file, Document reposition/component, VFS), backed by the binary-side fail-closed guards (`guard_ipc_snapshot_adoption_against_live_prompt_drift` / `..._against_prompt_duplication`). Residual risk is purely outside the guarded window (a foreign/old plugin emitting `fullContent`), which is rejected, not applied.
+
+#### Why still gated (not done)
+The item's contract is "stays open until prevention lands **and is live-verified**," gated on a captured `idea.log` transport/payload packet pinning the exact `setText` shape. That packet was never captured (JB debug logging off during repros), and live verification needs installing 0.2.140, restarting IntelliJ, and catching a recurrence via the in-place v0.2.135 diagnostics — a reproduction the user reports is unreliable. Both are interactive-IntelliJ steps outside this headless session.
+
+**Next step (you):** install `agent-doc-jetbrains-0.2.140-signed.zip`, restart, enable `#com.github.btakita.agentdoc` debug logging, run normal sessions. If corruption recurs, the paired `[patch-watcher] document-mutation … user_region_changed=true` (idea.log) + `ipc_snapshot_adoption_(allowed|blocked)` (ops.log) lines pin the transport/payload; if it doesn't recur, this can move to done.
+<!-- agent:boundary:e3b2f4ba -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -69,7 +99,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#ipcfullprompt-recur2]
+- ~do [#ipcfullprompt-recur2]~
 - do [#codex-final-response-not-written]
 - do [#prompt-preempts-auto-queue]
 - do [#codex-owned-pane-prompt-miss]

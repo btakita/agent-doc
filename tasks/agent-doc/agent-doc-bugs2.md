@@ -30,96 +30,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260530-200534.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260530-205109.md`*
 
 Compacted content:
-- Archived 1 response topic(s): do #queue-user-edit-overwrite
+- Archived 4 response topic(s): do #prompt-preempts-auto-queue; continue; do #jb-compact-repair-left-uncommitted; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: do #prompt-preempts-auto-queue — opus-4-8
-
-Landed the snapshot-independent unresolved-exchange-prompt detector and wired it into the Codex final-gate so a live prompt preempts queue continuation. **Gated** (not done) — the preflight/run/route halves remain; see below.
-
-#### What landed
-
-- **`session_check.rs`** — new `unresolved_exchange_prompt(file)` (+ pure `unresolved_exchange_prompt_in_content`): parses `agent:exchange`, finds the latest `agent:boundary`, and reports user-authored text after it that no `### Re:` heading answers. This is **snapshot-independent** — it fires even when the prompt was already baselined into the `.agent-doc` snapshot (the exact live-repro failure where the ordinary diff saw only queue bookkeeping).
-- **`run_with_options` (session-check)** — when queue continuation is detected but an unresolved exchange prompt exists, defer: print `queue_continuation_required=false queue_deferred_for_unresolved_exchange_prompt=…` and skip the Codex final-gate `exit 2`, so the next cycle answers the prompt instead of forcing the queue head.
-
-#### Verification
-
-- 4 new unit tests: unanswered tail after boundary → detected; answered tail → none; empty tail (normal post-closeout shape) → none; fresh prompt without a boundary → detected.
-- Confirmed the normal auto-loop is unaffected: after a closeout the boundary sits at the end of the exchange, so the tail is empty and continuation proceeds (this document's own drain is unbroken).
-- `make check` green (clippy `-D warnings` clean); both binaries rebuilt + installed. No FlowCore budget change.
-
-#### Gated — remaining scope (plan-prompt-preempts-auto-queue.md)
-
-Covered: the precedence helper + Codex final-gate deferral (plan items 1 and 5, partial). Still open: preflight emitting a synthetic `exchange_unresolved` prompt diff with `user_intent_prompt_changes` set (so the Claude auto-loop skips queue continuation), direct-`run` prompt precedence over the active-queue synthetic head, and route queue-snapshot recovery not absorbing unanswered exchange prompts. Those touch the diff/`no_changes` and route-recovery machinery and are deferred for focused work rather than a broad change in this cycle.
-❯ continue
-
-### Re: continue — opus-4-8
-
-Continued with the queue head `#jb-compact-malformed-response-commit`. Landed a fail-closed validator that blocks malformed compact output before commit. **Gated** (not done) — root-cause normalization + HEAD coverage remain; see below.
-
-#### What landed
-
-- **`compact.rs`** — new `malformed_compact_summary_lines()` + `validate_compacted_exchange()`, called at the top of `apply_compacted_document` (the single replacement boundary for all compact paths: inline, component, partial). It detects the live-repro corruption — a compact summary line rendered as a user prompt (`❯ *Compacted. Content archived ...*`) — and fails closed with a precise repair diagnostic **before any write**, so the malformed exchange never reaches disk or HEAD.
-
-#### Verification
-
-- 3 new tests: malformed `❯`-prefixed summary detected; clean `*Compacted...` summary under `### Session Summary` not flagged (no false positive); `apply_compacted_document` returns an error and leaves the file untouched on malformed input.
-- `make check` green (clippy `-D warnings`); both binaries rebuilt + installed.
-
-#### Gated — remaining scope (plan-jb-compact-malformed-response-commit.md)
-
-Covered: structural fail-closed before commit (plan items 3-4). Still open: the root-cause normalization audit (item 2 — *why* the archived prompt tail leaks its `❯` onto the summary line, so compaction produces clean output rather than just rejecting bad output), the "unarchived response body belongs to an archived topic" check (needs archive context, risks false-positives with partial compact), and `session-check` coverage classifying an already-committed malformed compacted exchange in HEAD as compact drift (item 5).
-
----
-
-Note: you removed `auto` from the queue and typed `continue`, so I treated this as manual steering — I ran this one item but will **not** re-arm the auto-loop. The queue still has 15 items (`#jb-compact-repair-left-uncommitted` next). Say `continue` again for the next one, or re-add `auto` to the queue tag to resume hands-off draining.
-
-### Re: do #jb-compact-repair-left-uncommitted — opus-4-8
-
-Made the uncommitted-compact state non-silent. **Gated** (not done) — root-cause investigation + route/preflight classification remain; see below.
-
-#### What landed
-
-- **`compact.rs`** — `run()` now re-reads the document after compaction and, when it changed but `--commit` was not passed, records a `compact_left_uncommitted` ops-log entry and prints an explicit WARNING naming the dirty state and the exact recovery command (`agent-doc compact <FILE> --commit` / `agent-doc write --commit <FILE>`). This directly addresses the plan's "should not silently leave a repaired document dirty": a JB action calling bare `compact` (no `--commit`) previously left corrected-visible / stale-HEAD with no signal.
-
-#### Precondition now mitigated
-
-The sibling fix `#jb-compact-malformed-response-commit` (prior cycle) makes a malformed compact fail closed **before** any write, so the "malformed compact result in HEAD, then a dirty correction on top" sequence that produced this bug can no longer originate from the binary's compact path.
-
-#### Verification
-
-- New test: bare `compact` (no `--commit`) on a changed template doc records `compact_left_uncommitted`. The existing `--commit` test (commits + writes vcs-refresh signal) still passes, confirming commit semantics are unchanged.
-- `make check` green (clippy `-D warnings`); both binaries rebuilt + installed.
-
-#### Gated — remaining scope (plan-jb-compact-repair-left-uncommitted.md)
-
-Covered: non-silent dirty-state diagnostic (partial item 3). Still open: reconstructing the exact repair path that produced the live dirty correction (items 1-2 — investigation), the atomic-commit-or-fail-closed repair invariant including mixed user-edit detection (item 3 full), route/preflight classifying an uncommitted compact repair separately from new prompt input (item 4), and the JB notification test (item 5). These touch the repair/git/route interaction and need the path reconstruction before a safe change, so deferred from a blind edit.
-
-### Re: do #jb-run-agent-doc-response-queue-contamination — opus-4-8
-
-Landed a session-check guard that rejects assistant response prose leaked into `agent:queue`. **Gated** (not done) — the route-side enqueue audit + provenance metadata remain; see below.
-
-#### What landed
-
-- **`session_check.rs`** — new `check_queue_response_contamination_guard` (wired into the inspect chain) with two helpers: `assistant_response_text()` (collects `### Re:` body prose from the exchange) and `is_queue_directive_prompt()` (recognizes `do `/`preset `/`dispatch `/`run `/`#id` shapes). It flags a free-text queue prompt whose first 40 normalized chars appear inside an assistant response body — the exact live-repro corruption (`- Yes. I drove the already-authenticated Google Ads browser session ...` copied from `### Re: #gads106demote`) — and fails closed naming the candidate.
-
-#### False-positive guards
-
-- Directive-shaped queue entries (`do [#id]`, `preset`, `dispatch`, `#id`) are skipped, so normal queues never trip it (this document's own `do [#…]` drain is unaffected).
-- Short free-text prompts (< 20 chars) and free-text not found in any response body are allowed (`#free-text-queue-head-consume` stays valid).
-
-#### Verification
-
-- 3 new tests: response prose in queue → flagged; directive-only queue → clean; legitimate free-text prompt not from a response → clean.
-- `make check` green (clippy `-D warnings`); FlowCore `guard_` budget 31→35 (audited); both binaries rebuilt + installed.
-
-#### Gated — remaining scope (plan-jb-run-agent-doc-response-queue-contamination.md)
-
-Covered: the session-check backstop (plan item 6) + the exchange prompt/response split helper (item 3). Still open: auditing `route.rs` pending-dispatch enqueue + queue-auto regeneration to stop response-body text entering the queue at the source (item 2), and requiring proven queue-addition provenance — user exchange prompt / backlog id / preserved user edit — with a skip+diagnostic when unprovable (items 4-5). Those touch route enqueue synthesis and are deferred for focused work.
-<!-- agent:boundary:3e2d70ea -->
+<!-- agent:boundary:17a24e72 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->

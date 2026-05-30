@@ -35,7 +35,25 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 2 response topic(s): do #codex-auto-queue-live-verify; do #drained-done-queue-clear
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:1bee62ad -->
+
+### Re: #finalize-retry-ipc-response-duplication — opus-4-8
+
+Implemented the CLI-side fix + recovery for the multi-retry/late-IPC response duplication that `❯`-prefixed agent body lines. Three changes in `src/agent-doc/agent-doc-orchestration/src/`:
+
+- **`git.rs` — never `❯`-prefix response body.** `canonicalize_answered_prompt_prefixes` now tracks *why* the prelude walk stops. A prose block that butts directly against a preceding `### Re:` heading (no blank-line/comment separator) is the trailing body of that response — e.g. a duplicated block from a retry — not a fresh user prelude, so it's skipped. This is the root cause of `❯ **Scope:** …` / `❯ **Commits:** …` mis-attribution (hypothesis #2).
+- **`dedupe.rs` — `❯`-insensitive collapse, keep the clean twin.** `normalize_response_block_line` strips a leading `❯` from response-body lines so a corrupted copy still compares equal to its clean committed twin (previously the prefix made them look "new" and slipped past dedupe + over-application guards). `dedupe_responses_with_report` now drops the `❯`-corrupted copy of a duplicate pair (new `block_has_prompt_prefixed_body`), keeping the clean one instead of always-second.
+- **Recovery is now automatic.** Because `is_committed_response_overapplication` (and the consecutive dedupe replay) are `❯`-insensitive, `detect_late_ipc_response_overapplication` / `detect_jb_cache_conflict_accept_duplicate_replay` recognize the corrupted-duplicate shape and `preflight` restores clean HEAD over the working tree — eliminating the manual `git checkout HEAD -- <doc>` the repro required (hypothesis #3).
+
+**New deterministic regression coverage:**
+- `dedupe::dedupe_collapses_prompt_prefixed_corrupted_duplicate` — corrupted duplicate → one clean block, no surviving `❯`, idempotent (stands in for the two-retry `already_applied` convergence invariant).
+- `dedupe::overapplication_detects_prompt_prefixed_corrupted_duplicate`.
+- `git::canonicalize_answered_prompt_prefixes_never_prefixes_duplicate_response_body`.
+- `session_check::detects_prompt_prefixed_corrupted_duplicate_as_overapplication` — remediation restores committed HEAD, no manual checkout.
+
+**Verification:** `make check` green (clippy clean + full suite). Both binaries rebuilt (`cargo build --release` + `cargo install --path .`, exit 0) so the fix is live in `.bin/agent-doc` and `~/.cargo/bin/agent-doc`.
+
+**Scope/honesty:** This is the CLI defensive + auto-recovery layer. Root-cause hypothesis #1 (live-buffer non-idempotence across IPC `already_applied` retries) is plausibly plugin-side — the plan flags confirming whether plugin 0.2.138 eliminates the compounding before adding more CLI machinery. Gating (not closing) this item: code-complete and unit-verified, awaiting live IDE-IPC validation that the corruption no longer recurs and the preflight auto-repair fires in a real session.
+<!-- agent:boundary:a3b9e7c2 -->
 <!-- /agent:exchange --> 
 ###
 <!--
@@ -61,7 +79,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#pending-gate-snapshot-desync]~
 - ~do [#codex-auto-queue-live-verify]. auto-queue in monsterrodholders.md stalled~
 - ~do [#drained-done-queue-clear]~
-- do [#finalize-retry-ipc-response-duplication]
+- ~do [#finalize-retry-ipc-response-duplication]~
 - do [#pending-add-append-not-prepend]
 - do [#next-steps-backlog-capture]
 - do [#run-agent-doc-stale-busy-replay]
@@ -71,7 +89,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#finalize-retry-ipc-response-duplication] [recommended] Multi-retry finalize + live IPC duplicates the response and prefixes its body lines with the user-prompt marker. Live repro 2026-05-29 on agent-doc-bugs2.md: a closeout needing several finalize/write retries (lint-gate / session-check / live_prompt_drift re-runs) with the IDE IPC listener active and concurrent editing left a duplicated response block plus agent body lines wrongly prefixed (uncommitted; HEAD stayed clean; manual git checkout repaired). Fix direction: idempotent retry convergence on IPC already_applied, never prefix agent response body as a prompt, and repair/session-check auto-dedup. Relates to #prompt-duplicated-while-typing, #duplicate-response-after-commit, #ipc-dup-tracking-double-merge (plugin 0.2.138 not yet installed during repro). Plan: tasks/agent-doc/plan-finalize-retry-ipc-response-duplication.md.
 - [ ] [#route-drain-all-surface-live-verify] [recommended] Live-verify the route-drain all-surface reap (submodule b239988b / superproject 4c7b06b7f) resolves the JB Run Agent Doc "completed tracked item blocks dispatch" retry: with the installed binary, reproduce a closeout that leaves a completed [x] item in review or icebox on an IDE-owned doc, then run JB Run Agent Doc once and confirm it dispatches without a manual repeat. Also exercises the #pending-gate-snapshot-desync snapshot re-sync (ab074710) under the route path.
 - [ ] [#codex-auto-queue-stalled-final-gate] Codex auto-queue final gate failed live: after `src/boost-client/tasks/monsterrodholders.md` completed/deployed `#seocat`, the document still had `queue_active: true`, `agent:queue auto`, and next head `do [#seopdp]`, but Codex sent a normal final answer instead of continuing/blocking. This is the failed live proof for `#codex-auto-queue-live-verify`. Fix by adding a binary-owned durable "queue continuation required" marker/final gate that successful closeout writes when a ready auto-queue head remains, and teach Codex Stop/session-check strict mode to block final answers even when transient hook session state is missing or the turn used a manual/recovery closeout path. Plan: tasks/agent-doc/plan-codex-auto-queue-stalled-final-gate.md.
 - [ ] [#active-queue-persisted-no-continue] Active persisted queues can stall after a successful closeout when `queue_active: true` remains but the queue tag lacks `auto`: the next head is ready, yet continuation paths only consider `agent:queue auto` (`codex_hook.rs::active_auto_queue_prompt` requires the attr; direct continuation gates on an auto outcome; Claude guidance checks `queue_trigger == "auto"`). Repro 2026-05-30 `tasks/agent-doc/agent-doc-bugs2.md`: plain `agent:queue` (no auto attr), `queue_active: true`, five remaining heads beginning `#pending-gate-snapshot-desync`, no next cycle launched after closeout. Treat `auto` as a start trigger and `queue_active` as the continuation signal, or halt with an explicit reason. Plan: tasks/agent-doc/plan-active-queue-persisted-continuation.md.
@@ -89,6 +106,7 @@ preset #spec-test-build-install-commit-push
 ## Review
  
 <!-- agent:review -->
+- [/] [#finalize-retry-ipc-response-duplication] [recommended] Multi-retry finalize + live IPC duplicates the response and prefixes its body lines with the user-prompt marker. Live repro 2026-05-29 on agent-doc-bugs2.md: a closeout needing several finalize/write retries (lint-gate / session-check / live_prompt_drift re-runs) with the IDE IPC listener active and concurrent editing left a duplicated response block plus agent body lines wrongly prefixed (uncommitted; HEAD stayed clean; manual git checkout repaired). Fix direction: idempotent retry convergence on IPC already_applied, never prefix agent response body as a prompt, and repair/session-check auto-dedup. Relates to #prompt-duplicated-while-typing, #duplicate-response-after-commit, #ipc-dup-tracking-double-merge (plugin 0.2.138 not yet installed during repro). Plan: tasks/agent-doc/plan-finalize-retry-ipc-response-duplication.md.
 - [/] [#ipc-dup-tracking-double-merge] PromptPoller double-tracking fix (plugin 0.2.138, submodule 32fb0b98 / superproject d585a33de): addFile keyed trackedFiles by project-relative path while handlePollResults keyed by "$cwd:$file", double-tracking the same VirtualFile (live: corky.md, brandon-cinquegrana.md, agent-doc-bugs2.md; trackedFiles=13 vs ffiTracked=9). Two divergent baselines -> mergeOrReload ran twice per change = full-document duplication path. Fixed by keying both via trackingKey(VirtualFile.path); convergence test + AGENTS.md invariant. GATED on live verify: install signed 0.2.138, restart, confirm no recurring duplication (corky.md). Exact setText payload uncaptured (JB debug logging was OFF). Relates to #ipcfullprompt-recur2, #adoc-queue-ipc-buffer-divergence, #prompt-duplicated-while-typing.
 - [/] [#jb-load-tmux-window-verify] [recommended] Live-verify the new JB Load Tmux Window action (plugin 0.2.136): install the signed zip, confirm it autostarts/loads the tmux pane for a focused doc whose pane is not up (e.g. corky.md). If the autostart sync genuinely fails to spawn the pane in that case (vs. by-design passive open), capture the route/sync logs as a separate autostart bug.
 - [/] [#jb-stale-busy-idle-footer] Three JB Run Agent Doc / Clear Session Context reports queue-instead-of-dispatch or block Clear while the live pane footer shows a Claude Code idle composer: monsterrodholders.md (actor gen 233, pane %19), equityfundingsource.md (gen 35, pane %3), tsift.md (pane %21, footer 22.4K (11%) ctrl+p commands). The tsift.md case is the strongest stale-busy candidate — Clear was blocked though the footer indicates idle. Fix: route.rs / session_actor_cmd.rs busy projection should treat the Claude Code idle-composer footer (ctrl+p commands / context % used) as idle direct evidence to repair a stale busy actor/lease projection before queuing or blocking, mirroring the existing OpenCode context % used idle-composer rule. Relates to #run-agent-doc-stale-busy-replay and #snrun (plan tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md).

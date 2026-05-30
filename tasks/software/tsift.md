@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -36,6 +36,7 @@ Compacted content:
 - Archived 1 response topic(s): do [#clippy-workspace-gate]. #spec-test-build-install-commit-push
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
 ❯ What are #next-steps to save tokens?
+
 ### Re: next steps to save tokens — gpt-5
 
 Top backlog item: `#token-budget-guardrail`.
@@ -45,7 +46,8 @@ I added three prioritized follow-ups. The highest-impact one is to turn the exis
 Operationally, the next token-saving habit is: use `tsift session-review --next-context tasks/software/tsift.md` or `tsift --envelope context-pack tasks/software/tsift.md --budget normal` instead of rereading the document archive or raw harness logs. For command output, keep using digest paths such as `tsift rewrite --run '<command>'`, `tsift diff-digest`, `tsift test-digest`, and `tsift log-digest` rather than pasting verbose output back into the session.
 
 Evidence used: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, and `tsift --envelope context-pack tasks/software/tsift.md --budget normal`. No source code changes were made in this cycle; only the session document/backlog is being updated through `agent-doc finalize`.
-<!-- agent:boundary:25064a34 -->
+Should we split out a tsift-agent-doc crate?
+<!-- agent:boundary:39413b3c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -54,8 +56,12 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 dispatch #spec-test-build-install-commit-push
+- do [#token-budget-guardrail]
+- do [#token-rewrite-codex-path]
+- do [#token-closeout-noop-dedupe]
+- Should we split out a tsift-agent-doc crate?
 <!-- /agent:queue -->
 
 ## Backlog

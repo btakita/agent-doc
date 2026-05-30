@@ -150,7 +150,8 @@ The main payoff is cleaner consumption: agents or tools that only need `parse`, 
 The cost is real: workspace release choreography, more semver surface, more docs, and more internal API decisions becoming public. So I would not do a broad workspace split until the core API is stable enough to support independently.
 
 My call: yes to a conservative `tagpath-core` extraction first; no to a many-crate breakup yet.
-<!-- agent:boundary:50fb42a3 -->
+What are #next-steps to split out crates?
+<!-- agent:boundary:56c19bf0 -->
 <!-- /agent:exchange -->
 ###
 <!--

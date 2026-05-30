@@ -35,7 +35,8 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 4 response topic(s): agent-doc domain boundary; #graph-neighborhood-budget; #token-action-coverage; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ What are #next-steps to extract tsift crates?
+What are #next-steps to extract tsift crates?
+
 ### Re: next steps to extract tsift crates — gpt-5
 
 The extraction is mostly past the first split: `src/tsift/Cargo.toml` already has a `packages/tsift-*` workspace, and the root `src/tsift/src/*.rs` surface is now just re-export shims. The highest-value next step is to remove the remaining runtime reliance on that shim from `tsift-cli`; right now `packages/tsift-cli` still depends on `tsift` and many CLI call sites use `tsift::...`, so the root crate is still part of the CLI implementation path instead of only a compatibility facade.
@@ -49,7 +50,12 @@ I added the follow-up backlog in priority order:
 Top backlog item: `#tsiftcli-direct-crates`.
 
 No code changed in this cycle; I only inspected the crate layout and added backlog items.
-<!-- agent:boundary:feefcd2b -->
+
+### Re: queued next steps closeout — gpt-5
+
+This queued copy is the same `#next-steps` prompt answered immediately above. The backlog is already updated in priority order, and the top item remains `#tsiftcli-direct-crates`.
+
+<!-- agent:boundary:fef93e31 -->
 <!-- /agent:exchange -->
 ###
 <!--

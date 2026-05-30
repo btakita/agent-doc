@@ -30,87 +30,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260530-022103.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260530-030222.md`*
 
 Compacted content:
-- Archived 5 response topic(s): do [#backlog-auto-marker-misfire]; Why is #backlog-auto-marker-misfire marked "DO NOT IMPLEMENT"?; Validate the fix for #backlog-auto-marker-misfire; 2 more
+- Archived 4 response topic(s): IPC corruption on corky.md; session_restart refused; do #session-restart-refusal-shows-busy-proof; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ The IPC corruption bug happed on /home/brian/work/btakita/agent-loop/tasks/software/corky.md
-❯ #spec-test-build-install-commit-push
-
-### Re: IPC corruption on corky.md — opus-4-8
-
-Investigated with real evidence (no guessing). corky.md's git history shows **no** committed full-document dup/deletion spike, and the corky session log has no corruption signature — consistent with the corruption living in the **live editor buffer**, not git. The documented blocker still holds: **JB debug logging (`#com.github.btakita.agentdoc`) was OFF**, so the exact corrupting `setText` payload was not captured this time.
-
-But the active IDE's `idea.log` surfaced a concrete, novel defect:
-
-**Root cause (duplication shape): PromptPoller double-tracked the same file.**
-- `addFile()` keyed `trackedFiles` by the project-relative path (`tasks/software/corky.md`).
-- `handlePollResults()` keyed the same VirtualFile by `"$cwd:$file"` (`/home/.../agent-loop:tasks/software/corky.md`), and its dedup check only tested that qualified key.
-- Result (seen live): `corky.md`, `brandon-cinquegrana.md`, and `agent-doc-bugs2.md` were each tracked **twice** (`trackedFiles=13` vs `ffiTracked=9`).
-- Each key holds an **independent `TrackedFile` baseline**. `refreshTrackedFiles()` / `autoSaveTrackedFiles()` iterate *every* entry and call `mergeOrReload()` per entry — so one disk change triggers **two merges with divergent baselines**, re-merging already-merged content → **full-document duplication**.
-
-**Fix (plugin 0.2.138):** both registration paths now key by canonical `trackingKey(VirtualFile.path)`, so a file is tracked exactly once. Added a convergence regression test (`PromptPollerTest`) and an AGENTS.md invariant. Full plugin gradle suite green; both signed/unsigned 0.2.138 zips built.
-
-**Commits:** submodule `32fb0b98`, superproject pointer `d585a33de` (pushed to `main`/working branch).
-
-**GATED — needs your live verification** (I can't headlessly test a JB merge-path fix): install the signed `agent-doc-jetbrains-0.2.138-signed.zip`, **restart IDEA**, then exercise corky.md (and the other double-tracked docs) and confirm no recurring full-document duplication. Tracked as review item `#ipc-dup-tracking-double-merge`.
-
-**Honest scope:** this is *one* plausible root cause for the **duplication** variant, confirmed as a real defect and fixed — but not proven to be the cause of every IPC corruption report (the deletion variant and the typing-race shapes are separate tracked items). To pin anything still remaining, **enable `#com.github.btakita.agentdoc` debug logging** so the next occurrence captures the exact `setText` payload. I did **not** touch the CLI/FFI merge path this turn.
-❯ JB `Restart Supervisor Process`
-```
-Error: session_restart refused for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md because pane %28 is alive-busy (source=authoritative_actor, current_command=agent-doc, tail="⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents"). Run `agent-doc session status /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md` and wait for an idle prompt, or pass `--force` to interrupt the running turn and restart anyway.
-```
-
-### Re: session_restart refused — pane %28 alive-busy — opus-4-8
-
-**This refusal was correct — pane %28 is genuinely busy, not stale-busy.** I captured the live pane: it shows `• Working (7m 47s • esc to interrupt)` running a `gpt-5.5` turn (*"Summarize recent commits"*) in `~/work/btakita/agent-loop/src/boost-client` (where monsterrodholders.md lives). A real turn is mid-flight, so `session_restart` correctly declined to restart the supervisor under it.
-
-So this is **not** `#jb-stale-busy-idle-footer` / the stale-busy misprojection — the busy-guard worked as designed. Note the decision came from `source=authoritative_actor` (the actor registry knew a turn was dispatched), which is the robust signal — it did **not** guess from the pane tail.
-
-**What to do:** the error message already tells you correctly —
-- **Wait** for the turn to finish (then `Restart Supervisor Process` will succeed), or
-- **`--force`** to interrupt the running turn and restart anyway (`agent-doc session restart <FILE> --force`, or the JB action's force path). Only do this if you're willing to kill the in-progress gpt-5.5 turn.
-- To check status: `agent-doc session status .../monsterrodholders.md`.
-
-**One real UX weakness (filed `[recommended]`):** the refusal message surfaces `tail="⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents"` — the Claude Code **permission-mode footer**, which is ambiguous (it shows in both idle and busy states). That's almost certainly why this *looked* wrong to you. The message should instead surface the actual busy-proof line (`Working (Xs · esc to interrupt)`, or the context-% spinner) so the busy state is self-evident. The classification was right; only the displayed evidence is misleading. Tracked as `#session-restart-refusal-shows-busy-proof`.
-
-(Housekeeping: this cycle also commits the review item `#ipc-dup-tracking-double-merge` that the `#pending-gate-snapshot-desync` defect stranded last turn.)
-❯ do #session-restart-refusal-shows-busy-proof. #spec-test-build-install-commit-push
-
-### Re: do #session-restart-refusal-shows-busy-proof — opus-4-8
-
-Done. Busy-guard refusals now surface the concrete active-turn line, not just the ambiguous footer.
-
-**Change:**
-- New `HarnessConfig::busy_proof_line()` (harness.rs) returns the recent pane line proving an active turn — the interrupt hint / working spinner (`Working (Xs · esc to interrupt)`), reusing the same detection as the busy cue.
-- `session_restart` / `session_clear` busy-guard refusals (session_actor_cmd.rs) now include `busy_proof=<line>` alongside the raw `tail`, captured best-effort from the live pane via a new `busy_proof_for_pane()` helper. So your monsterrodholders.md case would now read `busy_proof="• Working (7m 47s · esc to interrupt)"` instead of only the `⏵⏵ bypass permissions…` footer.
-- The busy **decision** is unchanged (still `source=authoritative_actor`) — this is display-only, exactly the UX gap identified last turn.
-
-**Verification:**
-- New tests: `busy_proof_line` returns the working/esc-to-interrupt line and `None` for an idle pane; `restart_busy_refusal_points_to_force` asserts `busy_proof=` is shown.
-- `make check` green (clippy `-D warnings` + full suite); `cargo build --release` + `cargo install --path .` (both binaries).
-- Spec `07-session-tmux-commands` updated.
-
-**Commits:** submodule `3386625c`, superproject pointer `25ae9a6df` (pushed to `main`/working branch).
-
-This is a deterministic message-format change fully covered by unit tests, so it's marked done (no live-IDE gate needed, unlike the PromptPoller merge-path fix which still awaits your 0.2.138 install).
-
-### Re: do #session-restart-refusal-shows-busy-proof — opus-4-8
-
-Done. Busy-guard refusals now surface the concrete active-turn line, not just the ambiguous footer.
-
-**Change:**
-- New `HarnessConfig::busy_proof_line()` (harness.rs) returns the recent pane line proving an active turn — the interrupt hint / working spinner (`Working (Xs · esc to interrupt)`), reusing the same detection as the busy cue.
-- `session_restart` / `session_clear` busy-guard refusals (session_actor_cmd.rs) now include `busy_proof=<line>` alongside the raw `tail`, captured best-effort from the live pane. So your monsterrodholders.md case would now read `busy_proof="• Working (7m 47s · esc to interrupt)"` instead of only the bypass-permissions footer.
-- The busy **decision** is unchanged (still `source=authoritative_actor`) — display-only, exactly the UX gap identified last turn.
-
-**Verification:** new tests (`busy_proof_line` returns the working/esc-to-interrupt line and `None` for idle; `restart_busy_refusal_points_to_force` asserts `busy_proof=` shown); `make check` green; `cargo build --release` + `cargo install --path .` (both binaries); spec `07-session-tmux-commands` updated.
-
-**Commits:** submodule `3386625c`, superproject pointer `25ae9a6df` (pushed).
-
-(Closeout note: this finalize was first blocked by a `lint-gate` false positive — your new backlog item `#active-queue-persisted-no-continue` contained a literal `` `&lt;!-- agent:queue --&gt;` `` token in backticks, which the lint dialect parsed as a real unclosed marker (no inline-code exclusion). I neutralized it to `` `agent:queue` (no auto attr) `` to unblock. That lint inline-code-exclusion gap is worth its own follow-up.)
-<!-- agent:boundary:9cd165d2 -->
+<!-- agent:boundary:4bcd495a -->
 <!-- /agent:exchange --> 
 ###
 <!--

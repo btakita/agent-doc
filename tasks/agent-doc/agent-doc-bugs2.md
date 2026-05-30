@@ -30,88 +30,16 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260530-175639.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260530-191353.md`*
 
 Compacted content:
-- Archived 5 response topic(s): do #codex-final-response-not-written; follow-up backlog capture; auto queue stalled (#agent-doc-bug); 2 more
+- Archived 7 response topic(s): Is tsift properly integrated into multi-crate architecture?; free-text queue head; free-text queue head; 4 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: Is tsift properly integrated into multi-crate architecture? — opus-4-8
-
-Already answered and handled last turn — re-confirming, and this response consumes the lingering queue line so the queue advances.
-
-- **Integration: yes.** From the `src/agent-doc` submodule root, `tsift status` is `fresh (328 files tracked)` and tracks all workspace members — `agent-doc-core`, `agent-doc-orchestration`, `agent-doc-sqlite` — plus the `agent-doc` root crate. Properly integrated with the multi-crate architecture.
-- **Index: fresh.** I ran `tsift index .` last turn; still fresh (indexed ~7m ago, no source edits since). (The *superproject-wide* `tsift status` from `agent-loop/` shows other scopes stale — `boost-client` etc. — but those are unrelated projects, not the agent-doc workspace.)
-
-**Correction to my earlier note:** I was wrong that a non-`#id` free-text queue line "can't be struck." It can — once the line is the queue *head*, the synthetic-queue-head diff matches it, so `should_consume_queue_prompt_for_diff_content` returns true and `mark_first_n_prompts_completed` strikes the head regardless of `#id` (`consume_count.max(1)`). This finalize is consuming it now; no manual deletion needed. So there's no real "free-text head" gap to file — withdrawing that suggestion.
-
-Queue advances to `do [#pending-done-guard-false-positive]`.
-### Re: free-text queue head — correction + real fix — opus-4-8
-
-**Correcting my previous response:** it claimed this finalize had consumed the tsift line. It had **not** — the log showed `[queue] skipped consumption`, and the line stayed the head. My reasoning was wrong: in *finalize* the consumption diff is baseline→response, not preflight's synthetic-queue-head diff, so the response never text-matches a free-text head. So the gap I originally flagged was **real**, not withdrawn.
-
-**Root cause:** a free-text queue head (no id) cannot be consumed by any path — the done-id, explicit-completion-signal, and synthetic-head-topic paths all require an id, and the diff-based check can't match it. It blocked the auto-queue permanently.
-
-**Fix (`808ffcf7`, free-text-queue-head-consume):** a free-text head (no extractable id, not a `do queue`/`run queue` trigger) has no id-based completion mechanism, so a captured response body for the cycle *is* its completion signal. Bare do-directives and preset heads keep an id and still require an explicit completion flag, so strike-on-halt is preserved. Helper `queue_head_is_free_text_prompt` + regression `free_text_queue_head_detection`; `make check` green; both binaries rebuilt + installed.
-
-This finalize runs on the fixed binary, so it now actually consumes the tsift line (no follow-up backlog items — the work is done). Substantive answer is unchanged: tsift **is** properly integrated with the multi-crate workspace (core/orchestration/sqlite + root, 328 files, fresh). The queue advances to the next item.
-### Re: free-text queue head — correction + real fix — opus-4-8
-
-**Correcting my previous response:** it claimed this finalize had consumed the tsift line. It had **not** — the log showed `[queue] skipped consumption`, and the line stayed the head. My reasoning was wrong: in *finalize* the consumption diff is baseline→response, not preflight's synthetic-queue-head diff, so the response never text-matches a free-text head. So the gap I originally flagged was **real**, not withdrawn.
-
-**Root cause:** a free-text queue head (no id) cannot be consumed by any path — the done-id, explicit-completion-signal, and synthetic-head-topic paths all require an id, and the diff-based check can't match it. It blocked the auto-queue permanently.
-
-**Fix (`808ffcf7`, free-text-queue-head-consume):** a free-text head (no extractable id, not a `do queue`/`run queue` trigger) has no id-based completion mechanism, so a captured response body for the cycle *is* its completion signal. Bare do-directives and preset heads keep an id and still require an explicit completion flag, so strike-on-halt is preserved. Helper `queue_head_is_free_text_prompt` + regression `free_text_queue_head_detection`.
-
-**Also fixed a second bug this surfaced:** the tagpath `backlog-id-collision` lint was a false-positive — it scanned every bracket-id token in the backlog span, so a `do` directive written as example syntax in two item *descriptions* tripped a fake collision and blocked finalize entirely. Now it only treats the leading id of each item line as a definition (regression `backlog_id_collision_ignores_bracket_ids_in_descriptions`). `make check` + tagpath tests green; both binaries rebuilt + installed.
-
-Substantive answer unchanged: tsift **is** properly integrated with the multi-crate workspace (core/orchestration/sqlite + root, 328 files, fresh). The queue advances to the next item.
-### Re: free-text queue head — correction + real fix — opus-4-8
-
-**Correcting my previous response:** it claimed this finalize had consumed the tsift line. It had **not** — the log showed `[queue] skipped consumption` and the line stayed the head. My reasoning was wrong: in *finalize* the consumption diff is baseline→response, not preflight's synthetic-queue-head diff, so the response never text-matches a free-text head. The gap I originally flagged was **real**, not withdrawn.
-
-**Root cause:** a free-text queue head (no id) cannot be consumed by any path — the done-id, explicit-completion-signal, and synthetic-head-topic paths all require an id, and the diff-based check can't match it. It blocked the auto-queue permanently.
-
-**Fix 1 (`808ffcf7`, free-text-queue-head-consume):** a free-text head (no extractable id, not a `do queue`/`run queue` trigger) has no id-based completion mechanism, so a captured response body for the cycle *is* its completion signal. Bare do-directives and preset heads keep an id and still require an explicit completion flag, so strike-on-halt is preserved. Helper `queue_head_is_free_text_prompt` + regression `free_text_queue_head_detection`.
-
-**Fix 2 (tagpath lint false-positive, surfaced by this turn):** `backlog-id-collision` scanned every bracket-id token in the backlog span, so a `do`-directive written as example syntax in two item *descriptions* tripped a fake collision and blocked finalize entirely. Now it only treats the leading id of each item line as a definition (regression `backlog_id_collision_ignores_bracket_ids_in_descriptions`). This required bumping agent-doc's `tagpath` dep `0.11.1 → 0.12` so the locally-patched fix is actually used (the patch was silently inactive on a version mismatch).
-
-`make check` + tagpath tests green; both binaries rebuilt + installed. Substantive answer unchanged: tsift **is** properly integrated with the multi-crate workspace (core/orchestration/sqlite + root, 328 files, fresh). The queue advances to the next item.
-### Re: strike the completed tsift line — opus-4-8
-
-You're right that it should have been struck on completion — that was the free-text-queue-head-consume bug, now fixed and live. This cycle runs on the fixed binary, so answering the line consumes it (strikes it). The substantive answer stands: tsift is properly integrated with the multi-crate workspace (core/orchestration/sqlite + root), index fresh. Queue advances to the next item.
-
-### Re: do #pending-done-guard-false-positive — opus-4-8
-
-Fixed (`6b266c62`) — and this very response is the live test: it cites related open ids (`#pending-add-suppresses-queue-consume`, `#next-steps-backlog-capture`) in prose with completion words nearby, yet finalize should consume the head **without** a `--no-pending-done-guard` suppression. That suppression is what I had to add repeatedly this session; if you see this committed cleanly, the false-positive is gone.
-
-#### Root cause
-`response_clearly_completes_pending_id` used a prose-window heuristic: any line citing `#id` with a completion marker (`fixed`, `committed`, `done`, …) within 5 lines counted as a completion claim. So a response that completed its head but merely *referenced* a related/residual open id in prose falsely demanded `--done` for the cited id — forcing retry cycles. It was flagged as a top finalize friction and I hit it ~5× today.
-
-#### Fix
-Completion is now signalled **only** by a response *heading* whose topic **resolves** to the id:
-- a batch `do [#a] [#b] …` directive heading resolves to every bracketed id;
-- a titled `### Re: #id descriptive text` heading resolves to its **leading** id only (trailing words are prose);
-- a `#id` cited anywhere in the response **body** never resolves.
-
-Covers both enforcement points — the pre-write gate (`precommit_pending_done_check`) and post-commit `session-check`, both via `detect_missing_pending_done_ids`. Regression `session_check_pending_done_ignores_prose_citation_of_open_id`; the existing heading-completion and batch-`do`-heading detections still pass. `make check` green; both binaries rebuilt + installed.
-
-Relates to `#pending-add-suppresses-queue-consume` (the sibling queue-consume vs bundled-mutation issue, already fixed) — cited here deliberately to exercise the fix.
-
-### Re: strikethrough on completed free-text queue lines — opus-4-8
-
-Agreed, and now fixed — that exact expectation drove the free-text-queue-head-consume fix (`808ffcf7`). A free-text queue head with no id is now struck when the cycle answers it, so completed free-text lines get wrapped in `~…~` just like consumed `do [#id]` directives. The earlier tsift line is already struck in HEAD (`~Is tsift properly integrated…~`), and this note itself is being consumed/struck the same way now. No code change needed this cycle — acknowledging and clearing.
-<!-- agent:boundary:251cb76a -->
+<!-- agent:boundary:376453d6 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- ~do [#ipcfullprompt-recur2]~
-- ~do [#codex-final-response-not-written]~
-- ~do [#pending-add-suppresses-queue-consume]~
-- ~Is tsift properly integrated into multi-crate architecture? If not, run tsift update.~
-- ~do [#pending-done-guard-false-positive]~
-- ~When "Is tsift properly integrated into multi-crate architecture? If not, run tsift update." was completed, it should have been wrapped in a strikethrough: "~Is tsift properly integrated into multi-crate architecture?~".~
 - do [#do-id-closeout-open-backlog]
 - do [#queue-user-edit-overwrite]
 - do [#prompt-preempts-auto-queue]

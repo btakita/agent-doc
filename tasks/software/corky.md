@@ -141,7 +141,40 @@ Handled in the preceding response. I could not complete the Google-side registra
 ### Re: Queue cleanup — gpt-5
 
 Cleared the stale auto queue entry that duplicated the prompt already answered above.
-<!-- agent:boundary:35cd30b1 -->
+❯ Are all the crates published?
+
+### Re: Are all the crates published? — gpt-5
+
+No. The root `corky` crate is published, but the split workspace crates are not published on crates.io at the current local version.
+
+I verified the local workspace with `cargo metadata --format-version 1 --no-deps`; it has six workspace packages, all at `0.28.2`:
+
+- `corky`
+- `corky-core`
+- `corky-google`
+- `corky-mail`
+- `corky-social`
+- `corky-transcribe`
+
+Then I checked crates.io from outside the workspace with `cargo info --registry crates-io <crate>@0.28.2` so Cargo could not accidentally resolve local path packages. Result:
+
+- `corky@0.28.2`: published — https://crates.io/crates/corky/0.28.2
+- `corky-core@0.28.2`: not found in crates.io
+- `corky-google@0.28.2`: not found in crates.io
+- `corky-mail@0.28.2`: not found in crates.io
+- `corky-social@0.28.2`: not found in crates.io
+- `corky-transcribe@0.28.2`: not found in crates.io
+
+So the current session status line `crates.io publish — v0.28.2` is accurate for the public root `corky` package, but not for every crate in the split workspace. If those internal crates are intended to be independently consumable, they still need to be published; if not, the release/status wording should say "root crate published" rather than "all crates published."
+
+Local proof:
+
+- Changed paths: none outside the session document.
+- Commands run: `cargo metadata --format-version 1 --no-deps`; `cargo info --registry crates-io` for all six package names.
+- Verification: registry lookup succeeded only for `corky@0.28.2`; the other five returned `could not find ... in registry`.
+- Confidence: high.
+- Escalation: none.
+<!-- agent:boundary:7e721c1f -->
 <!-- /agent:exchange -->
 ###
 <!--

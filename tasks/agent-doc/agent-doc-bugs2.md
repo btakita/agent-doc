@@ -35,10 +35,46 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 1 response topic(s): do #ipcfullprompt-recur2
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:b7c0515a -->
+
+### Re: do #codex-final-response-not-written — opus-4-8
+
+Added a deterministic, harness-agnostic `session-check` guard that fails closed when a turn commits binary-owned work but never captures an assistant response body — exactly the "commits/pushes completed but `agent:exchange` lacked the close-out" symptom (and it would have auto-caught my own malformed-patchback miss two turns ago).
+
+#### The guard
+`check_committed_without_response_body_guard` (`agent-doc-orchestration/src/session_check.rs`), wired into `inspect_with_warnings` right after the snapshot-committed guard. It fires `INTERRUPTED` when:
+- `cycle_state.phase == Committed`, **and**
+- no response was captured this cycle (`capture_id` / `response_sha256` both `None`), **and**
+- `had_pending_mutations == true`.
+
+The error names the cycle + last event and ends with the exact recovery command: `agent-doc write --commit <FILE>`, then re-run `session-check`. Landing the response sets `capture_id` and clears the guard.
+
+#### Why the signal is precise (low false-positive)
+- A captured response **always** sets `capture_id`/`response_sha256` (`capture::record` → `cycle_state::mark_response_captured`), so any normal response cycle is excluded.
+- `had_pending_mutations` is set **only** by the `write`/`finalize` response path (`write.rs` → `mark_pending_mutations`), so it proves a real response turn ran this cycle.
+- Bookkeeping-only commits stay OK: a bare sweep re-commit never sets `had_pending_mutations`, and `repair`'s completed-backlog reap records `reaped_pending_ids` via `record_reaped_pending_ids` **without** it (caught during testing — an early broader condition false-fired `repair_commits_reaped_completed_backlog_in_git_repo`, which is why the guard now keys solely on `had_pending_mutations`).
+
+#### Harness coverage
+Harness-agnostic by construction — the cycle-state shape is identical regardless of harness. Claude/OpenCode hit it through `finalize`'s post-commit `session-check`; **Codex** hits it through the `Stop` hook's `session-check` backstop (`.codex/hooks.json`), so the original Codex direct/manual repro is now covered without harness-specific code.
+
+#### Tests (`session_check.rs`)
+- `..._fires_on_pending_mutations_no_capture` — the bug shape → Error.
+- `..._is_wired_into_inspect` — fires through the full `inspect` chain → Interrupted with the recovery command.
+- `..._passes_with_captured_response` — normal cycle → None.
+- `..._passes_on_done_ids_without_write_turn` — backlog bookkeeping (repair-reap shape) → None.
+- `..._passes_on_noop_sweep_close` — sweep re-commit → None.
+
+#### Verification
+- `cargo test -p agent-doc-orchestration session_check` — 95 + 5 new green.
+- `make check` (full Rust suite incl. clippy + the FlowCore hot-path token-budget gate, bumped 16→22 for the audited new `guard_` tokens) — 0 failures.
+- Both binaries rebuilt + installed (`cargo build --release` + `cargo install --path .`) so the guard is live for tmux/IDE-spawned sessions.
+
+Note: I chose **fail-closed-with-recovery-command** over auto-forcing `write --commit` (the plan's other option) — it matches the existing sibling guards and avoids a guard silently mutating the doc. Live re-verification against a real Codex direct run is a recommended opportunistic follow-up (added to backlog).
+<!-- agent:boundary:597edb9b -->
 <!-- /agent:exchange -->
 ###
 <!--
+Verify [#ipcfullprompt-recur2]
+---
 JB `Run Agent Doc`, then cancel run directly in the session, then JB `Clear Session Context`, then JB `Run Agent Doc`:
 ```
 resync: stash pane %32 is registered in its own project root — skipping kill
@@ -70,10 +106,12 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#ipcfullprompt-recur2]~
-- do [#codex-final-response-not-written]
+- ~do [#codex-final-response-not-written]~
+- do [#pending-add-suppresses-queue-consume]
+- do [#pending-done-guard-false-positive]
+- do [#queue-user-edit-overwrite]
 - do [#prompt-preempts-auto-queue]
 - do [#codex-owned-pane-prompt-miss]
-- do [#pending-add-suppresses-queue-consume]
 - do [#stuck-capture-compact-false-positive]
 - do [#codex-route-busy-ctrl-g-opens-editor]
 - do [#cross-project-stash-pane-condition]
@@ -93,7 +131,6 @@ preset #spec-test-build-install-commit-push
 <!-- agent:backlog -->
 - [ ] [#queue-user-edit-overwrite] [recommended] User-authored agent:queue edits can be silently overwritten/deleted by write/reset/commit queue convergence. Live repro 2026-05-30 boost-client monsterrodholders.md: user added do [#gscaccess] at queue head; agent-doc repeatedly removed/reverted it during closeout/snapshot repair. Fix by tracking queue edit provenance/epochs, preserving explicit queue edits unless the current response consumes that exact head, and failing closed on stale IPC/snapshot queue rewrites. Plan: tasks/agent-doc/plan-user-queue-edit-preservation.md.
 - [ ] [#pending-done-guard-false-positive] [recommended] finalize/write pending_done_guard fires a FALSE POSITIVE when the response merely REFERENCES an open backlog id in prose (e.g. mentioning #jb-busy-queue-ux-feedback as a related/residual item) — it reads the citation as a completion claim and demands --done, forcing a retry with  suppression. Hit 3x in one session (2026-05-30) and independently flagged as a top agent-doc finalize friction in the Claude Code usage report (2026-05-28..30: 'a false-positive done-guard, requiring multiple retry cycles'). Fix: only fire when the response heading/topic RESOLVES to the id (completion), per the exact-id queue-consume matching in specs/07-orchestration-commands.md — not when the body merely cites it. Relates to #pending-add-suppresses-queue-consume.
-- [ ] [#codex-final-response-not-written] [recommended] Codex final response was not written back into the session document after a manual/direct run on `src/boost-client/tasks/monsterrodholders.md` (reported 2026-05-30 after `#nsga4verify` work). Symptom: commits and pushes completed, but `agent:exchange` lacked the assistant close-out; the user had to request a manual document patch. Plan: reproduce with an owned-pane recursive/direct invocation path where `agent-doc` refuses direct recursion, the agent continues manually, and finalizes outside the normal `agent-doc write` capture; add a session-check/finalization guard that detects a completed turn with no new `agent:exchange` response body, then either forces `agent-doc write --commit` or fails closed with the exact recovery command. Regression should cover Codex final responses after fallback/manual handling and ensure the response body lands before the boundary and is included in the committed doc.
 - [ ] [#pending-add-suppresses-queue-consume] [recommended] Bundling --pending-add in the same finalize as a queue-head-targeting response suppresses queue-head consumption: finalize logs 'skipped consumption because the active prompt did not target the queue head' and treats the pending-add as the active prompt, even when the response heading exactly matches the head (Re: do #ID form, no brackets). Repro 2026-05-29 agent-doc-bugs2.md declining backlog-auto-marker-misfire with a bundled --pending-add — head stayed unstruck. Fix: heading/queue-head match should drive consumption independently of bundled pending mutations, or consume the head when the response heading matches regardless of detected active prompt.
 - [ ] [#stuck-capture-compact-false-positive] [recommended] stuck_captured_cycle false-positive after compaction: a capture recorded as committed (cycle-1780100032048, response 'gate→done for codex guidance') is later archived by compact, so preflight reports committed-but-not-in-HEAD and suggests `write --commit` recovery — which would re-inject an already-archived response (it lives in .agent-doc/archives/<hash>-*.md). Fix: when a captured-committed body is absent from HEAD because it was compacted (present in the matching archive), reconcile the capture instead of flagging it stuck. Repro 2026-05-29 agent-doc-bugs2.md.
 - [ ] [#prompt-preempts-auto-queue] [recommended] Unanswered exchange prompts must run before active `agent:queue auto` continuation, even when the prompt was accidentally baselined into the `.agent-doc` snapshot. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `What are #next-steps to complete review items?` was visible after the exchange boundary and duplicated in `agent:queue auto`, but the snapshot already contained the exchange prompt, so the next diff only saw queue bookkeeping and the prompt did not run. Fix: add snapshot-independent unresolved exchange prompt detection, make preflight/direct-run prefer it over queue synthetic diffs, prevent route queue snapshot recovery from absorbing unanswered exchange prompts, and defer Codex/Claude queue continuation while such a prompt exists. Plan: tasks/agent-doc/plan-prompt-preempts-auto-queue.md.

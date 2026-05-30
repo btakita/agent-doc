@@ -1,6 +1,6 @@
 ---
 agent_doc_session: tsift-v0.1
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -35,7 +35,17 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): do [#clippy-workspace-gate]. #spec-test-build-install-commit-push
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:41f4efb2 -->
+❯ What are #next-steps to save tokens?
+### Re: next steps to save tokens — gpt-5
+
+Top backlog item: `#token-budget-guardrail`.
+
+I added three prioritized follow-ups. The highest-impact one is to turn the existing `session-review`/`context-pack` guardrails into an explicit `next_token_actions` section, because the current context pack already shows the main token leaks: a 587k-token largest prompt turn, a 99.16% cached-input resend ratio, restart churn, and repeated no-op closeouts.
+
+Operationally, the next token-saving habit is: use `tsift session-review --next-context tasks/software/tsift.md` or `tsift --envelope context-pack tasks/software/tsift.md --budget normal` instead of rereading the document archive or raw harness logs. For command output, keep using digest paths such as `tsift rewrite --run '<command>'`, `tsift diff-digest`, `tsift test-digest`, and `tsift log-digest` rather than pasting verbose output back into the session.
+
+Evidence used: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, and `tsift --envelope context-pack tasks/software/tsift.md --budget normal`. No source code changes were made in this cycle; only the session document/backlog is being updated through `agent-doc finalize`.
+<!-- agent:boundary:25064a34 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -51,6 +61,9 @@ dispatch #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#token-budget-guardrail] [recommended] Add a session-review/context-pack token-pressure gate that turns prompt_budget/cache_resend/restart_loop/noop_closeout guardrails into a prioritized next_token_actions block with exact compact, restart, and digest commands.
+- [ ] [#token-rewrite-codex-path] [recommended] Make the Codex/OpenCode low-token path explicit: document or install a wrapper that routes broad search, raw transcript reads, cargo/pytest/build output, and git diffs through tsift rewrite/context-pack/digest-runner equivalents.
+- [ ] [#token-closeout-noop-dedupe] [recommended] Reduce token waste from repeated agent-doc no-op closeouts by adding a fixture-backed session-review regression for commit_already_current churn and tightening the emitted guidance to one actionable row per cycle family.
 <!-- /agent:backlog -->
 
 ## Review

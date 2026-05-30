@@ -289,10 +289,32 @@ pub fn restart(file: &Path, mode: RestartMode, force: bool) -> Result<()> {
 }
 
 fn prepare_restart_live_busy_pane(ctx: &SessionContext, tmux: &Tmux, force: bool) -> Result<()> {
+    let evidence = live_pane_evidence(ctx, tmux);
+    // #hj7s: refuse if a terminal editor (e.g. Claude Code `ctrl+g` edit-in-nvim)
+    // owns the pane TTY. A raw `C-c` is swallowed by the editor and the follow-up
+    // restart-command keystrokes would land in the editor buffer. The editor is a
+    // legitimate operator state, so do not force-quit it or SIGINT around it —
+    // refuse and let the operator close it manually. `--force` must NOT bypass this
+    // (it runs before the force branch).
+    if let Some(command) = evidence.current_command.as_deref()
+        && terminal_editor_command(command)
+    {
+        let pane = evidence.pane_id.as_deref().unwrap_or("unknown");
+        log_restart_evidence_event(ctx, "session_restart_editor_holds_pane_refused", &evidence);
+        anyhow::bail!(
+            "{}",
+            restart_editor_holds_pane_refusal_message(
+                &ctx.canonical_file,
+                pane,
+                evidence.source,
+                command,
+                evidence.tail.as_deref().unwrap_or("unknown"),
+            )
+        );
+    }
     if !force {
         return guard_destructive_operator_on_live_busy_pane(ctx, tmux, "session_restart");
     }
-    let evidence = live_pane_evidence(ctx, tmux);
     if evidence.state == LivePaneState::AliveBusy {
         if pane_shows_clean_exit_prompt(ctx, tmux, &evidence) {
             return Ok(());
@@ -1192,6 +1214,31 @@ pub(crate) fn restart_busy_refusal_message(
         source,
         command,
         busy_proof.unwrap_or("none"),
+        tail,
+        file.display()
+    )
+}
+
+/// #hj7s: refusal message when a terminal editor owns the pane TTY during a
+/// restart. Mirrors `restart_busy_refusal_message`'s field convention
+/// (`source=`/`current_command=`/`tail=`) so the JB plugin can parse it. The
+/// header (`is held by editor <command>`) is the distinctive marker the editor
+/// refusal parser keys off. Applies to both `Restart` and `--force`
+/// `Interrupt and Restart`: the operator must close the editor manually.
+pub(crate) fn restart_editor_holds_pane_refusal_message(
+    file: &Path,
+    pane: &str,
+    source: &str,
+    command: &str,
+    tail: &str,
+) -> String {
+    format!(
+        "session_restart refused for {} because pane {} is held by editor {} (source={}, current_command={}, tail={:?}). Run `agent-doc session status {}` to inspect the pane. A terminal editor (for example Claude Code `ctrl+g` edit-in-nvim) owns the pane, so the restart interrupt is swallowed and the restart command would type into the editor buffer. Close the editor (for example `:wq` in nvim) and retry.",
+        file.display(),
+        pane,
+        command,
+        source,
+        command,
         tail,
         file.display()
     )
@@ -2453,6 +2500,31 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         assert!(message.contains("agent-doc session status /tmp/doc.md"));
         assert!(message.contains("pass `--force`"));
         assert!(message.contains("interrupt the running turn and restart anyway"));
+    }
+
+    #[test]
+    fn restart_editor_holds_pane_refusal_names_editor_and_close_guidance() {
+        // #hj7s: the refusal must carry the parseable header + fields the JB plugin
+        // keys off, name the editor, and tell the operator to close it manually.
+        let message = restart_editor_holds_pane_refusal_message(
+            Path::new("/tmp/doc.md"),
+            "%7",
+            "authoritative_actor",
+            "nvim",
+            "-- INSERT --",
+        );
+
+        assert!(message.contains("session_restart refused for /tmp/doc.md"));
+        assert!(message.contains("pane %7 is held by editor nvim"));
+        assert!(message.contains("source=authoritative_actor"));
+        assert!(message.contains("current_command=nvim"));
+        assert!(message.contains("ctrl+g"));
+        // UX: close the editor manually — do NOT force-quit or SIGINT around it.
+        assert!(message.contains("Close the editor"));
+        assert!(message.contains(":wq"));
+        assert!(message.contains("agent-doc session status /tmp/doc.md"));
+        // Must not advise --force: --force does not bypass the editor guard.
+        assert!(!message.contains("--force"));
     }
 
     #[test]

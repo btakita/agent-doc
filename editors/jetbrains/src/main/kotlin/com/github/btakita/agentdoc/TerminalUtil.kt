@@ -39,6 +39,12 @@ object TerminalUtil {
         """session_restart refused for (.+?) because the authoritative actor is still starting and (.+?)\. Wait for a dispatch-ready prompt""",
         RegexOption.DOT_MATCHES_ALL,
     )
+    // #hj7s: a terminal editor (e.g. Claude Code `ctrl+g` edit-in-nvim) owns the
+    // pane TTY, so restart is refused and the operator must close the editor.
+    private val EDITOR_RESTART_REFUSAL_HEADER_REGEX = Regex(
+        """session_restart refused for (.+?) because pane (\S+) is held by editor (\S+)""",
+        RegexOption.DOT_MATCHES_ALL,
+    )
     private val PROTECTED_CLEAR_REASON_REGEX = Regex("""reason=([^,)]+)""")
     private val BUSY_CLEAR_SOURCE_REGEX = Regex("""source=([^,)]+)""")
     private val BUSY_CLEAR_COMMAND_REGEX = Regex("""current_command=([^,)]+)""")
@@ -153,6 +159,15 @@ object TerminalUtil {
     internal data class StartingSessionRestartRefusal(
         val file: String,
         val reason: String,
+    )
+
+    internal data class EditorHoldsPaneRestartRefusal(
+        val file: String,
+        val pane: String,
+        val editor: String,
+        val source: String,
+        val currentCommand: String,
+        val tail: String,
     )
 
     internal data class RestartSupervisorTelemetry(
@@ -497,10 +512,16 @@ object TerminalUtil {
                     showHint(project, message)
                 }
             },
-            onFailure = if (force) {
-                null
-            } else {
-                { relativePath, exitCode, output ->
+            onFailure = { relativePath, exitCode, output ->
+                // #hj7s: an editor holding the pane refuses for BOTH Restart and
+                // --force Interrupt-and-Restart, so this handler runs for force too
+                // (the force path previously had no onFailure and failed silently).
+                val editorRefusal = parseEditorHoldsPaneRestartRefusal(output)
+                if (editorRefusal != null) {
+                    notifyEditorHoldsPaneRestartBlocked(project, file, relativePath, editorRefusal, output)
+                } else if (force) {
+                    notifyError(project, "agent-doc command failed (exit $exitCode):\n$output")
+                } else {
                     val busyRefusal = parseBusySessionRestartRefusal(output)
                     if (busyRefusal != null) {
                         notifyBusySessionRestartBlocked(project, file, relativePath, busyRefusal, output)
@@ -840,6 +861,21 @@ object TerminalUtil {
         )
     }
 
+    internal fun parseEditorHoldsPaneRestartRefusal(output: String): EditorHoldsPaneRestartRefusal? {
+        val match = EDITOR_RESTART_REFUSAL_HEADER_REGEX.find(output) ?: return null
+        val detail = output.substring(match.range.last + 1)
+        val source = BUSY_CLEAR_SOURCE_REGEX.find(detail)?.groupValues?.getOrNull(1).orEmpty()
+        val currentCommand = BUSY_CLEAR_COMMAND_REGEX.find(detail)?.groupValues?.getOrNull(1).orEmpty()
+        return EditorHoldsPaneRestartRefusal(
+            file = match.groupValues[1],
+            pane = match.groupValues[2],
+            editor = match.groupValues[3],
+            source = source.ifBlank { "unknown" },
+            currentCommand = currentCommand.ifBlank { "unknown" },
+            tail = extractBusyClearTail(detail),
+        )
+    }
+
     private fun extractBusyClearTail(detail: String): String {
         val marker = "tail="
         val start = detail.indexOf(marker)
@@ -1146,6 +1182,34 @@ object TerminalUtil {
         }
     }
 
+    private fun notifyEditorHoldsPaneRestartBlocked(
+        project: Project,
+        file: VirtualFile,
+        relativePath: String,
+        refusal: EditorHoldsPaneRestartRefusal,
+        rawOutput: String,
+    ) {
+        val summary = buildEditorHoldsPaneRestartBlockedMessage(relativePath, refusal)
+        try {
+            val notification = NotificationGroupManager.getInstance()
+                .getNotificationGroup("Agent Doc")
+                .createNotification(summary, NotificationType.WARNING)
+            notification.isImportant = true
+            // No "Interrupt and restart" action: --force does not bypass the editor
+            // guard. The operator must close the editor manually (#hj7s).
+            notification.addAction(NotificationAction.createSimple("Show status") {
+                showSessionStatus(project, file)
+            })
+            notification.addAction(NotificationAction.createSimple("Copy details") {
+                CopyPasteManager.getInstance().setContents(StringSelection(rawOutput))
+                showHint(project, "Copied editor-holds-pane restart details for $relativePath")
+            })
+            notification.notify(project)
+        } catch (_: Exception) {
+            System.err.println("[agent-doc] $summary")
+        }
+    }
+
     internal fun buildBusySessionClearBlockedMessage(
         relativePath: String,
         refusal: BusySessionClearRefusal,
@@ -1216,6 +1280,28 @@ object TerminalUtil {
             append(refusal.reason)
         }
         append(". Use Interrupt and restart to stop the current supervisor generation and restart anyway, or Show status to inspect the session.")
+    }
+
+    internal fun buildEditorHoldsPaneRestartBlockedMessage(
+        relativePath: String,
+        refusal: EditorHoldsPaneRestartRefusal,
+    ): String = buildString {
+        append("Restart Supervisor is blocked for ")
+        append(relativePath)
+        append(".\nA terminal editor")
+        val editor = refusal.editor.ifBlank { refusal.currentCommand }
+        if (editor.isNotBlank() && editor != "unknown") {
+            append(" (")
+            append(editor)
+            append(")")
+        }
+        append(" holds pane ")
+        append(refusal.pane)
+        append(" — e.g. Claude Code `ctrl+g` edit-in-nvim. Close the editor (for example `:wq` in nvim) and retry; Interrupt and restart will not bypass it. Use Show status to inspect the session.")
+        if (refusal.tail.isNotBlank() && refusal.tail != "unknown") {
+            append("\nLatest pane output: ")
+            append(refusal.tail)
+        }
     }
 
     private fun notify(project: Project, content: String, type: NotificationType) {

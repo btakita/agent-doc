@@ -555,6 +555,47 @@ class TerminalUtilTest {
     }
 
     @Test
+    fun `editor-holds-pane restart refusal parses editor and fields`() {
+        val output = """
+            agent-doc command failed (exit 1): Error: session_restart refused for /repo/tasks/root.md because pane %2 is held by editor nvim (source=authoritative_actor, current_command=nvim, tail="-- INSERT --"). Run `agent-doc session status /repo/tasks/root.md` to inspect the pane. A terminal editor (for example Claude Code `ctrl+g` edit-in-nvim) owns the pane, so the restart interrupt is swallowed and the restart command would type into the editor buffer. Close the editor (for example `:wq` in nvim) and retry.
+        """.trimIndent()
+
+        val refusal = TerminalUtil.parseEditorHoldsPaneRestartRefusal(output)
+
+        assertNotNull(refusal)
+        assertEquals("/repo/tasks/root.md", refusal!!.file)
+        assertEquals("%2", refusal.pane)
+        assertEquals("nvim", refusal.editor)
+        assertEquals("authoritative_actor", refusal.source)
+        assertEquals("nvim", refusal.currentCommand)
+        assertEquals("-- INSERT --", refusal.tail)
+    }
+
+    @Test
+    fun `editor-holds-pane restart message tells operator to close the editor and omits interrupt action`() {
+        val message = TerminalUtil.buildEditorHoldsPaneRestartBlockedMessage(
+            relativePath = "tasks/root.md",
+            refusal = TerminalUtil.EditorHoldsPaneRestartRefusal(
+                file = "/repo/tasks/root.md",
+                pane = "%2",
+                editor = "nvim",
+                source = "authoritative_actor",
+                currentCommand = "nvim",
+                tail = "-- INSERT --",
+            ),
+        )
+
+        assertTrue(message.contains("Restart Supervisor is blocked"))
+        assertTrue(message.contains("terminal editor (nvim) holds pane %2"))
+        assertTrue(message.contains("Close the editor"))
+        assertTrue(message.contains(":wq"))
+        // The message tells the operator --force won't help (the notify action list
+        // also omits an "Interrupt and restart" button).
+        assertTrue(message.contains("will not bypass it"))
+        assertFalse(message.contains("agent-doc command failed"))
+    }
+
+    @Test
     fun `restart telemetry parses force recovery ops log events for document`() {
         val lines = listOf(
             "[1] session_restart_force_used file=/repo/tasks/other.md pane=%9 source=authoritative_actor state=alive-busy current_command=agent-doc prompt_ready=false tail=\"other\"",

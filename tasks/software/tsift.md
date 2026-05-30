@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -66,7 +66,8 @@ Yes. From the current workspace graph, `tsift-tokensave` is a real workspace cra
 That is why `#tsift-dormant-crates` should stay open: the task is not just to delete dead code. It should decide, crate by crate, whether to wire the surface into CLI/root exports or explicitly park/remove the crate so the spec, manifests, and dependency graph all say the same thing.
 
 No code changed in this cycle.
-<!-- agent:boundary:c7fd735e -->
+re [#tsift-dormant-crates]: Is there functionality in tsift-tokensave and tsift-algorithms that should be used?
+<!-- agent:boundary:23f17720 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -75,7 +76,8 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+- re [#tsift-dormant-crates]: Is there functionality in tsift-tokensave and tsift-algorithms that should be used?
 <!-- /agent:queue -->
 
 ## Backlog

@@ -58,7 +58,7 @@ Commits pushed:
 - `agent-loop`: `59a970951 chore: update tsift submodule`, pushed to `origin/main`.
 
 `#tsift-dormant-crates` and `#tsift-crate-publish-preflight` remain queued for later cycles.
-<!-- agent:boundary:0248f652 -->
+<!-- agent:boundary:56a626a3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -77,7 +77,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#tsift-dormant-crates] Make dormant extracted crates intentional: wire or explicitly park tsift-tokensave and tsift-algorithms so workspace membership, CLI usage, root re-exports, and spec language agree.
 - [ ] [#tsift-crate-publish-preflight] Normalize extracted-crate release metadata and version policy: align split-crate versions/readmes/publish settings, then run cargo check/test plus cargo publish --dry-run in dependency order.
 <!-- /agent:backlog -->
 

@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -119,7 +119,7 @@ No `tmux-ci` target or tmux workflow exists in `src/tsift`, so there was no tmux
 ### Re: closeout repair — gpt-5
 
 Closed the leftover agent-doc queue-drain and boundary-normalization diff from the `#token-action-coverage` write-back. No additional repo work was needed.
-<!-- agent:boundary:792ed211 -->
+<!-- agent:boundary:ef614921 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -128,11 +128,7 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~do [#agent-doc-domain-boundary]~
-- ~do [#graph-neighborhood-budget]~
-- do [#token-action-coverage]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

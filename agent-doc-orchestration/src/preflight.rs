@@ -2385,7 +2385,19 @@ pub fn run_pending_maintenance(file: &Path) -> Result<PendingMaintenanceReport> 
 
     let mut current_content = content.clone();
     let mut snapshot_content = snapshot::load(file)?;
+    // Reorder detection (step 4) compares the file's backlog order against the
+    // snapshot as it was at cycle start. Capture it before the loop re-syncs the
+    // snapshot to the file (#pending-gate-snapshot-desync), otherwise the synced
+    // snapshot masks a same-cycle reorder.
+    let snapshot_at_start = snapshot_content.clone();
     let mut mutated = false;
+    // #pending-gate-snapshot-desync: the snapshot may need re-syncing to the
+    // file's tracked surfaces even when maintenance itself makes no change —
+    // the write phase can apply --pending-gate / --pending-edit / --review-add
+    // to the file without those reaching the content_ours snapshot. Tracked
+    // separately from `mutated` so the snapshot is re-saved without an
+    // unnecessary working-tree rewrite.
+    let mut snapshot_mutated = false;
     let mut saw_completed_before = false;
 
     for surface in &tracked_surfaces {
@@ -2426,17 +2438,14 @@ pub fn run_pending_maintenance(file: &Path) -> Result<PendingMaintenanceReport> 
             mutated = true;
         }
 
-        if current_body == body {
-            continue;
-        }
-
-        current_content = comp.replace_content(&current_content, &current_body);
-        if !removed_items.is_empty()
-            && let Some(archived) = archive_pending_done(file, &current_content, &removed_items)?
-        {
-            current_content = archived;
-        }
-
+        // Re-sync the snapshot's tracked surface to the file's body whenever the
+        // two diverge — even if maintenance made no change to it this pass. The
+        // write phase persists --pending-gate / --pending-edit / --review-add to
+        // the file but saves the content_ours snapshot (baseline + response)
+        // before those mutations, so a pure gate/edit/review-add would otherwise
+        // leave the snapshot stale and the mutation stranded as post-commit drift
+        // (#pending-gate-snapshot-desync). --done already reaches this via reap,
+        // which sets `mutated`; this also covers the no-reap mutations.
         if let Some(ref mut snap_content) = snapshot_content {
             let snap_comps = crate::component::parse(snap_content).ok();
             let snap_comp = snap_comps
@@ -2450,12 +2459,28 @@ pub fn run_pending_maintenance(file: &Path) -> Result<PendingMaintenanceReport> 
                         surface
                     )
                 })?;
-            *snap_content = snap_comp.replace_content(snap_content, &current_body);
+            let snap_body = snap_comp.content(snap_content).to_string();
+            if snap_body != current_body {
+                *snap_content = snap_comp.replace_content(snap_content, &current_body);
+                snapshot_mutated = true;
+            }
             if !removed_items.is_empty()
                 && let Some(archived) = archive_pending_done(file, snap_content, &removed_items)?
             {
                 *snap_content = archived;
+                snapshot_mutated = true;
             }
+        }
+
+        if current_body == body {
+            continue;
+        }
+
+        current_content = comp.replace_content(&current_content, &current_body);
+        if !removed_items.is_empty()
+            && let Some(archived) = archive_pending_done(file, &current_content, &removed_items)?
+        {
+            current_content = archived;
         }
     }
 
@@ -2471,23 +2496,27 @@ pub fn run_pending_maintenance(file: &Path) -> Result<PendingMaintenanceReport> 
             crate::status_cmd::reconcile_top_backlog_status_content(snap_content)?
     {
         *snap_content = reconciled;
+        snapshot_mutated = true;
     }
 
-    // 3. Persist any mutations to BOTH the working tree file and the snapshot.
+    // 3. Persist any mutations to the working tree file and/or the snapshot.
     //    Writing to both (surgically, via component replace) keeps the two in
     //    sync so the upcoming step-2 `git::commit` stages the reaped+archived
     //    snapshot in a single commit. We no longer call `git::commit` here —
     //    see #64mb: calling commit inside maintenance produced a second commit
-    //    per preflight whenever anything mutated.
+    //    per preflight whenever anything mutated. The snapshot is saved
+    //    independently of the file write so a write-phase pending mutation that
+    //    only diverged the snapshot (gate/edit/review-add) is still committed
+    //    rather than stranded (#pending-gate-snapshot-desync).
     if mutated {
         std::fs::write(file, &current_content)
             .with_context(|| format!("failed to write pending updates to {}", file.display()))?;
-
-        if let Some(snap_content) = &snapshot_content
-            && let Err(e) = snapshot::save(file, snap_content)
-        {
-            eprintln!("[preflight] pending: snapshot sync warning: {}", e);
-        }
+    }
+    if (mutated || snapshot_mutated)
+        && let Some(snap_content) = &snapshot_content
+        && let Err(e) = snapshot::save(file, snap_content)
+    {
+        eprintln!("[preflight] pending: snapshot sync warning: {}", e);
     }
 
     if saw_completed_before {
@@ -2508,9 +2537,13 @@ pub fn run_pending_maintenance(file: &Path) -> Result<PendingMaintenanceReport> 
         ensure_no_completed_tracked_items(&snapshot_content, "snapshot")?;
     }
 
-    // 4. Reorder detection: compare the snapshot's pending component to the current body.
+    // 4. Reorder detection: compare the cycle-start snapshot's pending component
+    //    to the current body. Uses the pre-sync snapshot (`snapshot_at_start`)
+    //    rather than re-loading from disk, since step 3 may have re-synced the
+    //    on-disk snapshot to the file (#pending-gate-snapshot-desync) which would
+    //    otherwise hide a same-cycle reorder.
     let current_body = tracked_body_for_reorder(&current_content);
-    let reordered = match snapshot::load(file).unwrap_or(None) {
+    let reordered = match snapshot_at_start {
         Some(snap) => {
             let snap_comp = crate::component::parse(&snap)
                 .ok()
@@ -5955,6 +5988,71 @@ mod tests {
         assert!(snapshot_after.contains("[#keep2]"));
         assert!(snapshot_after.contains("## Completed / Reaped"));
         assert!(snapshot_after.contains("[#ice01] Reap me from icebox"));
+    }
+
+    #[test]
+    fn pending_maintenance_syncs_snapshot_for_write_phase_gate_without_reap() {
+        // #pending-gate-snapshot-desync: the write phase moved #g1 from backlog
+        // to review (a --pending-gate) on the FILE, but the content_ours snapshot
+        // still shows #g1 in backlog and an empty review. Maintenance makes no
+        // reap/backfill change, yet it must re-sync the snapshot's tracked
+        // surfaces to the file so the upcoming commit stages the gate instead of
+        // stranding it as post-commit drift.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let file_content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#keep1] Keep me\n",
+            "<!-- /agent:backlog -->\n\n",
+            "## Review\n\n",
+            "<!-- agent:review -->\n",
+            "- [/] [#g1] Gated, awaiting review\n",
+            "<!-- /agent:review -->\n"
+        );
+        // Snapshot lags the file: #g1 still in backlog, review empty (the
+        // baseline+response content_ours saved before the gate mutation).
+        let snapshot_content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#keep1] Keep me\n",
+            "- [ ] [#g1] Gated, awaiting review\n",
+            "<!-- /agent:backlog -->\n\n",
+            "## Review\n\n",
+            "<!-- agent:review -->\n",
+            "<!-- /agent:review -->\n"
+        );
+        std::fs::write(&doc, file_content).unwrap();
+        snapshot::save(&doc, snapshot_content).unwrap();
+
+        run_pending_maintenance(&doc).unwrap();
+
+        let snapshot_after = snapshot::load(&doc).unwrap().unwrap();
+        let comps = crate::component::parse(&snapshot_after).unwrap();
+        let snap_backlog = comps
+            .iter()
+            .find(|c| c.name == "backlog")
+            .unwrap()
+            .content(&snapshot_after)
+            .to_string();
+        let snap_review = comps
+            .iter()
+            .find(|c| c.name == "review")
+            .unwrap()
+            .content(&snapshot_after)
+            .to_string();
+        // Snapshot now matches the file: #g1 gated into review, gone from backlog.
+        assert!(
+            !snap_backlog.contains("[#g1]"),
+            "snapshot backlog must drop the gated item: {snap_backlog}"
+        );
+        assert!(
+            snap_review.contains("[/] [#g1]"),
+            "snapshot review must carry the gated item: {snap_review}"
+        );
+        assert!(snap_backlog.contains("[#keep1]"));
     }
 
     #[test]

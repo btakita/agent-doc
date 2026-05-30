@@ -136,6 +136,7 @@ On every preflight run:
      session document or its explicit external done archive instead of
      disappearing from live tracked work without a local record.
    - Persistence invariant: the reap must land in both the working tree document and the snapshot that the commit boundary stages. If preflight cannot persist that synchronized reap safely, it must fail closed instead of continuing with completed tracked-work items still present in backlog, review, or icebox.
+   - Snapshot-sync invariant (`#pending-gate-snapshot-desync`): closeout pending maintenance must re-sync the snapshot's tracked-work surfaces to the working-tree document whenever they diverge — even when maintenance itself performed no reap or backfill. The write phase persists `--pending-gate` / `--pending-edit` / `--review-add` mutations to the document but saves the `content_ours` snapshot (baseline + response) *before* those mutations, so without the re-sync the snapshot lags, the commit stages `snapshot == HEAD`, and the mutation is stranded as uncommitted post-commit drift (`--done` avoided this only because reap already triggered a snapshot rewrite). Reorder detection still compares the file against the **cycle-start** snapshot, not the re-synced one, so a same-cycle reorder is not masked.
 - The standalone `agent-doc backlog <file> reap` command follows the same
   visibility rule for direct maintenance: it removes completed items from live
   tracked work, creates `agent:done` when needed, and appends each removed item

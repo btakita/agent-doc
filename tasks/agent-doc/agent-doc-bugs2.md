@@ -88,13 +88,65 @@ Proof:
 - Verification: preflight and plan completed after reclaim; no source-code change was made in this repair cycle.
 - Confidence: high for queue-state normalization; source-code verification belongs to the already-committed authoritative `#closeout-repair-churn` cycle.
 - Escalation: none.
-<!-- agent:boundary:a39744c0 -->
+
+### Re: JB Run Agent Doc busy-queue reports — opus-4-8
+
+Triaged the two JB `Run Agent Doc` reports you pasted into `agent:queue`. **Both show correct routing/resync behavior — neither is a new bug.** They are additional live evidence for items already queued, so I'm not opening new root-cause work or starting an implementation cycle this turn (`queue_active: false`, and `plan` classifies this as `prompt_response` with no `repo_actions`).
+
+**Report 1 — cancel → Clear Session Context → Run Agent Doc**
+- `authoritative actor generation 96 for tsift.md is busy on pane %36; queued pending dispatch "..." instead of injecting a duplicate trigger` — this is the **intended** busy-actor path: when the owning actor is mid-turn, route enqueues into `agent:queue auto` rather than double-triggering. Same for `gen 241 ... monsterrodholders.md ... queued "deploy"`.
+- `resync: stash pane %32 ... registered in its own project root — skipping kill` maps to `#cross-project-stash-pane-condition` (nested superproject+submodule sharing tmux session 0). Preservation is correct.
+- `resync: stash pane %8 is unregistered but still hosts live supervisor b26b9957-… — skipping kill` — that supervisor id **is this document's own session** (`agent_doc_session: b26b9957-…`). resync correctly refused to reap our live pane. Working as designed.
+
+**Report 2 — "JB Run Agent Doc error"**
+- `gen 241 ... busy on pane %40; queued pending dispatch "do [#next-steps-2]. #spec-test-commit-push-deploy" instead of injecting a duplicate trigger` — identical busy then enqueue path. Correct.
+
+**The one real defect is presentation, not routing:** the plugin surfaces these benign route/resync log dumps as an **error** notification. That is exactly `#jb-busy-queue-ux-feedback` (already in the backlog, `[recommended]`): present "queued behind a busy turn" and benign resync info (`registered in its own project root — skipping kill`, live-supervisor preservation) as *informational* notifications distinct from real failures. The stash-pane accumulation these logs show is tracked by `#cross-project-stash-pane-condition` and `#stash-session-ttl-prune`.
+
+So: no new item needed — the pasted evidence maps cleanly onto `#jb-busy-queue-ux-feedback` (UX classification) + `#cross-project-stash-pane-condition` (shared nested-root session) + `#stash-session-ttl-prune` (accumulation hygiene). To act on it, re-activate the queue or run `do [#jb-busy-queue-ux-feedback]`; that is a JetBrains/VS Code plugin notification-classification change, not a routing change.
+
+Two housekeeping notes:
+- The log blocks currently sit in `agent:queue` as free-text (preflight flagged `unexpected content in agent:queue`). I left them in place rather than silently rewrite user queue content (`#queue-user-edit-overwrite` class). If you want them out of the queue, say so and I will relocate them into the `#jb-busy-queue-ux-feedback` evidence trail.
+- Your new `#do-id-partial-closeout-state` backlog item is captured and committed.
+
+Proof:
+- Changed paths: `tasks/agent-doc/agent-doc-bugs2.md` only, through `agent-doc finalize`.
+- Commands: `agent-doc preflight bugs2.md`; `agent-doc plan bugs2.md`.
+- Verification: triage only — no source change this turn; `plan` returned `repo_actions: []`, `handoff: none`.
+- Confidence: high — logs show intended busy then enqueue and correct stash-preservation; defect is UX classification, already tracked.
+- Escalation: none.
+<!-- agent:boundary:17acc4e6 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
+---
+JB `Run Agent Doc`, then cancel run directly in the session, then JB `Clear Session Context`, then JB `Run Agent Doc`:
+```
+resync: stash pane %32 is registered in its own project root — skipping kill
+[route] debounce OK — file idle for 7.8s and typing indicator idle
+[route] target tmux session: 0
+[route] authoritative actor generation 96 for tasks/software/tsift.md is busy on pane %36; queued pending dispatch "What are #next-steps to extract tsift crates?" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
+```
+```
+[sync] recovered live pane %40 for session a9421282 via supervisor pid 2462423
+[sync] found alive agent-doc child (pid 2855208) in pane %32 for tasks/monsterrodholders/mrh-project.md
+[sync] recovered live pane %36 for session tsift-v0 via path provenance pid=433924 instance=d60e6829-3864-4edc-b2cf-c06da7fa6866
+resync: stash pane %8 is unregistered but still hosts live supervisor b26b9957-8de6-4eae-bb98-5d7fe4d6b781 — skipping kill
+[route] debounce OK — file idle for 2.4s and typing indicator idle
+[route] target tmux session: 0
+[route] authoritative actor generation 241 for tasks/monsterrodholders.md is busy on pane %40; queued pending dispatch "deploy" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
+```
+#spec-test-build-install-commit-push
+---
+JB `Run Agent Doc` error:
+```
+[route] debounce OK — file idle for 4.3s and typing indicator idle
+[route] target tmux session: 0
+[route] authoritative actor generation 241 for tasks/monsterrodholders.md is busy on pane %40; queued pending dispatch "do [#next-steps-2]. #spec-test-commit-push-deploy" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
+```
+#spec-test-commit-push-deploy
+---
 preset #spec-test-build-install-commit-push
-- ~If a completed item is gated in review, agent-doc should automatically add task(s) into the backlog to ungate the review item.~
-- ~do [#closeout-repair-churn]~
 - do [#closeout-recovery-state-machine]
 - do [#codex-owned-pane-prompt-miss]
 - do [#stuck-capture-compact-false-positive]
@@ -116,21 +168,6 @@ preset #spec-test-build-install-commit-push
 ###
 <!--
 Verify [#ipcfullprompt-recur2]
----
-JB `Run Agent Doc` error:
-```
-[route] debounce OK — file idle for 4.3s and typing indicator idle
-[route] target tmux session: 0
-[route] authoritative actor generation 241 for tasks/monsterrodholders.md is busy on pane %40; queued pending dispatch "do [#next-steps-2]. #spec-test-commit-push-deploy" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
-```
----
-JB `Run Agent Doc`, then cancel run directly in the session, then JB `Clear Session Context`, then JB `Run Agent Doc`:
-```
-resync: stash pane %32 is registered in its own project root — skipping kill
-[route] debounce OK — file idle for 7.8s and typing indicator idle
-[route] target tmux session: 0
-[route] authoritative actor generation 96 for tasks/software/tsift.md is busy on pane %36; queued pending dispatch "What are #next-steps to extract tsift crates?" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
-```
 ---
 The last run had a code fence stripped away by agent-doc.
 #spec-test-build-install-commit-push

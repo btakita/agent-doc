@@ -99,7 +99,7 @@ Commands: `agent-doc repair`, `agent-doc preflight`, `agent-doc plan`, and this 
 Verification: no source files changed in this recovery cycle. The prior implementation verification remains `make check`, `cargo build -p tsift-cli`, `cargo install --path packages/tsift-cli --locked --force`, and CI run `26686994059` passing.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:85e5bb2e -->
+<!-- agent:boundary:9b747b31 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -111,7 +111,7 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#tsiftcli-direct-crates]~
-- do [#tsift-dormant-crates]. wire
+- ~do [#tsift-dormant-crates]. wire~
 - do [#tsift-crate-publish-preflight]
 <!-- /agent:queue -->
 

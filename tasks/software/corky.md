@@ -129,7 +129,7 @@ Performance notes:
 - Core crate publish packaging is small and fast; dependent crate dry-runs must wait until predecessor internal crates exist in the crates.io index, and the SPEC now calls that out.
 
 Caveat: I also attempted the parent repo `make check` before committing the submodule pointer. It completed the shared crate checks and got deep into `src/agent-doc`, then hung in unrelated `agent_doc_orchestration` test execution after the suite reported `supervisor::ipc::tests::long_path_fallback_binds_successfully` running over 60 seconds. I terminated that parent-wide check and did not treat it as Corky evidence; the Corky verification above is complete and green.
-<!-- agent:boundary:5ccaaf58 -->
+<!-- agent:boundary:f79590df -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -139,7 +139,7 @@ Please give me a report the performance
 
 ## Queue
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 dispatch #spec-test-build-install-commit-push
 - do [#vbpm]
 - do [#69ge]

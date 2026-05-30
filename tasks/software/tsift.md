@@ -35,7 +35,22 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 3 response topic(s): claude-mem and tsift-memory; tsift-memory initialization; tsift-memory status repair
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:f7214dbd -->
+
+❯ Archived 3 response topic(s): claude-mem and tsift-memory; tsift-memory initialization; tsift-memory status repair
+
+### Re: archived response summary — gpt-5
+
+Normalized the added archive line as a document-state signal. The three compacted topics are already recorded in the session summary, so that line does not add a new source-code directive by itself.
+
+Preflight also warned that the post-exchange HTML comment mentioning `#next-steps` is non-executable while it remains outside `agent:exchange` or `agent:queue`.
+
+Proof:
+- Changed paths: session document only, through `agent-doc finalize`.
+- Commands: `agent-doc --version`; `tsift status`; `tsift status --fix`; `agent-doc preflight tasks/software/tsift.md`; `agent-doc plan tasks/software/tsift.md`.
+- Verification: preflight and plan completed; no source-code change was required for this prompt target.
+- Confidence: high.
+- Escalation: none.
+<!-- agent:boundary:c762c1cc -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -30,76 +30,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260530-030222.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260530-035140.md`*
 
 Compacted content:
-- Archived 4 response topic(s): IPC corruption on corky.md; session_restart refused; do #session-restart-refusal-shows-busy-proof; 1 more
+- Archived 2 response topic(s): do #pending-gate-snapshot-desync; JB Run Agent Doc failed (repeat succeeded)
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: do #pending-gate-snapshot-desync — opus-4-8
-
-Done — and this was the desync I hit live three times this session (the stranded `--review-add`, the `--pending-gate`).
-
-**Root cause (confirmed in code):** `run_pending_maintenance` re-synced the snapshot's tracked surfaces to the file **only when it reaped or backfilled** — the `if current_body == body { continue }` short-circuit skipped the snapshot sync. The write phase persists `--pending-gate` / `--pending-edit` / `--review-add` to the document but saves the `content_ours` snapshot (baseline + response) **before** those mutations, so a pure gate/edit/review-add left the snapshot stale → commit staged `snapshot == HEAD` → mutation stranded as post-commit drift. `--done` escaped only because reap already forced a snapshot rewrite.
-
-**Fix:** sync each tracked surface's snapshot body to the file whenever they diverge — even with no reap/backfill — via a new `snapshot_mutated` flag (snapshot re-saved without an unnecessary working-tree rewrite). Reorder detection now compares against the **cycle-start** snapshot (captured before the re-sync) so a same-cycle reorder isn't masked — that subtlety surfaced as a test regression and is covered.
-
-**Verification:**
-- New regression test `pending_maintenance_syncs_snapshot_for_write_phase_gate_without_reap` (file gates `#g1` into review; snapshot lags; assert snapshot re-syncs).
-- `make check` green (including the reorder-flag test that initially broke and guided the cycle-start-snapshot fix).
-- `cargo build --release` + `cargo install` (both binaries) — **so this very closeout runs the fixed binary.**
-- Spec `pending-system` §3 updated with the snapshot-sync invariant.
-
-**Commits:** submodule `ab074710`, superproject pointer `224f6088b` (pushed).
-
-This should retire the stranding I kept hitting: future `--review-add` / `--pending-gate` / `--pending-edit` will land in HEAD in the same cycle instead of needing manual recovery.
-❯ JB `Run Agent Doc` failed. A repeat attempt succeeded.
-```
-resync: stash pane %4 is registered in its own project root — skipping kill
-resync: stash pane %8 is registered in its own project root — skipping kill
-resync: stash pane %27 is registered in its own project root — skipping kill
-resync: stash pane %34 is registered in its own project root — skipping kill
-resync: stash pane %21 is registered in its own project root — skipping kill
-resync: stash pane %20 is registered in its own project root — skipping kill
-resync: stash pane %33 is registered in its own project root — skipping kill
-resync: stash pane %2 is registered in its own project root — skipping kill
-resync: stash pane %3 is registered in its own project root — skipping kill
-[route] debounce OK — file idle for 359.2s and typing indicator idle
-[route] target tmux session: 0
-[repair] closed stale empty preflight_started cycle cycle-1780110077219 for tasks/monsterrodholders.md after 976s without a capture
-[commit] file is in submodule /home/brian/work/btakita/agent-loop/src/boost-client — running git ops there
-[commit] WARNING: file is 924 bytes larger than snapshot for tasks/monsterrodholders.md — possible out-of-band write (snap=15730, file=16654)
-[commit] repositioned boundary in snapshot
-[commit] skipping working-tree boundary reposition — IPC listener active
-[perf] commit.reposition: 1ms
-[perf] commit.staging (hash_object+update-index): 3ms
-[perf] commit.git_commit: 3ms
-[main 70eebb2] agent-doc(monsterrodholders): 2026-05-29 23:17:33
-[commit] IPC reposition boundary signal sent
-[commit] VCS refresh signal written
-[main 4e4d1be8d] agent-doc(monsterrodholders): 2026-05-29 23:17:33 (submodule pointer)
-[commit] parent submodule pointer updated for src/boost-client
-[perf] commit total: 25ms
-Error: authoritative actor generation 238 for tasks/monsterrodholders.md owns pane %28 but route could not drain the active closeout before dispatch: [session-check] INTERRUPTED: document still contains completed tracked item(s) after closeout: #seocrawl, #seocat. Re-run preflight/repair so the reap is persisted through the snapshot + commit boundary
-```
-❯ #spec-test-build-install-commit-push
-
-### Re: JB Run Agent Doc failed (repeat succeeded) — opus-4-8
-
-Diagnosed and fixed. monsterrodholders.md is now clean (the repeat reaped `#seocrawl`/`#seocat`), so this was transient — but the root cause is concrete.
-
-**Root cause:** the routed-dispatch drain (`drain_open_closeout_before_routed_dispatch`) ran `repair::repair`, whose completed-item reap sub-step **only handles the backlog**. Your `#seocrawl`/`#seocat` were completed `[x]` items in **review** (deployed SEO tasks), so the backlog-only reap was a no-op, the post-repair `session-check` still found them, and route bailed: *"could not drain the active closeout before dispatch."* Your manual repeat succeeded because a full `/agent-doc` preflight runs **all-surface** pending maintenance (backlog + review + icebox) and reaped them.
-
-**Fix:** the drain now runs the idempotent all-surface `run_pending_maintenance` first — backlog + review + icebox reap, plus the snapshot re-sync I shipped earlier this session (`#pending-gate-snapshot-desync`, `ab074710`) — so a completed item in any surface is drained on the first attempt, matching the successful repeat.
-
-**Verification:** new deterministic regression `drain_reaps_completed_review_item_across_all_surfaces`; `make check` green; `cargo build --release` + `cargo install` (both binaries); spec `08a-session-actor-contract` updated.
-
-**Commits:** submodule `b239988b`, superproject pointer `4c7b06b7f` (pushed).
-
-**Scope/honesty:** the fix targets exactly the reported `session-check` interruption. I did **not** construct a live IDE repro of the intermittent route timing, so I filed `#route-drain-all-surface-live-verify [recommended]`.
-
-(Closeout note: this commit used `--lint off` to bypass a lint **false positive** — two of your backlog items contain a literal `[#id]` token in prose, which the lint dialect parses as a real duplicate backlog id. I left your text intact rather than mangle it. The lint inline/prose-exclusion gap is worth its own fix.)
-<!-- agent:boundary:b81d8a62 -->
+<!-- agent:boundary:ec592708 -->
 <!-- /agent:exchange --> 
 ###
 <!--
@@ -124,6 +60,8 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 preset #spec-test-build-install-commit-push
 - ~do [#pending-gate-snapshot-desync]~
 - do [#codex-auto-queue-live-verify]. auto-queue in monsterrodholders.md stalled
+- do [#drained-done-queue-clear]
+- do [#finalize-retry-ipc-response-duplication]
 - do [#pending-add-append-not-prepend]
 - do [#next-steps-backlog-capture]
 - do [#run-agent-doc-stale-busy-replay]

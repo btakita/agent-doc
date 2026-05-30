@@ -82,7 +82,28 @@ I read "validate the fix" as **validate the *proposed* fix in the plan** (no fix
 **Honest uncertainty:** this is a static read of current source only. I could **not** pin the original corruption to a specific prior version/path — its shape (`preset #…` line + `- [ ] [#minted] do [#oldid]`) matches the orchestration task-batch *backlog write-back* output, so the historical trigger was an orchestration write-back that, in today's code, only sources from `queue`. Whether the queue-scoping that closes #2/#3 was pre-existing or landed with the recent queue-auto convergence work isn't proven without git archaeology of the orchestration write-back at report time.
 
 `#backlog-auto-marker-misfire` stays `DO NOT IMPLEMENT`. If you want the defensive warn (fix #1) actually built, say "implement #backlog-auto-marker-misfire" and I'll scope it to a parser-level warning with the regression tests the plan lists.
-<!-- agent:boundary:239e09b3 -->
+❯ implement #backlog-auto-marker-misfire
+
+### Re: implement #backlog-auto-marker-misfire — opus-4-8
+
+Implemented the defensive fix, the only part the validation found genuinely open (#2 auto-loop scope and #3 backlog rewrite were already prevented by queue-scoping). **Marked done.**
+
+**Change** — a non-blocking `misplaced_component_attr` preflight warning (`agent-doc-orchestration/src/preflight.rs`):
+- Queue-only attr (`auto`) on a non-`queue` component → warns with `did you mean &lt;!-- agent:queue auto --&gt;?`
+- Unrecognized attribute key (the reported `auot` typo) on any component → warns `not a recognized component attribute`
+- The attribute is **never mutated** and never activates the auto-loop — the warning just makes the previously-silent misfire visible. Known keys allow-listed: `patch`, `mode`, `max_lines`, `archive`, `transfer-source`, `timestamp`, `broken`, plus queue-only `auto`.
+
+**Verification:**
+- 4 new tests: `auto`-on-backlog warns, `auot` typo warns, queue `auto` + known attrs do **not** warn, and a regression asserting backlog `auto` never activates the queue.
+- `make check` green (clippy `-D warnings` + full suite).
+- `cargo build --release` + `cargo install --path .` (both binaries refreshed).
+- **Live-verified**: ran the installed binary's `preflight` on a throwaway doc with `&lt;!-- agent:backlog auto --&gt;` → warning fired as expected.
+- Spec §2.4 (attribute validation) + §2.5 (queue-only `auto`) updated.
+
+**Commits:** submodule `fdc184f2` (code+spec+tests, pushed), superproject pointer `f88ca1951`, plan status → IMPLEMENTED `881d3656a` (all pushed to `main`).
+
+**Not implemented:** proposed fix #4 (pre-auto-run recovery snapshot) — deferred as unnecessary now that the misfire is both inert (queue-scoped) and surfaced (warning). Fixes #2/#3 needed no code change. If you want #4 anyway, say so and I'll file/scope it.
+<!-- agent:boundary:ac5ef746 -->
 <!-- /agent:exchange --> 
 ###
 <!--
@@ -109,7 +130,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#queue-head-consume-on-topic-id-regression]~
 - ~do [#route-busy-vs-starting-wording]~
 - ~do [#codex-queue-head-exact-heading-guidance]~
-- do [#backlog-auto-marker-misfire]
+- ~do [#backlog-auto-marker-misfire]~
 - do [#pending-gate-snapshot-desync]
 - do [#pending-add-append-not-prepend]
 - do [#next-steps-backlog-capture]
@@ -126,7 +147,6 @@ preset #spec-test-build-install-commit-push
 - [ ] [#pending-gate-snapshot-desync] `--pending-gate <id>` lands the gate ([/], moved to review) on the working-tree disk but NOT the committed snapshot when the IPC listener is dead and the write goes through the CRDT-merge / --force-disk path: the snapshot is saved from content_ours (baseline+response, item still [ ]) before the gate mutation, so commit sees snapshot==HEAD and leaves the gate uncommitted as post-commit local drift. Repro 2026-05-29 on agent-doc-bugs2.md finalizing the codex heading-guidance item; --done does NOT hit it (reap is captured pre-snapshot). Fix: apply pending gate/edit mutations before saving content_ours / the commit snapshot.
 - [ ] [#codex-auto-queue-live-verify] [recommended] Live-verify a Codex auto-queue advances across items with the new harness-invocation heading-discipline guidance: run a real Codex auto-queue and confirm a descriptive-heading completion advances once the agent titles the heading exactly with the head (### Re: do [#id] / ### Re: #id) or passes --done. Needs a live Codex session.
 - [ ] [#ipcfullprompt-recur2] CURE ONLY (capture/detection split out to #ipcfullprompt-capture, done). Editor-side PatchWatcher.setText PREVENTION: stop the live editor buffer from producing full-document/full-tail duplication or deletion while a prompt is being typed. Gated on the transport/payload packet from idea.log (enable #com.github.btakita.agentdoc debug logging) to pin the exact setText call shape. Add a SimWorld/Kotlin regression for the prevention once the fix lands; bump pluginVersion past 0.2.137 and reinstall the signed plugin. Stays open until prevention lands and is live-verified. Plan: tasks/agent-doc/plan-full-document-ipc-corruption-typing-prompt.md.
-- [ ] [#backlog-auto-marker-misfire] The 'auto' attribute on the agent:backlog marker (queue-only attribute) misfired an auto-run that destructively rewrote the backlog — minted new IDs wrapping 'do [#...]' stubs of already-done items; user reported original task text lost and recovery needed git/sidecar archaeology. Fix: reject 'auto'/unknown attrs on agent:backlog (warn, no mutation); auto-loop must trigger only from the queue 'auto' attribute; never rewrite committed backlog item text in an auto-run. Plan: tasks/agent-doc/plan-backlog-auto-marker-misfire.md. DO NOT IMPLEMENT.
 - [ ] [#pending-add-append-not-prepend] `--pending-add` appends new items below the previous CLI arg within the same finalize cycle, contradicting SKILL.md "Pending capture rule" ("Put new items at the beginning of agent:backlog"). Repro: tasks/agent-doc/open-code.md commit f94e7851c — agent added wave-4, wave-3, wave-2, wave-1 expecting wave-1 on top per SKILL.md; actual backlog was wave-4 on top (pure CLI-arg order). User flagged it as bug; agent had to issue --pending-reorder. Plan: tasks/agent-doc/plan-pending-add-prepend-semantics.md (recommend Option A — strict prepend, drop the implicit adjacency heuristic).
 - [ ] [#next-steps-backlog-capture] Agent responses containing #next-steps recommendations do not auto-add items to backlog when prompt preset is present. Agent must manually call `--pending-add` but the planning output `pending_mutations: expect_add` is not enforced by session-check `pending_done_guard`.
 - [ ] [#run-agent-doc-stale-busy-replay] Follow-up to the #snrun stale-busy-projection fix (submodule 89c99c79): the dispatch-only busy-vs-stale repair is covered by unit tests on the pure decision functions; add a live JB Run Agent Doc replay regression (SimWorld or tmux-ci) exercising a stale busy actor projection + proven ready prompt and asserting dispatch instead of agent:queue auto enqueue. Also still open in #snrun: distinguishing rescued-stash accepted-only proof misses. Plan: tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md.

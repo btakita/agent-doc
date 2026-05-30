@@ -54,15 +54,37 @@ Landed the snapshot-independent unresolved-exchange-prompt detector and wired it
 #### Gated — remaining scope (plan-prompt-preempts-auto-queue.md)
 
 Covered: the precedence helper + Codex final-gate deferral (plan items 1 and 5, partial). Still open: preflight emitting a synthetic `exchange_unresolved` prompt diff with `user_intent_prompt_changes` set (so the Claude auto-loop skips queue continuation), direct-`run` prompt precedence over the active-queue synthetic head, and route queue-snapshot recovery not absorbing unanswered exchange prompts. Those touch the diff/`no_changes` and route-recovery machinery and are deferred for focused work rather than a broad change in this cycle.
-<!-- agent:boundary:8aef9d60 -->
+❯ continue
+
+### Re: continue — opus-4-8
+
+Continued with the queue head `#jb-compact-malformed-response-commit`. Landed a fail-closed validator that blocks malformed compact output before commit. **Gated** (not done) — root-cause normalization + HEAD coverage remain; see below.
+
+#### What landed
+
+- **`compact.rs`** — new `malformed_compact_summary_lines()` + `validate_compacted_exchange()`, called at the top of `apply_compacted_document` (the single replacement boundary for all compact paths: inline, component, partial). It detects the live-repro corruption — a compact summary line rendered as a user prompt (`❯ *Compacted. Content archived ...*`) — and fails closed with a precise repair diagnostic **before any write**, so the malformed exchange never reaches disk or HEAD.
+
+#### Verification
+
+- 3 new tests: malformed `❯`-prefixed summary detected; clean `*Compacted...` summary under `### Session Summary` not flagged (no false positive); `apply_compacted_document` returns an error and leaves the file untouched on malformed input.
+- `make check` green (clippy `-D warnings`); both binaries rebuilt + installed.
+
+#### Gated — remaining scope (plan-jb-compact-malformed-response-commit.md)
+
+Covered: structural fail-closed before commit (plan items 3-4). Still open: the root-cause normalization audit (item 2 — *why* the archived prompt tail leaks its `❯` onto the summary line, so compaction produces clean output rather than just rejecting bad output), the "unarchived response body belongs to an archived topic" check (needs archive context, risks false-positives with partial compact), and `session-check` coverage classifying an already-committed malformed compacted exchange in HEAD as compact drift (item 5).
+
+---
+
+Note: you removed `auto` from the queue and typed `continue`, so I treated this as manual steering — I ran this one item but will **not** re-arm the auto-loop. The queue still has 15 items (`#jb-compact-repair-left-uncommitted` next). Say `continue` again for the next one, or re-add `auto` to the queue tag to resume hands-off draining.
+<!-- agent:boundary:3ac1c6cf -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#do-id-closeout-open-backlog]~
 - ~do [#queue-user-edit-overwrite]~
 - ~do [#prompt-preempts-auto-queue]~
-- do [#jb-compact-malformed-response-commit]
+- ~do [#jb-compact-malformed-response-commit]~
 - do [#jb-compact-repair-left-uncommitted]
 - do [#jb-run-agent-doc-response-queue-contamination]
 - do [#codex-owned-pane-prompt-miss]
@@ -121,7 +143,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#jb-compact-malformed-response-commit] [recommended] JetBrains `Compact Exchange` can commit malformed compact output. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md` / commit `f8fe36b`: compact summary line was committed with user prompt prefix `❯`, and archived response content remained in the live exchange shape. Add post-compact structural validation and fail closed before commit. Plan: tasks/agent-doc/plan-jb-compact-malformed-response-commit.md.
 - [ ] [#jb-compact-repair-left-uncommitted] [recommended] Compact-output repair can leave the corrected session document dirty instead of committing through a binary-owned repair boundary. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: visible exchange correction differs from malformed `HEAD`, creating mixed visible/HEAD/snapshot state for later JetBrains actions. Repair should commit atomically or fail closed with an exact recovery path. Plan: tasks/agent-doc/plan-jb-compact-repair-left-uncommitted.md.
 - [ ] [#jb-run-agent-doc-response-queue-contamination] [recommended] JetBrains `Run Agent Doc` can add assistant response prose to `agent:queue auto` after compact/repair drift. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: queue gained `- Yes. I drove the already-authenticated Google Ads browser session...`, copied from `### Re: #gads106demote`, alongside real `do [#nbsearch]`/`#bidstrat`/`#pdpconv` entries. Require queue-source provenance and reject assistant response bodies as queue candidates. Plan: tasks/agent-doc/plan-jb-run-agent-doc-response-queue-contamination.md.
 - [ ] [#preset-item-id-collision] [recommended] Enforce unique active identities across frontmatter `prompt_presets` keys and active `agent:backlog` / `agent:review` / `agent:icebox` item ids. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `#next-steps` exists both as a prompt preset and as a backlog item, making `do #next-steps` and "top backlog item: #next-steps" ambiguous between preset expansion and backlog execution. Fix with an identity registry, mutation-time rejection, preflight/session-check fail-closed diagnostics, and regressions. Plan: tasks/agent-doc/plan-preset-item-id-collision.md.
@@ -144,6 +165,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Review
  
 <!-- agent:review -->
+- [/] [#jb-compact-malformed-response-commit] [recommended] JetBrains `Compact Exchange` can commit malformed compact output. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md` / commit `f8fe36b`: compact summary line was committed with user prompt prefix `❯`, and archived response content remained in the live exchange shape. Add post-compact structural validation and fail closed before commit. Plan: tasks/agent-doc/plan-jb-compact-malformed-response-commit.md.
 - [/] [#prompt-preempts-auto-queue] [recommended] Unanswered exchange prompts must run before active `agent:queue auto` continuation, even when the prompt was accidentally baselined into the `.agent-doc` snapshot. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `What are #next-steps to complete review items?` was visible after the exchange boundary and duplicated in `agent:queue auto`, but the snapshot already contained the exchange prompt, so the next diff only saw queue bookkeeping and the prompt did not run. Fix: add snapshot-independent unresolved exchange prompt detection, make preflight/direct-run prefer it over queue synthetic diffs, prevent route queue snapshot recovery from absorbing unanswered exchange prompts, and defer Codex/Claude queue continuation while such a prompt exists. Plan: tasks/agent-doc/plan-prompt-preempts-auto-queue.md.
 - [/] [#queue-user-edit-overwrite] [recommended] User-authored agent:queue edits can be silently overwritten/deleted by write/reset/commit queue convergence. Live repro 2026-05-30 boost-client monsterrodholders.md: user added do [#gscaccess] at queue head; agent-doc repeatedly removed/reverted it during closeout/snapshot repair. Fix by tracking queue edit provenance/epochs, preserving explicit queue edits unless the current response consumes that exact head, and failing closed on stale IPC/snapshot queue rewrites. Plan: tasks/agent-doc/plan-user-queue-edit-preservation.md.
 - [/] [#ipcfullprompt-recur2] CURE ONLY (capture/detection split out to #ipcfullprompt-capture, done). Editor-side PatchWatcher.setText PREVENTION: stop the live editor buffer from producing full-document/full-tail duplication or deletion while a prompt is being typed. Gated on the transport/payload packet from idea.log (enable #com.github.btakita.agentdoc debug logging) to pin the exact setText call shape. Add a SimWorld/Kotlin regression for the prevention once the fix lands; bump pluginVersion past 0.2.137 and reinstall the signed plugin. Stays open until prevention lands and is live-verified. Plan: tasks/agent-doc/plan-full-document-ipc-corruption-typing-prompt.md.

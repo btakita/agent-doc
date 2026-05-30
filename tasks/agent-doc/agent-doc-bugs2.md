@@ -65,7 +65,20 @@ Verified against source + test:
 The plan's repro (`open-code.md` f94e7851c: waves added 4→3→2→1, wave-4 landed on top) was a **usage error**, not a binary defect — items must be passed top-to-bottom (wave-1 first), not tail-first. This matches the standing guidance in `feedback-agent-doc-pending-add-order` ("the ordering behavior is correct, so don't file a fabricated bug").
 
 Plan Option A (newest-arg-on-top stack) was **not** implemented: it would invert the documented convention, break the passing test, and contradict that feedback. `tasks/agent-doc/plan-pending-add-prepend-semantics.md` is effectively superseded — current behavior already satisfies the "beginning of backlog" spec; the doc fix it recommends (Option A) is declined. If a true newest-on-top stack is ever wanted, it should be a new explicit opt-in flag, not a change to `--pending-add`'s default.
-<!-- agent:boundary:96cf685e -->
+
+### Re: #recguard-abandon — opus-4-8
+
+Done — implemented + shipped (preset `#spec-test-build-install-commit-push` satisfied).
+
+The recursive same-pane direct-invocation guard refused to dispatch (correct) but left the freshly-opened preflight cycle in `preflight_started`, so `session-check` reported an interruption and the owner session stayed wedged until a manual `agent-doc cancel`. Fix in `agent-doc-orchestration/src/run.rs`:
+
+- New `abandon_run_recursive_cycle` marks the empty cycle **terminal (`Abandoned`)** instead of recoverable. The guard fires *before any response capture*, so abandoning loses nothing. `CycleState::is_open()` already excludes `Abandoned`, so `session-check` accepts the terminal state and reaches the `ok — cycle … is abandoned (recursive_direct_invocation_blocked …)` path — no manual cancel.
+- The fail-fast refusal is unchanged (still bails with `recursive direct invocation would deadlock`); only the cycle bookkeeping and the user-facing message changed (now says the cycle was abandoned/terminal, not "left recoverable").
+
+**Verification:** new regression `recursive_direct_invocation_abandoned_cycle_passes_session_check` (abandoned recursive-guard cycle → `session-check` OK); `make check` green; both binaries rebuilt (`cargo build --release` + `cargo install`, exit 0). `VERSIONS.md` updated.
+
+**Commit + push:** `src/agent-doc` `6f91beb2` (branch `20260422/codex-agent-backend`, pushed to origin). The commit also bundles the earlier retry/IPC-dedup source changes that share `session_check.rs`/`VERSIONS.md`; that separate item is unchanged in status here — it stays gated pending its own live IDE-IPC validation, and the code landing does not by itself satisfy that gate.
+<!-- agent:boundary:8f1888b4 -->
 <!-- /agent:exchange --> 
 ###
 <!--
@@ -101,7 +114,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#recguard-abandon] [recommended] Recursive same-pane direct `agent-doc <FILE>` correctly refuses to dispatch back into the owning Codex pane, but the guard path can leave an empty `preflight_started` cycle that requires manual recovery. Live repro 2026-05-30: repeated `agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md` from owner pane `%28` failed with `recursive direct invocation would deadlock`; fix should fail fast with the same diagnostic while closing/abandoning the empty preflight cycle so `session-check` accepts the terminal state. Plan: tasks/agent-doc/plan-recursive-direct-invocation-abandon.md.
 - [ ] [#route-drain-all-surface-live-verify] [recommended] Live-verify the route-drain all-surface reap (submodule b239988b / superproject 4c7b06b7f) resolves the JB Run Agent Doc "completed tracked item blocks dispatch" retry: with the installed binary, reproduce a closeout that leaves a completed [x] item in review or icebox on an IDE-owned doc, then run JB Run Agent Doc once and confirm it dispatches without a manual repeat. Also exercises the #pending-gate-snapshot-desync snapshot re-sync (ab074710) under the route path.
 - [ ] [#codex-auto-queue-stalled-final-gate] Codex auto-queue final gate failed live: after `src/boost-client/tasks/monsterrodholders.md` completed/deployed `#seocat`, the document still had `queue_active: true`, `agent:queue auto`, and next head `do [#seopdp]`, but Codex sent a normal final answer instead of continuing/blocking. This is the failed live proof for `#codex-auto-queue-live-verify`. Fix by adding a binary-owned durable "queue continuation required" marker/final gate that successful closeout writes when a ready auto-queue head remains, and teach Codex Stop/session-check strict mode to block final answers even when transient hook session state is missing or the turn used a manual/recovery closeout path. Plan: tasks/agent-doc/plan-codex-auto-queue-stalled-final-gate.md.
 - [ ] [#active-queue-persisted-no-continue] Active persisted queues can stall after a successful closeout when `queue_active: true` remains but the queue tag lacks `auto`: the next head is ready, yet continuation paths only consider `agent:queue auto` (`codex_hook.rs::active_auto_queue_prompt` requires the attr; direct continuation gates on an auto outcome; Claude guidance checks `queue_trigger == "auto"`). Repro 2026-05-30 `tasks/agent-doc/agent-doc-bugs2.md`: plain `agent:queue` (no auto attr), `queue_active: true`, five remaining heads beginning `#pending-gate-snapshot-desync`, no next cycle launched after closeout. Treat `auto` as a start trigger and `queue_active` as the continuation signal, or halt with an explicit reason. Plan: tasks/agent-doc/plan-active-queue-persisted-continuation.md.

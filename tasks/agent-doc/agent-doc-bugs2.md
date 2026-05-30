@@ -30,42 +30,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260530-035140.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260530-041336.md`*
 
 Compacted content:
-- Archived 2 response topic(s): do #pending-gate-snapshot-desync; JB Run Agent Doc failed (repeat succeeded)
+- Archived 2 response topic(s): do #codex-auto-queue-live-verify; do #drained-done-queue-clear
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-### Re: do #codex-auto-queue-live-verify — opus-4-8
-
-Closing this verify item on a **negative live result**, not a pass. You ran a real Codex auto-queue and it **stalled in `monsterrodholders.md`** — which is the answer the verify item existed to obtain ("run a real Codex auto-queue and confirm whether a descriptive-heading completion advances"). It does not advance; it stops.
-
-**Why done, not passing:** this is an observational task — execute a live auto-queue and record what happens. We now have a definitive observation (stall), and the failure is already captured downstream with plans, so there is no remaining work hanging on this ID:
-
-- **`#codex-auto-queue-stalled-final-gate`** (stays open) — the explicit failed-proof capture: after a completed/deployed head the doc still had a live persisted queue, an `auto` attr, and a ready next head, but Codex emitted a normal final answer instead of continuing or blocking. Fix direction: a binary-owned durable "queue continuation required" final gate that successful closeout writes when a ready auto-queue head remains, plus a Codex Stop/session-check strict mode that blocks final answers even when transient hook session state is missing or a manual/recovery closeout path was used. Plan: `tasks/agent-doc/plan-codex-auto-queue-stalled-final-gate.md`.
-- **`#active-queue-persisted-no-continue`** (stays open) — the adjacent root cause: continuation paths only consider an `auto`-attributed queue (`codex_hook.rs::active_auto_queue_prompt` requires the attr), so a persisted live queue with a ready head can stall. Fix: treat `auto` as a start trigger and persisted-active as the continuation signal, or halt with an explicit reason. Plan: `tasks/agent-doc/plan-active-queue-persisted-continuation.md`.
-
-Marking advance-confirmation as still-open would just shadow those two; the proof they need is "Codex continues after the gate lands," which belongs to those IDs once their fix ships — not to a standing verify item.
-
-**On the preflight `stuck_captured_cycle` warning (cycle-1780111236991, 2071 bytes):** left untouched on purpose. That body — the `do #pending-gate-snapshot-desync` response — was compacted into `.agent-doc/archives/483039e7…-20260530-035140.md`, so it is committed-but-absent-from-HEAD only because compaction archived it. Running the suggested `write --commit` would re-inject an already-archived response. This is exactly the false positive already tracked as **`#stuck-capture-compact-false-positive`** (reconcile a compacted capture instead of flagging it stuck). No recovery action this cycle.
-
-No code changed, so no suite/CI leg this turn — this is a verification-closeout, with the live finding routed to the two fix IDs above.
-
-### Re: do #drained-done-queue-clear — opus-4-8
-
-Fixed and shipped to both local binaries. Root cause was a stale activation flag, not the drain logic itself.
-
-**Diagnosis.** `run_queue_maintenance` calls `resolve_activation` *before* the auto-strike pass. When every queued `do [#id]` is already resolved (in `agent:done` or review-gated), the strike pass converts all live heads to `Completed`, but `activation.active` stays the stale pre-strike `true`. The now-headless queue then hit the cross-cycle head-modified check, where `detect_head_prompt_modified` compares the post-strike head (`None`) against the still-live snapshot head (`Some`) → `(Some, None)` → misclassified as an `item_modified` halt. The halt returns *before* the drain-cleanup path, so the dispatch directive + completed residue and `queue_active: true` survived until a manual `agent-doc commit`. Exactly the Corky live repro.
-
-**Fix (three parts, `run_queue_maintenance` + commit-boundary recovery):**
-
-1. **Re-resolve activation after the strike.** When the strike empties the live-prompt set, flip `active` false (and clear the trigger) so the drain-cleanup path runs — clearing `queue_active`, stripping `auto`, emptying the body in the same binary-owned pass — instead of the stale-active state tripping the halt or reporting an active queue with zero prompts.
-2. **Strike the snapshot before comparing heads.** The partial case (a leading done head + a still-live next head) also false-halted because the snapshot's first prompt was still the done head. Applying the same done/gated strike to the snapshot entries first means only a *genuine* operator head edit halts; a head resolved this cycle via `--done` advances cleanly to the next live head.
-3. **Self-heal the standalone drain.** A no-diff preflight that drains writes file+snapshot but leaves HEAD on the active-queue commit. The route queue commit-boundary recovery now also accepts a drained snapshot when HEAD proves the prior active auto-queue and *only* queue state differs — guarded so any accompanying user edit blocks the auto-commit. No more manual `agent-doc commit`.
-
-**Verification:** 4 new regression tests (all-done drain without halt; partial-strike advance; drained commit-boundary recovery; user-edit guard) — all green. `make check` clean (clippy + full suite, exit 0). `cargo build --release` + `cargo install` both done, so this very closeout runs the fixed binary. Spec `07-orchestration-commands` updated with the already-resolved-heads-drain invariant.
-
-**Commits:** submodule `b83b4606`, superproject pointer `df2a4502d`. Plan: `tasks/agent-doc/plan-drained-done-queue-clear.md`.
-<!-- agent:boundary:6a530482 -->
+<!-- agent:boundary:1bee62ad -->
 <!-- /agent:exchange --> 
 ###
 <!--

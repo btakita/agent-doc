@@ -35,7 +35,25 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 1 response topic(s): auto-add backlog tasks to ungate review items
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:c6b8f9f4 -->
+
+### Re: closeout-repair-churn — opus-4-8
+
+Shipped the highest-value piece of the plan: raw-component patchback now fails closed **before** commit, closing the worst symptom (escaped `agent:exchange` directives committed into the live exchange).
+
+**What changed**
+- New `PatchbackShape::EscapedComponentMarkers` in `flow::document_mutation`: a patch-free response carrying fully-formed `&lt;!-- agent:NAME --&gt;` … `&lt;!-- /agent:NAME --&gt;` component blocks is classified distinctly and rejected in `parse_template_patchback` before any snapshot save or commit. This guards every template write path (`run_template`, `run_stream`, `run_ipc`, `apply_template_from_string`).
+- The typed diagnostic points at the supported `<!-- patch:exchange -->` form, or at rerunning `agent-doc write --commit <FILE>` to absorb an already-visible `### Re:` response.
+- Boundary markers (`<!-- agent:boundary:HASH -->`, no close) and markers inside code fences do not trip the guard — it reuses the validated `component::parse`. Emits an ops-log line + a typed `FailedClosed` flow event.
+- Spec invariant added to `specs/07-closeout-commands.md`.
+
+**Tests** (all green under `make check`): classifier precedence (valid patches win over incidental component blocks), `raw_component_block_count` ignores plain `### Re:` and bare boundary markers, `parse_template_patchback` rejects the raw-template form with the patch-form hint, plain responses still accepted, and a write-path integration test asserting the document and HEAD stay byte-for-byte unchanged on rejection.
+
+**Live**: built release + `cargo install` + `lib-install` (JB cdylib refresh); smoke-tested the installed binary — piping the raw component form to `write --commit` fails closed and leaves the doc untouched.
+
+**Commit note**: the submodule held ~1627 lines of *previously-uncommitted* source from earlier auto-loop cycles (compact validation, compact uncommitted-state warning, queue contamination guard, review ungate-tasks, missing-response/preflight guards) that committed only their session doc. Those rode into submodule `6da30a9d` alongside this fix — all green. Superproject pointer `5f0636739`.
+
+**Remaining scope** → `#closeout-recovery-state-machine`: the unified typed recovery state machine across finalize/write/repair/commit plus the single-instruction diagnostic (plan fixes #1/#5). Plan fixes #3 (direct-`### Re:` absorption) and #4 (atomic parent-pointer) are already substantially covered by existing `write --commit` absorption and `complete_required_closeout` retry.
+<!-- agent:boundary:d2523253 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -50,6 +68,7 @@ preset #spec-test-build-install-commit-push
 - do [#route-drain-all-surface-live-verify]
 - do [#run-agent-doc-stale-busy-replay]
 - do [#jb-busy-queue-ux-feedback]
+- do [#free-text-queue-owner-consume]
 - do [#plugin-cleanup-menu-command]
 - do [#stash-session-ttl-prune]
 - do [#next-steps-backlog-capture]
@@ -100,8 +119,8 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#closeout-recovery-state-machine] [recommended] Remaining #closeout-repair-churn scope: a unified typed closeout recovery state machine shared by finalize / write --commit / repair / commit (states missing_response_body, direct_response_patchback, escaped_template_patch, boundary_only_drift, reaped_item_pending_parent, nested_parent_pointer_stale) that collapses the scattered 'try finalize / write --commit / commit' diagnostic chain into one typed instruction per state. The escaped-component-marker fail-closed guard already shipped (PatchbackShape::EscapedComponentMarkers). Direct-### Re: absorption and atomic parent-pointer repair are already substantially covered by write --commit absorption and complete_required_closeout retry. Plan: tasks/agent-doc/plan-closeout-repair-churn.md.
 - [ ] [#free-text-queue-owner-consume] [recommended] Free-text `agent:queue auto` heads can remain live after an owner-pane/direct Codex closeout writes the response but lacks queue-target proof. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `Approve [#shoptiers]. What are #next-steps?` was answered, then reported as not marked done; same-pane `agent-doc <FILE>` refused recursive dispatch and repair finalize logged `[queue] skipped consumption because the active prompt did not target the queue head`. Preserve id-backed queue safety, but record/restore synthetic free-text queue-target proof for recursive-direct repair/finalize paths and add diagnostics/regressions. Plan: tasks/agent-doc/plan-free-text-queue-owner-consume.md.
-- [ ] [#closeout-repair-churn] [recommended] Agent-doc closeout repair should converge in one path instead of causing multi-command repair churn. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: after successful Codex side-effect work, `write --commit`, `finalize`, template fallback, manual response insertion, direct-patchback absorption, and parent-pointer commit were all needed before `session-check` passed; one attempt committed escaped `agent:exchange` directives into the live exchange. Add a typed closeout recovery state machine, reject unsupported template patch stdin before commit, absorb visible `### Re:` direct patchbacks without manual boundary surgery, and make nested parent pointer repair atomic. Plan: tasks/agent-doc/plan-closeout-repair-churn.md.
 - [ ] [#preset-item-id-collision] [recommended] Enforce unique active identities across frontmatter `prompt_presets` keys and active `agent:backlog` / `agent:review` / `agent:icebox` item ids. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `#next-steps` exists both as a prompt preset and as a backlog item, making `do #next-steps` and "top backlog item: #next-steps" ambiguous between preset expansion and backlog execution. Fix with an identity registry, mutation-time rejection, preflight/session-check fail-closed diagnostics, and regressions. Plan: tasks/agent-doc/plan-preset-item-id-collision.md.
 - [ ] [#codex-final-response-live-verify] [recommended] Opportunistic live re-verification of the #codex-final-response-not-written guard: do a real Codex direct/manual run that commits side-effect work, confirm session-check (via the .codex Stop hook) fails closed with the 'no assistant response body was captured' message + 'agent-doc write --commit' recovery when no ### Re: close-out was written, and that a normal Codex turn with a response stays OK. Guard + deterministic regressions already landed (session_check.rs check_committed_without_response_body_guard).
 - [ ] [#stuck-capture-compact-false-positive] [recommended] stuck_captured_cycle false-positive after compaction: a capture recorded as committed (cycle-1780100032048, response 'gate→done for codex guidance') is later archived by compact, so preflight reports committed-but-not-in-HEAD and suggests `write --commit` recovery — which would re-inject an already-archived response (it lives in .agent-doc/archives/<hash>-*.md). Fix: when a captured-committed body is absent from HEAD because it was compacted (present in the matching archive), reconcile the capture instead of flagging it stuck. Repro 2026-05-29 agent-doc-bugs2.md.

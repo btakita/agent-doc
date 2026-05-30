@@ -1144,6 +1144,8 @@ fn guard_destructive_operator_on_live_busy_pane(
         let pane = evidence.pane_id.as_deref().unwrap_or("unknown");
         let command = evidence.current_command.as_deref().unwrap_or("unknown");
         let tail = evidence.tail.as_deref().unwrap_or("unknown");
+        let busy_proof = busy_proof_for_pane(ctx, tmux, &evidence);
+        let busy_proof = busy_proof.as_deref();
         if action == "session_restart" {
             anyhow::bail!(
                 "{}",
@@ -1152,17 +1154,19 @@ fn guard_destructive_operator_on_live_busy_pane(
                     pane,
                     evidence.source,
                     command,
+                    busy_proof,
                     tail
                 )
             );
         }
         anyhow::bail!(
-            "{} refused for {} because pane {} is alive-busy (source={}, current_command={}, tail={:?}). Run `agent-doc session status {}` and wait for an idle prompt, or inspect/stop the pane explicitly before clearing or restarting it.",
+            "{} refused for {} because pane {} is alive-busy (source={}, current_command={}, busy_proof={:?}, tail={:?}). Run `agent-doc session status {}` and wait for an idle prompt, or inspect/stop the pane explicitly before clearing or restarting it.",
             action,
             ctx.canonical_file.display(),
             pane,
             evidence.source,
             command,
+            busy_proof.unwrap_or("none"),
             tail,
             ctx.canonical_file.display()
         );
@@ -1178,17 +1182,36 @@ pub(crate) fn restart_busy_refusal_message(
     pane: &str,
     source: &str,
     command: &str,
+    busy_proof: Option<&str>,
     tail: &str,
 ) -> String {
     format!(
-        "session_restart refused for {} because pane {} is alive-busy (source={}, current_command={}, tail={:?}). Run `agent-doc session status {}` and wait for an idle prompt, or pass `--force` to interrupt the running turn and restart anyway.",
+        "session_restart refused for {} because pane {} is alive-busy (source={}, current_command={}, busy_proof={:?}, tail={:?}). Run `agent-doc session status {}` and wait for an idle prompt, or pass `--force` to interrupt the running turn and restart anyway.",
         file.display(),
         pane,
         source,
         command,
+        busy_proof.unwrap_or("none"),
         tail,
         file.display()
     )
+}
+
+/// Capture the live pane and return the line that proves an active turn (the
+/// interrupt/working-spinner cue), so busy-guard refusals can cite concrete
+/// busy evidence instead of the ambiguous footer
+/// (#session-restart-refusal-shows-busy-proof). Best-effort: returns None when
+/// the pane cannot be captured or no proof line is present.
+fn busy_proof_for_pane(
+    ctx: &SessionContext,
+    tmux: &Tmux,
+    evidence: &LivePaneEvidence,
+) -> Option<String> {
+    let pane = evidence.pane_id.as_deref()?;
+    let captured = agent_doc_orchestration::sessions::capture_pane_with_ansi(tmux, pane)
+        .or_else(|_| agent_doc_orchestration::sessions::capture_pane(tmux, pane))
+        .ok()?;
+    harness_for_evidence(ctx, evidence).busy_proof_line(&captured)
 }
 
 fn log_restart_evidence_event(ctx: &SessionContext, event: &str, evidence: &LivePaneEvidence) {
@@ -2415,14 +2438,18 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             "%7",
             "authoritative_actor",
             "agent-doc",
-            "Working...",
+            Some("• Working (7m 47s · esc to interrupt)"),
+            "⏵⏵ bypass permissions on (shift+tab to cycle)",
         );
 
         assert!(message.contains("session_restart refused"));
         assert!(message.contains("pane %7 is alive-busy"));
         assert!(message.contains("source=authoritative_actor"));
         assert!(message.contains("current_command=agent-doc"));
-        assert!(message.contains("tail=\"Working...\""));
+        // Busy-proof line is surfaced so the busy state is self-evident, not the
+        // ambiguous permission footer (#session-restart-refusal-shows-busy-proof).
+        assert!(message.contains("busy_proof=\"• Working (7m 47s · esc to interrupt)\""));
+        assert!(message.contains("bypass permissions"));
         assert!(message.contains("agent-doc session status /tmp/doc.md"));
         assert!(message.contains("pass `--force`"));
         assert!(message.contains("interrupt the running turn and restart anyway"));

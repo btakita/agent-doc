@@ -317,7 +317,13 @@ single-owner actor controls:
   evidence classifies the resolved pane as `alive-busy`, restart must fail
   closed before mutating the session, except when the pane is visibly at the
   harness clean-exit restart prompt. The refusal must point to `--force` as the
-  explicit discard path. A `starting` actor generation is also a restart guard:
+  explicit discard path, and must surface a `busy_proof` field carrying the
+  concrete active-turn line (the interrupt/working-spinner cue such as
+  `Working (Xs · esc to interrupt)`) when one is present, in addition to the raw
+  pane `tail`. The raw tail alone is the ambiguous composer/permission footer
+  (e.g. `⏵⏵ bypass permissions on …`), which shows in both idle and busy states
+  and reads as a false refusal; `busy_proof` makes the busy classification
+  self-evident. A `starting` actor generation is also a restart guard:
   bare restart may proceed only after the pane shows a dispatch-ready prompt or
   that clean-exit restart prompt, and the document has not changed after the
   last committed response cycle. `--force` bypasses that starting guard and may

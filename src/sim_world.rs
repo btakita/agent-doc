@@ -835,6 +835,7 @@ impl SimWorld {
                         &pane,
                         "authoritative_actor",
                         "agent-doc",
+                        Some("• Working (1m 34s · esc to interrupt)"),
                         "Working..."
                     ),
                     self.seed,

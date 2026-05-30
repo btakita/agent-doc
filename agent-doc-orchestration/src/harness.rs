@@ -282,6 +282,27 @@ impl HarnessConfig {
         self.dispatch_blocker_reason(output).is_some()
     }
 
+    /// Return the recent pane line that proves an active turn — the interrupt
+    /// hint (`esc to interrupt`) or a working spinner with an elapsed-seconds
+    /// timer. Busy-guard refusals cite this concrete proof instead of the
+    /// ambiguous composer/permission footer, which shows in both idle and busy
+    /// states (#session-restart-refusal-shows-busy-proof). Returns the
+    /// original-case, trimmed line, or None when no active-turn proof line is
+    /// present (idle, or a non-turn blocker such as a permission prompt).
+    pub fn busy_proof_line(&self, output: &str) -> Option<String> {
+        output
+            .lines()
+            .rev()
+            .take(8)
+            .map(crate::prompt::strip_ansi)
+            .map(|line| line.trim().to_string())
+            .filter(|line| !line.is_empty())
+            .find(|line| {
+                let lower = line.to_ascii_lowercase();
+                lower.contains("esc to interrupt") || is_claude_working_spinner_line(&lower)
+            })
+    }
+
     pub fn is_help_screen_output(&self, output: &str) -> bool {
         match self.binary.as_str() {
             "opencode" => is_opencode_help_screen(output),
@@ -1163,6 +1184,32 @@ mod tests {
         assert!(
             !h.has_busy_cue(CLAUDE_IDLE_PANE),
             "idle composer pane must not read as busy"
+        );
+    }
+
+    #[test]
+    fn busy_proof_line_returns_active_turn_line_not_footer() {
+        // #session-restart-refusal-shows-busy-proof: surface the interrupt/working
+        // line, not the ambiguous permission footer.
+        let h = HarnessConfig::claude();
+        let pane = concat!(
+            "• Working (7m 47s · esc to interrupt)\n",
+            "› Summarize recent commits\n",
+            "  gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/boost-client · Context 60% used\n",
+            "  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents\n",
+        );
+        assert_eq!(
+            h.busy_proof_line(pane).as_deref(),
+            Some("• Working (7m 47s · esc to interrupt)")
+        );
+    }
+
+    #[test]
+    fn busy_proof_line_is_none_for_idle_pane() {
+        let h = HarnessConfig::claude();
+        assert!(
+            h.busy_proof_line(CLAUDE_IDLE_PANE).is_none(),
+            "idle composer/permission footer is not a busy-proof line"
         );
     }
 

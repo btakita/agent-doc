@@ -128,7 +128,29 @@ v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-gramm
 Compacted content:
 - Archived 6 response topic(s): do [#tpauditpolicy]; do [#commhxstrong]; do [#p6tspub]; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-<!-- agent:boundary:2983d309 -->
+❯ Does it make sense to break up tagpath into separate crates?
+
+### Re: separate crates — gpt-5
+
+Yes, but I would split it narrowly along dependency and target boundaries, not into a crate per module.
+
+The current crate is carrying several distinct products at once: a pure identifier/tag semantic library, native project analysis, a CLI, MCP integration, a watcher, dynamic grammar loading, and a WASM surface. That is still manageable, but the pressure is visible in the feature graph: defaults pull in the language grammars plus MCP and watch support, `src/lib.rs` has many native-vs-wasm gates, `src/main.rs` is a large CLI orchestration layer, and the WASM module intentionally exposes only a small filesystem-free subset.
+
+The split that makes sense first:
+
+1. `tagpath-core`: parser, convention detection, alias, family, prose, query normalization, compression, and the pure data types that do not require filesystem or tree-sitter.
+2. `tagpath` as the existing user-facing crate/binary: keep the CLI name and compatibility path here; depend on `tagpath-core` internally.
+3. Later, only if the surfaces keep growing, add thin adapter crates such as `tagpath-wasm` and `tagpath-mcp`.
+4. Possibly extract `tagpath-project` or `tagpath-native` for config resolution, extract/search/lint/index/ontology/rename/watch/tree-sitter if that layer keeps expanding.
+
+I would not split the tree-sitter languages into separate crates right now. Feature flags are already a better fit for that boundary, and per-language crates would add publishing/versioning overhead without buying much unless third parties need to consume those grammar bundles independently.
+
+The main payoff is cleaner consumption: agents or tools that only need `parse`, `alias`, `family`, or `normalize_query` could depend on a small stable core without inheriting CLI, watcher, MCP, tree-sitter, native filesystem, or WASM concerns. It also makes the WASM story cleaner because the current WASM subset is basically already describing a core API.
+
+The cost is real: workspace release choreography, more semver surface, more docs, and more internal API decisions becoming public. So I would not do a broad workspace split until the core API is stable enough to support independently.
+
+My call: yes to a conservative `tagpath-core` extraction first; no to a many-crate breakup yet.
+<!-- agent:boundary:50fb42a3 -->
 <!-- /agent:exchange -->
 ###
 <!--

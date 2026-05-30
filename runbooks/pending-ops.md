@@ -169,6 +169,17 @@ plan path into another `.md` file.
   completes `#id` but omits the matching done mutation. If the item is
   code-complete but blocked on an external gate, prefer
   `--pending-gate <id>` instead of leaving it silently open.
+- **`do [#id]` / `do #id` directives are closeout-gated regardless of response
+  wording** (`#do-id-closeout-open-backlog`). When the prompt directive names a
+  tracked id that is open in `agent:backlog` at preflight, the cycle records an
+  `expect_done_or_gate` obligation for that id. A successful closeout — even one
+  that only clears the queue or updates status without a "completed #id" heading
+  — fails closed if the id is still `[ ]` in `agent:backlog` and no `--done`,
+  `--pending-gate`, or kept-open edit (`--pending-edit "id=… (stays open: …)"`)
+  was recorded this cycle. Resolve every `do [#id]` target with exactly one
+  lifecycle outcome: `--done <id>`, `--pending-gate <id>` (code-complete,
+  awaiting review/external validation), an explicit kept-open edit, or set
+  `pending_done_guard: off` for the document when the item must stay open.
 - If the completed ids are also contiguous head entries in an active
   `agent:queue`, repeating `--done <id>` for each completed id lets closeout
   consume that done-backed queue batch in the same commit. The queue still stops

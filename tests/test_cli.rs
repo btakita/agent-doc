@@ -244,7 +244,16 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         ("agent-doc-orchestration/src/route.rs", "guard_") => 7,
         ("agent-doc-orchestration/src/route.rs", "proof=") => 2,
         ("agent-doc-orchestration/src/route.rs", "reason=") => 10,
-        ("agent-doc-orchestration/src/session_check.rs", "guard_") => 22,
+        // +8 for the audited `#do-id-closeout-open-backlog` guard:
+        // `expect_done_or_gate_guard_fired` ops_log diagnostic plus seven
+        // `expect_done_or_gate_guard_*` test names. +1 for the audited
+        // `#queue-user-edit-overwrite` `dropped_queue_prompt_guard_failed`
+        // ops_log diagnostic. +4 for the audited
+        // `#jb-run-agent-doc-response-queue-contamination` guard:
+        // `queue_response_contamination_guard_failed` ops_log diagnostic plus
+        // three `queue_contamination_guard_*` test names. All follow the same
+        // ops_log pattern as the sibling session-check pending guards.
+        ("agent-doc-orchestration/src/session_check.rs", "guard_") => 35,
         ("agent-doc-orchestration/src/write.rs", "guard_") => 70,
         // +1 for the audited `bare_write_escalated_to_commit ... reason=response_body_placed`
         // ops_log diagnostic on the #bare-write-captured-uncommitted escalation path.

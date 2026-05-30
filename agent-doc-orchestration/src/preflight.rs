@@ -2257,12 +2257,47 @@ pub fn run(file: &Path) -> Result<()> {
         &frontmatter_prompt_presets,
         &prompt_bearing_changes,
     );
+    // `#do-id-closeout-open-backlog`: tracked-work ids named by an explicit
+    // `do [#id]` directive that are still open in the live backlog must reach a
+    // lifecycle outcome before closeout. Record them so `session-check` can fail
+    // closed when a directive clears the queue but leaves its target `[ ]`.
+    let expect_done_or_gate_ids = {
+        let directive_ids = crate::session_check::do_directive_target_ids(&prompt_targets);
+        if directive_ids.is_empty() {
+            Vec::new()
+        } else {
+            let open_backlog: std::collections::HashSet<String> = std::fs::read_to_string(file)
+                .ok()
+                .and_then(|content| crate::component::parse(&content).ok().map(|c| (content, c)))
+                .map(|(content, components)| {
+                    components
+                        .into_iter()
+                        .filter(|component| crate::component::is_backlog_component(&component.name))
+                        .flat_map(|component| {
+                            let (_, items, _) =
+                                crate::pending::parse_items(component.content(&content));
+                            items
+                        })
+                        .filter(|item| !item.is_done())
+                        .map(|item| item.id)
+                        .filter(|id| !id.is_empty())
+                        .collect::<std::collections::HashSet<String>>()
+                })
+                .unwrap_or_default();
+            directive_ids
+                .into_iter()
+                .map(|id| crate::pending::normalize_pending_id(&id))
+                .filter(|id| open_backlog.contains(id))
+                .collect::<Vec<_>>()
+        }
+    };
     if !no_changes {
         crate::cycle_state::record_backlog_capture_requirement(file, backlog_capture_required)?;
         crate::cycle_state::record_backlog_target_requirements(
             file,
             &explicit_backlog_requirements,
         )?;
+        crate::cycle_state::record_expect_done_or_gate_ids(file, &expect_done_or_gate_ids)?;
         crate::cycle_state::record_required_explicit_backlog_item_count(
             file,
             required_explicit_backlog_item_count,

@@ -1041,6 +1041,11 @@ enum Commands {
         #[command(subcommand)]
         action: PendingAction,
     },
+    /// Operate on the review component of a session document
+    Review {
+        #[command(subcommand)]
+        action: ReviewAction,
+    },
     /// Resolve typed gates across tracked documents.
     /// Scans documents under the project root for [/<type>] items and flips to [x].
     /// Designed for hook integration: `agent-doc resolve-gate release`
@@ -1305,6 +1310,18 @@ enum PendingAction {
         id: String,
         /// Gate type (e.g., "release", "deploy")
         gate_type: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum ReviewAction {
+    /// Add a backlog follow-up task for each gated review item so it is driven
+    /// back out of review (ungate → done). Idempotent: review ids already
+    /// covered by an existing ungate task are skipped.
+    #[command(name = "ungate-tasks")]
+    UngateTasks {
+        /// Path to the session document
+        file: PathBuf,
     },
 }
 
@@ -2308,6 +2325,15 @@ fn main() -> anyhow::Result<()> {
             }
             PendingAction::SetGateType { id, gate_type } => {
                 agent_doc_orchestration::pending_cmd::set_gate_type(&file, &id, &gate_type)
+            }
+        },
+        Commands::Review { action } => match action {
+            ReviewAction::UngateTasks { file } => {
+                let report = agent_doc_orchestration::pending_cmd::add_ungate_tasks_for_review(&file)?;
+                println!("  scanned review: {} gated item(s)", report.scanned);
+                println!("  added {} backlog ungate task(s)", report.added.len());
+                println!("  (skipped {} already-tracked)", report.skipped.len());
+                Ok(())
             }
         },
         Commands::ResolveGateCmd { gate_type, scope } => {

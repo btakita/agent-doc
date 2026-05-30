@@ -13,6 +13,11 @@ pub struct PatchbackShapeFacts {
     pub exchange_patch_count: usize,
     pub unmatched_len: usize,
     pub has_transcript_markers: bool,
+    /// Count of fully-formed `<!-- agent:NAME -->` ... `<!-- /agent:NAME -->`
+    /// component blocks parsed from the response stdin (outside code fences).
+    /// Non-zero with no patch markers means the caller piped the raw template
+    /// form instead of `<!-- patch:* -->` blocks.
+    pub raw_component_block_count: usize,
 }
 
 pub fn classify_patchback_shape(facts: PatchbackShapeFacts) -> PatchbackShape {
@@ -25,10 +30,29 @@ pub fn classify_patchback_shape(facts: PatchbackShapeFacts) -> PatchbackShape {
     if facts.patch_count > 0 {
         return PatchbackShape::ValidPatch;
     }
+    // No supported patch blocks. A response that instead carries literal
+    // component blocks is the raw template form and must not be committed as
+    // plain exchange text (`#closeout-repair-churn`).
+    if facts.raw_component_block_count > 0 {
+        return PatchbackShape::EscapedComponentMarkers;
+    }
     if facts.has_transcript_markers {
         return PatchbackShape::TranscriptDump;
     }
     PatchbackShape::PlainResponse
+}
+
+/// Count fully-formed `<!-- agent:NAME -->` component blocks in a response.
+///
+/// Reuses the validated component parser so boundary markers
+/// (`<!-- agent:boundary:HASH -->`, which have no close marker) and markers
+/// inside code fences are excluded. A parse error (mismatched/invalid markers)
+/// is treated as "no clean component blocks" — that shape is handled by the
+/// existing malformed/plain paths rather than this raw-template guard.
+pub fn raw_component_block_count(response: &str) -> usize {
+    component::parse(response)
+        .map(|components| components.len())
+        .unwrap_or(0)
 }
 
 #[derive(Debug, Clone)]
@@ -43,6 +67,10 @@ pub struct TemplatePatchbackPlan {
 impl TemplatePatchbackPlan {
     pub fn has_malformed_orphan_markers(&self) -> bool {
         self.shape == PatchbackShape::MalformedPatch && !self.unmatched.trim().is_empty()
+    }
+
+    pub fn has_escaped_component_markers(&self) -> bool {
+        self.shape == PatchbackShape::EscapedComponentMarkers
     }
 }
 
@@ -85,6 +113,7 @@ fn patchback_shape_facts(
             .count(),
         unmatched_len: unmatched.trim().len(),
         has_transcript_markers: response.contains("## User") || response.contains("## Assistant"),
+        raw_component_block_count: raw_component_block_count(response),
     }
 }
 
@@ -97,13 +126,15 @@ pub fn parse_template_patchback(
         template::parse_patches(response).context("failed to parse patch blocks from response")?;
     let facts = patchback_shape_facts(response, &patches, &unmatched);
     let shape = classify_patchback_shape(facts.clone());
-    let parse_outcome = if shape == PatchbackShape::MalformedPatch && facts.unmatched_len > 0 {
+    let parse_outcome = if (shape == PatchbackShape::MalformedPatch && facts.unmatched_len > 0)
+        || shape == PatchbackShape::EscapedComponentMarkers
+    {
         FlowOutcome::FailedClosed
     } else {
         FlowOutcome::Completed
     };
 
-    if facts.marker_count > 0 {
+    if facts.marker_count > 0 || facts.raw_component_block_count > 0 {
         log_patchback_parse_event(file, shape, parse_outcome);
         crate::ops_log::log_op(
             file,
@@ -141,6 +172,22 @@ pub fn parse_template_patchback(
         );
         anyhow::bail!(
             "malformed template patchback: found patch/replace markers but no closed patch blocks parsed; refusing to append unmatched content"
+        );
+    }
+    if plan.has_escaped_component_markers() {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "template_patchback_escaped_component_rejected file={} source={} response_hash={} component_blocks={} reason=raw_component_markers_without_patch_blocks",
+                file.display(),
+                source,
+                crate::ops_log::content_hash(response),
+                facts.raw_component_block_count
+            ),
+        );
+        anyhow::bail!(
+            "escaped template patchback: response carries raw `<!-- agent:NAME -->` component blocks instead of supported `<!-- patch:* -->` patch blocks; refusing to commit them as literal exchange text. Wrap the response in `<!-- patch:exchange -->` … `<!-- /patch:exchange -->` blocks, or rerun `agent-doc write --commit {}` to absorb an already-visible `### Re:` response.",
+            file.display()
         );
     }
 
@@ -499,6 +546,7 @@ mod tests {
             exchange_patch_count: 0,
             unmatched_len: 42,
             has_transcript_markers: false,
+            raw_component_block_count: 0,
         });
 
         assert_eq!(shape, PatchbackShape::MalformedPatch);
@@ -512,9 +560,96 @@ mod tests {
             exchange_patch_count: 1,
             unmatched_len: 7,
             has_transcript_markers: false,
+            raw_component_block_count: 0,
         });
 
         assert_eq!(shape, PatchbackShape::MixedOutput);
+    }
+
+    #[test]
+    fn raw_component_blocks_without_patches_are_escaped_component_markers() {
+        let shape = classify_patchback_shape(PatchbackShapeFacts {
+            marker_count: 0,
+            patch_count: 0,
+            exchange_patch_count: 0,
+            unmatched_len: 64,
+            has_transcript_markers: false,
+            raw_component_block_count: 1,
+        });
+
+        assert_eq!(shape, PatchbackShape::EscapedComponentMarkers);
+    }
+
+    #[test]
+    fn valid_patches_take_precedence_over_incidental_component_blocks() {
+        // A response that has real patch blocks must never be misread as the
+        // raw-template form even if a component block also appears.
+        let shape = classify_patchback_shape(PatchbackShapeFacts {
+            marker_count: 1,
+            patch_count: 1,
+            exchange_patch_count: 1,
+            unmatched_len: 0,
+            has_transcript_markers: false,
+            raw_component_block_count: 1,
+        });
+
+        assert_eq!(shape, PatchbackShape::ValidPatch);
+    }
+
+    #[test]
+    fn raw_component_block_count_ignores_plain_response_and_boundary_markers() {
+        assert_eq!(
+            raw_component_block_count("### Re: topic — gpt-5\n\nImplemented and verified.\n"),
+            0
+        );
+        // A bare boundary marker has no close marker, so it is not a block.
+        assert_eq!(
+            raw_component_block_count("<!-- agent:boundary:abc123 -->\nsome text\n"),
+            0
+        );
+        // A full component block is counted.
+        assert_eq!(
+            raw_component_block_count(
+                "<!-- agent:exchange -->\n### Re: topic\nbody\n<!-- /agent:exchange -->\n"
+            ),
+            1
+        );
+    }
+
+    #[test]
+    fn parse_template_patchback_rejects_raw_component_form_before_commit() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let file = temp.path().join("doc.md");
+        std::fs::write(&file, "").unwrap();
+        let raw_template_form = concat!(
+            "<!-- agent:status -->\n",
+            "Work complete.\n",
+            "<!-- /agent:status -->\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: closeout — gpt-5\n\n",
+            "Implemented and verified.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let err = parse_template_patchback(&file, raw_template_form, "test").unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("escaped template patchback"),
+            "expected escaped-component rejection, got: {msg}"
+        );
+        assert!(
+            msg.contains("<!-- patch:exchange -->"),
+            "diagnostic must point to the supported patch form, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn parse_template_patchback_accepts_plain_response_without_component_markers() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let file = temp.path().join("doc.md");
+        std::fs::write(&file, "").unwrap();
+        let plain = "### Re: closeout — gpt-5\n\nImplemented and verified.\n";
+        let plan = parse_template_patchback(&file, plain, "test").unwrap();
+        assert_eq!(plan.shape, PatchbackShape::PlainResponse);
     }
 
     #[test]

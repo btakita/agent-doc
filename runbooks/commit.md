@@ -19,6 +19,7 @@ A harness-native `agent-doc` entrypoint (`/agent-doc <FILE>` in Claude Code, `ag
 - For direct-exec harness paths such as Codex and OpenCode, run `agent-doc session-check <FILE>` immediately after the persistence command returns. A nonzero check means the cycle is still open, so do not report success.
 - Do **not** describe a normal harness-native `agent-doc` turn as successful while also saying the response is still uncommitted, unless the user explicitly requested that exception.
 - After `finalize` returns, do not continue with more long-running task work for that same turn. Only `session-check`, failure recovery, and final reporting should remain.
+- When the turn resolves a `do [#id]` / `do #id` directive whose target is an open `agent:backlog` item, that id must reach a lifecycle outcome in the same closeout (`--done <id>`, `--pending-gate <id>`, or an explicit kept-open `--pending-edit`). `session-check` fails closed if the directive cleared the queue but left the target `[ ]` in `agent:backlog` (`#do-id-closeout-open-backlog`); see `pending-ops.md`.
 
 ## Explicit Exceptions
 

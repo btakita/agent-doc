@@ -210,6 +210,88 @@ pub fn add_many(file: &Path, items: &[String], gated: bool) -> Result<Vec<String
     Ok(ids)
 }
 
+/// Summary of an `agent-doc review ungate-tasks` run.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct UngateTasksReport {
+    /// Gated review items scanned.
+    pub scanned: usize,
+    /// Review item ids a new backlog ungate task was added for.
+    pub added: Vec<String>,
+    /// Review item ids already covered by an existing ungate task.
+    pub skipped: Vec<String>,
+}
+
+/// Stable body text for a generated ungate backlog task, so re-runs dedup
+/// against their own prior output idempotently.
+fn ungate_task_text(normalized_id: &str) -> String {
+    format!(
+        "[recommended] Ungate review item #{} — validate and move to done",
+        normalized_id
+    )
+}
+
+/// `#jb-run-agent-doc-response-queue-contamination` sibling feature: for each
+/// gated item in `agent:review`, ensure a backlog follow-up task exists to drive
+/// it back out of review (ungate → done), so gated items are not stranded.
+/// On-demand and idempotent: a review id whose ungate task already exists in the
+/// backlog is skipped.
+pub fn add_ungate_tasks_for_review(file: &Path) -> Result<UngateTasksReport> {
+    let content = std::fs::read_to_string(file)?;
+    let components = crate::component::parse(&content)?;
+
+    let gated_review_ids: Vec<String> = components
+        .iter()
+        .filter(|c| crate::component::is_review_component(&c.name))
+        .flat_map(|c| {
+            let (_, items, _) = pending::parse_items(c.content(&content));
+            items
+        })
+        .filter(|item| item.state == pending::PendingState::Gated)
+        .map(|item| pending::normalize_pending_id(&item.id))
+        .filter(|id| !id.is_empty())
+        .collect();
+
+    let backlog_text: String = components
+        .iter()
+        .filter(|c| crate::component::is_backlog_component(&c.name))
+        .map(|c| c.content(&content).to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let mut report = UngateTasksReport {
+        scanned: gated_review_ids.len(),
+        ..Default::default()
+    };
+    let mut seen = std::collections::HashSet::new();
+    let mut to_add: Vec<String> = Vec::new();
+    for id in gated_review_ids {
+        if !seen.insert(id.clone()) {
+            continue;
+        }
+        // Dedup against the existing backlog: an ungate task (this command's own
+        // generated text, or any backlog item naming `ungate` + `#id`) counts.
+        let task_text = ungate_task_text(&id);
+        let id_marker = format!("#{}", id);
+        let already_tracked = backlog_text.contains(&task_text)
+            || backlog_text
+                .lines()
+                .any(|line| {
+                    let lower = line.to_ascii_lowercase();
+                    lower.contains("ungate") && line.contains(&id_marker)
+                });
+        if already_tracked {
+            report.skipped.push(id);
+        } else {
+            to_add.push(task_text);
+            report.added.push(id);
+        }
+    }
+    if !to_add.is_empty() {
+        add_many(file, &to_add, false)?;
+    }
+    Ok(report)
+}
+
 /// Run lazy backfill over the pending component and write if changed.
 pub fn backfill(file: &Path) -> Result<()> {
     let (full_content, comp) = find_pending_component(file)?;
@@ -973,5 +1055,44 @@ mod tests {
         let c2 = fs::read_to_string(&doc2).unwrap();
         assert!(c2.contains("[x]")); // release resolved
         assert!(c2.contains("[/deploy]")); // deploy untouched
+    }
+
+    #[test]
+    fn ungate_tasks_adds_one_per_gated_review_item_and_is_idempotent() {
+        let (_tmp, doc) = setup_test_dir();
+        let content = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#keep1] unrelated open item\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:review -->\n",
+            "- [/] [#rev1] gated review item one\n",
+            "- [/] [#rev2] gated review item two\n",
+            "<!-- /agent:review -->\n",
+        );
+        fs::write(&doc, content).unwrap();
+
+        let report = add_ungate_tasks_for_review(&doc).unwrap();
+        assert_eq!(report.scanned, 2);
+        assert_eq!(report.added.len(), 2, "{report:?}");
+        assert!(report.skipped.is_empty());
+
+        let after = fs::read_to_string(&doc).unwrap();
+        assert!(after.contains("Ungate review item #rev1"), "{after}");
+        assert!(after.contains("Ungate review item #rev2"), "{after}");
+
+        // Re-run is idempotent: both already tracked, nothing added.
+        let report2 = add_ungate_tasks_for_review(&doc).unwrap();
+        assert_eq!(report2.scanned, 2);
+        assert!(report2.added.is_empty(), "{report2:?}");
+        assert_eq!(report2.skipped.len(), 2);
+    }
+
+    #[test]
+    fn ungate_tasks_noop_when_no_gated_review_items() {
+        let (_tmp, doc) = doc_with_pending("- [ ] [#a] open item\n");
+        let report = add_ungate_tasks_for_review(&doc).unwrap();
+        assert_eq!(report.scanned, 0);
+        assert!(report.added.is_empty());
     }
 }

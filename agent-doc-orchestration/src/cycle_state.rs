@@ -96,6 +96,14 @@ pub struct CycleState {
     pub pending_kept_open_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reaped_pending_ids: Vec<String>,
+    /// `#do-id-closeout-open-backlog`: tracked-work ids named by an explicit
+    /// `do [#id]` / `do #id` prompt directive that were still open in the live
+    /// `agent:backlog` at preflight time. A successful closeout must end each of
+    /// these with an explicit lifecycle outcome (`--done`, `--pending-gate`, an
+    /// explicit kept-open edit, or reap); otherwise `session-check` fails closed
+    /// so a directive cannot clear the queue while leaving its target `[ ]`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub expect_done_or_gate_ids: Vec<String>,
     #[serde(default)]
     pub ipc_snapshot_adoption_blocked: bool,
     /// `#exchange-prompt-dropped-on-merge`: user-authored exchange prompt lines
@@ -106,6 +114,14 @@ pub struct CycleState {
     /// (the silent-loss race the post-commit disk diff cannot win).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dropped_exchange_prompts: Vec<String>,
+    /// `#queue-user-edit-overwrite`: user-authored `agent:queue` prompt lines
+    /// (e.g. `- do [#gscaccess]`) that were dropped when `content_ours` was
+    /// adopted over a divergent IPC candidate. Recorded at adoption time so
+    /// `session-check` can fail closed if a user queue edit was silently
+    /// deleted by write/reset/commit convergence instead of being consumed by
+    /// the current response.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dropped_queue_prompts: Vec<String>,
 }
 
 impl CycleState {
@@ -153,8 +169,10 @@ pub fn start_preflight(
         pending_done_ids: Vec::new(),
         pending_kept_open_ids: Vec::new(),
         reaped_pending_ids: Vec::new(),
+        expect_done_or_gate_ids: Vec::new(),
         ipc_snapshot_adoption_blocked: false,
         dropped_exchange_prompts: Vec::new(),
+        dropped_queue_prompts: Vec::new(),
     };
     save(file, &state)?;
     append_phase_event_to_session_log(file, &state);
@@ -297,6 +315,34 @@ pub fn record_reaped_pending_ids(file: &Path, ids: &[String]) -> Result<Option<C
             .any(|existing| existing == &id)
         {
             state.reaped_pending_ids.push(id);
+            changed = true;
+        }
+    }
+
+    if changed {
+        state.updated_at = now_secs();
+        save(file, &state)?;
+    }
+    Ok(Some(state))
+}
+
+pub fn record_expect_done_or_gate_ids(file: &Path, ids: &[String]) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+
+    let mut changed = false;
+    for id in ids
+        .iter()
+        .map(|id| normalize_pending_id(id))
+        .filter(|id| !id.is_empty())
+    {
+        if !state
+            .expect_done_or_gate_ids
+            .iter()
+            .any(|existing| existing == &id)
+        {
+            state.expect_done_or_gate_ids.push(id);
             changed = true;
         }
     }
@@ -468,6 +514,50 @@ pub fn clear_dropped_exchange_prompts(file: &Path) -> Result<Option<CycleState>>
     Ok(Some(state))
 }
 
+/// `#queue-user-edit-overwrite`: record user-authored `agent:queue` prompt
+/// line(s) dropped when `content_ours` was adopted over a divergent IPC
+/// candidate, so `session-check` can fail closed if a user queue edit was
+/// silently deleted instead of consumed. Appends only previously-unseen lines.
+pub fn record_dropped_queue_prompts(file: &Path, prompts: &[String]) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+    let mut changed = false;
+    for prompt in prompts {
+        let trimmed = prompt.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if !state
+            .dropped_queue_prompts
+            .iter()
+            .any(|existing| existing == trimmed)
+        {
+            state.dropped_queue_prompts.push(trimmed.to_string());
+            changed = true;
+        }
+    }
+    if changed {
+        state.updated_at = now_secs();
+        save(file, &state)?;
+    }
+    Ok(Some(state))
+}
+
+/// Clear the recorded dropped-queue markers once they are resolved (the queue
+/// edit reached the committed document or was legitimately consumed).
+pub fn clear_dropped_queue_prompts(file: &Path) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+    if !state.dropped_queue_prompts.is_empty() {
+        state.dropped_queue_prompts.clear();
+        state.updated_at = now_secs();
+        save(file, &state)?;
+    }
+    Ok(Some(state))
+}
+
 pub fn mark_committed(
     file: &Path,
     event: &str,
@@ -611,8 +701,10 @@ fn synthetic_state_with_id(
         pending_done_ids: Vec::new(),
         pending_kept_open_ids: Vec::new(),
         reaped_pending_ids: Vec::new(),
+        expect_done_or_gate_ids: Vec::new(),
         ipc_snapshot_adoption_blocked: false,
         dropped_exchange_prompts: Vec::new(),
+        dropped_queue_prompts: Vec::new(),
     }
 }
 

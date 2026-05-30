@@ -25,7 +25,7 @@ fn session_stream_doc_content() -> String {
 }
 
 fn cycle_1779845677327_doc_content() -> String {
-    "---\nagent_doc_session: cycle-1779845677327\nagent_doc_format: template\nagent_doc_write: crdt\nagent: codex\nmodel: gpt-5\nprompt_presets:\n  '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push\n---\n\n<!-- agent:exchange -->\n❯ do [#liveipcrace]\n<!-- agent:boundary:17798456:cycle1779 -->\n<!-- /agent:exchange -->\n\n###\n\n<!--\n-->\n\n<!-- agent:queue auto -->\ndispatch #spec-test-build-install-commit-push\n- do [#liveipcrace]\n<!-- /agent:queue -->\n\n<!-- agent:backlog -->\n- [ ] [#liveipcrace] Reproduce and fix the live post-exchange typing/full-document IPC corruption path.\n<!-- /agent:backlog -->\n".to_string()
+    "---\nagent_doc_session: cycle-1779845677327\nagent_doc_format: template\nagent_doc_write: crdt\nagent: codex\nmodel: gpt-5\npending_done_guard: off\nprompt_presets:\n  '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push\n---\n\n<!-- agent:exchange -->\n❯ do [#liveipcrace]\n<!-- agent:boundary:17798456:cycle1779 -->\n<!-- /agent:exchange -->\n\n###\n\n<!--\n-->\n\n<!-- agent:queue auto -->\ndispatch #spec-test-build-install-commit-push\n- do [#liveipcrace]\n<!-- /agent:queue -->\n\n<!-- agent:backlog -->\n- [ ] [#liveipcrace] Reproduce and fix the live post-exchange typing/full-document IPC corruption path.\n<!-- /agent:backlog -->\n".to_string()
 }
 
 fn init_git_repo(root: &Path, tracked: &Path) {

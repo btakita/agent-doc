@@ -539,6 +539,50 @@ fn dropped_prompt_lines_after_content_ours(
         .collect()
 }
 
+fn queue_component_text(doc: &str) -> String {
+    let Ok(components) = crate::component::parse(doc) else {
+        return String::new();
+    };
+    components
+        .iter()
+        .find(|c| c.name == "queue")
+        .map(|c| c.content(doc).to_string())
+        .unwrap_or_default()
+}
+
+/// `#queue-user-edit-overwrite`: the user-authored `do [#id]` queue line(s)
+/// present in the IPC `candidate` (disk / ack sidecar) `agent:queue` that
+/// `content_ours` does not own — i.e. the queue edits that would be silently
+/// deleted when `content_ours` is adopted. Scoped to `agent:queue` so exchange /
+/// backlog drift is not misread. Recorded so `session-check` can fail closed on
+/// the silent-queue-deletion class instead of letting convergence drop a
+/// user-added queue head the current response never consumed.
+fn dropped_queue_prompt_lines_after_content_ours(
+    baseline: &str,
+    candidate: &str,
+    content_ours: &str,
+) -> Vec<String> {
+    let baseline_q = queue_component_text(baseline);
+    let candidate_q = queue_component_text(candidate);
+    let content_ours_q = queue_component_text(content_ours);
+
+    let candidate_changes = prompt_bearing_user_changes_between(&baseline_q, &candidate_q);
+    if candidate_changes.is_empty() {
+        return Vec::new();
+    }
+    let owned_changes = prompt_bearing_user_changes_between(&baseline_q, &content_ours_q);
+    candidate_changes
+        .into_iter()
+        // Only a discrete prompt target (a `do #id` / prompt-shaped queue line)
+        // is an unambiguous user queue edit. Multi-line content edits are noisy
+        // diff context, not a discrete queued prompt to recover.
+        .filter(|change| change.kind == crate::diff::PromptBearingChangeKind::PromptTarget)
+        .filter(|change| !prompt_bearing_change_owned_by_content_ours(change, &owned_changes))
+        .map(|change| change.text.trim().to_string())
+        .filter(|text| !text.is_empty() && !text.contains('\n'))
+        .collect()
+}
+
 fn snapshot_content_to_persist<'a>(
     mode: SnapshotPersistMode,
     content_ours: &'a str,
@@ -8364,6 +8408,34 @@ fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
             ),
         );
     }
+    // #queue-user-edit-overwrite: same silent-loss race for user-authored queue
+    // edits. Record the dropped `do [#id]` queue lines now; session-check
+    // filters them against committed HEAD (preserved or consumed → cleared,
+    // silently deleted → fail closed).
+    let dropped_queue = dropped_queue_prompt_lines_after_content_ours(
+        base,
+        &decision.snapshot_content,
+        ours,
+    );
+    if !dropped_queue.is_empty() {
+        if let Err(e) = crate::cycle_state::record_dropped_queue_prompts(file, &dropped_queue) {
+            eprintln!(
+                "[write] warning: failed to record dropped queue prompt(s) for {}: {}",
+                file.display(),
+                e
+            );
+        }
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "dropped_queue_prompt_recorded file={} source={} patch_id={} count={}",
+                file.display(),
+                source,
+                patch_id.unwrap_or("-"),
+                dropped_queue.len()
+            ),
+        );
+    }
     decision.replace_snapshot_with_content_ours_for_live_prompt_drift(ours);
     true
 }
@@ -12757,6 +12829,40 @@ scratch
             err.to_string().contains("unsafe unmatched content"),
             "trailing unmatched patchback text must fail closed, got: {err:#}"
         );
+    }
+
+    #[test]
+    fn apply_template_from_string_rejects_raw_component_form_without_mutating() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("test.md");
+        let content = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "do #churn. spec-test-build-install-commit-push\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        // Operator pipes the raw template form (component markers) instead of
+        // `<!-- patch:exchange -->` blocks — this is the shape that previously
+        // committed escaped directives into the live exchange.
+        let raw_template_form = concat!(
+            "<!-- agent:status -->\nWork complete.\n<!-- /agent:status -->\n\n",
+            "<!-- agent:exchange -->\n### Re: churn — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n",
+        );
+        let err = apply_template_from_string(&doc, raw_template_form).unwrap_err();
+        assert!(
+            err.to_string().contains("escaped template patchback"),
+            "raw component-form stdin must fail closed, got: {err:#}"
+        );
+
+        // The document must be untouched — no escaped markers committed.
+        let after = fs::read_to_string(&doc).unwrap();
+        assert_eq!(after, content, "rejected patchback must not mutate the document");
+        assert!(!after.contains("### Re: churn"));
     }
 
     #[test]

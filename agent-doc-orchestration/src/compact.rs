@@ -209,12 +209,29 @@ pub fn run(
         crate::session_accretion::record_recent_exchange_compaction(file)?;
     }
 
+    let updated = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to re-read {} after compact", file.display()))?;
+    let changed = updated != content;
     if commit {
-        let updated = std::fs::read_to_string(file)
-            .with_context(|| format!("failed to re-read {} after compact", file.display()))?;
-        if updated != content {
+        if changed {
             closeout_compact_with_commit(file)?;
         }
+    } else if changed {
+        // #jb-compact-repair-left-uncommitted: a compact/repair that rewrites the
+        // exchange but does not cross a commit boundary leaves the document dirty
+        // (corrected visible content, stale HEAD). Later JetBrains/route actions
+        // then see mixed visible/HEAD/snapshot state. Surface it explicitly with
+        // the exact recovery command instead of silently leaving it dirty.
+        crate::ops_log::log_op(
+            file,
+            &format!("compact_left_uncommitted file={}", file.display()),
+        );
+        eprintln!(
+            "[compact] WARNING: {} was compacted but NOT committed (--commit not set). The corrected document is dirty (visible content differs from HEAD); later actions may route/queue from a stale surface. Commit it with `agent-doc compact {} --commit` or `agent-doc write --commit {}` before continuing (#jb-compact-repair-left-uncommitted).",
+            file.display(),
+            file.display(),
+            file.display()
+        );
     }
 
     Ok(())
@@ -247,6 +264,55 @@ fn discard_archived_captures(file: &Path, archived_text: &str) {
     }
 }
 
+/// `#jb-compact-malformed-response-commit`: a compact summary line must never be
+/// rendered as a user prompt. The live repro committed
+/// `❯ *Compacted. Content archived ...*` — the summary inheriting the `❯ ` user
+/// prompt marker from an archived prompt tail. Detect that malformed shape in
+/// the rebuilt `agent:exchange` so the compact commit fails closed before it
+/// reaches disk/HEAD instead of persisting a corrupt exchange structure.
+pub fn malformed_compact_summary_lines(compacted: &str) -> Vec<String> {
+    let Ok(components) = component::parse(compacted) else {
+        return Vec::new();
+    };
+    let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
+        return Vec::new();
+    };
+    exchange
+        .content(compacted)
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            let rest = trimmed.strip_prefix('❯')?.trim_start();
+            // A compact summary line carries the `*Compacted` / archive pointer
+            // text. Prefixed with `❯`, it is a malformed summary-as-prompt line.
+            if rest.starts_with("*Compacted") || rest.contains("Content archived to") {
+                Some(trimmed.to_string())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn validate_compacted_exchange(file: &Path, compacted: &str) -> Result<()> {
+    let malformed = malformed_compact_summary_lines(compacted);
+    if malformed.is_empty() {
+        return Ok(());
+    }
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "compact_malformed_summary_rejected file={} count={}",
+            file.display(),
+            malformed.len()
+        ),
+    );
+    anyhow::bail!(
+        "[compact] INTERRUPTED: post-compact exchange is malformed — compact summary line(s) rendered as a user prompt (`❯ ` prefix): {}. The compact output was not committed (see #jb-compact-malformed-response-commit). Re-run compaction; if it recurs, the archived prompt tail is leaking its `❯` marker onto the summary and the source exchange needs manual repair before compacting.",
+        malformed.join(" | ")
+    )
+}
+
 fn apply_compacted_document(
     file: &Path,
     compacted: &str,
@@ -254,6 +320,10 @@ fn apply_compacted_document(
     source_content: &str,
     refresh_crdt: bool,
 ) -> Result<()> {
+    // Fail closed before any write if the rebuilt exchange is structurally
+    // malformed (#jb-compact-malformed-response-commit).
+    validate_compacted_exchange(file, compacted)?;
+
     crate::write::atomic_write_if_current_pub(
         file,
         compacted,
@@ -2101,5 +2171,102 @@ mod tests {
         let committed = crate::git::show_head(&file).unwrap().unwrap();
         assert!(committed.contains("Compacted summary."));
         assert!(!committed.contains("### Re: topic one"));
+    }
+
+    #[test]
+    fn malformed_compact_summary_detects_prompt_prefixed_summary() {
+        // #jb-compact-malformed-response-commit: the live repro shape.
+        let doc = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "❯ *Compacted. Content archived to `.agent-doc/archives/x.md`*\n",
+            "### Re: #next-steps-2 — gpt-5\n\nLeftover archived body.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let malformed = malformed_compact_summary_lines(doc);
+        assert_eq!(malformed.len(), 1, "{malformed:?}");
+        assert!(malformed[0].contains("Compacted"), "{malformed:?}");
+    }
+
+    #[test]
+    fn malformed_compact_summary_accepts_clean_summary() {
+        let doc = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Session Summary\n\n",
+            "*Compacted. Content archived to `.agent-doc/archives/x.md`*\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        assert!(
+            malformed_compact_summary_lines(doc).is_empty(),
+            "clean compact summary must not be flagged"
+        );
+    }
+
+    #[test]
+    fn apply_compacted_document_fails_closed_on_malformed_summary() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        let file = root.join("doc.md");
+        let source = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange -->\n❯ prompt\n### Re: prompt — gpt-5\n\nAnswered.\n<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&file, source).unwrap();
+        let malformed_compacted = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange -->\n❯ *Compacted. Content archived to `x.md`*\n<!-- /agent:exchange -->\n",
+        );
+        let err = apply_compacted_document(&file, malformed_compacted, malformed_compacted, source, false)
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("post-compact exchange is malformed"),
+            "{err}"
+        );
+        // The malformed content must NOT have been written.
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), source);
+    }
+
+    #[test]
+    fn compact_without_commit_records_uncommitted_warning() {
+        // #jb-compact-repair-left-uncommitted: compact without --commit rewrites
+        // the doc but must not silently leave it dirty — it records an explicit
+        // uncommitted-state diagnostic with the recovery command.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc/archives")).unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+
+        let file = root.join("session.md");
+        let doc = concat!(
+            "---\nagent_doc_session: test-compact\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: topic one\n\nResponse one.\n\n",
+            "### Re: topic two\n\nResponse two.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&file, doc).unwrap();
+        snapshot::save(&file, doc).unwrap();
+
+        run(
+            &file,
+            None,
+            Some("exchange"),
+            Some("Compacted summary."),
+            Some("skip"),
+            false, // no --commit
+        )
+        .unwrap();
+
+        let after = std::fs::read_to_string(&file).unwrap();
+        assert!(after.contains("Compacted summary."), "doc should be compacted");
+        let ops_log = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("compact_left_uncommitted"),
+            "uncommitted compact must be recorded, got:\n{ops_log}"
+        );
     }
 }

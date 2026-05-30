@@ -123,6 +123,24 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
         SessionCheckStatus::Ok(message) => {
             println!("{}", message);
             if let Some(continuation) = crate::queue_continuation::detect(file)? {
+                // #prompt-preempts-auto-queue: a live unresolved exchange prompt
+                // must run before queue continuation, even when it was already
+                // baselined into the snapshot. Defer the queue (do not force the
+                // Codex final-gate) while such a prompt exists so the next cycle
+                // answers it instead of skipping to the queue head.
+                if let Some(unresolved) = unresolved_exchange_prompt(file)? {
+                    println!(
+                        "queue_continuation_required=false queue_deferred_for_unresolved_exchange_prompt={:?} next_queue_prompt={:?}",
+                        unresolved, continuation.head_prompt
+                    );
+                    eprintln!(
+                        "[session-check] queue continuation deferred for {}: unresolved exchange prompt {:?} must run before the queue head {:?} (#prompt-preempts-auto-queue).",
+                        file.display(),
+                        unresolved,
+                        continuation.head_prompt
+                    );
+                    return Ok(());
+                }
                 println!(
                     "queue_continuation_required=true next_queue_prompt={:?}",
                     continuation.head_prompt
@@ -158,6 +176,22 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
     };
     if matches!(report.status, SessionCheckStatus::Ok(_)) {
         match check_dropped_exchange_prompt_guard(file)? {
+            GuardResult::None => {}
+            GuardResult::Warn(lines) => report.warnings.extend(lines),
+            GuardResult::Error(message) => {
+                report.status = SessionCheckStatus::Interrupted(message);
+                return Ok(report);
+            }
+        }
+        match check_dropped_queue_prompt_guard(file)? {
+            GuardResult::None => {}
+            GuardResult::Warn(lines) => report.warnings.extend(lines),
+            GuardResult::Error(message) => {
+                report.status = SessionCheckStatus::Interrupted(message);
+                return Ok(report);
+            }
+        }
+        match check_queue_response_contamination_guard(file)? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -228,6 +262,7 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
         for guard in [
             check_pending_capture_guard(file)?,
             check_pending_done_guard(file)?,
+            check_expect_done_or_gate_guard(file)?,
         ] {
             match guard {
                 GuardResult::None => {}
@@ -292,6 +327,201 @@ fn exchange_contains_prompt_line(doc: &str, prompt: &str) -> bool {
         .content(doc)
         .lines()
         .any(|line| normalized_prompt_for_match(line) == needle)
+}
+
+/// True when the committed `doc`'s `agent:queue` still contains the given queue
+/// prompt line (normalized). Used to decide whether a dropped user queue edit
+/// reached HEAD (preserved) so the guard can clear.
+fn normalized_queue_line_for_match(line: &str) -> String {
+    let trimmed = line.trim();
+    let trimmed = trimmed
+        .strip_prefix("- ")
+        .or_else(|| trimmed.strip_prefix("* "))
+        .or_else(|| trimmed.strip_prefix("+ "))
+        .unwrap_or(trimmed);
+    normalized_prompt_for_match(trimmed)
+}
+
+fn queue_contains_prompt_line(doc: &str, prompt: &str) -> bool {
+    let needle = normalized_queue_line_for_match(prompt);
+    if needle.is_empty() {
+        return true;
+    }
+    let Ok(components) = crate::component::parse(doc) else {
+        return false;
+    };
+    let Some(queue) = components.iter().find(|c| c.name == "queue") else {
+        return false;
+    };
+    queue
+        .content(doc)
+        .lines()
+        .any(|line| normalized_queue_line_for_match(line) == needle)
+}
+
+/// `#queue-user-edit-overwrite`: fail closed when this cycle recorded a
+/// user-authored `agent:queue` edit dropped during a `content_ours` IPC adoption
+/// and that queue line is still absent from the committed `HEAD` — unless the
+/// current response legitimately consumed it (its `do [#id]` id reached a
+/// lifecycle outcome this cycle). A preserved queue line (reached HEAD's queue
+/// or exchange) or a consumed head clears the marker; a silently-deleted user
+/// queue edit fails closed.
+fn check_dropped_queue_prompt_guard(file: &Path) -> Result<GuardResult> {
+    let Some(state) = crate::cycle_state::load(file)? else {
+        return Ok(GuardResult::None);
+    };
+    if state.dropped_queue_prompts.is_empty() {
+        return Ok(GuardResult::None);
+    }
+    // Unlike the exchange guard, a user queue edit is SUPPOSED to stay out of
+    // HEAD: `content_ours` adoption preserves it on disk so it re-surfaces as a
+    // next-cycle diff. The loss case is the edit vanishing from the visible
+    // document, so check the current file (and HEAD as a committed fallback).
+    let visible = std::fs::read_to_string(file).unwrap_or_default();
+    let head = crate::git::show_head(file)?.unwrap_or_default();
+    let resolved_ids = crate::cycle_state::resolved_pending_ids(file)?;
+    let still_missing: Vec<String> = state
+        .dropped_queue_prompts
+        .iter()
+        .filter(|prompt| {
+            // Preserved in the visible/HEAD queue, or answered in the
+            // visible/HEAD exchange → kept, not lost.
+            if queue_contains_prompt_line(&visible, prompt)
+                || queue_contains_prompt_line(&head, prompt)
+                || exchange_contains_prompt_line(&visible, prompt)
+                || exchange_contains_prompt_line(&head, prompt)
+            {
+                return false;
+            }
+            // Legitimately consumed this cycle: the queued `do [#id]` id reached
+            // a done/gate/reap outcome, so deleting the queue line is correct.
+            let consumed = do_directive_target_ids(std::slice::from_ref(prompt))
+                .into_iter()
+                .any(|id| resolved_ids.contains(&id));
+            !consumed
+        })
+        .cloned()
+        .collect();
+    if still_missing.is_empty() {
+        crate::cycle_state::clear_dropped_queue_prompts(file)?;
+        return Ok(GuardResult::None);
+    }
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "dropped_queue_prompt_guard_failed file={} count={}",
+            file.display(),
+            still_missing.len()
+        ),
+    );
+    Ok(GuardResult::Error(format!(
+        "[session-check] INTERRUPTED: user-authored agent:queue edit(s) were dropped during an IPC content_ours merge and are missing from the visible document without being consumed: {}. Convergence overwrote a newer visible queue; re-add them to `agent:queue` and re-run `agent-doc finalize {}` / `agent-doc write --commit {}` so the queued work is preserved (see #queue-user-edit-overwrite).",
+        still_missing.join("; "),
+        file.display(),
+        file.display()
+    )))
+}
+
+/// Collect the assistant `### Re:` response prose from an exchange component
+/// body (heading + boundary + comment lines excluded). Used to detect queue
+/// lines that were copied out of a response body.
+fn assistant_response_text(exchange_body: &str) -> String {
+    let mut in_response = false;
+    let mut out = String::new();
+    for line in exchange_body.lines() {
+        let trimmed = line.trim();
+        if is_exchange_response_heading(trimmed) {
+            in_response = true;
+            continue;
+        }
+        if trimmed.starts_with("<!-- agent:boundary") {
+            continue;
+        }
+        if in_response && !trimmed.is_empty() && !trimmed.starts_with("<!--") {
+            out.push_str(trimmed);
+            out.push('\n');
+        }
+    }
+    out
+}
+
+/// True when a queue prompt's text is a recognized directive / id-bearing prompt
+/// (a legitimate queue entry shape) rather than free-text prose.
+fn is_queue_directive_prompt(text: &str) -> bool {
+    let t = text.trim();
+    let lower = t.to_ascii_lowercase();
+    lower.starts_with("do ")
+        || lower.starts_with("preset ")
+        || lower.starts_with("dispatch ")
+        || lower.starts_with("run ")
+        || t.starts_with('#')
+        || t.contains("[#")
+}
+
+/// `#jb-run-agent-doc-response-queue-contamination`: `Run Agent Doc` / queue
+/// synthesis must never enqueue assistant response prose. The live repro added
+/// `- Yes. I drove the already-authenticated Google Ads browser session ...`
+/// (copied from a `### Re:` body) to `agent:queue auto`. Detect a free-text
+/// queue prompt whose text appears inside an assistant response body and fail
+/// closed naming the contaminating candidate.
+fn check_queue_response_contamination_guard(file: &Path) -> Result<GuardResult> {
+    let content = std::fs::read_to_string(file)?;
+    let Ok(components) = crate::component::parse(&content) else {
+        return Ok(GuardResult::None);
+    };
+    let Some(queue) = components.iter().find(|c| c.name == "queue") else {
+        return Ok(GuardResult::None);
+    };
+    let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
+        return Ok(GuardResult::None);
+    };
+
+    let queue_body = &content[queue.open_end..queue.close_start];
+    let Ok(entries) = crate::queue::parse(queue_body) else {
+        return Ok(GuardResult::None);
+    };
+    let response_text = assistant_response_text(exchange.content(&content));
+    if response_text.trim().is_empty() {
+        return Ok(GuardResult::None);
+    }
+
+    let mut contaminated: Vec<String> = Vec::new();
+    for prompt in crate::queue::prompts(&entries) {
+        let text = prompt.text.trim();
+        if text.is_empty() || is_queue_directive_prompt(text) {
+            continue;
+        }
+        // Only treat substantial prose as a contamination candidate; short
+        // free-text prompts are legitimate (`#free-text-queue-head-consume`).
+        let normalized = normalized_prompt_for_match(text);
+        if normalized.chars().count() < 20 {
+            continue;
+        }
+        let needle: String = normalized.chars().take(40).collect();
+        if response_text.contains(&needle) {
+            contaminated.push(text.chars().take(80).collect::<String>());
+        }
+    }
+
+    if contaminated.is_empty() {
+        return Ok(GuardResult::None);
+    }
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "queue_response_contamination_guard_failed file={} count={}",
+            file.display(),
+            contaminated.len()
+        ),
+    );
+    Ok(GuardResult::Error(format!(
+        "[session-check] INTERRUPTED: agent:queue contains assistant response prose copied from a `### Re:` body, not a user prompt or `do [#id]` directive: {}. Remove the contaminating line(s) from `agent:queue` (only user prompts, `do [#id]`, `preset`/`dispatch`, or backlog-derived entries are valid queue sources) and re-run finalize (see #jb-run-agent-doc-response-queue-contamination).",
+        contaminated
+            .iter()
+            .map(|t| format!("{:?}", t))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )))
 }
 
 /// `#exchange-prompt-dropped-on-merge`: fail closed when this cycle recorded a
@@ -1784,6 +2014,186 @@ fn extract_pending_hash_ids(text: &str) -> Vec<String> {
     ids
 }
 
+/// `#do-id-closeout-open-backlog`: extract the tracked-work ids named by an
+/// explicit `do [#id]` / `do #id` prompt directive. Mirrors the binary-side
+/// `tsift_graph::extract_do_targets` normalization (strip leading `❯`, an
+/// optional bracketed annotation prefix like `[id]`, then require a `do `
+/// prefix) so preflight can record the closeout expectation for those ids.
+pub fn do_directive_target_ids(prompt_texts: &[String]) -> Vec<String> {
+    let mut ids = Vec::new();
+    for prompt in prompt_texts {
+        for line in prompt.lines() {
+            for id in do_directive_target_ids_in_line(line) {
+                if !ids.iter().any(|existing| existing == &id) {
+                    ids.push(id);
+                }
+            }
+        }
+    }
+    ids
+}
+
+fn do_directive_target_ids_in_line(line: &str) -> Vec<String> {
+    let mut normalized = line.trim().trim_start_matches('❯').trim();
+    normalized = normalized
+        .strip_prefix("- ")
+        .or_else(|| normalized.strip_prefix("* "))
+        .or_else(|| normalized.strip_prefix("+ "))
+        .unwrap_or(normalized)
+        .trim();
+    if normalized.starts_with('[')
+        && let Some(closing) = normalized.find(']')
+    {
+        normalized = normalized[closing + 1..].trim();
+    }
+    let lower = normalized.to_ascii_lowercase();
+    let Some(rest) = lower.strip_prefix("do ") else {
+        return Vec::new();
+    };
+    extract_pending_hash_ids(rest)
+}
+
+/// Open (`[ ]`/gated, not done) ids that live specifically in the live
+/// `agent:backlog` component. The `expect_done_or_gate` guard keys off backlog
+/// membership: `--done`, `--pending-gate`, reap, and icebox moves all remove an
+/// id from `agent:backlog`, so an id still present here was never given a
+/// lifecycle outcome.
+fn open_backlog_ids(file: &Path) -> Result<Vec<String>> {
+    let content = std::fs::read_to_string(file)?;
+    let Ok(components) = crate::component::parse(&content) else {
+        return Ok(Vec::new());
+    };
+    Ok(components
+        .into_iter()
+        .filter(|component| is_backlog_component(&component.name))
+        .flat_map(|component| {
+            let (_, items, _) = crate::pending::parse_items(component.content(&content));
+            items
+        })
+        .filter(|item| !item.is_done())
+        .map(|item| item.id)
+        .filter(|id| !id.is_empty())
+        .collect())
+}
+
+/// `#do-id-closeout-open-backlog`: a resolved `do [#id]` directive must end with
+/// an explicit lifecycle outcome for its target id. If the cycle committed a
+/// response (queue cleared, status updated) but the target id is still open in
+/// `agent:backlog` and was not recorded as done / kept-open / reaped this cycle,
+/// fail closed so the directive cannot silently leave its target `[ ]`.
+fn check_expect_done_or_gate_guard(file: &Path) -> Result<GuardResult> {
+    let mode = resolve_pending_done_guard_mode(file)?;
+    if mode == crate::frontmatter::PendingCaptureGuardMode::Off {
+        return Ok(GuardResult::None);
+    }
+
+    let Some(state) = crate::cycle_state::load(file)? else {
+        return Ok(GuardResult::None);
+    };
+    if state.expect_done_or_gate_ids.is_empty() {
+        return Ok(GuardResult::None);
+    }
+    // Only enforce once the cycle has closed with a committed response. An open
+    // cycle is still mid-flight; a no-response commit never sets `capture_id`.
+    if state.is_open() {
+        return Ok(GuardResult::None);
+    }
+    let Some(capture_id) = state.capture_id.as_deref() else {
+        return Ok(GuardResult::None);
+    };
+    let Some(capture) = crate::capture::load_by_id(file, capture_id)? else {
+        return Ok(GuardResult::None);
+    };
+    if capture.state != crate::capture::CaptureState::Committed {
+        return Ok(GuardResult::None);
+    }
+    if capture
+        .response_body
+        .contains("<!-- no-pending-done-guard -->")
+    {
+        return Ok(GuardResult::None);
+    }
+
+    let resolved: std::collections::HashSet<String> = state
+        .pending_done_ids
+        .iter()
+        .chain(state.pending_kept_open_ids.iter())
+        .chain(state.reaped_pending_ids.iter())
+        .map(|id| crate::pending::normalize_pending_id(id))
+        .filter(|id| !id.is_empty())
+        .collect();
+
+    let open_backlog: std::collections::HashSet<String> =
+        open_backlog_ids(file)?.into_iter().collect();
+
+    let mut unresolved: Vec<String> = Vec::new();
+    for id in state
+        .expect_done_or_gate_ids
+        .iter()
+        .map(|id| crate::pending::normalize_pending_id(id))
+        .filter(|id| !id.is_empty())
+    {
+        if resolved.contains(&id) {
+            continue;
+        }
+        if !open_backlog.contains(&id) {
+            continue;
+        }
+        if !unresolved.iter().any(|existing| existing == &id) {
+            unresolved.push(id);
+        }
+    }
+
+    if unresolved.is_empty() {
+        return Ok(GuardResult::None);
+    }
+
+    let ids = unresolved
+        .iter()
+        .map(|id| format!("#{}", id))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let done_hint = unresolved
+        .iter()
+        .map(|id| format!("--done {}", id))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let repair = format!(
+        "agent-doc write {} {} --pending-only --commit",
+        file.display(),
+        done_hint
+    );
+    let warn_line = format!(
+        "[session-check] warn: `do #id` directive resolved this cycle but tracked target {} is still open in agent:backlog with no `--done`, `--pending-gate`, or kept-open edit recorded",
+        ids
+    );
+
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "expect_done_or_gate_guard_fired file={} unresolved={}",
+            file.display(),
+            unresolved.join(",")
+        ),
+    );
+
+    Ok(match mode {
+        crate::frontmatter::PendingCaptureGuardMode::Warn => GuardResult::Warn(vec![
+            warn_line,
+            format!(
+                "[session-check] hint: repair with `{}`, run `--pending-gate <id>` if review/external validation remains, or add `pending_done_guard: off` when the item should stay open",
+                repair
+            ),
+        ]),
+        crate::frontmatter::PendingCaptureGuardMode::Strict => GuardResult::Error(format!(
+            "{}\n[session-check] hint: repair with `{}`, run `--pending-gate <id>` if review/external validation remains, or set pending_done_guard = \"warn\" to downgrade",
+            warn_line.replacen("[session-check] warn:", "[session-check] INTERRUPTED:", 1),
+            repair
+        )),
+        crate::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
+    })
+}
+
 fn single_open_review_item_id(file: &Path) -> Result<Option<String>> {
     let content = std::fs::read_to_string(file)?;
     let Ok(components) = crate::component::parse(&content) else {
@@ -2231,6 +2641,60 @@ pub fn is_exchange_response_heading(trimmed: &str) -> bool {
         || trimmed.starts_with("#### Re:")
         || trimmed.starts_with("##### Re:")
         || trimmed.starts_with("###### Re:")
+}
+
+/// `#prompt-preempts-auto-queue`: snapshot-independent detection of a live
+/// unresolved user prompt in `agent:exchange`. A prompt is unresolved when there
+/// is user-authored, non-comment text after the latest `agent:boundary` marker
+/// in the exchange and no `### Re:` response heading follows it in that tail
+/// segment. Unlike the snapshot-diff path, this fires even when the prompt was
+/// already baselined into the snapshot (so the ordinary diff sees only queue
+/// bookkeeping). Returns the joined prompt text, or `None` when the tail is
+/// empty or already answered.
+pub fn unresolved_exchange_prompt(file: &Path) -> Result<Option<String>> {
+    let content = std::fs::read_to_string(file)?;
+    Ok(unresolved_exchange_prompt_in_content(&content))
+}
+
+fn unresolved_exchange_prompt_in_content(content: &str) -> Option<String> {
+    let components = crate::component::parse(content).ok()?;
+    let exchange = components.iter().find(|c| c.name == "exchange")?;
+    let body = exchange.content(content);
+    let lines: Vec<&str> = body.lines().collect();
+
+    // The latest boundary marks the end of the last committed/answered segment;
+    // everything after it is the new, not-yet-answered tail.
+    let tail_start = lines
+        .iter()
+        .rposition(|line| line.trim().starts_with("<!-- agent:boundary:"))
+        .map(|idx| idx + 1)
+        .unwrap_or(0);
+    let tail = &lines[tail_start..];
+
+    // A response heading in the tail means the trailing prompt was answered.
+    if tail
+        .iter()
+        .any(|line| is_exchange_response_heading(line.trim()))
+    {
+        return None;
+    }
+
+    let prompt_lines: Vec<String> = tail
+        .iter()
+        .map(|line| line.trim())
+        .filter(|line| {
+            !line.is_empty()
+                && !line.starts_with("<!--")
+                && !line.starts_with("-->")
+                && !is_exchange_response_heading(line)
+        })
+        .map(normalized_prompt_for_match)
+        .filter(|line| !line.is_empty())
+        .collect();
+    if prompt_lines.is_empty() {
+        return None;
+    }
+    Some(prompt_lines.join("\n"))
 }
 
 pub fn detect_unstarted_prompt_bearing_diff(file: &Path) -> Result<Option<String>> {
@@ -5214,6 +5678,202 @@ Body\n\
         }
     }
 
+    // `#do-id-closeout-open-backlog`: a resolved `do [#id]` directive must end
+    // with an explicit lifecycle outcome for its target id.
+    #[allow(clippy::too_many_arguments)]
+    fn setup_committed_do_directive_cycle(
+        root: &Path,
+        frontmatter: Option<&str>,
+        response: &str,
+        pending_body: Option<&str>,
+        expect_ids: &[&str],
+        done_ids: &[&str],
+        kept_open_ids: &[&str],
+    ) -> std::path::PathBuf {
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        let doc = root.join("doc.md");
+        let prefix = frontmatter.unwrap_or("---\nagent_doc_session: test\n---\n\n");
+        let mut current = format!("{prefix}## Exchange\n\nHello\n");
+        if let Some(pending_body) = pending_body {
+            current.push_str("\n<!-- agent:backlog -->\n");
+            current.push_str(pending_body);
+            if !pending_body.ends_with('\n') {
+                current.push('\n');
+            }
+            current.push_str("<!-- /agent:backlog -->\n");
+        }
+        fs::write(&doc, &current).unwrap();
+        crate::snapshot::save(&doc, &current).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
+        crate::capture::capture_response(&doc, response).unwrap();
+        if !expect_ids.is_empty() {
+            crate::cycle_state::record_expect_done_or_gate_ids(
+                &doc,
+                &expect_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>(),
+            )
+            .unwrap();
+        }
+        if !done_ids.is_empty() {
+            crate::cycle_state::record_pending_done_ids(
+                &doc,
+                &done_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>(),
+            )
+            .unwrap();
+        }
+        if !kept_open_ids.is_empty() {
+            crate::cycle_state::record_pending_kept_open_ids(
+                &doc,
+                &kept_open_ids
+                    .iter()
+                    .map(|id| id.to_string())
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap();
+        }
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(&current), Some(&current))
+            .unwrap();
+        crate::capture::mark_committed(&doc).unwrap();
+        doc
+    }
+
+    #[test]
+    fn do_directive_target_ids_extracts_bracketed_and_bare_forms() {
+        let prompts = vec![
+            "do [#alpha]".to_string(),
+            "❯ do #beta".to_string(),
+            "[queue] do #gamma".to_string(),
+            "investigate #delta".to_string(),
+        ];
+        let ids = do_directive_target_ids(&prompts);
+        assert_eq!(ids, vec!["alpha", "beta", "gamma"]);
+    }
+
+    #[test]
+    fn expect_done_or_gate_guard_fails_when_directive_target_left_open() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_committed_do_directive_cycle(
+            tmp.path(),
+            None,
+            "### Re: do #nstep2 — gpt-5\n\nShipped the repo/API/deploy work and cleared the queue.\n",
+            Some("- [ ] [#nstep2] Tracked work the directive resolved\n"),
+            &["nstep2"],
+            &[],
+            &[],
+        );
+
+        match check_expect_done_or_gate_guard(&doc).unwrap() {
+            GuardResult::Error(message) => {
+                assert!(message.contains("#nstep2"), "{message}");
+                assert!(message.contains("--done nstep2"), "{message}");
+                assert!(message.contains("agent:backlog"), "{message}");
+            }
+            other => panic!("expected strict-mode failure for open directive target, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn expect_done_or_gate_guard_is_wired_into_inspect() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_committed_do_directive_cycle(
+            tmp.path(),
+            None,
+            "### Re: do #nstep2 — gpt-5\n\nCompleted.\n",
+            Some("- [ ] [#nstep2] Tracked work the directive resolved\n"),
+            &["nstep2"],
+            &[],
+            &[],
+        );
+
+        match inspect_with_warnings(&doc).unwrap().status {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(message.contains("#nstep2"), "{message}");
+            }
+            other => panic!("expected interrupted status, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn expect_done_or_gate_guard_passes_when_target_marked_done() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // `--done` reaps the item, so it is no longer open in the backlog and is
+        // also recorded in `pending_done_ids`.
+        let doc = setup_committed_do_directive_cycle(
+            tmp.path(),
+            None,
+            "### Re: do #nstep2 — gpt-5\n\nCompleted.\n",
+            Some("- [ ] [#keep1] Unrelated open item\n"),
+            &["nstep2"],
+            &["nstep2"],
+            &[],
+        );
+
+        assert!(matches!(
+            check_expect_done_or_gate_guard(&doc).unwrap(),
+            GuardResult::None
+        ));
+    }
+
+    #[test]
+    fn expect_done_or_gate_guard_passes_when_target_gated_to_review() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // `--pending-gate` moves the item out of backlog into review and records
+        // it as kept-open for the cycle.
+        let doc = setup_committed_do_directive_cycle(
+            tmp.path(),
+            None,
+            "### Re: do #nstep2 — gpt-5\n\nImplemented; awaiting review.\n",
+            Some("- [ ] [#keep1] Unrelated open item\n"),
+            &["nstep2"],
+            &[],
+            &["nstep2"],
+        );
+
+        assert!(matches!(
+            check_expect_done_or_gate_guard(&doc).unwrap(),
+            GuardResult::None
+        ));
+    }
+
+    #[test]
+    fn expect_done_or_gate_guard_does_not_fire_on_unrelated_open_backlog() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // No directive recorded this cycle (incidental open backlog only).
+        let doc = setup_committed_do_directive_cycle(
+            tmp.path(),
+            None,
+            "### Re: investigation — gpt-5\n\nLooked into it; relates to #keep1.\n",
+            Some("- [ ] [#keep1] Open and intentionally left open\n"),
+            &[],
+            &[],
+            &[],
+        );
+
+        assert!(matches!(
+            check_expect_done_or_gate_guard(&doc).unwrap(),
+            GuardResult::None
+        ));
+    }
+
+    #[test]
+    fn expect_done_or_gate_guard_off_mode_skips() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_committed_do_directive_cycle(
+            tmp.path(),
+            Some("---\nagent_doc_session: test\npending_done_guard: off\n---\n\n"),
+            "### Re: do #nstep2 — gpt-5\n\nCompleted.\n",
+            Some("- [ ] [#nstep2] Tracked work left open\n"),
+            &["nstep2"],
+            &[],
+            &[],
+        );
+
+        assert!(matches!(
+            check_expect_done_or_gate_guard(&doc).unwrap(),
+            GuardResult::None
+        ));
+    }
+
     #[test]
     fn session_check_interrupts_when_open_backlog_item_exists_only_in_shadow_copy() {
         let tmp = tempfile::TempDir::new().unwrap();
@@ -5843,6 +6503,248 @@ Body\n\
                 .dropped_exchange_prompts
                 .is_empty(),
             "resolved marker should be cleared"
+        );
+    }
+
+    fn init_committed_doc_for_queue_guard(root: &Path, committed: &str) -> std::path::PathBuf {
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        for args in [
+            vec!["init"],
+            vec!["config", "user.email", "test@example.com"],
+            vec!["config", "user.name", "Test"],
+        ] {
+            Command::new("git")
+                .current_dir(root)
+                .args(&args)
+                .output()
+                .unwrap();
+        }
+        let doc = root.join("doc.md");
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        for args in [
+            vec!["add", "doc.md"],
+            vec!["commit", "-m", "ours", "--no-verify"],
+        ] {
+            Command::new("git")
+                .current_dir(root)
+                .args(&args)
+                .output()
+                .unwrap();
+        }
+        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(committed), Some(committed))
+            .unwrap();
+        doc
+    }
+
+    #[test]
+    fn session_check_fails_closed_on_dropped_queue_edit() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // HEAD = content_ours: queue lacks the user-added head, no consumption.
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n### Re: prior — gpt-5\n\nAnswered.\n<!-- /agent:exchange -->\n",
+            "\n<!-- agent:queue auto -->\n- do [#existing]\n<!-- /agent:queue -->\n",
+        );
+        let doc = init_committed_doc_for_queue_guard(tmp.path(), committed);
+        crate::cycle_state::record_dropped_queue_prompts(&doc, &["do [#gscaccess]".to_string()])
+            .unwrap();
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(
+                    message.contains("agent:queue edit(s) were dropped"),
+                    "expected dropped-queue classification: {message}"
+                );
+                assert!(
+                    message.contains("gscaccess"),
+                    "should name the dropped queue edit: {message}"
+                );
+            }
+            other => panic!("expected dropped-queue interruption, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn session_check_clears_dropped_queue_marker_when_preserved_in_head() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // HEAD's queue DOES contain the user-added head — preserved, marker stale.
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n### Re: prior — gpt-5\n\nAnswered.\n<!-- /agent:exchange -->\n",
+            "\n<!-- agent:queue auto -->\n- do [#gscaccess]\n- do [#existing]\n<!-- /agent:queue -->\n",
+        );
+        let doc = init_committed_doc_for_queue_guard(tmp.path(), committed);
+        crate::cycle_state::record_dropped_queue_prompts(&doc, &["do [#gscaccess]".to_string()])
+            .unwrap();
+
+        assert!(
+            matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
+            "guard should clear when the dropped queue edit is preserved in HEAD"
+        );
+        assert!(
+            crate::cycle_state::load(&doc)
+                .unwrap()
+                .expect("state")
+                .dropped_queue_prompts
+                .is_empty(),
+            "resolved marker should be cleared"
+        );
+    }
+
+    #[test]
+    fn session_check_clears_dropped_queue_marker_when_consumed_this_cycle() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // HEAD's queue lacks the head because the response consumed #gscaccess
+        // (recorded as done this cycle) — legitimate, not a silent deletion.
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n### Re: do #gscaccess — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n",
+            "\n<!-- agent:queue auto -->\n- do [#existing]\n<!-- /agent:queue -->\n",
+        );
+        let doc = init_committed_doc_for_queue_guard(tmp.path(), committed);
+        crate::cycle_state::record_dropped_queue_prompts(&doc, &["do [#gscaccess]".to_string()])
+            .unwrap();
+        crate::cycle_state::record_pending_done_ids(&doc, &["gscaccess".to_string()]).unwrap();
+
+        assert!(
+            matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
+            "guard should clear when the dropped queue head was consumed this cycle"
+        );
+    }
+
+    #[test]
+    fn queue_contamination_guard_flags_response_prose_in_queue() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+        let doc = tmp.path().join("doc.md");
+        let prose = "Yes. I drove the already-authenticated Google Ads browser session with chromium-bridge to demote the campaign.";
+        let content = format!(
+            concat!(
+                "---\nagent_doc_session: test\n---\n\n",
+                "<!-- agent:exchange -->\n",
+                "### Re: #gads106demote — gpt-5\n\n{prose}\n",
+                "<!-- /agent:exchange -->\n",
+                "\n<!-- agent:queue auto -->\n",
+                "- do [#nbsearch]\n",
+                "- {prose}\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            prose = prose
+        );
+        fs::write(&doc, content).unwrap();
+        match check_queue_response_contamination_guard(&doc).unwrap() {
+            GuardResult::Error(message) => {
+                assert!(message.contains("assistant response prose"), "{message}");
+                assert!(message.contains("I drove"), "{message}");
+            }
+            other => panic!("expected contamination error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn queue_contamination_guard_allows_directive_only_queue() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+        let doc = tmp.path().join("doc.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: #gads106demote — gpt-5\n\nYes. I drove the already-authenticated Google Ads session.\n",
+            "<!-- /agent:exchange -->\n",
+            "\n<!-- agent:queue auto -->\n",
+            "preset #spec-test\n- do [#nbsearch]\n- do [#bidstrat]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        fs::write(&doc, content).unwrap();
+        assert!(matches!(
+            check_queue_response_contamination_guard(&doc).unwrap(),
+            GuardResult::None
+        ));
+    }
+
+    #[test]
+    fn queue_contamination_guard_allows_free_text_prompt_not_from_response() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+        let doc = tmp.path().join("doc.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: prior — gpt-5\n\nAn unrelated answer about caching.\n",
+            "<!-- /agent:exchange -->\n",
+            "\n<!-- agent:queue auto -->\n",
+            "- check the deploy status on staging before release\n",
+            "<!-- /agent:queue -->\n",
+        );
+        fs::write(&doc, content).unwrap();
+        assert!(
+            matches!(
+                check_queue_response_contamination_guard(&doc).unwrap(),
+                GuardResult::None
+            ),
+            "legitimate free-text queue prompt must not be flagged"
+        );
+    }
+
+    #[test]
+    fn unresolved_exchange_prompt_detects_unanswered_tail_after_boundary() {
+        let content = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "❯ earlier prompt\n### Re: earlier — gpt-5\n\nAnswered.\n",
+            "<!-- agent:boundary:committed -->\n",
+            "What are #next-steps to complete review items?\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        assert_eq!(
+            unresolved_exchange_prompt_in_content(content).as_deref(),
+            Some("What are #next-steps to complete review items?")
+        );
+    }
+
+    #[test]
+    fn unresolved_exchange_prompt_none_when_answered_after_boundary() {
+        let content = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "❯ earlier\n### Re: earlier — gpt-5\n\nAnswered.\n",
+            "<!-- agent:boundary:committed -->\n",
+            "new prompt\n### Re: new prompt — gpt-5\n\nAnswered too.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        assert_eq!(unresolved_exchange_prompt_in_content(content), None);
+    }
+
+    #[test]
+    fn unresolved_exchange_prompt_none_when_tail_empty_after_boundary() {
+        // Normal post-closeout shape: boundary at the very end, nothing after.
+        let content = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "❯ prompt\n### Re: prompt — gpt-5\n\nAnswered.\n",
+            "<!-- agent:boundary:committed -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        assert_eq!(unresolved_exchange_prompt_in_content(content), None);
+    }
+
+    #[test]
+    fn unresolved_exchange_prompt_detects_fresh_prompt_without_boundary() {
+        let content = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "do [#xyz]\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        assert_eq!(
+            unresolved_exchange_prompt_in_content(content).as_deref(),
+            Some("do [#xyz]")
         );
     }
 

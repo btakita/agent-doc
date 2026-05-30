@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 
@@ -227,25 +227,61 @@ Confidence: high for tagpath CI/release-check coverage; root-suite confidence is
 Escalation: none.
 
 Next queue item remains `#tpcoreadapters`.
-<!-- agent:boundary:c0695da4 -->
+
+### Re: do #tpcoreadapters — gpt-5
+Completed `#tpcoreadapters` by recording the adapter-crate decision instead of adding more crates before `tagpath-core` has downstream mileage.
+
+Changed paths:
+- `src/tagpath/SPEC.md`
+- `src/tagpath/README.md`
+- `src/tagpath/VERSIONS.md`
+- `src/tagpath/tests/test_core_split_plan.rs`
+- root submodule pointer `src/tagpath`
+
+What changed:
+- Added SPEC section `18.7 Adapter crate decision`.
+- Documented that no separate Rust crates named `tagpath-wasm`, `tagpath-mcp`, or `tagpath-project` are part of the first split.
+- Kept `tagpath::wasm`, `tagpath::mcp`, and project/index/search/config surfaces in the root facade while `tagpath-core` stabilizes.
+- Clarified that `@btakita/tagpath-wasm` remains the npm package produced by `scripts/build-wasm.sh`, not a Rust crate.
+- Added regression coverage in `tests/test_core_split_plan.rs` so the adapter decision stays visible in SPEC, README, and release notes.
+
+Commits:
+- `src/tagpath`: `6a7131b docs: defer adapter crate split`
+- root: `5bf334507 chore: update tagpath submodule`
+
+Verification:
+- `cargo test --test test_core_split_plan` passed after fixing a line-wrap-sensitive README assertion.
+- `cargo clippy --workspace --all-targets -- -D warnings` passed.
+- `cargo test --workspace` passed.
+- `cargo test -p tagpath-core --no-default-features` passed.
+- `cargo test -p tagpath --lib --no-default-features` passed.
+- `cargo build --target wasm32-unknown-unknown --no-default-features --features wasm` passed.
+- `scripts/check-release.sh` passed; it accepted the expected facade dry-run blocker until `tagpath-core` is published to crates.io first.
+- `scripts/build-wasm.sh` passed.
+- `node pkg-smoke/smoke.mjs` passed.
+- `cargo install --path . --force` passed.
+- Tagpath GitHub Actions passed for `6a7131b`: `CI` run `26675167995`, `WASM build` run `26675167980`.
+
+Root verification:
+- `make check` still fails in unrelated dirty `src/agent-doc`, on `codex_bare_run_inside_owning_pane_fails_before_nested_dispatch`: actual `abandoned`, expected `preflight_started`. I did not modify or stage `src/agent-doc`.
+- Root has no workflow named `CI`.
+- Latest root `Agent Doc` run `26675003816` is still an external CI-start blocker: both `check` and `tmux-ci` jobs failed with empty step lists.
+
+Confidence: high for the tagpath adapter decision and submodule pointer. The remaining red evidence is outside this tagpath change.
+
+Escalation: none.
+<!-- agent:boundary:faa922ec -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~do [#tpcoreplan]~
-- ~do [#tpcoreextract]~
-- ~do [#tpcorefacade]~
-- ~do [#tpcoreci]~
-- do [#tpcoreadapters]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#tpcoreadapters] [recommended] Re-evaluate adapter crates such as tagpath-wasm, tagpath-mcp, and tagpath-project only after tagpath-core has stabilized.
 <!-- /agent:backlog -->
 
 ## Review

@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 
@@ -128,7 +128,21 @@ v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-gramm
 Compacted content:
 - Archived 3 response topic(s): separate crates; next steps to split crates; do #tpcoreplan
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-<!-- agent:boundary:551b548a -->
+
+### Re: do #tpcoreextract — gpt-5
+
+Completed `#tpcoreextract`.
+
+Changed paths are in `src/tagpath`: created the `crates/tagpath-core` workspace crate at `0.12.0`, moved `parser`, `alias`, `family`, `prose`, `query`, and `compression` into it with their pure unit tests, and kept the root `tagpath` crate as the CLI/library facade through named re-exports from `tagpath_core`. Existing imports such as `tagpath::parser::parse`, `tagpath::alias::generate_aliases`, and `tagpath::compression::build_report` remain covered by facade tests.
+
+I also updated `SPEC.md`, `README.md`, `VERSIONS.md`, `Cargo.lock`, `tests/test_core_split_plan.rs`, and `tagpath.iml`; removed the redundant root `license-file` metadata warning; committed and pushed `btakita/tagpath` at `00144ae` (`feat: extract tagpath core crate`); then committed and pushed the `agent-loop` submodule pointer at `4b3ad70b5`.
+
+Verification passed: `cargo check`, `cargo test -p tagpath-core --no-default-features`, `cargo test`, `cargo test --workspace`, `cargo clippy`, `cargo build --target wasm32-unknown-unknown --no-default-features --features wasm`, `cargo install --path . --force`, `cargo publish --dry-run --allow-dirty -p tagpath-core`, and root `make check` from `agent-loop`.
+
+The facade publish dry-run was attempted with and without `--no-verify`, but Cargo stops before verification because `tagpath-core 0.12.0` is not yet present in the crates.io index. That matches the documented publish order: publish `tagpath-core` first, then rerun the `tagpath` facade dry-run/publish once the registry can resolve the core crate. Latest tagpath CI is green (`26674038403`), latest agent-doc CI is green (`26674156964`, `check` job only), and the root repo has no workflow named `CI`.
+
+Escalation: none. Confidence: high. Next queue item remains `#tpcorefacade`.
+<!-- agent:boundary:ce17e439 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -137,7 +151,7 @@ Compacted content:
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#tpcoreplan]~
-- do [#tpcoreextract]
+- ~do [#tpcoreextract]~
 - do [#tpcorefacade]
 - do [#tpcoreci]
 <!-- /agent:queue -->
@@ -145,7 +159,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#tpcoreextract] Extract tagpath-core with parser, convention detection, alias, family, prose, query normalization, compression, and pure tests moved into the core crate.
 - [ ] [#tpcorefacade] Keep the tagpath crate as the existing CLI/library facade depending on tagpath-core; preserve binary behavior, public exports, and feature defaults.
 - [ ] [#tpcoreci] Add workspace CI, docs, and release checks for the split, including no-default-features, wasm, and crates.io publish ordering smoke tests.
 - [ ] [#tpcoreadapters] [recommended] Re-evaluate adapter crates such as tagpath-wasm, tagpath-mcp, and tagpath-project only after tagpath-core has stabilized.

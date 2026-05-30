@@ -16,7 +16,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -75,14 +75,27 @@ Shipped the highest-value piece of the plan: raw-component patchback now fails c
 **Commit note**: the submodule held ~1627 lines of *previously-uncommitted* source from earlier auto-loop cycles (compact validation, compact uncommitted-state warning, queue contamination guard, review ungate-tasks, missing-response/preflight guards) that committed only their session doc. Those rode into submodule `6da30a9d` alongside this fix — all green. Superproject pointer `5f0636739`.
 
 **Remaining scope** → `#closeout-recovery-state-machine`: the unified typed recovery state machine across finalize/write/repair/commit plus the single-instruction diagnostic (plan fixes #1/#5). Plan fixes #3 (direct-`### Re:` absorption) and #4 (atomic parent-pointer) are already substantially covered by existing `write --commit` absorption and `complete_required_closeout` retry.
-<!-- agent:boundary:27a7dde8 -->
+
+### Re: closeout repair queue state — gpt-5
+
+Recovered the closeout state after the delegated `agent-doc` run. `#closeout-repair-churn` is already complete and committed by the authoritative route-owned session, while `#closeout-recovery-state-machine` remains open in the backlog and should not have been consumed as done.
+
+I restored the queue head to `do [#closeout-recovery-state-machine]`; preflight halted auto-queue consumption as `item_modified`, which is the right fail-closed behavior for this repair. The two prior `❯`-prefixed diagnostic bullets are assistant-body corruption from the earlier closeout, not new user prompts.
+
+Proof:
+- Changed paths: `tasks/agent-doc/agent-doc-bugs2.md` only through `agent-doc finalize`.
+- Commands: `agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`; `agent-doc write --commit /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`; `agent-doc claim --pane %36 --force /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`; `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`; `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`.
+- Verification: preflight and plan completed after reclaim; no source-code change was made in this repair cycle.
+- Confidence: high for queue-state normalization; source-code verification belongs to the already-committed authoritative `#closeout-repair-churn` cycle.
+- Escalation: none.
+<!-- agent:boundary:fee69c94 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~If a completed item is gated in review, agent-doc should automatically add task(s) into the backlog to ungate the review item.~
 - ~do [#closeout-repair-churn]~
-- ~do [#closeout-recovery-state-machine]~
+- do [#closeout-recovery-state-machine]
 - do [#codex-owned-pane-prompt-miss]
 - do [#stuck-capture-compact-false-positive]
 - do [#codex-final-response-live-verify]

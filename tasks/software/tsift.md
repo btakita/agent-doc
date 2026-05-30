@@ -108,7 +108,14 @@ CI:
 - The root `btakita/agent-loop` repo has no workflow named `CI`; its latest `Agent Doc` run `26696235620` for `01857c8b1` failed before runner steps were allocated. Both jobs (`tmux-ci`, `check`) have empty step lists and completed in about three seconds, so I classified this as an external CI-start blocker rather than a code or tmux regression. Local `make check` passed.
 
 Confidence: high. Escalation: none; no follow-up backlog item is needed for this task.
-<!-- agent:boundary:12441f23 -->
+Completed both queued continuations.
+
+For `tasks/software/tsift.md`, `#tsiftmempending` is done, committed, pushed, and the queue is drained. The change explicitly excludes `claude-mem.pending_messages` from the replacement import contract with an `unsupported_reason`, spec text, and regression coverage. Commits: `f446797` in `btakita/tsift`, `01857c8b1` superproject pointer, and `b21a65fd7` session closeout.
+
+Verification passed: `cargo fmt --check`, focused tsift-memory test, `cargo test --workspace`, `cargo build --release`, `cargo install --path .`, `make check`, and `tsift memory status . --json`. `btakita/tsift` CI run `26696235528` passed. Root `Agent Doc` CI failed before allocating job steps, with empty `tmux-ci`/`check` step lists, so I classified it as an external CI-start blocker.
+
+I also ran the earlier `tasks/agent-doc/agent-doc-bugs2.md` continuation. That cycle completed and `session-check` is clean with `queue_continuation_required=false`. It produced local session commits through `6f37948be`; I left those unpushed because that hook only asked to run the continuation, not push it.
+<!-- agent:boundary:8a4c94f9 -->
 <!-- /agent:exchange -->
 ###
 <!--

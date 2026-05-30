@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -30,58 +30,32 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260530-041336.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260530-045734.md`*
 
 Compacted content:
-- Archived 2 response topic(s): do #codex-auto-queue-live-verify; do #drained-done-queue-clear
+- Archived 3 response topic(s): #finalize-retry-ipc-response-duplication; #pending-add-append-not-prepend; #recguard-abandon
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: #finalize-retry-ipc-response-duplication — opus-4-8
-
-Implemented the CLI-side fix + recovery for the multi-retry/late-IPC response duplication that `❯`-prefixed agent body lines. Three changes in `src/agent-doc/agent-doc-orchestration/src/`:
-
-- **`git.rs` — never `❯`-prefix response body.** `canonicalize_answered_prompt_prefixes` now tracks *why* the prelude walk stops. A prose block that butts directly against a preceding `### Re:` heading (no blank-line/comment separator) is the trailing body of that response — e.g. a duplicated block from a retry — not a fresh user prelude, so it's skipped. This is the root cause of `❯ **Scope:** …` / `❯ **Commits:** …` mis-attribution (hypothesis #2).
-- **`dedupe.rs` — `❯`-insensitive collapse, keep the clean twin.** `normalize_response_block_line` strips a leading `❯` from response-body lines so a corrupted copy still compares equal to its clean committed twin (previously the prefix made them look "new" and slipped past dedupe + over-application guards). `dedupe_responses_with_report` now drops the `❯`-corrupted copy of a duplicate pair (new `block_has_prompt_prefixed_body`), keeping the clean one instead of always-second.
-- **Recovery is now automatic.** Because `is_committed_response_overapplication` (and the consecutive dedupe replay) are `❯`-insensitive, `detect_late_ipc_response_overapplication` / `detect_jb_cache_conflict_accept_duplicate_replay` recognize the corrupted-duplicate shape and `preflight` restores clean HEAD over the working tree — eliminating the manual `git checkout HEAD -- <doc>` the repro required (hypothesis #3).
-
-**New deterministic regression coverage:**
-- `dedupe::dedupe_collapses_prompt_prefixed_corrupted_duplicate` — corrupted duplicate → one clean block, no surviving `❯`, idempotent (stands in for the two-retry `already_applied` convergence invariant).
-- `dedupe::overapplication_detects_prompt_prefixed_corrupted_duplicate`.
-- `git::canonicalize_answered_prompt_prefixes_never_prefixes_duplicate_response_body`.
-- `session_check::detects_prompt_prefixed_corrupted_duplicate_as_overapplication` — remediation restores committed HEAD, no manual checkout.
-
-**Verification:** `make check` green (clippy clean + full suite). Both binaries rebuilt (`cargo build --release` + `cargo install --path .`, exit 0) so the fix is live in `.bin/agent-doc` and `~/.cargo/bin/agent-doc`.
-
-**Scope/honesty:** This is the CLI defensive + auto-recovery layer. Root-cause hypothesis #1 (live-buffer non-idempotence across IPC `already_applied` retries) is plausibly plugin-side — the plan flags confirming whether plugin 0.2.138 eliminates the compounding before adding more CLI machinery. Gating (not closing) this item: code-complete and unit-verified, awaiting live IDE-IPC validation that the corruption no longer recurs and the preflight auto-repair fires in a real session.
-
-### Re: #pending-add-append-not-prepend — opus-4-8
-
-Resolved as **already-correct — no binary change** (your call: close as spec-conformant).
-
-Verified against source + test:
-- `src/notify.rs:187` iterates `pending_add.iter().rev()` inserting each at position 0, so CLI args `[A, B]` land as backlog `[A, B, …existing]` — reading order at the **front**, which is exactly SKILL.md's "Put new items at the beginning of `agent:backlog`."
-- Test `pending_add_multiple_items_keep_sequence_order_at_front` (`src/notify.rs:603`) pins this: `--pending-add "first new" --pending-add "second new"` over `[#abcd]` → `[first new, second new, #abcd]`. **Passes.**
-
-The plan's repro (`open-code.md` f94e7851c: waves added 4→3→2→1, wave-4 landed on top) was a **usage error**, not a binary defect — items must be passed top-to-bottom (wave-1 first), not tail-first. This matches the standing guidance in `feedback-agent-doc-pending-add-order` ("the ordering behavior is correct, so don't file a fabricated bug").
-
-Plan Option A (newest-arg-on-top stack) was **not** implemented: it would invert the documented convention, break the passing test, and contradict that feedback. `tasks/agent-doc/plan-pending-add-prepend-semantics.md` is effectively superseded — current behavior already satisfies the "beginning of backlog" spec; the doc fix it recommends (Option A) is declined. If a true newest-on-top stack is ever wanted, it should be a new explicit opt-in flag, not a change to `--pending-add`'s default.
-
-### Re: #recguard-abandon — opus-4-8
-
-Done — implemented + shipped (preset `#spec-test-build-install-commit-push` satisfied).
-
-The recursive same-pane direct-invocation guard refused to dispatch (correct) but left the freshly-opened preflight cycle in `preflight_started`, so `session-check` reported an interruption and the owner session stayed wedged until a manual `agent-doc cancel`. Fix in `agent-doc-orchestration/src/run.rs`:
-
-- New `abandon_run_recursive_cycle` marks the empty cycle **terminal (`Abandoned`)** instead of recoverable. The guard fires *before any response capture*, so abandoning loses nothing. `CycleState::is_open()` already excludes `Abandoned`, so `session-check` accepts the terminal state and reaches the `ok — cycle … is abandoned (recursive_direct_invocation_blocked …)` path — no manual cancel.
-- The fail-fast refusal is unchanged (still bails with `recursive direct invocation would deadlock`); only the cycle bookkeeping and the user-facing message changed (now says the cycle was abandoned/terminal, not "left recoverable").
-
-**Verification:** new regression `recursive_direct_invocation_abandoned_cycle_passes_session_check` (abandoned recursive-guard cycle → `session-check` OK); `make check` green; both binaries rebuilt (`cargo build --release` + `cargo install`, exit 0). `VERSIONS.md` updated.
-
-**Commit + push:** `src/agent-doc` `6f91beb2` (branch `20260422/codex-agent-backend`, pushed to origin). The commit also bundles the earlier retry/IPC-dedup source changes that share `session_check.rs`/`VERSIONS.md`; that separate item is unchanged in status here — it stays gated pending its own live IDE-IPC validation, and the code landing does not by itself satisfy that gate.
-<!-- agent:boundary:8f1888b4 -->
+<!-- agent:boundary:748571a5 -->
 <!-- /agent:exchange --> 
 ###
 <!--
+JB `Run Agent Doc` error
+```
+resync: stash pane %31 is registered in its own project root — skipping kill
+resync: stash pane %20 is registered in its own project root — skipping kill
+resync: stash pane %35 is registered in its own project root — skipping kill
+resync: stash pane %27 is registered in its own project root — skipping kill
+resync: stash pane %4 is registered in its own project root — skipping kill
+resync: stash pane %34 is registered in its own project root — skipping kill
+resync: stash pane %2 is registered in its own project root — skipping kill
+resync: stash pane %3 is registered in its own project root — skipping kill
+resync: stash pane %33 is registered in its own project root — skipping kill
+resync: stash pane %21 is registered in its own project root — skipping kill
+[route] debounce OK — file idle for 0.5s and typing indicator idle
+[route] target tmux session: 0
+[route] authoritative actor generation 239 for tasks/monsterrodholders.md is busy on pane %28; queued pending dispatch "What are #next-steps to complete [#gfwconnect]?" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
+```
+---
 The completed queue item was not removed from the queue. #mermaid
 #spec-test-build-install-commit-push
 ---
@@ -99,16 +73,19 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 #spec-test-build-install-commit-push
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- ~do [#pending-gate-snapshot-desync]~
-- ~do [#codex-auto-queue-live-verify]. auto-queue in monsterrodholders.md stalled~
-- ~do [#drained-done-queue-clear]~
-- ~do [#finalize-retry-ipc-response-duplication]~
-- do [#pending-add-append-not-prepend]
-- do [#next-steps-backlog-capture]
+- ~do [#recguard-abandon]~
+- do [#codex-auto-queue-stalled-final-gate]
+- do [#active-queue-persisted-no-continue]
+- do [#bare-write-captured-uncommitted]
 - do [#run-agent-doc-stale-busy-replay]
 - do [#jb-busy-queue-ux-feedback]
+- do [#next-steps-backlog-capture]
+- do [#ah0s]
+- do [#pending-add-suppresses-queue-consume]
+- do [#stuck-capture-compact-false-positive]
+- do [#ipcfullprompt-recur2]
 <!-- /agent:queue -->
 
 ## Backlog

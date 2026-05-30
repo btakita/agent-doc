@@ -135,7 +135,11 @@ Later phases may refine caller values without changing the field names.
 - Repeated dispatches are queue-first once a document actor is already busy.
   Route must first try to drain an open binary-owned closeout (`repair` /
   strict commit / `session-check`) so an idle console can accept the reroute
-  immediately after the prior cycle is closed. If that drain is blocked, or if a
+  immediately after the prior cycle is closed. The drain must reap completed
+  tracked items across **all** surfaces (backlog, review, icebox) via full
+  pending maintenance — not just the backlog-focused repair sub-step — so a
+  deployed/completed `[x]` item left in review or icebox does not leave
+  `session-check` interrupted and force the operator into a manual retry. If that drain is blocked, or if a
   dispatch-only reroute still cannot prove the authoritative actor is
   dispatch-ready, route must not inject a duplicate trigger. It appends the
   pending prompt-bearing request to `agent:queue`, creates the component when

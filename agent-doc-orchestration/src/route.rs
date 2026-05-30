@@ -1707,6 +1707,26 @@ fn drain_open_closeout_before_routed_dispatch(file: &Path) -> Result<RouteCloseo
             state.phase
         ),
     );
+
+    // Reap completed tracked items across ALL surfaces (backlog, review, icebox)
+    // and re-sync the snapshot before the focused repair, matching what a manual
+    // re-run's full preflight maintenance does. The repair sub-step only reaps
+    // the backlog, so a deployed/completed `[x]` item left in review or icebox
+    // would make that reap a no-op, the post-repair session-check would still
+    // find the completed item, and route would refuse dispatch until the user
+    // manually retried (the "JB Run Agent Doc failed; repeat succeeded" report).
+    // run_pending_maintenance is idempotent, so this is safe even when there is
+    // nothing to reap.
+    if let Err(e) = crate::preflight::run_pending_maintenance(file) {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_dispatch_drain_pending_maintenance_warning file={} error={}",
+                file.display(),
+                crate::secret_redact::redact(&e.to_string())
+            ),
+        );
+    }
     match crate::repair::repair(file) {
         Ok(outcome) => match crate::session_check::inspect(file)? {
             crate::session_check::SessionCheckStatus::Ok(_) => {

@@ -2496,6 +2496,56 @@ fn wait_for_start_ack_detects_new_committed_cycle_after_prior_commit() {
 }
 
 #[test]
+fn drain_reaps_completed_review_item_across_all_surfaces() {
+    // #route-drain reap-all-surfaces: the focused route-drain repair reaped only
+    // the backlog, so a deployed `[x]` item left in review blocked dispatch until
+    // a manual repeat ran full preflight maintenance ("JB Run Agent Doc failed; a
+    // repeat attempt succeeded"). The drain now runs all-surface pending
+    // maintenance first, so the completed review item is reaped on the first
+    // attempt regardless of the final drain outcome.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("drain-review.md");
+    let content = concat!(
+        "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+        "## Backlog\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#keep1] Keep me\n",
+        "<!-- /agent:backlog -->\n\n",
+        "## Review\n\n",
+        "<!-- agent:review -->\n",
+        "- [x] [#seocat] Implemented and deployed\n",
+        "<!-- /agent:review -->\n\n",
+        "## Completed / Reaped\n\n",
+        "<!-- agent:done -->\n",
+        "<!-- /agent:done -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    crate::snapshot::save(&doc, content).unwrap();
+    // Open cycle so the drain actually runs (is_open()).
+    crate::cycle_state::start_preflight(&doc, None, Some(content)).unwrap();
+
+    // The drain may still report Blocked on later (committed/etc.) guards in this
+    // minimal fixture, but the all-surface reap runs before that — assert the
+    // completed review item is gone from the file.
+    let _ = super::drain_open_closeout_before_routed_dispatch(&doc);
+
+    let after = std::fs::read_to_string(&doc).unwrap();
+    let review = crate::component::parse(&after)
+        .unwrap()
+        .into_iter()
+        .find(|c| c.name == "review")
+        .unwrap()
+        .content(&after)
+        .to_string();
+    assert!(
+        !review.contains("[#seocat]"),
+        "drain must reap the completed review item via all-surface maintenance: {review}"
+    );
+    assert!(after.contains("[#keep1]"), "open backlog item must remain");
+}
+
+#[test]
 fn wait_for_start_ack_times_out_without_cycle_change() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();

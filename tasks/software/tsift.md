@@ -153,20 +153,7 @@ Commands: `tsift status --fix`, `agent-doc preflight`, `agent-doc plan`, compone
 Verification: no repo code changed, so no project test suite was run for this backlog-only preset.
 Confidence: high.
 Escalation: none.
-
-### Re: Add #next-steps — gpt-5
-
-Added three prioritized backlog items.
-
-Top backlog id: `#agent-doc-domain-boundary`.
-
-Changed paths: session document only.
-Commands: `tsift status --fix`, `agent-doc preflight`, `agent-doc plan`, component reads, and `agent-doc finalize`.
-Verification: no repo code changed, so no project test suite was run for this backlog-only preset.
-Confidence: high.
-Escalation: none.
-
-<!-- agent:boundary:73961534 -->
+<!-- agent:boundary:837ad92f -->
 <!-- /agent:exchange -->
 ###
 <!--

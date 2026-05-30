@@ -134,6 +134,7 @@ pub fn fire_post_commit(file: &Path, session_id: &str) {
             )
             .map_err(|e| eprintln!("[hooks] post_commit fire failed: {}", e));
     }
+    capture_tsift_memory_closeout(file);
 }
 
 /// Fire a claim hook event.
@@ -194,6 +195,126 @@ fn capture_metadata(file: &Path) -> Option<serde_json::Map<String, serde_json::V
         serde_json::Value::String(capture.response_sha256),
     );
     Some(map)
+}
+
+fn capture_tsift_memory_closeout(file: &Path) {
+    let capture = match crate::capture::load_active(file) {
+        Ok(Some(capture)) => capture,
+        Ok(None) => return,
+        Err(err) => {
+            eprintln!("[hooks] tsift-memory closeout capture skipped: {err}");
+            return;
+        }
+    };
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let Some(project_root) = crate::snapshot::find_project_root(&canonical) else {
+        return;
+    };
+    if !project_root.join(".tsift/memory.db").exists() {
+        return;
+    }
+    let response_summary = summarize_agent_doc_response(&capture.response_body);
+    if response_summary.trim().is_empty() {
+        eprintln!(
+            "[hooks] tsift-memory closeout capture skipped for {}: empty response body",
+            file.display()
+        );
+        return;
+    }
+    let prompt_target = extract_agent_doc_prompt_target(&capture.response_body)
+        .unwrap_or_else(|| canonical.display().to_string());
+    let commit_hash = git_head(&project_root).unwrap_or_else(|| "unknown".to_string());
+    let output = std::process::Command::new("tsift")
+        .arg("memory")
+        .arg("capture-agent-doc-closeout")
+        .arg(&project_root)
+        .arg("--session-path")
+        .arg(&canonical)
+        .arg("--prompt-target")
+        .arg(prompt_target)
+        .arg("--response-summary")
+        .arg(response_summary)
+        .arg("--commit-hash")
+        .arg(commit_hash)
+        .arg("--session-check-status")
+        .arg("committed")
+        .arg("--json")
+        .output();
+    match output {
+        Ok(output) if output.status.success() => {
+            eprintln!(
+                "[hooks] tsift-memory closeout capture ok for {}",
+                file.display()
+            );
+        }
+        Ok(output) => {
+            eprintln!(
+                "[hooks] tsift-memory closeout capture exited with code {:?}: {}",
+                output.status.code(),
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        Err(err) => {
+            eprintln!("[hooks] tsift-memory closeout capture failed to spawn: {err}");
+        }
+    }
+}
+
+fn git_head(project_root: &Path) -> Option<String> {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(project_root)
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let head = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!head.is_empty()).then_some(head)
+}
+
+fn extract_agent_doc_prompt_target(response_body: &str) -> Option<String> {
+    for line in response_body.lines() {
+        let without_hashes = line.trim().trim_start_matches('#').trim_start();
+        let Some(rest) = without_hashes.strip_prefix("Re:") else {
+            continue;
+        };
+        let target = rest.split(" — ").next().unwrap_or(rest).trim();
+        if !target.is_empty() {
+            return Some(target.to_string());
+        }
+    }
+    None
+}
+
+fn summarize_agent_doc_response(response_body: &str) -> String {
+    let lines = response_body
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            trimmed != "<!-- patch:exchange -->"
+                && trimmed != "<!-- /patch:exchange -->"
+                && !(trimmed.starts_with("<!--") && trimmed.ends_with("-->"))
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    truncate_agent_doc_summary(lines.trim(), 4000)
+}
+
+fn truncate_agent_doc_summary(input: &str, max_chars: usize) -> String {
+    let mut chars = input.chars();
+    let mut output = String::new();
+    for _ in 0..max_chars {
+        let Some(ch) = chars.next() else {
+            return input.to_string();
+        };
+        output.push(ch);
+    }
+    if chars.next().is_some() {
+        output.push_str("\n[truncated]");
+    }
+    output
 }
 
 #[cfg(test)]
@@ -273,5 +394,26 @@ mod tests {
         assert_eq!(data["patches"].as_u64(), Some(1));
         assert!(data["capture_id"].is_string());
         assert!(data["response_sha256"].is_string());
+    }
+
+    #[test]
+    fn agent_doc_prompt_target_uses_re_heading_without_model_suffix() {
+        let response = "<!-- patch:exchange -->\n### Re: do [#tsiftmemhooks] — gpt-5\nDone.\n<!-- /patch:exchange -->\n";
+        assert_eq!(
+            extract_agent_doc_prompt_target(response).as_deref(),
+            Some("do [#tsiftmemhooks]")
+        );
+    }
+
+    #[test]
+    fn agent_doc_response_summary_removes_patch_markers_and_truncates() {
+        let body = format!(
+            "<!-- patch:exchange -->\n### Re: x\n{}\n<!-- /patch:exchange -->\n",
+            "a".repeat(4100)
+        );
+        let summary = summarize_agent_doc_response(&body);
+        assert!(!summary.contains("patch:exchange"));
+        assert!(summary.contains("[truncated]"));
+        assert!(summary.starts_with("### Re: x"));
     }
 }

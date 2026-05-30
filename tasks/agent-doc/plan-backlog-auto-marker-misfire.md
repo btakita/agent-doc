@@ -1,6 +1,8 @@
 # Plan — `auto` on the `agent:backlog` marker misfires an auto-run that rewrites the backlog
 
-> Status: PLAN ONLY — do not implement. Filed via `#agent-doc-bug` from `boost-client/tasks/monsterrodholders/mrh-project.md`.
+> Status: IMPLEMENTED 2026-05-29 (defensive warn). Filed via `#agent-doc-bug` from `boost-client/tasks/monsterrodholders/mrh-project.md`.
+>
+> Implementation (submodule `fdc184f2`, superproject `f88ca1951`): validation (below) confirmed the destructive path (#2 auto-loop scope, #3 backlog rewrite) was already prevented by queue-scoping; only proposed fix #1 (warn on misplaced/unknown attrs) was genuinely open. Added a non-blocking `misplaced_component_attr` preflight warning in `agent-doc-orchestration/src/preflight.rs` for queue-only attrs on non-queue components (`auto` on `agent:backlog`) and unrecognized attribute keys (the `auot` typo), with guidance toward `<!-- agent:queue auto -->`. No mutation occurs. Tests + spec §2.4/§2.5 updated; live-verified against a throwaway doc. Proposed fixes #2/#3 needed no code change; #4 (recovery snapshot) was not implemented — deferred as unnecessary given the misfire is now inert + surfaced.
 
 ## Symptom (observed 2026-05-29)
 

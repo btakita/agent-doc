@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Session History
@@ -142,7 +142,7 @@ Handled in the preceding response. I could not complete the Google-side registra
 
 Cleared the stale auto queue entry that duplicated the prompt already answered above.
 queue_active: false
-<!-- agent:boundary:0bd68248 -->
+<!-- agent:boundary:367dcfa8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -152,7 +152,7 @@ Please give me a report the performance
 
 ## Queue
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

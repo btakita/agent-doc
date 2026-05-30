@@ -46,7 +46,24 @@ Two side notes from this cycle:
 
 - The `stuck_captured_cycle` warning preflight raised is a **false positive**: capture `cycle-1780100032048` ("gate→done for codex guidance") was committed and then archived by compaction (`.agent-doc/archives/483039e7…-20260530-013546.md`), so it's correctly absent from HEAD. No recovery run — that would re-inject an already-archived response. Logged as a recommended backlog item (`#stuck-capture-compact-false-positive`).
 - The post-`/agent:exchange` HTML comment referencing `#mermaid` / `#spec-test-build-install-commit-push` / `#next-steps` is parked outside `agent:exchange`/`agent:queue`, so it's a non-executable note and was not run.
-<!-- agent:boundary:cf1ebdeb -->
+❯ Why is [#backlog-auto-marker-misfire] marked as "DO NOT IMPLEMENT"?
+
+### Re: Why is #backlog-auto-marker-misfire marked "DO NOT IMPLEMENT"? — opus-4-8
+
+Because it was filed through the **`#agent-doc-bug` preset**, which is plan-only by definition. That preset (frontmatter) reads: *"Please create a plan for agent-doc to fix this issue. Add to the backlog of tasks/agent-doc/agent-doc-bugs2.md."* It never authorizes writing code — it produces a diagnosis, a plan file, and a backlog entry, and then stops.
+
+Concretely, three things put the marker there:
+
+1. **Provenance.** The item entered the backlog via `#agent-doc-bug` on 2026-05-29 13:25 (commit `69ccbc2ff`), originally filed from `boost-client/tasks/monsterrodholders/mrh-project.md`. The plan file header states it directly: *"Status: PLAN ONLY — do not implement. Filed via `#agent-doc-bug`."*
+
+2. **The fix isn't validated yet.** `plan-backlog-auto-marker-misfire.md` lists its root cause as *hypotheses* ("to confirm during implementation") and its remedy as *"decide during implementation."* Nobody has confirmed which path actually rewrote the backlog (marker-attr parser tolerating `auto`/`auot`, the auto-loop keying off any `auto` attribute, or the destructive backlog-rewrite path).
+
+3. **It's high-risk surface.** The fix touches marker-attribute parsing **and** backlog mutation — the same destructive-rewrite territory that caused the original data loss (minted IDs wrapping `do #…` stubs, original task text gone, recovery via git/sidecar archaeology). That's deliberately gated behind explicit go-ahead.
+
+So the marker means: *diagnosed and planned, but do not write code until you explicitly authorize it.* Standard lifecycle for any `#agent-doc-bug`-filed item — it stays `DO NOT IMPLEMENT` until you say "implement #backlog-auto-marker-misfire" (or similar) in the document or chat. You removing the queue's `auto` attribute this turn is consistent with keeping it parked.
+
+(Side note: this turn's `stuck_captured_cycle` warning is again a false positive — the cited body *is* in HEAD; the capture's recorded snapshot hash just went stale after the follow-up pending-only commit advanced HEAD. Same family as `#stuck-capture-compact-false-positive`; no recovery run.)
+<!-- agent:boundary:add1a1bf -->
 <!-- /agent:exchange --> 
 ###
 <!--
@@ -67,7 +84,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 #spec-test-build-install-commit-push
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#jb-load-tmux-window-verify]~
 - ~do [#queue-head-consume-on-topic-id-regression]~

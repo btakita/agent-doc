@@ -51,6 +51,46 @@ fn init_git_repo(root: &Path, tracked: &Path) {
         .unwrap();
 }
 
+fn auto_queue_doc_content() -> String {
+    "---\nagent_doc_session: testsid\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n### Re: prior — gpt-5\n\nDone.\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue auto -->\n- do [#seopdp] deploy product page\n<!-- /agent:queue -->\n".to_string()
+}
+
+#[test]
+fn session_check_codex_final_gate_blocks_on_active_auto_queue() {
+    // #codex-auto-queue-stalled-final-gate: a clean document that still owes an
+    // `agent:queue auto` continuation reports `queue_continuation_required=true`,
+    // exits 0 in default mode, and exits nonzero under `--codex-final-gate`.
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    fs::write(&doc, auto_queue_doc_content()).unwrap();
+    // Commit so the working tree matches HEAD — a clean cycle with no open
+    // preflight state (running preflight here would rewrite frontmatter and open
+    // a cycle, defeating the clean-document scenario under test).
+    init_git_repo(tmp.path(), &doc);
+
+    // Default mode: clean cycle is OK (exit 0) but surfaces the typed detail.
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["session-check", doc.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("queue_continuation_required=true"))
+        .stdout(predicate::str::contains("do [#seopdp] deploy product page"));
+
+    // Strict Codex final gate: continuation required → nonzero exit.
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "session-check",
+            doc.to_str().unwrap(),
+            "--codex-final-gate",
+        ])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("queue_continuation_required=true"));
+}
+
 #[test]
 fn codex_hook_cli_auto_closes_open_cycle_after_user_prompt_submit() {
     let (tmp, doc) = setup_template_doc();

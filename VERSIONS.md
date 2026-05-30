@@ -6,6 +6,25 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Binary-owned auto-queue continuation final gate (`#codex-auto-queue-stalled-final-gate`).**
+  Codex auto-queue continuation previously depended on the `codex-stop` hook finding
+  tracked in-memory session state, which the live failure (`monsterrodholders.md`
+  `#seocat`→`#seopdp`) showed is too fragile — a clean document still owed a
+  continuation but Codex sent a final answer. New shared `queue_continuation::detect`
+  is the single source of truth (`queue_active` + `agent:queue auto` + active
+  `resolve_activation` + a ready, unmodified head); `active_auto_queue_prompt` now
+  delegates to it. Every clean binary closeout (`finalize` / `write --commit` /
+  `repair` / already-committed no-op) reconciles a durable
+  `.agent-doc/queue-continuations/<doc-hash>.json` marker (written when owed, cleared
+  on drain / `auto` removal / `queue_active` false / head advance). `codex-stop` now
+  consults that marker when no tracked session state exists — re-confirmed against the
+  live document so a stale marker never forces a spurious block — and still blocks the
+  final answer, failing closed on a repeated non-advancing head. `agent-doc session-check`
+  surfaces `queue_continuation_required=…` / `next_queue_prompt=…`; the new strict
+  `agent-doc session-check <FILE> --codex-final-gate` exits nonzero when continuation is
+  required. New `queue_continuation` unit tests, two `codex_hook` marker-fallback tests,
+  and a `codex_hook_integration` strict-gate test. Live verification still gated on
+  `#codex-auto-queue-live-verify`.
 - **Recursive direct-invocation guard abandons its empty cycle (`#recguard-abandon`).**
   When a Codex-backed `agent-doc <FILE>` runs inside the same tmux pane that already
   owns the document, the recursive-invocation guard fails fast with the existing

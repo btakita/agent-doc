@@ -95,6 +95,7 @@ pub mod prompt;
 pub mod prompt_context;
 pub mod prompt_contract;
 pub mod queue;
+pub mod queue_continuation;
 pub mod repair;
 // Relocated to `agent-doc-core` (#adoc-pure-to-core — only uses core::template).
 pub use agent_doc_core::replay_guard;

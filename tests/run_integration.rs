@@ -607,8 +607,12 @@ fn codex_bare_run_inside_owning_pane_fails_before_nested_dispatch() {
             "recursive direct invocation would deadlock",
         ));
 
+    // #recguard-abandon: the recursive guard now marks the empty preflight cycle
+    // terminal (`abandoned`) instead of leaving it `preflight_started`, so the
+    // owner session is not wedged and `session-check` accepts the terminal state
+    // without a manual `agent-doc cancel`.
     let state = read_cycle_state(tmp.path());
-    assert_eq!(state["phase"].as_str().unwrap(), "preflight_started");
+    assert_eq!(state["phase"].as_str().unwrap(), "abandoned");
     assert!(
         state["last_event"]
             .as_str()

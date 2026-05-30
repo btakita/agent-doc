@@ -661,6 +661,9 @@ enum Commands {
     SessionCheck {
         /// Path to the session document
         file: PathBuf,
+        /// Strict Codex final gate: exit nonzero when a clean document still owes an active `agent:queue auto` continuation
+        #[arg(long)]
+        codex_final_gate: bool,
     },
     /// Serve a localhost HTTP markdown editor for one document or a project session list
     Serve {
@@ -1963,7 +1966,10 @@ fn main() -> anyhow::Result<()> {
                 jobs::collect(&file, cycle.as_deref(), json)
             }
         },
-        Commands::SessionCheck { file } => agent_doc_orchestration::session_check::run(&file),
+        Commands::SessionCheck {
+            file,
+            codex_final_gate,
+        } => agent_doc_orchestration::session_check::run_with_options(&file, codex_final_gate),
         Commands::Serve {
             file,
             host,

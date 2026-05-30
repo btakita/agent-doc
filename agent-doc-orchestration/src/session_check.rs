@@ -102,6 +102,18 @@ enum GuardResult {
 /// - `0` — log empty/missing, or last entry is a terminal event
 /// - `1` — last entry is `preflight_diff_start` (interrupted cycle)
 pub fn run(file: &Path) -> Result<()> {
+    run_with_options(file, false)
+}
+
+/// `session-check` with the optional Codex final-gate.
+///
+/// Default (`codex_final_gate = false`): keeps exit 0 for a clean document and
+/// prints `queue_continuation_required=...` as an informational typed detail.
+/// Strict (`codex_final_gate = true`): exits `2` when a clean document still
+/// owes an active `agent:queue auto` continuation, so Codex direct-exec closeout
+/// paths cannot send a final answer past a stalled queue.
+/// (#codex-auto-queue-stalled-final-gate)
+pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
     let report = inspect_with_warnings(file)?;
     for warning in &report.warnings {
         eprintln!("{}", warning);
@@ -109,6 +121,22 @@ pub fn run(file: &Path) -> Result<()> {
     match report.status {
         SessionCheckStatus::Ok(message) => {
             println!("{}", message);
+            if let Some(continuation) = crate::queue_continuation::detect(file)? {
+                println!(
+                    "queue_continuation_required=true next_queue_prompt={:?}",
+                    continuation.head_prompt
+                );
+                if codex_final_gate {
+                    eprintln!(
+                        "[session-check] codex-final-gate: active `agent:queue auto` continuation required for {} — continue with `agent-doc {}` before sending any final answer.",
+                        file.display(),
+                        file.display()
+                    );
+                    std::process::exit(2);
+                }
+            } else {
+                println!("queue_continuation_required=false");
+            }
             Ok(())
         }
         SessionCheckStatus::Interrupted(message) => {

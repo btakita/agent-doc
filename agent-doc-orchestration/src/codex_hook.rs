@@ -191,6 +191,14 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
         return Ok(StopResponse::Continue { continue_: true });
     }
     let Some((loaded_root, state)) = load_state_any(&roots, &input.session_id)? else {
+        // No tracked in-memory session state — but a cleanly-committed document
+        // can still owe an `agent:queue auto` continuation. Consult the durable
+        // marker before letting Codex send its final answer; this is the live
+        // failure mode the marker exists to close.
+        // (#codex-auto-queue-stalled-final-gate)
+        if let Some(response) = marker_fallback_continuation_response(&roots, input)? {
+            return Ok(response);
+        }
         return Ok(StopResponse::Continue { continue_: true });
     };
 
@@ -297,12 +305,59 @@ fn auto_queue_continuation_response(
     next_state.last_auto_queue_head = Some(prompt.clone());
     next_state.updated_at = now_secs();
     save_state_across_roots(cleanup_roots, loaded_root, &next_state)?;
+    // Keep the durable marker's requested-head in sync so a later stop with
+    // missing session state still applies the non-advancing-head guard.
+    let _ = crate::queue_continuation::record_requested_head(file, &prompt);
     Ok(Some(StopResponse::Block {
         decision: "block",
         reason: format!(
             "agent-doc Stop hook kept an active `agent:queue auto` moving for {}. The next queue prompt is {:?}. Continue this turn by running `agent-doc {}` and do not send the final answer yet.",
             file.display(),
             prompt,
+            file.display()
+        ),
+    }))
+}
+
+/// Codex Stop-hook fallback when no tracked in-memory session state exists: a
+/// durable continuation marker (written at the last clean closeout) may still
+/// prove the document owes an `agent:queue auto` continuation. The marker is
+/// re-confirmed against the live document inside
+/// [`crate::queue_continuation::pending_marker_continuation_for_roots`], so a
+/// stale marker never forces a spurious block. (#codex-auto-queue-stalled-final-gate)
+fn marker_fallback_continuation_response(
+    roots: &[PathBuf],
+    input: &StopInput,
+) -> Result<Option<StopResponse>> {
+    let Some((file, continuation, marker)) =
+        crate::queue_continuation::pending_marker_continuation_for_roots(roots)?
+    else {
+        return Ok(None);
+    };
+
+    // Non-advancing-head guard: a repeated stop whose marker already requested
+    // this exact head must fail closed instead of looping forever.
+    if input.stop_hook_active
+        && marker.last_requested_head.as_deref() == Some(continuation.head_prompt.as_str())
+    {
+        return Ok(Some(StopResponse::Stop {
+            continue_: false,
+            stop_reason: format!(
+                "agent-doc Stop hook requested auto-queue continuation for {} from the durable continuation marker, but the queue head did not advance: {:?}. Run `agent-doc {}` manually or remove `auto` from the queue before ending the turn.",
+                file.display(),
+                continuation.head_prompt,
+                file.display()
+            ),
+        }));
+    }
+
+    crate::queue_continuation::record_requested_head(&file, &continuation.head_prompt)?;
+    Ok(Some(StopResponse::Block {
+        decision: "block",
+        reason: format!(
+            "agent-doc Stop hook found a durable `agent:queue auto` continuation for {} with no tracked session state. The next queue prompt is {:?}. Continue this turn by running `agent-doc {}` and do not send the final answer yet.",
+            file.display(),
+            continuation.head_prompt,
             file.display()
         ),
     }))
@@ -704,55 +759,10 @@ fn load_state(root: &Path, session_id: &str) -> Result<Option<SessionState>> {
 }
 
 fn active_auto_queue_prompt(file: &Path) -> Result<Option<String>> {
-    let content =
-        std::fs::read_to_string(file).with_context(|| format!("read {}", file.display()))?;
-    let (fm, _) = crate::frontmatter::parse_for_file(&content, file)?;
-    if fm.queue_active != Some(true) {
-        return Ok(None);
-    }
-    let components = crate::component::parse(&content)?;
-    let Some(queue_component) = components
-        .iter()
-        .find(|component| component.name == "queue")
-    else {
-        return Ok(None);
-    };
-    if !crate::queue::has_auto_attr(&queue_component.attrs) {
-        return Ok(None);
-    }
-
-    let body = &content[queue_component.open_end..queue_component.close_start];
-    let entries =
-        crate::queue::parse(body).context("codex hook auto queue: failed to parse queue")?;
-    let activation = crate::queue::resolve_activation(&entries, true, false, true);
-    if !activation.active
-        || crate::queue::has_stop_fence_at_head(&activation.entries_after)
-        || crate::queue::time_gate_at_head(&activation.entries_after).is_some()
-    {
-        return Ok(None);
-    }
-
-    if let Some(snapshot_content) = crate::snapshot::load(file)?
-        && let Ok(snapshot_components) = crate::component::parse(&snapshot_content)
-        && let Some(snapshot_queue) = snapshot_components
-            .iter()
-            .find(|component| component.name == "queue")
-    {
-        let snapshot_body = &snapshot_content[snapshot_queue.open_end..snapshot_queue.close_start];
-        if let Ok(snapshot_entries) = crate::queue::parse(snapshot_body) {
-            let snapshot_has_auto = crate::queue::has_auto_attr(&snapshot_queue.attrs);
-            let snapshot_activation =
-                crate::queue::resolve_activation(&snapshot_entries, snapshot_has_auto, false, true);
-            if crate::queue::detect_head_prompt_modified(
-                &snapshot_activation.entries_after,
-                &activation.entries_after,
-            ) {
-                return Ok(None);
-            }
-        }
-    }
-
-    Ok(crate::queue::first_prompt(&activation.entries_after).map(|prompt| prompt.text.clone()))
+    // Single source of truth: the shared queue-continuation detector
+    // (#codex-auto-queue-stalled-final-gate). Keeps the Stop-hook continuation
+    // decision identical to the durable marker and `session-check` gate.
+    Ok(crate::queue_continuation::detect(file)?.map(|continuation| continuation.head_prompt))
 }
 
 fn open_cycle_started_from_unchanged_file(file: &Path) -> Result<bool> {
@@ -2043,6 +2053,74 @@ agent-doc {}\n",
         let root = project_root_for(dir.path()).unwrap();
         let state = load_state(&root, "codex-session").unwrap().unwrap();
         assert_eq!(state.last_auto_queue_head.as_deref(), Some("do #fix2"));
+    }
+
+    #[test]
+    fn stop_blocks_from_durable_marker_when_session_state_missing() {
+        // #codex-auto-queue-stalled-final-gate live regression (monsterrodholders
+        // shape): the completed head was consumed, `#seopdp` remains, queue_active
+        // is true with `agent:queue auto`, and the document is clean — but the
+        // Stop hook has NO tracked in-memory session state (the live failure). The
+        // durable continuation marker (written at the prior clean closeout) must
+        // still force continuation instead of letting Codex send a final answer.
+        let dir = setup_project();
+        let doc = write_auto_queue_doc(&dir, &["do [#seopdp] deploy product page"]);
+        init_git_repo(dir.path(), &doc);
+        // Prior clean closeout wrote the durable marker.
+        crate::queue_continuation::reconcile_marker(&doc, "commit")
+            .expect("continuation required");
+
+        // Untracked session id → load_state_any returns None.
+        let response = apply_stop(&StopInput {
+            session_id: "untracked-session".to_string(),
+            turn_id: "turn-x".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "Final answer.".to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        match response {
+            StopResponse::Block { reason, .. } => {
+                assert!(reason.contains("durable"), "{reason}");
+                assert!(reason.contains("do [#seopdp] deploy product page"), "{reason}");
+                assert!(reason.contains("do not send the final answer"), "{reason}");
+            }
+            other => panic!("expected durable-marker continuation block, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stop_marker_fallback_fails_closed_when_head_does_not_advance() {
+        // #codex-auto-queue-stalled-final-gate: a repeated stop (stop_hook_active)
+        // whose durable marker already requested this exact head must fail closed
+        // instead of looping forever.
+        let dir = setup_project();
+        let doc = write_auto_queue_doc(&dir, &["do [#seopdp] deploy"]);
+        init_git_repo(dir.path(), &doc);
+        crate::queue_continuation::reconcile_marker(&doc, "commit").unwrap();
+        // The first continuation request recorded this head into the marker.
+        crate::queue_continuation::record_requested_head(&doc, "do [#seopdp] deploy").unwrap();
+
+        let response = apply_stop(&StopInput {
+            session_id: "untracked-session".to_string(),
+            turn_id: "turn-x".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "Final answer.".to_string(),
+            stop_hook_active: true,
+        })
+        .unwrap();
+
+        match response {
+            StopResponse::Stop {
+                continue_,
+                stop_reason,
+            } => {
+                assert!(!continue_);
+                assert!(stop_reason.contains("did not advance"), "{stop_reason}");
+            }
+            other => panic!("expected fail-closed Stop, got {other:?}"),
+        }
     }
 
     #[test]

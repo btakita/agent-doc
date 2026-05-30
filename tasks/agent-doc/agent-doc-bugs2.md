@@ -30,97 +30,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260530-055632.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260530-144208.md`*
 
 Compacted content:
-- Archived 3 response topic(s): #codex-auto-queue-stalled-final-gate; JB Run Agent Doc route/resync log paste; do option b
+- Archived 4 response topic(s): do [#bare-write-captured-uncommitted]; do [#hj7s]; JB Restart Supervisor live-verify; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: do [#bare-write-captured-uncommitted] — opus-4-8
-
-Implemented per `tasks/agent-doc/plan-bare-write-captured-response-outside-commit.md`.
-
-**This cycle also live-verifies `#active-queue-persisted-no-continue` (now `--done`).** The only reason this turn is working on `do [#bare-write-captured-uncommitted]` is that the prior fix's persisted-active queue auto-advanced: preflight synthesized the next head with `queue_trigger: persisted` (no `auto` attr) and `session-check` reported `queue_continuation_required=true`. That is the binary-path continuation the gate was waiting on, observed live in this session. (Scope note: the binary/preflight/session-check continuation is proven live; the Claude Code `/loop` auto-invocation leg remains covered only by the rendered-skill test, since this turn was re-invoked manually.)
-
-**Root cause:** a bare `agent-doc write` (CommitMode::None) that placed/preserved a response body on a session document left the cycle at `response_captured`/`write_applied` and failed `session-check` with no deterministic continuation — forcing a manual `git commit`. `recover_missing_commit_boundary` only repairs responses **already in HEAD**, so a genuinely-uncommitted placed body had no recovery path.
-
-**Fix (submodule `8fd699b1`, pointer `e1b617179`):**
-- `write::run_command` — after the write, if a session-document bare write placed a response body, escalate `commit_mode` to `Required` **before** the commit-mode-gated phases (queue consumption, pending gates, commit). IPC `already_applied` proves placement, not closeout, so the next step is still commit. Not in a git repo → fail with a concrete recovery command instead of stranding.
-- `bare_write_placed_response_body` detector — two confirmations: (1) cycle open at `response_captured`/`write_applied` (covers both the captured path and the synthetic-cycle stream path with no durable capture), and (2) the working tree carries an assistant response heading HEAD lacks (`detect_bypassed_response_write_between`), so a pending/status-only bare write is never force-committed.
-- Reworded the no-response bare-write closeout message — that branch now only handles pre-existing open cycles.
-
-**Tests / verification:**
-- `bare_write_stream_on_session_doc_escalates_to_commit_when_response_placed` (was `*_fails_closed_*`) — bare write now succeeds, commits to HEAD, reaches `committed`, session-check clean.
-- The three `write_commit_empty_stdin_*` adoption tests reworked: they used a bare write as a setup shortcut to strand a response; that shortcut no longer strands, so they now stage the IPC-patchback precondition directly via `place_uncommitted_visible_response`. The adoption path they guard (`write --commit` empty-stdin adopts a visible uncommitted response) is unchanged and still verified.
-- FlowCore hot-path `reason=` budget for write.rs audited 25 → 26.
-- `make check` exit 0 and a direct `cargo test --workspace` both green (RTK masked an interim FlowCore-gate failure on the first run — caught via the authoritative log, fixed the budget, re-verified). Both binaries rebuilt + installed (02:22).
-
-### Re: do [#hj7s] — opus-4-8
-
-You queued `#hj7s` and `#prompt-preempts-auto-queue` and chose **one per cycle**, so this cycle does `#hj7s`; the queue advances to `#prompt-preempts-auto-queue` next. (Preflight correctly halted the auto-continuation with `queue_halted: item_modified` because you edited the head.)
-
-**Approach (from your note):** the editor owning the pane is a *legitimate* state — Claude Code's `ctrl+g` edit-in-nvim. So the fix **refuses with a diagnostic and lets the operator close the editor manually** — it does not force-quit it (unlike interrupt-clear's `:qa!`) or SIGINT around it, and `--force` does not bypass it. Plan: `tasks/agent-doc/plan-hj7s-restart-editor-foreground-guard.md`.
-
-**Rust core (the actual bug fix — submodule `6544cf53`, pointer `011c6f81a`):**
-- `prepare_restart_live_busy_pane` now builds `live_pane_evidence` once and, **before** the force/non-force branch, refuses via `anyhow::bail!` when `terminal_editor_command` matches the pane's `current_command` (logs `session_restart_editor_holds_pane_refused`). Because it runs before the force branch, both `Restart` and `Interrupt and Restart` refuse cleanly — no more `C-c`/restart-typing into the editor buffer.
-- `restart_editor_holds_pane_refusal_message`: parseable header `session_restart refused for <file> because pane <pane> is held by editor <cmd>` + `source=`/`current_command=`/`tail=` fields + close-editor guidance (`:wq`), mirroring the busy/starting refusal convention.
-
-**JetBrains surfacing (`TerminalUtil.kt`, plugin `0.2.139`):**
-- `EditorHoldsPaneRestartRefusal` + `parseEditorHoldsPaneRestartRefusal` + `notifyEditorHoldsPaneRestartBlocked` (no "Interrupt and restart" action — `--force` won't bypass).
-- `runRestartSupervisorCommand` `onFailure` now runs for the force path too (it was `null`, so Interrupt-and-Restart refusals were **silent**); the editor refusal is checked first. Signed zip built.
-
-**Verification:** Rust `restart_editor_holds_pane_refusal_names_editor_and_close_guidance` + Kotlin parse/message tests; `make check` green (exit 0, no FAILED; FlowCore gate ok — `session_actor_cmd.rs` is not a budgeted hot-path file); JB `gradle test buildPlugin signPlugin` green (160 tests). Both Rust binaries rebuilt + installed (10:10).
-
-**Gated, not done:** the Rust guard is fully unit-tested and live in the binaries, but the JB notification needs live IDE verification (install signed `0.2.139`, open `ctrl+g` nvim in a Claude Code pane, click Interrupt-and-Restart, confirm the refusal notification appears and no keys reach the editor). Gated on that.
-
-**Follow-up:** `route.rs` busy-interrupt (`route.rs` ~6427) sends a raw `C-c` into the pane foreground in the reroute path — same shape, but a hard refusal there would change reroute semantics, so it's tracked separately rather than forced into this cycle.
-❯ I was able to successfully run JB `Restart Supervisor Process` on a Claude & Codex session. Successful.
-
-### Re: JB Restart Supervisor live-verify — opus-4-8
-
-That's the live verification `#hj7s` was gated on — resolving it to **done**.
-
-Scope of what your test confirms: running `Restart Supervisor Process` successfully on live Claude **and** Codex sessions proves the new guard **doesn't regress the normal restart path** (the main risk of adding an evidence/foreground check before the interrupt — restart still reaches the supervisor and succeeds). The editor-refusal branch itself (nvim holding the pane → refusal + JB notification, no keys into the buffer) is covered by the Rust unit test and the Kotlin parse/message tests rather than this run, since a normal session has no editor foreground. If the `ctrl+g` edit-in-nvim refusal ever misbehaves in practice, just flag it and I'll reopen.
-
-Gate cleared on submodule `6544cf53` / pointer `011c6f81a`, plugin `0.2.139`.
-
-**Queue:** the gated `do [#hj7s]` head was auto-struck this preflight (`source=review_gated`) and the queue is now **inactive** (`inactive_queue_residue`). `do [#prompt-preempts-auto-queue]` is still listed but won't auto-run until the queue is reactivated — re-add `auto` (or trigger it) when you want me to pick it up next, per one-per-cycle.
-JB `Clear Session Context` failed on a Codex session. Using `Interrupt and Clear` opened nvim on the Codex session.
-```
-Error: session_clear refused for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md because pane %28 contains protected prompt input (reason=drafted prompt input, source=authoritative_actor, current_command=agent-doc, tail="gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/boost-client · Context 75% used"). Clear the prompt input manually, or run `agent-doc session interrupt-clear /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md` to intentionally interrupt the pane and clear context.
-```
-#spec-test-build-install-commit-push
-
-### Re: JB Interrupt and Clear opened nvim on a Codex session — opus-4-8
-
-Root cause found and fixed. Two distinct things were happening; only the second is a bug.
-
-**1. `Clear Session Context` refused — by design, not a false positive.** The refusal fires only when the live Codex composer holds non-placeholder text starting with `›`/`>`/`❯` (empty composers and dim idle placeholders like `› Ask Codex to do anything` return ready, not protected). The `tail=` in the error is the status/footer line (`gpt-5.5 xhigh · … · Context 75% used`), which is *not* what the detector keys on — it's just context for the operator. So `session_clear` correctly protected drafted prompt input and pointed you to `interrupt-clear`. I can't retroactively prove what was in that composer, so I didn't touch the detection; if you ever see this refusal on a *visibly empty* Codex composer, capture the pane and reopen — that would be a real false positive.
-
-**2. `Interrupt and Clear` opened nvim — the actual bug, now fixed.** The Codex operator interrupt sequence sent `C-g` first, unconditionally:
-
-```
-C-g  →  Escape  →  C-c
-```
-
-`C-g` is only safe in one place: a shell `reverse-i-search` / history-search, where it aborts the search (that's the case the route recovery path and its SimWorld test model). In the **normal Codex TUI composer**, `C-g` opens the external editor (`$EDITOR`, i.e. nvim) — exactly what you saw. The editor-recovery net (`Escape` + `:qa!`) then races to back out, which is why it presented as nvim flashing open rather than a clean interrupt.
-
-**Fix (submodule `3acb93f6`, pointer `911e3fbaf`):**
-- `send_operator_interrupt_sequence` now takes a `codex_shell_search` flag. `C-g` is emitted **only** when a live capture proves the pane is in a shell reverse-i-search / history-search state; every other Codex state (idle composer, active turn) gets `Escape` + `C-c`.
-- New `codex_pane_in_shell_search_state` captures the pane and checks `dispatch_blocker_reason` for those two shell states before deciding.
-- Both callers gated: `interrupt-clear` (your path) **and** `restart-supervisor --force`.
-- Ordered keys extracted into the pure `operator_interrupt_key_plan` so the decision is unit-tested directly.
-
-**Spec/tests/build:**
-- `specs/07-session-tmux-commands.md` + the AGENTS invariant now document the state-scoped Codex interrupt keys (`#codex-interrupt-clear-ctrl-g-opens-editor`).
-- 3 new unit tests: codex-composer omits `C-g`; codex-shell-search includes it; opencode/claude unchanged. `cargo test --workspace` green (4257-line artifact, 0 failures), `make check` exit 0 (verified past the RTK exit-mask via the digest runner).
-- Both binaries rebuilt + installed (`cargo build --release` + `cargo install --path .`). This is CLI-binary logic, not the cdylib, so no JB plugin reinstall / `lib-install` is needed — the installed `agent-doc` the plugin shells out to already has the fix.
-- CI: prior run on this branch green; my push's run is in flight at closeout.
-
-**Live-verify when convenient:** on a Codex session, click **Interrupt and Clear** and confirm it interrupts + clears without nvim opening.
-
-**Follow-up queued (`#codex-route-busy-ctrl-g-opens-editor`):** the route.rs busy-pane reroute interrupt (~`6409`) shares the same unconditional `C-g` and the same latent editor-open; gated separately because changing it touches reroute semantics.
-<!-- agent:boundary:0202fb35 -->
+<!-- agent:boundary:21bf7343 -->
 <!-- /agent:exchange --> 
 ###
 <!--

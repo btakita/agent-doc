@@ -57,7 +57,26 @@ But the active IDE's `idea.log` surfaced a concrete, novel defect:
 **GATED — needs your live verification** (I can't headlessly test a JB merge-path fix): install the signed `agent-doc-jetbrains-0.2.138-signed.zip`, **restart IDEA**, then exercise corky.md (and the other double-tracked docs) and confirm no recurring full-document duplication. Tracked as review item `#ipc-dup-tracking-double-merge`.
 
 **Honest scope:** this is *one* plausible root cause for the **duplication** variant, confirmed as a real defect and fixed — but not proven to be the cause of every IPC corruption report (the deletion variant and the typing-race shapes are separate tracked items). To pin anything still remaining, **enable `#com.github.btakita.agentdoc` debug logging** so the next occurrence captures the exact `setText` payload. I did **not** touch the CLI/FFI merge path this turn.
-<!-- agent:boundary:6e771b7d -->
+❯ JB `Restart Supervisor Process`
+```
+Error: session_restart refused for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md because pane %28 is alive-busy (source=authoritative_actor, current_command=agent-doc, tail="⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents"). Run `agent-doc session status /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md` and wait for an idle prompt, or pass `--force` to interrupt the running turn and restart anyway.
+```
+
+### Re: session_restart refused — pane %28 alive-busy — opus-4-8
+
+**This refusal was correct — pane %28 is genuinely busy, not stale-busy.** I captured the live pane: it shows `• Working (7m 47s • esc to interrupt)` running a `gpt-5.5` turn (*"Summarize recent commits"*) in `~/work/btakita/agent-loop/src/boost-client` (where monsterrodholders.md lives). A real turn is mid-flight, so `session_restart` correctly declined to restart the supervisor under it.
+
+So this is **not** `#jb-stale-busy-idle-footer` / the stale-busy misprojection — the busy-guard worked as designed. Note the decision came from `source=authoritative_actor` (the actor registry knew a turn was dispatched), which is the robust signal — it did **not** guess from the pane tail.
+
+**What to do:** the error message already tells you correctly —
+- **Wait** for the turn to finish (then `Restart Supervisor Process` will succeed), or
+- **`--force`** to interrupt the running turn and restart anyway (`agent-doc session restart <FILE> --force`, or the JB action's force path). Only do this if you're willing to kill the in-progress gpt-5.5 turn.
+- To check status: `agent-doc session status .../monsterrodholders.md`.
+
+**One real UX weakness (filed `[recommended]`):** the refusal message surfaces `tail="⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents"` — the Claude Code **permission-mode footer**, which is ambiguous (it shows in both idle and busy states). That's almost certainly why this *looked* wrong to you. The message should instead surface the actual busy-proof line (`Working (Xs · esc to interrupt)`, or the context-% spinner) so the busy state is self-evident. The classification was right; only the displayed evidence is misleading. Tracked as `#session-restart-refusal-shows-busy-proof`.
+
+(Housekeeping: this cycle also commits the review item `#ipc-dup-tracking-double-merge` that the `#pending-gate-snapshot-desync` defect stranded last turn.)
+<!-- agent:boundary:1ab81927 -->
 <!-- /agent:exchange --> 
 ###
 <!--
@@ -80,11 +99,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
-- ~do [#jb-load-tmux-window-verify]~
-- ~do [#queue-head-consume-on-topic-id-regression]~
-- ~do [#route-busy-vs-starting-wording]~
-- ~do [#codex-queue-head-exact-heading-guidance]~
-- ~do [#backlog-auto-marker-misfire]~
 - do [#pending-gate-snapshot-desync]
 - do [#pending-add-append-not-prepend]
 - do [#next-steps-backlog-capture]
@@ -95,6 +109,7 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#session-restart-refusal-shows-busy-proof] [recommended] session_restart (and similar busy-guard) refusal messages report tail="⏵⏵ bypass permissions on (shift+tab to cycle)…" — the ambiguous Claude Code permission-mode footer — instead of the actual busy-proof line (e.g. "Working (Xs · esc to interrupt)"). Users read the permission footer as idle and think the refusal is wrong. Reported 2026-05-29 monsterrodholders.md pane %28, which was genuinely busy (live: gpt-5.5 "Summarize recent commits", Working 7m47s · esc to interrupt). Surface the busy-proof line in the refusal tail so the busy classification is self-evident. UX only — the busy decision (source=authoritative_actor) was correct.
 - [ ] [#ah0s] [recommended] Add explicit-position --pending-add primitives so ordered backlog batches never depend on implicit prepend-vs-argorder semantics: --pending-add-after <id>, --pending-add-before <id>, --pending-add-back/--pending-append, keeping --pending-add as the front-insert default. Backlog is a priority pool with ID-based consumption (not a stack/queue; FIFO lives in agent:queue), so position should be author-set explicitly when it matters. Two agents (open-code.md #adcr waves f94e7851c; corky.md crate-split phases fc8d9b3bc) both reversed args expecting prepend-flip and got reverse-of-intended order. Pairs with #pending-add-append-not-prepend (that item finalizes the default-order decision; this adds the explicit escape hatches). Plan: tasks/agent-doc/plan-pending-add-explicit-position.md.
 - [ ] [#pending-add-suppresses-queue-consume] [recommended] Bundling --pending-add in the same finalize as a queue-head-targeting response suppresses queue-head consumption: finalize logs 'skipped consumption because the active prompt did not target the queue head' and treats the pending-add as the active prompt, even when the response heading exactly matches the head (Re: do #ID form, no brackets). Repro 2026-05-29 agent-doc-bugs2.md declining backlog-auto-marker-misfire with a bundled --pending-add — head stayed unstruck. Fix: heading/queue-head match should drive consumption independently of bundled pending mutations, or consume the head when the response heading matches regardless of detected active prompt.
 - [ ] [#stuck-capture-compact-false-positive] [recommended] stuck_captured_cycle false-positive after compaction: a capture recorded as committed (cycle-1780100032048, response 'gate→done for codex guidance') is later archived by compact, so preflight reports committed-but-not-in-HEAD and suggests `write --commit` recovery — which would re-inject an already-archived response (it lives in .agent-doc/archives/<hash>-*.md). Fix: when a captured-committed body is absent from HEAD because it was compacted (present in the matching archive), reconcile the capture instead of flagging it stuck. Repro 2026-05-29 agent-doc-bugs2.md.
@@ -110,6 +125,7 @@ preset #spec-test-build-install-commit-push
 ## Review
  
 <!-- agent:review -->
+- [/] [#ipc-dup-tracking-double-merge] PromptPoller double-tracking fix (plugin 0.2.138, submodule 32fb0b98 / superproject d585a33de): addFile keyed trackedFiles by project-relative path while handlePollResults keyed by "$cwd:$file", double-tracking the same VirtualFile (live: corky.md, brandon-cinquegrana.md, agent-doc-bugs2.md; trackedFiles=13 vs ffiTracked=9). Two divergent baselines -> mergeOrReload ran twice per change = full-document duplication path. Fixed by keying both via trackingKey(VirtualFile.path); convergence test + AGENTS.md invariant. GATED on live verify: install signed 0.2.138, restart, confirm no recurring duplication (corky.md). Exact setText payload uncaptured (JB debug logging was OFF). Relates to #ipcfullprompt-recur2, #adoc-queue-ipc-buffer-divergence, #prompt-duplicated-while-typing.
 - [/] [#jb-load-tmux-window-verify] [recommended] Live-verify the new JB Load Tmux Window action (plugin 0.2.136): install the signed zip, confirm it autostarts/loads the tmux pane for a focused doc whose pane is not up (e.g. corky.md). If the autostart sync genuinely fails to spawn the pane in that case (vs. by-design passive open), capture the route/sync logs as a separate autostart bug.
 - [/] [#jb-stale-busy-idle-footer] Three JB Run Agent Doc / Clear Session Context reports queue-instead-of-dispatch or block Clear while the live pane footer shows a Claude Code idle composer: monsterrodholders.md (actor gen 233, pane %19), equityfundingsource.md (gen 35, pane %3), tsift.md (pane %21, footer 22.4K (11%) ctrl+p commands). The tsift.md case is the strongest stale-busy candidate — Clear was blocked though the footer indicates idle. Fix: route.rs / session_actor_cmd.rs busy projection should treat the Claude Code idle-composer footer (ctrl+p commands / context % used) as idle direct evidence to repair a stale busy actor/lease projection before queuing or blocking, mirroring the existing OpenCode context % used idle-composer rule. Relates to #run-agent-doc-stale-busy-replay and #snrun (plan tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md).
 - [/] [#adoc-queue-ipc-buffer-divergence] Root cause #2 IMPLEMENTED (submodule c483080a; pointer 4703f9788): live editor-buffer convergence after queue halt/drain. New core fn component::converge_queue_auto + agent_doc_converge_queue_auto FFI (C-int ABI for stable JNA); ipc_socket::send_queue_convergence carries queue_auto opening-tag state + queue_active frontmatter; preflight run_queue_maintenance pushes convergence through an active IPC listener after each halt/drain disk write (best-effort, non-fatal). JB plugin 0.2.137 parses queue_auto and applies via NativePatching.convergeQueueAuto in Document-API + VFS paths. Deterministic SimWorld repro queue_maintenance_converges_live_ipc_buffer_on_item_modified_halt + Kotlin ParsePatchJsonQueueAutoTest; make check green; both binaries built+installed (symbol verified in release cdylib); spec 07-orchestration-commands updated. GATED on live verification: install signed plugin 0.2.137, restart the route-owned agent-doc process to load the new binary, then confirm a real IDE-owned session no longer re-diverges (no recurring agent:queue diff / stuck_captured_cycle / inactive_queue_residue) after a consume->halt cycle without a raw git checkout. Plan: tasks/agent-doc/plan-queue-ipc-drift.md.

@@ -35,7 +35,29 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 5 response topic(s): do [#backlog-auto-marker-misfire]; Why is #backlog-auto-marker-misfire marked "DO NOT IMPLEMENT"?; Validate the fix for #backlog-auto-marker-misfire; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:ffe3a11b -->
+❯ The IPC corruption bug happed on /home/brian/work/btakita/agent-loop/tasks/software/corky.md
+❯ #spec-test-build-install-commit-push
+
+### Re: IPC corruption on corky.md — opus-4-8
+
+Investigated with real evidence (no guessing). corky.md's git history shows **no** committed full-document dup/deletion spike, and the corky session log has no corruption signature — consistent with the corruption living in the **live editor buffer**, not git. The documented blocker still holds: **JB debug logging (`#com.github.btakita.agentdoc`) was OFF**, so the exact corrupting `setText` payload was not captured this time.
+
+But the active IDE's `idea.log` surfaced a concrete, novel defect:
+
+**Root cause (duplication shape): PromptPoller double-tracked the same file.**
+- `addFile()` keyed `trackedFiles` by the project-relative path (`tasks/software/corky.md`).
+- `handlePollResults()` keyed the same VirtualFile by `"$cwd:$file"` (`/home/.../agent-loop:tasks/software/corky.md`), and its dedup check only tested that qualified key.
+- Result (seen live): `corky.md`, `brandon-cinquegrana.md`, and `agent-doc-bugs2.md` were each tracked **twice** (`trackedFiles=13` vs `ffiTracked=9`).
+- Each key holds an **independent `TrackedFile` baseline**. `refreshTrackedFiles()` / `autoSaveTrackedFiles()` iterate *every* entry and call `mergeOrReload()` per entry — so one disk change triggers **two merges with divergent baselines**, re-merging already-merged content → **full-document duplication**.
+
+**Fix (plugin 0.2.138):** both registration paths now key by canonical `trackingKey(VirtualFile.path)`, so a file is tracked exactly once. Added a convergence regression test (`PromptPollerTest`) and an AGENTS.md invariant. Full plugin gradle suite green; both signed/unsigned 0.2.138 zips built.
+
+**Commits:** submodule `32fb0b98`, superproject pointer `d585a33de` (pushed to `main`/working branch).
+
+**GATED — needs your live verification** (I can't headlessly test a JB merge-path fix): install the signed `agent-doc-jetbrains-0.2.138-signed.zip`, **restart IDEA**, then exercise corky.md (and the other double-tracked docs) and confirm no recurring full-document duplication. Tracked as review item `#ipc-dup-tracking-double-merge`.
+
+**Honest scope:** this is *one* plausible root cause for the **duplication** variant, confirmed as a real defect and fixed — but not proven to be the cause of every IPC corruption report (the deletion variant and the typing-race shapes are separate tracked items). To pin anything still remaining, **enable `#com.github.btakita.agentdoc` debug logging** so the next occurrence captures the exact `setText` payload. I did **not** touch the CLI/FFI merge path this turn.
+<!-- agent:boundary:6e771b7d -->
 <!-- /agent:exchange --> 
 ###
 <!--

@@ -115,7 +115,11 @@ Verification:
 - `tsift --version` -> `tsift 0.1.62`
 
 No `tmux-ci` target or tmux workflow exists in `src/tsift`, so there was no tmux leg to run.
-<!-- agent:boundary:ea69f930 -->
+
+### Re: closeout repair — gpt-5
+
+Closed the leftover agent-doc queue-drain and boundary-normalization diff from the `#token-action-coverage` write-back. No additional repo work was needed.
+<!-- agent:boundary:792ed211 -->
 <!-- /agent:exchange -->
 ###
 <!--

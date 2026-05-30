@@ -30,66 +30,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260529-225736.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260530-013546.md`*
 
 Compacted content:
-- Archived 6 response topic(s): do [#jb-stale-busy-idle-footer]; [#ipcfullprompt-recur2] reproduced at brandon; Was this a plugin issue?; 3 more
+- Archived 6 response topic(s): queue auto enabled; do [#jb-load-tmux-window-verify]; do [#queue-head-consume-on-topic-id-regression]; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: queue auto enabled — opus-4-8
-
-Auto-loop activated (`agent:queue auto`). Queue head is now `#jb-load-tmux-window-verify`, followed by `#queue-head-consume-on-topic-id-regression` and 7 more.
-
-Starting the loop. Note `#jb-load-tmux-window-verify` is a live IntelliJ task (install the signed plugin zip, confirm the Load Tmux Window action autostarts a focused doc's pane) — that can't be driven from a headless session, so when the loop reaches it I'll gate it for live verification rather than falsely mark it done, then continue to the actionable code items behind it.
-
-### Re: do [#jb-load-tmux-window-verify] — opus-4-8
-
-Gated, not done — this is a live-GUI verification task and I can't drive a running IntelliJ from a headless session.
-
-What I verified statically (grounds the gate):
-- `LoadTmuxWindowAction.kt` exists, is enable-gated to `.md` docs, registered as `AgentDoc.LoadTmuxWindow` in the popup, and on invoke runs the proven autostart path `SyncLayoutAction.syncLayout(notify=true, noAutostart=false)` → `route::auto_start`. By design, plain doc-open fires only the passive `sync --no-autostart` (no pane growth behind the user), so this action is the intended explicit on-demand loader for a focused doc whose pane is not up.
-- Unit coverage present and sound by inspection: `LoadTmuxWindowActionTest` asserts the md-only enable gate and popup registration. Signed zips built through `agent-doc-jetbrains-0.2.137-signed.zip`.
-
-What still needs you (the live part): install `agent-doc-jetbrains-0.2.137-signed.zip`, open a `.md` doc whose tmux pane is NOT up (e.g. corky.md), invoke Load Tmux Window, and confirm it spawns/attaches the pane and starts the harness. If it fails to spawn in that case, capture route/sync logs and file a separate autostart bug.
-
-Keeping `#jb-load-tmux-window-verify` open + gated awaiting that live confirmation.
-
-### Re: do [#queue-head-consume-on-topic-id-regression] — opus-4-8
-
-Fixed and committed. Root cause: `#queue-strike-on-halt` (submodule `baa44a37`) over-narrowed queue-head consumption — it removed the heading-based consumption path from the finalize/`write` flow **and** collapsed `response_topic_matches_queue_head` to exact full-text only. That broke consumption whenever a response heading targets the head's id exactly.
-
-**Fix (submodule `7541af22`):**
-- **finalize/`write` path** — new `response_targets_synthetic_queue_head_id`: a *synthetic/preset* head (a prompt carrying a trailing `#preset` id, not a bare `do [#id]` directive) is consumed when the response heading resolves to **exactly** the head id (e.g. `### Re: #spec-test-build-install-commit-push`). Bare `do [#id]` heads still require an explicit `--done`/`--pending-gate`/`--pending-edit` flag, so strike-on-halt is preserved.
-- **Codex Stop-hook path** — `response_topic_matches_queue_head` now also matches a topic that resolves to exactly the head id (`### Re: #fix1` for head `do #fix1`), not only exact full text. Trailing modifiers (`#id halt`/`#id deferred`) still never match.
-
-**Verification:** both previously-RED tests now pass — `finalize_consumes_synthetic_queue_prompt_when_response_topic_targets_head_id` and `codex_hook::stop_auto_closes_open_cycle_then_blocks_for_next_auto_queue_head` (the latter was the same regression in the Codex path, also red at clean HEAD). Added unit coverage for the bare-do-directive detector and exact-id resolver. `make check` green (clippy + full suite). Both binaries rebuilt+installed. SPEC.md + specs/07-orchestration-commands.md aligned. Submodule pushed; superproject pointer bumped (`33672c0b6`). CI run `26667229199` triggered (prior two were RED on this regression) — watching for green.
-
-### Re: do [#route-busy-vs-starting-wording] — opus-4-8
-
-Fixed and committed (submodule `6b5a6b4d`). The authoritative-actor `FailClosed` reroute error always read `(waited Ns for <harness> startup)`, which mis-reads a pane that is **busy on an active turn** (e.g. a live Claude turn showing the working spinner / interrupt hint) as a stuck cold start.
-
-**Fix:** the `FailClosed` branch in `route_via_authoritative_actor` now probes the live pane (best-effort `capture_pane`) for a harness busy cue via `HarnessConfig::dispatch_blocker_reason` — the same detector that already distinguishes an active Claude/Codex/OpenCode turn from idle. When a cue is present it words the wait context as `the pane is busy on an active <harness> turn (<cue>), not cold-starting`; otherwise it keeps the `waited Ns for <harness> startup` phrasing. **Behavior is unchanged** — the route still fails closed; only the diagnostic wording differs (UX-only, as scoped).
-
-Extracted `failclosed_wait_context` as a pure helper with unit coverage for both branches. `make check` green, both binaries rebuilt+installed, submodule pushed, superproject pointer bumped (`a992ae098`). No spec change — the fail-closed contract is unchanged and the wording isn't specced at that granularity.
-
-(Persistence note: the first finalize hit a transient unresponsive IPC listener + a ~25-min-stale live-buffer record; recovered by resetting the partial state, clearing the stale record, and re-finalizing via `--force-disk`.)
-
-### Re: do [#codex-queue-head-exact-heading-guidance] — opus-4-8
-
-Guidance shipped (submodule `65ea6ee4`); **gated**, not done, because the item also asks to live-verify a Codex auto-queue advances across items — that needs a live Codex session I can't drive headless.
-
-**What shipped:** a new `runbooks/harness-invocation.md` Codex bullet — **Auto-queue heading discipline**. When a Codex auto-loop turn completes the active `agent:queue auto` head, the Stop-hook auto-consume fires only on an explicit completion signal: either pass `--done`/`--pending-gate`/`--pending-edit` naming the head id, or title the response heading **exactly** with the queue head (`### Re: do [#id]` for a do-directive head, or `### Re: #id` for a preset/synthetic head — the exact-id consumption I restored in `#queue-head-consume-on-topic-id-regression`). A descriptive `### Re: <topic>` heading does **not** auto-consume, so the queue stalls and the hook fails closed on the next non-advancing repeat; trailing modifiers (`#id halt`/`#id deferred`) never consume (`#queue-strike-on-halt`).
-
-`make check` green, binary rebuilt+installed, installed Claude runbook synced, submodule pushed, superproject pointer bumped (`a03d8a768`).
-
-**Still gated on:** a live Codex auto-queue run confirming a descriptive-heading completion now advances when the agent follows the new guidance (or pass `--done`). Headless can't exercise the Codex Stop hook end-to-end.
-
-### Re: gate→done for codex guidance — opus-4-8
-
-Closing the codex heading-guidance item as **done** rather than gated. The guidance (its primary deliverable) shipped in the prior response; I tried to gate it pending live-verify, but a binary desync kept the gate out of the committed snapshot: the dead IPC listener forced a CRDT-merge / `--force-disk` path that snapshots `baseline+response` (item still open) *before* applying the gate, so the commit saw `snapshot==HEAD` and left the gate as uncommitted working-tree drift.
-
-Rather than keep fighting it, I'm marking the guidance done and splitting the two remainders into fresh backlog items: the live Codex auto-queue verification, and the gate-vs-snapshot commit defect itself (a genuine agent-doc bug worth fixing).
-<!-- agent:boundary:3bdca7ba -->
+<!-- agent:boundary:3bf1ad5e -->
 <!-- /agent:exchange --> 
 ###
 <!--

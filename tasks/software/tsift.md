@@ -173,7 +173,41 @@ Verification passed:
 CI annotations were non-blocking: GitHub's Node.js 20 action deprecation notice and the existing live Convex graph no-op annotation for missing `TSIFT_LIVE_CONVEX_GRAPH_URL`. I did not find a separate tmux-test workflow for this repo, so the CI evidence is the `main CI` run above. No escalation was required.
 
 Confidence: high.
-<!-- agent:boundary:53e2e374 -->
+
+### Re: do [#tsift-claude-mem-adapter] — gpt-5
+
+Completed `#tsift-claude-mem-adapter`.
+
+Implemented a read-only `claude-mem` graph-db adapter in `src/tsift` so graph refresh can project existing `claude-mem` SQLite memory without importing or owning capture. The adapter reads project-local `.claude-mem/claude-mem.db` first, otherwise the default `~/.claude-mem/claude-mem.db`, filters global rows to the current project root, and materializes matching observations, session summaries, user prompts, and Chroma handles as stable graph rows.
+
+Changed and pushed:
+
+- `src/tsift` commit `4a226520acdeb12e1fe6ea6c87209a5d988c736e` (`feat: project claude-mem into graph-db`)
+- root submodule pointer commit `ce1c0e0ecde6f41918671ca4812deb88dcf15823` (`chore: update tsift submodule`)
+
+Key touched surfaces:
+
+- `packages/tsift-memory/src/lib.rs`: added `ClaudeMemReadReport` and `read_claude_mem_events`, then reused that reader for import planning/apply so read-only projection and migration share one SQLite read path.
+- `packages/tsift-cli/src/lib.rs`: graph-db projection now appends `claude-mem` `session`, `source_handle`, `semantic_concept`, and `semantic_vector_handle` rows with stable ids, local hash embeddings, provenance/freshness, Chroma vector refs, and session/source/semantic edges.
+- `packages/tsift-cli/src/lib.rs`: added a fixture-backed regression proving graph-db refresh projects read-only `claude-mem` rows and `tsift semantic` can retrieve them.
+- `README.md`, `SPEC.md`, and `packages/tsift-memory/README.md`: documented the read-only adapter boundary.
+
+Verification passed:
+
+- `cargo fmt`
+- `tsift rewrite --run 'cargo test -p tsift-cli traversal_projection_materializes_read_only_claude_mem_rows'` (`tart-00d3f4e263`)
+- `tsift rewrite --run 'cargo test -p tsift-memory -p tsift-cli'` (`tart-3cf6716314`)
+- `tsift rewrite --run 'cargo clippy --workspace --all-targets -- -D warnings'` (`tart-799ab74940`)
+- `tsift --envelope __digest-runner --kind log --path . --shell-command 'make check'` (`tart-b728df6109`)
+- `tsift rewrite --run 'cargo install --path . --force'` (`tart-70a51bf1d6`)
+- installed `tsift memory status . --json` smoke for the expanded memory graph node kinds
+- `git diff --check`
+- GitHub Actions `main CI` run `26693216013` passed `clippy + test` and `live Convex graph acceptance`
+
+Notes: the `make check` digest still reports the known non-fatal temp-index open signal while the command exits 0. CI annotations were non-blocking: GitHub's Node.js 20 action deprecation notice and the existing live Convex graph no-op annotation for missing `TSIFT_LIVE_CONVEX_GRAPH_URL`. This repo has `CI` and `Release` workflows only; there is no separate tmux-test workflow to inspect. No escalation was required.
+
+Confidence: high.
+<!-- agent:boundary:d85a6d49 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -186,7 +220,7 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 preset #spec-test-build-install-commit-push
 - ~do [#tsift-memory-crate-plugin]~
 - ~do [#tsift-memory-budget-guard]~
-- do [#tsift-claude-mem-adapter]
+- ~do [#tsift-claude-mem-adapter]~
 - do [#tsift-neighborhood-token-budget]
 - do [#tsift-memory-eval-harness]
 - do [#tsift-summary-extract-gate]
@@ -195,7 +229,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#tsift-claude-mem-adapter] Add a read-only claude-mem adapter for tsift graph-db: project claude-mem SQLite observations, session summaries, user prompts, and Chroma/vector handles as semantic/session/source nodes with stable ids so tsift can query existing memory without owning capture yet.
 - [ ] [#tsift-neighborhood-token-budget] Add token/usefulness budgets to graph-db related/neighborhood/evidence output: rank nodes and edges by semantic match, edge kind, depth, recency, and source-handle coverage; enforce per-kind quotas plus estimated-token caps; report dropped_by_budget diagnostics.
 - [ ] [#tsift-memory-eval-harness] Create a memory retrieval eval fixture from the Claude Code Insights report plus sampled claude-mem failures, comparing claude-mem API, tsift session-review/context-pack, and graph-db related on useful hits, output tokens, latency, and zero-output failure rate.
 - [ ] [#tsift-summary-extract-gate] Promote missing summary cache from reminder to graph effectiveness gate: context-pack/graph-db related should provide the exact summarize --extract and graph refresh commands required before semantic neighborhoods are trusted.

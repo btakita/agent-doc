@@ -30,33 +30,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260530-191353.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260530-194633.md`*
 
 Compacted content:
-- Archived 7 response topic(s): Is tsift properly integrated into multi-crate architecture?; free-text queue head; free-text queue head; 4 more
+- Archived 1 response topic(s): do #do-id-closeout-open-backlog
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: do #do-id-closeout-open-backlog — opus-4-8
-
-Implemented the `expect_done_or_gate` invariant so a `do [#id]` directive can no longer clear the queue while leaving its target `[ ]` in `agent:backlog`.
-
-#### What changed
-
-- **`cycle_state.rs`** — new `expect_done_or_gate_ids` field on `CycleState` plus `record_expect_done_or_gate_ids()`, persisted across all three struct constructors.
-- **`preflight.rs`** — for each `do [#id]` / `do #id` prompt target that is open in the live `agent:backlog` at preflight, record an `expect_done_or_gate` obligation for that id.
-- **`session_check.rs`** — new `check_expect_done_or_gate_guard` wired into the guard chain next to `pending_done_guard`. It fires only after a committed response cycle: if an obligated id is still open in `agent:backlog` and was not recorded done / gated / kept-open this cycle, it fails closed (Strict) or warns (Warn), with a `--done <id>` / `--pending-gate <id>` repair hint. Respects `pending_done_guard: off` and the `` opt-out. Added `do_directive_target_ids()` (mirrors `tsift_graph::extract_do_targets`) and `open_backlog_ids()` helpers.
-
-Lifecycle coverage: `--done` reaps the id, `--pending-gate` moves it to review, and `--pending-edit "id=… (stays open: …)"` records a kept-open reason — all three remove the id from the open-backlog set or the obligation, so only a silently-dropped target fails closed. Detection keys off backlog membership (not response wording), so it catches the queue-cleared / status-updated closeouts the heading-based `pending_done_guard` misses.
-
-#### Verification
-
-- 7 new unit tests (parse + 6 guard scenarios: open-target fail, wired-into-inspect, done-passes, gated-passes, unrelated-open no-false-positive, off-mode skip). `make check` green (clippy + full suite, 1939 orchestration tests).
-- The real-binary `live_ipc_race_integration` cycle-1779845677327 case (a genuine `do [#liveipcrace]` closeout that doesn't resolve the item) now correctly trips the guard; it opts out via `pending_done_guard: off` since it deliberately tests IPC drift, not backlog lifecycle.
-- Updated the FlowCore token budget (session_check `guard_` 22→30, audited) and the `pending-ops.md` / `commit.md` runbooks; regenerated Claude/Codex/OpenCode/Cursor skill surfaces (`audit-docs` managed-surface error cleared).
-- Built `--release` + `cargo install`; both binaries carry the fix.
-
-Note: this cycle's preflight ran on the prior binary, so the new obligation isn't enforced on this turn — but it now guards every subsequent `do [#id]` queue cycle.
-<!-- agent:boundary:98f4d12b -->
+<!-- agent:boundary:9de0cfc6 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->

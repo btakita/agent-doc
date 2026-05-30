@@ -35,7 +35,37 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 8 response topic(s): next steps to save tokens; do #token-budget-guardrail; token rewrite Codex path; 5 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:586a5d11 -->
+
+### Re: agent-doc domain boundary — gpt-5
+
+Completed `#agent-doc-domain-boundary`.
+
+Changed paths:
+- `src/tsift/packages/tsift-agent-doc/` added as the new domain crate for `session_cost`, `session_digest`, and `session_review`.
+- `src/tsift/packages/tsift-session/` reduced to a compatibility shim that re-exports the new crate and forwards `test-support`.
+- `src/tsift/Cargo.toml`, `src/tsift/Cargo.lock`, `src/tsift/src/lib.rs`, and `src/tsift/packages/tsift-cli/Cargo.toml` updated so root `tsift` depends on/re-exports `tsift-agent-doc` directly and `tsift-cli` no longer carries the redundant `tsift-session` dependency.
+- `src/tsift/SPEC.md` and `src/tsift/VERSIONS.md` updated for the new boundary.
+- Superproject `src/tsift` submodule pointer updated to the pushed tsift commit.
+
+Commits:
+- `src/tsift`: `1f04724` (`tsift(#agent-doc-domain-boundary): extract agent-doc session crate`) pushed to `btakita/tsift:main`.
+- Superproject pointer: `13fed0648` (`tsift: update submodule for agent-doc domain crate`) prepared locally; it will be pushed after this document finalize step.
+
+Verification:
+- `cargo fmt --package tsift-agent-doc --package tsift-session --package tsift --check`
+- `cargo check --workspace`
+- `cargo test --package tsift-agent-doc --package tsift-session --package tsift-sim-world`
+- `cargo clippy --package tsift-agent-doc --package tsift-session --package tsift --all-targets -- -D warnings`
+- `make check` after the final manifest cleanup: workspace clippy, workspace tests, OpenCode plugin tests, and npm publish dry-run all passed.
+- `cargo build --workspace`
+- `cargo install --path packages/tsift-cli --force`
+- `tsift --version` => `tsift 0.1.62`
+- Latest `btakita/tsift` GitHub Actions `CI` run before this push was green (`26651628506`, 2026-05-29). The tsift workflow has no `tmux`/`tmux-ci` job or Makefile target, so there was no separate tmux leg to inspect.
+
+Escalation: none.
+
+Confidence: high. The move is a crate-boundary split with unchanged module bodies except rustfmt import ordering in `session_review`; existing digest/cost/review and SimWorld coverage moved with the crate and passed.
+<!-- agent:boundary:ede1ccfb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +76,7 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#agent-doc-domain-boundary]
+- ~do [#agent-doc-domain-boundary]~
 - do [#graph-neighborhood-budget]
 - do [#token-action-coverage]
 <!-- /agent:queue -->
@@ -54,7 +84,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#agent-doc-domain-boundary] Extract a tsift-agent-doc domain crate for session-review, session-digest, session-cost, agent-doc log parsing, guardrails, and fixtures after the CLI command/domain boundary is small enough to keep rendering in tsift-cli.
 - [ ] [#graph-neighborhood-budget] Improve graph and neighborhood queries with bounded scoring/caps so context packs return high-signal callers, callees, and nearby symbols without broad graph expansion.
 - [ ] [#token-action-coverage] Add fixture-backed coverage for prompt_budget, cache_resend, and restart_loop next_token_actions so bounded session reviews avoid duplicate failure/action rows beyond the noop_closeout case.
 <!-- /agent:backlog -->

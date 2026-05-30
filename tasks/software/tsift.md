@@ -30,52 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260530-205847.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260530-212202.md`*
 
 Compacted content:
-- Archived 8 response topic(s): token savings, graph neighborhoods, and claude-mem; first-party memory crate/plugin; tsift-memory crate/plugin; 5 more
+- Archived 3 response topic(s): claude-mem and tsift-memory; tsift-memory initialization; tsift-memory status repair
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ Can we replace claude-mem with tsift-memory? Can we migrate all claude-mem data into tsift-memory?
-
-### Re: claude-mem and tsift-memory — gpt-5
-
-Yes, but there are two meanings of "replace".
-
-For retrieval/reuse, tsift can already stand in front of `claude-mem`. The current spec and code project `claude-mem` rows into graph-db as read-only semantic/session/source/vector-handle rows, and `tsift memory status` sees the existing `~/.claude-mem/claude-mem.db` plus adjacent Chroma directory. That means existing memory can seed tsift graph/semantic queries without mutating `claude-mem`.
-
-For replacement as the owner of live memory capture, not completely yet. `tsift-memory` owns `.tsift/memory.db`, schema versioning, budget guards, hook contracts, import commands, and deduped event storage. I only found writes through `tsift memory init` and `tsift memory import-claude-mem`; I did not find automatic agent-doc/Claude closeout hooks writing live prompt/tool/summary/session-check events into `tsift-memory` yet. That wiring is the main remaining replacement step.
-
-Migration is available for the supported `claude-mem` memory tables. Dry-run evidence against this workspace:
-
-- `tsift memory status /home/brian/work/btakita/agent-loop --json`: target `.tsift/memory.db` is not initialized; `claude-mem` DB is readable; Chroma is present.
-- `tsift memory import-claude-mem /home/brian/work/btakita/agent-loop --limit 40000 --json`: plans 50,447 imported events from `observations`, `session_summaries`, and `user_prompts`.
-- The default import is capped at 1,000 rows per table, so a full supported import needs an explicit high `--limit`.
-
-Caveat: "all `claude-mem` data" is not true yet if it means every byte/table. `pending_messages` is inspected and currently has 6,541 rows, but the importer does not convert it. Chroma vectors are preserved as external handles/read-only graph rows; they are not copied into `.tsift/memory.db`.
-
-Practical answer: use `tsift-memory` as the new first-party memory substrate, migrate the supported `claude-mem` rows now, and keep the old `claude-mem` DB as a read-only compatibility source until pending-message import and live capture hooks are added. I did not apply the import.
-
-Proof: changed paths: none by hand; document response/backlog only through `agent-doc finalize`. Verification commands: `tsift memory status ... --json`, `tsift memory import-claude-mem ... --json`, and full dry-run with `--limit 40000`. Escalation: none. Confidence: high for current supported migration behavior, medium for full replacement until the live hook and pending-message gaps are closed.
-
-❯ `tsift memory status /home/brian/work/btakita/agent-loop --json`: target `.tsift/memory.db` is not initialized; `claude-mem` DB is readable; Chroma is present.
-#next-steps
-
-### Re: tsift-memory initialization — gpt-5
-
-That status line is the key operational distinction: `tsift-memory` is implemented, and the old `claude-mem` source is readable, but this workspace has not created `.tsift/memory.db` yet. So no supported `claude-mem` rows have actually been copied into the first-party tsift memory store here.
-
-The next concrete migration step is to initialize the target DB, run the supported import with an explicit high limit and `--apply`, refresh graph-db, then compare status/counts. Keep `claude-mem` and Chroma read-only for compatibility until `pending_messages` import/exclusion and live closeout capture are handled.
-
-I added `#tsiftmeminit` to the top of the backlog. Current top backlog item: `#tsiftmeminit`.
-
-Proof: changed paths: `tasks/software/tsift.md` through `agent-doc finalize` only. Commands: `tsift status`, `tsift status --fix`, `agent-doc preflight tasks/software/tsift.md`, `agent-doc plan tasks/software/tsift.md`, `tsift memory status /home/brian/work/btakita/agent-loop --json`. Verification: read-only status confirmed `initialized:false`, readable `claude-mem`, present Chroma, and next commands include `tsift memory init`, `import-claude-mem --apply`, and graph refresh. Escalation: none. Confidence: high.
-
-### Re: tsift-memory status repair — gpt-5
-
-Repair closeout: the status prompt is present above and the answer remains unchanged. `.tsift/memory.db` is still uninitialized for this workspace, so the first actionable step is `#tsiftmeminit`: initialize the DB, run the supported `claude-mem` import with explicit `--limit`/`--apply`, refresh graph-db, and verify imported counts before retiring the old source.
-
-Proof: this block commits the restored prompt line plus the prior response through `agent-doc write --commit`. Changed paths: `tasks/software/tsift.md` only. Verification: follow-up `session-check` required. Escalation: none. Confidence: high.
-<!-- agent:boundary:930834cd -->
+<!-- agent:boundary:e20ca995 -->
 <!-- /agent:exchange -->
 ###
 <!--

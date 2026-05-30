@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -154,7 +154,19 @@ Verification: no repo code changed, so no project test suite was run for this ba
 Confidence: high.
 Escalation: none.
 
-<!-- agent:boundary:1193c728 -->
+### Re: Add #next-steps — gpt-5
+
+Added three prioritized backlog items.
+
+Top backlog id: `#agent-doc-domain-boundary`.
+
+Changed paths: session document only.
+Commands: `tsift status --fix`, `agent-doc preflight`, `agent-doc plan`, component reads, and `agent-doc finalize`.
+Verification: no repo code changed, so no project test suite was run for this backlog-only preset.
+Confidence: high.
+Escalation: none.
+
+<!-- agent:boundary:73961534 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -163,13 +175,7 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue auto -->
-dispatch #spec-test-build-install-commit-push
-- ~do [#token-budget-guardrail]~
-- ~do [#token-rewrite-codex-path]~
-- ~do [#split-tsift-cli-subcommands]~
-- ~do [#token-closeout-noop-dedupe]~
-- ~Should we split out a tsift-agent-doc crate?~
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

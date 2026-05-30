@@ -108,7 +108,19 @@ Verification:
 - `cargo test -p tsift-session agent_doc_log_dedupes_document_cycle_runtime_events_by_cycle` passed (`tart-ff46fce060`)
 - `make check` passed after the final test adjustment (`tart-b94b8a176e`)
 - Latest GitHub Actions CI run `26651628506` is green with `clippy + test` and `live Convex graph acceptance`; there is no separate tmux-test job in that workflow.
-<!-- agent:boundary:e6bd1528 -->
+
+### Re: tsift-agent-doc crate — gpt-5
+
+Yes eventually, but I would not split out a `tsift-agent-doc` crate before the CLI command split lands.
+
+The useful boundary is real: `session-review`, `session-digest`, `session-cost`, agent-doc runtime log parsing, closeout churn detection, and agent-doc-specific fixtures are now a coherent domain. Pulling that into a crate could make token-budget/session evidence work easier to test and keep `tsift-cli` from owning agent-doc semantics.
+
+The sequencing matters. Right now `tsift-cli` still contains command routing, preview budgeting, envelope shaping, context-pack composition, and graph orchestration in one large surface. Extracting `tsift-agent-doc` first would likely create a crate boundary around unstable CLI internals and force extra public APIs before the command modules are separated.
+
+Recommended gate: after the per-command CLI split, extract only if the agent-doc pieces can expose a small API such as `session_digest`, `session_review`, `session_cost`, and `agent_doc_log` fixtures without depending on CLI output formatting. Keep budget/envelope rendering in `tsift-cli`; keep parsing, aggregation, guardrails, and fixtures in the extracted crate.
+
+No repo changes for this advisory response.
+<!-- agent:boundary:afd49265 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -121,8 +133,8 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 dispatch #spec-test-build-install-commit-push
 - ~do [#token-budget-guardrail]~
 - ~do [#token-rewrite-codex-path]~
-- do [#split-tsift-cli-subcommands]
-- do [#token-closeout-noop-dedupe]
+- ~do [#split-tsift-cli-subcommands]~
+- ~do [#token-closeout-noop-dedupe]~
 - Should we split out a tsift-agent-doc crate?
 <!-- /agent:queue -->
 

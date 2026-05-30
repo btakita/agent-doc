@@ -35,7 +35,18 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 6 response topic(s): queue auto enabled; do [#jb-load-tmux-window-verify]; do [#queue-head-consume-on-topic-id-regression]; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:3bf1ad5e -->
+
+### Re: do [#backlog-auto-marker-misfire] — opus-4-8
+
+**Skipping — not implemented.** This item and its plan (`tasks/agent-doc/plan-backlog-auto-marker-misfire.md`) both carry an explicit **DO NOT IMPLEMENT** marker, so I'm respecting the committed instruction rather than the queue directive. The queue head is consumed/struck without any code change.
+
+Notably, this surfaced via the `auto` queue-loop (`queue_trigger: auto`) — i.e. an auto-run pulled in a DO-NOT-IMPLEMENT item, which is exactly the failure *class* `#backlog-auto-marker-misfire` exists to prevent (auto attributes triggering work that shouldn't run). I'm **halting the auto-loop** here and handing control back; the four remaining queue items (`#pending-add-append-not-prepend`, `#next-steps-backlog-capture`, `#run-agent-doc-stale-busy-replay`, `#jb-busy-queue-ux-feedback`) stay queued for a deliberate re-trigger.
+
+Two side notes from this cycle:
+
+- The `stuck_captured_cycle` warning preflight raised is a **false positive**: capture `cycle-1780100032048` ("gate→done for codex guidance") was committed and then archived by compaction (`.agent-doc/archives/483039e7…-20260530-013546.md`), so it's correctly absent from HEAD. No recovery run — that would re-inject an already-archived response. Logged as a recommended backlog item (`#stuck-capture-compact-false-positive`).
+- The post-`/agent:exchange` HTML comment referencing `#mermaid` / `#spec-test-build-install-commit-push` / `#next-steps` is parked outside `agent:exchange`/`agent:queue`, so it's a non-executable note and was not run.
+<!-- agent:boundary:516852b3 -->
 <!-- /agent:exchange --> 
 ###
 <!--
@@ -63,6 +74,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#route-busy-vs-starting-wording]~
 - ~do [#codex-queue-head-exact-heading-guidance]~
 - do [#backlog-auto-marker-misfire]
+- do [#pending-gate-snapshot-desync]
 - do [#pending-add-append-not-prepend]
 - do [#next-steps-backlog-capture]
 - do [#run-agent-doc-stale-busy-replay]
@@ -72,6 +84,7 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#stuck-capture-compact-false-positive] [recommended] stuck_captured_cycle false-positive after compaction: a capture recorded as committed (cycle-1780100032048, response 'gate→done for codex guidance') is later archived by compact, so preflight reports committed-but-not-in-HEAD and suggests `write --commit` recovery — which would re-inject an already-archived response (it lives in .agent-doc/archives/<hash>-*.md). Fix: when a captured-committed body is absent from HEAD because it was compacted (present in the matching archive), reconcile the capture instead of flagging it stuck. Repro 2026-05-29 agent-doc-bugs2.md.
 - [ ] [#pending-gate-snapshot-desync] `--pending-gate <id>` lands the gate ([/], moved to review) on the working-tree disk but NOT the committed snapshot when the IPC listener is dead and the write goes through the CRDT-merge / --force-disk path: the snapshot is saved from content_ours (baseline+response, item still [ ]) before the gate mutation, so commit sees snapshot==HEAD and leaves the gate uncommitted as post-commit local drift. Repro 2026-05-29 on agent-doc-bugs2.md finalizing the codex heading-guidance item; --done does NOT hit it (reap is captured pre-snapshot). Fix: apply pending gate/edit mutations before saving content_ours / the commit snapshot.
 - [ ] [#codex-auto-queue-live-verify] [recommended] Live-verify a Codex auto-queue advances across items with the new harness-invocation heading-discipline guidance: run a real Codex auto-queue and confirm a descriptive-heading completion advances once the agent titles the heading exactly with the head (### Re: do [#id] / ### Re: #id) or passes --done. Needs a live Codex session.
 - [ ] [#ipcfullprompt-recur2] CURE ONLY (capture/detection split out to #ipcfullprompt-capture, done). Editor-side PatchWatcher.setText PREVENTION: stop the live editor buffer from producing full-document/full-tail duplication or deletion while a prompt is being typed. Gated on the transport/payload packet from idea.log (enable #com.github.btakita.agentdoc debug logging) to pin the exact setText call shape. Add a SimWorld/Kotlin regression for the prevention once the fix lands; bump pluginVersion past 0.2.137 and reinstall the signed plugin. Stays open until prevention lands and is live-verified. Plan: tasks/agent-doc/plan-full-document-ipc-corruption-typing-prompt.md.

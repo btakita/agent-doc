@@ -88,7 +88,19 @@ Confidence: high on current reachability/wiring; medium on product direction bec
 
 Escalation: none.
 
-<!-- agent:boundary:bf1b9980 -->
+### Re: [#tsift-dormant-crates]: Is there functionality in tsift-tokensave and tsift-algorithms that should be used? — gpt-5
+
+Yes; this is the exact queue-head closeout for the same prompt answered above.
+
+`tsift-tokensave` should be used only as an explicit `.tokensave/tokensave.db` read-only adapter/import surface, not in the default tsift indexing path. `tsift-algorithms` has useful SCC and coupling pieces, but its health/dead-code surfaces need entry-point and correctness hardening before a user-facing CLI surface relies on them. The backlog item remains open because the code still needs an intentional wire-or-park decision.
+
+Changed paths: none in `src/tsift`.
+
+Commands and verification: same inspection evidence as above; focused `cargo test -p tsift-tokensave -p tsift-algorithms` passed through `tsift --envelope __digest-runner` (`exit_code=0`, artifact `tart-cca0a38e2f`).
+
+Confidence: high on current reachability/wiring. Escalation: none.
+
+<!-- agent:boundary:4ab08ea7 -->
 <!-- /agent:exchange -->
 ###
 <!--

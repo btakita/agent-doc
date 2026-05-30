@@ -1998,11 +1998,21 @@ pub fn run(file: &Path) -> Result<()> {
         QueueState::default()
     });
     warnings.extend(queue_state.warnings.clone());
+    // `#agent-doc-bug` auto-queue stall: when there is no real user/document diff
+    // this cycle, an active queue head is synthesized as the cycle's prompt diff.
+    // That synthetic head is queue *continuation*, not user intent — so it must
+    // NOT populate `user_intent_prompt_changes`, or the skill's auto-loop
+    // precondition (`user_intent_prompt_changes` empty) never holds and the
+    // `auto` queue stalls after every item. A real user prompt typed mid-queue
+    // keeps `diff_result` non-None here, so this flag stays false and the
+    // prompt is surfaced normally.
+    let mut diff_from_queue_head_only = false;
     if diff_result.is_none()
         && let Some(head_prompt) = queue_state.queue_prompts.first()
     {
         diff_result = Some(diff::synthetic_added_lines_diff(head_prompt, "queue"));
         classification = diff_result.as_ref().map(|d| diff::classify_diff(d));
+        diff_from_queue_head_only = true;
     }
 
     let no_changes = diff_result.is_none();
@@ -2317,11 +2327,16 @@ pub fn run(file: &Path) -> Result<()> {
         diff_type: diff_type_str.clone(),
         diff_type_reason: classification.map(|c| c.diff_type_reason),
         annotated_diff,
-        user_intent_prompt_changes: prompt_bearing_changes
-            .iter()
-            .filter(|change| !crate::diff::change_is_managed_state_only(change))
-            .cloned()
-            .collect(),
+        user_intent_prompt_changes: if diff_from_queue_head_only {
+            // Synthetic auto-queue continuation only — no user intent this cycle.
+            Vec::new()
+        } else {
+            prompt_bearing_changes
+                .iter()
+                .filter(|change| !crate::diff::change_is_managed_state_only(change))
+                .cloned()
+                .collect()
+        },
         prompt_bearing_changes,
         inline_annotations,
         slash_commands,

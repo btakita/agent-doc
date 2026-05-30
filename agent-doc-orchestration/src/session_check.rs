@@ -90,6 +90,7 @@ pub struct SessionCheckReport {
     pub warnings: Vec<String>,
 }
 
+#[derive(Debug)]
 enum GuardResult {
     None,
     Warn(Vec<String>),
@@ -201,6 +202,14 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
             }
         }
         match check_parent_submodule_pointer_guard(file)? {
+            GuardResult::None => {}
+            GuardResult::Warn(lines) => report.warnings.extend(lines),
+            GuardResult::Error(message) => {
+                report.status = SessionCheckStatus::Interrupted(message);
+                return Ok(report);
+            }
+        }
+        match check_committed_without_response_body_guard(file)? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -418,6 +427,71 @@ fn closeout_recovery_hint(file: &Path) -> String {
         file.display(),
         file.display()
     )
+}
+
+/// `#codex-final-response-not-written`: a completed turn that committed real
+/// binary-owned work this cycle but never captured an assistant response body.
+///
+/// Symptom: an agent (notably a Codex/direct-exec run, or any cycle whose
+/// `finalize` landed pending mutations + the commit but lost the response — e.g.
+/// a malformed/empty patchback) reaches `Committed` with side effects applied,
+/// yet `agent:exchange` has no new `### Re:` close-out. The cycle-state proves
+/// it: a real binary write turn sets `had_pending_mutations`, and a captured
+/// response always sets `capture_id`/`response_sha256` (see
+/// `capture::record` → `cycle_state::mark_response_captured`). So
+/// `Committed` + `had_pending_mutations` + no `capture_id` means the write path
+/// processed this turn's mutations and committed without ever persisting a
+/// response — the missing close-out.
+///
+/// This is precise rather than broad: a no-op sweep close
+/// (`closing cycle as already committed`) never sets `had_pending_mutations`,
+/// and any normal response cycle sets `capture_id`, so neither false-fires.
+/// Recovery is non-destructive — land the visible response through
+/// `agent-doc write --commit`, which sets `capture_id` and clears the guard.
+fn check_committed_without_response_body_guard(file: &Path) -> Result<GuardResult> {
+    let Some(state) = crate::cycle_state::load(file)? else {
+        return Ok(GuardResult::None);
+    };
+    if !matches!(state.phase, crate::cycle_state::CyclePhase::Committed) {
+        return Ok(GuardResult::None);
+    }
+    // A captured response (capture_id/response_sha256) means the close-out body
+    // landed through the binary write path — not the missing-response shape.
+    if state.capture_id.is_some() || state.response_sha256.is_some() {
+        return Ok(GuardResult::None);
+    }
+    // Only fire when this cycle ran a response-write turn. `had_pending_mutations`
+    // is set exclusively by the `write`/`finalize` response path
+    // (`write.rs` → `cycle_state::mark_pending_mutations`), so it proves a real
+    // response cycle processed mutations this turn. Bookkeeping-only commits stay
+    // OK: a bare sweep re-commit never touches it, and `repair`'s completed-backlog
+    // reap records `reaped_pending_ids` via `record_reaped_pending_ids` WITHOUT
+    // `mark_pending_mutations` — a legitimate no-response commit that must not fire.
+    if !state.had_pending_mutations {
+        return Ok(GuardResult::None);
+    }
+    let side_effects = tracked_side_effect_note(file)?;
+    let msg = format!(
+        "[session-check] INTERRUPTED: cycle committed binary-owned work this turn but no assistant response body was captured (cycle `{}`, last_event `{}`). The close-out response was never written into `agent:exchange`{}. {}",
+        state.cycle_id,
+        state.last_event,
+        side_effects,
+        closeout_recovery_hint(file)
+    );
+    eprintln!("{}", msg);
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "committed_without_response_body_guard_failed file={} cycle_id={} last_event={} had_pending_mutations={} pending_done={} reaped={}",
+            file.display(),
+            state.cycle_id,
+            state.last_event,
+            state.had_pending_mutations,
+            state.pending_done_ids.len(),
+            state.reaped_pending_ids.len(),
+        ),
+    );
+    Ok(GuardResult::Error(msg))
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -2927,6 +3001,108 @@ Body\n\
             .unwrap();
         crate::capture::mark_committed(&doc).unwrap();
         doc
+    }
+
+    // #codex-final-response-not-written: a committed turn that ran binary-owned
+    // work but never captured a response body must fail closed.
+
+    fn write_committed_turn_doc(
+        root: &Path,
+        capture: bool,
+        had_pending_mutations: bool,
+        pending_done_ids: &[&str],
+    ) -> std::path::PathBuf {
+        let _lock = crate::test_support::env_lock();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        let doc = root.join("doc.md");
+        let current =
+            "---\nagent_doc_session: test\n---\n\n## Exchange\n\ndo [#nsga4verify]\n".to_string();
+        fs::write(&doc, &current).unwrap();
+        crate::snapshot::save(&doc, &current).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
+        if capture {
+            crate::capture::capture_response(&doc, "### Re: do #nsga4verify — gpt-5\n\nDone.")
+                .unwrap();
+        }
+        if had_pending_mutations {
+            crate::cycle_state::mark_pending_mutations(&doc).unwrap();
+        }
+        if !pending_done_ids.is_empty() {
+            crate::cycle_state::record_pending_done_ids(
+                &doc,
+                &pending_done_ids
+                    .iter()
+                    .map(|id| id.to_string())
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap();
+        }
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(&current), Some(&current))
+            .unwrap();
+        doc
+    }
+
+    #[test]
+    fn committed_without_response_body_guard_fires_on_pending_mutations_no_capture() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_committed_turn_doc(dir.path(), false, true, &[]);
+        match check_committed_without_response_body_guard(&doc).unwrap() {
+            GuardResult::Error(msg) => {
+                assert!(msg.contains("no assistant response body was captured"), "{msg}");
+                assert!(msg.contains("agent-doc write --commit"), "{msg}");
+            }
+            other => panic!("expected Error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn committed_without_response_body_guard_passes_on_done_ids_without_write_turn() {
+        // Backlog bookkeeping (done/reaped ids recorded without the response-write
+        // path setting `had_pending_mutations`, e.g. `repair`'s completed-backlog
+        // reap) is a legitimate no-response commit that must stay OK.
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_committed_turn_doc(dir.path(), false, false, &["nsga4verify"]);
+        assert!(matches!(
+            check_committed_without_response_body_guard(&doc).unwrap(),
+            GuardResult::None
+        ));
+    }
+
+    #[test]
+    fn committed_without_response_body_guard_is_wired_into_inspect() {
+        // Prove the guard runs in the `inspect` chain and flips the status to
+        // Interrupted with the recovery command, not just when called directly.
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_committed_turn_doc(dir.path(), false, true, &[]);
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Interrupted(msg) => {
+                assert!(msg.contains("no assistant response body was captured"), "{msg}");
+            }
+            other => panic!("expected Interrupted, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn committed_without_response_body_guard_passes_with_captured_response() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_committed_turn_doc(dir.path(), true, true, &["nsga4verify"]);
+        assert!(matches!(
+            check_committed_without_response_body_guard(&doc).unwrap(),
+            GuardResult::None
+        ));
+    }
+
+    #[test]
+    fn committed_without_response_body_guard_passes_on_noop_sweep_close() {
+        // No capture and no binary write turn (sweep re-commit) must stay OK so
+        // ordinary already-committed sweeps do not false-fire.
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_committed_turn_doc(dir.path(), false, false, &[]);
+        assert!(matches!(
+            check_committed_without_response_body_guard(&doc).unwrap(),
+            GuardResult::None
+        ));
     }
 
     fn write_backlog_doc(path: &Path, backlog_body: &str) {

@@ -244,7 +244,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         ("agent-doc-orchestration/src/route.rs", "guard_") => 7,
         ("agent-doc-orchestration/src/route.rs", "proof=") => 2,
         ("agent-doc-orchestration/src/route.rs", "reason=") => 10,
-        ("agent-doc-orchestration/src/session_check.rs", "guard_") => 16,
+        ("agent-doc-orchestration/src/session_check.rs", "guard_") => 22,
         ("agent-doc-orchestration/src/write.rs", "guard_") => 70,
         // +1 for the audited `bare_write_escalated_to_commit ... reason=response_body_placed`
         // ops_log diagnostic on the #bare-write-captured-uncommitted escalation path.
@@ -677,6 +677,76 @@ fn test_commit_explains_head_current_follow_up_without_repair_body_noise() {
             "This is not a full closeout for the follow-up prompt",
         ))
         .stderr(predicate::str::contains("agent-doc write --commit"));
+}
+
+#[test]
+fn test_preflight_active_auto_queue_head_is_not_user_intent() {
+    // #agent-doc-bug auto-queue stall: with an active `auto` queue and NO real
+    // user/document diff this cycle, preflight synthesizes the queue head as the
+    // cycle prompt. That synthetic continuation must NOT appear in
+    // `user_intent_prompt_changes`, or the skill's auto-loop precondition never
+    // holds and the queue stalls after each item. The head must still be exposed
+    // via `queue_prompts` so the cycle has work to do.
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    let doc = root.join("session.md");
+    let content = "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\n---\n\n\
+        ## Exchange\n\n\
+        <!-- agent:exchange patch=append -->\n\
+        ### Re: prior — gpt-5\n\nDone.\n\
+        <!-- agent:boundary:head-boundary -->\n\
+        <!-- /agent:exchange -->\n\n\
+        <!-- agent:queue auto -->\n\
+        - do [#alpha]\n\
+        - do [#beta]\n\
+        <!-- /agent:queue -->\n";
+    fs::write(&doc, content).unwrap();
+    // Commit is the baseline; no separate seeded snapshot. There is no real diff
+    // this cycle, so the active queue head is the only prompt source — the stall
+    // repro shape.
+    init_git_repo(root, &doc);
+
+    let mut preflight = agent_doc_cmd();
+    preflight.current_dir(root);
+    preflight.args(["preflight", doc.to_str().unwrap()]);
+    let output = preflight.output().unwrap();
+    assert!(
+        output.status.success(),
+        "preflight failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("preflight stdout must be JSON");
+
+    assert_eq!(
+        parsed["queue_active"], serde_json::Value::Bool(true),
+        "queue should be active: {parsed}"
+    );
+    let queue_prompts = parsed["queue_prompts"].as_array().cloned().unwrap_or_default();
+    assert!(
+        !queue_prompts.is_empty(),
+        "active queue must still expose its head as work: {parsed}"
+    );
+    // `user_intent_prompt_changes` is `skip_serializing_if` empty, so an empty
+    // value is omitted (null) — exactly what we want here.
+    let user_intent_empty = parsed["user_intent_prompt_changes"]
+        .as_array()
+        .map_or(true, |a| a.is_empty());
+    assert!(
+        user_intent_empty,
+        "synthetic auto-queue head must NOT count as user intent (would stall the auto-loop): {}",
+        parsed["user_intent_prompt_changes"]
+    );
+    // The head is still surfaced through prompt_bearing_changes for compatibility.
+    assert!(
+        !parsed["prompt_bearing_changes"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .is_empty(),
+        "queue head should remain in prompt_bearing_changes: {parsed}"
+    );
 }
 
 #[test]

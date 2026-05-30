@@ -55,7 +55,18 @@ No code changed in this cycle; I only inspected the crate layout and added backl
 
 This queued copy is the same `#next-steps` prompt answered immediately above. The backlog is already updated in priority order, and the top item remains `#tsiftcli-direct-crates`.
 
-<!-- agent:boundary:fef93e31 -->
+❯ re [#tsift-dormant-crates]: Are some crates not used?
+
+### Re: dormant crates usage — gpt-5
+
+Yes. From the current workspace graph, `tsift-tokensave` is a real workspace crate with tests, but it has no reverse dependency from the root `tsift` crate, `tsift-cli`, or another workspace crate. It is documented in `SPEC.md`, but operationally it is parked.
+
+`tsift-algorithms` is in a softer state: `tsift-cli/Cargo.toml` declares it as a dependency, so `cargo tree --workspace -i tsift-algorithms` shows it reachable through `tsift-cli`; however, source search only found the dependency declaration and spec text, not actual Rust call sites. So it is probably an unused dependency rather than a wired feature.
+
+That is why `#tsift-dormant-crates` should stay open: the task is not just to delete dead code. It should decide, crate by crate, whether to wire the surface into CLI/root exports or explicitly park/remove the crate so the spec, manifests, and dependency graph all say the same thing.
+
+No code changed in this cycle.
+<!-- agent:boundary:c7fd735e -->
 <!-- /agent:exchange -->
 ###
 <!--

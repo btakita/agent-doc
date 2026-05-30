@@ -122,7 +122,7 @@ I measured the coupling before recommending a sequence (`grep crate::` across mo
 - **Sequencing guard:** land Phase 1+2 and ship a release before touching core/domain splits — that proves the workspace + feature re-export plumbing on the easy case before you move the load-bearing modules.
 
 Queued the four phases as `[recommended]` backlog items so they're tracked without committing you to the work.
-<!-- agent:boundary:a7e15fd9 -->
+<!-- agent:boundary:32b60d70 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -133,10 +133,10 @@ Please give me a report the performance
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#5wnq] [recommended] corky crate-split phase 4+: extract corky-google (doc/cal/gsc/tasks), corky-mail (sync/draft/mailbox/filter/contact/search/topics/label), corky-social; slim corky bin to CLI dispatch (cli.rs/main.rs). Keep workspace members publish=false except the corky bin; update maturin/pyproject + multi-crate release order
-- [ ] [#0k50] [recommended] corky crate-split phase 3: extract corky-core foundation (config, accounts, resolve, oauth_loopback, filter::gmail_auth token store, file_store, util, app_config, desktop_notify) so domain crates share auth + the tokens.json/.sync-state.json stores
-- [ ] [#69ge] [recommended] corky crate-split phase 2: extract corky-transcribe (transcribe/ + whisper-rs/pyannote-rs/ort/symphonia/rubato/hound, feature-gated transcribe/cuda/metal/diarize). Only main.rs calls it, sole coupling crate::config; isolates the 2m+ CUDA build from core. Watch cross-crate #[cfg(test)] — use a test-support feature
 - [ ] [#vbpm] [recommended] corky crate-split phase 1: convert corky to a cargo workspace, root crate keeps lib+bin — scaffolding only, no module moves yet
+- [ ] [#69ge] [recommended] corky crate-split phase 2: extract corky-transcribe (transcribe/ + whisper-rs/pyannote-rs/ort/symphonia/rubato/hound, feature-gated transcribe/cuda/metal/diarize). Only main.rs calls it, sole coupling crate::config; isolates the 2m+ CUDA build from core. Watch cross-crate #[cfg(test)] — use a test-support feature
+- [ ] [#0k50] [recommended] corky crate-split phase 3: extract corky-core foundation (config, accounts, resolve, oauth_loopback, filter::gmail_auth token store, file_store, util, app_config, desktop_notify) so domain crates share auth + the tokens.json/.sync-state.json stores
+- [ ] [#5wnq] [recommended] corky crate-split phase 4+: extract corky-google (doc/cal/gsc/tasks), corky-mail (sync/draft/mailbox/filter/contact/search/topics/label), corky-social; slim corky bin to CLI dispatch (cli.rs/main.rs). Keep workspace members publish=false except the corky bin; update maturin/pyproject + multi-crate release order
 - [/] [#pypi-trusted-publisher] Configure PyPI trusted publishing for btakita/corky workflow .github/workflows/pypi.yml with environment pypi. Repo workflow is configured and pushed in Corky commit feb074e; PyPI run 26195923707 now builds all artifacts but is blocked by PyPI invalid-publisher until the project has a trusted publisher matching repo:btakita/corky:environment:pypi.
 <!-- /agent:backlog -->
 

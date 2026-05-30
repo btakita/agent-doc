@@ -115,7 +115,7 @@ presets/               Convention presets (immutable-tag.toml)
 ## Status
 
 <!-- agent:status patch=replace -->
-v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-grammar)
+v0.12.0 published to crates.io — tagpath-core split release complete
 <!-- /agent:status -->
 
 ## Exchange
@@ -128,7 +128,43 @@ v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-gramm
 Compacted content:
 - Archived 5 response topic(s): do #tpcoreextract; do #tpcorefacade; do #tpcoreci; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-<!-- agent:boundary:02daf1ac -->
+❯ publish 0.12.0
+
+### Re: publish 0.12.0 — gpt-5
+
+Published `tagpath` `0.12.0`.
+
+- Published `tagpath-core 0.12.0` and `tagpath 0.12.0` to crates.io: https://crates.io/crates/tagpath-core and https://crates.io/crates/tagpath
+- Tagged and pushed `v0.12.0` in `btakita/tagpath`; GitHub release is at https://github.com/btakita/tagpath/releases/tag/v0.12.0
+- Updated `VERSIONS.md` from `Unreleased` to `2026-05-30` in tagpath commit `682fcba`.
+- Committed the agent-loop superproject submodule pointer update as `eb15c8aa4`.
+
+Verification:
+
+- `cargo clippy --workspace --all-targets -- -D warnings`
+- `cargo test --workspace`
+- `cargo test -p tagpath-core --no-default-features`
+- `cargo test -p tagpath --lib --no-default-features`
+- `cargo build --target wasm32-unknown-unknown --no-default-features --features wasm`
+- `scripts/check-release.sh` before and after publishing `tagpath-core`
+- `cargo install --path . --force`
+- `cargo search tagpath --limit 3` and `cargo search tagpath-core --limit 3` both show `0.12.0`
+- GitHub `tagpath` CI run `26692232890` passed.
+- GitHub `tagpath` Release run `26692233759` passed.
+- Root `make check` passed.
+
+Root CI note: the latest agent-loop `Agent Doc` workflow run `26691990789` failed before any job steps were allocated for both `check` and `tmux-ci`, so I’m recording it as an external CI-start failure rather than a code or tmux regression. I did not run `make tmux-ci` because there was no runner-started tmux failure to reproduce.
+
+Changed paths:
+
+- `src/tagpath/VERSIONS.md` in the tagpath repo
+- `src/tagpath` submodule pointer in agent-loop
+- this session document via `agent-doc finalize`
+
+Escalation: no approval prompts were needed; the publish, tag, and push operations were authorized by the document prompt `publish 0.12.0`. Existing unrelated agent-loop worktree changes were left untouched.
+
+Confidence: high.
+<!-- agent:boundary:ffad1ad5 -->
 <!-- /agent:exchange -->
 ###
 <!--

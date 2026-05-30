@@ -527,6 +527,57 @@ fn route_enqueue_dispatch_prompt_creates_visible_auto_queue_and_snapshot() {
 }
 
 #[test]
+fn route_enqueue_dispatch_prompt_preserves_unparseable_queue_instead_of_crashing() {
+    // Repro of "JB Run Agent Doc error: route queue dispatch: failed to parse
+    // existing agent:queue": an earlier corruption merged free-text prose into
+    // the agent:queue component, so `queue::parse` bails on a bare line. The
+    // route must not propagate that as a fatal error — it must preserve the
+    // polluted body and still append the new pending dispatch.
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_format: template\n",
+        "queue_active: false\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue -->\n",
+        "JB `Run Agent Doc` error:\n",
+        "- do [#existing]\n",
+        "<!-- /agent:queue -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    crate::snapshot::save(&doc, content).unwrap();
+
+    // Sanity: the raw queue body really is unparseable.
+    assert!(crate::queue::parse("JB `Run Agent Doc` error:\n- do [#existing]\n").is_err());
+
+    let outcome = enqueue_route_dispatch_prompt(&doc, "do [#newitem]", "test_busy_actor")
+        .expect("route must not crash on an unparseable agent:queue");
+    assert!(outcome.appended);
+
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    // Existing (polluted) content preserved — not silently dropped.
+    assert!(updated.contains("JB `Run Agent Doc` error:"));
+    assert!(updated.contains("- do [#existing]"));
+    // New dispatch appended below it.
+    assert!(updated.contains("- do [#newitem]"));
+
+    // Re-dispatching the same prompt into the still-polluted queue is idempotent.
+    let outcome2 = enqueue_route_dispatch_prompt(&doc, "do [#newitem]", "test_busy_actor")
+        .expect("route must stay resilient on repeat dispatch");
+    assert!(outcome2.already_present);
+    let updated2 = std::fs::read_to_string(&doc).unwrap();
+    assert_eq!(
+        updated2.matches("- do [#newitem]").count(),
+        1,
+        "repeat dispatch into a polluted queue must not duplicate the entry:\n{updated2}"
+    );
+}
+
+#[test]
 fn route_enqueue_dispatch_prompt_activates_existing_queue_without_duplicate() {
     let dir = tempfile::TempDir::new().unwrap();
     std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();

@@ -1814,39 +1814,83 @@ fn enqueue_route_dispatch_prompt(
         .cloned()
     {
         let body = &content[queue_component.open_end..queue_component.close_start];
-        let mut entries = crate::queue::parse(body)
-            .context("route queue dispatch: failed to parse existing agent:queue")?;
-        already_present = crate::queue::prompts(&entries)
-            .iter()
-            .any(|prompt| prompt.text.trim() == prompt_text);
-        if !already_present {
-            let active_prompt_count = entries
-                .iter()
-                .filter(|entry| matches!(entry, crate::queue::QueueEntry::Prompt(_)))
-                .count();
-            let replace_single_auto_prompt =
-                crate::queue::has_auto_attr(&queue_component.attrs) && active_prompt_count == 1;
-            if replace_single_auto_prompt {
-                for entry in &mut entries {
-                    if let crate::queue::QueueEntry::Prompt(prompt) = entry {
-                        prompt.multiline = prompt_text.contains('\n');
-                        prompt.text = prompt_text.clone();
-                        superseded = true;
-                        break;
+        match crate::queue::parse(body) {
+            Ok(mut entries) => {
+                already_present = crate::queue::prompts(&entries)
+                    .iter()
+                    .any(|prompt| prompt.text.trim() == prompt_text);
+                if !already_present {
+                    let active_prompt_count = entries
+                        .iter()
+                        .filter(|entry| matches!(entry, crate::queue::QueueEntry::Prompt(_)))
+                        .count();
+                    let replace_single_auto_prompt =
+                        crate::queue::has_auto_attr(&queue_component.attrs)
+                            && active_prompt_count == 1;
+                    if replace_single_auto_prompt {
+                        for entry in &mut entries {
+                            if let crate::queue::QueueEntry::Prompt(prompt) = entry {
+                                prompt.multiline = prompt_text.contains('\n');
+                                prompt.text = prompt_text.clone();
+                                superseded = true;
+                                break;
+                            }
+                        }
+                    } else {
+                        entries.push(crate::queue::QueueEntry::Prompt(
+                            crate::queue::QueuePrompt {
+                                multiline: prompt_text.contains('\n'),
+                                text: prompt_text.clone(),
+                            },
+                        ));
+                        appended = true;
                     }
                 }
-            } else {
-                entries.push(crate::queue::QueueEntry::Prompt(
-                    crate::queue::QueuePrompt {
+                let rendered = crate::queue::render(&entries);
+                content = queue_component.replace_content(&content, &rendered);
+            }
+            Err(parse_err) => {
+                // The existing agent:queue body is polluted (e.g. user prose /
+                // log dumps merged into the component by an earlier corruption).
+                // Do NOT brick the route by propagating a fatal parse error —
+                // preserve the existing body verbatim and append the new pending
+                // dispatch as a well-formed entry beneath it, leaving the
+                // corruption for separate repair (#jb-run-agent-doc-response-queue-contamination).
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "route_queue_dispatch_unparseable_preserved file={} prompt_hash={} reason={}",
+                        file.display(),
+                        crate::ops_log::content_hash(&prompt_text),
+                        parse_err
+                    ),
+                );
+                let new_rendered = crate::queue::render(std::slice::from_ref(
+                    &crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
                         multiline: prompt_text.contains('\n'),
                         text: prompt_text.clone(),
-                    },
+                    }),
                 ));
-                appended = true;
+                // Dedup against the raw body so a repeated dispatch into an
+                // already-polluted queue stays idempotent.
+                if body
+                    .lines()
+                    .any(|line| line.trim() == new_rendered.trim())
+                    || body.contains(prompt_text.as_str())
+                {
+                    already_present = true;
+                    content = queue_component.replace_content(&content, body);
+                } else {
+                    let mut preserved = body.to_string();
+                    if !preserved.is_empty() && !preserved.ends_with('\n') {
+                        preserved.push('\n');
+                    }
+                    preserved.push_str(&new_rendered);
+                    appended = true;
+                    content = queue_component.replace_content(&content, &preserved);
+                }
             }
         }
-        let rendered = crate::queue::render(&entries);
-        content = queue_component.replace_content(&content, &rendered);
         content = ensure_queue_component_auto_attr(&content)?;
     } else {
         component_created = true;

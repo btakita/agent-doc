@@ -243,7 +243,12 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         ("agent-doc-orchestration/src/route.rs", "flow_reason=") => 2,
         ("agent-doc-orchestration/src/route.rs", "guard_") => 7,
         ("agent-doc-orchestration/src/route.rs", "proof=") => 2,
-        ("agent-doc-orchestration/src/route.rs", "reason=") => 10,
+        // +1 for the audited route resilience diagnostic
+        // `route_queue_dispatch_unparseable_preserved ... reason={parse_err}`:
+        // when the existing agent:queue is polluted/unparseable the route
+        // preserves it and appends the new dispatch instead of bailing fatally
+        // (the "route queue dispatch: failed to parse existing agent:queue" bug).
+        ("agent-doc-orchestration/src/route.rs", "reason=") => 11,
         // +8 for the audited `#do-id-closeout-open-backlog` guard:
         // `expect_done_or_gate_guard_fired` ops_log diagnostic plus seven
         // `expect_done_or_gate_guard_*` test names. +1 for the audited

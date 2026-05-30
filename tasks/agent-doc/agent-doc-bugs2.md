@@ -80,7 +80,24 @@ Substantive answer unchanged: tsift **is** properly integrated with the multi-cr
 ### Re: strike the completed tsift line — opus-4-8
 
 You're right that it should have been struck on completion — that was the free-text-queue-head-consume bug, now fixed and live. This cycle runs on the fixed binary, so answering the line consumes it (strikes it). The substantive answer stands: tsift is properly integrated with the multi-crate workspace (core/orchestration/sqlite + root), index fresh. Queue advances to the next item.
-<!-- agent:boundary:73314e9d -->
+
+### Re: do #pending-done-guard-false-positive — opus-4-8
+
+Fixed (`6b266c62`) — and this very response is the live test: it cites related open ids (`#pending-add-suppresses-queue-consume`, `#next-steps-backlog-capture`) in prose with completion words nearby, yet finalize should consume the head **without** a `--no-pending-done-guard` suppression. That suppression is what I had to add repeatedly this session; if you see this committed cleanly, the false-positive is gone.
+
+#### Root cause
+`response_clearly_completes_pending_id` used a prose-window heuristic: any line citing `#id` with a completion marker (`fixed`, `committed`, `done`, …) within 5 lines counted as a completion claim. So a response that completed its head but merely *referenced* a related/residual open id in prose falsely demanded `--done` for the cited id — forcing retry cycles. It was flagged as a top finalize friction and I hit it ~5× today.
+
+#### Fix
+Completion is now signalled **only** by a response *heading* whose topic **resolves** to the id:
+- a batch `do [#a] [#b] …` directive heading resolves to every bracketed id;
+- a titled `### Re: #id descriptive text` heading resolves to its **leading** id only (trailing words are prose);
+- a `#id` cited anywhere in the response **body** never resolves.
+
+Covers both enforcement points — the pre-write gate (`precommit_pending_done_check`) and post-commit `session-check`, both via `detect_missing_pending_done_ids`. Regression `session_check_pending_done_ignores_prose_citation_of_open_id`; the existing heading-completion and batch-`do`-heading detections still pass. `make check` green; both binaries rebuilt + installed.
+
+Relates to `#pending-add-suppresses-queue-consume` (the sibling queue-consume vs bundled-mutation issue, already fixed) — cited here deliberately to exercise the fix.
+<!-- agent:boundary:d853ac7a -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -89,7 +106,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#codex-final-response-not-written]~
 - ~do [#pending-add-suppresses-queue-consume]~
 - ~Is tsift properly integrated into multi-crate architecture? If not, run tsift update.~
-- do [#pending-done-guard-false-positive]
+- ~do [#pending-done-guard-false-positive]~
 - When "Is tsift properly integrated into multi-crate architecture? If not, run tsift update." was completed, it should have been wrapped in a strikethrough: "~Is tsift properly integrated into multi-crate architecture?~".
 - do [#do-id-closeout-open-backlog]
 - do [#queue-user-edit-overwrite]
@@ -160,7 +177,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 - [ ] [#do-id-closeout-open-backlog] [recommended] `do [#id]` closeout can claim/queue-clear a tracked item while leaving that same id open in `agent:backlog`. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `do [#next-steps-2]. #spec-test-commit-push-deploy` recorded successful repo/API/deploy work and cleared the queue, but `#next-steps-2` remained `[ ]` in backlog. Add an `expect_done_or_gate` invariant for prompt-target ids so successful closeout requires `--done`, `--pending-gate`, or an explicit stays-open reason. Plan: tasks/agent-doc/plan-do-id-closeout-open-backlog.md.
 - [ ] [#codex-final-response-live-verify] [recommended] Opportunistic live re-verification of the #codex-final-response-not-written guard: do a real Codex direct/manual run that commits side-effect work, confirm session-check (via the .codex Stop hook) fails closed with the 'no assistant response body was captured' message + 'agent-doc write --commit' recovery when no ### Re: close-out was written, and that a normal Codex turn with a response stays OK. Guard + deterministic regressions already landed (session_check.rs check_committed_without_response_body_guard).
 - [ ] [#queue-user-edit-overwrite] [recommended] User-authored agent:queue edits can be silently overwritten/deleted by write/reset/commit queue convergence. Live repro 2026-05-30 boost-client monsterrodholders.md: user added do [#gscaccess] at queue head; agent-doc repeatedly removed/reverted it during closeout/snapshot repair. Fix by tracking queue edit provenance/epochs, preserving explicit queue edits unless the current response consumes that exact head, and failing closed on stale IPC/snapshot queue rewrites. Plan: tasks/agent-doc/plan-user-queue-edit-preservation.md.
-- [ ] [#pending-done-guard-false-positive] [recommended] finalize/write pending_done_guard fires a FALSE POSITIVE when the response merely REFERENCES an open backlog id in prose (e.g. mentioning #jb-busy-queue-ux-feedback as a related/residual item) — it reads the citation as a completion claim and demands --done, forcing a retry with  suppression. Hit 3x in one session (2026-05-30) and independently flagged as a top agent-doc finalize friction in the Claude Code usage report (2026-05-28..30: 'a false-positive done-guard, requiring multiple retry cycles'). Fix: only fire when the response heading/topic RESOLVES to the id (completion), per the exact-id queue-consume matching in specs/07-orchestration-commands.md — not when the body merely cites it. Relates to #pending-add-suppresses-queue-consume.
 - [ ] [#stuck-capture-compact-false-positive] [recommended] stuck_captured_cycle false-positive after compaction: a capture recorded as committed (cycle-1780100032048, response 'gate→done for codex guidance') is later archived by compact, so preflight reports committed-but-not-in-HEAD and suggests `write --commit` recovery — which would re-inject an already-archived response (it lives in .agent-doc/archives/<hash>-*.md). Fix: when a captured-committed body is absent from HEAD because it was compacted (present in the matching archive), reconcile the capture instead of flagging it stuck. Repro 2026-05-29 agent-doc-bugs2.md.
 - [ ] [#prompt-preempts-auto-queue] [recommended] Unanswered exchange prompts must run before active `agent:queue auto` continuation, even when the prompt was accidentally baselined into the `.agent-doc` snapshot. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `What are #next-steps to complete review items?` was visible after the exchange boundary and duplicated in `agent:queue auto`, but the snapshot already contained the exchange prompt, so the next diff only saw queue bookkeeping and the prompt did not run. Fix: add snapshot-independent unresolved exchange prompt detection, make preflight/direct-run prefer it over queue synthetic diffs, prevent route queue snapshot recovery from absorbing unanswered exchange prompts, and defer Codex/Claude queue continuation while such a prompt exists. Plan: tasks/agent-doc/plan-prompt-preempts-auto-queue.md.
 - [ ] [#codex-owned-pane-prompt-miss] [recommended] Codex-owned `agent-doc <FILE>` direct invocation from the same pane can abandon recursive dispatch without processing unresolved exchange prompts. Live repro 2026-05-30: `src/boost-client/tasks/monsterrodholders.md` contained `Please assist in placing GA4 Analytics credentials in passage.`, but the same-pane recursion guard refused dispatch and no response was written. Fix with earlier owner-pane self-invocation detection, unresolved-prompt preservation, and Codex guidance/final-gate recovery. Plan: tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md.

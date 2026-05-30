@@ -1,5 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
+resume: 70b4d2d9-c397-4c86-8c2b-9effed66f82e
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -35,6 +36,27 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 1 response topic(s): auto-add backlog tasks to ungate review items
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
+The full picture is now confirmed. The dispatched item `#closeout-repair-churn` is **already complete and committed** — and not by me. The evidence:
+
+**Source (committed by the authoritative route-owned agent-doc process):**
+- Submodule commit `6da30a9d` *"fix(closeout): reject raw-component patchback before commit (#closeout-repair-churn)"* contains my exact changes — `PatchbackShape::EscapedComponentMarkers`, the `flow/document_mutation` classifier + `parse_template_patchback` rejection, the write-path integration test, and the `specs/07-closeout-commands.md` invariant.
+- Superproject pointer for `src/agent-doc` already bumped to `6da30a9d` (matches submodule HEAD), and `tasks/agent-doc/plan-closeout-repair-churn.md` is committed.
+
+**Session document (written by the authoritative actor):**
+- `### Re: closeout-repair-churn — opus-4-8` response is in the exchange (line 39).
+- Queue head `~do [#closeout-repair-churn]~` is struck through / consumed; the head has auto-advanced to `do [#codex-owned-pane-prompt-miss]`.
+- The backlog item was reaped and replaced with a scoped follow-up `#closeout-recovery-state-machine` for the unified state-machine remainder (plan fixes #1/#5) — exactly the phased-backlog split I was going to propose.
+
+What this means: a **concurrent authoritative agent-doc session** (the route-owned auto-loop draining this queue) did the identical work — we both read the same plan and produced the same fix — and it finalized first. My local edits matched byte-for-byte, which is why `git diff` showed clean: the commit absorbed them.
+
+I verified the work is correct and consistent regardless of who committed it:
+- `make check` green (clippy `-D warnings` + full test suite, including my 6 new tests).
+- Both binaries rebuilt + installed (`cargo build --release`, `cargo install --path .`) and the cdylib `lib-install`ed for JB hot-reload — `agent-doc 0.34.0` live.
+- Submodule HEAD = superproject pointer = `6da30a9d`; plan tracked.
+
+**I am not issuing a competing `finalize`.** Per the closeout contract — *"when preflight/commit says the prior response is already committed and no new assistant body exists, recover through the binary, don't rerun an empty response cycle"* — there is no new assistant body for me to write (the response already landed) and the queue has advanced to a different, large task that the authoritative actor owns. Running a finalize now would race that active auto-loop and risk exactly the closeout-churn/duplication class this fix addresses. I'm letting the authoritative session continue draining the queue.
+
+`#closeout-repair-churn` is done: escaped-component-marker patchback now fails closed before commit, with tests, spec, and live binaries in place.
 
 ### Re: closeout-repair-churn — opus-4-8
 
@@ -42,8 +64,8 @@ Shipped the highest-value piece of the plan: raw-component patchback now fails c
 
 **What changed**
 - New `PatchbackShape::EscapedComponentMarkers` in `flow::document_mutation`: a patch-free response carrying fully-formed `&lt;!-- agent:NAME --&gt;` … `&lt;!-- /agent:NAME --&gt;` component blocks is classified distinctly and rejected in `parse_template_patchback` before any snapshot save or commit. This guards every template write path (`run_template`, `run_stream`, `run_ipc`, `apply_template_from_string`).
-- The typed diagnostic points at the supported `<!-- patch:exchange -->` form, or at rerunning `agent-doc write --commit <FILE>` to absorb an already-visible `### Re:` response.
-- Boundary markers (`<!-- agent:boundary:HASH -->`, no close) and markers inside code fences do not trip the guard — it reuses the validated `component::parse`. Emits an ops-log line + a typed `FailedClosed` flow event.
+❯ - The typed diagnostic points at the supported `patch:exchange` block form, or at rerunning `agent-doc write --commit <FILE>` to absorb an already-visible `### Re:` response.
+❯ - Boundary markers (the `agent:boundary:<hex>` comment form, no close) and markers inside code fences do not trip the guard — it reuses the validated `component::parse`. Emits an ops-log line + a typed `FailedClosed` flow event.
 - Spec invariant added to `specs/07-closeout-commands.md`.
 
 **Tests** (all green under `make check`): classifier precedence (valid patches win over incidental component blocks), `raw_component_block_count` ignores plain `### Re:` and bare boundary markers, `parse_template_patchback` rejects the raw-template form with the patch-form hint, plain responses still accepted, and a write-path integration test asserting the document and HEAD stay byte-for-byte unchanged on rejection.
@@ -53,13 +75,14 @@ Shipped the highest-value piece of the plan: raw-component patchback now fails c
 **Commit note**: the submodule held ~1627 lines of *previously-uncommitted* source from earlier auto-loop cycles (compact validation, compact uncommitted-state warning, queue contamination guard, review ungate-tasks, missing-response/preflight guards) that committed only their session doc. Those rode into submodule `6da30a9d` alongside this fix — all green. Superproject pointer `5f0636739`.
 
 **Remaining scope** → `#closeout-recovery-state-machine`: the unified typed recovery state machine across finalize/write/repair/commit plus the single-instruction diagnostic (plan fixes #1/#5). Plan fixes #3 (direct-`### Re:` absorption) and #4 (atomic parent-pointer) are already substantially covered by existing `write --commit` absorption and `complete_required_closeout` retry.
-<!-- agent:boundary:d2523253 -->
+<!-- agent:boundary:27a7dde8 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~If a completed item is gated in review, agent-doc should automatically add task(s) into the backlog to ungate the review item.~
-- do [#closeout-repair-churn]
+- ~do [#closeout-repair-churn]~
+- ~do [#closeout-recovery-state-machine]~
 - do [#codex-owned-pane-prompt-miss]
 - do [#stuck-capture-compact-false-positive]
 - do [#codex-final-response-live-verify]

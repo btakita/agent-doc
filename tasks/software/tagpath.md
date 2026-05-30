@@ -150,8 +150,23 @@ The main payoff is cleaner consumption: agents or tools that only need `parse`, 
 The cost is real: workspace release choreography, more semver surface, more docs, and more internal API decisions becoming public. So I would not do a broad workspace split until the core API is stable enough to support independently.
 
 My call: yes to a conservative `tagpath-core` extraction first; no to a many-crate breakup yet.
-What are #next-steps to split out crates?
-<!-- agent:boundary:56c19bf0 -->
+
+❯ What are #next-steps to split out crates?
+
+### Re: next steps to split crates — gpt-5
+
+Yes. I would put the split work in the backlog as a narrow, priority-ordered sequence, with `#tpcoreplan` at the top.
+
+1. `#tpcoreplan` - define the exact `tagpath-core` boundary first: public API inventory, pure data types, dependency exclusions, compatibility re-exports, and release impact.
+2. `#tpcoreextract` - extract the pure crate: parser, convention detection, alias, family, prose, query normalization, compression, and the tests that should move with those APIs.
+3. `#tpcorefacade` - keep `tagpath` as the existing user-facing crate and binary, depending on `tagpath-core` while preserving current CLI behavior, public exports, and feature defaults.
+4. `#tpcoreci` - add workspace CI/docs/release coverage: `--no-default-features`, WASM, normal CLI defaults, and publish-order smoke checks.
+5. `#tpcoreadapters` - only after the core split settles, re-evaluate thin adapter crates like `tagpath-wasm`, `tagpath-mcp`, or `tagpath-project`.
+
+Top backlog item: `#tpcoreplan`.
+
+No code changed in this cycle. Verification was limited to the agent-doc cycle checks: `preflight`, `plan`, and finalize/session-check.
+<!-- agent:boundary:401f03ef -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -163,6 +178,11 @@ What are #next-steps to split out crates?
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#tpcoreplan] Create a concrete workspace split plan for a conservative tagpath-core extraction: public API inventory, dependency boundary, compatibility re-exports, and release impact.
+- [ ] [#tpcoreextract] Extract tagpath-core with parser, convention detection, alias, family, prose, query normalization, compression, and pure tests moved into the core crate.
+- [ ] [#tpcorefacade] Keep the tagpath crate as the existing CLI/library facade depending on tagpath-core; preserve binary behavior, public exports, and feature defaults.
+- [ ] [#tpcoreci] Add workspace CI, docs, and release checks for the split, including no-default-features, wasm, and crates.io publish ordering smoke tests.
+- [ ] [#tpcoreadapters] [recommended] Re-evaluate adapter crates such as tagpath-wasm, tagpath-mcp, and tagpath-project only after tagpath-core has stabilized.
 <!-- /agent:backlog -->
 
 ## Review

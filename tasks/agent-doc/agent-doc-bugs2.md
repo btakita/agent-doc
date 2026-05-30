@@ -35,18 +35,40 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 4 response topic(s): do [#bare-write-captured-uncommitted]; do [#hj7s]; JB Restart Supervisor live-verify; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:21bf7343 -->
-<!-- /agent:exchange --> 
-###
-<!--
-JB `Run Agent Doc` on an idle session. Why did `registered in its own project root` occur? 
+❯ JB `Run Agent Doc` on an idle session. Why did `registered in its own project root` occur?
 ```
 resync: stash pane %32 is registered in its own project root — skipping kill
 [route] debounce OK — file idle for 0.5s and typing indicator idle
 [route] target tmux session: 0
 [route] authoritative actor generation 96 for tasks/software/tsift.md is busy on pane %36; queued pending dispatch "re [#tsift-dormant-crates]: Is there functionality in tsift-tokensave and tsift-algorithms that should be used?" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
 ```
----
+❯ #spec-test-build-install-commit-push
+
+### Re: Why "registered in its own project root" occurred — opus-4-8
+
+That line is **expected, by-design output — not an error and not a bug.** Nothing in the binary needs fixing, so this cycle has no spec/test/build/commit change; here's the why.
+
+**What it is.** When JB `Run Agent Doc` runs, it triggers a `resync` of the tmux session for the *current* project root. resync sweeps stash-window panes (and dead/unregistered agent panes) to reap idle leftovers. Before killing any candidate it runs a cross-project safety check (`resync.rs:771`, `1303`, `1793`):
+
+1. Is the pane in the **current** project root's registry? → leave it.
+2. Otherwise, does the pane belong to a **different** project root — i.e. is it registered in *that* root's `.agent-doc/sessions.json`? → **skip kill** and log `registered in its own project root`.
+
+So pane `%32` is a live agent-doc pane owned by another project root (a submodule or sibling repo with its own `sessions.json`), currently parked in this session's stash window. From the agent-loop superproject's point of view it isn't in *its* registry, but it *is* the authoritative pane of its own project — so resync correctly refuses to kill it.
+
+**Why it appeared now.** You ran `Run Agent Doc` on `tasks/software/tsift.md` (agent-loop root). The log sequence is three separate, independent steps:
+- `resync: … registered in its own project root — skipping kill` → the cross-project preservation above (benign).
+- `debounce OK` / `target tmux session: 0` → route proceeding normally.
+- `authoritative actor generation 96 … is busy on pane %36 … queued pending dispatch … in agent:queue auto` → the tsift.md actor was mid-turn, so the dispatch was correctly queued instead of double-injected.
+
+None of these are failures. The reason the first line *reads* alarming is the JB plugin dumps the whole route/resync stderr stream as if it were an error — which is exactly the open item **`#jb-busy-queue-ux-feedback`** (present benign route/resync info as informational, distinct from real failures). I extended that item with this concrete example.
+
+**Why preserving it is correct:** killing a pane that is the live authoritative session of another project — just because it's parked in this project's stash window — would silently terminate that project's running agent. The guard exists precisely to prevent cross-project collateral kills, so it fails safe (skip + log) rather than reaping.
+
+If you'd rather not see it at all, the right move is the plugin-side notification classification in `#jb-busy-queue-ux-feedback`; I left the stderr line as-is since it's accurate operational evidence and the reaping logic/tests assert on it.
+<!-- agent:boundary:55d5f46b -->
+<!-- /agent:exchange --> 
+###
+<!--
 JB `Run Agent Doc`, then cancel run directly in the session, then JB `Clear Session Context`, then JB `Run Agent Doc`:
 ```
 resync: stash pane %32 is registered in its own project root — skipping kill
@@ -102,7 +124,7 @@ preset #spec-test-build-install-commit-push
 - [ ] [#ipcfullprompt-recur2] CURE ONLY (capture/detection split out to #ipcfullprompt-capture, done). Editor-side PatchWatcher.setText PREVENTION: stop the live editor buffer from producing full-document/full-tail duplication or deletion while a prompt is being typed. Gated on the transport/payload packet from idea.log (enable #com.github.btakita.agentdoc debug logging) to pin the exact setText call shape. Add a SimWorld/Kotlin regression for the prevention once the fix lands; bump pluginVersion past 0.2.137 and reinstall the signed plugin. Stays open until prevention lands and is live-verified. Plan: tasks/agent-doc/plan-full-document-ipc-corruption-typing-prompt.md.
 - [ ] [#next-steps-backlog-capture] Agent responses containing #next-steps recommendations do not auto-add items to backlog when prompt preset is present. Agent must manually call `--pending-add` but the planning output `pending_mutations: expect_add` is not enforced by session-check `pending_done_guard`.
 - [ ] [#run-agent-doc-stale-busy-replay] Follow-up to the #snrun stale-busy-projection fix (submodule 89c99c79): the dispatch-only busy-vs-stale repair is covered by unit tests on the pure decision functions; add a live JB Run Agent Doc replay regression (SimWorld or tmux-ci) exercising a stale busy actor projection + proven ready prompt and asserting dispatch instead of agent:queue auto enqueue. Also still open in #snrun: distinguishing rescued-stash accepted-only proof misses. Plan: tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md.
-- [ ] [#jb-busy-queue-ux-feedback] [recommended] When the authoritative actor is genuinely busy, JB Run Agent Doc correctly queues the dispatch in agent:queue auto instead of injecting a duplicate trigger (monsterrodholders.md, equityfundingsource.md reports), but the plugin surfaces the route/resync log dump as an error. Present queued-behind-a-busy-turn as an informational notification distinct from real failures so expected busy-queuing does not read as a plugin error.
+- [ ] [#jb-busy-queue-ux-feedback] [recommended] When the authoritative actor is genuinely busy, JB Run Agent Doc correctly queues the dispatch in agent:queue auto instead of injecting a duplicate trigger (monsterrodholders.md, equityfundingsource.md reports), but the plugin surfaces the route/resync log dump as an error. The dump also includes benign cross-project resync info such as `resync: stash pane %N is registered in its own project root — skipping kill` (cross-project stash-pane preservation, resync.rs:771/1303/1793 — a stash-window pane that is the live authoritative pane of a different project root is correctly preserved, not reaped), which is expected and not a failure. Present queued-behind-a-busy-turn and benign route/resync info as informational notifications distinct from real failures so expected behavior does not read as a plugin error.
 <!-- /agent:backlog -->
 
 ## Review

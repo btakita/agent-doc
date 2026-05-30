@@ -72,18 +72,31 @@ Done — full subsystem implemented + shipped (you chose full implementation; pr
 **Commit + push:** `src/agent-doc` `14ac8b4b` on `20260422/codex-agent-backend`, pushed (also carries the recguard test fix). Both binaries rebuilt; `--codex-final-gate` verified live in `.bin/agent-doc` and `~/.cargo/bin/agent-doc`.
 
 **Live verification deferred:** the end-to-end Codex two-item auto-queue proof stays gated under `#codex-auto-queue-live-verify` per the plan.
-<!-- agent:boundary:b9492597 -->
+❯ JB `Run Agent Doc`
+❯ resync: stash pane %32 is registered in its own project root — skipping kill
+❯ [route] debounce OK — file idle for 3.1s and typing indicator idle
+❯ [route] dispatch-only codex reopen for tasks/software/tsift.md found active codex turn on pane %36; queued pending dispatch "Should we split out a tsift-agent-doc crate?" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
+
+### Re: JB Run Agent Doc route/resync log paste — opus-4-8
+
+That pasted block is a **route/resync diagnostic dump showing correct behavior**, not a failure — and it maps onto two already-tracked items, so I'm reading it as evidence rather than implementing anything this cycle (plan classified it as a prompt-only change: `repo_actions: null`, no `--done`). No new backlog item is warranted — everything below maps to existing tracked work.
+
+What the log actually shows:
+- `resync: stash pane %32 ... skipping kill` — resync correctly left a stash pane that owns its own project root alone (expected; not a leak).
+- `debounce OK — file idle 3.1s` — the route debounce gate passed.
+- `dispatch-only codex reopen for tsift.md found active codex turn on pane %36; queued pending dispatch "Should we split out a tsift-agent-doc crate?" in agent:queue auto (appended=true, already_present=false, superseded=false)` — the authoritative actor on `%36` was **busy** (active codex turn), so the route **queued** the dispatch into `agent:queue auto` instead of injecting a duplicate trigger. Per the dispatch-proof-scope rule this is a **queued pending dispatch** (`appended=true`), **not** a consumed/submitted one — correct fail-safe busy behavior.
+
+Mapping (no new items needed):
+- This is exactly **`#jb-busy-queue-ux-feedback`** (already queued in this doc): the busy-queue *behavior* is right; the open work is making the JB plugin present this route/resync dump as an **informational** "queued behind a busy turn" notice rather than an error-looking log dump. Your paste is good corroborating evidence for that item.
+- Separately, this document's own queue is now `queue_active: true` with `queue_trigger: persisted` (the `auto` attribute is gone), which is precisely the stall shape **`#active-queue-persisted-no-continue`** describes — the current head `do [#active-queue-persisted-no-continue]`.
+
+Two housekeeping notes before the next implementation cycle:
+1. **Exchange is large** — `session_accretion` is at `block` level (12 closeouts in ~30 min, 10 no-ops). Auto-compact is off. If you want, I can run `agent-doc compact tasks/agent-doc/agent-doc-bugs2.md --commit` to trim the exchange before continuing.
+2. **What do you want next?** Tell me to (a) `do #jb-busy-queue-ux-feedback` (turn the dump into an informational notice), (b) `do #active-queue-persisted-no-continue` (treat `auto` as start-trigger and `queue_active` as the continuation signal), or (c) just file this paste somewhere. I held off auto-picking because the paste had no directive and the queue trigger is `persisted`, not `auto`.
+<!-- agent:boundary:09d4b4bb -->
 <!-- /agent:exchange --> 
 ###
 <!--
-JB `Run Agent Doc`
-```
-resync: stash pane %32 is registered in its own project root — skipping kill
-[route] debounce OK — file idle for 3.1s and typing indicator idle
-[route] target tmux session: 0
-[route] dispatch-only codex reopen for tasks/software/tsift.md found active codex turn on pane %36; queued pending dispatch "Should we split out a tsift-agent-doc crate?" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
-```
----
 The completed queue item was not removed from the queue. #mermaid
 #spec-test-build-install-commit-push
 ---

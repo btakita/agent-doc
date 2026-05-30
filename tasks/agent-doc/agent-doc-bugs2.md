@@ -85,10 +85,53 @@ Scope of what your test confirms: running `Restart Supervisor Process` successfu
 Gate cleared on submodule `6544cf53` / pointer `011c6f81a`, plugin `0.2.139`.
 
 **Queue:** the gated `do [#hj7s]` head was auto-struck this preflight (`source=review_gated`) and the queue is now **inactive** (`inactive_queue_residue`). `do [#prompt-preempts-auto-queue]` is still listed but won't auto-run until the queue is reactivated — re-add `auto` (or trigger it) when you want me to pick it up next, per one-per-cycle.
-<!-- agent:boundary:c5fce15b -->
+JB `Clear Session Context` failed on a Codex session. Using `Interrupt and Clear` opened nvim on the Codex session.
+```
+Error: session_clear refused for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md because pane %28 contains protected prompt input (reason=drafted prompt input, source=authoritative_actor, current_command=agent-doc, tail="gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/boost-client · Context 75% used"). Clear the prompt input manually, or run `agent-doc session interrupt-clear /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md` to intentionally interrupt the pane and clear context.
+```
+#spec-test-build-install-commit-push
+
+### Re: JB Interrupt and Clear opened nvim on a Codex session — opus-4-8
+
+Root cause found and fixed. Two distinct things were happening; only the second is a bug.
+
+**1. `Clear Session Context` refused — by design, not a false positive.** The refusal fires only when the live Codex composer holds non-placeholder text starting with `›`/`>`/`❯` (empty composers and dim idle placeholders like `› Ask Codex to do anything` return ready, not protected). The `tail=` in the error is the status/footer line (`gpt-5.5 xhigh · … · Context 75% used`), which is *not* what the detector keys on — it's just context for the operator. So `session_clear` correctly protected drafted prompt input and pointed you to `interrupt-clear`. I can't retroactively prove what was in that composer, so I didn't touch the detection; if you ever see this refusal on a *visibly empty* Codex composer, capture the pane and reopen — that would be a real false positive.
+
+**2. `Interrupt and Clear` opened nvim — the actual bug, now fixed.** The Codex operator interrupt sequence sent `C-g` first, unconditionally:
+
+```
+C-g  →  Escape  →  C-c
+```
+
+`C-g` is only safe in one place: a shell `reverse-i-search` / history-search, where it aborts the search (that's the case the route recovery path and its SimWorld test model). In the **normal Codex TUI composer**, `C-g` opens the external editor (`$EDITOR`, i.e. nvim) — exactly what you saw. The editor-recovery net (`Escape` + `:qa!`) then races to back out, which is why it presented as nvim flashing open rather than a clean interrupt.
+
+**Fix (submodule `3acb93f6`, pointer `911e3fbaf`):**
+- `send_operator_interrupt_sequence` now takes a `codex_shell_search` flag. `C-g` is emitted **only** when a live capture proves the pane is in a shell reverse-i-search / history-search state; every other Codex state (idle composer, active turn) gets `Escape` + `C-c`.
+- New `codex_pane_in_shell_search_state` captures the pane and checks `dispatch_blocker_reason` for those two shell states before deciding.
+- Both callers gated: `interrupt-clear` (your path) **and** `restart-supervisor --force`.
+- Ordered keys extracted into the pure `operator_interrupt_key_plan` so the decision is unit-tested directly.
+
+**Spec/tests/build:**
+- `specs/07-session-tmux-commands.md` + the AGENTS invariant now document the state-scoped Codex interrupt keys (`#codex-interrupt-clear-ctrl-g-opens-editor`).
+- 3 new unit tests: codex-composer omits `C-g`; codex-shell-search includes it; opencode/claude unchanged. `cargo test --workspace` green (4257-line artifact, 0 failures), `make check` exit 0 (verified past the RTK exit-mask via the digest runner).
+- Both binaries rebuilt + installed (`cargo build --release` + `cargo install --path .`). This is CLI-binary logic, not the cdylib, so no JB plugin reinstall / `lib-install` is needed — the installed `agent-doc` the plugin shells out to already has the fix.
+- CI: prior run on this branch green; my push's run is in flight at closeout.
+
+**Live-verify when convenient:** on a Codex session, click **Interrupt and Clear** and confirm it interrupts + clears without nvim opening.
+
+**Follow-up queued (`#codex-route-busy-ctrl-g-opens-editor`):** the route.rs busy-pane reroute interrupt (~`6409`) shares the same unconditional `C-g` and the same latent editor-open; gated separately because changing it touches reroute semantics.
+<!-- agent:boundary:0202fb35 -->
 <!-- /agent:exchange --> 
 ###
 <!--
+JB `Run Agent Doc` on an idle session. Why did `registered in its own project root` occur? 
+```
+resync: stash pane %32 is registered in its own project root — skipping kill
+[route] debounce OK — file idle for 0.5s and typing indicator idle
+[route] target tmux session: 0
+[route] authoritative actor generation 96 for tasks/software/tsift.md is busy on pane %36; queued pending dispatch "re [#tsift-dormant-crates]: Is there functionality in tsift-tokensave and tsift-algorithms that should be used?" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
+```
+---
 JB `Run Agent Doc`, then cancel run directly in the session, then JB `Clear Session Context`, then JB `Run Agent Doc`:
 ```
 resync: stash pane %32 is registered in its own project root — skipping kill
@@ -120,7 +163,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#bare-write-captured-uncommitted]~
-- do [#hj7s]
+- ~do [#hj7s]~
 - do [#prompt-preempts-auto-queue]
 - do [#run-agent-doc-stale-busy-replay]
 - do [#jb-busy-queue-ux-feedback]
@@ -134,6 +177,7 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#codex-route-busy-ctrl-g-opens-editor] [recommended] route.rs busy-pane reroute interrupt (route.rs ~6409) also sends C-g unconditionally to a busy Codex pane before the Escape+C-c fallback — same root cause as #codex-interrupt-clear-ctrl-g-opens-editor: C-g opens the external editor ($EDITOR/nvim) in the normal Codex composer. Gate it on a shell reverse-i-search/history-search capture like send_operator_interrupt_sequence now does (or skip C-g when the busy blocker is an active turn). Tracked separately from the operator interrupt-clear fix because a hard change here alters reroute semantics. Add a route SimWorld regression for the non-search composer case — the existing ctrl-g test (write_mock_busy_registered_agent_doc_recovers_on_ctrl_g) only models reverse-i-search recovery, which is why this regression slipped through.
 - [ ] [#prompt-preempts-auto-queue] [recommended] Unanswered exchange prompts must run before active `agent:queue auto` continuation, even when the prompt was accidentally baselined into the `.agent-doc` snapshot. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `What are #next-steps to complete review items?` was visible after the exchange boundary and duplicated in `agent:queue auto`, but the snapshot already contained the exchange prompt, so the next diff only saw queue bookkeeping and the prompt did not run. Fix: add snapshot-independent unresolved exchange prompt detection, make preflight/direct-run prefer it over queue synthetic diffs, prevent route queue snapshot recovery from absorbing unanswered exchange prompts, and defer Codex/Claude queue continuation while such a prompt exists. Plan: tasks/agent-doc/plan-prompt-preempts-auto-queue.md.
 - [ ] [#codex-final-response-not-written] [recommended] Codex final response was not written back into the session document after a manual/direct run on `src/boost-client/tasks/monsterrodholders.md` (reported 2026-05-30 after `#nsga4verify` work). Symptom: commits and pushes completed, but `agent:exchange` lacked the assistant close-out; the user had to request a manual document patch. Plan: reproduce with an owned-pane recursive/direct invocation path where `agent-doc` refuses direct recursion, the agent continues manually, and finalizes outside the normal `agent-doc write` capture; add a session-check/finalization guard that detects a completed turn with no new `agent:exchange` response body, then either forces `agent-doc write --commit` or fails closed with the exact recovery command. Regression should cover Codex final responses after fallback/manual handling and ensure the response body lands before the boundary and is included in the committed doc.
 - [ ] [#route-drain-all-surface-live-verify] [recommended] Live-verify the route-drain all-surface reap (submodule b239988b / superproject 4c7b06b7f) resolves the JB Run Agent Doc "completed tracked item blocks dispatch" retry: with the installed binary, reproduce a closeout that leaves a completed [x] item in review or icebox on an IDE-owned doc, then run JB Run Agent Doc once and confirm it dispatches without a manual repeat. Also exercises the #pending-gate-snapshot-desync snapshot re-sync (ab074710) under the route path.

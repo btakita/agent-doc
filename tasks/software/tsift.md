@@ -207,7 +207,35 @@ Verification passed:
 Notes: the `make check` digest still reports the known non-fatal temp-index open signal while the command exits 0. CI annotations were non-blocking: GitHub's Node.js 20 action deprecation notice and the existing live Convex graph no-op annotation for missing `TSIFT_LIVE_CONVEX_GRAPH_URL`. This repo has `CI` and `Release` workflows only; there is no separate tmux-test workflow to inspect. No escalation was required.
 
 Confidence: high.
-<!-- agent:boundary:d85a6d49 -->
+
+### Re: do [#tsift-neighborhood-token-budget] — gpt-5
+
+Completed `#tsift-neighborhood-token-budget`.
+
+Implemented in `src/tsift`:
+- Added graph-db `output_budget` reports for related, neighborhood, and evidence JSON with selected/candidate counts, estimated token caps, and `dropped_by_budget` diagnostics.
+- Added usefulness ranking by semantic score, node/edge kind, hop depth, recency, and source-handle/source-path coverage.
+- Enforced per-kind node/edge quotas plus estimated-token caps; neighborhood pages and related retrieval now mark truncation when budget drops occur.
+- Evidence packets now apply the budget using shortest-path hop depth overrides, then filter evidence families and paths to retained rows.
+- Added regression coverage for neighborhood budget drops, evidence depth ranking, and related/evidence diagnostics.
+
+Commits:
+- `src/tsift`: `f726dbd5` (`feat: budget graph-db output`)
+- root: `551161b4` (`chore: update tsift submodule`)
+
+Verification:
+- `cargo test -p tsift-cli graph_db_output_budget_uses_depth_overrides_for_evidence_rows` passed (`tart-ae5b806717`).
+- `cargo test -p tsift-cli` passed (`tart-f73cb4032e`).
+- `cargo clippy --workspace --all-targets -- -D warnings` passed (`tart-799ab74940`).
+- `make check` passed (`tart-8e3a3b679b`; digest reported existing patch warnings and an expected error-shaped test log line, exit 0).
+- `cargo install --path . --force` passed (`tart-70a51bf1d6`; same existing patch warnings).
+- `cargo fmt --all -- --check` and `git diff --check` passed.
+- GitHub CI `26693680101` passed both `clippy + test` and `live Convex graph acceptance`; annotations were GitHub's Node 20 deprecation and the expected missing live Convex URL note.
+- No tmux-test workflow exists for this repo (`gh workflow list` shows `CI` and `Release`).
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:53236aa7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -221,7 +249,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#tsift-memory-crate-plugin]~
 - ~do [#tsift-memory-budget-guard]~
 - ~do [#tsift-claude-mem-adapter]~
-- do [#tsift-neighborhood-token-budget]
+- ~do [#tsift-neighborhood-token-budget]~
 - do [#tsift-memory-eval-harness]
 - do [#tsift-summary-extract-gate]
 <!-- /agent:queue -->
@@ -229,7 +257,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#tsift-neighborhood-token-budget] Add token/usefulness budgets to graph-db related/neighborhood/evidence output: rank nodes and edges by semantic match, edge kind, depth, recency, and source-handle coverage; enforce per-kind quotas plus estimated-token caps; report dropped_by_budget diagnostics.
 - [ ] [#tsift-memory-eval-harness] Create a memory retrieval eval fixture from the Claude Code Insights report plus sampled claude-mem failures, comparing claude-mem API, tsift session-review/context-pack, and graph-db related on useful hits, output tokens, latency, and zero-output failure rate.
 - [ ] [#tsift-summary-extract-gate] Promote missing summary cache from reminder to graph effectiveness gate: context-pack/graph-db related should provide the exact summarize --extract and graph refresh commands required before semantic neighborhoods are trusted.
 <!-- /agent:backlog -->

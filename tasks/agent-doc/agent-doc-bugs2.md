@@ -30,32 +30,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260530-194633.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260530-200534.md`*
 
 Compacted content:
-- Archived 1 response topic(s): do #do-id-closeout-open-backlog
+- Archived 1 response topic(s): do #queue-user-edit-overwrite
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: do #queue-user-edit-overwrite — opus-4-8
-
-Landed a fail-closed guard for the silent-queue-deletion class on the IPC `content_ours` convergence path, mirroring the proven `#exchange-prompt-dropped-on-merge` mechanism. **Gated** (not done) — the broader provenance/epoch work remains; see below.
-
-#### What landed
-
-- **`cycle_state.rs`** — new `dropped_queue_prompts` field + `record_dropped_queue_prompts()` / `clear_dropped_queue_prompts()`.
-- **`write.rs`** — at the IPC `content_ours` adoption site (where live prompt drift is detected), record user-authored `do [#id]` `agent:queue` lines that `content_ours` does not own, via a new `dropped_queue_prompt_lines_after_content_ours()` (queue-scoped twin of the exchange detector).
-- **`session_check.rs`** — new `check_dropped_queue_prompt_guard` wired into the inspect chain. Key correction vs. the exchange guard: a user queue edit is *supposed* to stay out of HEAD (`content_ours` adoption preserves it on disk so it re-surfaces next cycle), so the guard checks the **visible document** (with HEAD as a committed fallback) and clears when the edit is preserved or when its `do [#id]` was consumed this cycle (`resolved_pending_ids`). Only a genuine disappearance from the visible queue fails closed.
-
-#### Verification
-
-- 3 new unit tests: silent-deletion fails closed, preserved-in-doc clears, consumed-this-cycle clears. Queue line matching strips `- `/`*`/`+` list markers and `❯`.
-- The existing real-binary `live_ipc_race_integration::finalize_file_ipc_preserves_live_queue_drift_without_snapshot_absorb` (which preserves a live-typed queue prompt for the next cycle) still passes — confirming the guard does not misfire on the legitimate deferred-preserve flow. This caught my first (HEAD-based) model, which I corrected to the visible-document check.
-- `make check` green; FlowCore `guard_` budget 30→31 (audited); `--release` + `cargo install` done.
-
-#### Gated — remaining scope (plan-user-queue-edit-preservation.md)
-
-This slice covers "fail closed on stale IPC/snapshot queue rewrites" and the detection half of provenance. Still open: full last-writer-wins **preservation** across `reset --from-current` / `commit` convergence, a durable queue epoch/hash so stale payloads no-op rather than just fail closed, and the FFI/JB-plugin queue-convergence boundary. Those need a queue-epoch design decision and are deliberately deferred from a blind code change.
-<!-- agent:boundary:6248a4d2 -->
+<!-- agent:boundary:b3e0d1e0 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->

@@ -52,20 +52,16 @@ Implemented as the **on-demand command** you chose: `agent-doc review ungate-tas
 - `make check` green (clippy `-D warnings`); both binaries rebuilt + installed.
 
 Run `agent-doc review ungate-tasks <FILE>` whenever you want backlog follow-ups for the items gated into review this session. I deliberately did not wire it into `--pending-gate` (your on-demand choice), so there are no surprise backlog mutations.
-<!-- agent:boundary:c2dfd147 -->
+<!-- agent:boundary:5a2562d4 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- ~do [#do-id-closeout-open-backlog]~
-- ~do [#queue-user-edit-overwrite]~
-- ~do [#prompt-preempts-auto-queue]~
-- ~do [#jb-compact-malformed-response-commit]~
-- ~do [#jb-compact-repair-left-uncommitted]~
-- ~do [#jb-run-agent-doc-response-queue-contamination]~
-- If a completed item is gated in review, agent-doc should automatically add task(s) into the backlog to ungate the review item.
+- ~If a completed item is gated in review, agent-doc should automatically add task(s) into the backlog to ungate the review item.~
+- do [#closeout-repair-churn]
 - do [#codex-owned-pane-prompt-miss]
 - do [#stuck-capture-compact-false-positive]
+- do [#codex-final-response-live-verify]
 - do [#codex-route-busy-ctrl-g-opens-editor]
 - do [#cross-project-stash-pane-condition]
 - do [#route-drain-all-surface-live-verify]
@@ -77,6 +73,7 @@ preset #spec-test-build-install-commit-push
 - do [#ah0s]
 - do [#backlog-priority-attribute]
 - do [#backlog-queue-sync-attribute]
+- do [#preset-item-id-collision]
 <!-- /agent:queue -->
 ###
 <!--

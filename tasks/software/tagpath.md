@@ -182,7 +182,52 @@ Verification:
 Escalation: none.
 
 Next queue item remains `#tpcoreci`.
-<!-- agent:boundary:e615ecd7 -->
+
+### Re: do #tpcoreci — gpt-5
+
+Completed `#tpcoreci`.
+
+Changed paths:
+- `src/tagpath/.github/workflows/ci.yml`
+- `src/tagpath/.github/workflows/release.yml`
+- `src/tagpath/scripts/check-release.sh`
+- `src/tagpath/tests/test_core_split_plan.rs`
+- `src/tagpath/AGENTS.md`
+- `src/tagpath/README.md`
+- `src/tagpath/SPEC.md`
+- `src/tagpath/VERSIONS.md`
+- `src/tagpath` submodule pointer in the superproject
+
+What changed:
+- Expanded CI to run workspace clippy/tests, `tagpath-core` no-default tests, root facade library no-default tests, plain wasm target builds, and a crates.io publish-order smoke check.
+- Added `scripts/check-release.sh`, which requires `tagpath-core` to package successfully and accepts the root `tagpath` dry-run only when it is blocked by the documented same-version `tagpath-core` crates.io ordering issue.
+- Gated release artifact builds behind the same split-aware checks.
+- Kept the existing wasm-pack workflow and added regression coverage proving the workflow/script/docs stay wired.
+- Updated release documentation in AGENTS, README, SPEC, and VERSIONS.
+
+Commits:
+- `tagpath`: `8e27ce4 ci: add split release checks`
+- `agent-loop`: `70ec5441a chore: update tagpath submodule`
+
+Verification:
+- `cargo test --test test_core_split_plan` passed.
+- `scripts/check-release.sh` passed: `tagpath-core` dry-run passed; root `tagpath` dry-run reached the expected `tagpath-core` not-yet-published blocker.
+- `cargo clippy --workspace --all-targets -- -D warnings` passed.
+- `cargo test --workspace` passed.
+- `cargo test -p tagpath-core --no-default-features` passed.
+- `cargo test -p tagpath --lib --no-default-features` passed.
+- `cargo build --target wasm32-unknown-unknown --no-default-features --features wasm` passed.
+- `cargo install --path . --force` passed.
+- `scripts/build-wasm.sh` passed.
+- `node pkg-smoke/smoke.mjs` passed.
+- Tagpath GitHub Actions CI run `26674941830` passed with the expanded step list.
+- Root `make check` was attempted and failed in the dirty `src/agent-doc` submodule on `codex_bare_run_inside_owning_pane_fails_before_nested_dispatch`: the local uncommitted agent-doc code now records `abandoned` where the existing committed test expects `preflight_started`. I did not modify or commit that unrelated submodule state in this tagpath queue item.
+
+Confidence: high for tagpath CI/release-check coverage; root-suite confidence is limited by the unrelated dirty agent-doc failure noted above.
+Escalation: none.
+
+Next queue item remains `#tpcoreadapters`.
+<!-- agent:boundary:c0695da4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -193,14 +238,13 @@ preset #spec-test-build-install-commit-push
 - ~do [#tpcoreplan]~
 - ~do [#tpcoreextract]~
 - ~do [#tpcorefacade]~
-- do [#tpcoreci]
+- ~do [#tpcoreci]~
 - do [#tpcoreadapters]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#tpcoreci] Add workspace CI, docs, and release checks for the split, including no-default-features, wasm, and crates.io publish ordering smoke tests.
 - [ ] [#tpcoreadapters] [recommended] Re-evaluate adapter crates such as tagpath-wasm, tagpath-mcp, and tagpath-project only after tagpath-core has stabilized.
 <!-- /agent:backlog -->
 

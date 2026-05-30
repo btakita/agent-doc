@@ -115,7 +115,21 @@ For `tasks/software/tsift.md`, `#tsiftmempending` is done, committed, pushed, an
 Verification passed: `cargo fmt --check`, focused tsift-memory test, `cargo test --workspace`, `cargo build --release`, `cargo install --path .`, `make check`, and `tsift memory status . --json`. `btakita/tsift` CI run `26696235528` passed. Root `Agent Doc` CI failed before allocating job steps, with empty `tmux-ci`/`check` step lists, so I classified it as an external CI-start blocker.
 
 I also ran the earlier `tasks/agent-doc/agent-doc-bugs2.md` continuation. That cycle completed and `session-check` is clean with `queue_continuation_required=false`. It produced local session commits through `6f37948be`; I left those unpushed because that hook only asked to run the continuation, not push it.
-<!-- agent:boundary:8a4c94f9 -->
+❯ What is `claude-mem.pending_messages`?
+
+### Re: claude-mem.pending_messages — gpt-5
+
+`claude-mem.pending_messages` is a table in the external claude-mem SQLite database, not a first-party tsift memory table. It holds queued or in-progress claude-mem work: message type, status/retry counters, cwd/session info, recent user/assistant text, and raw tool input/response payloads.
+
+Tsift reports that table when inspecting or planning a claude-mem import, so skipped data is visible. It intentionally does not import it into `.tsift/memory.db` or project it into graph retrieval because those rows are transient queue state and raw processing payloads, not durable replacement memory. The durable claude-mem import contract remains the supported memory-like tables: observations, session summaries, and user prompts.
+
+Proof:
+- Changed paths: session document only, through `agent-doc finalize`.
+- Commands: `agent-doc --version`; `tsift status`; `tsift status --fix`; `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/software/tsift.md`; `agent-doc read /home/brian/work/btakita/agent-loop/tasks/software/tsift.md`; `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/software/tsift.md`; `rg -n "pending_messages|unsupported_reason|ClaudeMemTablePlan" src/tsift/SPEC.md src/tsift/packages/tsift-memory/src/lib.rs`; `sed -n '1295,1330p' src/tsift/packages/tsift-memory/src/lib.rs`; `git status --short`.
+- Verification: preflight and plan completed; source/spec lookup confirms `pending_messages` is surfaced but unsupported with the transient queue/raw payload exclusion reason; no source-code change was required.
+- Confidence: high.
+- Escalation: none.
+<!-- agent:boundary:bcc97025 -->
 <!-- /agent:exchange -->
 ###
 <!--

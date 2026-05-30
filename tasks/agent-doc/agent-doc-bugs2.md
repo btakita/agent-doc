@@ -35,10 +35,58 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 4 response topic(s): IPC corruption on corky.md; session_restart refused; do #session-restart-refusal-shows-busy-proof; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:4bcd495a -->
+
+### Re: do #pending-gate-snapshot-desync — opus-4-8
+
+Done — and this was the desync I hit live three times this session (the stranded `--review-add`, the `--pending-gate`).
+
+**Root cause (confirmed in code):** `run_pending_maintenance` re-synced the snapshot's tracked surfaces to the file **only when it reaped or backfilled** — the `if current_body == body { continue }` short-circuit skipped the snapshot sync. The write phase persists `--pending-gate` / `--pending-edit` / `--review-add` to the document but saves the `content_ours` snapshot (baseline + response) **before** those mutations, so a pure gate/edit/review-add left the snapshot stale → commit staged `snapshot == HEAD` → mutation stranded as post-commit drift. `--done` escaped only because reap already forced a snapshot rewrite.
+
+**Fix:** sync each tracked surface's snapshot body to the file whenever they diverge — even with no reap/backfill — via a new `snapshot_mutated` flag (snapshot re-saved without an unnecessary working-tree rewrite). Reorder detection now compares against the **cycle-start** snapshot (captured before the re-sync) so a same-cycle reorder isn't masked — that subtlety surfaced as a test regression and is covered.
+
+**Verification:**
+- New regression test `pending_maintenance_syncs_snapshot_for_write_phase_gate_without_reap` (file gates `#g1` into review; snapshot lags; assert snapshot re-syncs).
+- `make check` green (including the reorder-flag test that initially broke and guided the cycle-start-snapshot fix).
+- `cargo build --release` + `cargo install` (both binaries) — **so this very closeout runs the fixed binary.**
+- Spec `pending-system` §3 updated with the snapshot-sync invariant.
+
+**Commits:** submodule `ab074710`, superproject pointer `224f6088b` (pushed).
+
+This should retire the stranding I kept hitting: future `--review-add` / `--pending-gate` / `--pending-edit` will land in HEAD in the same cycle instead of needing manual recovery.
+<!-- agent:boundary:a56db8a3 -->
 <!-- /agent:exchange --> 
 ###
 <!--
+JB `Run Agent Doc` failed. A repeat attempt succeeded.
+```
+resync: stash pane %4 is registered in its own project root — skipping kill
+resync: stash pane %8 is registered in its own project root — skipping kill
+resync: stash pane %27 is registered in its own project root — skipping kill
+resync: stash pane %34 is registered in its own project root — skipping kill
+resync: stash pane %21 is registered in its own project root — skipping kill
+resync: stash pane %20 is registered in its own project root — skipping kill
+resync: stash pane %33 is registered in its own project root — skipping kill
+resync: stash pane %2 is registered in its own project root — skipping kill
+resync: stash pane %3 is registered in its own project root — skipping kill
+[route] debounce OK — file idle for 359.2s and typing indicator idle
+[route] target tmux session: 0
+[repair] closed stale empty preflight_started cycle cycle-1780110077219 for tasks/monsterrodholders.md after 976s without a capture
+[commit] file is in submodule /home/brian/work/btakita/agent-loop/src/boost-client — running git ops there
+[commit] WARNING: file is 924 bytes larger than snapshot for tasks/monsterrodholders.md — possible out-of-band write (snap=15730, file=16654)
+[commit] repositioned boundary in snapshot
+[commit] skipping working-tree boundary reposition — IPC listener active
+[perf] commit.reposition: 1ms
+[perf] commit.staging (hash_object+update-index): 3ms
+[perf] commit.git_commit: 3ms
+[main 70eebb2] agent-doc(monsterrodholders): 2026-05-29 23:17:33
+[commit] IPC reposition boundary signal sent
+[commit] VCS refresh signal written
+[main 4e4d1be8d] agent-doc(monsterrodholders): 2026-05-29 23:17:33 (submodule pointer)
+[commit] parent submodule pointer updated for src/boost-client
+[perf] commit total: 25ms
+Error: authoritative actor generation 238 for tasks/monsterrodholders.md owns pane %28 but route could not drain the active closeout before dispatch: [session-check] INTERRUPTED: document still contains completed tracked item(s) after closeout: #seocrawl, #seocat. Re-run preflight/repair so the reap is persisted through the snapshot + commit boundary
+```
+---
 The completed queue item was not removed from the queue. #mermaid
 #spec-test-build-install-commit-push
 ---
@@ -56,9 +104,10 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 #spec-test-build-install-commit-push
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#pending-gate-snapshot-desync]
+- ~do [#pending-gate-snapshot-desync]~
+- do [#codex-auto-queue-live-verify]. auto-queue in monsterrodholders.md stalled
 - do [#pending-add-append-not-prepend]
 - do [#next-steps-backlog-capture]
 - do [#run-agent-doc-stale-busy-replay]
@@ -68,12 +117,12 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#codex-auto-queue-stalled-final-gate] Codex auto-queue final gate failed live: after `src/boost-client/tasks/monsterrodholders.md` completed/deployed `#seocat`, the document still had `queue_active: true`, `agent:queue auto`, and next head `do [#seopdp]`, but Codex sent a normal final answer instead of continuing/blocking. This is the failed live proof for `#codex-auto-queue-live-verify`. Fix by adding a binary-owned durable "queue continuation required" marker/final gate that successful closeout writes when a ready auto-queue head remains, and teach Codex Stop/session-check strict mode to block final answers even when transient hook session state is missing or the turn used a manual/recovery closeout path. Plan: tasks/agent-doc/plan-codex-auto-queue-stalled-final-gate.md.
 - [ ] [#active-queue-persisted-no-continue] Active persisted queues can stall after a successful closeout when `queue_active: true` remains but the queue tag lacks `auto`: the next head is ready, yet continuation paths only consider `agent:queue auto` (`codex_hook.rs::active_auto_queue_prompt` requires the attr; direct continuation gates on an auto outcome; Claude guidance checks `queue_trigger == "auto"`). Repro 2026-05-30 `tasks/agent-doc/agent-doc-bugs2.md`: plain `agent:queue` (no auto attr), `queue_active: true`, five remaining heads beginning `#pending-gate-snapshot-desync`, no next cycle launched after closeout. Treat `auto` as a start trigger and `queue_active` as the continuation signal, or halt with an explicit reason. Plan: tasks/agent-doc/plan-active-queue-persisted-continuation.md.
 - [ ] [#bare-write-captured-uncommitted] `agent-doc write` can preserve/synthesize a template response body, receive IPC `already_applied`, then fail `session-check` with the cycle still `response_captured`, leaving the visible response outside the binary-owned commit boundary. Repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md` #seocrawl closeout: `agent-doc write --done seocrawl ...` printed "bare `agent-doc write` preserved the response body, but the session closeout is still outside the commit boundary"; operator had to manually commit `tasks/monsterrodholders.md` as `c13c258`. Fix: if write places/preserves response content, continue through snapshot+commit+session-check or fail before mutating; add idempotent repair for matching `response_captured` body-present state. Plan: tasks/agent-doc/plan-bare-write-captured-response-outside-commit.md.
 - [ ] [#ah0s] [recommended] Add explicit-position --pending-add primitives so ordered backlog batches never depend on implicit prepend-vs-argorder semantics: --pending-add-after <id>, --pending-add-before <id>, --pending-add-back/--pending-append, keeping --pending-add as the front-insert default. Backlog is a priority pool with ID-based consumption (not a stack/queue; FIFO lives in agent:queue), so position should be author-set explicitly when it matters. Two agents (open-code.md #adcr waves f94e7851c; corky.md crate-split phases fc8d9b3bc) both reversed args expecting prepend-flip and got reverse-of-intended order. Pairs with #pending-add-append-not-prepend (that item finalizes the default-order decision; this adds the explicit escape hatches). Plan: tasks/agent-doc/plan-pending-add-explicit-position.md.
 - [ ] [#pending-add-suppresses-queue-consume] [recommended] Bundling --pending-add in the same finalize as a queue-head-targeting response suppresses queue-head consumption: finalize logs 'skipped consumption because the active prompt did not target the queue head' and treats the pending-add as the active prompt, even when the response heading exactly matches the head (Re: do #ID form, no brackets). Repro 2026-05-29 agent-doc-bugs2.md declining backlog-auto-marker-misfire with a bundled --pending-add — head stayed unstruck. Fix: heading/queue-head match should drive consumption independently of bundled pending mutations, or consume the head when the response heading matches regardless of detected active prompt.
 - [ ] [#stuck-capture-compact-false-positive] [recommended] stuck_captured_cycle false-positive after compaction: a capture recorded as committed (cycle-1780100032048, response 'gate→done for codex guidance') is later archived by compact, so preflight reports committed-but-not-in-HEAD and suggests `write --commit` recovery — which would re-inject an already-archived response (it lives in .agent-doc/archives/<hash>-*.md). Fix: when a captured-committed body is absent from HEAD because it was compacted (present in the matching archive), reconcile the capture instead of flagging it stuck. Repro 2026-05-29 agent-doc-bugs2.md.
-- [ ] [#pending-gate-snapshot-desync] `--pending-gate <id>` lands the gate ([/], moved to review) on the working-tree disk but NOT the committed snapshot when the IPC listener is dead and the write goes through the CRDT-merge / --force-disk path: the snapshot is saved from content_ours (baseline+response, item still [ ]) before the gate mutation, so commit sees snapshot==HEAD and leaves the gate uncommitted as post-commit local drift. Repro 2026-05-29 on agent-doc-bugs2.md finalizing the codex heading-guidance item; --done does NOT hit it (reap is captured pre-snapshot). Fix: apply pending gate/edit mutations before saving content_ours / the commit snapshot.
 - [ ] [#codex-auto-queue-live-verify] [recommended] Live-verify a Codex auto-queue advances across items with the new harness-invocation heading-discipline guidance: run a real Codex auto-queue and confirm a descriptive-heading completion advances once the agent titles the heading exactly with the head (### Re: do [#id] / ### Re: #id) or passes --done. Needs a live Codex session.
 - [ ] [#ipcfullprompt-recur2] CURE ONLY (capture/detection split out to #ipcfullprompt-capture, done). Editor-side PatchWatcher.setText PREVENTION: stop the live editor buffer from producing full-document/full-tail duplication or deletion while a prompt is being typed. Gated on the transport/payload packet from idea.log (enable #com.github.btakita.agentdoc debug logging) to pin the exact setText call shape. Add a SimWorld/Kotlin regression for the prevention once the fix lands; bump pluginVersion past 0.2.137 and reinstall the signed plugin. Stays open until prevention lands and is live-verified. Plan: tasks/agent-doc/plan-full-document-ipc-corruption-typing-prompt.md.
 - [ ] [#pending-add-append-not-prepend] `--pending-add` appends new items below the previous CLI arg within the same finalize cycle, contradicting SKILL.md "Pending capture rule" ("Put new items at the beginning of agent:backlog"). Repro: tasks/agent-doc/open-code.md commit f94e7851c — agent added wave-4, wave-3, wave-2, wave-1 expecting wave-1 on top per SKILL.md; actual backlog was wave-4 on top (pure CLI-arg order). User flagged it as bug; agent had to issue --pending-reorder. Plan: tasks/agent-doc/plan-pending-add-prepend-semantics.md (recommend Option A — strict prepend, drop the implicit adjacency heuristic).

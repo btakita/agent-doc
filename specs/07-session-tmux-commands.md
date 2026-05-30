@@ -356,7 +356,14 @@ single-owner actor controls:
   log and tell the operator to use
   `agent-doc session interrupt-clear <FILE>` for an explicit discard.
   `interrupt-clear` owns harness-specific interrupt keys, waits for direct
-  idle/closed evidence, and then retries the normal clear path. If the interrupt
+  idle/closed evidence, and then retries the normal clear path. The Codex
+  interrupt keys are state-scoped: `C-g` is sent only when the live pane is in a
+  shell `reverse-i-search` / history-search state (where it aborts the search),
+  because in the normal Codex TUI composer `C-g` opens the external editor
+  (`$EDITOR`, e.g. nvim) instead of interrupting; any other Codex state (idle
+  composer, active turn) receives only `Escape` + `C-c`
+  (`#codex-interrupt-clear-ctrl-g-opens-editor`). The same gating applies to the
+  `session restart-supervisor <FILE> --force` busy-pane interrupt. If the interrupt
   opens a Vim/Neovim editor prompt in the managed pane, the discard path must
   attempt one forced editor quit before continuing the idle/closed wait; if the
   pane still does not settle, the ops event and error must name the final

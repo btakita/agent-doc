@@ -335,7 +335,9 @@ fn force_restart_live_busy_pane(
 ) -> Result<()> {
     let pane = evidence.pane_id.as_deref().unwrap_or("unknown");
     log_restart_evidence_event(ctx, "session_restart_force_used", evidence);
-    if let Err(err) = send_operator_interrupt_sequence(tmux, pane, &ctx.harness) {
+    let codex_shell_search = codex_pane_in_shell_search_state(ctx, tmux, evidence);
+    if let Err(err) = send_operator_interrupt_sequence(tmux, pane, &ctx.harness, codex_shell_search)
+    {
         agent_doc_orchestration::ops_log::log_op(
             &ctx.canonical_file,
             &format!(
@@ -844,7 +846,8 @@ pub fn interrupt_clear(file: &Path) -> Result<()> {
         InterruptClearInitialAction::SendInterrupt => {}
     }
 
-    send_operator_interrupt_sequence(&tmux, pane, &ctx.harness)?;
+    let codex_shell_search = codex_pane_in_shell_search_state(&ctx, &tmux, &evidence);
+    send_operator_interrupt_sequence(&tmux, pane, &ctx.harness, codex_shell_search)?;
     let outcome = wait_for_interrupt_clear_settle(&ctx, &tmux, pane, Duration::from_secs(10));
     agent_doc_orchestration::ops_log::log_op(
         &ctx.canonical_file,
@@ -957,25 +960,71 @@ fn send_clear_to_pane(tmux: &Tmux, pane: &str, file: &Path, harness: &str) -> Re
     )
 }
 
-fn send_operator_interrupt_sequence(tmux: &Tmux, pane: &str, harness: &str) -> Result<()> {
+/// Ordered interrupt keys for an operator interrupt-clear / force-restart on a
+/// live pane. `codex_shell_search` is true only when the Codex pane is in a
+/// shell `reverse-i-search` / history-search state — the one place `C-g` is
+/// safe and useful (it aborts the search). In the normal Codex TUI composer
+/// `C-g` opens the external editor (`$EDITOR`, e.g. nvim), so it must be omitted
+/// there and the interrupt falls through to `Escape` + `C-c`
+/// (#codex-interrupt-clear-ctrl-g-opens-editor).
+fn operator_interrupt_key_plan(harness: &str, codex_shell_search: bool) -> Vec<&'static str> {
     match harness {
-        "opencode" => {
-            tmux.send_keys_raw(pane, "Escape")?;
-            std::thread::sleep(Duration::from_millis(200));
-            tmux.send_keys_raw(pane, "Escape")?;
+        "opencode" => vec!["Escape", "Escape"],
+        "codex" if codex_shell_search => vec!["C-g", "Escape", "C-c"],
+        "codex" => vec!["Escape", "C-c"],
+        _ => vec!["C-c"],
+    }
+}
+
+fn operator_interrupt_step_delay(harness: &str) -> Duration {
+    match harness {
+        "opencode" => Duration::from_millis(200),
+        _ => Duration::from_millis(100),
+    }
+}
+
+fn send_operator_interrupt_sequence(
+    tmux: &Tmux,
+    pane: &str,
+    harness: &str,
+    codex_shell_search: bool,
+) -> Result<()> {
+    let plan = operator_interrupt_key_plan(harness, codex_shell_search);
+    let delay = operator_interrupt_step_delay(harness);
+    for (index, key) in plan.iter().enumerate() {
+        if index > 0 {
+            std::thread::sleep(delay);
         }
-        "codex" => {
-            tmux.send_keys_raw(pane, "C-g")?;
-            std::thread::sleep(Duration::from_millis(100));
-            tmux.send_keys_raw(pane, "Escape")?;
-            std::thread::sleep(Duration::from_millis(100));
-            tmux.send_keys_raw(pane, "C-c")?;
-        }
-        _ => {
-            tmux.send_keys_raw(pane, "C-c")?;
-        }
+        tmux.send_keys_raw(pane, key)?;
     }
     Ok(())
+}
+
+/// True when a live Codex pane is in a shell `reverse-i-search` / history-search
+/// state, where sending `C-g` safely aborts the search. Any other state (normal
+/// composer, active turn) must not receive `C-g` because it opens the external
+/// editor (#codex-interrupt-clear-ctrl-g-opens-editor).
+fn codex_pane_in_shell_search_state(
+    ctx: &SessionContext,
+    tmux: &Tmux,
+    evidence: &LivePaneEvidence,
+) -> bool {
+    let Some(pane) = evidence.pane_id.as_deref() else {
+        return false;
+    };
+    let harness = harness_for_evidence(ctx, evidence);
+    if harness.binary != "codex" {
+        return false;
+    }
+    let Ok(captured) = agent_doc_orchestration::sessions::capture_pane_with_ansi(tmux, pane)
+        .or_else(|_| agent_doc_orchestration::sessions::capture_pane(tmux, pane))
+    else {
+        return false;
+    };
+    matches!(
+        harness.dispatch_blocker_reason(&captured).as_deref(),
+        Some("interactive shell reverse-i-search") | Some("interactive shell history search")
+    )
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -2566,6 +2615,44 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         assert!(!terminal_editor_command("codex"));
         assert!(!terminal_editor_command("agent-doc"));
         assert!(!terminal_editor_command("vim-addon-manager"));
+    }
+
+    #[test]
+    fn operator_interrupt_key_plan_omits_ctrl_g_for_codex_composer() {
+        // #codex-interrupt-clear-ctrl-g-opens-editor: C-g opens the external
+        // editor (nvim) in the Codex composer, so the normal interrupt path must
+        // not send it — Escape + C-c is the safe interrupt.
+        assert_eq!(
+            operator_interrupt_key_plan("codex", false),
+            vec!["Escape", "C-c"]
+        );
+        assert!(!operator_interrupt_key_plan("codex", false).contains(&"C-g"));
+    }
+
+    #[test]
+    fn operator_interrupt_key_plan_sends_ctrl_g_only_for_codex_shell_search() {
+        // C-g is safe (aborts the search) only when the Codex pane is in a shell
+        // reverse-i-search / history-search state.
+        assert_eq!(
+            operator_interrupt_key_plan("codex", true),
+            vec!["C-g", "Escape", "C-c"]
+        );
+    }
+
+    #[test]
+    fn operator_interrupt_key_plan_unchanged_for_other_harnesses() {
+        // The codex_shell_search flag is codex-scoped and must not perturb other
+        // harnesses' interrupt sequences.
+        assert_eq!(
+            operator_interrupt_key_plan("opencode", false),
+            vec!["Escape", "Escape"]
+        );
+        assert_eq!(
+            operator_interrupt_key_plan("opencode", true),
+            vec!["Escape", "Escape"]
+        );
+        assert_eq!(operator_interrupt_key_plan("claude", false), vec!["C-c"]);
+        assert_eq!(operator_interrupt_key_plan("claude", true), vec!["C-c"]);
     }
 
     #[test]

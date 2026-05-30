@@ -43,6 +43,27 @@ class PromptPollerTest {
     }
 
     @Test
+    fun `tracking key converges for editor and poll registration`() {
+        // #ipcfullprompt regression: addFile (editor) and handlePollResults (poll)
+        // must derive the SAME key for the same file so it is tracked once. Both
+        // now key by the resolved VirtualFile.path (an absolute path). Previously
+        // the poller keyed by "$cwd:$file", diverging from addFile's relative-path
+        // key and double-tracking the file (two baselines -> double mergeOrReload).
+        val base = "/home/brian/work/btakita/agent-loop"
+        val rel = "tasks/software/corky.md"
+        val abs = File(base, rel).absolutePath
+
+        // Poll side resolves File(base, rel).absolutePath -> VirtualFile.path == abs.
+        // Editor side uses VirtualFile.path == abs. Both feed trackingKey().
+        assertEquals(trackingKey(abs), trackingKey(File(base, rel).absolutePath))
+
+        // The key must be the absolute path, never the old colon-joined form
+        // that caused the same file to occupy two map entries.
+        assertEquals(abs, trackingKey(File(base, rel).absolutePath))
+        assertNotEquals("$base:$rel", trackingKey(File(base, rel).absolutePath))
+    }
+
+    @Test
     fun `buildPromptAnswerCommand sends one based option position`() {
         assertEquals(
             listOf("/bin/agent-doc", "prompt", "--answer", "2", "tasks/demo.md"),

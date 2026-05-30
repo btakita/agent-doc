@@ -56,9 +56,11 @@ class PromptPoller(private val project: Project) : Disposable {
      * Register a file for tracking and ensure the poller is running.
      */
     fun addFile(file: VirtualFile) {
-        val relativePath = TerminalUtil.relativePath(project, file)
         val doc = FileDocumentManager.getInstance().getDocument(file)
-        trackedFiles[relativePath] = TrackedFile(file, file.modificationStamp, doc?.text)
+        // Key by the canonical absolute path so the editor-registration path and
+        // the poll-registration path (handlePollResults) converge on a single
+        // entry per file. See trackingKey().
+        trackedFiles[trackingKey(file.path)] = TrackedFile(file, file.modificationStamp, doc?.text)
         ensurePolling()
     }
 
@@ -305,14 +307,20 @@ class PromptPoller(private val project: Project) : Disposable {
     private fun handlePollResults(entries: List<PromptAllEntry>, basePath: String) {
         // Resolve VirtualFiles for sessions we haven't explicitly tracked
         for (entry in entries) {
+            if (entry.file.isEmpty()) continue
             val entryBasePath = entry.cwd?.takeIf { it.isNotBlank() } ?: basePath
-            val trackedKey = "$entryBasePath:${entry.file}"
-            if (entry.file.isNotEmpty() && !trackedFiles.containsKey(trackedKey)) {
-                val absPath = java.io.File(entryBasePath, entry.file).absolutePath
-                val vf = LocalFileSystem.getInstance().findFileByPath(absPath)
-                if (vf != null) {
-                    trackedFiles[trackedKey] = TrackedFile(vf, vf.modificationStamp)
-                }
+            val absPath = java.io.File(entryBasePath, entry.file).absolutePath
+            val vf = LocalFileSystem.getInstance().findFileByPath(absPath) ?: continue
+            // Key by the resolved VirtualFile's canonical path (the same scheme
+            // addFile uses) so a file already tracked from the editor side is not
+            // re-added under a divergent key. Double-tracking previously created
+            // two TrackedFile entries for one file, each with its own baseline,
+            // and refreshTrackedFiles/autoSaveTrackedFiles then ran mergeOrReload
+            // twice with divergent baselines — a full-document duplication path
+            // (#ipcfullprompt). See trackingKey().
+            val key = trackingKey(vf.path)
+            if (!trackedFiles.containsKey(key)) {
+                trackedFiles[key] = TrackedFile(vf, vf.modificationStamp)
             }
         }
 
@@ -520,6 +528,20 @@ private fun parsePromptAllEntry(json: String): PromptAllEntry? {
 
     return PromptAllEntry(sessionId = sessionId, file = file, cwd = cwd, info = info)
 }
+
+/**
+ * Canonical key for a tracked session document. Both registration paths —
+ * [PromptPoller.addFile] (editor side, keyed from `VirtualFile.path`) and
+ * `handlePollResults` (poll side, keyed from the resolved `VirtualFile.path`)
+ * — must produce the same key for the same file so it is tracked exactly once.
+ *
+ * Previously addFile keyed by the project-relative path while the poller keyed
+ * by `"$cwd:$file"`, so the same file was tracked under two keys. That created
+ * two independent `TrackedFile` baselines, and `refreshTrackedFiles` /
+ * `autoSaveTrackedFiles` then invoked `mergeOrReload` twice per change with
+ * divergent baselines — a full-document duplication path (#ipcfullprompt).
+ */
+internal fun trackingKey(absolutePath: String): String = absolutePath
 
 private fun extractJsonString(json: String, key: String): String? {
     val pattern = "\"$key\"\\s*:\\s*\"".toRegex()

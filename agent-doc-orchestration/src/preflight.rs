@@ -608,6 +608,67 @@ fn post_exchange_comment_prompt_preset_warning(
     })
 }
 
+/// Attributes that are only meaningful on the `agent:queue` component. Seeing
+/// one of these on any other component is a misplaced-attribute mistake.
+const QUEUE_ONLY_COMPONENT_ATTRS: &[&str] = &["auto"];
+
+/// Component attribute keys recognized anywhere in the document (excluding the
+/// queue-only set above). A key outside both sets is almost certainly a typo
+/// (for example `auot` for `auto`) and must never be silently accepted.
+const KNOWN_COMPONENT_ATTRS: &[&str] = &[
+    "patch",
+    "mode",
+    "max_lines",
+    "archive",
+    "transfer-source",
+    "timestamp",
+    "broken",
+];
+
+/// Warn when a component carries a queue-only attribute on the wrong component
+/// (e.g. `auto` on `agent:backlog`) or an unrecognized attribute key (e.g. the
+/// `auot` typo). Root cause for `#backlog-auto-marker-misfire`: such attributes
+/// were previously parsed and silently ignored, so a misplaced `auto` gave the
+/// user no feedback. The attribute is still never mutated — the auto-loop only
+/// triggers from `<!-- agent:queue auto -->` — this warning just makes the
+/// silent misfire visible.
+fn misplaced_component_attr_warning(file: &Path, content: &str) -> Option<PreflightWarning> {
+    let components = crate::component::parse(content).ok()?;
+    let mut issues: Vec<String> = Vec::new();
+    for component in &components {
+        for key in component.attrs.keys() {
+            if QUEUE_ONLY_COMPONENT_ATTRS.contains(&key.as_str()) {
+                if component.name != "queue" {
+                    issues.push(format!(
+                        "`{key}` is a queue-only attribute but appears on `agent:{}` (did you mean `<!-- agent:queue {key} -->`?)",
+                        component.name
+                    ));
+                }
+            } else if !KNOWN_COMPONENT_ATTRS.contains(&key.as_str()) {
+                issues.push(format!(
+                    "`{key}` on `agent:{}` is not a recognized component attribute (possible typo)",
+                    component.name
+                ));
+            }
+        }
+    }
+    if issues.is_empty() {
+        return None;
+    }
+    // attrs is a HashMap, so sort for deterministic message ordering.
+    issues.sort();
+    Some(PreflightWarning {
+        code: "misplaced_component_attr".to_string(),
+        message: format!(
+            "{}: {}. The attribute is ignored (no mutation); the auto-loop only triggers from `<!-- agent:queue auto -->`.",
+            file.display(),
+            issues.join("; ")
+        ),
+        document_agent: None,
+        active_harness: None,
+    })
+}
+
 fn post_exchange_ordinary_html_comments(content: &str) -> Vec<String> {
     let Ok(components) = crate::component::parse(content) else {
         return Vec::new();
@@ -2128,12 +2189,17 @@ pub fn run(file: &Path) -> Result<()> {
             missing_prompt_presets.join(", ")
         );
     }
-    if let Ok(content) = std::fs::read_to_string(file)
-        && let Some(warning) =
+    if let Ok(content) = std::fs::read_to_string(file) {
+        if let Some(warning) =
             post_exchange_comment_prompt_preset_warning(file, &content, &frontmatter_prompt_presets)
-    {
-        eprintln!("[preflight] warning: {}", warning.message);
-        warnings.push(warning);
+        {
+            eprintln!("[preflight] warning: {}", warning.message);
+            warnings.push(warning);
+        }
+        if let Some(warning) = misplaced_component_attr_warning(file, &content) {
+            eprintln!("[preflight] warning: {}", warning.message);
+            warnings.push(warning);
+        }
     }
     let backlog_capture_required = crate::prompt_contract::prompt_requests_backlog_work(
         &prompt_targets,
@@ -6829,6 +6895,96 @@ mod tests {
             )
             .is_none(),
             "agent-owned queue directives remain executable state, not ordinary scratch comments"
+        );
+    }
+
+    #[test]
+    fn misplaced_component_attr_warning_flags_auto_on_backlog() {
+        // #backlog-auto-marker-misfire: `auto` is a queue-only attribute; on the
+        // backlog it must be surfaced (no longer silently tolerated).
+        let content = concat!(
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog auto -->\n",
+            "- [ ] [#x1] keep this\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let warning = misplaced_component_attr_warning(Path::new("session.md"), content)
+            .expect("`auto` on agent:backlog should warn");
+        assert_eq!(warning.code, "misplaced_component_attr");
+        assert!(warning.message.contains("queue-only attribute"));
+        assert!(warning.message.contains("agent:backlog"));
+        assert!(warning.message.contains("agent:queue auto"));
+        assert!(warning.message.contains("no mutation"));
+    }
+
+    #[test]
+    fn misplaced_component_attr_warning_flags_unknown_attr_typo() {
+        // The reported trigger was the typo `auot`; an unrecognized key must warn.
+        let content = concat!(
+            "<!-- agent:backlog auot -->\n",
+            "- [ ] [#x1] keep this\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let warning = misplaced_component_attr_warning(Path::new("session.md"), content)
+            .expect("typo'd attribute on a component should warn");
+        assert_eq!(warning.code, "misplaced_component_attr");
+        assert!(warning.message.contains("not a recognized component attribute"));
+        assert!(warning.message.contains("auot"));
+    }
+
+    #[test]
+    fn misplaced_component_attr_warning_allows_queue_auto_and_known_attrs() {
+        // `auto` on the queue and known attrs elsewhere must not warn.
+        let content = concat!(
+            "<!-- agent:queue auto -->\n",
+            "- do #fix1\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:exchange patch=append max_lines=50 -->\n",
+            "### Re: prior — gpt-5\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#x1] keep this\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:done archive=tasks/x.done.md -->\n",
+            "<!-- /agent:done -->\n",
+        );
+        assert!(
+            misplaced_component_attr_warning(Path::new("session.md"), content).is_none(),
+            "`auto` on queue plus recognized attrs elsewhere must not warn"
+        );
+    }
+
+    #[test]
+    fn auto_on_backlog_does_not_activate_queue() {
+        // #backlog-auto-marker-misfire regression: the auto-loop reads `auto`
+        // only from the queue component, never from the backlog.
+        let content = concat!(
+            "<!-- agent:queue -->\n",
+            "- do #fix1\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog auto -->\n",
+            "- [ ] [#x1] keep this\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let components = crate::component::parse(content).unwrap();
+        let queue = components.iter().find(|c| c.name == "queue").unwrap();
+        assert!(
+            !crate::queue::has_auto_attr(&queue.attrs),
+            "queue has no auto attribute"
+        );
+        let backlog = components.iter().find(|c| c.name == "backlog").unwrap();
+        assert!(
+            crate::queue::has_auto_attr(&backlog.attrs),
+            "backlog carries the misplaced auto attribute"
+        );
+        let body = &content[queue.open_end..queue.close_start];
+        let entries = crate::queue::parse(body).unwrap();
+        // Activation is driven solely by the queue component's auto flag.
+        let activation = crate::queue::resolve_activation(&entries, false, false, false);
+        assert!(
+            !activation.active,
+            "backlog `auto` must never activate the auto-loop"
         );
     }
 

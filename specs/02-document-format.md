@@ -40,6 +40,8 @@ Marker format: `<!-- agent:{name} -->` (open) and `<!-- /agent:{name} -->` (clos
 
 **Inline attributes:** Open markers support inline attribute overrides: `<!-- agent:name patch=append -->`. `mode=` is accepted as a backward-compatible alias; `patch=` takes precedence if both are present. `max_lines=N` trims component content to the last N lines after patching (0 or absent = unlimited). Precedence chain: inline attribute > `.agent-doc/components.toml` > built-in default (`replace` for patch, unlimited for max_lines).
 
+**Attribute validation (preflight):** Recognized attribute keys are `patch`, `mode`, `max_lines`, `archive`, `transfer-source`, `timestamp`, `broken`, and the queue-only `auto`. Preflight emits a non-blocking `misplaced_component_attr` warning when the queue-only `auto` attribute appears on a non-`queue` component (e.g. `<!-- agent:backlog auto -->`) or when an unrecognized key appears on any component (e.g. the typo `auot`). The attribute is never mutated and never activates the auto-loop — the warning exists so a misplaced/misspelled attribute is surfaced instead of silently tolerated. This closes `#backlog-auto-marker-misfire`, where `auto`/`auot` on the backlog marker had previously been parsed and ignored without feedback. The auto-loop activates only from `<!-- agent:queue auto -->` (see §2.5).
+
 **Code range exclusion:** Component marker detection uses pulldown-cmark for CommonMark-compliant code range detection, replacing the previous regex-based approach. Markers inside inline code spans or fenced code blocks are excluded and never treated as component boundaries.
 
 **Standard component names:**
@@ -73,7 +75,7 @@ The `agent:queue` component holds a batch of prompts consumed sequentially. It i
 | Start fence | `--- start [at <datetime>]` | Activation signal (consumed on use) |
 | Stop fence | `--- stop` | Breakpoint (consumed when reached) |
 
-**Attributes:** `<!-- agent:queue auto -->` enables immediate activation when the queue is non-empty. The `auto` attribute is stripped when the queue drains.
+**Attributes:** `<!-- agent:queue auto -->` enables immediate activation when the queue is non-empty. The `auto` attribute is stripped when the queue drains. `auto` is **queue-only**: placing it on any other component (e.g. `agent:backlog`) does not activate the auto-loop and triggers a `misplaced_component_attr` preflight warning (see §2.4).
 
 **Activation resolution (preflight):** Preflight detects the `agent:queue` component and resolves activation in priority order:
 

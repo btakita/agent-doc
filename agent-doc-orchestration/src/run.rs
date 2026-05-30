@@ -285,7 +285,12 @@ fn run_once(
     if let Some(diagnostic) =
         recursive_codex_direct_invocation_diagnostic(file, &session_id, agent_name)
     {
-        record_run_preflight_timeout(file, "recursive_direct_invocation_blocked", &diagnostic)?;
+        // The recursive same-pane guard fires before any response capture, so the
+        // empty preflight cycle just opened by `start_run_cycle` must be marked
+        // terminal (`Abandoned`) rather than left `preflight_started`. Otherwise
+        // `session-check` reports an interruption and the owner session stays
+        // wedged until a manual `agent-doc cancel`. (#recguard-abandon)
+        abandon_run_recursive_cycle(file, "recursive_direct_invocation_blocked", &diagnostic)?;
         anyhow::bail!("{}", diagnostic);
     }
 
@@ -693,6 +698,35 @@ fn record_run_preflight_timeout(file: &Path, event: &str, diagnostic: &str) -> R
     Ok(())
 }
 
+/// Mark the empty preflight cycle opened by `start_run_cycle` as terminal
+/// (`Abandoned`) when a fail-fast guard refuses to dispatch before any response
+/// capture (e.g. recursive same-pane direct invocation). Unlike
+/// [`record_run_preflight_timeout`], which leaves the cycle `preflight_started`
+/// (recoverable/open) for genuine hangs that may still complete, this records a
+/// terminal state `session-check` accepts immediately — no manual
+/// `agent-doc cancel` required. (#recguard-abandon)
+fn abandon_run_recursive_cycle(file: &Path, event: &str, diagnostic: &str) -> Result<()> {
+    let compact = diagnostic.split_whitespace().collect::<Vec<_>>().join(" ");
+    let event = format!("{event} {}", compact.chars().take(700).collect::<String>());
+    let snapshot_content = snapshot::load(file)?;
+    let file_content = std::fs::read_to_string(file).ok();
+    crate::cycle_state::mark_abandoned(
+        file,
+        &event,
+        snapshot_content.as_deref(),
+        file_content.as_deref(),
+    )?;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "run_recursive_direct_invocation_abandoned file={} diagnostic={}",
+            file.display(),
+            compact
+        ),
+    );
+    Ok(())
+}
+
 fn recursive_codex_direct_invocation_diagnostic(
     file: &Path,
     session_id: &str,
@@ -727,7 +761,7 @@ fn recursive_codex_direct_invocation_diagnostic(
             "actor_generation=<unknown> actor_state=<unknown> actor_pane=<unknown>".to_string()
         });
     Some(format!(
-        "recursive direct invocation would deadlock: `agent-doc {}` is running inside the Codex pane that already owns this document (current_pane={}, session_id={}, {}). The preflight cycle has been left recoverable; retry from outside the managed pane or restart the owner with `agent-doc start {}`.",
+        "recursive direct invocation would deadlock: `agent-doc {}` is running inside the Codex pane that already owns this document (current_pane={}, session_id={}, {}). The empty preflight cycle has been abandoned (terminal — `session-check` accepts it, no manual `agent-doc cancel` needed); retry from outside the managed pane or restart the owner with `agent-doc start {}`.",
         file.display(),
         current_pane,
         session_id,

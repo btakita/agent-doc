@@ -214,16 +214,27 @@ fn dedupe_responses_with_report(content: &str) -> (String, Option<String>) {
             .collect::<Vec<_>>()
             .join("\n");
         if block1 == block2 {
+            // Prefer to drop the copy whose body was corrupted with `❯ `
+            // user-prompt prefixes (a multi-retry / late-IPC reposition
+            // artifact), keeping the clean twin. Default to dropping the later
+            // copy when neither (or both) carries the corruption.
+            let b1_corrupt = block_has_prompt_prefixed_body(&lines[s1..e1]);
+            let b2_corrupt = block_has_prompt_prefixed_body(&lines[s2..e2]);
+            let (skip_s, skip_e) = if b1_corrupt && !b2_corrupt {
+                (s1, e1)
+            } else {
+                (s2, e2)
+            };
             eprintln!(
                 "[dedupe] duplicate found: \"{}\" (lines {}-{})",
-                lines[s2].trim(),
-                s2 + 1,
-                e2
+                lines[skip_s].trim(),
+                skip_s + 1,
+                skip_e
             );
             if first_duplicate.is_none() {
-                first_duplicate = Some(lines[s2].trim().to_string());
+                first_duplicate = Some(lines[skip_s].trim().to_string());
             }
-            skip_ranges.push((s2, e2));
+            skip_ranges.push((skip_s, skip_e));
         }
     }
 
@@ -259,7 +270,28 @@ fn normalize_response_block_line(line: &str) -> Option<String> {
                 .to_string(),
         );
     }
-    Some(trimmed.to_string())
+    // Response body lines must never carry the `❯ ` user-prompt prefix; a
+    // multi-retry / late-IPC reposition can wrongly prefix them. Normalize the
+    // prefix away so a corrupted duplicate still compares equal to its clean
+    // committed twin instead of slipping past the dedupe / over-application
+    // guards as "new" content.
+    let unprefixed = trimmed
+        .strip_prefix('❯')
+        .map(str::trim_start)
+        .unwrap_or(trimmed);
+    Some(unprefixed.to_string())
+}
+
+/// Does this `### Re:` block carry any body line wrongly prefixed with the
+/// `❯ ` user-prompt marker? Used by [`dedupe_responses_with_report`] to drop
+/// the corrupted copy of a duplicate pair in favor of its clean twin.
+fn block_has_prompt_prefixed_body(block_lines: &[&str]) -> bool {
+    block_lines.iter().any(|line| {
+        let trimmed = line.trim();
+        !trimmed.starts_with("### Re:")
+            && !trimmed.starts_with("<!-- agent:boundary:")
+            && trimmed.starts_with('❯')
+    })
 }
 
 #[cfg(test)]
@@ -407,6 +439,54 @@ do [#another-thing]
 <!-- /agent:exchange -->
 ";
         assert!(!is_committed_response_overapplication(current, HEAD_DOC));
+    }
+
+    #[test]
+    fn dedupe_collapses_prompt_prefixed_corrupted_duplicate() {
+        // #finalize-retry-ipc-response-duplication: a multi-retry / late-IPC
+        // reposition left a duplicate response whose earlier copy had its body
+        // lines wrongly prefixed with the `❯ ` user-prompt marker. Dedupe must
+        // collapse to a single CLEAN block (the corrupted copy is dropped, not
+        // kept), with no surviving `❯`-prefixed body line.
+        let content = "\
+### Re: fix thing — opus-4-8
+❯ **Scope:** narrow.
+❯ **Commits:** abc123.
+### Re: fix thing — opus-4-8 (HEAD)
+**Scope:** narrow.
+**Commits:** abc123.
+";
+        let result = dedupe_responses(content);
+        assert_eq!(
+            result.matches("### Re: fix thing").count(),
+            1,
+            "exactly one response block must remain:\n{result}"
+        );
+        assert!(
+            !result.contains('❯'),
+            "no `❯`-prefixed body line may survive dedupe:\n{result}"
+        );
+        // Convergence is idempotent — a second pass is a no-op.
+        assert_eq!(dedupe_responses(&result), result);
+    }
+
+    #[test]
+    fn overapplication_detects_prompt_prefixed_corrupted_duplicate() {
+        // The re-applied copy's body was `❯ `-prefixed by the retry; it must
+        // still normalize to the committed response and count as a safe
+        // restore-to-HEAD over-application.
+        let current = "\
+<!-- agent:exchange -->
+do [#fix-thing]
+### Re: fix thing — opus-4-8
+❯ Fixed it.
+<!-- agent:boundary:old -->
+### Re: fix thing — opus-4-8 (HEAD)
+Fixed it.
+<!-- agent:boundary:88409761 -->
+<!-- /agent:exchange -->
+";
+        assert!(is_committed_response_overapplication(current, HEAD_DOC));
     }
 
     #[test]

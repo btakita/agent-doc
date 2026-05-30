@@ -695,6 +695,7 @@ fn canonicalize_answered_prompt_prefixes(exchange_content: &str) -> String {
 
         let mut block_indices = Vec::new();
         let mut cursor = idx;
+        let mut stopped_on_response_heading = false;
         while cursor > 0 {
             cursor -= 1;
             let line = lines[cursor].trim_end_matches('\n');
@@ -704,12 +705,23 @@ fn canonicalize_answered_prompt_prefixes(exchange_content: &str) -> String {
                 || trimmed.starts_with("<!--")
                 || is_response_heading_line(trimmed)
             {
+                stopped_on_response_heading =
+                    !line_in_fence[cursor] && is_response_heading_line(trimmed);
                 break;
             }
             block_indices.push(cursor);
         }
         block_indices.reverse();
         if block_indices.is_empty() {
+            continue;
+        }
+        // A prose block that butts directly against a preceding `### Re:`
+        // heading with no blank-line / comment separator is the trailing body
+        // of that response (e.g. a duplicated response block left by a
+        // multi-retry / late-IPC reposition), not a fresh user prelude. Never
+        // canonicalize those lines into `❯ ` prompt prefixes — agent response
+        // body must never receive the user-prompt marker.
+        if stopped_on_response_heading {
             continue;
         }
 
@@ -4633,6 +4645,41 @@ Done.
         assert!(
             normalized.contains("\n❯ Please rerun the deploy check.\n"),
             "soft prompt requests before a response heading should still be canonicalized:\n{normalized}"
+        );
+    }
+
+    #[test]
+    fn canonicalize_answered_prompt_prefixes_never_prefixes_duplicate_response_body() {
+        // #finalize-retry-ipc-response-duplication: a multi-retry / late-IPC
+        // reposition can leave a stale duplicate response block whose body
+        // butts directly against the canonical `### Re: … (HEAD)` heading with
+        // no blank-line separator. Those lines are agent response body, not a
+        // user prelude, and must never receive the `❯ ` prompt prefix.
+        let exchange = "\
+❯ do [#fix-thing]
+### Re: fix thing — opus-4-8
+**Scope/honesty:** narrow.
+**Commits:** abc123.
+### Re: fix thing — opus-4-8 (HEAD)
+**Scope/honesty:** narrow.
+**Commits:** abc123.
+";
+
+        let normalized = canonicalize_answered_prompt_prefixes(exchange);
+
+        assert!(
+            !normalized.contains("❯ **Scope/honesty:**"),
+            "duplicate response body must not be rewritten as a prompt:\n{normalized}"
+        );
+        assert!(
+            !normalized.contains("❯ **Commits:**"),
+            "duplicate response body must not be rewritten as a prompt:\n{normalized}"
+        );
+        // The only `❯` line is the genuine, already-marked user prompt.
+        assert_eq!(
+            normalized.matches('❯').count(),
+            1,
+            "exactly the existing user prompt keeps its marker:\n{normalized}"
         );
     }
 

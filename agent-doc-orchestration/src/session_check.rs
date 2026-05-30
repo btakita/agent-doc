@@ -5259,6 +5259,73 @@ Body\n\
     }
 
     #[test]
+    fn recursive_direct_invocation_abandoned_cycle_passes_session_check() {
+        // #recguard-abandon: when the recursive same-pane guard refuses to
+        // dispatch, it abandons the empty preflight cycle (terminal) instead of
+        // leaving it `preflight_started`. session-check must then accept the
+        // terminal abandoned state — no manual `agent-doc cancel` required.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        for args in [
+            vec!["init"],
+            vec!["config", "user.email", "test@example.com"],
+            vec!["config", "user.name", "Test"],
+        ] {
+            Command::new("git")
+                .current_dir(root)
+                .args(&args)
+                .output()
+                .unwrap();
+        }
+
+        let doc = root.join("doc.md");
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nAnswered.\n",
+            "<!-- agent:boundary:committed -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "doc.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "committed", "--no-verify"])
+            .output()
+            .unwrap();
+
+        // Run opened a preflight cycle, then the recursive guard fired before any
+        // response capture and abandoned it.
+        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::cycle_state::mark_abandoned(
+            &doc,
+            "recursive_direct_invocation_blocked recursive direct invocation would deadlock",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Ok(message) => {
+                assert!(
+                    message.contains("abandoned"),
+                    "terminal abandoned cycle should report an abandoned OK state: {message}"
+                );
+            }
+            other => panic!("abandoned recursive-guard cycle must pass session-check, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn session_check_classifies_late_ipc_response_overapplication() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
@@ -5342,6 +5409,70 @@ Body\n\
             }
             other => panic!("expected late-IPC over-application interruption, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn detects_prompt_prefixed_corrupted_duplicate_as_overapplication() {
+        // #finalize-retry-ipc-response-duplication: a multi-retry / late-IPC
+        // reposition left a duplicate response whose stale copy had its body
+        // wrongly prefixed with `❯ `. HEAD still holds a single clean copy, so
+        // the over-application detector must recognize the corrupted duplicate
+        // and remediate by restoring committed HEAD — no manual `git checkout`.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        for args in [
+            vec!["init"],
+            vec!["config", "user.email", "test@example.com"],
+            vec!["config", "user.name", "Test"],
+        ] {
+            Command::new("git")
+                .current_dir(root)
+                .args(&args)
+                .output()
+                .unwrap();
+        }
+
+        let doc = root.join("doc.md");
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "do [#fix-thing]\n",
+            "### Re: fix thing — gpt-5\n\n",
+            "**Scope:** narrow.\n",
+            "<!-- agent:boundary:committed -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "doc.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "committed response", "--no-verify"])
+            .output()
+            .unwrap();
+
+        // Working tree gains a stale duplicate whose body line is `❯ `-prefixed.
+        let corrupted = committed.replace(
+            "<!-- agent:boundary:committed -->\n<!-- /agent:exchange -->",
+            "### Re: fix thing — gpt-5\n\n❯ **Scope:** narrow.\n<!-- agent:boundary:replayed -->\n<!-- /agent:exchange -->",
+        );
+        fs::write(&doc, corrupted).unwrap();
+
+        let overapplication = detect_late_ipc_response_overapplication(&doc)
+            .unwrap()
+            .expect("prompt-prefixed corrupted duplicate must be detected");
+        assert_eq!(
+            overapplication.remediated_content, committed,
+            "remediation must restore the clean committed HEAD"
+        );
     }
 
     #[test]

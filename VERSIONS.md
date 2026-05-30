@@ -6,6 +6,27 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Recursive direct-invocation guard abandons its empty cycle (`#recguard-abandon`).**
+  When a Codex-backed `agent-doc <FILE>` runs inside the same tmux pane that already
+  owns the document, the recursive-invocation guard fails fast with the existing
+  `recursive direct invocation would deadlock` diagnostic — but it previously left the
+  freshly-opened preflight cycle in `preflight_started`, so `session-check` reported an
+  interruption and the owner session stayed wedged until a manual `agent-doc cancel`.
+  `run.rs` now marks that empty cycle terminal (`Abandoned`) via a new
+  `abandon_run_recursive_cycle` (the guard fires before any response capture, so nothing
+  is lost); `session-check` accepts the terminal abandoned state automatically. Regression:
+  `recursive_direct_invocation_abandoned_cycle_passes_session_check`.
+- **Multi-retry / late-IPC response duplication hardened (`#finalize-retry-ipc-response-duplication`).**
+  A closeout needing several finalize/write retries with the IDE IPC listener active and
+  concurrent editing could leave a duplicated `### Re:` response block whose stale copy had
+  its body lines wrongly prefixed with the `❯ ` user-prompt marker, fail-closing
+  `session-check` until a manual `git checkout`. Fixes: `canonicalize_answered_prompt_prefixes`
+  never `❯`-prefixes a prose block that butts directly against a preceding response heading
+  (it's that response's body, not a user prelude); dedupe response-block normalization is
+  now `❯`-insensitive and drops the corrupted copy of a duplicate pair; the late-IPC
+  over-application / JB-cache replay detectors recognize the `❯`-corrupted-duplicate shape,
+  so `preflight` restores clean HEAD automatically. Regressions in `dedupe`, `git`, and
+  `session_check`.
 - **Prompt-prefix dedup gap fixed (`#prompt-duplicated-while-typing`, partial).** The
   shared-core append dedup (`component::append_patch_already_present` via
   `normalize_append_patch_content`) stripped boundary / `(HEAD)` markers but not the

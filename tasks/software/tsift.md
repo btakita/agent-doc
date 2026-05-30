@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -99,7 +99,39 @@ Commands: `agent-doc repair`, `agent-doc preflight`, `agent-doc plan`, and this 
 Verification: no source files changed in this recovery cycle. The prior implementation verification remains `make check`, `cargo build -p tsift-cli`, `cargo install --path packages/tsift-cli --locked --force`, and CI run `26686994059` passing.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:9b747b31 -->
+
+### Re: #tsift-crate-publish-preflight — gpt-5
+
+Implemented and pushed the split-crate publish preflight.
+
+What changed:
+
+- Normalized all Rust workspace crate versions and internal path dependencies to `0.1.62`.
+- Added publish metadata across the split crates: `publish = true`, README paths, keywords, categories, and package READMEs where missing.
+- Made the root `tsift` package own the public `tsift` binary, delegating to `tsift-cli`, so `cargo install tsift` keeps working without a workspace duplicate-bin warning.
+- Kept `tsift-cli` as the dispatch/test package with its own `tsift-cli` test binary.
+- Updated the release workflow to validate every manifest version against the tag, package-list every split crate during verification, build release assets from the public root package, and run `cargo publish --dry-run` immediately before each real dependency-ordered publish.
+- Updated README/SPEC release notes and added tests that enforce the release order and manifest publish metadata.
+
+Verification:
+
+- `cargo test -p tsift-cli release_publish_gate_requires_secret_variable_and_dry_run` passed.
+- `cargo test -p tsift-cli split_crate_manifests_are_publish_ready` passed through the full suite.
+- `cargo test -p tsift-cli graph_db_cli_conformance_matches_sqlite_and_convex_snapshot_queries` passed.
+- `cargo build -p tsift --release --locked` passed.
+- Dependency-order `cargo package -p "$package" --locked --allow-dirty --list` passed for every Rust crate.
+- `cargo publish -p tsift-core --locked --dry-run --allow-dirty` passed.
+- `cargo publish -p tsift-graph --locked --dry-run --allow-dirty` fails before upload because `tsift-core` is not published to crates.io yet; that is the expected crates.io dependency constraint and is why the workflow dry-runs each crate immediately before its real publish, after prior dependencies have landed.
+- `make check` passed after the final binary-target cleanup.
+- GitHub Actions `CI` run `26687756843` passed: `clippy + test` and `live Convex graph acceptance` both green. The live Convex job only emitted the expected no-op configuration annotation plus GitHub's Node 20 actions deprecation notice.
+
+Commits pushed:
+
+- `src/tsift`: `24ef10d chore: prepare split crates for publish`
+- parent repo: `0bb7abdee chore: update tsift submodule`
+
+I also checked for a tmux CI leg in the tsift repo and there is no `tmux`/`tmux-ci` workflow target to inspect.
+<!-- agent:boundary:b5164701 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -108,17 +140,12 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~do [#tsiftcli-direct-crates]~
-- ~do [#tsift-dormant-crates]. wire~
-- do [#tsift-crate-publish-preflight]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#tsift-crate-publish-preflight] Normalize extracted-crate release metadata and version policy: align split-crate versions/readmes/publish settings, then run cargo check/test plus cargo publish --dry-run in dependency order.
 <!-- /agent:backlog -->
 
 ## Review

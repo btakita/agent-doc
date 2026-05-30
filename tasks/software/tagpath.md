@@ -142,7 +142,47 @@ Verification passed: `cargo check`, `cargo test -p tagpath-core --no-default-fea
 The facade publish dry-run was attempted with and without `--no-verify`, but Cargo stops before verification because `tagpath-core 0.12.0` is not yet present in the crates.io index. That matches the documented publish order: publish `tagpath-core` first, then rerun the `tagpath` facade dry-run/publish once the registry can resolve the core crate. Latest tagpath CI is green (`26674038403`), latest agent-doc CI is green (`26674156964`, `check` job only), and the root repo has no workflow named `CI`.
 
 Escalation: none. Confidence: high. Next queue item remains `#tpcorefacade`.
-<!-- agent:boundary:ce17e439 -->
+
+### Re: do #tpcorefacade — gpt-5
+
+Completed `#tpcorefacade`.
+
+Changed paths:
+- `src/tagpath/SPEC.md`
+- `src/tagpath/VERSIONS.md`
+- `src/tagpath/tests/lib_api.rs`
+- `src/tagpath/tests/test_core_split_plan.rs`
+- `src/tagpath/tests/test_facade.rs`
+- `src/tagpath` submodule pointer in the superproject
+
+What changed:
+- Locked the root `tagpath` package as the compatibility facade: package name/version, `cdylib`/`rlib` crate type, binary name/path, `treesitter` binary gate, default feature set, and named optional feature wiring.
+- Added facade API coverage for the old public `tagpath::...` paths that now re-export `tagpath-core` types.
+- Added CLI facade regression tests for `parse`, `alias`, `family`, `prose`, and `normalize-query` through the `tagpath` binary.
+- Updated the spec and changelog notes for the facade boundary.
+
+Commits:
+- `tagpath`: `06f853f test: lock tagpath facade compatibility`
+- `agent-loop`: `a7714e617 chore: update tagpath submodule`
+
+Verification:
+- `cargo test --test lib_api --test test_core_split_plan --test test_facade` passed.
+- `cargo test -p tagpath-core --no-default-features` passed.
+- `cargo test` passed.
+- `cargo test --workspace` passed.
+- `cargo clippy` passed.
+- `cargo build --target wasm32-unknown-unknown --no-default-features --features wasm` passed.
+- `cargo install --path . --force` passed.
+- `cargo publish --dry-run --allow-dirty -p tagpath-core` passed.
+- `cargo publish --dry-run --allow-dirty -p tagpath` reached the expected publish-order blocker: crates.io does not yet have `tagpath-core 0.12.0`.
+- Root `make check` passed.
+- Tagpath GitHub Actions CI run `26674665718` passed.
+- Root GitHub Actions workflow `Agent Doc` latest inspected run `26674487574` failed before runner startup: both `tmux-ci` and `check` jobs had zero steps and no logs, so this is classified as an external CI-start blocker rather than a code or tmux regression.
+
+Escalation: none.
+
+Next queue item remains `#tpcoreci`.
+<!-- agent:boundary:e615ecd7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -152,14 +192,14 @@ Escalation: none. Confidence: high. Next queue item remains `#tpcorefacade`.
 preset #spec-test-build-install-commit-push
 - ~do [#tpcoreplan]~
 - ~do [#tpcoreextract]~
-- do [#tpcorefacade]
+- ~do [#tpcorefacade]~
 - do [#tpcoreci]
+- do [#tpcoreadapters]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#tpcorefacade] Keep the tagpath crate as the existing CLI/library facade depending on tagpath-core; preserve binary behavior, public exports, and feature defaults.
 - [ ] [#tpcoreci] Add workspace CI, docs, and release checks for the split, including no-default-features, wasm, and crates.io publish ordering smoke tests.
 - [ ] [#tpcoreadapters] [recommended] Re-evaluate adapter crates such as tagpath-wasm, tagpath-mcp, and tagpath-project only after tagpath-core has stabilized.
 <!-- /agent:backlog -->

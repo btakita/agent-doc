@@ -35,7 +35,18 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 5 response topic(s): do #codex-final-response-not-written; follow-up backlog capture; auto queue stalled (#agent-doc-bug); 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:9ec5cf5a -->
+
+### Re: Is tsift properly integrated into multi-crate architecture? — opus-4-8
+
+Already answered and handled last turn — re-confirming, and this response consumes the lingering queue line so the queue advances.
+
+- **Integration: yes.** From the `src/agent-doc` submodule root, `tsift status` is `fresh (328 files tracked)` and tracks all workspace members — `agent-doc-core`, `agent-doc-orchestration`, `agent-doc-sqlite` — plus the `agent-doc` root crate. Properly integrated with the multi-crate architecture.
+- **Index: fresh.** I ran `tsift index .` last turn; still fresh (indexed ~7m ago, no source edits since). (The *superproject-wide* `tsift status` from `agent-loop/` shows other scopes stale — `boost-client` etc. — but those are unrelated projects, not the agent-doc workspace.)
+
+**Correction to my earlier note:** I was wrong that a non-`#id` free-text queue line "can't be struck." It can — once the line is the queue *head*, the synthetic-queue-head diff matches it, so `should_consume_queue_prompt_for_diff_content` returns true and `mark_first_n_prompts_completed` strikes the head regardless of `#id` (`consume_count.max(1)`). This finalize is consuming it now; no manual deletion needed. So there's no real "free-text head" gap to file — withdrawing that suggestion.
+
+Queue advances to `do [#pending-done-guard-false-positive]`.
+<!-- agent:boundary:516243a6 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->

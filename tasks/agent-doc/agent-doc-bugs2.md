@@ -76,7 +76,28 @@ Covered: structural fail-closed before commit (plan items 3-4). Still open: the 
 ---
 
 Note: you removed `auto` from the queue and typed `continue`, so I treated this as manual steering — I ran this one item but will **not** re-arm the auto-loop. The queue still has 15 items (`#jb-compact-repair-left-uncommitted` next). Say `continue` again for the next one, or re-add `auto` to the queue tag to resume hands-off draining.
-<!-- agent:boundary:3ac1c6cf -->
+
+### Re: do #jb-compact-repair-left-uncommitted — opus-4-8
+
+Made the uncommitted-compact state non-silent. **Gated** (not done) — root-cause investigation + route/preflight classification remain; see below.
+
+#### What landed
+
+- **`compact.rs`** — `run()` now re-reads the document after compaction and, when it changed but `--commit` was not passed, records a `compact_left_uncommitted` ops-log entry and prints an explicit WARNING naming the dirty state and the exact recovery command (`agent-doc compact <FILE> --commit` / `agent-doc write --commit <FILE>`). This directly addresses the plan's "should not silently leave a repaired document dirty": a JB action calling bare `compact` (no `--commit`) previously left corrected-visible / stale-HEAD with no signal.
+
+#### Precondition now mitigated
+
+The sibling fix `#jb-compact-malformed-response-commit` (prior cycle) makes a malformed compact fail closed **before** any write, so the "malformed compact result in HEAD, then a dirty correction on top" sequence that produced this bug can no longer originate from the binary's compact path.
+
+#### Verification
+
+- New test: bare `compact` (no `--commit`) on a changed template doc records `compact_left_uncommitted`. The existing `--commit` test (commits + writes vcs-refresh signal) still passes, confirming commit semantics are unchanged.
+- `make check` green (clippy `-D warnings`); both binaries rebuilt + installed.
+
+#### Gated — remaining scope (plan-jb-compact-repair-left-uncommitted.md)
+
+Covered: non-silent dirty-state diagnostic (partial item 3). Still open: reconstructing the exact repair path that produced the live dirty correction (items 1-2 — investigation), the atomic-commit-or-fail-closed repair invariant including mixed user-edit detection (item 3 full), route/preflight classifying an uncommitted compact repair separately from new prompt input (item 4), and the JB notification test (item 5). These touch the repair/git/route interaction and need the path reconstruction before a safe change, so deferred from a blind edit.
+<!-- agent:boundary:23b10664 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
@@ -85,7 +106,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#queue-user-edit-overwrite]~
 - ~do [#prompt-preempts-auto-queue]~
 - ~do [#jb-compact-malformed-response-commit]~
-- do [#jb-compact-repair-left-uncommitted]
+- ~do [#jb-compact-repair-left-uncommitted]~
 - do [#jb-run-agent-doc-response-queue-contamination]
 - do [#codex-owned-pane-prompt-miss]
 - do [#stuck-capture-compact-false-positive]
@@ -143,7 +164,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#jb-compact-repair-left-uncommitted] [recommended] Compact-output repair can leave the corrected session document dirty instead of committing through a binary-owned repair boundary. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: visible exchange correction differs from malformed `HEAD`, creating mixed visible/HEAD/snapshot state for later JetBrains actions. Repair should commit atomically or fail closed with an exact recovery path. Plan: tasks/agent-doc/plan-jb-compact-repair-left-uncommitted.md.
 - [ ] [#jb-run-agent-doc-response-queue-contamination] [recommended] JetBrains `Run Agent Doc` can add assistant response prose to `agent:queue auto` after compact/repair drift. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: queue gained `- Yes. I drove the already-authenticated Google Ads browser session...`, copied from `### Re: #gads106demote`, alongside real `do [#nbsearch]`/`#bidstrat`/`#pdpconv` entries. Require queue-source provenance and reject assistant response bodies as queue candidates. Plan: tasks/agent-doc/plan-jb-run-agent-doc-response-queue-contamination.md.
 - [ ] [#preset-item-id-collision] [recommended] Enforce unique active identities across frontmatter `prompt_presets` keys and active `agent:backlog` / `agent:review` / `agent:icebox` item ids. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `#next-steps` exists both as a prompt preset and as a backlog item, making `do #next-steps` and "top backlog item: #next-steps" ambiguous between preset expansion and backlog execution. Fix with an identity registry, mutation-time rejection, preflight/session-check fail-closed diagnostics, and regressions. Plan: tasks/agent-doc/plan-preset-item-id-collision.md.
 - [ ] [#codex-final-response-live-verify] [recommended] Opportunistic live re-verification of the #codex-final-response-not-written guard: do a real Codex direct/manual run that commits side-effect work, confirm session-check (via the .codex Stop hook) fails closed with the 'no assistant response body was captured' message + 'agent-doc write --commit' recovery when no ### Re: close-out was written, and that a normal Codex turn with a response stays OK. Guard + deterministic regressions already landed (session_check.rs check_committed_without_response_body_guard).
@@ -165,6 +185,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Review
  
 <!-- agent:review -->
+- [/] [#jb-compact-repair-left-uncommitted] [recommended] Compact-output repair can leave the corrected session document dirty instead of committing through a binary-owned repair boundary. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: visible exchange correction differs from malformed `HEAD`, creating mixed visible/HEAD/snapshot state for later JetBrains actions. Repair should commit atomically or fail closed with an exact recovery path. Plan: tasks/agent-doc/plan-jb-compact-repair-left-uncommitted.md.
 - [/] [#jb-compact-malformed-response-commit] [recommended] JetBrains `Compact Exchange` can commit malformed compact output. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md` / commit `f8fe36b`: compact summary line was committed with user prompt prefix `❯`, and archived response content remained in the live exchange shape. Add post-compact structural validation and fail closed before commit. Plan: tasks/agent-doc/plan-jb-compact-malformed-response-commit.md.
 - [/] [#prompt-preempts-auto-queue] [recommended] Unanswered exchange prompts must run before active `agent:queue auto` continuation, even when the prompt was accidentally baselined into the `.agent-doc` snapshot. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `What are #next-steps to complete review items?` was visible after the exchange boundary and duplicated in `agent:queue auto`, but the snapshot already contained the exchange prompt, so the next diff only saw queue bookkeeping and the prompt did not run. Fix: add snapshot-independent unresolved exchange prompt detection, make preflight/direct-run prefer it over queue synthetic diffs, prevent route queue snapshot recovery from absorbing unanswered exchange prompts, and defer Codex/Claude queue continuation while such a prompt exists. Plan: tasks/agent-doc/plan-prompt-preempts-auto-queue.md.
 - [/] [#queue-user-edit-overwrite] [recommended] User-authored agent:queue edits can be silently overwritten/deleted by write/reset/commit queue convergence. Live repro 2026-05-30 boost-client monsterrodholders.md: user added do [#gscaccess] at queue head; agent-doc repeatedly removed/reverted it during closeout/snapshot repair. Fix by tracking queue edit provenance/epochs, preserving explicit queue edits unless the current response consumes that exact head, and failing closed on stale IPC/snapshot queue rewrites. Plan: tasks/agent-doc/plan-user-queue-edit-preservation.md.

@@ -4997,6 +4997,13 @@ pub fn find_live_owner_pane(tmux: &Tmux, file: &Path, session_id: &str) -> Optio
     find_live_owner_pane_excluding(tmux, file, session_id, None)
 }
 
+/// Quiet variant of [`find_live_owner_pane`] that suppresses the per-hit
+/// stderr diagnostics. Used by `focus` on every editor navigation, where the
+/// happy path re-resolves the same owner and logging each hit would be noise.
+pub fn find_live_owner_pane_quiet(tmux: &Tmux, file: &Path, session_id: &str) -> Option<String> {
+    find_live_owner_pane_excluding_with_logging(tmux, file, session_id, None, false)
+}
+
 pub fn find_normal_path_owner_pane(
     tmux: &Tmux,
     file: &Path,

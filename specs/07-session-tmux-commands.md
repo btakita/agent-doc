@@ -91,6 +91,20 @@ This file covers the session-bound command surface: pane ownership, routing, syn
   is the editor fast path and must stay independent of slower reconciliation.
 - Focus may use `sessions.json` only as a fallback binding helper when no live
   local actor projection exists.
+- Live-owner precedence: a pane resolved from the local actor projection or the
+  `sessions.json` registry only proves the pane is alive, not that it still owns
+  the document. After a reroute / fresh-restart the session can move to a new
+  pane while the old pane stays alive with a dead owner, which previously left
+  editor navigation focusing the stale pane (it appeared to "not swap"). Before
+  selecting, focus reconciles the candidate against the document's provable live
+  owner (`sync::find_live_owner_pane`); when a different pane provably owns the
+  document right now, focus selects that live owner and lets resync repair the
+  registry. The owner-resolution stays quiet (no per-hit stderr) on the navigation
+  fast path, and the happy path is unchanged because the resolver returns the
+  candidate when it is already the owner.
+- Focus must also recover instead of failing closed when the registered pane is
+  dead, or no registry entry exists, but the document is still served by a live
+  owner in another pane.
 - Editor automatic tab-to-pane sync must not use `focus` as a substitute for
   passive `sync --no-autostart`; focus does not own stash rescue, safe passive
   replacement, or preserved-layout reselect proof.

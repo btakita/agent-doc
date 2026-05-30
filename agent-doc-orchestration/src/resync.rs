@@ -767,9 +767,16 @@ fn purge_unregistered_stash_panes_with_registry_and_supervisors(
                         .any(|entry| entry.pane == *pane_id)
                 });
             if registered_in_pane_root {
-                eprintln!(
-                    "resync: stash pane {} ({}) is registered in its own project root — skipping kill",
-                    pane_id, session_name
+                // #cross-project-stash-pane-condition: this is correct cross-project
+                // preservation, not an error. Route it to ops_log telemetry instead of
+                // stderr so it does not pollute the IDE/route error surface (the JB
+                // plugin renders resync stderr as an error). Keep the skip behavior.
+                crate::ops_log::log_op(
+                    &current_root,
+                    &format!(
+                        "resync: stash pane {} ({}) is registered in its own project root — skipping kill",
+                        pane_id, session_name
+                    ),
                 );
                 continue;
             }
@@ -1299,9 +1306,15 @@ fn purge_unregistered_stash_panes_bulk_with_supervisors_in_mode(
                     .any(|entry| entry.pane == *pane_id)
             });
         if registered_in_pane_root {
-            eprintln!(
-                "resync: stash pane {} is registered in its own project root — skipping kill",
-                pane_id
+            // #cross-project-stash-pane-condition: correct cross-project preservation,
+            // not an error — log as telemetry, not stderr, so the IDE/route error
+            // surface stays clean. Skip behavior unchanged.
+            crate::ops_log::log_op(
+                &current_root,
+                &format!(
+                    "resync: stash pane {} is registered in its own project root — skipping kill",
+                    pane_id
+                ),
             );
             continue;
         }
@@ -1789,9 +1802,14 @@ fn purge_orphaned_agent_panes_with_registry(tmux: &Tmux, registry: &sessions::Se
                             .any(|entry| entry.pane == *pane_id)
                     });
                 if registered_in_pane_root {
-                    eprintln!(
-                        "resync: non-stash pane {} is registered in its own project root — skipping kill",
-                        pane_id
+                    // #cross-project-stash-pane-condition: correct cross-project
+                    // preservation, not an error — telemetry, not stderr.
+                    crate::ops_log::log_op(
+                        &current_root,
+                        &format!(
+                            "resync: non-stash pane {} is registered in its own project root — skipping kill",
+                            pane_id
+                        ),
                     );
                     continue;
                 }

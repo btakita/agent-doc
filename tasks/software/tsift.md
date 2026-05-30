@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -104,7 +104,7 @@ Commands used: `tsift status`, `tsift status --fix`, `agent-doc preflight`, and 
 Verification: document-analysis cycle only; no source verification required.
 
 Confidence: high. The important constraint is to keep `claude-mem` as an import source until tsift proves the new pipeline with measured retrieval and persistence results.
-<!-- agent:boundary:3c439914 -->
+<!-- agent:boundary:e587ea02 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -126,7 +126,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#tsift-memory-crate-plugin] Spike a first-party tsift-memory crate plus harness plugin: own the schema, token-budgeted capture/import pipeline, graph projection, query API, and agent-doc hooks; import existing claude-mem SQLite/Chroma data as a migration source rather than depending on claude-mem as the durable runtime.
 - [ ] [#tsift-memory-budget-guard] Build a token-budget guard for observer/memory handoffs: estimate prompt size before model calls, split oversized tool responses and transcripts, replace raw logs with tsift session-digest/context-pack handles, and fail closed with retryable chunk plans instead of sending prompts that can only overflow.
 - [ ] [#tsift-claude-mem-adapter] Add a read-only claude-mem adapter for tsift graph-db: project claude-mem SQLite observations, session summaries, user prompts, and Chroma/vector handles as semantic/session/source nodes with stable ids so tsift can query existing memory without owning capture yet.
 - [ ] [#tsift-neighborhood-token-budget] Add token/usefulness budgets to graph-db related/neighborhood/evidence output: rank nodes and edges by semantic match, edge kind, depth, recency, and source-handle coverage; enforce per-kind quotas plus estimated-token caps; report dropped_by_budget diagnostics.

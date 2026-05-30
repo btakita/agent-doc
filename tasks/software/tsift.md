@@ -235,7 +235,45 @@ Verification:
 
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:53236aa7 -->
+
+### Re: do [#tsift-memory-eval-harness] — gpt-5
+
+Completed `#tsift-memory-eval-harness`.
+
+Implemented in `src/tsift`:
+- Added `fixtures/memory-retrieval-eval.json`, a recorded memory retrieval eval fixture derived from the Claude Code Insights report and sampled `claude-mem` failure modes.
+- Extended the DCI benchmark fixture/report contract with optional `expected_strategies`, `useful_hits`, `output_tokens`, and `zero_output` metrics.
+- Updated strategy summaries and task rows to report useful-hit averages, output-token averages, zero-output failure counts/rates, and per-task most-useful/zero-output lanes.
+- Updated `tsift dci-benchmark` human/compact output and SPEC documentation for the new retrieval metrics.
+- Added unit and compiled CLI coverage for the memory retrieval fixture.
+
+Changed paths:
+- `src/tsift/SPEC.md`
+- `src/tsift/fixtures/memory-retrieval-eval.json`
+- `src/tsift/packages/tsift-quality/src/dci_benchmark.rs`
+- `src/tsift/packages/tsift-cli/src/lib.rs`
+- `src/tsift/packages/tsift-cli/tests/exit_code.rs`
+
+Commits:
+- `src/tsift`: `49e1387` (`feat: add memory retrieval eval fixture`)
+- root: `3c93aa8` (`chore: update tsift submodule`)
+
+Verification:
+- `cargo test -p tsift-quality supports_memory_retrieval_metrics` passed (`tart-2fcfad3673`).
+- `cargo test -p tsift-cli dci_benchmark_summarizes_memory_retrieval_eval_fixture` passed (`tart-b2bfb8efc0`).
+- `cargo run -p tsift-cli -- dci-benchmark --fixture packages/tsift-cli/fixtures/memory-retrieval-eval.json --json` emitted the expected memory strategies and metrics.
+- `cargo test -p tsift-quality` passed (`tart-e55fa92b36`).
+- `cargo test -p tsift-cli` passed (`tart-6f499b83fd`).
+- `cargo clippy --workspace --all-targets -- -D warnings` passed (`tart-799ab74940`).
+- `make check` passed after the SPEC edit (`tart-bd08291b25`; digest reported existing patch warnings and an expected error-shaped test log line, exit 0).
+- `cargo install --path . --force` passed (`tart-a7c645c6ba`; existing patch warnings only).
+- `cargo fmt --all -- --check` and `git diff --check` passed.
+- GitHub CI `26694055447` passed both `clippy + test` and `live Convex graph acceptance`; annotations were GitHub's Node 20 deprecation and the expected missing live Convex URL note.
+- No tmux-test workflow exists for this repo (`gh workflow list` shows `CI` and `Release`).
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:358e3f6d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -250,14 +288,13 @@ preset #spec-test-build-install-commit-push
 - ~do [#tsift-memory-budget-guard]~
 - ~do [#tsift-claude-mem-adapter]~
 - ~do [#tsift-neighborhood-token-budget]~
-- do [#tsift-memory-eval-harness]
+- ~do [#tsift-memory-eval-harness]~
 - do [#tsift-summary-extract-gate]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#tsift-memory-eval-harness] Create a memory retrieval eval fixture from the Claude Code Insights report plus sampled claude-mem failures, comparing claude-mem API, tsift session-review/context-pack, and graph-db related on useful hits, output tokens, latency, and zero-output failure rate.
 - [ ] [#tsift-summary-extract-gate] Promote missing summary cache from reminder to graph effectiveness gate: context-pack/graph-db related should provide the exact summarize --extract and graph refresh commands required before semantic neighborhoods are trusted.
 <!-- /agent:backlog -->
 

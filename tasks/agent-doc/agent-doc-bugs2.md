@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -65,7 +65,7 @@ Verified against source + test:
 The plan's repro (`open-code.md` f94e7851c: waves added 4→3→2→1, wave-4 landed on top) was a **usage error**, not a binary defect — items must be passed top-to-bottom (wave-1 first), not tail-first. This matches the standing guidance in `feedback-agent-doc-pending-add-order` ("the ordering behavior is correct, so don't file a fabricated bug").
 
 Plan Option A (newest-arg-on-top stack) was **not** implemented: it would invert the documented convention, break the passing test, and contradict that feedback. `tasks/agent-doc/plan-pending-add-prepend-semantics.md` is effectively superseded — current behavior already satisfies the "beginning of backlog" spec; the doc fix it recommends (Option A) is declined. If a true newest-on-top stack is ever wanted, it should be a new explicit opt-in flag, not a change to `--pending-add`'s default.
-<!-- agent:boundary:7efc6207 -->
+<!-- agent:boundary:96cf685e -->
 <!-- /agent:exchange --> 
 ###
 <!--
@@ -86,7 +86,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 #spec-test-build-install-commit-push
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#pending-gate-snapshot-desync]~
 - ~do [#codex-auto-queue-live-verify]. auto-queue in monsterrodholders.md stalled~

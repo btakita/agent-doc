@@ -35,7 +35,23 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 5 response topic(s): tsiftcli-direct-crates; #tsift-dormant-crates; closeout recovery; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:bcc490f4 -->
+❯ Are there #next-steps for tsift to manage monorepos, multi-crate architectures, and other multiplicities?
+### Re: monorepo and multiplicity next steps — gpt-5
+
+Yes. tsift already has a solid first layer for monorepos: `.gitmodules`-backed workspace scopes, per-scope index DBs, federated search, duplicate leaf-name disambiguation, privacy/isolation tiers, path-hinted scope inference, and fail-closed unknown/ambiguous scope handling. The next step is not just “more scopes”; it is making nested multiplicities explicit in the graph and scheduler.
+
+I added the backlog in priority order. Top item: `#tsift-multiplicity-inventory`.
+
+Recommended order:
+
+1. `#tsift-multiplicity-inventory` — define the hierarchy and precedence among repo root, git submodule, Cargo workspace, package/crate, language workspace, generated/runtime scope, and agent-doc session scope.
+2. `#tsift-crate-graph` — project Cargo workspace/package/crate structure into the graph substrate as first-class nodes and edges.
+3. `#tsift-scope-selectors` — extend selectors and path inference beyond git submodules while keeping ambiguous cases fail-closed.
+4. `#tsift-multiplicity-orchestration` — feed scope/package/crate ownership into `conflict-matrix` and `dependency-dag` so parallel work can split by real ownership boundaries.
+5. `#tsift-multiplicity-fixtures` — lock the behavior with fixtures for duplicate crate names, nested workspaces, private scopes, stale indexes, graph parity, and perf gates.
+
+Proof: changed only this session document/backlog; no source edits. Commands run: `tsift status`, `tsift status --fix`, `agent-doc preflight`, `agent-doc orchestrate --from-exchange --plan`, `agent-doc plan`, `agent-doc read`, targeted tsift/search/source reads, and `git status --short`. Verification is document-level finalize/session-check only because this cycle captured follow-up work rather than changing code.
+<!-- agent:boundary:704a022a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -50,6 +66,11 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#tsift-multiplicity-fixtures] Add a fixture and acceptance suite for monorepo/multiplicity behavior: duplicate crate names, nested workspaces, multi-language package managers, private/isolated boundaries, missing/stale scoped indexes, graph-db/conflict-matrix/dependency-dag parity, and full-projection perf gates.
+- [ ] [#tsift-multiplicity-orchestration] Feed scope/package/crate ownership into conflict-matrix and dependency-dag so parallel worker packets can reason about cross-crate shared files, generated outputs, tests, config ownership, and safe antichains without collapsing the whole monorepo into one target.
+- [ ] [#tsift-scope-selectors] Extend CLI/config selectors beyond git submodules: preserve existing --scope behavior, add crate/package/workspace aliases where appropriate, infer nested path targets deterministically, and keep unknown/ambiguous selectors fail-closed with available-scope guidance.
+- [ ] [#tsift-crate-graph] Project Cargo workspace/package/crate structure into the graph substrate: workspace/package/crate nodes, membership edges, feature/target metadata, build/test targets, and cross-crate import/use edges separate from ordinary call edges.
+- [ ] [#tsift-multiplicity-inventory] Write the multiplicity model before adding more indexing behavior: define the hierarchy and precedence among repository root, git submodule scope, Cargo workspace, package/crate, language package manager workspace, generated/runtime scope, and agent-doc session scope.
 <!-- /agent:backlog -->
 
 ## Review

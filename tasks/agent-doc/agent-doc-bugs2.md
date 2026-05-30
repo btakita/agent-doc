@@ -103,7 +103,14 @@ Implemented the defensive fix, the only part the validation found genuinely open
 **Commits:** submodule `fdc184f2` (code+spec+tests, pushed), superproject pointer `f88ca1951`, plan status → IMPLEMENTED `881d3656a` (all pushed to `main`).
 
 **Not implemented:** proposed fix #4 (pre-auto-run recovery snapshot) — deferred as unnecessary now that the misfire is both inert (queue-scoped) and surfaced (warning). Fixes #2/#3 needed no code change. If you want #4 anyway, say so and I'll file/scope it.
-<!-- agent:boundary:ac5ef746 -->
+❯ Add to icebox
+
+### Re: Add to icebox — opus-4-8
+
+Parked **fix #4** (the deferred pre-auto-run recovery snapshot from `#backlog-auto-marker-misfire`) in the icebox — that's the only open/deferrable item from the prior exchange, where I offered to file it. If you meant something else by "add to icebox," tell me and I'll swap it.
+
+Icebox entry: `#misfire-recovery-snapshot` — a `pre-auto-run` recovery snapshot/tag (mirroring how `compact` tags before mutating) so any future destructive auto-run misfire is recoverable without git/sidecar archaeology. Deferred (not backlog) because the misfire is now both **inert** (queue-scoped) and **surfaced** (the `misplaced_component_attr` warning); it only becomes worth doing if a new auto-run path can mutate the backlog in place.
+<!-- agent:boundary:f93f6d7d -->
 <!-- /agent:exchange --> 
 ###
 <!--
@@ -168,6 +175,7 @@ preset #spec-test-build-install-commit-push
 <!-- /agent:review -->
 
 <!-- agent:icebox -->
+- [ ] [#misfire-recovery-snapshot] Pre-auto-run recovery snapshot/tag (mirroring `compact`'s pre-mutation tag) so a destructive auto-run misfire is recoverable without git/sidecar archaeology. Proposed fix #4 of `#backlog-auto-marker-misfire` (now IMPLEMENTED for fixes #1–#3). Parked: only worth doing if a new auto-run path can mutate the backlog in place — currently the misfire is inert (queue-scoped) and surfaced (misplaced_component_attr warning). Plan: tasks/agent-doc/plan-backlog-auto-marker-misfire.md.
 <!-- /agent:icebox -->
 
 ## Completed / Reaped

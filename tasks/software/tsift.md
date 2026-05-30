@@ -65,7 +65,35 @@ Verification:
 Escalation: none.
 
 Confidence: high. The move is a crate-boundary split with unchanged module bodies except rustfmt import ordering in `session_review`; existing digest/cost/review and SimWorld coverage moved with the crate and passed.
-<!-- agent:boundary:ede1ccfb -->
+
+### Re: #graph-neighborhood-budget — gpt-5
+
+Implemented `#graph-neighborhood-budget` in `src/tsift`.
+
+What changed:
+- `graph-db related` now score-ranks semantic-seeded incident/outgoing expansion before applying per-node edge caps and node discovery caps, so semantic/source/caller/callee links survive high-degree neighborhoods ahead of low-signal edges.
+- `graph-db neighborhood` keeps stable node-id pagination unchanged, but caps additive `ranked_neighbors` to a score-sorted preview and reports that cap in the ranking-gate diagnostics.
+- `tsift traverse <node> --limit N` now queues scored incident neighbors first, instead of allowing lexicographic neighbor order to decide tight caps.
+- Added regression coverage for score-before-cap semantic expansion, capped traversal-neighborhood selection, and capped ranked-neighbor scoring. Updated `SPEC.md` and `VERSIONS.md`.
+
+Verification:
+- `cargo test -p tsift-resolution ranked_neighbors_capped_truncates_after_scoring`
+- `cargo test -p tsift-cli graph_db_semantic_seeded_neighborhood_scores_before_caps`
+- `cargo test -p tsift-cli traversal_neighborhood_handles_prioritizes_high_signal_edges_when_limited`
+- `cargo test -p tsift-cli graph_db_api_queries_sqlite_neighborhood_and_schema`
+- `cargo clippy -p tsift-resolution -p tsift-cli --all-targets -- -D warnings`
+- `make check`
+- `cargo build --workspace`
+- `cargo install --path packages/tsift-cli --force`
+- `tsift --version` -> `tsift 0.1.62`
+- GitHub CI `26677186684` passed after rerunning a failed runner job; the initial failed attempt was GitHub runner disk exhaustion (`No space left on device`), not a code/test failure.
+
+Commits:
+- `src/tsift`: `cd10a3a tsift(#graph-neighborhood-budget): bound graph neighborhood previews` (pushed)
+- parent repo: `1a0903191 tsift: update graph neighborhood budget implementation` (submodule pointer only; parent push follows this document closeout)
+
+I also checked for tmux CI coverage in this repo; there is no `tmux` workflow or `make tmux-ci` target in `src/tsift`.
+<!-- agent:boundary:52f77c80 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -77,14 +105,13 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#agent-doc-domain-boundary]~
-- do [#graph-neighborhood-budget]
+- ~do [#graph-neighborhood-budget]~
 - do [#token-action-coverage]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#graph-neighborhood-budget] Improve graph and neighborhood queries with bounded scoring/caps so context packs return high-signal callers, callees, and nearby symbols without broad graph expansion.
 - [ ] [#token-action-coverage] Add fixture-backed coverage for prompt_budget, cache_resend, and restart_loop next_token_actions so bounded session reviews avoid duplicate failure/action rows beyond the noop_closeout case.
 <!-- /agent:backlog -->
 

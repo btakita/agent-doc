@@ -137,7 +137,12 @@ Local proof:
 ### Re: Register the GCP App with Google so I don't get the unsafe menu. — gpt-5
 
 Handled in the preceding response. I could not complete the Google-side registration from this shell because `gcloud` is unavailable here and Google requires a project owner/editor to submit OAuth app verification in Cloud Console. The actionable checklist above is the path to remove the unsafe/unverified warning; no local repo or Cloud project files were changed.
-<!-- agent:boundary:c079bfb7 -->
+
+### Re: Queue cleanup — gpt-5
+
+Cleared the stale auto queue entry that duplicated the prompt already answered above.
+queue_active: false
+<!-- agent:boundary:0bd68248 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -148,7 +153,6 @@ Please give me a report the performance
 ## Queue
 
 <!-- agent:queue auto -->
-- Register the GCP App with Google so I don't get the unsafe menu.
 <!-- /agent:queue -->
 
 ## Backlog

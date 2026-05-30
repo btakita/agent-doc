@@ -270,7 +270,36 @@ Root verification:
 Confidence: high for the tagpath adapter decision and submodule pointer. The remaining red evidence is outside this tagpath change.
 
 Escalation: none.
-<!-- agent:boundary:faa922ec -->
+❯ Should we split out the 3 additional crates?
+
+### Re: adapter crates — gpt-5
+No, not yet. I would keep the v0.12 split to `tagpath-core` plus the existing root `tagpath` facade.
+
+The three proposed adapter crates are plausible later, but splitting them now would add release and compatibility surface before we have evidence that the core boundary is stable:
+
+- `tagpath-wasm`: keep this as `tagpath::wasm` in the facade and publish `@btakita/tagpath-wasm` from `scripts/build-wasm.sh`. A Rust crate only makes sense if Rust-side wasm consumers need to depend on the adapter without pulling the facade package shape.
+- `tagpath-mcp`: keep this in the facade because MCP currently couples JSON-RPC stdio, harness config install, project config, indexed search, lint, and filesystem behavior. Splitting it now would mostly move facade dependencies into a new crate without simplifying the API.
+- `tagpath-project`: defer until project/index/search/config/ontology types settle. This might become the best second split, but only if downstream consumers need a stable project model without CLI/MCP/wasm packaging.
+
+A good split trigger would be: `tagpath-core` 0.12.x is published and used downstream, an adapter has an independent consumer, the dependency reduction is measurable, and the adapter API can be versioned without re-export churn. If that happens, I would evaluate `tagpath-project` first, then `tagpath-mcp` on top of it, and leave `tagpath-wasm` as npm packaging unless Rust consumers specifically ask for a crate.
+
+Changed paths: none.
+
+Commands run:
+- `tsift status`
+- `agent-doc --version`
+- `tsift status --fix`
+- `tsift index --workspace .`
+- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/software/tagpath.md`
+- `agent-doc read /home/brian/work/btakita/agent-loop/tasks/software/tagpath.md`
+- `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/software/tagpath.md`
+
+Verification: prompt-only decision; no code or tests changed.
+
+Confidence: high.
+
+Escalation: none.
+<!-- agent:boundary:547f654c -->
 <!-- /agent:exchange -->
 ###
 <!--

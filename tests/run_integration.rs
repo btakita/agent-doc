@@ -347,10 +347,10 @@ fn run_auto_queue_continues_until_drained() {
             "[run] active queue head synthesized as prompt diff",
         ))
         .stderr(predicate::str::contains(
-            "[queue] auto queue continuation: completed 1 item(s); launching next prompt: \"do #fix2\"",
+            "[queue] queue continuation: completed 1 item(s); launching next prompt: \"do #fix2\"",
         ))
         .stderr(predicate::str::contains(
-            "[queue] auto queue continuation: completed 2 item(s); launching next prompt: \"do #fix3\"",
+            "[queue] queue continuation: completed 2 item(s); launching next prompt: \"do #fix3\"",
         ))
         .stderr(predicate::str::contains("[queue] drained"));
 
@@ -372,6 +372,61 @@ fn run_auto_queue_continues_until_drained() {
         "queue should clear active state after all prompts are consumed"
     );
     assert!(!content.contains("agent:queue auto"));
+    assert!(!content.contains("do #fix1"));
+    assert!(!content.contains("do #fix2"));
+    assert!(!content.contains("do #fix3"));
+    assert_eq!(fs::read_to_string(counter).unwrap(), "3");
+}
+
+fn active_persisted_queue_doc() -> String {
+    // Persisted-active queue: `queue_active: true` but the opening tag is plain
+    // `<!-- agent:queue -->` (no `auto`). `#active-queue-persisted-no-continue`.
+    "---\nagent_doc_format: template\nagent_doc_write: crdt\nagent: mock\nmodel: gpt-5\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n- do #fix1\n- do #fix2\n- do #fix3\n<!-- /agent:queue -->\n\n## Pending\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n".to_string()
+}
+
+#[test]
+fn run_persisted_active_queue_continues_until_drained_without_auto() {
+    // `#active-queue-persisted-no-continue`: an already-active queue with no
+    // `auto` attribute must keep draining after each clean closeout — `auto` is
+    // a start trigger only; `queue_active: true` is the continuation signal.
+    let tmp = TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    fs::write(&doc, active_persisted_queue_doc()).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    seed_snapshot(tmp.path(), &doc);
+
+    let (script, counter) = write_counting_queue_agent(tmp.path());
+    let config_root = write_config(tmp.path(), &script);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .env("XDG_CONFIG_HOME", &config_root)
+        .args(["run", doc.to_str().unwrap()])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(
+            "[run] active queue head synthesized as prompt diff",
+        ))
+        .stderr(predicate::str::contains(
+            "[queue] queue continuation: completed 1 item(s); launching next prompt: \"do #fix2\"",
+        ))
+        .stderr(predicate::str::contains(
+            "[queue] queue continuation: completed 2 item(s); launching next prompt: \"do #fix3\"",
+        ));
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        content.contains("### Re: queue item 1 — gpt-5"),
+        "first queue response should be written"
+    );
+    assert!(
+        content.contains("### Re: queue item 3 — gpt-5"),
+        "third queue response should be written"
+    );
+    assert!(
+        content.contains("queue_active: false"),
+        "queue should clear active state after all prompts are consumed"
+    );
     assert!(!content.contains("do #fix1"));
     assert!(!content.contains("do #fix2"));
     assert!(!content.contains("do #fix3"));
@@ -400,7 +455,7 @@ fn run_auto_queue_stop_fence_halts_continuation_before_next_prompt() {
         .assert()
         .success()
         .stderr(predicate::str::contains(
-            "[queue] auto queue continuation stopped after 1 completed item(s): stop_fence before next prompt Some(\"do #fix2\")",
+            "[queue] queue continuation stopped after 1 completed item(s): stop_fence before next prompt Some(\"do #fix2\")",
         ));
 
     let content = fs::read_to_string(&doc).unwrap();

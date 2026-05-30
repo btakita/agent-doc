@@ -506,21 +506,27 @@ fn should_continue_auto_queue(
     let Some(queue) = outcome.queue_consumption.as_ref() else {
         return Ok(false);
     };
-    if !queue.auto || queue.drained || queue.remaining == 0 {
+    // `auto` is a start trigger only. Continuation is driven by the active queue
+    // state: consumption only runs when `queue_active: true`, so an active
+    // persisted queue (no `auto`) continues on the same evidence as `auto`
+    // (`#active-queue-persisted-no-continue`). The `active_queue_prompt_state`
+    // re-check below still halts on stop fence / time gate / head-modified /
+    // inactive / empty.
+    if queue.drained || queue.remaining == 0 {
         return Ok(false);
     }
 
     match active_queue_prompt_state(file)? {
         ActiveQueuePromptState::Ready { prompt } => {
             eprintln!(
-                "[queue] auto queue continuation: completed {} item(s); launching next prompt: {:?}",
+                "[queue] queue continuation: completed {} item(s); launching next prompt: {:?}",
                 completed_queue_items, prompt
             );
             Ok(true)
         }
         ActiveQueuePromptState::StopFence { next_prompt } => {
             eprintln!(
-                "[queue] auto queue continuation stopped after {} completed item(s): stop_fence before next prompt {:?}",
+                "[queue] queue continuation stopped after {} completed item(s): stop_fence before next prompt {:?}",
                 completed_queue_items, next_prompt
             );
             Ok(false)
@@ -530,7 +536,7 @@ fn should_continue_auto_queue(
             next_prompt,
         } => {
             eprintln!(
-                "[queue] auto queue continuation stopped after {} completed item(s): time_gate {} before next prompt {:?}",
+                "[queue] queue continuation stopped after {} completed item(s): time_gate {} before next prompt {:?}",
                 completed_queue_items, start_at, next_prompt
             );
             Ok(false)
@@ -540,21 +546,21 @@ fn should_continue_auto_queue(
             document_head,
         } => {
             eprintln!(
-                "[queue] auto queue continuation stopped after {} completed item(s): item_modified snapshot_head={:?} document_head={:?}",
+                "[queue] queue continuation stopped after {} completed item(s): item_modified snapshot_head={:?} document_head={:?}",
                 completed_queue_items, snapshot_head, document_head
             );
             Ok(false)
         }
         ActiveQueuePromptState::Inactive => {
             eprintln!(
-                "[queue] auto queue continuation stopped after {} completed item(s): queue_inactive",
+                "[queue] queue continuation stopped after {} completed item(s): queue_inactive",
                 completed_queue_items
             );
             Ok(false)
         }
         ActiveQueuePromptState::Empty => {
             eprintln!(
-                "[queue] auto queue continuation stopped after {} completed item(s): no_remaining_prompt",
+                "[queue] queue continuation stopped after {} completed item(s): no_remaining_prompt",
                 completed_queue_items
             );
             Ok(false)

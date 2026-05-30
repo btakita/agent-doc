@@ -13,10 +13,13 @@
 //! auto-queue continuation.
 //!
 //! The only durable proof after closeout is the document itself
-//! (`queue_active: true`, `agent:queue auto`, and a ready head) plus the durable
-//! marker this module persists at successful closeout. The detector here is the
-//! single shared source of truth; `session-check`, the `codex-stop` hook, and
-//! the closeout paths all consult it instead of duplicating the activation
+//! (`queue_active: true` and a ready head) plus the durable marker this module
+//! persists at successful closeout. `auto` is only a *start* trigger; once a
+//! queue is active, continuation is driven by `queue_active: true`, so a
+//! persisted-active `agent:queue` (no `auto` attribute) is equally eligible
+//! (`#active-queue-persisted-no-continue`). The detector here is the single
+//! shared source of truth; `session-check`, the `codex-stop` hook, and the
+//! closeout paths all consult it instead of duplicating the activation
 //! reasoning.
 
 use anyhow::{Context, Result};
@@ -33,13 +36,20 @@ pub struct QueueContinuation {
     pub reason: String,
 }
 
-/// Detect whether `file` currently requires auto-queue continuation.
+/// Detect whether `file` currently requires queue continuation.
 ///
-/// True only when: frontmatter `queue_active: true`, the `agent:queue` component
-/// carries `auto`, [`crate::queue::resolve_activation`] is active, the head is a
-/// real prompt (not a stop fence or future time gate), and the head was not
-/// edited between the committed snapshot and the file. This mirrors the
-/// codex-hook `active_auto_queue_prompt` logic in one shared, testable place.
+/// True only when: frontmatter `queue_active: true`,
+/// [`crate::queue::resolve_activation`] is active, the head is a real prompt
+/// (not a stop fence or future time gate), and the head was not edited between
+/// the committed snapshot and the file.
+///
+/// `auto` is a *start* trigger only; once a queue is active (`queue_active:
+/// true`) continuation is driven by the active state, not the opening-tag
+/// attribute, so a persisted-active `agent:queue` (no `auto`) is equally
+/// eligible (`#active-queue-persisted-no-continue`). An inactive plain queue
+/// never reaches here because the `queue_active` guard above fails first. This
+/// mirrors the codex-hook `active_auto_queue_prompt` logic in one shared,
+/// testable place.
 pub fn detect(file: &Path) -> Result<Option<QueueContinuation>> {
     let content = match std::fs::read_to_string(file) {
         Ok(content) => content,
@@ -57,13 +67,14 @@ fn detect_in_content(file: &Path, content: &str) -> Result<Option<QueueContinuat
     let Some(queue_component) = components.iter().find(|component| component.name == "queue") else {
         return Ok(None);
     };
-    if !crate::queue::has_auto_attr(&queue_component.attrs) {
-        return Ok(None);
-    }
+    // `auto` is a start trigger only — continuation is gated on `queue_active:
+    // true` (checked above), so a persisted-active queue without `auto` still
+    // continues (`#active-queue-persisted-no-continue`).
+    let has_auto = crate::queue::has_auto_attr(&queue_component.attrs);
 
     let body = &content[queue_component.open_end..queue_component.close_start];
     let entries = crate::queue::parse(body).context("queue continuation: failed to parse queue")?;
-    let activation = crate::queue::resolve_activation(&entries, true, false, true);
+    let activation = crate::queue::resolve_activation(&entries, has_auto, false, true);
     if !activation.active
         || crate::queue::has_stop_fence_at_head(&activation.entries_after)
         || crate::queue::time_gate_at_head(&activation.entries_after).is_some()
@@ -99,9 +110,14 @@ fn detect_in_content(file: &Path, content: &str) -> Result<Option<QueueContinuat
     };
     let head_prompt = head.text.clone();
     let head_id = extract_head_id(&head_prompt);
+    let reason = if has_auto {
+        "active `agent:queue auto` still has a ready head prompt after a clean closeout"
+    } else {
+        "active persisted `agent:queue` (queue_active: true) still has a ready head prompt after a clean closeout"
+    }
+    .to_string();
     Ok(Some(QueueContinuation {
-        reason: "active `agent:queue auto` still has a ready head prompt after a clean closeout"
-            .to_string(),
+        reason,
         head_id,
         head_prompt,
     }))
@@ -356,9 +372,28 @@ mod tests {
     }
 
     #[test]
-    fn detect_none_without_auto_attr() {
+    fn detect_returns_head_for_persisted_active_queue_without_auto() {
+        // `#active-queue-persisted-no-continue`: a persisted-active queue
+        // (queue_active: true) without the `auto` attribute still owes
+        // continuation — `auto` is a start trigger only.
         let dir = tempfile::tempdir().unwrap();
-        let doc = write_doc(dir.path(), &["do [#x]"], true, false);
+        let doc = write_doc(dir.path(), &["do [#persisted] next", "do [#third]"], true, false);
+        let continuation = detect(&doc).unwrap().expect("ready persisted-active head");
+        assert_eq!(continuation.head_prompt, "do [#persisted] next");
+        assert_eq!(continuation.head_id.as_deref(), Some("persisted"));
+        assert!(
+            continuation.reason.contains("persisted"),
+            "persisted-active reason should name the persisted trigger, got: {}",
+            continuation.reason
+        );
+    }
+
+    #[test]
+    fn detect_none_when_inactive_plain_queue() {
+        // A queue without `auto` AND without `queue_active: true` must never
+        // self-start — the `queue_active` guard fails first.
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(dir.path(), &["do [#x]"], false, false);
         assert!(detect(&doc).unwrap().is_none());
     }
 

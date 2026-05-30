@@ -138,7 +138,7 @@ const CLAUDE_QUEUE_AUTO_LOOP_SECTION: &str = r#"
 After a successful `agent-doc finalize` / `agent-doc write --commit` cycle whose `agent-doc session-check` returns OK, check preflight's queue fields:
 
 - `preflight.queue_active == true`
-- `preflight.queue_trigger == "auto"`
+- `preflight.queue_trigger == "auto"` **or** `preflight.queue_trigger == "persisted"` — `auto` is a start trigger only; once the queue is active, a persisted-active queue (`queue_active: true` with no `auto` attribute) is equally continuation-eligible (`#active-queue-persisted-no-continue`). Do not require the `auto` attribute to keep draining an already-active queue.
 - `preflight.queue_prompts.len() >= 1`
 - `preflight.user_intent_prompt_changes` is empty (a real user prompt mid-loop takes precedence; do NOT auto-loop over it). Managed-component state edits — queue activity toggle, queue item add/strike, backlog/review/done item edits, `queue_active:` frontmatter flip — appear in `prompt_bearing_changes` for compatibility but are filtered out of `user_intent_prompt_changes` so routine session bookkeeping does not block the auto-loop.
 
@@ -901,6 +901,10 @@ mod tests {
         assert!(
             rendered.contains("queue_active") && rendered.contains("queue_prompts"),
             "auto-loop section must reference preflight queue fields"
+        );
+        assert!(
+            rendered.contains("\"persisted\""),
+            "auto-loop section must make persisted-active queues continuation-eligible (#active-queue-persisted-no-continue)"
         );
     }
 

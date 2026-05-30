@@ -30,53 +30,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260530-160233.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260530-161657.md`*
 
 Compacted content:
-- Archived 6 response topic(s): Why "registered in its own project root" occurred; Why the cross-project stash condition surfaces; Cross-project resync workflow bug; 3 more
+- Archived 2 response topic(s): Usage report → reprioritized agent-doc backlog; #next-steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ Evaluate file:///home/brian/.claude/usage-data/report-2026-05-30-112308.html. Please priortize #next-steps for agent-doc
-
-### Re: Usage report → reprioritized agent-doc backlog — opus-4-8
-
-Evaluated `report-2026-05-30-112308.html` (Claude Code Insights, 3,888 msgs / 317 sessions, 2026-05-28→30). The agent-doc-relevant signal is unambiguous and it changed the priority order.
-
-**What the data says about agent-doc:** the report's top "what's hindering you" item is the **finalize pipeline itself** — *"your agent-doc finalize pipeline introduced its own retries through doubled IDs, unclosed patch blocks, and malformed requests,"* and in the friction detail: *"doubled IDs, unclosed patch blocks, and a false-positive done-guard, requiring multiple retry cycles plus manual normalization of a space-named directory."* It also recorded an API 400 (thinking-block) that blocked a whole session. "Agent-Doc Tooling & IPC Bug Fixes" was ~10 sessions — the single largest work area, and the friction is concentrated in self-inflicted finalize/IPC churn, not the task work.
-
-So the highest-leverage agent-doc work per the data is **finalize/write pipeline reliability**, not the codex/live-verify items I had on top. Reprioritized accordingly:
-
-**Tier 1 — finalize/write reliability (data-dominant friction):**
-1. `#ipcfullprompt-recur2` — full-document IPC corruption/duplication while typing (the "doubled IDs / unclosed patches" root; needs manual git cleanup when it hits).
-2. `#pending-done-guard-false-positive` *(new)* — the report's "false-positive done-guard." I hit it **3×** this session; it demands `--done` whenever a response merely *cites* an open id.
-3. `#codex-final-response-not-written` — finalize-path response loss.
-4. `#pending-add-suppresses-queue-consume` — finalize queue-consume bug.
-5. `#stuck-capture-compact-false-positive` — capture-not-in-HEAD false positive after compaction (I hit this exact warning *this* cycle).
-
-**Tier 2 — other correctness:** `#prompt-preempts-auto-queue`, `#codex-owned-pane-prompt-miss`, `#codex-route-busy-ctrl-g-opens-editor`.
-**Tier 3 — live-verify of shipped work:** `#cross-project-stash-pane-condition`, `#route-drain-all-surface-live-verify`, `#run-agent-doc-stale-busy-replay`.
-**Tier 4 — convenience/UX/opt-in:** `#jb-busy-queue-ux-feedback`, `#plugin-cleanup-menu-command`, `#stash-session-ttl-prune`, `#next-steps-backlog-capture`, `#ah0s`.
-
-**Top of the backlog: `#ipcfullprompt-recur2`** — the document-corruption/duplication class is the most severe of the data-flagged finalize failures (it can require a raw `git checkout` to recover), so it outranks the high-frequency-but-low-severity done-guard quick win at #2.
-
-**Note (queue divergence):** you flipped `agent:queue` to `auto`, but its `do [#id]` list was frozen in the *previous* order, so the auto-drain would still start at `#codex-final-response-not-written`, not the new top. A real prompt (this one) took precedence so I did **not** auto-loop. Before resuming the drain, say the word and I'll regenerate the queue to match this new priority (or you can re-trigger it) — otherwise it'll execute stale-ordered. Two report items I did *not* turn into agent-doc backlog entries: the observer/claude-mem "Prompt is too long" failures and the Cloudflare token-scope stalls are outside agent-doc's scope.
-- Please add a `priority` attribute to `agent:backlog`, `agent:icebox`, `agent:queue` that will order the item list by priority. #next-steps
-- Please add a `queue=sync|append|prepend` attribute to `agent:backlog` and `agent:icebox`. `queue=sync` will replace the content of the `agent:queue` with a list to run each item id. `queue=append` will append the item ids that are not already in the `agent:queue`. `queue=prepend` will prepend the item ids that are not already in the `agent:queue`. `queue` can be used with `priority` to first prioritize the list then update the `agent:queue`. #next-steps
-
-### Re: #next-steps — priority + queue-sync component attributes — opus-4-8
-
-Both captured as backlog items — and they're well-aimed: they'd turn the last three cycles of *manual* `--pending-reorder` + hand-regenerating the queue into declarative component attributes.
-
-- **`#backlog-priority-attribute`** — a priority flag on `agent:backlog` / `agent:icebox` / `agent:queue` so the binary keeps the list in priority order instead of me running `--pending-reorder` each `#next-steps` pass.
-- **`#backlog-queue-sync-attribute`** — `queue=sync|append|prepend` on the backlog/icebox: `sync` replaces the queue with a `do [#id]` list, `append`/`prepend` add only ids not already queued — composable with the priority flag (prioritize, then sync). This is exactly the "regenerate the queue to the new priority" step I had to offer by hand last cycle.
-
-I placed both in the **ergonomics tier** (with `#ah0s`), below the data-flagged finalize-reliability bugs — they're tooling conveniences, not the duplication/done-guard reliability issues the usage report ranked first. They don't change the top.
-
-**Top of the backlog: `#ipcfullprompt-recur2`** (unchanged). I also see you moved `do [#ipcfullprompt-recur2]` to the `agent:queue` head by hand — that re-syncs the queue head to the new top.
-
-Process note: my first attempt at this write failed because the `#backlog-priority-attribute` item text I added literally contained an `agent:backlog` HTML-comment marker form, which the parser read as a nested unclosed component — a live instance of the "unclosed patch/marker" class the usage report flagged. I repaired the item text (no marker syntax in prose) and re-committed.
-
-These are captured as `#next-steps`, not implemented. Want me to start implementing — the top reliability item `#ipcfullprompt-recur2`, or these two ergonomics attributes (which make future reprioritization self-maintaining)?
-<!-- agent:boundary:6f5b4a3c -->
+<!-- agent:boundary:9eb1360f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -124,7 +83,9 @@ preset #spec-test-build-install-commit-push
 - do [#plugin-cleanup-menu-command]
 - do [#stash-session-ttl-prune]
 - do [#next-steps-backlog-capture]
-- do [#ah0s] 
+- do [#ah0s]
+- do [#backlog-priority-attribute]
+- do [#backlog-queue-sync-attribute]
 <!-- /agent:queue -->
 
 ## Backlog

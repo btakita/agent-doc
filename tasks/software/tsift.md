@@ -35,7 +35,21 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 4 response topic(s): agent-doc domain boundary; #graph-neighborhood-budget; #token-action-coverage; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:f191d5d4 -->
+❯ What are #next-steps to extract tsift crates?
+### Re: next steps to extract tsift crates — gpt-5
+
+The extraction is mostly past the first split: `src/tsift/Cargo.toml` already has a `packages/tsift-*` workspace, and the root `src/tsift/src/*.rs` surface is now just re-export shims. The highest-value next step is to remove the remaining runtime reliance on that shim from `tsift-cli`; right now `packages/tsift-cli` still depends on `tsift` and many CLI call sites use `tsift::...`, so the root crate is still part of the CLI implementation path instead of only a compatibility facade.
+
+I added the follow-up backlog in priority order:
+
+1. `#tsiftcli-direct-crates` — make `tsift-cli` import sibling crates directly and leave root `tsift` as a compatibility re-export crate.
+2. `#tsift-dormant-crates` — make `tsift-tokensave` and `tsift-algorithms` intentional in the public/CLI surface, or explicitly park them so the spec, workspace, and dependency graph agree.
+3. `#tsift-crate-publish-preflight` — normalize extracted-crate version/readme/publish metadata and prove publish order with check/test plus dry runs.
+
+Top backlog item: `#tsiftcli-direct-crates`.
+
+No code changed in this cycle; I only inspected the crate layout and added backlog items.
+<!-- agent:boundary:feefcd2b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -50,6 +64,9 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#tsiftcli-direct-crates] Remove tsift-cli's dependency on the root tsift shim by importing sibling tsift-* crates directly, leaving the root crate as backwards-compatible re-export surface only.
+- [ ] [#tsift-dormant-crates] Make dormant extracted crates intentional: wire or explicitly park tsift-tokensave and tsift-algorithms so workspace membership, CLI usage, root re-exports, and spec language agree.
+- [ ] [#tsift-crate-publish-preflight] Normalize extracted-crate release metadata and version policy: align split-crate versions/readmes/publish settings, then run cargo check/test plus cargo publish --dry-run in dependency order.
 <!-- /agent:backlog -->
 
 ## Review

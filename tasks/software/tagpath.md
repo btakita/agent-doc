@@ -123,98 +123,18 @@ v0.10.0 published to crates.io — Phase 4 complete (index, MCP, WASM, dyn-gramm
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260530-034427.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260530-041418.md`*
 
 Compacted content:
-- Archived 6 response topic(s): do [#tpauditpolicy]; do [#commhxstrong]; do [#p6tspub]; 3 more
+- Archived 3 response topic(s): separate crates; next steps to split crates; do #tpcoreplan
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-❯ Does it make sense to break up tagpath into separate crates?
-
-### Re: separate crates — gpt-5
-
-Yes, but I would split it narrowly along dependency and target boundaries, not into a crate per module.
-
-The current crate is carrying several distinct products at once: a pure identifier/tag semantic library, native project analysis, a CLI, MCP integration, a watcher, dynamic grammar loading, and a WASM surface. That is still manageable, but the pressure is visible in the feature graph: defaults pull in the language grammars plus MCP and watch support, `src/lib.rs` has many native-vs-wasm gates, `src/main.rs` is a large CLI orchestration layer, and the WASM module intentionally exposes only a small filesystem-free subset.
-
-The split that makes sense first:
-
-1. `tagpath-core`: parser, convention detection, alias, family, prose, query normalization, compression, and the pure data types that do not require filesystem or tree-sitter.
-2. `tagpath` as the existing user-facing crate/binary: keep the CLI name and compatibility path here; depend on `tagpath-core` internally.
-3. Later, only if the surfaces keep growing, add thin adapter crates such as `tagpath-wasm` and `tagpath-mcp`.
-4. Possibly extract `tagpath-project` or `tagpath-native` for config resolution, extract/search/lint/index/ontology/rename/watch/tree-sitter if that layer keeps expanding.
-
-I would not split the tree-sitter languages into separate crates right now. Feature flags are already a better fit for that boundary, and per-language crates would add publishing/versioning overhead without buying much unless third parties need to consume those grammar bundles independently.
-
-The main payoff is cleaner consumption: agents or tools that only need `parse`, `alias`, `family`, or `normalize_query` could depend on a small stable core without inheriting CLI, watcher, MCP, tree-sitter, native filesystem, or WASM concerns. It also makes the WASM story cleaner because the current WASM subset is basically already describing a core API.
-
-The cost is real: workspace release choreography, more semver surface, more docs, and more internal API decisions becoming public. So I would not do a broad workspace split until the core API is stable enough to support independently.
-
-My call: yes to a conservative `tagpath-core` extraction first; no to a many-crate breakup yet.
-
-❯ What are #next-steps to split out crates?
-
-### Re: next steps to split crates — gpt-5
-
-Yes. I would put the split work in the backlog as a narrow, priority-ordered sequence, with `#tpcoreplan` at the top.
-
-1. `#tpcoreplan` - define the exact `tagpath-core` boundary first: public API inventory, pure data types, dependency exclusions, compatibility re-exports, and release impact.
-2. `#tpcoreextract` - extract the pure crate: parser, convention detection, alias, family, prose, query normalization, compression, and the tests that should move with those APIs.
-3. `#tpcorefacade` - keep `tagpath` as the existing user-facing crate and binary, depending on `tagpath-core` while preserving current CLI behavior, public exports, and feature defaults.
-4. `#tpcoreci` - add workspace CI/docs/release coverage: `--no-default-features`, WASM, normal CLI defaults, and publish-order smoke checks.
-5. `#tpcoreadapters` - only after the core split settles, re-evaluate thin adapter crates like `tagpath-wasm`, `tagpath-mcp`, or `tagpath-project`.
-
-Top backlog item: `#tpcoreplan`.
-
-No code changed in this cycle. Verification was limited to the agent-doc cycle checks: `preflight`, `plan`, and finalize/session-check.
-Updated [tasks/software/tagpath.md](/home/brian/work/btakita/agent-loop/tasks/software/tagpath.md:156) with the next-steps response and added prioritized backlog items.
-
-Top backlog item: `#tpcoreplan`.
-
-Closeout passed: `agent-doc session-check` ok. Committed as `8782ef5e5`. No code changed, so no project test suite was run.
-
-### Re: do #tpcoreplan — gpt-5
-
-Completed `#tpcoreplan`.
-
-I added the conservative `tagpath-core` split plan to `src/tagpath/SPEC.md` as a new workspace split section. It now inventories the public APIs to move, names the native/facade modules that stay in `tagpath`, sets the dependency boundary for `tagpath-core`, defines compatibility re-exports for existing `tagpath::...` imports, and documents release/publish order.
-
-I also added `src/tagpath/tests/test_core_split_plan.rs` so the required plan boundaries stay covered by tests.
-
-Changed paths:
-
-- `src/tagpath/SPEC.md`
-- `src/tagpath/tests/test_core_split_plan.rs`
-- parent submodule pointer `src/tagpath`
-
-Commits and push:
-
-- tagpath: `404e593` (`docs: plan tagpath core split`) pushed to `btakita/tagpath main`
-- agent-loop: `c74a6d87d` (`chore: update tagpath split plan`) pushed to `btakita/agent-loop main`
-
-Verification:
-
-- `rustfmt --check tests/test_core_split_plan.rs` passed
-- `git diff --check` passed
-- `cargo test core_split_plan` passed
-- `cargo test` passed
-- `cargo clippy -- -D warnings` passed
-- `cargo build` passed
-- `cargo install --path . --force` passed and replaced the local `tagpath` binary
-- root `make check` passed
-- tagpath GitHub Actions `CI` passed
-- tagpath GitHub Actions `WASM build` passed
-
-Notes:
-
-- `cargo fmt --check` for the whole tagpath crate is still red on pre-existing formatting in `src/lint/agent_doc.rs`; I did not touch that unrelated file.
-- agent-loop GitHub Actions still fails before runner steps are created: both `tmux-ci` and `check` jobs have empty step logs (`log not found`). Local `make check` passed, so I classified the GitHub result as an external CI-start blocker rather than a code failure.
-<!-- agent:boundary:acfd7282 -->
+<!-- agent:boundary:551b548a -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#tpcoreplan]~
 - do [#tpcoreextract]

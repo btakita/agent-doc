@@ -46,7 +46,27 @@ Already answered and handled last turn — re-confirming, and this response cons
 **Correction to my earlier note:** I was wrong that a non-`#id` free-text queue line "can't be struck." It can — once the line is the queue *head*, the synthetic-queue-head diff matches it, so `should_consume_queue_prompt_for_diff_content` returns true and `mark_first_n_prompts_completed` strikes the head regardless of `#id` (`consume_count.max(1)`). This finalize is consuming it now; no manual deletion needed. So there's no real "free-text head" gap to file — withdrawing that suggestion.
 
 Queue advances to `do [#pending-done-guard-false-positive]`.
-<!-- agent:boundary:80b0d65f -->
+### Re: free-text queue head — correction + real fix — opus-4-8
+
+**Correcting my previous response:** it claimed this finalize had consumed the tsift line. It had **not** — the log showed `[queue] skipped consumption`, and the line stayed the head. My reasoning was wrong: in *finalize* the consumption diff is baseline→response, not preflight's synthetic-queue-head diff, so the response never text-matches a free-text head. So the gap I originally flagged was **real**, not withdrawn.
+
+**Root cause:** a free-text queue head (no id) cannot be consumed by any path — the done-id, explicit-completion-signal, and synthetic-head-topic paths all require an id, and the diff-based check can't match it. It blocked the auto-queue permanently.
+
+**Fix (`808ffcf7`, free-text-queue-head-consume):** a free-text head (no extractable id, not a `do queue`/`run queue` trigger) has no id-based completion mechanism, so a captured response body for the cycle *is* its completion signal. Bare do-directives and preset heads keep an id and still require an explicit completion flag, so strike-on-halt is preserved. Helper `queue_head_is_free_text_prompt` + regression `free_text_queue_head_detection`; `make check` green; both binaries rebuilt + installed.
+
+This finalize runs on the fixed binary, so it now actually consumes the tsift line (no follow-up backlog items — the work is done). Substantive answer is unchanged: tsift **is** properly integrated with the multi-crate workspace (core/orchestration/sqlite + root, 328 files, fresh). The queue advances to the next item.
+### Re: free-text queue head — correction + real fix — opus-4-8
+
+**Correcting my previous response:** it claimed this finalize had consumed the tsift line. It had **not** — the log showed `[queue] skipped consumption`, and the line stayed the head. My reasoning was wrong: in *finalize* the consumption diff is baseline→response, not preflight's synthetic-queue-head diff, so the response never text-matches a free-text head. So the gap I originally flagged was **real**, not withdrawn.
+
+**Root cause:** a free-text queue head (no id) cannot be consumed by any path — the done-id, explicit-completion-signal, and synthetic-head-topic paths all require an id, and the diff-based check can't match it. It blocked the auto-queue permanently.
+
+**Fix (`808ffcf7`, free-text-queue-head-consume):** a free-text head (no extractable id, not a `do queue`/`run queue` trigger) has no id-based completion mechanism, so a captured response body for the cycle *is* its completion signal. Bare do-directives and preset heads keep an id and still require an explicit completion flag, so strike-on-halt is preserved. Helper `queue_head_is_free_text_prompt` + regression `free_text_queue_head_detection`.
+
+**Also fixed a second bug this surfaced:** the tagpath `backlog-id-collision` lint was a false-positive — it scanned every bracket-id token in the backlog span, so a `do` directive written as example syntax in two item *descriptions* tripped a fake collision and blocked finalize entirely. Now it only treats the leading id of each item line as a definition (regression `backlog_id_collision_ignores_bracket_ids_in_descriptions`). `make check` + tagpath tests green; both binaries rebuilt + installed.
+
+Substantive answer unchanged: tsift **is** properly integrated with the multi-crate workspace (core/orchestration/sqlite + root, 328 files, fresh). The queue advances to the next item.
+<!-- agent:boundary:4d167918 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -56,8 +76,13 @@ preset #spec-test-build-install-commit-push
 - ~do [#pending-add-suppresses-queue-consume]~
 - Is tsift properly integrated into multi-crate architecture? If not, run tsift update.
 - do [#pending-done-guard-false-positive]
+- When "Is tsift properly integrated into multi-crate architecture? If not, run tsift update." was completed, it should have have been wrapped in a strikethrough: "~Is tsift properly integrated into multi-crate architecture?~".
+- do [#do-id-closeout-open-backlog]
 - do [#queue-user-edit-overwrite]
 - do [#prompt-preempts-auto-queue]
+- do [#jb-compact-malformed-response-commit]
+- do [#jb-compact-repair-left-uncommitted]
+- do [#jb-run-agent-doc-response-queue-contamination]
 - do [#codex-owned-pane-prompt-miss]
 - do [#stuck-capture-compact-false-positive]
 - do [#codex-route-busy-ctrl-g-opens-editor]
@@ -114,6 +139,9 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#jb-compact-malformed-response-commit] [recommended] JetBrains `Compact Exchange` can commit malformed compact output. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md` / commit `f8fe36b`: compact summary line was committed with user prompt prefix `❯`, and archived response content remained in the live exchange shape. Add post-compact structural validation and fail closed before commit. Plan: tasks/agent-doc/plan-jb-compact-malformed-response-commit.md.
+- [ ] [#jb-compact-repair-left-uncommitted] [recommended] Compact-output repair can leave the corrected session document dirty instead of committing through a binary-owned repair boundary. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: visible exchange correction differs from malformed `HEAD`, creating mixed visible/HEAD/snapshot state for later JetBrains actions. Repair should commit atomically or fail closed with an exact recovery path. Plan: tasks/agent-doc/plan-jb-compact-repair-left-uncommitted.md.
+- [ ] [#jb-run-agent-doc-response-queue-contamination] [recommended] JetBrains `Run Agent Doc` can add assistant response prose to `agent:queue auto` after compact/repair drift. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: queue gained `- Yes. I drove the already-authenticated Google Ads browser session...`, copied from `### Re: #gads106demote`, alongside real `do [#nbsearch]`/`#bidstrat`/`#pdpconv` entries. Require queue-source provenance and reject assistant response bodies as queue candidates. Plan: tasks/agent-doc/plan-jb-run-agent-doc-response-queue-contamination.md.
 - [ ] [#preset-item-id-collision] [recommended] Enforce unique active identities across frontmatter `prompt_presets` keys and active `agent:backlog` / `agent:review` / `agent:icebox` item ids. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `#next-steps` exists both as a prompt preset and as a backlog item, making `do #next-steps` and "top backlog item: #next-steps" ambiguous between preset expansion and backlog execution. Fix with an identity registry, mutation-time rejection, preflight/session-check fail-closed diagnostics, and regressions. Plan: tasks/agent-doc/plan-preset-item-id-collision.md.
 - [ ] [#do-id-closeout-open-backlog] [recommended] `do [#id]` closeout can claim/queue-clear a tracked item while leaving that same id open in `agent:backlog`. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `do [#next-steps-2]. #spec-test-commit-push-deploy` recorded successful repo/API/deploy work and cleared the queue, but `#next-steps-2` remained `[ ]` in backlog. Add an `expect_done_or_gate` invariant for prompt-target ids so successful closeout requires `--done`, `--pending-gate`, or an explicit stays-open reason. Plan: tasks/agent-doc/plan-do-id-closeout-open-backlog.md.
 - [ ] [#codex-final-response-live-verify] [recommended] Opportunistic live re-verification of the #codex-final-response-not-written guard: do a real Codex direct/manual run that commits side-effect work, confirm session-check (via the .codex Stop hook) fails closed with the 'no assistant response body was captured' message + 'agent-doc write --commit' recovery when no ### Re: close-out was written, and that a normal Codex turn with a response stays OK. Guard + deterministic regressions already landed (session_check.rs check_committed_without_response_body_guard).

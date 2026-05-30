@@ -35,12 +35,33 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 7 response topic(s): Is tsift properly integrated into multi-crate architecture?; free-text queue head; free-text queue head; 4 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:376453d6 -->
+
+### Re: do #do-id-closeout-open-backlog — opus-4-8
+
+Implemented the `expect_done_or_gate` invariant so a `do [#id]` directive can no longer clear the queue while leaving its target `[ ]` in `agent:backlog`.
+
+#### What changed
+
+- **`cycle_state.rs`** — new `expect_done_or_gate_ids` field on `CycleState` plus `record_expect_done_or_gate_ids()`, persisted across all three struct constructors.
+- **`preflight.rs`** — for each `do [#id]` / `do #id` prompt target that is open in the live `agent:backlog` at preflight, record an `expect_done_or_gate` obligation for that id.
+- **`session_check.rs`** — new `check_expect_done_or_gate_guard` wired into the guard chain next to `pending_done_guard`. It fires only after a committed response cycle: if an obligated id is still open in `agent:backlog` and was not recorded done / gated / kept-open this cycle, it fails closed (Strict) or warns (Warn), with a `--done <id>` / `--pending-gate <id>` repair hint. Respects `pending_done_guard: off` and the `` opt-out. Added `do_directive_target_ids()` (mirrors `tsift_graph::extract_do_targets`) and `open_backlog_ids()` helpers.
+
+Lifecycle coverage: `--done` reaps the id, `--pending-gate` moves it to review, and `--pending-edit "id=… (stays open: …)"` records a kept-open reason — all three remove the id from the open-backlog set or the obligation, so only a silently-dropped target fails closed. Detection keys off backlog membership (not response wording), so it catches the queue-cleared / status-updated closeouts the heading-based `pending_done_guard` misses.
+
+#### Verification
+
+- 7 new unit tests (parse + 6 guard scenarios: open-target fail, wired-into-inspect, done-passes, gated-passes, unrelated-open no-false-positive, off-mode skip). `make check` green (clippy + full suite, 1939 orchestration tests).
+- The real-binary `live_ipc_race_integration` cycle-1779845677327 case (a genuine `do [#liveipcrace]` closeout that doesn't resolve the item) now correctly trips the guard; it opts out via `pending_done_guard: off` since it deliberately tests IPC drift, not backlog lifecycle.
+- Updated the FlowCore token budget (session_check `guard_` 22→30, audited) and the `pending-ops.md` / `commit.md` runbooks; regenerated Claude/Codex/OpenCode/Cursor skill surfaces (`audit-docs` managed-surface error cleared).
+- Built `--release` + `cargo install`; both binaries carry the fix.
+
+Note: this cycle's preflight ran on the prior binary, so the new obligation isn't enforced on this turn — but it now guards every subsequent `do [#id]` queue cycle.
+<!-- agent:boundary:98f4d12b -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#do-id-closeout-open-backlog]
+- ~do [#do-id-closeout-open-backlog]~
 - do [#queue-user-edit-overwrite]
 - do [#prompt-preempts-auto-queue]
 - do [#jb-compact-malformed-response-commit]
@@ -106,7 +127,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 - [ ] [#jb-compact-repair-left-uncommitted] [recommended] Compact-output repair can leave the corrected session document dirty instead of committing through a binary-owned repair boundary. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: visible exchange correction differs from malformed `HEAD`, creating mixed visible/HEAD/snapshot state for later JetBrains actions. Repair should commit atomically or fail closed with an exact recovery path. Plan: tasks/agent-doc/plan-jb-compact-repair-left-uncommitted.md.
 - [ ] [#jb-run-agent-doc-response-queue-contamination] [recommended] JetBrains `Run Agent Doc` can add assistant response prose to `agent:queue auto` after compact/repair drift. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: queue gained `- Yes. I drove the already-authenticated Google Ads browser session...`, copied from `### Re: #gads106demote`, alongside real `do [#nbsearch]`/`#bidstrat`/`#pdpconv` entries. Require queue-source provenance and reject assistant response bodies as queue candidates. Plan: tasks/agent-doc/plan-jb-run-agent-doc-response-queue-contamination.md.
 - [ ] [#preset-item-id-collision] [recommended] Enforce unique active identities across frontmatter `prompt_presets` keys and active `agent:backlog` / `agent:review` / `agent:icebox` item ids. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `#next-steps` exists both as a prompt preset and as a backlog item, making `do #next-steps` and "top backlog item: #next-steps" ambiguous between preset expansion and backlog execution. Fix with an identity registry, mutation-time rejection, preflight/session-check fail-closed diagnostics, and regressions. Plan: tasks/agent-doc/plan-preset-item-id-collision.md.
-- [ ] [#do-id-closeout-open-backlog] [recommended] `do [#id]` closeout can claim/queue-clear a tracked item while leaving that same id open in `agent:backlog`. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `do [#next-steps-2]. #spec-test-commit-push-deploy` recorded successful repo/API/deploy work and cleared the queue, but `#next-steps-2` remained `[ ]` in backlog. Add an `expect_done_or_gate` invariant for prompt-target ids so successful closeout requires `--done`, `--pending-gate`, or an explicit stays-open reason. Plan: tasks/agent-doc/plan-do-id-closeout-open-backlog.md.
 - [ ] [#codex-final-response-live-verify] [recommended] Opportunistic live re-verification of the #codex-final-response-not-written guard: do a real Codex direct/manual run that commits side-effect work, confirm session-check (via the .codex Stop hook) fails closed with the 'no assistant response body was captured' message + 'agent-doc write --commit' recovery when no ### Re: close-out was written, and that a normal Codex turn with a response stays OK. Guard + deterministic regressions already landed (session_check.rs check_committed_without_response_body_guard).
 - [ ] [#queue-user-edit-overwrite] [recommended] User-authored agent:queue edits can be silently overwritten/deleted by write/reset/commit queue convergence. Live repro 2026-05-30 boost-client monsterrodholders.md: user added do [#gscaccess] at queue head; agent-doc repeatedly removed/reverted it during closeout/snapshot repair. Fix by tracking queue edit provenance/epochs, preserving explicit queue edits unless the current response consumes that exact head, and failing closed on stale IPC/snapshot queue rewrites. Plan: tasks/agent-doc/plan-user-queue-edit-preservation.md.
 - [ ] [#stuck-capture-compact-false-positive] [recommended] stuck_captured_cycle false-positive after compaction: a capture recorded as committed (cycle-1780100032048, response 'gate→done for codex guidance') is later archived by compact, so preflight reports committed-but-not-in-HEAD and suggests `write --commit` recovery — which would re-inject an already-archived response (it lives in .agent-doc/archives/<hash>-*.md). Fix: when a captured-committed body is absent from HEAD because it was compacted (present in the matching archive), reconcile the capture instead of flagging it stuck. Repro 2026-05-29 agent-doc-bugs2.md.

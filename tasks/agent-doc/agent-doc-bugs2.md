@@ -30,91 +30,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260530-045734.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260530-055632.md`*
 
 Compacted content:
-- Archived 3 response topic(s): #finalize-retry-ipc-response-duplication; #pending-add-append-not-prepend; #recguard-abandon
+- Archived 3 response topic(s): #codex-auto-queue-stalled-final-gate; JB Run Agent Doc route/resync log paste; do option b
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ JB `Run Agent Doc` error
-```
-resync: stash pane %31 is registered in its own project root — skipping kill
-resync: stash pane %20 is registered in its own project root — skipping kill
-resync: stash pane %35 is registered in its own project root — skipping kill
-resync: stash pane %27 is registered in its own project root — skipping kill
-resync: stash pane %4 is registered in its own project root — skipping kill
-resync: stash pane %34 is registered in its own project root — skipping kill
-resync: stash pane %2 is registered in its own project root — skipping kill
-resync: stash pane %3 is registered in its own project root — skipping kill
-resync: stash pane %33 is registered in its own project root — skipping kill
-resync: stash pane %21 is registered in its own project root — skipping kill
-[route] debounce OK — file idle for 0.5s and typing indicator idle
-[route] target tmux session: 0
-[route] authoritative actor generation 239 for tasks/monsterrodholders.md is busy on pane %28; queued pending dispatch "What are #next-steps to complete [#gfwconnect]?" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
-```
-❯ #spec-test-build-install-commit-push
-
-### Re: #codex-auto-queue-stalled-final-gate — opus-4-8
-
-Done — full subsystem implemented + shipped (you chose full implementation; preset `#spec-test-build-install-commit-push` satisfied).
-
-**New `queue_continuation` module** — the single source of truth for "this clean document still owes an `agent:queue auto` continuation": `queue_active: true` + `auto` + active `resolve_activation` + a ready head that is not a stop fence / future time gate / snapshot-modified head. `codex_hook::active_auto_queue_prompt` now delegates to it, so the hook, the durable marker, and the session-check gate can never disagree.
-
-**Durable marker** `.agent-doc/queue-continuations/<doc-hash>.json` — reconciled at every clean binary closeout (the `git::commit` success path + the already-committed no-op path, which `finalize` / `write --commit` / `repair` all funnel through): written when a continuation is owed, cleared on drain / `auto` removal / `queue_active: false` / head advance. Carries `head_prompt`, `head_id`, `source_command`, `commit_head`, and `last_requested_head`.
-
-**codex-stop fallback** — the live failure was the Stop hook finding *no tracked session state* (so it let Codex send a final answer). It now consults the durable marker when session state is missing, **re-confirming against the live document** (a stale marker is pruned, never forces a spurious block), and fails closed on a repeated non-advancing head.
-
-**session-check** — surfaces `queue_continuation_required=true` / `next_queue_prompt=…` (informational, exit 0); new strict `agent-doc session-check <FILE> --codex-final-gate` exits nonzero when continuation is required, for Codex direct-exec closeout paths.
-
-**Tests (genuinely green):** `queue_continuation` unit suite (detect on/off cases, marker write/clear, stale-marker pruning, head-id extraction, requested-head persistence), two `codex_hook` marker-fallback tests (block on missing state; fail-closed on non-advancing head), and a `codex_hook_integration` strict-gate test. Spec `07-orchestration-commands.md`, `runbooks/harness-invocation.md`, `VERSIONS.md` updated.
-
-**Verification caveat that mattered:** the rtk-wrapped `make check` reported exit 0 while a `run_integration` test was actually red — the prior `#recguard-abandon` commit (`6f91beb2`) shipped that test failing (it asserted the old `preflight_started` instead of the new terminal `abandoned`). Caught it here, fixed the assertion, and verified the suite with an explicit `MAKE_CHECK_EXIT=0` plus a `result: FAILED` grep. **Always capture make's real exit code; the wrapper masks failures.**
-
-**Commit + push:** `src/agent-doc` `14ac8b4b` on `20260422/codex-agent-backend`, pushed (also carries the recguard test fix). Both binaries rebuilt; `--codex-final-gate` verified live in `.bin/agent-doc` and `~/.cargo/bin/agent-doc`.
-
-**Live verification deferred:** the end-to-end Codex two-item auto-queue proof stays gated under `#codex-auto-queue-live-verify` per the plan.
-❯ JB `Run Agent Doc`
-❯ resync: stash pane %32 is registered in its own project root — skipping kill
-❯ [route] debounce OK — file idle for 3.1s and typing indicator idle
-❯ [route] dispatch-only codex reopen for tasks/software/tsift.md found active codex turn on pane %36; queued pending dispatch "Should we split out a tsift-agent-doc crate?" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
-
-### Re: JB Run Agent Doc route/resync log paste — opus-4-8
-
-That pasted block is a **route/resync diagnostic dump showing correct behavior**, not a failure — and it maps onto two already-tracked items, so I'm reading it as evidence rather than implementing anything this cycle (plan classified it as a prompt-only change: `repo_actions: null`, no `--done`). No new backlog item is warranted — everything below maps to existing tracked work.
-
-What the log actually shows:
-- `resync: stash pane %32 ... skipping kill` — resync correctly left a stash pane that owns its own project root alone (expected; not a leak).
-- `debounce OK — file idle 3.1s` — the route debounce gate passed.
-- `dispatch-only codex reopen for tsift.md found active codex turn on pane %36; queued pending dispatch "Should we split out a tsift-agent-doc crate?" in agent:queue auto (appended=true, already_present=false, superseded=false)` — the authoritative actor on `%36` was **busy** (active codex turn), so the route **queued** the dispatch into `agent:queue auto` instead of injecting a duplicate trigger. Per the dispatch-proof-scope rule this is a **queued pending dispatch** (`appended=true`), **not** a consumed/submitted one — correct fail-safe busy behavior.
-
-Mapping (no new items needed):
-- This is exactly **`#jb-busy-queue-ux-feedback`** (already queued in this doc): the busy-queue *behavior* is right; the open work is making the JB plugin present this route/resync dump as an **informational** "queued behind a busy turn" notice rather than an error-looking log dump. Your paste is good corroborating evidence for that item.
-- Separately, this document's own queue is now `queue_active: true` with `queue_trigger: persisted` (the `auto` attribute is gone), which is precisely the stall shape **`#active-queue-persisted-no-continue`** describes — the current head `do [#active-queue-persisted-no-continue]`.
-
-Two housekeeping notes before the next implementation cycle:
-1. **Exchange is large** — `session_accretion` is at `block` level (12 closeouts in ~30 min, 10 no-ops). Auto-compact is off. If you want, I can run `agent-doc compact tasks/agent-doc/agent-doc-bugs2.md --commit` to trim the exchange before continuing.
-2. **What do you want next?** Tell me to (a) `do #jb-busy-queue-ux-feedback` (turn the dump into an informational notice), (b) `do #active-queue-persisted-no-continue` (treat `auto` as start-trigger and `queue_active` as the continuation signal), or (c) just file this paste somewhere. I held off auto-picking because the paste had no directive and the queue trigger is `persisted`, not `auto`.
-do option b
-
-### Re: do option b — opus-4-8
-
-Option b = `do #active-queue-persisted-no-continue`. Implemented per `tasks/agent-doc/plan-active-queue-persisted-continuation.md`. The codebase has been refactored since the plan was written, so the fix is smaller and more centralized than the plan's 6-step outline: `queue_continuation::detect` is now the single shared source of truth that the Codex Stop hook (`active_auto_queue_prompt`) and `session-check` both delegate to.
-
-**Principle:** `auto` is a *start* trigger only. Once a queue is active (`queue_active: true`), continuation is driven by the active state — not the opening-tag attribute. A persisted-active `agent:queue` (no `auto`) is now equally continuation-eligible. Inactive plain queues (no `auto`, `queue_active` not true) stay inert.
-
-**Changes (submodule `51859c2b`, pointer `0bea13cd7`):**
-- `queue_continuation::detect` — dropped the `has_auto_attr` early-return; passes the real `has_auto` to `resolve_activation` (active via Priority 4 Persisted when prompts exist). Reason string names the persisted trigger. This single change covers the Codex Stop hook + `session-check` final gate.
-- `run::should_continue_auto_queue` — dropped the `!queue.auto` gate; consumption only runs for active queues, and the `active_queue_prompt_state` re-check still halts on stop fence / time gate / head-modified / inactive / empty.
-- Claude Code auto-loop skill instruction (`skill.rs` + regenerated installed `SKILL.md`) — accepts `queue_trigger == "persisted"`, not just `"auto"`.
-- Continuation log renamed `auto queue continuation` → `queue continuation` for accuracy.
-- Spec `07-orchestration-commands.md` updated: `auto` starts, `queue_active` continues.
-
-**Tests / verification:**
-- New: `detect_returns_head_for_persisted_active_queue_without_auto`, `detect_none_when_inactive_plain_queue`, `run_persisted_active_queue_continues_until_drained_without_auto`, skill-render persisted-eligibility assertion.
-- Existing halt regression (`stop_fence`) still green.
-- `make check` green (exit 0, no FAILED). Both binaries rebuilt + installed (`~/.cargo/bin` 01:48, `target/release` 01:46).
-
-**Gated, not done:** the logic is fully covered by deterministic tests, but the end-to-end proof — a real persisted-active queue in a live Claude Code session actually invoking `/loop` and draining after closeout — is non-deterministic (agent-driven). Gated on that live verify. This document is itself the repro (`queue_active: true`, plain `agent:queue`, `queue_trigger: persisted`), so the next clean closeout is the live check.
-<!-- agent:boundary:6cdac065 -->
+<!-- agent:boundary:67b51968 -->
 <!-- /agent:exchange --> 
 ###
 <!--
@@ -140,9 +61,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
-- ~do [#recguard-abandon]~
-- ~do [#codex-auto-queue-stalled-final-gate]~
-- ~do [#active-queue-persisted-no-continue]~
 - do [#bare-write-captured-uncommitted]
 - do [#run-agent-doc-stale-busy-replay]
 - do [#jb-busy-queue-ux-feedback]
@@ -157,6 +75,7 @@ preset #spec-test-build-install-commit-push
 
 <!-- agent:backlog -->
 - [ ] [#hj7s] [recommended] JB `Restart Supervisor Process` / `Interrupt and Restart` lands its input in a non-shell foreground process when one owns the pane TTY. Live repro 2026-05-30: clicking `Interrupt and Restart` after Restart failed surfaced `vim`/`nvim` in the console — the raw `C-c` interrupt sent by `session_actor_cmd.rs:950/953` (and `route.rs:6427` for routed restart) goes to the pane's foreground process, not the supervisor. With vim/nvim foreground, `C-c` is a no-op and the follow-up restart command typing lands in normal-mode buffer. Fix: detect non-shell foreground (TIOCGPGRP -> tcgetpgrp -> process comm against an allow-list of supervisor/shell names) before issuing tmux send-keys for restart; if a non-shell editor/pager owns the TTY, refuse with an explicit "editor X holds the pane; close it before restart" diagnostic and surface that in the JB notification, OR target the supervisor process directly via SIGINT to its pgid instead of the pane's foreground pgid. Relates to #snrun stale-busy guards (different class — this is correct-pane, wrong-foreground-process). Plan: TBD.
+- [ ] [#prompt-preempts-auto-queue] [recommended] Unanswered exchange prompts must run before active `agent:queue auto` continuation, even when the prompt was accidentally baselined into the `.agent-doc` snapshot. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `What are #next-steps to complete review items?` was visible after the exchange boundary and duplicated in `agent:queue auto`, but the snapshot already contained the exchange prompt, so the next diff only saw queue bookkeeping and the prompt did not run. Fix: add snapshot-independent unresolved exchange prompt detection, make preflight/direct-run prefer it over queue synthetic diffs, prevent route queue snapshot recovery from absorbing unanswered exchange prompts, and defer Codex/Claude queue continuation while such a prompt exists. Plan: tasks/agent-doc/plan-prompt-preempts-auto-queue.md.
 - [ ] [#route-drain-all-surface-live-verify] [recommended] Live-verify the route-drain all-surface reap (submodule b239988b / superproject 4c7b06b7f) resolves the JB Run Agent Doc "completed tracked item blocks dispatch" retry: with the installed binary, reproduce a closeout that leaves a completed [x] item in review or icebox on an IDE-owned doc, then run JB Run Agent Doc once and confirm it dispatches without a manual repeat. Also exercises the #pending-gate-snapshot-desync snapshot re-sync (ab074710) under the route path.
 - [ ] [#bare-write-captured-uncommitted] `agent-doc write` can preserve/synthesize a template response body, receive IPC `already_applied`, then fail `session-check` with the cycle still `response_captured`, leaving the visible response outside the binary-owned commit boundary. Repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md` #seocrawl closeout: `agent-doc write --done seocrawl ...` printed "bare `agent-doc write` preserved the response body, but the session closeout is still outside the commit boundary"; operator had to manually commit `tasks/monsterrodholders.md` as `c13c258`. Fix: if write places/preserves response content, continue through snapshot+commit+session-check or fail before mutating; add idempotent repair for matching `response_captured` body-present state. Plan: tasks/agent-doc/plan-bare-write-captured-response-outside-commit.md.
 - [ ] [#ah0s] [recommended] Add explicit-position --pending-add primitives so ordered backlog batches never depend on implicit prepend-vs-argorder semantics: --pending-add-after <id>, --pending-add-before <id>, --pending-add-back/--pending-append, keeping --pending-add as the front-insert default. Backlog is a priority pool with ID-based consumption (not a stack/queue; FIFO lives in agent:queue), so position should be author-set explicitly when it matters. Two agents (open-code.md #adcr waves f94e7851c; corky.md crate-split phases fc8d9b3bc) both reversed args expecting prepend-flip and got reverse-of-intended order. Pairs with #pending-add-append-not-prepend (that item finalizes the default-order decision; this adds the explicit escape hatches). Plan: tasks/agent-doc/plan-pending-add-explicit-position.md.

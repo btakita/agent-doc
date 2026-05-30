@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -80,7 +80,35 @@ Proof:
 - Verification: `src/tsift make check` passed (`tart-87878d27fd`); `src/agent-doc make check` passed (`tart-b6475e4cc7`); installs passed (`tart-29b8cc1182`, `tart-c346067263`); installed versions are `tsift 0.1.62` and `agent-doc 0.34.0`; CLI smoke captured 4 closeout events. Latest tsift CI run `26694480302` succeeded; latest agent-doc CI run `26695418551` succeeded, including its `make tmux-ci` job. Tsift has no separate tmux workflow (`gh workflow list` shows CI and Release only).
 - Confidence: high.
 - Escalation: none.
-<!-- agent:boundary:1cb99f23 -->
+
+### Re: do [#tsiftmempending] — gpt-5
+
+Completed `#tsiftmempending` by explicitly excluding `claude-mem.pending_messages` from the replacement import contract while making that exclusion visible and test-covered.
+
+Changed paths:
+- `src/tsift/packages/tsift-memory/src/lib.rs`: `ClaudeMemTablePlan` now carries `unsupported_reason`; `inspect_claude_mem` marks `pending_messages` unsupported with the explicit transient/raw-payload reason; the import reader continues to skip it; added a regression test that verifies the table is reported but not imported.
+- `src/tsift/SPEC.md`: documents that `pending_messages` is surfaced in status/import plans but outside the durable replacement contract.
+- `src/tsift` submodule pointer updated in the superproject.
+
+Commits:
+- `f446797` in `btakita/tsift`: `feat(memory): exclude claude pending messages`
+- `01857c8b1` in `btakita/agent-loop`: `chore: update tsift pending-message exclusion`
+
+Verification:
+- `cargo fmt --check`
+- `cargo test -p tsift-memory claude_mem_pending_messages_are_reported_but_not_imported`
+- `cargo test --workspace`
+- `cargo build --release`
+- `cargo install --path .`
+- `make check`
+- `tsift memory status . --json` against the real workspace reports `pending_messages.supported=false` with the explicit exclusion reason.
+
+CI:
+- `btakita/tsift` CI run `26696235528` passed for `f446797`.
+- The root `btakita/agent-loop` repo has no workflow named `CI`; its latest `Agent Doc` run `26696235620` for `01857c8b1` failed before runner steps were allocated. Both jobs (`tmux-ci`, `check`) have empty step lists and completed in about three seconds, so I classified this as an external CI-start blocker rather than a code or tmux regression. Local `make check` passed.
+
+Confidence: high. Escalation: none; no follow-up backlog item is needed for this task.
+<!-- agent:boundary:12441f23 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -89,17 +117,12 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue auto -->
-dispatch #spec-test-build-install-commit-push
-- ~do [#tsiftmeminit]~
-- ~do [#tsiftmemhooks]~
-- do [#tsiftmempending]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#tsiftmempending] [recommended] Extend claude-mem migration to handle pending_messages or explicitly exclude it from the full-replacement contract, with tests.
 <!-- /agent:backlog -->
 
 ## Review

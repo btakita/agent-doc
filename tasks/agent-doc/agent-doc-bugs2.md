@@ -93,10 +93,34 @@ Mapping (no new items needed):
 Two housekeeping notes before the next implementation cycle:
 1. **Exchange is large** — `session_accretion` is at `block` level (12 closeouts in ~30 min, 10 no-ops). Auto-compact is off. If you want, I can run `agent-doc compact tasks/agent-doc/agent-doc-bugs2.md --commit` to trim the exchange before continuing.
 2. **What do you want next?** Tell me to (a) `do #jb-busy-queue-ux-feedback` (turn the dump into an informational notice), (b) `do #active-queue-persisted-no-continue` (treat `auto` as start-trigger and `queue_active` as the continuation signal), or (c) just file this paste somewhere. I held off auto-picking because the paste had no directive and the queue trigger is `persisted`, not `auto`.
-<!-- agent:boundary:09d4b4bb -->
+do option b
+
+### Re: do option b — opus-4-8
+
+Option b = `do #active-queue-persisted-no-continue`. Implemented per `tasks/agent-doc/plan-active-queue-persisted-continuation.md`. The codebase has been refactored since the plan was written, so the fix is smaller and more centralized than the plan's 6-step outline: `queue_continuation::detect` is now the single shared source of truth that the Codex Stop hook (`active_auto_queue_prompt`) and `session-check` both delegate to.
+
+**Principle:** `auto` is a *start* trigger only. Once a queue is active (`queue_active: true`), continuation is driven by the active state — not the opening-tag attribute. A persisted-active `agent:queue` (no `auto`) is now equally continuation-eligible. Inactive plain queues (no `auto`, `queue_active` not true) stay inert.
+
+**Changes (submodule `51859c2b`, pointer `0bea13cd7`):**
+- `queue_continuation::detect` — dropped the `has_auto_attr` early-return; passes the real `has_auto` to `resolve_activation` (active via Priority 4 Persisted when prompts exist). Reason string names the persisted trigger. This single change covers the Codex Stop hook + `session-check` final gate.
+- `run::should_continue_auto_queue` — dropped the `!queue.auto` gate; consumption only runs for active queues, and the `active_queue_prompt_state` re-check still halts on stop fence / time gate / head-modified / inactive / empty.
+- Claude Code auto-loop skill instruction (`skill.rs` + regenerated installed `SKILL.md`) — accepts `queue_trigger == "persisted"`, not just `"auto"`.
+- Continuation log renamed `auto queue continuation` → `queue continuation` for accuracy.
+- Spec `07-orchestration-commands.md` updated: `auto` starts, `queue_active` continues.
+
+**Tests / verification:**
+- New: `detect_returns_head_for_persisted_active_queue_without_auto`, `detect_none_when_inactive_plain_queue`, `run_persisted_active_queue_continues_until_drained_without_auto`, skill-render persisted-eligibility assertion.
+- Existing halt regression (`stop_fence`) still green.
+- `make check` green (exit 0, no FAILED). Both binaries rebuilt + installed (`~/.cargo/bin` 01:48, `target/release` 01:46).
+
+**Gated, not done:** the logic is fully covered by deterministic tests, but the end-to-end proof — a real persisted-active queue in a live Claude Code session actually invoking `/loop` and draining after closeout — is non-deterministic (agent-driven). Gated on that live verify. This document is itself the repro (`queue_active: true`, plain `agent:queue`, `queue_trigger: persisted`), so the next clean closeout is the live check.
+<!-- agent:boundary:6cdac065 -->
 <!-- /agent:exchange --> 
 ###
 <!--
+The last run had a code fence stripped away by agent-doc.
+#spec-test-build-install-commit-push
+---
 The completed queue item was not removed from the queue. #mermaid
 #spec-test-build-install-commit-push
 ---
@@ -118,7 +142,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 preset #spec-test-build-install-commit-push
 - ~do [#recguard-abandon]~
 - ~do [#codex-auto-queue-stalled-final-gate]~
-- do [#active-queue-persisted-no-continue]
+- ~do [#active-queue-persisted-no-continue]~
 - do [#bare-write-captured-uncommitted]
 - do [#run-agent-doc-stale-busy-replay]
 - do [#jb-busy-queue-ux-feedback]
@@ -134,7 +158,6 @@ preset #spec-test-build-install-commit-push
 <!-- agent:backlog -->
 - [ ] [#hj7s] [recommended] JB `Restart Supervisor Process` / `Interrupt and Restart` lands its input in a non-shell foreground process when one owns the pane TTY. Live repro 2026-05-30: clicking `Interrupt and Restart` after Restart failed surfaced `vim`/`nvim` in the console — the raw `C-c` interrupt sent by `session_actor_cmd.rs:950/953` (and `route.rs:6427` for routed restart) goes to the pane's foreground process, not the supervisor. With vim/nvim foreground, `C-c` is a no-op and the follow-up restart command typing lands in normal-mode buffer. Fix: detect non-shell foreground (TIOCGPGRP -> tcgetpgrp -> process comm against an allow-list of supervisor/shell names) before issuing tmux send-keys for restart; if a non-shell editor/pager owns the TTY, refuse with an explicit "editor X holds the pane; close it before restart" diagnostic and surface that in the JB notification, OR target the supervisor process directly via SIGINT to its pgid instead of the pane's foreground pgid. Relates to #snrun stale-busy guards (different class — this is correct-pane, wrong-foreground-process). Plan: TBD.
 - [ ] [#route-drain-all-surface-live-verify] [recommended] Live-verify the route-drain all-surface reap (submodule b239988b / superproject 4c7b06b7f) resolves the JB Run Agent Doc "completed tracked item blocks dispatch" retry: with the installed binary, reproduce a closeout that leaves a completed [x] item in review or icebox on an IDE-owned doc, then run JB Run Agent Doc once and confirm it dispatches without a manual repeat. Also exercises the #pending-gate-snapshot-desync snapshot re-sync (ab074710) under the route path.
-- [ ] [#active-queue-persisted-no-continue] Active persisted queues can stall after a successful closeout when `queue_active: true` remains but the queue tag lacks `auto`: the next head is ready, yet continuation paths only consider `agent:queue auto` (`codex_hook.rs::active_auto_queue_prompt` requires the attr; direct continuation gates on an auto outcome; Claude guidance checks `queue_trigger == "auto"`). Repro 2026-05-30 `tasks/agent-doc/agent-doc-bugs2.md`: plain `agent:queue` (no auto attr), `queue_active: true`, five remaining heads beginning `#pending-gate-snapshot-desync`, no next cycle launched after closeout. Treat `auto` as a start trigger and `queue_active` as the continuation signal, or halt with an explicit reason. Plan: tasks/agent-doc/plan-active-queue-persisted-continuation.md.
 - [ ] [#bare-write-captured-uncommitted] `agent-doc write` can preserve/synthesize a template response body, receive IPC `already_applied`, then fail `session-check` with the cycle still `response_captured`, leaving the visible response outside the binary-owned commit boundary. Repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md` #seocrawl closeout: `agent-doc write --done seocrawl ...` printed "bare `agent-doc write` preserved the response body, but the session closeout is still outside the commit boundary"; operator had to manually commit `tasks/monsterrodholders.md` as `c13c258`. Fix: if write places/preserves response content, continue through snapshot+commit+session-check or fail before mutating; add idempotent repair for matching `response_captured` body-present state. Plan: tasks/agent-doc/plan-bare-write-captured-response-outside-commit.md.
 - [ ] [#ah0s] [recommended] Add explicit-position --pending-add primitives so ordered backlog batches never depend on implicit prepend-vs-argorder semantics: --pending-add-after <id>, --pending-add-before <id>, --pending-add-back/--pending-append, keeping --pending-add as the front-insert default. Backlog is a priority pool with ID-based consumption (not a stack/queue; FIFO lives in agent:queue), so position should be author-set explicitly when it matters. Two agents (open-code.md #adcr waves f94e7851c; corky.md crate-split phases fc8d9b3bc) both reversed args expecting prepend-flip and got reverse-of-intended order. Pairs with #pending-add-append-not-prepend (that item finalizes the default-order decision; this adds the explicit escape hatches). Plan: tasks/agent-doc/plan-pending-add-explicit-position.md.
 - [ ] [#pending-add-suppresses-queue-consume] [recommended] Bundling --pending-add in the same finalize as a queue-head-targeting response suppresses queue-head consumption: finalize logs 'skipped consumption because the active prompt did not target the queue head' and treats the pending-add as the active prompt, even when the response heading exactly matches the head (Re: do #ID form, no brackets). Repro 2026-05-29 agent-doc-bugs2.md declining backlog-auto-marker-misfire with a bundled --pending-add — head stayed unstruck. Fix: heading/queue-head match should drive consumption independently of bundled pending mutations, or consume the head when the response heading matches regardless of detected active prompt.
@@ -148,6 +171,7 @@ preset #spec-test-build-install-commit-push
 ## Review
  
 <!-- agent:review -->
+- [/] [#active-queue-persisted-no-continue] Active persisted queues can stall after a successful closeout when `queue_active: true` remains but the queue tag lacks `auto`: the next head is ready, yet continuation paths only consider `agent:queue auto` (`codex_hook.rs::active_auto_queue_prompt` requires the attr; direct continuation gates on an auto outcome; Claude guidance checks `queue_trigger == "auto"`). Repro 2026-05-30 `tasks/agent-doc/agent-doc-bugs2.md`: plain `agent:queue` (no auto attr), `queue_active: true`, five remaining heads beginning `#pending-gate-snapshot-desync`, no next cycle launched after closeout. Treat `auto` as a start trigger and `queue_active` as the continuation signal, or halt with an explicit reason. Plan: tasks/agent-doc/plan-active-queue-persisted-continuation.md.
 - [/] [#finalize-retry-ipc-response-duplication] [recommended] Multi-retry finalize + live IPC duplicates the response and prefixes its body lines with the user-prompt marker. Live repro 2026-05-29 on agent-doc-bugs2.md: a closeout needing several finalize/write retries (lint-gate / session-check / live_prompt_drift re-runs) with the IDE IPC listener active and concurrent editing left a duplicated response block plus agent body lines wrongly prefixed (uncommitted; HEAD stayed clean; manual git checkout repaired). Fix direction: idempotent retry convergence on IPC already_applied, never prefix agent response body as a prompt, and repair/session-check auto-dedup. Relates to #prompt-duplicated-while-typing, #duplicate-response-after-commit, #ipc-dup-tracking-double-merge (plugin 0.2.138 not yet installed during repro). Plan: tasks/agent-doc/plan-finalize-retry-ipc-response-duplication.md.
 - [/] [#ipc-dup-tracking-double-merge] PromptPoller double-tracking fix (plugin 0.2.138, submodule 32fb0b98 / superproject d585a33de): addFile keyed trackedFiles by project-relative path while handlePollResults keyed by "$cwd:$file", double-tracking the same VirtualFile (live: corky.md, brandon-cinquegrana.md, agent-doc-bugs2.md; trackedFiles=13 vs ffiTracked=9). Two divergent baselines -> mergeOrReload ran twice per change = full-document duplication path. Fixed by keying both via trackingKey(VirtualFile.path); convergence test + AGENTS.md invariant. GATED on live verify: install signed 0.2.138, restart, confirm no recurring duplication (corky.md). Exact setText payload uncaptured (JB debug logging was OFF). Relates to #ipcfullprompt-recur2, #adoc-queue-ipc-buffer-divergence, #prompt-duplicated-while-typing.
 - [/] [#jb-load-tmux-window-verify] [recommended] Live-verify the new JB Load Tmux Window action (plugin 0.2.136): install the signed zip, confirm it autostarts/loads the tmux pane for a focused doc whose pane is not up (e.g. corky.md). If the autostart sync genuinely fails to spawn the pane in that case (vs. by-design passive open), capture the route/sync logs as a separate autostart bug.

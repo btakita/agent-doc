@@ -69,7 +69,11 @@ Harness-agnostic by construction — the cycle-state shape is identical regardle
 - Both binaries rebuilt + installed (`cargo build --release` + `cargo install --path .`) so the guard is live for tmux/IDE-spawned sessions.
 
 Note: I chose **fail-closed-with-recovery-command** over auto-forcing `write --commit` (the plan's other option) — it matches the existing sibling guards and avoids a guard silently mutating the doc. Live re-verification against a real Codex direct run is a recommended opportunistic follow-up (added to backlog).
-<!-- agent:boundary:597edb9b -->
+
+### Re: follow-up backlog capture — opus-4-8
+
+Recorded the recommended opportunistic follow-up `#codex-final-response-live-verify` (live Codex re-verification of the new guard) so the claim in the prior close-out is backed by a real backlog item. The guard itself and its deterministic regressions are already committed (`5019c725e`); this item only tracks the optional live-run confirmation.
+<!-- agent:boundary:37c9607c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -129,6 +133,7 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#codex-final-response-live-verify] [recommended] Opportunistic live re-verification of the #codex-final-response-not-written guard: do a real Codex direct/manual run that commits side-effect work, confirm session-check (via the .codex Stop hook) fails closed with the 'no assistant response body was captured' message + 'agent-doc write --commit' recovery when no ### Re: close-out was written, and that a normal Codex turn with a response stays OK. Guard + deterministic regressions already landed (session_check.rs check_committed_without_response_body_guard).
 - [ ] [#queue-user-edit-overwrite] [recommended] User-authored agent:queue edits can be silently overwritten/deleted by write/reset/commit queue convergence. Live repro 2026-05-30 boost-client monsterrodholders.md: user added do [#gscaccess] at queue head; agent-doc repeatedly removed/reverted it during closeout/snapshot repair. Fix by tracking queue edit provenance/epochs, preserving explicit queue edits unless the current response consumes that exact head, and failing closed on stale IPC/snapshot queue rewrites. Plan: tasks/agent-doc/plan-user-queue-edit-preservation.md.
 - [ ] [#pending-done-guard-false-positive] [recommended] finalize/write pending_done_guard fires a FALSE POSITIVE when the response merely REFERENCES an open backlog id in prose (e.g. mentioning #jb-busy-queue-ux-feedback as a related/residual item) — it reads the citation as a completion claim and demands --done, forcing a retry with  suppression. Hit 3x in one session (2026-05-30) and independently flagged as a top agent-doc finalize friction in the Claude Code usage report (2026-05-28..30: 'a false-positive done-guard, requiring multiple retry cycles'). Fix: only fire when the response heading/topic RESOLVES to the id (completion), per the exact-id queue-consume matching in specs/07-orchestration-commands.md — not when the body merely cites it. Relates to #pending-add-suppresses-queue-consume.
 - [ ] [#pending-add-suppresses-queue-consume] [recommended] Bundling --pending-add in the same finalize as a queue-head-targeting response suppresses queue-head consumption: finalize logs 'skipped consumption because the active prompt did not target the queue head' and treats the pending-add as the active prompt, even when the response heading exactly matches the head (Re: do #ID form, no brackets). Repro 2026-05-29 agent-doc-bugs2.md declining backlog-auto-marker-misfire with a bundled --pending-add — head stayed unstruck. Fix: heading/queue-head match should drive consumption independently of bundled pending mutations, or consume the head when the response heading matches regardless of detected active prompt.

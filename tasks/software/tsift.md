@@ -87,7 +87,19 @@ Verification:
 - GitHub Actions `CI` run `26686994059` completed `success` after push.
 
 Workflow note: this repo currently has `CI` and `Release` workflows; there is no separate tmux workflow/job to inspect.
-<!-- agent:boundary:a0057789 -->
+
+### Re: closeout recovery — gpt-5
+
+Recovered the session document closeout after the prior response was already committed but the live buffer still had agent-owned bookkeeping drift.
+
+Changed paths: only `tasks/software/tsift.md` in this recovery cycle. The tsift implementation and submodule pointer were already committed and pushed in the previous cycle.
+
+Commands: `agent-doc repair`, `agent-doc preflight`, `agent-doc plan`, and this `agent-doc finalize` recovery closeout.
+
+Verification: no source files changed in this recovery cycle. The prior implementation verification remains `make check`, `cargo build -p tsift-cli`, `cargo install --path packages/tsift-cli --locked --force`, and CI run `26686994059` passing.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:85e5bb2e -->
 <!-- /agent:exchange -->
 ###
 <!--

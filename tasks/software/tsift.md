@@ -69,7 +69,40 @@ Verification: document-analysis cycle only; source verification was not required
 
 Confidence: high on the direction. The only caveat is that the current active `claude-mem` worker is a minified plugin cache, so implementation should target either its stable HTTP/SQLite surfaces or a tsift-owned adapter rather than patching cached plugin internals directly.
 Please analyze claude-mem. Should we drop it or have our own?
-<!-- agent:boundary:e2c920df -->
+
+### Re: first-party memory crate/plugin — gpt-5
+
+Yes: make our own memory crate/plugin, but do it as a staged replacement, not a hard fork or immediate rip-out of `claude-mem`.
+
+The reason is ownership boundary, not NIH. `claude-mem` is useful as a capture/UI/history source and it already has valuable local data. But the failure mode we care about is inside the contract: unbudgeted observer prompts, oversized raw tool payloads, shallow retrieval over the wrong evidence, and no hard proof that an observation was persisted before the session ends. Those are core tsift/agent-doc concerns, so tsift should own them.
+
+Recommended shape:
+
+1. First-party crate: `tsift-memory`.
+   Own a stable schema for observations, session summaries, prompts, artifacts, tool spans, token accounting, embeddings, source handles, and graph node ids. Make importers adapters, not the canonical model.
+
+2. First-party plugin/hook layer.
+   The plugin should emit bounded events into `tsift-memory`: prompt target, tool call, tool result artifact handle, response summary, closeout proof, commit hash, session-check result. It should never send raw transcript blobs to a model before a budget pass.
+
+3. Import `claude-mem`, do not depend on it.
+   Build a read-only importer for `~/.claude-mem/claude-mem.db` plus Chroma references. Preserve observation ids, session ids, timestamps, project, type, title/facts/narrative fields, and then map them into tsift graph nodes. This gives us migration value without inheriting the runtime failure mode.
+
+4. Keep `claude-mem` running during migration.
+   Use it as a comparator and fallback UI while `tsift-memory` proves reliability. Once the eval harness shows lower prompt size, better useful-hit rate, and zero silent memory-output failures, then we can decide whether to disable `claude-mem` capture.
+
+5. Optimize for graph usefulness, not memory volume.
+   The memory crate should serve `graph-db related`, `evidence`, `context-pack`, and `session-review` with token-capped ranked packets. The unit of retrieval should be an evidence packet with source handles and expand commands, not a list of verbose observations.
+
+I added one top-level follow-up item for the first-party memory crate/plugin spike. The previously added memory-budget guard, claude-mem adapter, neighborhood token budget, eval harness, and summary gate are the right implementation phases under that umbrella.
+
+Changed paths: session document/backlog only; no source edits.
+
+Commands used: `tsift status`, `tsift status --fix`, `agent-doc preflight`, and `agent-doc plan`.
+
+Verification: document-analysis cycle only; no source verification required.
+
+Confidence: high. The important constraint is to keep `claude-mem` as an import source until tsift proves the new pipeline with measured retrieval and persistence results.
+<!-- agent:boundary:76ba23c4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -84,6 +117,7 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#tsift-memory-crate-plugin] Spike a first-party tsift-memory crate plus harness plugin: own the schema, token-budgeted capture/import pipeline, graph projection, query API, and agent-doc hooks; import existing claude-mem SQLite/Chroma data as a migration source rather than depending on claude-mem as the durable runtime.
 - [ ] [#tsift-memory-budget-guard] Build a token-budget guard for observer/memory handoffs: estimate prompt size before model calls, split oversized tool responses and transcripts, replace raw logs with tsift session-digest/context-pack handles, and fail closed with retryable chunk plans instead of sending prompts that can only overflow.
 - [ ] [#tsift-claude-mem-adapter] Add a read-only claude-mem adapter for tsift graph-db: project claude-mem SQLite observations, session summaries, user prompts, and Chroma/vector handles as semantic/session/source nodes with stable ids so tsift can query existing memory without owning capture yet.
 - [ ] [#tsift-neighborhood-token-budget] Add token/usefulness budgets to graph-db related/neighborhood/evidence output: rank nodes and edges by semantic match, edge kind, depth, recency, and source-handle coverage; enforce per-kind quotas plus estimated-token caps; report dropped_by_budget diagnostics.

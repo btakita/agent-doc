@@ -97,17 +97,40 @@ The sibling fix `#jb-compact-malformed-response-commit` (prior cycle) makes a ma
 #### Gated — remaining scope (plan-jb-compact-repair-left-uncommitted.md)
 
 Covered: non-silent dirty-state diagnostic (partial item 3). Still open: reconstructing the exact repair path that produced the live dirty correction (items 1-2 — investigation), the atomic-commit-or-fail-closed repair invariant including mixed user-edit detection (item 3 full), route/preflight classifying an uncommitted compact repair separately from new prompt input (item 4), and the JB notification test (item 5). These touch the repair/git/route interaction and need the path reconstruction before a safe change, so deferred from a blind edit.
-<!-- agent:boundary:23b10664 -->
+
+### Re: do #jb-run-agent-doc-response-queue-contamination — opus-4-8
+
+Landed a session-check guard that rejects assistant response prose leaked into `agent:queue`. **Gated** (not done) — the route-side enqueue audit + provenance metadata remain; see below.
+
+#### What landed
+
+- **`session_check.rs`** — new `check_queue_response_contamination_guard` (wired into the inspect chain) with two helpers: `assistant_response_text()` (collects `### Re:` body prose from the exchange) and `is_queue_directive_prompt()` (recognizes `do `/`preset `/`dispatch `/`run `/`#id` shapes). It flags a free-text queue prompt whose first 40 normalized chars appear inside an assistant response body — the exact live-repro corruption (`- Yes. I drove the already-authenticated Google Ads browser session ...` copied from `### Re: #gads106demote`) — and fails closed naming the candidate.
+
+#### False-positive guards
+
+- Directive-shaped queue entries (`do [#id]`, `preset`, `dispatch`, `#id`) are skipped, so normal queues never trip it (this document's own `do [#…]` drain is unaffected).
+- Short free-text prompts (< 20 chars) and free-text not found in any response body are allowed (`#free-text-queue-head-consume` stays valid).
+
+#### Verification
+
+- 3 new tests: response prose in queue → flagged; directive-only queue → clean; legitimate free-text prompt not from a response → clean.
+- `make check` green (clippy `-D warnings`); FlowCore `guard_` budget 31→35 (audited); both binaries rebuilt + installed.
+
+#### Gated — remaining scope (plan-jb-run-agent-doc-response-queue-contamination.md)
+
+Covered: the session-check backstop (plan item 6) + the exchange prompt/response split helper (item 3). Still open: auditing `route.rs` pending-dispatch enqueue + queue-auto regeneration to stop response-body text entering the queue at the source (item 2), and requiring proven queue-addition provenance — user exchange prompt / backlog id / preserved user edit — with a skip+diagnostic when unprovable (items 4-5). Those touch route enqueue synthesis and are deferred for focused work.
+<!-- agent:boundary:3e2d70ea -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#do-id-closeout-open-backlog]~
 - ~do [#queue-user-edit-overwrite]~
 - ~do [#prompt-preempts-auto-queue]~
 - ~do [#jb-compact-malformed-response-commit]~
 - ~do [#jb-compact-repair-left-uncommitted]~
-- do [#jb-run-agent-doc-response-queue-contamination]
+- ~do [#jb-run-agent-doc-response-queue-contamination]~
+- If a completed item is gated in review, agent-doc should automatically add task(s) into the backlog to ungate the review item.
 - do [#codex-owned-pane-prompt-miss]
 - do [#stuck-capture-compact-false-positive]
 - do [#codex-route-busy-ctrl-g-opens-editor]
@@ -164,7 +187,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#jb-run-agent-doc-response-queue-contamination] [recommended] JetBrains `Run Agent Doc` can add assistant response prose to `agent:queue auto` after compact/repair drift. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: queue gained `- Yes. I drove the already-authenticated Google Ads browser session...`, copied from `### Re: #gads106demote`, alongside real `do [#nbsearch]`/`#bidstrat`/`#pdpconv` entries. Require queue-source provenance and reject assistant response bodies as queue candidates. Plan: tasks/agent-doc/plan-jb-run-agent-doc-response-queue-contamination.md.
 - [ ] [#preset-item-id-collision] [recommended] Enforce unique active identities across frontmatter `prompt_presets` keys and active `agent:backlog` / `agent:review` / `agent:icebox` item ids. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `#next-steps` exists both as a prompt preset and as a backlog item, making `do #next-steps` and "top backlog item: #next-steps" ambiguous between preset expansion and backlog execution. Fix with an identity registry, mutation-time rejection, preflight/session-check fail-closed diagnostics, and regressions. Plan: tasks/agent-doc/plan-preset-item-id-collision.md.
 - [ ] [#codex-final-response-live-verify] [recommended] Opportunistic live re-verification of the #codex-final-response-not-written guard: do a real Codex direct/manual run that commits side-effect work, confirm session-check (via the .codex Stop hook) fails closed with the 'no assistant response body was captured' message + 'agent-doc write --commit' recovery when no ### Re: close-out was written, and that a normal Codex turn with a response stays OK. Guard + deterministic regressions already landed (session_check.rs check_committed_without_response_body_guard).
 - [ ] [#stuck-capture-compact-false-positive] [recommended] stuck_captured_cycle false-positive after compaction: a capture recorded as committed (cycle-1780100032048, response 'gate→done for codex guidance') is later archived by compact, so preflight reports committed-but-not-in-HEAD and suggests `write --commit` recovery — which would re-inject an already-archived response (it lives in .agent-doc/archives/<hash>-*.md). Fix: when a captured-committed body is absent from HEAD because it was compacted (present in the matching archive), reconcile the capture instead of flagging it stuck. Repro 2026-05-29 agent-doc-bugs2.md.
@@ -185,6 +207,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Review
  
 <!-- agent:review -->
+- [/] [#jb-run-agent-doc-response-queue-contamination] [recommended] JetBrains `Run Agent Doc` can add assistant response prose to `agent:queue auto` after compact/repair drift. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: queue gained `- Yes. I drove the already-authenticated Google Ads browser session...`, copied from `### Re: #gads106demote`, alongside real `do [#nbsearch]`/`#bidstrat`/`#pdpconv` entries. Require queue-source provenance and reject assistant response bodies as queue candidates. Plan: tasks/agent-doc/plan-jb-run-agent-doc-response-queue-contamination.md.
 - [/] [#jb-compact-repair-left-uncommitted] [recommended] Compact-output repair can leave the corrected session document dirty instead of committing through a binary-owned repair boundary. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: visible exchange correction differs from malformed `HEAD`, creating mixed visible/HEAD/snapshot state for later JetBrains actions. Repair should commit atomically or fail closed with an exact recovery path. Plan: tasks/agent-doc/plan-jb-compact-repair-left-uncommitted.md.
 - [/] [#jb-compact-malformed-response-commit] [recommended] JetBrains `Compact Exchange` can commit malformed compact output. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md` / commit `f8fe36b`: compact summary line was committed with user prompt prefix `❯`, and archived response content remained in the live exchange shape. Add post-compact structural validation and fail closed before commit. Plan: tasks/agent-doc/plan-jb-compact-malformed-response-commit.md.
 - [/] [#prompt-preempts-auto-queue] [recommended] Unanswered exchange prompts must run before active `agent:queue auto` continuation, even when the prompt was accidentally baselined into the `.agent-doc` snapshot. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `What are #next-steps to complete review items?` was visible after the exchange boundary and duplicated in `agent:queue auto`, but the snapshot already contained the exchange prompt, so the next diff only saw queue bookkeeping and the prompt did not run. Fix: add snapshot-independent unresolved exchange prompt detection, make preflight/direct-run prefer it over queue synthetic diffs, prevent route queue snapshot recovery from absorbing unanswered exchange prompts, and defer Codex/Claude queue continuation while such a prompt exists. Plan: tasks/agent-doc/plan-prompt-preempts-auto-queue.md.

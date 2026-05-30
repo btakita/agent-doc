@@ -47,7 +47,28 @@ Operationally, the next token-saving habit is: use `tsift session-review --next-
 
 Evidence used: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, and `tsift --envelope context-pack tasks/software/tsift.md --budget normal`. No source code changes were made in this cycle; only the session document/backlog is being updated through `agent-doc finalize`.
 Should we split out a tsift-agent-doc crate?
-<!-- agent:boundary:39413b3c -->
+
+### Re: do #token-budget-guardrail — gpt-5
+
+Done. I added a `next_token_actions` block to the bounded `session-review --next-context` report, which also flows into `context-pack` through its embedded `next_context` section. The block is built from the existing `prompt_budget`, `cache_resend`, `restart_loop`, and `noop_closeout` guardrails, ordered by priority, and includes exact `agent-doc compact`, `agent-doc start`, `tsift --envelope session-review`, and `tsift --envelope context-pack` commands for agent-doc markdown targets.
+
+Changed paths:
+- `src/tsift/Cargo.lock`
+- `src/tsift/SPEC.md`
+- `src/tsift/packages/tsift-cli/src/lib.rs`
+- `src/tsift` gitlink in the superproject
+
+Commits:
+- `src/tsift`: `aaf1b39 feat: surface next token actions`
+- superproject gitlink: `ff333bc5d chore: update tsift submodule for token actions`
+
+Verification:
+- `cargo test -p tsift-cli session_review_next_context_budget_limits_lists` passed.
+- `make check` passed through `tsift --envelope __digest-runner --kind test --path . --shell-command 'make check'` with artifact `tart-2aaf6dd72c`.
+- Latest GitHub Actions `CI` run checked: `26651628506`, completed `success` on 2026-05-29. Jobs were `clippy + test` and `live Convex graph acceptance`, both green; no separate tmux-test job was present in that CI job list.
+
+No push was requested or performed.
+<!-- agent:boundary:a0f29020 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -58,7 +79,7 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 
 <!-- agent:queue auto -->
 dispatch #spec-test-build-install-commit-push
-- do [#token-budget-guardrail]
+- ~do [#token-budget-guardrail]~
 - do [#token-rewrite-codex-path]
 - do [#token-closeout-noop-dedupe]
 - Should we split out a tsift-agent-doc crate?
@@ -67,7 +88,6 @@ dispatch #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#token-budget-guardrail] [recommended] Add a session-review/context-pack token-pressure gate that turns prompt_budget/cache_resend/restart_loop/noop_closeout guardrails into a prioritized next_token_actions block with exact compact, restart, and digest commands.
 - [ ] [#token-rewrite-codex-path] [recommended] Make the Codex/OpenCode low-token path explicit: document or install a wrapper that routes broad search, raw transcript reads, cargo/pytest/build output, and git diffs through tsift rewrite/context-pack/digest-runner equivalents.
 - [ ] [#token-closeout-noop-dedupe] [recommended] Reduce token waste from repeated agent-doc no-op closeouts by adding a fixture-backed session-review regression for commit_already_current churn and tightening the emitted guidance to one actionable row per cycle family.
 <!-- /agent:backlog -->

@@ -77,7 +77,10 @@ Substantive answer unchanged: tsift **is** properly integrated with the multi-cr
 **Fix 2 (tagpath lint false-positive, surfaced by this turn):** `backlog-id-collision` scanned every bracket-id token in the backlog span, so a `do`-directive written as example syntax in two item *descriptions* tripped a fake collision and blocked finalize entirely. Now it only treats the leading id of each item line as a definition (regression `backlog_id_collision_ignores_bracket_ids_in_descriptions`). This required bumping agent-doc's `tagpath` dep `0.11.1 → 0.12` so the locally-patched fix is actually used (the patch was silently inactive on a version mismatch).
 
 `make check` + tagpath tests green; both binaries rebuilt + installed. Substantive answer unchanged: tsift **is** properly integrated with the multi-crate workspace (core/orchestration/sqlite + root, 328 files, fresh). The queue advances to the next item.
-<!-- agent:boundary:10cabd49 -->
+### Re: strike the completed tsift line — opus-4-8
+
+You're right that it should have been struck on completion — that was the free-text-queue-head-consume bug, now fixed and live. This cycle runs on the fixed binary, so answering the line consumes it (strikes it). The substantive answer stands: tsift is properly integrated with the multi-crate workspace (core/orchestration/sqlite + root), index fresh. Queue advances to the next item.
+<!-- agent:boundary:73314e9d -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -85,7 +88,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#ipcfullprompt-recur2]~
 - ~do [#codex-final-response-not-written]~
 - ~do [#pending-add-suppresses-queue-consume]~
-- Is tsift properly integrated into multi-crate architecture? If not, run tsift update.
+- ~Is tsift properly integrated into multi-crate architecture? If not, run tsift update.~
 - do [#pending-done-guard-false-positive]
 - When "Is tsift properly integrated into multi-crate architecture? If not, run tsift update." was completed, it should have been wrapped in a strikethrough: "~Is tsift properly integrated into multi-crate architecture?~".
 - do [#do-id-closeout-open-backlog]

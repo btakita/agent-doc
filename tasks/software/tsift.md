@@ -140,7 +140,7 @@ The boundary is plausible because `session-review`, `session-digest`, `session-c
 The better sequence is: split `tsift-cli` by command first, then extract agent-doc parsing/aggregation once the CLI only formats and routes those results. Keep budget/envelope rendering in `tsift-cli`; move parsing, aggregation, guardrails, and fixtures only after their public API is small and stable.
 
 No repo changes for this advisory response.
-<!-- agent:boundary:3b37672c -->
+<!-- agent:boundary:eae5796c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -155,7 +155,7 @@ dispatch #spec-test-build-install-commit-push
 - ~do [#token-rewrite-codex-path]~
 - ~do [#split-tsift-cli-subcommands]~
 - ~do [#token-closeout-noop-dedupe]~
-- Should we split out a tsift-agent-doc crate?
+- ~Should we split out a tsift-agent-doc crate?~
 <!-- /agent:queue -->
 
 ## Backlog

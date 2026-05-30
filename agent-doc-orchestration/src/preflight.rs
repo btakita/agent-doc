@@ -1393,7 +1393,15 @@ fn detect_route_queue_snapshot_commit_boundary_recoverable(file: &Path) -> Resul
     }
 
     let snapshot_prompts = route_queue_prompt_texts(&snapshot)?;
-    if snapshot_prompts.is_empty() {
+    let head_prompts = route_queue_prompt_texts(&head)?;
+    // Recover only genuine active-auto-queue commit-boundary churn: either the
+    // snapshot still carries the queued dispatch (enqueue case) or HEAD carried
+    // an active auto-queue that the snapshot has since drained to inactive
+    // residue via queue maintenance (#drained-done-queue-clear). The drained
+    // case reduces to an empty stripped diff below (queue body + `queue_active`
+    // are both stripped before comparison), so it auto-commits only when no
+    // non-queue user change exists. Bail on any other snapshot/HEAD drift.
+    if snapshot_prompts.is_empty() && head_prompts.is_empty() {
         return Ok(false);
     }
 
@@ -2879,6 +2887,19 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
         // Recompute activation against the rewritten entry list so subsequent
         // halt / step / dispatch maintenance phases see the post-strike head.
         activation.entries_after = new_entries;
+        // If the strike consumed the entire live head set, the queue is now
+        // drained residue — every queued `do [#id]` was resolved via
+        // `agent:done` / review-gate. `resolve_activation` ran on the
+        // pre-strike entries (live prompts present) so `active` is stale-true;
+        // flip it false here so the drain-cleanup path below clears
+        // `queue_active`, strips `auto`, and empties the body. Without this the
+        // stale `active: true` either trips the `item_modified` halt (the
+        // post-strike head is `None` vs a still-live snapshot head) or leaves
+        // the queue reported active with an empty prompt set. (#drained-done-queue-clear)
+        if crate::queue::prompts(&activation.entries_after).is_empty() {
+            activation.active = false;
+            activation.trigger = None;
+        }
     }
 
     // Phase 3: halt detection — stop fences and item modification
@@ -2985,10 +3006,28 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
         {
             let snap_body = &snap_content[snap_q.open_end..snap_q.close_start];
             if let Ok(snap_entries) = crate::queue::parse(snap_body)
-                && crate::queue::detect_head_prompt_modified(
-                    &snap_entries,
-                    &activation.entries_after,
-                )
+                && {
+                    // Apply the same done/gated strike to the snapshot's
+                    // entries before comparing heads. A cycle that resolved a
+                    // leading queue head via `--done` (so the strike pass above
+                    // converted it to `Completed`) otherwise reads as a
+                    // head-text change vs the still-live snapshot head and
+                    // false-halts as `item_modified`, wedging the remaining
+                    // live head behind drained residue. Striking both sides
+                    // leaves only genuine operator head edits visible.
+                    // (#drained-done-queue-clear)
+                    let snap_entries_struck = if eligible_ids.is_empty() {
+                        snap_entries
+                    } else {
+                        strike_done_queue_head_prompts(&snap_entries, &eligible_ids)
+                            .map(|(entries, _)| entries)
+                            .unwrap_or(snap_entries)
+                    };
+                    crate::queue::detect_head_prompt_modified(
+                        &snap_entries_struck,
+                        &activation.entries_after,
+                    )
+                }
             {
                 eprintln!("[preflight] queue: halt — head prompt modified between cycles");
                 // Strip auto and clear queue_active
@@ -4690,6 +4729,124 @@ mod tests {
     }
 
     #[test]
+    fn queue_maintenance_drains_all_done_queue_without_item_modified_halt() {
+        // #drained-done-queue-clear: a fully resolved auto-queue (every `do
+        // [#id]` already in agent:done) plus a batch dispatch directive must
+        // drain — not false-halt as `item_modified`. Before the fix the
+        // strike pass converted every live head to Completed, leaving the
+        // post-strike head `None` vs a still-live snapshot head, which
+        // detect_head_prompt_modified read as an edit and halted before the
+        // drain-cleanup path ran. The Corky live-repro shape: template doc,
+        // dispatch preset, multiple bracketed `do [#id]` prompts, no diff.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "dispatch #spec-test-build-install-commit-push\n",
+            "- do [#alpha]\n",
+            "- do [#beta]\n",
+            "<!-- /agent:queue -->\n\n",
+            "## Completed / Reaped\n\n",
+            "<!-- agent:done -->\n",
+            "- [x] [#alpha] First done.\n",
+            "- [x] [#beta] Second done.\n",
+            "<!-- /agent:done -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+
+        assert_eq!(
+            state.queue_halted, None,
+            "fully-resolved queue must drain, not halt as item_modified"
+        );
+        assert_eq!(state.queue_active, Some(false));
+        assert!(state.queue_prompts.is_empty());
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(updated.contains("queue_active: false"), "file: {updated}");
+        assert!(
+            !updated.contains("agent:queue auto"),
+            "auto must be stripped on drain: {updated}"
+        );
+        assert!(
+            !updated.contains("- do [#alpha]") && !updated.contains("- do [#beta]"),
+            "drained queue body must be cleared: {updated}"
+        );
+
+        // Snapshot matches the drained file so the closeout commit boundary
+        // does not strand the maintenance mutation.
+        let snap = snapshot::load(&doc).unwrap().unwrap();
+        assert!(snap.contains("queue_active: false"));
+        assert!(!snap.contains("agent:queue auto"));
+        assert!(!snap.contains("- do [#alpha]"));
+    }
+
+    #[test]
+    fn queue_maintenance_partial_done_strike_advances_to_live_head_without_halt() {
+        // #drained-done-queue-clear (partial case): a leading queue head that
+        // is already done must be struck and the queue advanced to the next
+        // live head — without false-halting as item_modified. The snapshot is
+        // struck the same way before the head-modified comparison so only a
+        // genuine operator head edit can halt.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#alpha]\n",
+            "- do [#beta]\n",
+            "<!-- /agent:queue -->\n\n",
+            "## Completed / Reaped\n\n",
+            "<!-- agent:done -->\n",
+            "- [x] [#alpha] First done.\n",
+            "<!-- /agent:done -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+
+        assert_eq!(
+            state.queue_halted, None,
+            "striking a done head must not halt while a live head remains"
+        );
+        assert_eq!(state.queue_active, Some(true));
+        assert_eq!(state.queue_prompts, vec!["do [#beta]".to_string()]);
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            updated.contains("- ~do [#alpha]~"),
+            "done head struck to completed: {updated}"
+        );
+        assert!(updated.contains("- do [#beta]"));
+        assert!(updated.contains("agent:queue auto"));
+        assert!(updated.contains("queue_active: true"));
+    }
+
+    #[test]
     fn queue_maintenance_converges_live_ipc_buffer_on_item_modified_halt() {
         // SimWorld repro for #adoc-queue-ipc-buffer-divergence (root cause #2):
         // a live route-owned IPC listener owns the document. When an
@@ -5183,6 +5340,152 @@ mod tests {
         assert!(
             String::from_utf8_lossy(&show.stdout).contains("Reply"),
             "HEAD should now contain the response after auto-recovery"
+        );
+    }
+
+    /// #drained-done-queue-clear: a standalone no-diff preflight that drains a
+    /// fully-resolved auto-queue writes the drained shape to disk + snapshot
+    /// but leaves HEAD on the active-queue commit. The next preflight commit
+    /// step must self-heal that pure queue-maintenance drift via the route
+    /// queue commit-boundary recovery instead of stranding it for manual
+    /// `agent-doc commit`. The drained snapshot has no active prompts, so this
+    /// shape recovers only because HEAD proves the prior active auto-queue and
+    /// nothing but queue state differs.
+    #[test]
+    fn route_queue_commit_boundary_recovers_drained_queue_snapshot() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+
+        let active = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#alpha]\n",
+            "<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, active).unwrap();
+        snapshot::save(&doc, active).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "active queue", "--no-verify"])
+            .output()
+            .unwrap();
+
+        // Standalone maintenance drained the queue: queue_active cleared, auto
+        // stripped, body emptied — on disk and in the snapshot — but HEAD still
+        // carries the active auto-queue.
+        let drained = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "queue_active: false\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, drained).unwrap();
+        snapshot::save(&doc, drained).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(active), Some(active))
+            .unwrap();
+
+        assert!(matches!(
+            crate::git::verify_snapshot_committed(&doc).unwrap(),
+            crate::git::SnapshotCommitStatus::SnapshotDiffersFromHead { .. }
+        ));
+        assert!(
+            detect_route_queue_snapshot_commit_boundary_recoverable(&doc).unwrap(),
+            "drained-queue maintenance drift must be recoverable"
+        );
+
+        assert!(recover_route_queue_snapshot_commit_boundary(&doc).unwrap());
+        assert!(
+            matches!(
+                crate::git::verify_snapshot_committed(&doc).unwrap(),
+                crate::git::SnapshotCommitStatus::Committed
+            ),
+            "drained queue must be committed after recovery"
+        );
+        let show = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:session.md"])
+            .output()
+            .unwrap();
+        let head = String::from_utf8_lossy(&show.stdout);
+        assert!(head.contains("queue_active: false"), "HEAD: {head}");
+        assert!(!head.contains("agent:queue auto"), "HEAD: {head}");
+    }
+
+    /// #drained-done-queue-clear guard: the route queue commit-boundary
+    /// recovery must NOT fire when a real user edit rides alongside the queue
+    /// drain. Only pure queue-state churn is auto-committable.
+    #[test]
+    fn route_queue_commit_boundary_skips_drained_queue_with_user_edit() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+
+        let active = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#alpha]\n",
+            "<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, active).unwrap();
+        snapshot::save(&doc, active).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "active queue", "--no-verify"])
+            .output()
+            .unwrap();
+
+        // Drained queue PLUS an unrelated exchange edit — must not auto-commit.
+        let drained_plus_edit = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "queue_active: false\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n\nAn extra user line.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, drained_plus_edit).unwrap();
+        snapshot::save(&doc, drained_plus_edit).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(active), Some(active))
+            .unwrap();
+
+        assert!(
+            !detect_route_queue_snapshot_commit_boundary_recoverable(&doc).unwrap(),
+            "a user edit alongside the drain must block auto-commit"
         );
     }
 

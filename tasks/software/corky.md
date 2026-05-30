@@ -141,8 +141,7 @@ Handled in the preceding response. I could not complete the Google-side registra
 ### Re: Queue cleanup — gpt-5
 
 Cleared the stale auto queue entry that duplicated the prompt already answered above.
-queue_active: false
-<!-- agent:boundary:367dcfa8 -->
+<!-- agent:boundary:35cd30b1 -->
 <!-- /agent:exchange -->
 ###
 <!--

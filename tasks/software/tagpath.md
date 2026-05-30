@@ -171,7 +171,44 @@ Updated [tasks/software/tagpath.md](/home/brian/work/btakita/agent-loop/tasks/so
 Top backlog item: `#tpcoreplan`.
 
 Closeout passed: `agent-doc session-check` ok. Committed as `8782ef5e5`. No code changed, so no project test suite was run.
-<!-- agent:boundary:6401cb8c -->
+
+### Re: do #tpcoreplan — gpt-5
+
+Completed `#tpcoreplan`.
+
+I added the conservative `tagpath-core` split plan to `src/tagpath/SPEC.md` as a new workspace split section. It now inventories the public APIs to move, names the native/facade modules that stay in `tagpath`, sets the dependency boundary for `tagpath-core`, defines compatibility re-exports for existing `tagpath::...` imports, and documents release/publish order.
+
+I also added `src/tagpath/tests/test_core_split_plan.rs` so the required plan boundaries stay covered by tests.
+
+Changed paths:
+
+- `src/tagpath/SPEC.md`
+- `src/tagpath/tests/test_core_split_plan.rs`
+- parent submodule pointer `src/tagpath`
+
+Commits and push:
+
+- tagpath: `404e593` (`docs: plan tagpath core split`) pushed to `btakita/tagpath main`
+- agent-loop: `c74a6d87d` (`chore: update tagpath split plan`) pushed to `btakita/agent-loop main`
+
+Verification:
+
+- `rustfmt --check tests/test_core_split_plan.rs` passed
+- `git diff --check` passed
+- `cargo test core_split_plan` passed
+- `cargo test` passed
+- `cargo clippy -- -D warnings` passed
+- `cargo build` passed
+- `cargo install --path . --force` passed and replaced the local `tagpath` binary
+- root `make check` passed
+- tagpath GitHub Actions `CI` passed
+- tagpath GitHub Actions `WASM build` passed
+
+Notes:
+
+- `cargo fmt --check` for the whole tagpath crate is still red on pre-existing formatting in `src/lint/agent_doc.rs`; I did not touch that unrelated file.
+- agent-loop GitHub Actions still fails before runner steps are created: both `tmux-ci` and `check` jobs have empty step logs (`log not found`). Local `make check` passed, so I classified the GitHub result as an external CI-start blocker rather than a code failure.
+<!-- agent:boundary:acfd7282 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -179,7 +216,7 @@ Closeout passed: `agent-doc session-check` ok. Committed as `8782ef5e5`. No code
 
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
-- do [#tpcoreplan]
+- ~do [#tpcoreplan]~
 - do [#tpcoreextract]
 - do [#tpcorefacade]
 - do [#tpcoreci]

@@ -37,6 +37,8 @@ Compacted content:
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
 ❯ Read file:///home/brian/.claude/usage-data/report-2026-05-30-112308.html. What are #next-steps for tsift to save tokens and improve effectiveness of graph/neighborhood queries?
 
+Please analyze claude-mem. Should we drop it or have our own?
+
 ### Re: token savings, graph neighborhoods, and claude-mem — gpt-5
 
 I read the Claude Code Insights report and inspected the local `claude-mem` installation, database, logs, and HTTP API. The report is pointing at a real tsift opportunity: not generic “more memory,” but budgeted memory and graph retrieval that prevents large observer prompts from ever being constructed.
@@ -68,7 +70,7 @@ Commands used: `tsift status`, `tsift status --fix`, `agent-doc preflight`, `age
 Verification: document-analysis cycle only; source verification was not required because no code changed. The key checks were the usage-report read, local database/log/API inspection, and tsift’s own next-context/context-pack output.
 
 Confidence: high on the direction. The only caveat is that the current active `claude-mem` worker is a minified plugin cache, so implementation should target either its stable HTTP/SQLite surfaces or a tsift-owned adapter rather than patching cached plugin internals directly.
-Please analyze claude-mem. Should we drop it or have our own?
+❯ Should we make our own memory crate/plugin, optimized for our tsift/agent-doc stack? We can import claude-mem into the memory crate db.
 
 ### Re: first-party memory crate/plugin — gpt-5
 
@@ -102,7 +104,7 @@ Commands used: `tsift status`, `tsift status --fix`, `agent-doc preflight`, and 
 Verification: document-analysis cycle only; no source verification required.
 
 Confidence: high. The important constraint is to keep `claude-mem` as an import source until tsift proves the new pipeline with measured retrieval and persistence results.
-<!-- agent:boundary:76ba23c4 -->
+<!-- agent:boundary:3c439914 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -111,7 +113,14 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+preset #spec-test-build-install-commit-push
+- do [#tsift-memory-crate-plugin]
+- do [#tsift-memory-budget-guard]
+- do [#tsift-claude-mem-adapter]
+- do [#tsift-neighborhood-token-budget]
+- do [#tsift-memory-eval-harness]
+- do [#tsift-summary-extract-gate]
 <!-- /agent:queue -->
 
 ## Backlog

@@ -30,88 +30,37 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260530-163402.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260530-175639.md`*
 
 Compacted content:
-- Archived 1 response topic(s): do #ipcfullprompt-recur2
+- Archived 5 response topic(s): do #codex-final-response-not-written; follow-up backlog capture; auto queue stalled (#agent-doc-bug); 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: do #codex-final-response-not-written — opus-4-8
-
-Added a deterministic, harness-agnostic `session-check` guard that fails closed when a turn commits binary-owned work but never captures an assistant response body — exactly the "commits/pushes completed but `agent:exchange` lacked the close-out" symptom (and it would have auto-caught my own malformed-patchback miss two turns ago).
-
-#### The guard
-`check_committed_without_response_body_guard` (`agent-doc-orchestration/src/session_check.rs`), wired into `inspect_with_warnings` right after the snapshot-committed guard. It fires `INTERRUPTED` when:
-- `cycle_state.phase == Committed`, **and**
-- no response was captured this cycle (`capture_id` / `response_sha256` both `None`), **and**
-- `had_pending_mutations == true`.
-
-The error names the cycle + last event and ends with the exact recovery command: `agent-doc write --commit <FILE>`, then re-run `session-check`. Landing the response sets `capture_id` and clears the guard.
-
-#### Why the signal is precise (low false-positive)
-- A captured response **always** sets `capture_id`/`response_sha256` (`capture::record` → `cycle_state::mark_response_captured`), so any normal response cycle is excluded.
-- `had_pending_mutations` is set **only** by the `write`/`finalize` response path (`write.rs` → `mark_pending_mutations`), so it proves a real response turn ran this cycle.
-- Bookkeeping-only commits stay OK: a bare sweep re-commit never sets `had_pending_mutations`, and `repair`'s completed-backlog reap records `reaped_pending_ids` via `record_reaped_pending_ids` **without** it (caught during testing — an early broader condition false-fired `repair_commits_reaped_completed_backlog_in_git_repo`, which is why the guard now keys solely on `had_pending_mutations`).
-
-#### Harness coverage
-Harness-agnostic by construction — the cycle-state shape is identical regardless of harness. Claude/OpenCode hit it through `finalize`'s post-commit `session-check`; **Codex** hits it through the `Stop` hook's `session-check` backstop (`.codex/hooks.json`), so the original Codex direct/manual repro is now covered without harness-specific code.
-
-#### Tests (`session_check.rs`)
-- `..._fires_on_pending_mutations_no_capture` — the bug shape → Error.
-- `..._is_wired_into_inspect` — fires through the full `inspect` chain → Interrupted with the recovery command.
-- `..._passes_with_captured_response` — normal cycle → None.
-- `..._passes_on_done_ids_without_write_turn` — backlog bookkeeping (repair-reap shape) → None.
-- `..._passes_on_noop_sweep_close` — sweep re-commit → None.
-
-#### Verification
-- `cargo test -p agent-doc-orchestration session_check` — 95 + 5 new green.
-- `make check` (full Rust suite incl. clippy + the FlowCore hot-path token-budget gate, bumped 16→22 for the audited new `guard_` tokens) — 0 failures.
-- Both binaries rebuilt + installed (`cargo build --release` + `cargo install --path .`) so the guard is live for tmux/IDE-spawned sessions.
-
-Note: I chose **fail-closed-with-recovery-command** over auto-forcing `write --commit` (the plan's other option) — it matches the existing sibling guards and avoids a guard silently mutating the doc. Live re-verification against a real Codex direct run is a recommended opportunistic follow-up (added to backlog).
-
-### Re: follow-up backlog capture — opus-4-8
-
-Recorded the recommended opportunistic follow-up `#codex-final-response-live-verify` (live Codex re-verification of the new guard) so the claim in the prior close-out is backed by a real backlog item. The guard itself and its deterministic regressions are already committed (`5019c725e`); this item only tracks the optional live-run confirmation.
-### Re: auto queue stalled (#agent-doc-bug) — opus-4-8
-
-Root-caused and fixed. The auto queue stalled because of a **preflight classification bug**, not just my stopping. (Cites `#ipcfullprompt-recur2` only as a related prior fix — it stays gated, not completed here.)
-
-#### Root cause
-When a cycle has no real user/document diff, preflight synthesizes the active queue head as the cycle prompt (`preflight.rs` ~2001). That synthetic head was being included in `user_intent_prompt_changes`. But the skill's auto-loop precondition is "continue only when `user_intent_prompt_changes` is empty (a real user prompt mid-loop takes precedence)." So the queue's own continuation head looked like a fresh user prompt every cycle → the precondition never held → the `auto` queue stalled after each item. Confirmed against the live binary: `user_intent: [{prompt_target: "do [#alpha]"}]` for a pure queue-continuation cycle.
-
-#### Fix (`bc2c902b`)
-`preflight.rs` now tracks `diff_from_queue_head_only` — true only when `diff_result.is_none()` before the queue head is synthesized. In that case `user_intent_prompt_changes` is emptied (it's queue continuation, not user intent). A real user prompt typed mid-queue keeps `diff_result` non-None, so it's still surfaced normally; user-added queue items are still filtered via `change_is_managed_state_only`. The head remains exposed through `queue_prompts`/`prompt_bearing_changes` so the cycle still has work.
-
-#### Verification
-- New CLI regression `test_preflight_active_auto_queue_head_is_not_user_intent` (reproduces the stall shape, asserts empty `user_intent_prompt_changes` + populated `queue_prompts`).
-- `make check` green (0 failures); no FlowCore token-budget change.
-- Both binaries rebuilt + installed; **live-verified** on the real binary and on this document — `user_intent_prompt_changes` is now empty for the active queue head.
-
-Also committed the two prior source fixes that had only been doc-committed: `#ipcfullprompt-recur2` VFS guard (`fe4e89ef`) and `#codex-final-response-not-written` session-check guard (`bc2c902b`).
-
-With this fixed, the `auto` queue (16 items remaining) can now self-continue.
-
-### Re: tsift multi-crate integration — opus-4-8
-
-**Yes, tsift is properly integrated with the multi-crate architecture** — and I refreshed it. `tsift status` showed all three workspace members tracked alongside the root binary crate:
-- `agent-doc-core`, `agent-doc-sqlite`, `agent-doc-orchestration` (the `[workspace] members`), plus the `agent-doc` root package — 328 files tracked total.
-
-The only issue was **staleness**, not integration: 11 files were stale (`preflight.rs`, `session_check.rs`, `write.rs`, `test_cli.rs`, `PatchWatcher.kt`, etc. — my edits this session). I ran `tsift index .` (the actual refresh command; `tsift status` recommends it — there is no separate `tsift update` subcommand). Status is now `fresh (328 files tracked, 0s ago)`.
-
-Note: I left the `- Is tsift properly integrated…` line you added to `agent:queue`. It's free text (no `do [#id]`), so the queue parser treats it as an annotation and skips it for prompt-head resolution — it won't be dispatched. There's no CLI primitive to strike a non-`#id` queue line, so you can delete that line manually when convenient.
-
-### Re: do #pending-add-suppresses-queue-consume — opus-4-8
-
-Done (committed `33fe9927`). The **core suppression was already resolved** by prior work: `queue_head_matches_done_ids` / `queue_head_has_explicit_completion_signal` already let a `--done`/`--pending-gate`/`--pending-edit` naming the head consume it regardless of a bundled `--pending-add`. Verified empirically — `finalize --done h1 --pending-add "…"` strikes the head (`~do [#h1]~`).
-
-The item's *alternate* proposal (heading-match should drive consumption) is intentionally **superseded by `#queue-strike-on-halt`**: a bare `do [#id]` head must require an explicit completion flag so a halt/refusal response that merely names the head can't silently strike it.
-
-What I fixed (residual): the diff-based check printed a misleading `[queue] active prompt differs from queue head` line to **stderr even when consumption then succeeded** via the `--done` fallback — it read as a failure (I saw it fire repeatedly this session on successful closeouts). Now `should_consume_queue_prompt_for_write` checks the explicit `--done` short-circuit **first**, and the inner diff diagnostic is demoted from stderr to `ops_log` so only the caller's authoritative `[queue] skipped consumption` line (printed only when consumption is *definitively* skipped after all fallbacks) is user-facing.
-
-Regression: `done_head_consumes_despite_bundled_pending_add` (proves `--done` + bundled `--pending-add` consumes the head, and a bare head without a flag does not). `make check` green; both binaries rebuilt + installed.
-<!-- agent:boundary:fbe78a27 -->
+<!-- agent:boundary:9ec5cf5a -->
 <!-- /agent:exchange -->
+
+<!-- agent:queue auto -->
+preset #spec-test-build-install-commit-push
+- ~do [#ipcfullprompt-recur2]~
+- ~do [#codex-final-response-not-written]~
+- ~do [#pending-add-suppresses-queue-consume]~
+- Is tsift properly integrated into multi-crate architecture? If not, run tsift update.
+- do [#pending-done-guard-false-positive]
+- do [#queue-user-edit-overwrite]
+- do [#prompt-preempts-auto-queue]
+- do [#codex-owned-pane-prompt-miss]
+- do [#stuck-capture-compact-false-positive]
+- do [#codex-route-busy-ctrl-g-opens-editor]
+- do [#cross-project-stash-pane-condition]
+- do [#route-drain-all-surface-live-verify]
+- do [#run-agent-doc-stale-busy-replay]
+- do [#jb-busy-queue-ux-feedback]
+- do [#plugin-cleanup-menu-command]
+- do [#stash-session-ttl-prune]
+- do [#next-steps-backlog-capture]
+- do [#ah0s]
+- do [#backlog-priority-attribute]
+- do [#backlog-queue-sync-attribute]
+<!-- /agent:queue -->
 ###
 <!--
 Verify [#ipcfullprompt-recur2]
@@ -150,30 +99,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 
 #spec-test-build-install-commit-push
 -->
-
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~do [#ipcfullprompt-recur2]~
-- ~do [#codex-final-response-not-written]~
-- ~do [#pending-add-suppresses-queue-consume]~
-- Is tsift properly integrated into multi-crate architecture? If not, run tsift update.
-- do [#pending-done-guard-false-positive]
-- do [#queue-user-edit-overwrite]
-- do [#prompt-preempts-auto-queue]
-- do [#codex-owned-pane-prompt-miss]
-- do [#stuck-capture-compact-false-positive]
-- do [#codex-route-busy-ctrl-g-opens-editor]
-- do [#cross-project-stash-pane-condition]
-- do [#route-drain-all-surface-live-verify]
-- do [#run-agent-doc-stale-busy-replay]
-- do [#jb-busy-queue-ux-feedback]
-- do [#plugin-cleanup-menu-command]
-- do [#stash-session-ttl-prune]
-- do [#next-steps-backlog-capture]
-- do [#ah0s]
-- do [#backlog-priority-attribute]
-- do [#backlog-queue-sync-attribute]
-<!-- /agent:queue -->
 
 ## Backlog
 

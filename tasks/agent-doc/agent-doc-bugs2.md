@@ -74,7 +74,18 @@ You queued `#hj7s` and `#prompt-preempts-auto-queue` and chose **one per cycle**
 **Gated, not done:** the Rust guard is fully unit-tested and live in the binaries, but the JB notification needs live IDE verification (install signed `0.2.139`, open `ctrl+g` nvim in a Claude Code pane, click Interrupt-and-Restart, confirm the refusal notification appears and no keys reach the editor). Gated on that.
 
 **Follow-up:** `route.rs` busy-interrupt (`route.rs` ~6427) sends a raw `C-c` into the pane foreground in the reroute path — same shape, but a hard refusal there would change reroute semantics, so it's tracked separately rather than forced into this cycle.
-<!-- agent:boundary:0bd29182 -->
+❯ I was able to successfully run JB `Restart Supervisor Process` on a Claude & Codex session. Successful.
+
+### Re: JB Restart Supervisor live-verify — opus-4-8
+
+That's the live verification `#hj7s` was gated on — resolving it to **done**.
+
+Scope of what your test confirms: running `Restart Supervisor Process` successfully on live Claude **and** Codex sessions proves the new guard **doesn't regress the normal restart path** (the main risk of adding an evidence/foreground check before the interrupt — restart still reaches the supervisor and succeeds). The editor-refusal branch itself (nvim holding the pane → refusal + JB notification, no keys into the buffer) is covered by the Rust unit test and the Kotlin parse/message tests rather than this run, since a normal session has no editor foreground. If the `ctrl+g` edit-in-nvim refusal ever misbehaves in practice, just flag it and I'll reopen.
+
+Gate cleared on submodule `6544cf53` / pointer `011c6f81a`, plugin `0.2.139`.
+
+**Queue:** the gated `do [#hj7s]` head was auto-struck this preflight (`source=review_gated`) and the queue is now **inactive** (`inactive_queue_residue`). `do [#prompt-preempts-auto-queue]` is still listed but won't auto-run until the queue is reactivated — re-add `auto` (or trigger it) when you want me to pick it up next, per one-per-cycle.
+<!-- agent:boundary:c5fce15b -->
 <!-- /agent:exchange --> 
 ###
 <!--
@@ -138,7 +149,6 @@ preset #spec-test-build-install-commit-push
 ## Review
  
 <!-- agent:review -->
-- [/] [#hj7s] [recommended] JB `Restart Supervisor Process` / `Interrupt and Restart` lands its input in a non-shell foreground process when one owns the pane TTY. Live repro 2026-05-30: clicking `Interrupt and Restart` after Restart failed surfaced `vim`/`nvim` in the console — the raw `C-c` interrupt sent by `session_actor_cmd.rs:950/953` (and `route.rs:6427` for routed restart) goes to the pane's foreground process, not the supervisor. With vim/nvim foreground, `C-c` is a no-op and the follow-up restart command typing lands in normal-mode buffer. Fix: detect non-shell foreground (TIOCGPGRP -> tcgetpgrp -> process comm against an allow-list of supervisor/shell names) before issuing tmux send-keys for restart; if a non-shell editor/pager owns the TTY, refuse with an explicit "editor X holds the pane; close it before restart" diagnostic and surface that in the JB notification, OR target the supervisor process directly via SIGINT to its pgid instead of the pane's foreground pgid. Relates to #snrun stale-busy guards (different class — this is correct-pane, wrong-foreground-process). Plan: TBD.
 - [/] [#finalize-retry-ipc-response-duplication] [recommended] Multi-retry finalize + live IPC duplicates the response and prefixes its body lines with the user-prompt marker. Live repro 2026-05-29 on agent-doc-bugs2.md: a closeout needing several finalize/write retries (lint-gate / session-check / live_prompt_drift re-runs) with the IDE IPC listener active and concurrent editing left a duplicated response block plus agent body lines wrongly prefixed (uncommitted; HEAD stayed clean; manual git checkout repaired). Fix direction: idempotent retry convergence on IPC already_applied, never prefix agent response body as a prompt, and repair/session-check auto-dedup. Relates to #prompt-duplicated-while-typing, #duplicate-response-after-commit, #ipc-dup-tracking-double-merge (plugin 0.2.138 not yet installed during repro). Plan: tasks/agent-doc/plan-finalize-retry-ipc-response-duplication.md.
 - [/] [#ipc-dup-tracking-double-merge] PromptPoller double-tracking fix (plugin 0.2.138, submodule 32fb0b98 / superproject d585a33de): addFile keyed trackedFiles by project-relative path while handlePollResults keyed by "$cwd:$file", double-tracking the same VirtualFile (live: corky.md, brandon-cinquegrana.md, agent-doc-bugs2.md; trackedFiles=13 vs ffiTracked=9). Two divergent baselines -> mergeOrReload ran twice per change = full-document duplication path. Fixed by keying both via trackingKey(VirtualFile.path); convergence test + AGENTS.md invariant. GATED on live verify: install signed 0.2.138, restart, confirm no recurring duplication (corky.md). Exact setText payload uncaptured (JB debug logging was OFF). Relates to #ipcfullprompt-recur2, #adoc-queue-ipc-buffer-divergence, #prompt-duplicated-while-typing.
 - [/] [#jb-load-tmux-window-verify] [recommended] Live-verify the new JB Load Tmux Window action (plugin 0.2.136): install the signed zip, confirm it autostarts/loads the tmux pane for a focused doc whose pane is not up (e.g. corky.md). If the autostart sync genuinely fails to spawn the pane in that case (vs. by-design passive open), capture the route/sync logs as a separate autostart bug.

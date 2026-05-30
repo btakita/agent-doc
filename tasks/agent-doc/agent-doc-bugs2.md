@@ -35,7 +35,24 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 4 response topic(s): do #prompt-preempts-auto-queue; continue; do #jb-compact-repair-left-uncommitted; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:17a24e72 -->
+
+### Re: auto-add backlog tasks to ungate review items — opus-4-8
+
+Implemented as the **on-demand command** you chose: `agent-doc review ungate-tasks <FILE>`. **Done** — fully implemented, tested, and live-verified. (This cycle built the capability; it created no actionable follow-up items of its own. )
+
+#### What landed
+
+- **`pending_cmd.rs`** — `add_ungate_tasks_for_review()` + `UngateTasksReport`. Scans `agent:review` for gated `[/]` items and adds one `[recommended] Ungate review item #<id> — validate and move to done` backlog task per item, so gated items aren't stranded in review. **Idempotent**: a review id already covered by an ungate task (its own generated text, or any backlog line naming ungate + the id) is skipped.
+- **`main.rs`** — new `Review` command with `ReviewAction::UngateTasks { file }`, routed to print the scan/add/skip summary.
+
+#### Verification
+
+- 2 unit tests: one ungate task per gated review item + idempotent re-run (skips already-tracked); no-op when no gated review items.
+- **Live CLI smoke test** on a scratch doc with two gated review items: `scanned review: 2`, `added 2`, then a re-run reported `added 0 / skipped 2`, with the backlog gaining two `[recommended] Ungate review item #… — validate and move to done` entries above the existing item.
+- `make check` green (clippy `-D warnings`); both binaries rebuilt + installed.
+
+Run `agent-doc review ungate-tasks <FILE>` whenever you want backlog follow-ups for the items gated into review this session. I deliberately did not wire it into `--pending-gate` (your on-demand choice), so there are no surprise backlog mutations.
+<!-- agent:boundary:c2dfd147 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -103,6 +120,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#closeout-repair-churn] [recommended] Agent-doc closeout repair should converge in one path instead of causing multi-command repair churn. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: after successful Codex side-effect work, `write --commit`, `finalize`, template fallback, manual response insertion, direct-patchback absorption, and parent-pointer commit were all needed before `session-check` passed; one attempt committed escaped `agent:exchange` directives into the live exchange. Add a typed closeout recovery state machine, reject unsupported template patch stdin before commit, absorb visible `### Re:` direct patchbacks without manual boundary surgery, and make nested parent pointer repair atomic. Plan: tasks/agent-doc/plan-closeout-repair-churn.md.
 - [ ] [#preset-item-id-collision] [recommended] Enforce unique active identities across frontmatter `prompt_presets` keys and active `agent:backlog` / `agent:review` / `agent:icebox` item ids. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `#next-steps` exists both as a prompt preset and as a backlog item, making `do #next-steps` and "top backlog item: #next-steps" ambiguous between preset expansion and backlog execution. Fix with an identity registry, mutation-time rejection, preflight/session-check fail-closed diagnostics, and regressions. Plan: tasks/agent-doc/plan-preset-item-id-collision.md.
 - [ ] [#codex-final-response-live-verify] [recommended] Opportunistic live re-verification of the #codex-final-response-not-written guard: do a real Codex direct/manual run that commits side-effect work, confirm session-check (via the .codex Stop hook) fails closed with the 'no assistant response body was captured' message + 'agent-doc write --commit' recovery when no ### Re: close-out was written, and that a normal Codex turn with a response stays OK. Guard + deterministic regressions already landed (session_check.rs check_committed_without_response_body_guard).
 - [ ] [#stuck-capture-compact-false-positive] [recommended] stuck_captured_cycle false-positive after compaction: a capture recorded as committed (cycle-1780100032048, response 'gate→done for codex guidance') is later archived by compact, so preflight reports committed-but-not-in-HEAD and suggests `write --commit` recovery — which would re-inject an already-archived response (it lives in .agent-doc/archives/<hash>-*.md). Fix: when a captured-committed body is absent from HEAD because it was compacted (present in the matching archive), reconcile the capture instead of flagging it stuck. Repro 2026-05-29 agent-doc-bugs2.md.

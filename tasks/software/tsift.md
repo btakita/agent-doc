@@ -65,7 +65,22 @@ Proof:
 - Verification: memory status shows schema version 1 and 3000 imported events; graph-db status is current/materialized; tracked git status for the touched surfaces is clean.
 - Confidence: high for memory initialization/import verification; medium for graph semantic readiness because summaries remain empty by existing tsift status.
 - Escalation: none.
-<!-- agent:boundary:1b53d775 -->
+
+### Re: do [#tsiftmemhooks] — gpt-5
+
+Implemented the closeout capture path and switched graph retrieval to tsift-owned memory rows.
+
+The tsift side now has a first-party closeout capture command and native memory projection: `tsift memory capture-agent-doc-closeout` writes prompt target, response summary, session-check, and closeout proof events into `.tsift/memory.db`; graph-db now projects `.tsift/memory.db` events as `memory_session`, `memory_event`, source, and semantic rows instead of reading directly from claude-mem for live graph retrieval. The claude-mem import remains as a migration source.
+
+The agent-doc side now fires a best-effort post-commit bridge for initialized projects: after a committed response capture exists, it extracts the `### Re:` prompt target, stores a bounded response summary, records the current git HEAD, and invokes the tsift memory closeout command. Projects without `.tsift/memory.db` are skipped so ordinary agent-doc repos do not start writing memory unexpectedly.
+
+Proof:
+- Changed paths: `src/tsift/SPEC.md`, `src/tsift/packages/tsift-cli/src/cli.rs`, `src/tsift/packages/tsift-cli/src/commands/memory.rs`, `src/tsift/packages/tsift-cli/src/lib.rs`, `src/tsift/packages/tsift-memory/src/lib.rs`, `src/agent-doc/agent-doc-orchestration/src/hooks.rs`, plus the superproject submodule pointers. Source commits: `src/tsift@cf0d923` and `src/agent-doc@0d490aaa`; superproject pointer commit: `1274ebe34`.
+- Commands: focused `cargo test -p tsift-memory read_memory_events_round_trips_closeout_events -q`; focused `cargo test -p tsift-cli traversal_projection_materializes_tsift_memory_rows -q`; focused `cargo test -p agent-doc-orchestration agent_doc_ -q`; full `make check` for `src/tsift` via tsift digest-runner; full `make check` for `src/agent-doc` via tsift digest-runner; `cargo install --path . --force --locked` for both submodules; temp-db smoke test for `tsift memory capture-agent-doc-closeout`; `gh run list/view --workflow CI --limit 1` for both submodules.
+- Verification: `src/tsift make check` passed (`tart-87878d27fd`); `src/agent-doc make check` passed (`tart-b6475e4cc7`); installs passed (`tart-29b8cc1182`, `tart-c346067263`); installed versions are `tsift 0.1.62` and `agent-doc 0.34.0`; CLI smoke captured 4 closeout events. Latest tsift CI run `26694480302` succeeded; latest agent-doc CI run `26695418551` succeeded, including its `make tmux-ci` job. Tsift has no separate tmux workflow (`gh workflow list` shows CI and Release only).
+- Confidence: high.
+- Escalation: none.
+<!-- agent:boundary:1cb99f23 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -77,14 +92,13 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 <!-- agent:queue auto -->
 dispatch #spec-test-build-install-commit-push
 - ~do [#tsiftmeminit]~
-- do [#tsiftmemhooks]
+- ~do [#tsiftmemhooks]~
 - do [#tsiftmempending]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#tsiftmemhooks] [recommended] Wire agent-doc/Claude closeout capture into tsift-memory, then switch live capture/retrieval call sites away from direct claude-mem ownership.
 - [ ] [#tsiftmempending] [recommended] Extend claude-mem migration to handle pending_messages or explicitly exclude it from the full-replacement contract, with tests.
 <!-- /agent:backlog -->
 

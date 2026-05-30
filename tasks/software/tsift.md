@@ -68,7 +68,27 @@ Verification:
 - Latest GitHub Actions `CI` run checked: `26651628506`, completed `success` on 2026-05-29. Jobs were `clippy + test` and `live Convex graph acceptance`, both green; no separate tmux-test job was present in that CI job list.
 
 No push was requested or performed.
-<!-- agent:boundary:a0f29020 -->
+
+### Re: token rewrite Codex path — gpt-5
+
+Done for `#token-rewrite-codex-path`.
+
+I added an explicit low-token Codex/OpenCode path around `tsift rewrite --run`: OpenCode now gets a managed `/tsift-rewrite-run` command from `tsift init --opencode` and the `opencode-tsift` package. The command tells agents to route broad `rg`/recursive grep, raw transcript/session/log reads, git diff/show/log patch review, `cargo test`/`pytest`, and cargo build/check/clippy/install output through the same bounded rewrite surfaces used by the Claude hook.
+
+I also updated the generated Code Navigation instructions, `AGENTS.md` / `CLAUDE.md`, README/SPEC text, OpenCode package docs, and tests so the new command remains in parity between Rust `tsift init --opencode` and the npm package.
+
+Commits:
+- `59e3c8c` in `src/tsift`: `feat: expose opencode rewrite runner`
+- `a12a20ae8` in the parent repo: `chore: update tsift submodule for rewrite runner`
+
+Verification:
+- `cargo test -p tsift-index opencode` passed (`tart-3660effa7a`)
+- `cargo build -p tsift-cli` passed (`tart-0cedcbbe7b`)
+- `npm test` in `packages/opencode-tsift` passed (`tart-e88c7179dd`)
+- `make check` passed (`tart-bafabf8a37`)
+- `tsift status --fix` reports index fresh and instructions current
+- Latest GitHub Actions CI run `26651628506` is green with `clippy + test` and `live Convex graph acceptance`; there is no separate tmux-test job in that workflow.
+<!-- agent:boundary:e6c715b6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -80,7 +100,8 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 <!-- agent:queue auto -->
 dispatch #spec-test-build-install-commit-push
 - ~do [#token-budget-guardrail]~
-- do [#token-rewrite-codex-path]
+- ~do [#token-rewrite-codex-path]~
+- do [#split-tsift-cli-subcommands]
 - do [#token-closeout-noop-dedupe]
 - Should we split out a tsift-agent-doc crate?
 <!-- /agent:queue -->
@@ -88,7 +109,6 @@ dispatch #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#token-rewrite-codex-path] [recommended] Make the Codex/OpenCode low-token path explicit: document or install a wrapper that routes broad search, raw transcript reads, cargo/pytest/build output, and git diffs through tsift rewrite/context-pack/digest-runner equivalents.
 - [ ] [#token-closeout-noop-dedupe] [recommended] Reduce token waste from repeated agent-doc no-op closeouts by adding a fixture-backed session-review regression for commit_already_current churn and tightening the emitted guidance to one actionable row per cycle family.
 <!-- /agent:backlog -->
 

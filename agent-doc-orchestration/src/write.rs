@@ -1384,6 +1384,22 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
             response_targets_synthetic_queue_head_id(file, &capture.response_body)?;
     }
 
+    // #free-text-queue-head-consume: a free-text queue head (no `#id`, e.g. a
+    // plain question the user typed into `agent:queue`) has no `#id`, so none of
+    // the explicit-flag / heading-id completion paths above can ever strike it —
+    // it would block the auto-queue forever. Its only completion mechanism is
+    // being answered, so a captured response body for this cycle IS the
+    // completion signal. Bare `do [#id]` directives and `#preset` heads keep an
+    // `#id` and so are unaffected (they still require an explicit completion
+    // signal, preserving #queue-strike-on-halt).
+    if write_result.is_ok()
+        && !queue_consumption_allowed
+        && let Some(capture) = crate::capture::load_active(file)?
+        && !capture.response_body.trim().is_empty()
+    {
+        queue_consumption_allowed = queue_head_is_free_text_prompt(&current_content)?;
+    }
+
     // Phase 3c: consume queue prompt after all other strict closeout gates
     // have passed so a rejected closeout cannot advance the queue early.
     if write_result.is_ok() {
@@ -2754,6 +2770,26 @@ fn queue_head_is_bare_do_directive(queue_head: &str) -> bool {
                     .chars()
                     .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
     )
+}
+
+/// True when the active queue head is a free-text prompt: it carries no
+/// extractable `#id` (so it is neither a `do [#id]` directive nor a `#preset`
+/// head) and is not a `do queue` / `run queue` activation trigger. Such a prompt
+/// has no `#id`-based completion mechanism — none of the explicit-flag or
+/// heading-id consumption paths can ever strike it — so it is consumed by being
+/// answered: a captured response body for the cycle completes it
+/// (#free-text-queue-head-consume).
+fn queue_head_is_free_text_prompt(content: &str) -> Result<bool> {
+    let Some(queue_head) = active_queue_head_text(content)? else {
+        return Ok(false);
+    };
+    if queue_prompt_done_id(&queue_head).is_some() {
+        return Ok(false);
+    }
+    if crate::diff::detect_queue_trigger(&queue_head) {
+        return Ok(false);
+    }
+    Ok(true)
 }
 
 /// True when `topic` resolves to exactly `#<head_id>` (optionally `do `-prefixed
@@ -12062,6 +12098,36 @@ mod tests {
             !should_consume_queue_prompt_for_write(&doc, Some(baseline), &current, &[]).unwrap(),
             "bare do[#id] head needs an explicit completion flag"
         );
+    }
+
+    #[test]
+    fn free_text_queue_head_detection() {
+        // #free-text-queue-head-consume: a plain question typed into the queue
+        // has no #id and is not a do-directive/preset/trigger → free text.
+        let doc = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- Is tsift properly integrated into multi-crate architecture?\n",
+            "- do [#foo]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert!(
+            queue_head_is_free_text_prompt(doc).unwrap(),
+            "a no-#id queue head is free text and consumable by being answered"
+        );
+        // A bare do[#id] head is NOT free text (needs an explicit completion flag).
+        assert!(!queue_head_is_free_text_prompt(HALT_QUEUE_DOC).unwrap());
+        // A #preset head carries an #id, so it is not free text either.
+        let preset = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- #spec-test-build-install-commit-push\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert!(!queue_head_is_free_text_prompt(preset).unwrap());
+        // Inactive queue → no head → not free text.
+        let inactive = doc.replace("queue_active: true", "queue_active: false");
+        assert!(!queue_head_is_free_text_prompt(&inactive).unwrap());
     }
 
     #[test]

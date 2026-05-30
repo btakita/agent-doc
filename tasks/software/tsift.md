@@ -58,7 +58,36 @@ Commits pushed:
 - `agent-loop`: `59a970951 chore: update tsift submodule`, pushed to `origin/main`.
 
 `#tsift-dormant-crates` and `#tsift-crate-publish-preflight` remain queued for later cycles.
-<!-- agent:boundary:56a626a3 -->
+
+### Re: #tsift-dormant-crates — gpt-5
+
+Wired both dormant graph crates into real surfaces.
+
+- `tsift-algorithms` now backs a new `tsift analyze` command that reports SCCs, composite health, dead-code reachability, and module coupling over indexed call edges.
+- Fixed a dormant `tsift-algorithms` health-analysis Tarjan recursion bug that stack-overflowed on a dense cycle once the CLI exercised it.
+- `tsift-tokensave` is now available as `tsift graph-db --backend tokensave` for read-only provider-neutral node/kind/edge/neighborhood/path queries against `.tokensave/tokensave.db`.
+- Root `tsift` re-exports both crates as `tsift::algorithms` and `tsift::tokensave`; `SPEC.md` now describes the matching CLI and root API surface.
+
+Commits pushed:
+
+- `a319ad8` in `src/tsift`: `feat: wire dormant tsift graph crates`
+- `6644f7692` in `agent-loop`: `chore: update tsift submodule`
+
+Verification:
+
+- `cargo check -p tsift-cli`
+- `cargo check -p tsift`
+- `cargo test -p tsift-algorithms dense_cycle_does_not_recurse_on_current_node`
+- `cargo test -p tsift-cli analyze_json_runs_graph_algorithms`
+- `cargo test -p tsift-cli graph_db_tokensave_backend_queries_tokensave_db`
+- `cargo test -p tsift root_reexports_algorithm_and_tokensave_crates`
+- `make check` (clippy, workspace tests, opencode tests, npm publish dry-run)
+- `cargo build -p tsift-cli`
+- `cargo install --path packages/tsift-cli --locked --force`
+- GitHub Actions `CI` run `26686994059` completed `success` after push.
+
+Workflow note: this repo currently has `CI` and `Release` workflows; there is no separate tmux workflow/job to inspect.
+<!-- agent:boundary:a0057789 -->
 <!-- /agent:exchange -->
 ###
 <!--

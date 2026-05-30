@@ -130,7 +130,17 @@ The boundary is plausible because `session-review`, `session-digest`, `session-c
 The better sequence is: split `tsift-cli` by command first, then extract agent-doc parsing/aggregation once the CLI only formats and routes those results. Keep budget/envelope rendering in `tsift-cli`; move parsing, aggregation, guardrails, and fixtures only after their public API is small and stable.
 
 No repo changes for this advisory response.
-<!-- agent:boundary:2f21abc1 -->
+
+### Re: Should we split out a tsift-agent-doc crate? — gpt-5
+
+Yes eventually, but not before the `tsift-cli` command split.
+
+The boundary is plausible because `session-review`, `session-digest`, `session-cost`, agent-doc log parsing, closeout churn detection, and agent-doc fixtures now form a coherent domain. A `tsift-agent-doc` crate would make that domain easier to test and keep agent-doc semantics out of CLI command plumbing.
+
+The better sequence is: split `tsift-cli` by command first, then extract agent-doc parsing/aggregation once the CLI only formats and routes those results. Keep budget/envelope rendering in `tsift-cli`; move parsing, aggregation, guardrails, and fixtures only after their public API is small and stable.
+
+No repo changes for this advisory response.
+<!-- agent:boundary:3b37672c -->
 <!-- /agent:exchange -->
 ###
 <!--

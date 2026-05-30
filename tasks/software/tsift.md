@@ -131,7 +131,46 @@ Commits pushed:
 - parent repo: `0bb7abdee chore: update tsift submodule`
 
 I also checked for a tmux CI leg in the tsift repo and there is no `tmux`/`tmux-ci` workflow target to inspect.
-<!-- agent:boundary:b5164701 -->
+❯ release + publish
+
+### Re: release + publish — gpt-5
+
+Released and published `tsift` v0.1.62.
+
+The apparent stall was crates.io throttling new-crate publishes. The release creates many first-time crate names, and crates.io returned `429 Too Many Requests` with retry-after windows. The final failure before success was a separate ordering bug: `tsift-sim-world` was published before root `tsift`, even though `tsift-sim-world` has a dev-dependency on `tsift`. I fixed the order and reran the tag.
+
+Changed paths:
+- `src/tsift/.github/workflows/release.yml`
+- `src/tsift/README.md`
+- `src/tsift/SPEC.md`
+- `src/tsift/packages/tsift-cli/tests/exit_code.rs`
+- parent submodule pointer `src/tsift`
+
+Commits pushed:
+- `src/tsift` `fca3045` `fix: allow release package file checks after ci`
+- `src/tsift` `5f9c56b` `fix: resume crates publish on release rerun`
+- `src/tsift` `4f95873` `fix: publish root crate before sim world`
+- parent `db50360cf` `chore: update tsift submodule`
+- parent `72b487df3` `chore: update tsift release pointer`
+- parent `e25044502` `chore: update tsift release order`
+
+Verification:
+- `cargo test -p tsift-cli release_publish_gate_requires_secret_variable_and_dry_run` passed after each release-workflow fix.
+- `make check` passed after the final ordering fix.
+- Latest `CI` run for `4f95873` passed: `26690820586`.
+- Final `Release` run passed: `26690822959`, completed `2026-05-30T18:10:11Z`.
+- GitHub Release `v0.1.62` is published with Linux, macOS, and Windows archives plus SHA256 assets: `https://github.com/btakita/tsift/releases/tag/v0.1.62`.
+- crates.io verification passed for every `0.1.62` crate: `tsift-core`, `tsift-graph`, `tsift-sqlite`, `tsift-algorithms`, `tsift-resolution`, `tsift-tokensave`, `tsift-libsql`, `tsift-index`, `tsift-summarize`, `tsift-quality`, `tsift-agent-doc`, `tsift-digest`, `tsift-search`, `tsift-status`, `tsift-session`, `tsift-cli`, `tsift`, and `tsift-sim-world`.
+
+Notes:
+- OpenCode npm publish remains skipped by the release gate because npm publishing is not configured with the required repo variable/secret. The dry-run package check still passes.
+- GitHub emitted Node.js 20 deprecation annotations for current Actions dependencies; those did not block the release.
+- The `src/tsift` worktree is clean. The parent worktree still has unrelated pre-existing dirty files, which I left untouched.
+
+Confidence: high. The tag, release assets, CI, Release workflow, and all crates.io package versions are verified.
+
+Escalation: no approval escalation was needed; I used the existing approved git, cargo, make, gh, and agent-doc paths.
+<!-- agent:boundary:a0588abc -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -93,7 +93,29 @@ Commits:
 - parent repo: `1a0903191 tsift: update graph neighborhood budget implementation` (submodule pointer only; parent push follows this document closeout)
 
 I also checked for tmux CI coverage in this repo; there is no `tmux` workflow or `make tmux-ci` target in `src/tsift`.
-<!-- agent:boundary:52f77c80 -->
+
+### Re: #token-action-coverage — gpt-5
+
+Implemented `#token-action-coverage` in `src/tsift`.
+
+Added fixture-backed CLI coverage for `session-review --next-context` token actions:
+- `fixtures/session-review/token-action-guardrails.codex.jsonl` exercises Codex token-count guardrails for `prompt_budget` and `cache_resend`.
+- `fixtures/session-review/restart-loop.log` exercises agent-doc restart churn for `restart_loop`.
+- `packages/tsift-cli/tests/exit_code.rs` now asserts those three actionable guardrails appear once in `next_token_actions` and are collapsed out of bounded envelope `unresolved_failures`, matching the existing `noop_closeout` behavior.
+- `VERSIONS.md` records the Unreleased note.
+
+Committed and pushed tsift submodule commit `86b4a537 tsift(#token-action-coverage): cover session token actions`, then committed the parent submodule pointer as `9c1103632 tsift: update token action coverage`.
+
+Verification:
+- `cargo test -p tsift-cli session_review_next_context_collapses_actionable_guardrail_failures`
+- `cargo test -p tsift-cli session_review_next_context_collapses_noop_closeout_guidance`
+- `make check`
+- `cargo build --workspace`
+- `cargo install --path packages/tsift-cli --force`
+- `tsift --version` -> `tsift 0.1.62`
+
+No `tmux-ci` target or tmux workflow exists in `src/tsift`, so there was no tmux leg to run.
+<!-- agent:boundary:ea69f930 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -2,7 +2,7 @@
 agent_doc_session: 584ef929-37ee-47f6-b3d8-d4266ad31ee9
 agent_doc_format: template
 agent_doc_write: crdt
-agent: claude
+agent: codex
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 claude_model: opus
@@ -93,7 +93,43 @@ prompt_presets:
 Compacted content:
 - Archived 1 response topic(s): next-steps to split out crates in corky
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc...
-<!-- agent:boundary:aeaacb86 -->
+
+### Re: corky crate split — gpt-5
+
+Completed the Corky workspace split and closed out `#vbpm`, `#69ge`, `#0k50`, and `#5wnq`.
+
+What changed:
+- The root crate is now a Cargo workspace with the root `corky` crate plus `corky-core`, `corky-google`, `corky-mail`, `corky-social`, and `corky-transcribe`.
+- The root crate keeps the CLI/bin facade and re-exports the domain crates so existing `corky::...` paths continue to work.
+- Transcription moved behind `corky-transcribe`; root feature flags forward to it.
+- Shared config, account, OAuth, file-store, social profile/token, utility, and import config foundations moved into `corky-core`.
+- Google, mail, and social command domains moved into their own publishable crates.
+- `Makefile`, `pyproject.toml`, and `SPEC.md` now document and support workspace packaging and publish order.
+- Added focused packaging tests in `tests/test_workspace_packaging.rs`.
+
+Commits:
+- Corky repo: `f79ba50` (`feat: split corky into workspace crates`) pushed to `btakita/corky.git main`.
+- Parent repo: `6859cb142` (`chore: update corky submodule`) committed to pin `src/corky` at `f79ba50`. I will push parent `main` after this document finalization so the session response commit is included too.
+
+Verification:
+- `make precommit` in `src/corky`: passed, including workspace clippy, workspace tests, and `audit-docs`.
+- `cargo check --no-default-features`: passed in 2.18s.
+- `make release`: passed, about 50.32s for the optimized build and `.bin/corky` symlink.
+- `cargo install --path .`: passed, about 52.17s; installed `corky 0.28.2`.
+- `cargo publish -p corky-core --dry-run --allow-dirty`: passed; package was 23 files, 152.6 KiB uncompressed / 37.2 KiB compressed.
+- Corky CI check: latest `CI` run was `completed success` for run `26651427617` on 2026-05-29T17:14:53Z.
+
+Ignored-test report:
+- Corky currently has no ignored tests in the suite I ran. The `make precommit` Cargo summaries reported `0 ignored`, and `rg '#[ignore]'` found no Corky ignore annotations.
+- If you saw one ignored test earlier, I could not reproduce it in Corky after the split. The parent agent-loop `src/agent-doc` suite does have intentionally ignored live tmux integration tests, but that is a separate project.
+
+Performance notes:
+- The expensive steps remain optimized build/install, both around 50 seconds on this machine, mainly because the default feature set includes the transcription/diarization stack.
+- Cached structural checks are fast after the split: no-default-features check finished in 2.18s.
+- Core crate publish packaging is small and fast; dependent crate dry-runs must wait until predecessor internal crates exist in the crates.io index, and the SPEC now calls that out.
+
+Caveat: I also attempted the parent repo `make check` before committing the submodule pointer. It completed the shared crate checks and got deep into `src/agent-doc`, then hung in unrelated `agent_doc_orchestration` test execution after the suite reported `supervisor::ipc::tests::long_path_fallback_binds_successfully` running over 60 seconds. I terminated that parent-wide check and did not treat it as Corky evidence; the Corky verification above is complete and green.
+<!-- agent:boundary:5ccaaf58 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -101,13 +137,19 @@ Why is 1 test ignored?
 Please give me a report the performance
 -->
 
+## Queue
+
+<!-- agent:queue auto -->
+dispatch #spec-test-build-install-commit-push
+- do [#vbpm]
+- do [#69ge]
+- do [#0k50]
+- do [#5wnq]
+<!-- /agent:queue -->
+
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#vbpm] [recommended] corky crate-split phase 1: convert corky to a cargo workspace, root crate keeps lib+bin — scaffolding only, no module moves yet
-- [ ] [#69ge] [recommended] corky crate-split phase 2: extract corky-transcribe (transcribe/ + whisper-rs/pyannote-rs/ort/symphonia/rubato/hound, feature-gated transcribe/cuda/metal/diarize). Only main.rs calls it, sole coupling crate::config; isolates the 2m+ CUDA build from core. Watch cross-crate #[cfg(test)] — use a test-support feature
-- [ ] [#0k50] [recommended] corky crate-split phase 3: extract corky-core foundation (config, accounts, resolve, oauth_loopback, filter::gmail_auth token store, file_store, util, app_config, desktop_notify) so domain crates share auth + the tokens.json/.sync-state.json stores
-- [ ] [#5wnq] [recommended] corky crate-split phase 4+: extract corky-google (doc/cal/gsc/tasks), corky-mail (sync/draft/mailbox/filter/contact/search/topics/label), corky-social; slim corky bin to CLI dispatch (cli.rs/main.rs). Keep workspace members publish=false except the corky bin; update maturin/pyproject + multi-crate release order
 - [/] [#pypi-trusted-publisher] Configure PyPI trusted publishing for btakita/corky workflow .github/workflows/pypi.yml with environment pypi. Repo workflow is configured and pushed in Corky commit feb074e; PyPI run 26195923707 now builds all artifacts but is blocked by PyPI invalid-publisher until the project has a trusted publisher matching repo:btakita/corky:environment:pypi.
 <!-- /agent:backlog -->
 

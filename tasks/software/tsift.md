@@ -112,7 +112,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#token-action-coverage] Add fixture-backed coverage for prompt_budget, cache_resend, and restart_loop next_token_actions so bounded session reviews avoid duplicate failure/action rows beyond the noop_closeout case.
 <!-- /agent:backlog -->
 
 ## Review

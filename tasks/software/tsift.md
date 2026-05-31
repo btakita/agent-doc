@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -117,12 +117,14 @@ re [#terse-ultra-mode]: Does this affect the effectiveness of the searches?
 `TerseGraphNode`/`TerseGraphEdge`/`TerseSearchHit` are **post-search output structs** — they serialize the *envelope response* sent to the LLM. The search algorithm (`Sift::search()`), scoring, and ranking all operate on the full `SearchHit` with all fields intact. The terse conversion is a lossy serialization step that happens *after* results are found and scored.
 
 The only downstream consideration: if the LLM uses snippet text to decide which results to explore further, 80-char truncation could slightly reduce its context. But `label` (typically the symbol name/signature) is preserved and is the primary relevance signal. The full data remains in the database — only the LLM-facing envelope is compacted.
-<!-- agent:boundary:0db4e0ab -->
+Can the LLM follow-up with more detail on the ultraterse output?
+<!-- agent:boundary:02922b76 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+- Can the LLM follow-up with more detail on the ultraterse output?
 <!-- /agent:queue -->
 
 ## Backlog

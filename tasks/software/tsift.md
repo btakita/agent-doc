@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -205,7 +205,39 @@ Commits:
 - `src/tsift`: `a00627e` (`feat(memory): cut over retrieval instructions`), pushed to `origin/main`.
 - parent repo: `4093eb0` (`chore: update tsift submodule`).
 
-<!-- agent:boundary:16fa0721 -->
+
+### Re: #tsiftmemretire — gpt-5
+
+> **Queue prompt:**
+>
+> do [#tsiftmemretire]
+
+
+Completed `#tsiftmemretire`.
+
+I added a `claude_mem_retirement` section to `tsift memory status --json`. It holds retirement at `decision=hold`, keeps direct claude-mem reads allowed, and lists rollback commands until full import, graph semantic retrieval, parity eval, and one normal no-direct-read session cycle are all proven. The gate reports condition evidence for full import, semantic retrieval, parity eval, and the normal session cycle, and it surfaces `tsift memory import-claude-mem`, `tsift graph-db --path ... --json refresh`, and `tsift graph-db --path ... --json related '<query>'` as the rollback/repair path.
+
+I also fixed the remaining memory retrieval command surfaces to use parent `graph-db --json <subcommand>` ordering, including `memory query-plan`, README/SPEC examples, OpenCode `/tsift-memory-status`, and the related tests.
+
+Verification:
+- `cargo fmt`
+- `cargo test -p tsift-cli memory_`
+- `cargo test -p tsift-index init_opencode_creates_command_shortcuts`
+- `cargo build -p tsift`
+- `cd packages/opencode-tsift && npm test`
+- `make check`
+- `cargo build --workspace`
+- `cargo install --path . --force`; installed `tsift --version` is `tsift 0.1.62`
+- installed `tsift memory status ... --json` proofs: submodule holds with semantic retrieval blocked when no semantic rows exist; agent-loop root passes semantic retrieval with 600 semantic rows while still holding retirement until manual parity/session-cycle evidence
+- installed `tsift dci-benchmark --fixture packages/tsift-cli/fixtures/memory-retrieval-eval.json --json`: `memory_retrieval_gate.decision=pass`
+- installed `tsift graph-db --path /home/brian/work/btakita/agent-loop --json related 'claude-mem retirement rollback path'`: ready with 5 seeds and 18 nodes
+- GitHub Actions CI for `bb52a54`: `clippy + test` passed, `live Convex graph acceptance` passed. This repo's CI workflow has no separate tmux-test job to inspect.
+
+Commits:
+- tsift submodule: `bb52a54 feat(memory): hold claude-mem retirement behind proof gate`
+- parent pointer: `9f8c66e43 chore: update tsift submodule`
+
+<!-- agent:boundary:f29dfdfe -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -216,19 +248,12 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~do [#tsiftmemimportall]~
-- ~do [#tsiftmemsemanticgate]~
-- ~do [#tsiftmemparityeval]~
-- ~do [#tsiftmemcutover]~
-- do [#tsiftmemretire]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#tsiftmemretire] Retire claude-mem only after full import, semantic retrieval, and parity eval are green; keep a documented rollback path until at least one normal session cycle succeeds without direct claude-mem reads.
 <!-- /agent:backlog -->
 
 ## Review

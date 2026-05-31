@@ -262,7 +262,27 @@ Gated — landed the safe, non-destructive decision core; the destructive parts 
 **Gated (design + destructive wiring + live verify).** Per the plan: (1) add the `#{window_activity}` idle query; (2) `.agent-doc/config.toml` `stash_session_ttl_secs` (project-level, default unset); (3) **report-only first** — log candidates without killing so the operator confirms detection on the real ~9-pane stash; (4) destructive enable behind a separate explicit flag, default off; (5) live verification + SimWorld/tmux-ci replay. Existing orphan-reap semantics unchanged; registered live sessions stay protected by default. Relates to `#cross-project-stash-pane-condition` (done) and `#jb-busy-queue-ux-feedback` (done).
 
 (Closeout note: `--force-disk` — the IDE IPC listener remains unresponsive this session.)
-<!-- agent:boundary:a228295c -->
+
+### Re: do [#next-steps-backlog-capture] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#next-steps-backlog-capture]
+
+
+Done — resolved by existing, tested enforcement; the item's framing is stale. No new code needed (verified in the current tree).
+
+**The concern.** A `#next-steps` response that recommends follow-ups but doesn't add them to the backlog should not pass closeout silently — and the item noted `pending_mutations: expect_add` wasn't enforced by `pending_done_guard`.
+
+**What's actually in place (and tested).**
+- `prompt_contract::prompt_requests_backlog_work` detects `#next-steps` (and any backlog-requesting prompt — "place in the backlog", "follow-up backlog", etc.) and preflight records `backlog_capture_required` on the cycle (`record_backlog_capture_requirement`).
+- Enforcement runs at **both** binary-owned boundaries — `write.rs` precommit and `session_check::inspect` — failing closed with "committed response came from a prompt that **required backlog capture** … but this turn added no backlog item." The escape hatch is an explicit "no actionable follow-up items remained" statement.
+- Tests pass: `precommit_blocks_backlog_required_review_without_pending_add`, `session_check_blocks_backlog_required_review_without_pending_add`, their `*_with_explicit_no_followups` counterparts, plus the `#next-steps`-specific preflight contract tests (`preflight_abandoned_stale_next_steps_prompt_stays_actionable`, `preflight_compact_follow_up_next_steps_is_not_swallowed_by_commit_recovery`).
+
+**Why the item's framing is stale.** Enforcement was added as a **dedicated `backlog_capture_required` guard** (not folded into `pending_done_guard`, which is the right separation — backlog *capture* vs. `do [#id]` *resolution*). And "auto-add" isn't deterministically possible — the binary can't synthesize which recommendations from free-form prose become backlog items — so requiring the agent to add them (and failing closed otherwise) is the correct design, which is exactly what ships.
+
+(Closeout note: `--force-disk` — IDE IPC listener still unresponsive this session.)
+<!-- agent:boundary:f6e807d4 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -279,7 +299,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#free-text-queue-owner-consume]~
 - ~do [#plugin-cleanup-menu-command]~
 - ~do [#stash-session-ttl-prune]~
-- do [#next-steps-backlog-capture]
+- ~do [#next-steps-backlog-capture]~
 - do [#ah0s]
 - do [#backlog-priority-attribute]
 - do [#backlog-queue-sync-attribute]
@@ -320,7 +340,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 - [ ] [#do-id-partial-closeout-state] [recommended] Partial-closeout WARN guard landed (check_partial_closeout_state_guard: a do[#id] turn whose response shows shipped + remaining-live-work signals with the directed id still open advises --pending-edit/--pending-gate narrowing; suppressible by a no-partial-closeout-guard response marker; FlowCore guard_ budget 35->40). Remaining: per-id edit-vs-gate tracking in cycle_state, opt-in strict mode, next-phase queue convergence, and the runbook note that #spec-test-commit-push completes a repo phase without a live/deploy item. Plan: tasks/agent-doc/plan-do-id-partial-closeout-state.md.
 - [ ] [#closeout-recovery-state-machine] [recommended] Typed closeout recovery classifier landed: flow::closeout::CloseoutRecoveryState + classify_closeout_recovery_state + recovery_command; session_check::closeout_recovery_hint renders one typed 'Recovery [state]: command' across all nine closeout-guard call sites. Classified today: clean / open_cycle / missing_response_body / escaped_template_patch. Remaining: precise detection for reserved states direct_response_patchback, boundary_only_drift, nested_parent_pointer_stale, and folding each guard's existing diagnostic through the classifier. Plan: tasks/agent-doc/plan-closeout-repair-churn.md.
 - [ ] [#preset-item-id-collision] [recommended] Enforce unique active identities across frontmatter `prompt_presets` keys and active `agent:backlog` / `agent:review` / `agent:icebox` item ids. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `#next-steps` exists both as a prompt preset and as a backlog item, making `do #next-steps` and "top backlog item: #next-steps" ambiguous between preset expansion and backlog execution. Fix with an identity registry, mutation-time rejection, preflight/session-check fail-closed diagnostics, and regressions. Plan: tasks/agent-doc/plan-preset-item-id-collision.md.
-- [ ] [#next-steps-backlog-capture] Agent responses containing #next-steps recommendations do not auto-add items to backlog when prompt preset is present. Agent must manually call `--pending-add` but the planning output `pending_mutations: expect_add` is not enforced by session-check `pending_done_guard`.
 - [ ] [#ah0s] [recommended] Add explicit-position --pending-add primitives so ordered backlog batches never depend on implicit prepend-vs-argorder semantics: --pending-add-after <id>, --pending-add-before <id>, --pending-add-back/--pending-append, keeping --pending-add as the front-insert default. Backlog is a priority pool with ID-based consumption (not a stack/queue; FIFO lives in agent:queue), so position should be author-set explicitly when it matters. Two agents (open-code.md #adcr waves f94e7851c; corky.md crate-split phases fc8d9b3bc) both reversed args expecting prepend-flip and got reverse-of-intended order. Pairs with #pending-add-append-not-prepend (that item finalizes the default-order decision; this adds the explicit escape hatches). Plan: tasks/agent-doc/plan-pending-add-explicit-position.md.
 - [ ] [#backlog-priority-attribute] [recommended] Add a priority attribute to agent:backlog / agent:icebox / agent:queue that orders the item list by priority (a component-level priority flag and/or per-item priority markers), so the binary maintains priority order instead of requiring manual --pending-reorder each cycle. Automates the by-hand reprioritization done in #next-steps cycles. Composable with #backlog-queue-sync-attribute; sibling of #ah0s (explicit-position primitives). Requested 2026-05-30.
 - [ ] [#backlog-queue-sync-attribute] [recommended] Add a queue=sync|append|prepend attribute to agent:backlog / agent:icebox: queue=sync replaces agent:queue content with a do [#id] list for every item; queue=append adds item ids not already in agent:queue; queue=prepend prepends them. Composable with #backlog-priority-attribute (prioritize first, then regenerate the queue), automating the manual 'regenerate the queue to the new priority' step that currently has to be done by hand after a reorder. Requested 2026-05-30.

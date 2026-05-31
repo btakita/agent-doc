@@ -36,13 +36,30 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 1 response topic(s): do #busy-not-ready-message-reports-actual-wait
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:ab621f98 -->
+
+### Re: do [#rejected-response-must-block-queue-consume-and-done] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#rejected-response-must-block-queue-consume-and-done]
+
+
+Closeout-recovery cycle — `plan` reported queue-head drift: this target already has a completed `worker_result`, so the fix was implemented in a prior cycle and the active `do` packet just needed reaping. Verified the fix is live, not redispatched.
+
+Fix is in place and tested:
+
+- `agent-doc-orchestration/src/write.rs:1504` — queue consumption / `--done` reap is gated behind `write_result.is_ok()`. The comment is explicit: "consume queue prompt after all other strict closeout gates have passed so a rejected closeout cannot advance the queue early." A malformed-patch rejection sets `write_result = Err`, so the same closeout never reaches Phase 3c queue-consume.
+- `agent-doc-orchestration/src/flow/document_mutation.rs:165` — emits `template_patchback_malformed_rejected reason=patch_markers_without_closed_blocks` and fails closed at `patchback_parse` (`outcome=failed_closed reason=malformed_patch`).
+- `tests/finalize_integration.rs:480-510` — asserts an unclosed `<!-- patch:exchange -->` response is rejected, the body is **not** written, and the cycle fails with `malformed template patchback`.
+
+No new code change this cycle; the unrelated `Cargo.lock` / `VERSIONS.md` working-tree edits stay out of the closeout. Marking `--done`.
+<!-- agent:boundary:905f444d -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#busy-not-ready-message-reports-actual-wait]~
-- do [#rejected-response-must-block-queue-consume-and-done]
+- ~do [#rejected-response-must-block-queue-consume-and-done]~
 - do [#opencode-active-turn-reopen-auto-retry-on-idle]
 - do [#recovery-drift-apply-live-verify]
 - do [#jb-run-agent-doc-command-route-miss]
@@ -89,7 +106,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog priority queue=prepend -->
-- [ ] [#rejected-response-must-block-queue-consume-and-done] [recommended] Root-caused from #opencode-reap-only-no-response-finalize-investigate: when a closeout response patch is rejected as malformed (template_patchback_malformed_rejected reason=patch_markers_without_closed_blocks — unclosed <!-- patch:exchange --> with no <!-- /patch:exchange -->), the SAME closeout must NOT still proceed with queue-consume / --done reap. On tsift.md the OpenCode response was rejected twice, but the queue head was consumed and pending_done/reaped still committed, leaving a reap-only no-response cycle (the deadlock class just fixed defensively). Fix: fail the reap/queue-consume closed together with the rejected response so a malformed response cannot leave committed bookkeeping without a captured body. Also audit the installed OpenCode SKILL surface for patch:exchange examples missing the close marker (the likely trigger for the OpenCode agent emitting unclosed blocks).
 - [ ] [#opencode-active-turn-reopen-auto-retry-on-idle] [recommended] When a plain dispatch-only Run Agent Doc reopen is refused because the OpenCode (or Codex) pane shows an active turn, route currently fails closed and the operator must re-click once the turn ends. Optional refinement: watch the pane and auto-fire the bare reopen once it returns to a dispatch-ready/idle composer, so the operator does not have to retry manually. Must stay a plain reopen (no prompt to queue) and respect the existing no-inject-into-active-turn invariant. Lower priority than the live-verify items.
 - [ ] [#recovery-drift-apply-live-verify] [recommended] Live-verify the full one-command recovery (agent-doc repair --apply-recovery) on a real owner pane now that #recovery-drift-authoritative-side landed the authoritative-side determination: reproduce a queue_metadata_drift / sidecar_visible_drift closeout and confirm apply_closeout_recovery restores-from-HEAD for the spurious queue_active:false class and commits-forward otherwise, without the manual cancel->reset->commit sequence. Gated on a live owner pane (risky in a racy multi-session repo). Parent plan: tasks/agent-doc/plan-recursive-repair-state-drift.md.
 - [ ] [#repair-orphan-prefix-bug] Orphan-response repair path prefixes every body line with the user-prompt marker. Live repro 2026-05-31 tsift.md: direct Edit-based patchback triggered orphan repair, which applied the prefix to all assistant body lines. Fix: ensure orphan-repair preserves response body verbatim. Plan: tasks/agent-doc/plan-repair-orphan-prefix-bug.md. Related: #jb-compact-malformed-response-commit, #finalize-retry-ipc-response-duplication.

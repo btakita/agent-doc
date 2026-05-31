@@ -2,8 +2,8 @@
 agent_doc_session: fcad2407-3ace-4cfb-9fbf-134a6bc91181
 agent_doc_format: template
 agent_doc_write: crdt
-agent: codex
-claude_model: claude-opus-4-6
+agent: opencode
+claude_model: opus
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 prompt_presets:
@@ -25,7 +25,18 @@ prompt_presets:
 ### Session Summary
 
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/bf77544025b6498b4b3adb22564450277365202aaae611f028b3a133487cde76-20260511-032318.md`*
-<!-- agent:boundary:2129357f -->
+❯ main.rs has an error with the `tmux.attach_control_mode` call. `no method named `attach_control_mode` found for struct `Tmux` in the current scope [E0599]
+❯ method not found in `Tmux``
+
+
+### Re: attach_control_mode compile error — glm-5.1
+
+The error does not reproduce. `cargo check -p tmux-router` and `cargo test -p tmux-router` both pass cleanly (108 tests, 0 failures).
+
+`attach_control_mode` is correctly defined in `control.rs:198` via a separate `impl Tmux` block using `use crate::tmux::Tmux` — valid Rust for same-crate split impl blocks. The method is used in `main.rs:208` and compiles without issue.
+
+This may have been a transient IDE/rust-analyzer issue, or the error was from a prior version of the code that has since been fixed.
+<!-- agent:boundary:5f1509d0 -->
 <!-- /agent:exchange -->
 
 ## Queue

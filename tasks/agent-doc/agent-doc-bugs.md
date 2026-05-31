@@ -9,7 +9,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -63,7 +63,11 @@ No — `std::thread::scope` is the better choice here for several reasons:
 
 If the diagnose command evolves to stream results progressively or needs cancellable I/O, then an async runtime becomes worth considering. For the current "scan everything, return a report" shape, scoped threads are the right tool.
 Is [#dtmc] complete?
-<!-- agent:boundary:14926703 -->
+
+### Re: Is #dtmc complete? — glm-5.1
+
+Yes. `#dtmc` was completed in the previous cycle — `std::thread::scope` parallelization of all 8 independent scan sources in `diagnose_cycle` (`src/agent-doc/src/ops_report.rs:151`). Committed as `84345094`, all 2040+ tests passing, installed and pushed.
+<!-- agent:boundary:4d0ebd2f -->
 <!-- /agent:exchange -->
 
 <!--
@@ -71,12 +75,10 @@ Is [#dtmc] complete?
 
 ## Pending / Not Built
 
-<!-- agent:queue auto -->
-- Is [#dtmc] complete?
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
-- [ ] [#dtmc] scan_text_source parallelized via std::thread::scope in diagnose_cycle
 - [ ] [#editor-buffer-state-ffi-debounce] [recommended] Replace `wait_for_stable_content`'s last-added-line/truncation heuristic with editor-authoritative buffer stability when an IDE plugin is attached. JetBrains and VS Code plugins should report normalized editor state through the FFI bridge to the Session Actor: canonical doc path/session, monotonic editor document version, dirty flag, last edit timestamp, optional save timestamp, optional buffer hash, and ideally current buffer content. Run requests should include the editor version/hash observed at click time so the Session Actor can detect edits after invocation, debounce until the version/hash is stable, and compute the diff against the exact stable editor buffer when available. If no editor state exists, fall back to whole-file content + mtime stability polling. This removes reliance on `extract_last_added_line`, which misses edits above the last inserted line, and reduces disk/snapshot/editor-buffer race classes seen in live IPC/JB/VSCode flows.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:backlog -->
@@ -89,4 +91,5 @@ Is [#dtmc] complete?
 
 <!-- agent:done -->
 - 2026-05-31 [#pbc1] Commit-boundary reliability for Codex/IPC sessions: fail closed when fresh-start route trigger never fires, and auto-resume commit when write/snapshot succeeded but commit boundary was interrupted. Plan: `tasks/agent-doc/plans/commit-boundary-reliability-codex-ipc.md`
+- 2026-05-31 [#dtmc] scan_text_source parallelized via std::thread::scope in diagnose_cycle
 <!-- /agent:done -->

@@ -247,6 +247,12 @@ pub struct CommandOptions {
     pub pending_add: Vec<String>,
     pub pending_add_to: Vec<String>,
     pub pending_add_gated: Vec<String>,
+    /// `#ah0s`: repeated `<id> <text>` pairs — insert after the anchor id.
+    pub pending_add_after: Vec<String>,
+    /// `#ah0s`: repeated `<id> <text>` pairs — insert before the anchor id.
+    pub pending_add_before: Vec<String>,
+    /// `#ah0s`: tail-insert items (`--pending-add-back` / `--pending-append`).
+    pub pending_add_back: Vec<String>,
     pub pending_done: Vec<String>,
     pub pending_edit: Vec<String>,
     pub pending_clear: bool,
@@ -807,6 +813,24 @@ fn build_rerun_command_base(options: &CommandOptions, commit_mode: CommitMode) -
         args.push("--pending-add-gated".to_string());
         args.push(value.clone());
     }
+    for pair in options.pending_add_after.chunks(2) {
+        if let [anchor, value] = pair {
+            args.push("--pending-add-after".to_string());
+            args.push(anchor.clone());
+            args.push(value.clone());
+        }
+    }
+    for pair in options.pending_add_before.chunks(2) {
+        if let [anchor, value] = pair {
+            args.push("--pending-add-before".to_string());
+            args.push(anchor.clone());
+            args.push(value.clone());
+        }
+    }
+    for value in &options.pending_add_back {
+        args.push("--pending-add-back".to_string());
+        args.push(value.clone());
+    }
     for value in &options.pending_done {
         args.push("--done".to_string());
         args.push(value.clone());
@@ -1142,6 +1166,9 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     let has_pending_ops = !options.pending_add.is_empty()
         || !options.pending_add_to.is_empty()
         || !options.pending_add_gated.is_empty()
+        || !options.pending_add_after.is_empty()
+        || !options.pending_add_before.is_empty()
+        || !options.pending_add_back.is_empty()
         || !options.pending_done.is_empty()
         || !options.pending_edit.is_empty()
         || options.pending_clear
@@ -1206,9 +1233,35 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
             })?;
         }
         crate::pending_cmd::add_many(file, &options.pending_add_gated, true)?;
+        // #ah0s: explicit-position adds (after/before <id>, tail). Applied after
+        // the front-insert default so anchor ids added this same cycle resolve.
+        for pair in options.pending_add_after.chunks(2) {
+            if let [anchor, text] = pair {
+                crate::pending_cmd::add_after(file, anchor, text).with_context(|| {
+                    format!("failed to apply --pending-add-after {anchor}")
+                })?;
+            } else {
+                anyhow::bail!("--pending-add-after expects repeated ID TEXT pairs");
+            }
+        }
+        for pair in options.pending_add_before.chunks(2) {
+            if let [anchor, text] = pair {
+                crate::pending_cmd::add_before(file, anchor, text).with_context(|| {
+                    format!("failed to apply --pending-add-before {anchor}")
+                })?;
+            } else {
+                anyhow::bail!("--pending-add-before expects repeated ID TEXT pairs");
+            }
+        }
+        for text in &options.pending_add_back {
+            crate::pending_cmd::add_back(file, text)?;
+        }
         if !options.pending_add.is_empty()
             || !options.pending_add_to.is_empty()
             || !options.pending_add_gated.is_empty()
+            || !options.pending_add_after.is_empty()
+            || !options.pending_add_before.is_empty()
+            || !options.pending_add_back.is_empty()
         {
             crate::cycle_state::mark_pending_mutations(file)?;
         }

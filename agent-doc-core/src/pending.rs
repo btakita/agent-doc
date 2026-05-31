@@ -324,6 +324,29 @@ impl PendingLayout {
 
     fn insert_first_item(&mut self, item: PendingItem) {
         let index = self.first_item_index().unwrap_or(self.segments.len());
+        self.insert_item_at(index, item);
+    }
+
+    /// Segment index of the item whose id matches `id` (already normalized by
+    /// the caller), or `None` when no such item exists.
+    fn item_segment_index(&self, id: &str) -> Option<usize> {
+        self.segments.iter().position(|segment| {
+            matches!(segment, PendingSegment::Item { item, .. } if item.id == id)
+        })
+    }
+
+    /// Segment index just past the last item (before any trailing postlude
+    /// text), suitable for appending a new item at the tail of the active list.
+    fn last_item_index_plus_one(&self) -> usize {
+        self.segments
+            .iter()
+            .rposition(|segment| matches!(segment, PendingSegment::Item { .. }))
+            .map(|idx| idx + 1)
+            .unwrap_or_else(|| self.first_item_index().unwrap_or(self.segments.len()))
+    }
+
+    /// Insert `item` as a new segment at `index`, fixing the separator before it.
+    fn insert_item_at(&mut self, index: usize, item: PendingItem) {
         self.ensure_separator_before(index);
         self.segments.insert(
             index,
@@ -1619,7 +1642,36 @@ pub fn detect_reorder(snapshot_body: &str, current_body: &str) -> Option<Vec<Str
 /// Insert a new item at the beginning of the body. Binary assigns hash and `[ ]`
 /// (or `[/]` if `gated`).
 /// Returns `(new_body, assigned_id)`.
+/// `#ah0s`: explicit insertion position for a newly added pending item. The
+/// backlog is a priority-ordered pool with id-based consumption (not a stack or
+/// queue), so position encodes author intent and is set explicitly when it
+/// matters. `First` is the cheap default used by `--pending-add`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AddPosition<'a> {
+    /// Insert at the front of the active list (default).
+    First,
+    /// Append at the tail of the active list (before any trailing text).
+    Last,
+    /// Insert immediately after the existing item with this id.
+    After(&'a str),
+    /// Insert immediately before the existing item with this id.
+    Before(&'a str),
+}
+
 pub fn op_add(body: &str, text: &str, doc_id: &str, gated: bool) -> Result<(String, String)> {
+    op_add_at(body, text, doc_id, gated, AddPosition::First)
+}
+
+/// Position-aware variant of [`op_add`] (`#ah0s`). Assigns/validates the id and
+/// dedups exactly like `op_add`, then inserts the new item at `position`.
+/// `After`/`Before` error if the anchor id is absent.
+pub fn op_add_at(
+    body: &str,
+    text: &str,
+    doc_id: &str,
+    gated: bool,
+    position: AddPosition<'_>,
+) -> Result<(String, String)> {
     let (custom_id, text) = parse_custom_id_prefix(text)?;
     let mut text = text.trim().to_string();
     if text.is_empty() {
@@ -1672,7 +1724,7 @@ pub fn op_add(body: &str, text: &str, doc_id: &str, gated: bool) -> Result<(Stri
     };
     taken.insert(id.clone());
 
-    layout.insert_first_item(PendingItem {
+    let new_item = PendingItem {
         marker: PendingListMarker::Bullet,
         id: id.clone(),
         state: if gated {
@@ -1683,7 +1735,28 @@ pub fn op_add(body: &str, text: &str, doc_id: &str, gated: bool) -> Result<(Stri
         gate_type: None,
         text,
         continuation: String::new(),
-    });
+    };
+    match position {
+        AddPosition::First => layout.insert_first_item(new_item),
+        AddPosition::Last => {
+            let index = layout.last_item_index_plus_one();
+            layout.insert_item_at(index, new_item);
+        }
+        AddPosition::After(anchor) => {
+            let anchor = normalize_pending_id(anchor);
+            let Some(idx) = layout.item_segment_index(&anchor) else {
+                bail!("pending add: anchor id not found for --pending-add-after: {anchor}");
+            };
+            layout.insert_item_at(idx + 1, new_item);
+        }
+        AddPosition::Before(anchor) => {
+            let anchor = normalize_pending_id(anchor);
+            let Some(idx) = layout.item_segment_index(&anchor) else {
+                bail!("pending add: anchor id not found for --pending-add-before: {anchor}");
+            };
+            layout.insert_item_at(idx, new_item);
+        }
+    }
     Ok((layout.render(), id))
 }
 
@@ -2367,6 +2440,58 @@ mod tests {
             "expected previous first item second, got: {}",
             new_body
         );
+    }
+
+    #[test]
+    fn op_add_at_after_inserts_immediately_after_anchor() {
+        // #ah0s: --pending-add-after lands directly below the anchor.
+        let body = "- [ ] [#a1b2] first\n- [ ] [#c3d4] third\n";
+        let (new_body, _id) =
+            op_add_at(body, "second", DOC_ID, false, AddPosition::After("a1b2")).unwrap();
+        let lines: Vec<&str> = new_body.lines().collect();
+        assert!(lines[0].contains("first"), "{new_body}");
+        assert!(lines[1].contains("second"), "{new_body}");
+        assert!(lines[2].contains("third"), "{new_body}");
+    }
+
+    #[test]
+    fn op_add_at_before_inserts_immediately_before_anchor() {
+        let body = "- [ ] [#a1b2] first\n- [ ] [#c3d4] third\n";
+        let (new_body, _id) =
+            op_add_at(body, "zeroth", DOC_ID, false, AddPosition::Before("a1b2")).unwrap();
+        let lines: Vec<&str> = new_body.lines().collect();
+        assert!(lines[0].contains("zeroth"), "{new_body}");
+        assert!(lines[1].contains("first"), "{new_body}");
+    }
+
+    #[test]
+    fn op_add_at_last_appends_at_tail() {
+        // #ah0s: --pending-add-back lands at the tail without disturbing the head.
+        let body = "- [ ] [#a1b2] first\n- [ ] [#c3d4] second\n";
+        let (new_body, _id) =
+            op_add_at(body, "tail item", DOC_ID, false, AddPosition::Last).unwrap();
+        let lines: Vec<&str> = new_body.lines().collect();
+        assert!(lines[0].contains("first"), "{new_body}");
+        assert!(lines[2].contains("tail item"), "{new_body}");
+    }
+
+    #[test]
+    fn op_add_at_after_chains_build_deterministic_order() {
+        // #ah0s: chaining after A then after B builds A→B→C with no reorder pass.
+        let body = "- [ ] [#a1b2] A\n";
+        let (b1, _) = op_add_at(body, "id=bbbb B", DOC_ID, false, AddPosition::After("a1b2")).unwrap();
+        let (b2, _) = op_add_at(&b1, "C", DOC_ID, false, AddPosition::After("bbbb")).unwrap();
+        let lines: Vec<&str> = b2.lines().collect();
+        assert!(lines[0].contains(" A"), "{b2}");
+        assert!(lines[1].contains(" B"), "{b2}");
+        assert!(lines[2].contains(" C"), "{b2}");
+    }
+
+    #[test]
+    fn op_add_at_unknown_anchor_errors() {
+        let body = "- [ ] [#a1b2] first\n";
+        let err = op_add_at(body, "x", DOC_ID, false, AddPosition::After("nope")).unwrap_err();
+        assert!(err.to_string().contains("anchor id not found"), "{err}");
     }
 
     #[test]

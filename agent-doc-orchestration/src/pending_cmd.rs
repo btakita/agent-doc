@@ -210,6 +210,36 @@ pub fn add_many(file: &Path, items: &[String], gated: bool) -> Result<Vec<String
     Ok(ids)
 }
 
+/// `#ah0s`: insert a new item at an explicit position relative to the active
+/// list (after/before an anchor id, or at the tail), instead of the front
+/// default. Returns the assigned id.
+fn add_at(file: &Path, item: &str, position: pending::AddPosition<'_>) -> Result<String> {
+    let (full_content, comp) = find_pending_component(file)?;
+    let existing = &full_content[comp.open_end..comp.close_start];
+    let doc_id = doc_id_for(file);
+    let (new_content, id) = pending::op_add_at(existing, item, &doc_id, false, position)?;
+    let canonical = canonicalize_component_content(file, &new_content);
+    let new_doc = comp.replace_content(&full_content, &canonical);
+    std::fs::write(file, &new_doc)?;
+    Ok(id)
+}
+
+/// `#ah0s`: `--pending-add-after <id> "<text>"`. Repeatable; chaining
+/// after A "B" then after B "C" builds A→B→C deterministically.
+pub fn add_after(file: &Path, anchor_id: &str, item: &str) -> Result<String> {
+    add_at(file, item, pending::AddPosition::After(anchor_id))
+}
+
+/// `#ah0s`: `--pending-add-before <id> "<text>"`.
+pub fn add_before(file: &Path, anchor_id: &str, item: &str) -> Result<String> {
+    add_at(file, item, pending::AddPosition::Before(anchor_id))
+}
+
+/// `#ah0s`: `--pending-add-back "<text>"` (alias `--pending-append`) — tail insert.
+pub fn add_back(file: &Path, item: &str) -> Result<String> {
+    add_at(file, item, pending::AddPosition::Last)
+}
+
 /// Summary of an `agent-doc review ungate-tasks` run.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct UngateTasksReport {

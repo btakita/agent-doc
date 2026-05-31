@@ -192,6 +192,16 @@ struct WriteArgs {
     /// Leading `[#custom] ` is also accepted as compatibility input.
     #[arg(long = "pending-add-gated")]
     pending_add_gated: Vec<String>,
+    /// Add a new pending item immediately AFTER an existing item (repeatable pairs: ID TEXT).
+    /// Chains build a deterministic order: `--pending-add-after A "B" --pending-add-after B "C"` → A→B→C.
+    #[arg(long = "pending-add-after", num_args = 2, value_names = ["ID", "TEXT"])]
+    pending_add_after: Vec<String>,
+    /// Add a new pending item immediately BEFORE an existing item (repeatable pairs: ID TEXT).
+    #[arg(long = "pending-add-before", num_args = 2, value_names = ["ID", "TEXT"])]
+    pending_add_before: Vec<String>,
+    /// Add a new pending item at the END of the active list (repeatable). Alias `--pending-append`.
+    #[arg(long = "pending-add-back", alias = "pending-append")]
+    pending_add_back: Vec<String>,
     /// Mark a backlog or icebox item `[x]` by hash id (repeatable).
     /// `--pending-done` and `--backlog-done` are deprecated aliases.
     #[arg(long = "done", alias = "pending-done", alias = "backlog-done")]
@@ -1866,6 +1876,9 @@ fn main() -> anyhow::Result<()> {
                     pending_add: args.pending_add,
                     pending_add_to: args.pending_add_to,
                     pending_add_gated: args.pending_add_gated,
+                    pending_add_after: args.pending_add_after,
+                    pending_add_before: args.pending_add_before,
+                    pending_add_back: args.pending_add_back,
                     pending_done: args.pending_done,
                     pending_edit: args.pending_edit,
                     pending_clear: args.pending_clear,
@@ -1907,6 +1920,9 @@ fn main() -> anyhow::Result<()> {
                     pending_add: args.pending_add,
                     pending_add_to: args.pending_add_to,
                     pending_add_gated: args.pending_add_gated,
+                    pending_add_after: args.pending_add_after,
+                    pending_add_before: args.pending_add_before,
+                    pending_add_back: args.pending_add_back,
                     pending_done: args.pending_done,
                     pending_edit: args.pending_edit,
                     pending_clear: args.pending_clear,

@@ -110,8 +110,27 @@ recommended next step stays first.
 
 Exception: if you are later adding a follow-on step from an ordered batch that
 is already partially represented in pending, place the new item next to its
-predecessor rather than prepending it above earlier steps. The practical pattern
-is:
+predecessor rather than prepending it above earlier steps. `#ah0s` makes this
+first-class — prefer the explicit-position flags over a prepend + `--pending-reorder`:
+
+```bash
+# Insert directly after an existing item (no reorder pass needed):
+agent-doc write plan.md --pending-add-after step2 "id=step3 [recommended] Add step 3"
+
+# Chain to build an ordered sub-sequence A→B→C deterministically:
+agent-doc write plan.md \
+  --pending-add-after stepA "id=stepB Add B" \
+  --pending-add-after stepB "id=stepC Add C"
+
+# Low-priority capture that should not jump the head (tail insert):
+agent-doc write plan.md --pending-add-back "[recommended] Nice-to-have cleanup"
+```
+
+`--pending-add` stays the cheap front-insert default; `--pending-add-after <id>`,
+`--pending-add-before <id>`, and `--pending-add-back` (alias `--pending-append`)
+set position explicitly. The backlog is a priority-ordered pool with id-based
+consumption (not a stack/queue), so position is author intent, not argv order.
+The older prepend + `--pending-reorder` pattern still works:
 
 ```bash
 agent-doc write plan.md \

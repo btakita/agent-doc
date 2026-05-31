@@ -321,6 +321,37 @@ fn write_pending_add_creates_item_with_hash() {
 }
 
 #[test]
+fn write_pending_add_after_and_back_position_items_explicitly() {
+    // #ah0s: --pending-add-after lands directly below the anchor; --pending-add-back
+    // lands at the tail. Both leave the existing head undisturbed.
+    let (_tmp, doc) = setup_doc("- [ ] [#anc1] anchor task\n- [ ] [#tail9] tail task\n");
+    agent_doc()
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--pending-add-after",
+            "anc1",
+            "inserted after anchor",
+            "--pending-add-back",
+            "appended at tail",
+        ])
+        .write_stdin("<!-- patch:exchange -->\nresponse text\n<!-- /patch:exchange -->\n")
+        .assert()
+        .success();
+    let content = fs::read_to_string(&doc).unwrap();
+    let body = component_body(&content, "pending");
+    let lines: Vec<&str> = body.lines().filter(|l| l.contains("[#")).collect();
+    // anchor stays first, the after-insert is directly below it, tail append is last.
+    assert!(lines[0].contains("anchor task"), "{body}");
+    assert!(lines[1].contains("inserted after anchor"), "{body}");
+    assert!(
+        lines.last().unwrap().contains("appended at tail"),
+        "back insert must land at the tail: {body}"
+    );
+}
+
+#[test]
 fn write_pending_add_to_updates_target_not_current_doc() {
     let (tmp, doc) = setup_doc("");
     let target = tmp.path().join("target.md");

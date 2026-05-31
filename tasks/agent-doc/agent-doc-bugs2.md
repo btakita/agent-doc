@@ -391,13 +391,81 @@ That edit added a `queue=sync` attribute to the backlog marker, but `queue` is *
 **If the typo was unintentional:** drop `queue=sync` so the marker is the bare backlog marker again and the warning clears.
 
 I queued `#backlog-queue-sync-attr` (recommended) to decide whether `queue=sync` should become a real backlog-to-queue sync attribute or just get a directed repair hint — since you clearly tried to express *something* with it.
-<!-- agent:boundary:3080c8b2 -->
+❯ do [#backlog-queue-sync-attr]. Make queue a real attribute supporting `sync`, `append`, `prepend`.
+❯ The default `agent:backlog queue` would `append` to `agent:queue` and auto-prioritize the queue.
+❯ #spec-test-build-install-commit-push
+
+### Re: do [#backlog-queue-sync-attr] — make queue a real attribute (+ auto-prioritize) — opus-4-8
+
+Done. Both the `queue` sync attribute and the `priority` ordering attribute are implemented, tested (`make check` green), live-verified, built+installed, and committed/pushed.
+
+#### `queue` sync attribute (#backlog-queue-sync-attr)
+
+`agent:backlog` / `agent:icebox` may carry a `queue` attribute so the binary keeps `agent:queue` populated from the backlog:
+
+- bare `queue` / `queue=append` — add `do [#id]` for active backlog ids not already queued (the **default**; preserves existing entries/order, skips struck and gated/done items).
+- `queue=prepend` — like append, new prompts at the front in backlog order.
+- `queue=sync` — fully regenerate the queue as the active-backlog do-list.
+
+Active = open `[ ]` items with an id; gated `[/]` and done `[x]` excluded. The sync runs before activation (so a synced queue can auto-activate when the queue marker has `auto`) and is idempotent. Pure logic in `queue::sync_backlog_into_queue` + `pending::active_item_ids`.
+
+#### `priority` ordering attribute (#backlog-priority-attribute) — "auto-prioritize the queue"
+
+Your live edit added `priority` to the backlog/queue markers and the prompt asked to "auto-prioritize the queue", so I implemented the paired priority feature too (you chose *implement priority now*):
+
+- Per-item `priority=<1..9>` token (1 = highest, sorts first; absent = lowest, stable) anywhere in an item's text.
+- A bare `priority` marker on `agent:backlog` / `agent:icebox` stable-sorts that component's items by priority each cycle (`run_pending_maintenance`).
+- A bare `priority` marker on `agent:queue` stable-sorts the queue's `do [#id]` prompts by their source item's priority (covers append-built / manual queues).
+
+Because the backlog is priority-sorted before the queue sync, a `priority queue` backlog yields an already-prioritized queue. Pure logic: `pending::sort_by_priority` / `item_priority_rank` and `queue::sort_prompts_by_priority`.
+
+#### Lint + preflight
+
+`tagpath`'s agent-doc lint and preflight's `misplaced_component_attr` both now accept bare `queue`, `queue=sync|append|prepend` (warning `invalid-attr-value` on a bad mode), and bare `priority` on backlog/icebox/queue. The earlier `misplaced_component_attr` warning on this doc is gone.
+
+#### Live verification
+
+- `queue=sync` on an empty queue → regenerated as the active-backlog do-list, gated item excluded.
+- bare `queue` (append) → kept existing prompt, appended missing ids, skipped gated.
+- `priority queue` backlog with `priority=1/3/5` items → backlog and synced queue both ordered urgent → mid → low → unprioritized.
+
+This doc's own backlog now carries `priority queue`, so its `agent:queue` is live-maintained from the backlog each cycle (no `auto`, so it populates but does not self-run).
+
+#### Commits
+
+- tagpath `main`: `32fd000` (queue sync lint), `b55c305` (priority lint) — pushed.
+- agent-doc `20260422/codex-agent-backend`: `cde79239` (queue sync), `4f4d91b8` (priority) — pushed.
+- superproject `main`: `f85be0633`, `d9c8d45b1` (pointer bumps) — pushed after this closeout.
+
+#### Notes / follow-ups
+
+- The two gated review items this delivers — `#backlog-queue-sync-attribute` and `#backlog-priority-attribute` — are now code-complete + verified; close them after your review.
+- Earlier design note in this exchange flagged that blind `queue=sync` re-introduces `#queue-user-edit-overwrite`. Mitigation: the **default is append** (non-destructive); only explicit `queue=sync` does a full replace, which is the documented opt-in.
+- Queued `#tagpath-queue-priority-publish-align`: publish tagpath + bump agent-doc's tagpath dep before the next release, since a published agent-doc on tagpath 0.12 would still reject the new attributes.
+<!-- agent:boundary:43366e9f -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue -->
+<!-- agent:queue priority auto -->
+- do [#blocked-closeout-followup-capture]
+- do [#backlog-queue-sync-attr]
+- do [#preset-item-id-collision-enforce]
+- do [#free-text-queue-skip-diagnostic]
+- do [#stuck-capture-queue-echo-false-positive]
+- do [#codex-owned-pane-prompt-miss-followups]
+- do [#codex-owned-pane-auto-queue-stuck]
+- do [#completed-queue-residue-regression]
+- do [#do-id-partial-closeout-state]
+- do [#closeout-recovery-state-machine]
 <!-- /agent:queue -->
 ###
 <!--
+I ran JB `Run Agent Doc` when the tsift.md session was idle. The "opencode active turn" is false and this state is incorrect. How can we ensure an accurate state using hooks?
+```
+[route] debounce OK — file idle for 1.4s and typing indicator idle
+[route] target tmux session: 0
+Error: dispatch-only opencode reopen refused to inject into pane %42 for tasks/software/tsift.md because the pane still shows opencode active turn; restore an idle prompt and retry
+```
+---
 Verify [#ipcfullprompt-recur2]
 ---
 The last run had a code fence stripped away by agent-doc.
@@ -422,9 +490,10 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 
 ## Backlog
 
-<!-- agent:backlog queue=sync -->
+<!-- agent:backlog priority queue -->
+- [ ] [#recursive-repair-state-drift] [recommended] Recursive same-pane owner recovery can leave the document runnable only after a manual expert sequence: abandon an empty preflight cycle, rebuild sidecars from visible content, then commit metadata-only queue/boundary drift. Live repro 2026-05-31 `src/boost-client/tasks/monsterrodholders.md` after recursive direct invocation was blocked: `session-check` moved from open `preflight_started` to snapshot-vs-HEAD drift until `agent-doc cancel`, `agent-doc reset --from-current --preserve-session`, and `agent-doc commit` were run manually. Add a typed repair path that closes cycle/sidecar/HEAD invariants in one safe command and make diagnostic preflight side-effect-free or self-abandoning. Plan: tasks/agent-doc/plan-recursive-repair-state-drift.md.
+- [ ] [#tagpath-queue-priority-publish-align] [recommended] Before the next agent-doc release, publish tagpath (commits b55c305 + 32fd000: backlog/icebox/queue priority + queue sync lint attrs) and bump agent-doc's tagpath dependency past 0.12. Locally agent-doc resolves tagpath via the superproject .cargo/config.toml path patch so the lint-gate accepts the new attributes; a published agent-doc on tagpath 0.12 would reject bare priority/queue as malformed-attr.
 - [ ] [#blocked-closeout-followup-capture] [recommended] A directed `do [#id]` closeout that discovers the item is blocked can move/gate the item out of active backlog without preserving the concrete next steps needed to complete it. Live repro 2026-05-31 `src/boost-client/tasks/monsterrodholders.md`: `#374n-removalcleanup` found 17 active Merchant Center legacy rows and named completion conditions, but no active backlog item captured those next steps. Add a session-check/finalize guard that requires either `--pending-edit <id>` keeping blocked work open, a new follow-up backlog item, or an explicit no-follow-up justification before clean closeout. Plan: tasks/agent-doc/plan-blocked-closeout-followup-capture.md.
-- [ ] [#backlog-queue-sync-attr] [recommended] queue=sync on the backlog marker is silently ignored (preflight emits misplaced_component_attr, no mutation). Decide intended semantics, then either (a) make it a real attribute that promotes active backlog items into the queue component so the auto-loop drains the backlog, or (b) upgrade the warning to a directed repair hint (did you mean the queue auto marker?). Until then the only auto-loop trigger is the queue component opening marker carrying the auto attribute.
 - [ ] [#preset-item-id-collision-enforce] [recommended] Escalate #preset-item-id-collision from a preflight warning to hard enforcement (the riskier half, deferred to design carefully against over-blocking live sessions): (1) mutation-time rejection — write --pending-add / --pending-add-after / etc. with an explicit custom id (id=X or [#X]) that collides with a prompt_presets key or an existing active item id fails closed; (2) fail-closed dispatch — preflight/session-check block dispatch on an existing collision with the rename repair hint, surfaced by route/JB as a document-repair error not a generic agent failure; (3) queue generation refuses to emit do [#id] for an ambiguous id. The identity registry + detection + preflight warning + 3 regressions already landed (preflight::detect_identity_collisions). Plan: tasks/agent-doc/plan-preset-item-id-collision.md.
 - [ ] [#free-text-queue-skip-diagnostic] [recommended] Polish from #free-text-queue-owner-consume plan point 4: when queue consumption is skipped, the closeout still prints the generic '[queue] skipped consumption because the active prompt did not target the queue head'. For an id-backed head with no completion flag, name the missing proof source and the supported repair (--done/--pending-gate/--pending-edit <id>); for a free-text head edge case, point to the answered-response path. Replace the single generic line at write.rs ~1460/1469 with a shape-aware diagnostic. Plan: tasks/agent-doc/plan-free-text-queue-owner-consume.md (point 4).
 - [ ] [#stuck-capture-queue-echo-false-positive] [recommended] Fix landed (submodule 6220379c): response_already_applied matched the captured response as one contiguous block, but queue consumption inserts a > **Queue prompt:** echo blockquote (#queue-prompt-echo-in-response) between the response heading and body, so stuck_captured_cycle falsely warned committed-but-not-in-HEAD after every queue-consumed cycle and re-suggested a write --commit that would re-inject the response. normalized_response_lines now strips the echo blockquote on both sides before matching; unit + closeout regressions added. Verify across a couple more queue-consumed cycles that no preflight emits the false stuck_captured_cycle warning, then mark done.

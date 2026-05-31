@@ -220,6 +220,17 @@ fn wait_for_ready_override() -> Option<Duration> {
     WAIT_FOR_READY_OVERRIDE.with(|cell| cell.get())
 }
 
+/// Seconds to report as the dispatch-only busy / not-ready wait in operator-facing
+/// refusal messages: the caller's explicit `--wait-for-ready` override when set
+/// (the time route actually waited), otherwise the harness recovery-timeout
+/// `default`. Reporting the default alone is misleading when an editor passed a
+/// longer override — the JetBrains plugin's `--wait-for-ready 60` made the refusal
+/// claim "waiting 8s" (the Codex recovery constant) after a real 60s wait
+/// (`#busy-not-ready-message-reports-actual-wait`).
+fn dispatch_only_busy_refusal_wait_secs(default: Duration) -> u64 {
+    wait_for_ready_override().unwrap_or(default).as_secs()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct CommandDispatchResult {
     status: CommandDispatchStatus,
@@ -3977,7 +3988,7 @@ fn route_via_authoritative_actor(
                     file.display(),
                     dispatch_pane,
                     reason,
-                    dispatch_only_starting_pane_recovery_timeout(Some(harness)).as_secs(),
+                    dispatch_only_busy_refusal_wait_secs(dispatch_only_starting_pane_recovery_timeout(Some(harness))),
                     authoritative_actor_dispatch_recovery_hint(actor_state, file)
                 );
             }
@@ -4028,7 +4039,7 @@ fn route_via_authoritative_actor(
                     file.display(),
                     dispatch_pane,
                     reason,
-                    dispatch_only_starting_pane_recovery_timeout(Some(harness)).as_secs(),
+                    dispatch_only_busy_refusal_wait_secs(dispatch_only_starting_pane_recovery_timeout(Some(harness))),
                     authoritative_actor_dispatch_recovery_hint(actor_state, file)
                 )
             }
@@ -4122,7 +4133,7 @@ fn route_via_authoritative_actor(
             let wait_context = failclosed_wait_context(
                 harness,
                 busy_cue.as_deref(),
-                dispatch_only_starting_pane_recovery_timeout(Some(harness)).as_secs(),
+                dispatch_only_busy_refusal_wait_secs(dispatch_only_starting_pane_recovery_timeout(Some(harness))),
             );
             anyhow::bail!(
                 "authoritative actor generation {} for {} owns pane {} but route will not inject a new trigger because {} ({}){}. {}",

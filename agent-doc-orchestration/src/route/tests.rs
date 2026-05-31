@@ -10601,6 +10601,29 @@ fn wait_for_ready_override_guard_sets_and_restores_thread_local() {
     assert_eq!(wait_for_ready_override(), None);
 }
 
+#[test]
+fn busy_refusal_wait_secs_reports_override_then_default() {
+    use std::time::Duration;
+
+    // `#busy-not-ready-message-reports-actual-wait`: the busy/not-ready refusal
+    // must report the caller's `--wait-for-ready` override (the time route really
+    // waited), not the harness recovery constant. The JetBrains plugin passes 60,
+    // so the message must say 60 even when the Codex default is 8.
+    let guard = WaitForReadyOverrideGuard::set(Some(Duration::from_secs(60)));
+    assert_eq!(
+        dispatch_only_busy_refusal_wait_secs(Duration::from_secs(8)),
+        60
+    );
+    drop(guard);
+
+    // Without an override, the harness recovery-timeout default is reported.
+    let _none = WaitForReadyOverrideGuard::set(None);
+    assert_eq!(
+        dispatch_only_busy_refusal_wait_secs(Duration::from_secs(8)),
+        8
+    );
+}
+
 // #route-busy-vs-starting-wording: the FailClosed wait context distinguishes a
 // pane busy on an active harness turn from a genuine cold startup timeout.
 #[test]

@@ -19,6 +19,8 @@ A harness-native `agent-doc` entrypoint (`/agent-doc <FILE>` in Claude Code, `ag
 - For direct-exec harness paths such as Codex and OpenCode, run `agent-doc session-check <FILE>` immediately after the persistence command returns. A nonzero check means the cycle is still open, so do not report success.
 - Do **not** describe a normal harness-native `agent-doc` turn as successful while also saying the response is still uncommitted, unless the user explicitly requested that exception.
 - After `finalize` returns, do not continue with more long-running task work for that same turn. Only `session-check`, failure recovery, and final reporting should remain.
+- When the turn resolves a `do [#id]` / `do #id` directive whose target is an open `agent:backlog` item, that id must reach a lifecycle outcome in the same closeout (`--done <id>`, `--pending-gate <id>`, or an explicit kept-open `--pending-edit`). `session-check` fails closed if the directive cleared the queue but left the target `[ ]` in `agent:backlog` (`#do-id-closeout-open-backlog`); see `pending-ops.md`.
+- Reserve `--pending-gate <id>` for implementation-complete work awaiting review/external validation. If a `do [#id]` cycle gates its target but the response says the work is blocked / still needs future action, `session-check` fails closed (`#blocked-closeout-followup-capture`) unless the cycle keeps the id open with the narrowed next step (`--pending-edit`), adds a new follow-up (`--pending-add*`), or states an explicit "no additional backlog follow-up is needed because …" justification; see `pending-ops.md`.
 
 ## Explicit Exceptions
 
@@ -29,6 +31,33 @@ A harness-native `agent-doc` entrypoint (`/agent-doc <FILE>` in Claude Code, `ag
 - For real session documents (`agent_doc_session` / legacy `session`) that command now fails closed like `finalize`: non-git docs are rejected before mutation, commit errors fail the command, and success means the cycle reached `committed`. Best-effort behavior remains only for non-session docs and `--pending-only` maintenance.
 - The same post-write `agent-doc session-check <FILE>` guard applies after manual repair with `agent-doc write --commit`.
 - Manual repair uses the same ordering rule: do the repair write-back last, then `session-check`, then stop.
+
+## Lint Gate (tagpath agent-doc dialect)
+
+`finalize`, `write --commit`, and `stream` invoke `tagpath lint --dialect agent-doc` as an in-process library call on the session document **after** the response/pending edits have merged but **before** the snapshot/commit boundary. The gate catches malformed session-document directives — for example `<!-- agent:done archive PATH -->` missing the `=` between `archive` and the path — so they fail the cycle closed at the gate instead of crashing deeper inside finalize. `stream` runs the gate after the final flush completes and before the post-stream git commit, so a malformed streamed response is rejected before it enters git history.
+
+- Default mode (`warn`): error-class findings block the cycle; warning-class findings surface on stderr and continue.
+- `strict`: warning-class findings escalate to errors.
+- `off`: the gate is skipped (the skip is recorded via `ops_log` for audit).
+
+Mode resolution precedence (highest first):
+
+1. CLI: `--lint=off|warn|strict` on `agent-doc write` / `agent-doc finalize` / `agent-doc stream`.
+2. Frontmatter: `agent_doc_lint_dialect: off|warn|strict`.
+3. Workspace `.agent-doc/config.toml`: `[lint] dialect = "off|warn|strict"`.
+4. Default: `warn`.
+
+The error message preserves tagpath's CLI format — `<path>:<line>:<col> <severity>: <message> [<rule>]` with an optional `hint:` line — so the fix can be made and re-finalized in a single round-trip. See tagpath SPEC §16 (agent-doc dialect) for the full rule catalog. The integration lives in `src/lint_gate.rs` and is wired through `src/write.rs::run_command` for `finalize` / `write --commit`, and `src/stream.rs::run` for `stream`.
+
+## JetBrains File Cache Conflict
+
+When the IDE surfaces a File Cache Conflict dialog mid-IPC and the user cancels, `preflight` auto-recovers the wedge via the binary-owned commit boundary when the working tree still matches the snapshot. The cancel-branch contract, the auto-recovery preconditions, and the manual fallback for cases auto-recovery declines live in [jb-cache-conflict.md](jb-cache-conflict.md).
+
+Compact Exchange does not use the normal response IPC `fullContent` path. It closes through guarded direct disk write plus the standard compact commit/VCS refresh boundary; stale JetBrains live-buffer or file-cache proof must fail before document or snapshot replacement, then the operator resolves the IDE buffer and reruns compact. See [compact-exchange.md](compact-exchange.md) and the Compact Exchange section of [jb-cache-conflict.md](jb-cache-conflict.md).
+
+## Baseline Drift After Manual Commits
+
+When a user lands a manual commit to the session document after an agent-doc closeout, `preflight` may auto-refresh the captured baseline only when the drift is outside the captured response body and outside the active cycle's owned component scope. If drift overlaps owned response content, use the fail-closed diagnostic and the non-destructive recovery command from [baseline-drift.md](baseline-drift.md): `agent-doc reset --from-current --preserve-session <FILE>`.
 
 ## Anti-Patterns
 

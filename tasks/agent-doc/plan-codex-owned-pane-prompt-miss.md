@@ -15,10 +15,25 @@ precedence over an active auto-queue head. Tests:
 `preflight_owned_pane_self_invocation_absent_for_non_owner_pane`. Spec:
 `specs/07-core-commands.md`.
 
-**Remaining (gated):** (2) update the installed Codex agent-doc guidance to read
-`owned_pane_self_invocation` and drive an in-pane response cycle, plus a
-Codex Stop-hook / guidance regression asserting an in-pane response body before
-final chat output; (3) live Codex same-pane verification.
+**Phase 2a (guidance) now landed (2026-05-31):** the installed Codex agent-doc
+guidance reads `owned_pane_self_invocation` and drives an in-pane response cycle
+— a new bullet in `runbooks/harness-invocation.md` (Codex section, mirrored to
+all four harness surfaces) tells the agent to NOT launch a recursive child, to
+answer the `work_excerpt` for `kind: "unresolved_prompt"` / continue the
+`active_queue_head` named by `head_id`, then persist via `persistence_command`
++ `session-check`, and to never let an active auto-queue head run ahead of an
+unresolved exchange prompt. Regression: `tests/run_integration.rs`
+`preflight_emits_owned_pane_self_invocation_for_active_queue_head` (complements
+the existing `_for_unresolved_prompt` / `_absent_for_non_owner_pane` tests) locks
+the structured contract for the queue-head case the guidance depends on.
+
+**Remaining (gated — needs a live Codex pane):** (2b) a Codex Stop-hook live
+regression asserting that, after the owned-pane diagnostic, Codex persists an
+in-pane response body before sending final chat output (the deterministic
+session-check backstop — `check_prompt_only_exchange_tail_guard` + the
+`#recguard-abandon` terminal-abandon path — already landed in phase 1; this
+remaining piece is a live Stop-hook assertion); (3) live Codex same-pane
+verification with a real unresolved exchange prompt.
 
 ## Problem
 

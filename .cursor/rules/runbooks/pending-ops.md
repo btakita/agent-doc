@@ -110,8 +110,27 @@ recommended next step stays first.
 
 Exception: if you are later adding a follow-on step from an ordered batch that
 is already partially represented in pending, place the new item next to its
-predecessor rather than prepending it above earlier steps. The practical pattern
-is:
+predecessor rather than prepending it above earlier steps. `#ah0s` makes this
+first-class — prefer the explicit-position flags over a prepend + `--pending-reorder`:
+
+```bash
+# Insert directly after an existing item (no reorder pass needed):
+agent-doc write plan.md --pending-add-after step2 "id=step3 [recommended] Add step 3"
+
+# Chain to build an ordered sub-sequence A→B→C deterministically:
+agent-doc write plan.md \
+  --pending-add-after stepA "id=stepB Add B" \
+  --pending-add-after stepB "id=stepC Add C"
+
+# Low-priority capture that should not jump the head (tail insert):
+agent-doc write plan.md --pending-add-back "[recommended] Nice-to-have cleanup"
+```
+
+`--pending-add` stays the cheap front-insert default; `--pending-add-after <id>`,
+`--pending-add-before <id>`, and `--pending-add-back` (alias `--pending-append`)
+set position explicitly. The backlog is a priority-ordered pool with id-based
+consumption (not a stack/queue), so position is author intent, not argv order.
+The older prepend + `--pending-reorder` pattern still works:
 
 ```bash
 agent-doc write plan.md \
@@ -140,6 +159,15 @@ agent-doc write plan.md \
 That keeps the backlog self-describing: the pending line already tells the next
 cycle which concrete plan file exists and should be opened.
 
+For multi-phase implementation plans, prefer one flush-left backlog item per
+actionable phase with a stable custom id (for example `#crdtrespfx1`,
+`#crdtrespfx2`) instead of one parent id that gets repeatedly
+`--pending-gate`d after partial progress. The parent plan file can remain the
+overview, but queue entries and closeouts should target the concrete phase ids.
+Use `--pending-gate` when that specific phase is code-complete and waiting on
+review or an external signal, not merely because later phases in the same plan
+remain open.
+
 If the document is being used collaboratively, treat that cross-document read as
 a security boundary. Shared docs should carry both
 `agent_doc_collaboration: shared` and an auditable
@@ -160,6 +188,34 @@ plan path into another `.md` file.
   completes `#id` but omits the matching done mutation. If the item is
   code-complete but blocked on an external gate, prefer
   `--pending-gate <id>` instead of leaving it silently open.
+- **`do [#id]` / `do #id` directives are closeout-gated regardless of response
+  wording** (`#do-id-closeout-open-backlog`). When the prompt directive names a
+  tracked id that is open in `agent:backlog` at preflight, the cycle records an
+  `expect_done_or_gate` obligation for that id. A successful closeout — even one
+  that only clears the queue or updates status without a "completed #id" heading
+  — fails closed if the id is still `[ ]` in `agent:backlog` and no `--done`,
+  `--pending-gate`, or kept-open edit (`--pending-edit "id=… (stays open: …)"`)
+  was recorded this cycle. Resolve every `do [#id]` target with exactly one
+  lifecycle outcome: `--done <id>`, `--pending-gate <id>` (code-complete,
+  awaiting review/external validation), an explicit kept-open edit, or set
+  `pending_done_guard: off` for the document when the item must stay open.
+- **"Review-gated" is not "blocked but still actionable"**
+  (`#blocked-closeout-followup-capture`). `--pending-gate <id>` is for work that
+  is *implementation-complete* and only waiting on review/external validation —
+  no further agent execution step is needed. If a `do [#id]` cycle instead
+  reports the target is blocked / still needs future action (e.g. "next steps to
+  complete", "must remove/expire …", "awaiting approval before …") and gates the
+  id out of `agent:backlog`, closeout fails closed: the document then explains
+  the blocker while the active backlog no longer drives the remaining work.
+  Resolve it one of these ways:
+  - keep the same id open with the narrowed next action —
+    `--pending-edit "<id>=<remaining next step>"`;
+  - split a new actionable follow-up —
+    `--pending-add-after <id> "<new-id>=<concrete next step>"` (or any
+    `--pending-add*`);
+  - for a genuine review-only gate, state it explicitly in the response: an
+    "no additional backlog follow-up is needed because …" phrase satisfies the
+    guard, as does a `<!-- no-blocked-followup-guard -->` marker.
 - If the completed ids are also contiguous head entries in an active
   `agent:queue`, repeating `--done <id>` for each completed id lets closeout
   consume that done-backed queue batch in the same commit. The queue still stops

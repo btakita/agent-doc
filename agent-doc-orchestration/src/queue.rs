@@ -7,12 +7,14 @@
 //! - `~~~prompt` / `---` → multi-line prompt fence
 //! - `--- start [at <datetime>]` / `~~~start` → start fence (activation signal)
 //! - `--- stop` / `~~~stop` → stop fence (breakpoint)
-//! - any other non-empty line → `Freeform`: preserved verbatim and never
-//!   treated as an actionable prompt/dispatch target. `parse` is tolerant of a
-//!   polluted queue (free-text / log dumps merged into the component by an
-//!   earlier corruption) so consume/resume/dispatch guards stay resilient
-//!   instead of bailing; `parse` still fails closed only on a structurally
-//!   broken fence (unclosed `---` / `~~~` block).
+//! - any other non-empty line (and an unclosed fence opener) → `Freeform`:
+//!   preserved verbatim and never treated as an actionable prompt/dispatch
+//!   target. `parse` is fully tolerant of a polluted queue (free-text / log
+//!   dumps / stray `---` separators merged into the component by an earlier
+//!   corruption) and never bails — consume/resume/dispatch guards stay
+//!   resilient. A fence opener is only a fence when a matching closer follows;
+//!   otherwise it is preserved as a `Freeform` separator and the lines beneath
+//!   it (presets, real `do [#id]` items) still parse normally.
 //!
 //! Activation resolution (Phase 2):
 //! - `resolve_activation()` determines whether the queue should be active
@@ -26,7 +28,7 @@
 //!
 //! This module is I/O-free. Callers handle reading/writing files.
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -164,12 +166,15 @@ pub fn strip_auto_from_tag(tag: &str) -> String {
 
 pub fn parse(body: &str) -> Result<Vec<QueueEntry>> {
     let mut entries = Vec::new();
-    let mut lines = body.lines().peekable();
+    let lines: Vec<&str> = body.lines().collect();
+    let mut i = 0;
 
-    while let Some(line) = lines.next() {
+    while i < lines.len() {
+        let line = lines[i];
         let trimmed = line.trim();
 
         if trimmed.is_empty() {
+            i += 1;
             continue;
         }
 
@@ -179,12 +184,13 @@ pub fn parse(body: &str) -> Result<Vec<QueueEntry>> {
                     text: completed.to_string(),
                     multiline: false,
                 }));
-                continue;
+            } else {
+                entries.push(QueueEntry::Prompt(QueuePrompt {
+                    text: rest.to_string(),
+                    multiline: false,
+                }));
             }
-            entries.push(QueueEntry::Prompt(QueuePrompt {
-                text: rest.to_string(),
-                multiline: false,
-            }));
+            i += 1;
             continue;
         }
 
@@ -192,6 +198,7 @@ pub fn parse(body: &str) -> Result<Vec<QueueEntry>> {
             let preset = rest.trim();
             if !preset.is_empty() {
                 entries.push(QueueEntry::Preset(preset.to_string()));
+                i += 1;
                 continue;
             }
         }
@@ -200,6 +207,7 @@ pub fn parse(body: &str) -> Result<Vec<QueueEntry>> {
             let preset = rest.trim();
             if !preset.is_empty() {
                 entries.push(QueueEntry::Dispatch(preset.to_string()));
+                i += 1;
                 continue;
             }
         }
@@ -207,64 +215,66 @@ pub fn parse(body: &str) -> Result<Vec<QueueEntry>> {
         if is_start_fence(trimmed) {
             let datetime = parse_start_datetime(trimmed);
             entries.push(QueueEntry::StartFence(datetime));
+            i += 1;
             continue;
         }
 
         if is_stop_fence(trimmed) {
             entries.push(QueueEntry::StopFence);
+            i += 1;
             continue;
         }
 
         if is_completed_fence_open(trimmed) || is_prompt_fence_open(trimmed) {
             let completed = is_completed_fence_open(trimmed);
             let closer = fence_closer(trimmed);
-            let mut prompt_lines = Vec::new();
-            let mut found_close = false;
-            for inner in lines.by_ref() {
-                if inner.trim() == closer {
-                    found_close = true;
-                    break;
+            // Only treat the line as a fence-open when a matching closer
+            // exists ahead. An unclosed fence is preserved as a `Freeform`
+            // separator and the following lines parse normally, so a polluted
+            // queue (stray ``` / ~~~ from merged prose) cannot swallow the real
+            // queue items beneath it (#jb-run-agent-doc-response-queue-contamination).
+            if let Some(close_idx) =
+                (i + 1..lines.len()).find(|&j| lines[j].trim() == closer)
+            {
+                let text = lines[i + 1..close_idx].join("\n");
+                if !text.trim().is_empty() {
+                    let prompt = QueuePrompt {
+                        text,
+                        multiline: true,
+                    };
+                    if completed {
+                        entries.push(QueueEntry::Completed(prompt));
+                    } else {
+                        entries.push(QueueEntry::Prompt(prompt));
+                    }
                 }
-                prompt_lines.push(inner);
+                i = close_idx + 1;
+                continue;
             }
-            if !found_close {
-                bail!("unclosed prompt fence: {}", trimmed);
-            }
-            let text = prompt_lines.join("\n");
-            if !text.trim().is_empty() {
-                let prompt = QueuePrompt {
-                    text,
-                    multiline: true,
-                };
-                if completed {
-                    entries.push(QueueEntry::Completed(prompt));
-                } else {
-                    entries.push(QueueEntry::Prompt(prompt));
-                }
-            }
+            entries.push(QueueEntry::Freeform(line.to_string()));
+            i += 1;
             continue;
         }
 
         if is_bare_fence_open(trimmed) {
-            let mut prompt_lines = Vec::new();
-            let mut found_close = false;
-            for inner in lines.by_ref() {
-                if inner.trim() == "---" {
-                    found_close = true;
-                    break;
+            // A bare `---` is a fence only when a closing `---` follows;
+            // otherwise it is a stray separator preserved as `Freeform` so the
+            // remaining lines (presets, real `do [#id]` items) still parse.
+            if let Some(close_idx) =
+                (i + 1..lines.len()).find(|&j| lines[j].trim() == "---")
+            {
+                let text = lines[i + 1..close_idx].join("\n");
+                if !text.trim().is_empty() {
+                    entries.push(QueueEntry::Prompt(QueuePrompt {
+                        text,
+                        multiline: true,
+                    }));
                 }
-                prompt_lines.push(inner);
+                i = close_idx + 1;
+                continue;
             }
-            if !found_close {
-                bail!("unclosed --- fence");
-            }
-            let text = prompt_lines.join("\n");
-            if !text.trim().is_empty() {
-                entries.push(QueueEntry::Prompt(QueuePrompt {
-                    text,
-                    multiline: true,
-                }));
-            }
+            entries.push(QueueEntry::Freeform(line.to_string()));
+            i += 1;
             continue;
         }
 
@@ -273,6 +283,7 @@ pub fn parse(body: &str) -> Result<Vec<QueueEntry>> {
         // queue body (#jb-run-agent-doc-response-queue-contamination). The line
         // is preserved as-is and never treated as an actionable item.
         entries.push(QueueEntry::Freeform(line.to_string()));
+        i += 1;
     }
 
     Ok(entries)
@@ -779,15 +790,29 @@ mod tests {
     }
 
     #[test]
-    fn parse_error_on_unclosed_fence() {
+    fn unclosed_prompt_fence_opener_preserved_as_freeform() {
+        // Previously bailed; now an unclosed fence opener is preserved as a
+        // Freeform separator so a polluted queue cannot brick the parse.
         let body = "~~~prompt\nSome content without closing fence\n";
-        assert!(parse(body).is_err());
+        let entries = parse(body).expect("unclosed fence is tolerated");
+        assert!(prompts(&entries).is_empty());
+        assert!(
+            entries
+                .iter()
+                .any(|e| matches!(e, QueueEntry::Freeform(_)))
+        );
     }
 
     #[test]
-    fn parse_error_on_unclosed_dash_fence() {
+    fn unclosed_dash_fence_opener_preserved_as_freeform() {
         let body = "---\nContent without closing dashes\n";
-        assert!(parse(body).is_err());
+        let entries = parse(body).expect("unclosed --- fence is tolerated");
+        assert!(prompts(&entries).is_empty());
+        assert!(
+            entries
+                .iter()
+                .any(|e| matches!(e, QueueEntry::Freeform(s) if s.trim() == "---"))
+        );
     }
 
     #[test]
@@ -1242,5 +1267,40 @@ mod tests {
         ];
         assert!(prompts(&entries).is_empty());
         assert!(first_prompt(&entries).is_none());
+    }
+
+    #[test]
+    fn unclosed_bare_fence_does_not_swallow_real_items_beneath_it() {
+        // The exact live-corruption shape: a stray `---` separator with no
+        // matching close, followed by the real preset + queue items. The `---`
+        // must be preserved as Freeform and the items must still parse as
+        // actionable prompts (not swallowed into an unclosed fence).
+        let body = "---\npreset #spec-test\n- do [#first]\n- do [#second]\n";
+        let entries = parse(body).expect("unbalanced fences must not fail the parse");
+        let prompts = prompts(&entries);
+        assert_eq!(prompts.len(), 2);
+        assert_eq!(prompts[0].text, "do [#first]");
+        assert_eq!(prompts[1].text, "do [#second]");
+        assert!(
+            entries
+                .iter()
+                .any(|e| matches!(e, QueueEntry::Preset(p) if p == "#spec-test"))
+        );
+        assert!(
+            entries
+                .iter()
+                .any(|e| matches!(e, QueueEntry::Freeform(s) if s.trim() == "---")),
+            "the stray --- separator is preserved as Freeform"
+        );
+    }
+
+    #[test]
+    fn unclosed_prompt_fence_is_preserved_as_freeform_separator() {
+        // A stray ``` opener with no closer is preserved, and the `- do` item
+        // beneath it still parses.
+        let body = "```\n- do [#real]\n";
+        let entries = parse(body).expect("unclosed prompt fence must not fail the parse");
+        assert_eq!(prompts(&entries).len(), 1);
+        assert_eq!(prompts(&entries)[0].text, "do [#real]");
     }
 }

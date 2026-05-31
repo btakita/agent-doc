@@ -1,5 +1,5 @@
 use super::types::{CloseoutState, FlowEvent, FlowName, FlowOutcome, FlowStage};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -602,13 +602,19 @@ pub enum RecoveryApplication {
 ///   prompt-prefix artifacts only; the commit path normalizes them and cannot
 ///   revert user/response content).
 ///
-/// `QueueMetadataDrift` / `SidecarVisibleDrift` are *not* auto-applied: their safe
-/// direction (commit the snapshot vs restore from HEAD) depends on which side is
-/// authoritative, which the classifier cannot prove (live-observed: a spurious
-/// `queue_active:false` working-drift would be wrongly committed). They return
-/// `NotApplied` with the recommended command. `UnsafeUserContentDrift`,
-/// `OpenCycle`, `MissingResponseBody`, and the reserved states also fail closed
-/// because they need a preserved response, not a metadata commit.
+/// `QueueMetadataDrift` / `SidecarVisibleDrift` are auto-applied *only when the
+/// authoritative side is provable* (`#recovery-drift-authoritative-side`). The
+/// safe direction (commit the local side vs restore from HEAD) is decided by
+/// [`metadata_drift_authority`]: a live auto-queue continuation present in HEAD
+/// but dropped by the local metadata drift means HEAD is authoritative
+/// (restore-from-HEAD), because legitimate queue-head consumption always surfaces
+/// as response/content drift, never as metadata-only drift. This closes the
+/// live-observed gap where a spurious `queue_active:false` working-drift would be
+/// wrongly committed. A genuinely ambiguous direction (both sides carry distinct
+/// live continuation heads with no consuming response) still returns `NotApplied`.
+/// `UnsafeUserContentDrift`, `OpenCycle`, `MissingResponseBody`, and the reserved
+/// states also fail closed because they need a preserved response, not a metadata
+/// operation.
 pub fn apply_closeout_recovery(file: &Path) -> Result<RecoveryApplication> {
     let state = classify_closeout_recovery_state(file);
     match state {
@@ -628,11 +634,7 @@ pub fn apply_closeout_recovery(file: &Path) -> Result<RecoveryApplication> {
             })
         }
         CloseoutRecoveryState::QueueMetadataDrift | CloseoutRecoveryState::SidecarVisibleDrift => {
-            Ok(RecoveryApplication::NotApplied {
-                state,
-                reason: "auto-apply withheld — the authoritative side (commit the snapshot vs restore from HEAD) is ambiguous for queue/metadata drift; resolve direction first".to_string(),
-                recommended: state.recovery_command(file).unwrap_or_default(),
-            })
+            apply_metadata_drift_recovery(file, state)
         }
         other => Ok(RecoveryApplication::NotApplied {
             state: other,
@@ -640,6 +642,125 @@ pub fn apply_closeout_recovery(file: &Path) -> Result<RecoveryApplication> {
             recommended: other.recovery_command(file).unwrap_or_default(),
         }),
     }
+}
+
+/// Which side of a metadata-only drift is authoritative for recovery.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MetadataDriftAuthority {
+    /// The local side (snapshot for `QueueMetadataDrift`, the visible file for
+    /// `SidecarVisibleDrift`) is authoritative — commit it forward.
+    Local,
+    /// HEAD (committed) is authoritative — restore the local side from HEAD,
+    /// discarding the spurious local metadata drift.
+    Head,
+    /// Neither side is provably authoritative (both carry distinct live queue
+    /// continuation heads with no consuming response) — fail closed.
+    Ambiguous,
+}
+
+/// Decide the authoritative side of a content-equal metadata-only drift between a
+/// `local` document string (the candidate to commit) and the committed `head`.
+///
+/// The decision turns on the live auto-queue continuation signal
+/// (`#recovery-drift-authoritative-side`). Because the caller has already proven
+/// the *content* components (exchange / backlog / review / icebox / done) are
+/// byte-identical, the only durable state the diff can destroy is an active queue
+/// continuation. Legitimate consumption of a queue head always shows up as
+/// response/content drift, so a continuation that exists in HEAD but is gone (or
+/// re-headed) in a metadata-only local drift cannot have been legitimately
+/// consumed — HEAD is authoritative and the local drift is spurious.
+pub fn metadata_drift_authority(file: &Path, local: &str, head: &str) -> MetadataDriftAuthority {
+    let local_head = crate::queue_continuation::live_continuation_head(file, local);
+    let head_head = crate::queue_continuation::live_continuation_head(file, head);
+    match (local_head, head_head) {
+        // HEAD carries a live continuation that the local side dropped entirely
+        // (deactivated / drained / fenced) with no consuming response → HEAD is
+        // authoritative; committing the local side would silently lose it. This
+        // is the live-observed `queue_active:false` spurious-drift bug.
+        (None, Some(_)) => MetadataDriftAuthority::Head,
+        // Both sides carry a live continuation but with different ready heads, and
+        // (content-equal) no response consumed the old head → the next prompt
+        // diverged without proof. Genuinely ambiguous → fail closed.
+        (Some(local_id), Some(head_id)) if local_id != head_id => {
+            MetadataDriftAuthority::Ambiguous
+        }
+        // Same live head, HEAD has no live continuation at risk, or neither side
+        // does → committing the local side forward loses no continuation.
+        _ => MetadataDriftAuthority::Local,
+    }
+}
+
+/// Apply the provably-safe recovery for `QueueMetadataDrift` / `SidecarVisibleDrift`.
+fn apply_metadata_drift_recovery(
+    file: &Path,
+    state: CloseoutRecoveryState,
+) -> Result<RecoveryApplication> {
+    let head = crate::git::show_head(file)?;
+    let snapshot = crate::snapshot::load(file).ok().flatten();
+    let working = std::fs::read_to_string(file).ok();
+    // For QueueMetadataDrift the local (commit-candidate) side is the snapshot;
+    // for SidecarVisibleDrift the snapshot already matches HEAD and the local side
+    // is the visible/working file.
+    let local = match state {
+        CloseoutRecoveryState::QueueMetadataDrift => snapshot.as_deref(),
+        _ => working.as_deref(),
+    };
+    let (Some(local), Some(head)) = (local, head.as_deref()) else {
+        return Ok(RecoveryApplication::NotApplied {
+            state,
+            reason: "auto-apply withheld — could not load both the local and HEAD document sides to prove the authoritative direction".to_string(),
+            recommended: state.recovery_command(file).unwrap_or_default(),
+        });
+    };
+
+    match metadata_drift_authority(file, local, head) {
+        MetadataDriftAuthority::Local => {
+            // Commit the local side forward. For SidecarVisibleDrift the snapshot
+            // is HEAD-equal, so rebuild the sidecars from the visible file first so
+            // the selective `git::commit` stages the accepted working metadata.
+            if state == CloseoutRecoveryState::SidecarVisibleDrift {
+                rebuild_sidecars_from_content(file, local)?;
+            }
+            crate::git::commit(file)?;
+            Ok(RecoveryApplication::Applied {
+                state,
+                action:
+                    "committed local metadata drift (local side authoritative — no live HEAD queue continuation at risk)"
+                        .to_string(),
+            })
+        }
+        MetadataDriftAuthority::Head => {
+            // HEAD's live queue continuation is authoritative; discard the spurious
+            // local metadata drift by restoring the visible file and sidecars from
+            // HEAD. No new commit — HEAD already holds the authoritative content.
+            std::fs::write(file, head)
+                .with_context(|| format!("restore {} from HEAD", file.display()))?;
+            rebuild_sidecars_from_content(file, head)?;
+            Ok(RecoveryApplication::Applied {
+                state,
+                action:
+                    "restored the document and sidecars from HEAD (committed queue continuation authoritative; discarded spurious local metadata drift)"
+                        .to_string(),
+            })
+        }
+        MetadataDriftAuthority::Ambiguous => Ok(RecoveryApplication::NotApplied {
+            state,
+            reason: "auto-apply withheld — both the local and HEAD sides carry distinct live queue continuation heads with no consuming response; the authoritative direction is ambiguous".to_string(),
+            recommended: state.recovery_command(file).unwrap_or_default(),
+        }),
+    }
+}
+
+/// Rebuild the snapshot + CRDT sidecars from an explicit content string. Mirrors
+/// the binary `reset --from-current` sidecar rebuild (snapshot + CRDT) so a
+/// metadata-drift recovery converges the sidecars on the authoritative side. The
+/// preflight-owned baseline is intentionally left untouched (it is re-taken at the
+/// next stable post-commit point).
+fn rebuild_sidecars_from_content(file: &Path, content: &str) -> Result<()> {
+    crate::snapshot::save(file, content)?;
+    let crdt = crate::crdt::CrdtDoc::from_text(content).encode_state();
+    crate::snapshot::save_crdt(file, &crdt)?;
+    Ok(())
 }
 
 /// Classify the current closeout recovery state for `file`. Reuses the existing
@@ -1191,8 +1312,61 @@ mod tests {
     }
 
     #[test]
-    fn apply_recovery_withholds_queue_metadata_drift() {
-        // Ambiguous-direction queue metadata drift must NOT be auto-committed.
+    fn metadata_drift_authority_head_when_local_drops_live_continuation() {
+        // `#recovery-drift-authoritative-side`: HEAD carries a live `queue_active`
+        // continuation that the local (snapshot) side deactivated → HEAD is
+        // authoritative (the spurious `queue_active:false` working-drift bug).
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("doc.md");
+        let head = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue -->\n- do [#a]\n- do [#b]\n<!-- /agent:queue -->\n",
+        );
+        let local = head.replace("queue_active: true", "queue_active: false");
+        assert_eq!(
+            metadata_drift_authority(&file, &local, head),
+            MetadataDriftAuthority::Head
+        );
+    }
+
+    #[test]
+    fn metadata_drift_authority_local_when_no_live_head_continuation() {
+        // Neither side has a live continuation → committing the local side forward
+        // loses no continuation → local is authoritative.
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("doc.md");
+        let head = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:queue -->\n- do [#a]\n<!-- /agent:queue -->\n",
+        );
+        let local = head.replace("- do [#a]\n", "- do [#a]\n- do [#b]\n");
+        assert_eq!(
+            metadata_drift_authority(&file, &local, head),
+            MetadataDriftAuthority::Local
+        );
+    }
+
+    #[test]
+    fn metadata_drift_authority_ambiguous_when_live_heads_diverge() {
+        // Both sides carry a live continuation but with different ready heads and
+        // (content-equal) no consuming response → genuinely ambiguous.
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("doc.md");
+        let head = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue -->\n- do [#a]\n<!-- /agent:queue -->\n",
+        );
+        let local = head.replace("- do [#a]", "- do [#z]");
+        assert_eq!(
+            metadata_drift_authority(&file, &local, head),
+            MetadataDriftAuthority::Ambiguous
+        );
+    }
+
+    #[test]
+    fn apply_recovery_commits_queue_metadata_drift_when_no_live_continuation() {
+        // `#recovery-drift-authoritative-side`: with no live HEAD continuation at
+        // risk, queue metadata drift is now auto-committed (local authoritative).
         let head = concat!(
             "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
             "## Exchange\n\n",
@@ -1200,6 +1374,83 @@ mod tests {
             "<!-- agent:queue -->\n- do [#a]\n<!-- /agent:queue -->\n",
         );
         let snapshot = head.replace("- do [#a]\n", "- do [#a]\n- do [#b]\n");
+        let (_dir, doc) = setup_git_project_with_doc(head);
+        crate::cycle_state::start_preflight(&doc, Some(head), Some(head)).unwrap();
+        // The snapshot AND the visible file carry the drift; only HEAD is behind.
+        std::fs::write(&doc, &snapshot).unwrap();
+        crate::snapshot::save(&doc, &snapshot).unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(&snapshot),
+            Some(&snapshot),
+        )
+        .unwrap();
+        match apply_closeout_recovery(&doc).unwrap() {
+            RecoveryApplication::Applied { state, .. } => {
+                assert_eq!(state, CloseoutRecoveryState::QueueMetadataDrift);
+            }
+            other => panic!("expected Applied for queue metadata drift, got {other:?}"),
+        }
+        // HEAD now carries the committed queue item, and re-classification is Clean.
+        assert!(crate::git::show_head(&doc).unwrap().unwrap().contains("- do [#b]"));
+        assert_eq!(
+            classify_closeout_recovery_state(&doc),
+            CloseoutRecoveryState::Clean
+        );
+    }
+
+    #[test]
+    fn apply_recovery_restores_from_head_when_local_drops_live_continuation() {
+        // The live bug: HEAD has an active `queue_active` continuation; a spurious
+        // local snapshot drift flipped it to `false`. Auto-apply must restore from
+        // HEAD (not commit the snapshot), preserving the live queue.
+        let head = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nqueue_active: true\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n### Re: x — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n- do [#a]\n- do [#b]\n<!-- /agent:queue -->\n",
+        );
+        let snapshot = head.replace("queue_active: true", "queue_active: false");
+        let (_dir, doc) = setup_git_project_with_doc(head);
+        crate::cycle_state::start_preflight(&doc, Some(head), Some(head)).unwrap();
+        crate::snapshot::save(&doc, &snapshot).unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(&snapshot),
+            Some(&snapshot),
+        )
+        .unwrap();
+        match apply_closeout_recovery(&doc).unwrap() {
+            RecoveryApplication::Applied { state, action } => {
+                assert_eq!(state, CloseoutRecoveryState::QueueMetadataDrift);
+                assert!(action.contains("restored"), "{action}");
+            }
+            other => panic!("expected Applied (restore) for dropped continuation, got {other:?}"),
+        }
+        // The visible file + sidecars are restored to HEAD's live queue, so the
+        // continuation survives and re-classification is Clean.
+        let restored = std::fs::read_to_string(&doc).unwrap();
+        assert!(restored.contains("queue_active: true"), "{restored}");
+        assert_eq!(crate::snapshot::load(&doc).unwrap().unwrap(), restored);
+        assert_eq!(
+            classify_closeout_recovery_state(&doc),
+            CloseoutRecoveryState::Clean
+        );
+    }
+
+    #[test]
+    fn apply_recovery_withholds_queue_metadata_drift_when_live_heads_diverge() {
+        // Both sides carry distinct live continuation heads with no consuming
+        // response → the direction is genuinely ambiguous → fail closed.
+        let head = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nqueue_active: true\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n### Re: x — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n- do [#a]\n<!-- /agent:queue -->\n",
+        );
+        let snapshot = head.replace("- do [#a]", "- do [#z]");
         let (_dir, doc) = setup_git_project_with_doc(head);
         crate::cycle_state::start_preflight(&doc, Some(head), Some(head)).unwrap();
         crate::snapshot::save(&doc, &snapshot).unwrap();
@@ -1217,7 +1468,7 @@ mod tests {
                 assert_eq!(state, CloseoutRecoveryState::QueueMetadataDrift);
                 assert!(recommended.contains("agent-doc commit"), "{recommended}");
             }
-            other => panic!("expected NotApplied for queue metadata drift, got {other:?}"),
+            other => panic!("expected NotApplied for ambiguous queue drift, got {other:?}"),
         }
     }
 

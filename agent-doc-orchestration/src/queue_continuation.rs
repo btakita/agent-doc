@@ -123,6 +123,40 @@ fn detect_in_content(file: &Path, content: &str) -> Result<Option<QueueContinuat
     }))
 }
 
+/// The live auto-queue continuation head of a document **string**, independent
+/// of any snapshot/sidecar. Returns `Some(head_id_or_prompt)` when `content` has
+/// an active queue (`queue_active: true`) whose head is a ready prompt — not a
+/// stop fence or a future time gate — else `None`.
+///
+/// Unlike [`detect`], this performs no snapshot-edit comparison: callers that
+/// already hold two explicit document strings use it to compare continuation
+/// state across snapshot / HEAD / working without a sidecar round-trip. It is the
+/// authoritative-side signal for closeout metadata-drift recovery
+/// (`#recovery-drift-authoritative-side`): a live continuation present in HEAD
+/// but absent (or re-headed) in a metadata-only local drift means HEAD is
+/// authoritative, because legitimate consumption of a queue head always shows up
+/// as response/content drift, never as metadata-only drift.
+pub fn live_continuation_head(file: &Path, content: &str) -> Option<String> {
+    let (fm, _) = crate::frontmatter::parse_for_file(content, file).ok()?;
+    if fm.queue_active != Some(true) {
+        return None;
+    }
+    let components = crate::component::parse(content).ok()?;
+    let queue_component = components.iter().find(|c| c.name == "queue")?;
+    let has_auto = crate::queue::has_auto_attr(&queue_component.attrs);
+    let body = &content[queue_component.open_end..queue_component.close_start];
+    let entries = crate::queue::parse(body).ok()?;
+    let activation = crate::queue::resolve_activation(&entries, has_auto, false, true);
+    if !activation.active
+        || crate::queue::has_stop_fence_at_head(&activation.entries_after)
+        || crate::queue::time_gate_at_head(&activation.entries_after).is_some()
+    {
+        return None;
+    }
+    let head = crate::queue::first_prompt(&activation.entries_after)?;
+    Some(extract_head_id(&head.text).unwrap_or_else(|| head.text.trim().to_string()))
+}
+
 /// Extract the backlog `#id` from a queue prompt like `do [#id] ...` or `#id ...`.
 fn extract_head_id(prompt: &str) -> Option<String> {
     if let Some(start) = prompt.find("[#")

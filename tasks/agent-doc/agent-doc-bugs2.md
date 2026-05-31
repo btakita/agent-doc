@@ -36,12 +36,32 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 2 response topic(s): do [#blocked-closeout-followup-capture]; do [#codex-owned-pane-prompt-miss-followups]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:3ce9f518 -->
+
+### Re: do [#recursive-repair-state-drift] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#recursive-repair-state-drift]
+
+
+Landed a safe, tested **slice 1** and kept the item open with the remainder narrowed — this is a large delicate state-machine feature with an explicit "never auto-commit user content" non-goal, so I shipped the provably-safe part and gated the risky parts rather than rushing the whole thing in a racy multi-session repo.
+
+**Slice 1 (landed, submodule `c0b39846`):** extended the existing `flow::closeout::CloseoutRecoveryState` machine (the plan says *extend* `#closeout-recovery-state-machine`, not bypass) by wiring the previously-reserved `BoundaryOnlyDrift` state.
+
+- A committed cycle whose snapshot differs from HEAD **only** by agent-doc-generated exchange artifacts — transient boundary / `(HEAD)` markers and answered-prompt-prefix canonicalization — is now classified `BoundaryOnlyDrift`, and `session_check::closeout_recovery_hint` names the single safe recovery `agent-doc commit <file>` instead of the generic `write --commit` chain. That directly serves the plan's "name one safe command, not a multi-step manual recipe."
+- Detection (`committed_artifact_only_head_drift`) proves no real content drift via `normalize_committed_exchange_artifacts` equality — which is *fuller* than `verify_snapshot_committed`'s transient-only normalization, so it's exactly the reachable gap where prompt-prefix drift trips the snapshot-vs-HEAD guard but `agent-doc commit` is the right fix. Conservative: any read error → `false`, so genuine content drift never masquerades as metadata-only (honors the non-goal).
+- Test: `classify_recovery_boundary_only_drift_for_answered_prompt_prefix`. `make check` green; both binaries rebuilt + `cargo install`ed.
+
+**Gated remainder** (kept open in backlog via `--pending-edit`): the other recovery states (`open_empty_preflight` auto-abandon, `sidecar_visible_drift`, `unsafe_user_content_drift` fail-closed, queue/`queue_active`-metadata HEAD drift), teaching `agent-doc repair` to *apply* the safe states as one command, making probe `preflight` side-effect-free, and live same-pane recovery verification.
+
+#### Note on this turn's state
+Last turn's response was archived by a concurrent compaction (`...-170445.md`) within minutes, which surfaced a `stuck_captured_cycle` warning — a false positive of the compaction-vs-stale-capture class (`#stuck-capture-compact-false-positive`), **not** lost work. I did **not** run `write --commit` (it would re-inject the archived response). This racy multi-session environment is also why I gated the live-verification phases above.
+<!-- agent:boundary:9a32f387 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#recursive-repair-state-drift]
+- ~do [#recursive-repair-state-drift]~
 - do [#blocked-closeout-followup-capture]
 - do [#queue-sync-auto-pending-done-guard-misfire]
 - do [#tagpath-queue-priority-publish-align]
@@ -89,7 +109,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 
 <!-- agent:backlog priority queue -->
 - [ ] [#queue-sync-auto-pending-done-guard-misfire] [recommended] When a queue=sync/append attribute populates an active auto-queue in the same cycle, the freshly-synced do-[#id] entries appear as new do-directives in the cycle diff, so preflight records them all as expect_done_or_gate_ids and pending_done_guard then demands every synced item be --done in the populating cycle (live repro 2026-05-31 agent-doc-bugs2.md: do [#backlog-queue-sync-attr] cycle flagged 9 other freshly-synced queue items). Fix: agent-generated/synced queue items must not be treated as user do-directives; only a genuine user exchange do [#id] or the single consumed queue head should populate expect_done_or_gate_ids. Plan: tasks/agent-doc/plan-queue-sync-auto-pending-done-guard-misfire.md.
-- [ ] [#recursive-repair-state-drift] [recommended] Recursive same-pane owner recovery can leave the document runnable only after a manual expert sequence: abandon an empty preflight cycle, rebuild sidecars from visible content, then commit metadata-only queue/boundary drift. Live repro 2026-05-31 `src/boost-client/tasks/monsterrodholders.md` after recursive direct invocation was blocked: `session-check` moved from open `preflight_started` to snapshot-vs-HEAD drift until `agent-doc cancel`, `agent-doc reset --from-current --preserve-session`, and `agent-doc commit` were run manually. Add a typed repair path that closes cycle/sidecar/HEAD invariants in one safe command and make diagnostic preflight side-effect-free or self-abandoning. Plan: tasks/agent-doc/plan-recursive-repair-state-drift.md.
+- [ ] [#recursive-repair-state-drift] [recommended] Recursive same-pane owner recovery can leave the document runnable only after a manual expert sequence (cancel + reset --from-current + commit). Slice 1 LANDED 2026-05-31 (submodule c0b39846): wired the reserved CloseoutRecoveryState::BoundaryOnlyDrift — a committed cycle whose snapshot differs from HEAD only by agent-doc-generated artifacts (boundary/(HEAD) markers + answered-prompt-prefix canonicalization) now gets the single safe 'agent-doc commit' recovery hint instead of the generic write --commit chain (committed_artifact_only_head_drift via normalize_committed_exchange_artifacts equality; fails safe on read error). Remaining (gated): (1) the other recovery states — open_empty_preflight auto-abandon, sidecar_visible_drift, unsafe_user_content_drift fail-closed, queue/queue_active metadata HEAD drift; (2) teach 'agent-doc repair' to APPLY the safe states in one command; (3) make probe/diagnostic preflight side-effect-free/self-abandoning; (4) live same-pane recovery verification. Plan: tasks/agent-doc/plan-recursive-repair-state-drift.md.
 - [ ] [#tagpath-queue-priority-publish-align] [recommended] Before the next agent-doc release, publish tagpath (commits b55c305 + 32fd000: backlog/icebox/queue priority + queue sync lint attrs) and bump agent-doc's tagpath dependency past 0.12. Locally agent-doc resolves tagpath via the superproject .cargo/config.toml path patch so the lint-gate accepts the new attributes; a published agent-doc on tagpath 0.12 would reject bare priority/queue as malformed-attr.
 - [ ] [#preset-item-id-collision-enforce] [recommended] Escalate #preset-item-id-collision from a preflight warning to hard enforcement (the riskier half, deferred to design carefully against over-blocking live sessions): (1) mutation-time rejection — write --pending-add / --pending-add-after / etc. with an explicit custom id (id=X or [#X]) that collides with a prompt_presets key or an existing active item id fails closed; (2) fail-closed dispatch — preflight/session-check block dispatch on an existing collision with the rename repair hint, surfaced by route/JB as a document-repair error not a generic agent failure; (3) queue generation refuses to emit do [#id] for an ambiguous id. The identity registry + detection + preflight warning + 3 regressions already landed (preflight::detect_identity_collisions). Plan: tasks/agent-doc/plan-preset-item-id-collision.md.
 - [ ] [#free-text-queue-skip-diagnostic] [recommended] Polish from #free-text-queue-owner-consume plan point 4: when queue consumption is skipped, the closeout still prints the generic '[queue] skipped consumption because the active prompt did not target the queue head'. For an id-backed head with no completion flag, name the missing proof source and the supported repair (--done/--pending-gate/--pending-edit <id>); for a free-text head edge case, point to the answered-response path. Replace the single generic line at write.rs ~1460/1469 with a shape-aware diagnostic. Plan: tasks/agent-doc/plan-free-text-queue-owner-consume.md (point 4).

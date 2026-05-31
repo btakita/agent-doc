@@ -31,27 +31,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260531-205308.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260531-211014.md`*
 
 Compacted content:
-- Archived 1 response topic(s): JB Run Agent Doc deadlock on monsterrodholders.md
+- Archived 1 response topic(s): do #busy-not-ready-message-reports-actual-wait
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: do #busy-not-ready-message-reports-actual-wait — opus-4-8
-
-> **Queue prompt:**
->
-> do [#busy-not-ready-message-reports-actual-wait]
-
-
-Fixed. The dispatch-only busy/not-ready refusal reported `dispatch_only_starting_pane_recovery_timeout` — the harness recovery constant (8s for Codex) — as the wait duration, so the message said "after waiting 8s" even though the JetBrains plugin passes `--wait-for-ready 60` and route actually waited 60s.
-
-New helper `dispatch_only_busy_refusal_wait_secs(default)` returns the `wait_for_ready_override` when set (the real wait), else the harness default. Wired into all three refusal sites (the FocusOnly-busy bail, the DispatchOnlyBusyQueue else-bail, and the `failclosed_wait_context` path), so they now report the actual wait.
-
-Regression `busy_refusal_wait_secs_reports_override_then_default` (override 60 wins over default 8; falls back to 8 with no override). `make check` green; binary rebuilt + installed. Submodule `96a12eb3`. Marking done.
-
-This is the cosmetic follow-up only — the underlying monsterrodholders.md wedge is still the owner-pane recursion loop (`#codex-owned-pane-auto-queue-stuck`); say the word if you want me to restart that owner or take on the recursion fix.
-<!-- agent:boundary:a5f0072d -->
+<!-- agent:boundary:ab621f98 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->

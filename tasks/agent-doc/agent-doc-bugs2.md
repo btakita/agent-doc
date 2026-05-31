@@ -54,11 +54,45 @@ Gating this one — it's a live-IDE verification I can't perform autonomously. T
 I can't drive the IntelliJ plugin install or read the IDE Event Log from here, so I'm marking it gated (code-complete, awaiting your live verification) rather than reporting a `--done` I didn't actually observe.
 
 If you'd rather I verify the **route half** non-interactively (construct a busy authoritative-actor state and assert `route --dispatch-only --plain-trigger` now exits non-zero with the busy-not-ready message), say so — that part doesn't need the IDE, though reproducing a live busy pane in this multi-session repo is itself racy.
-<!-- agent:boundary:c84699e2 -->
+❯ JB error
+```
+[route] debounce OK — file idle for 19.2s and typing indicator idle
+[route] target tmux session: 0
+[preflight] review: 4 item(s), 4 gated
+[repair] repaired stale preflight_started cycle cycle-1780256669054 for tasks/software/tsift.md
+[commit] staged snapshot already matches HEAD for tasks/software/tsift.md — closing cycle as already committed
+[perf] commit total: 9ms
+[session-check] warning: open backlog item(s) also appear outside live agent:backlog: #compact-community-serialization (line 75), #louvain-dedup-aggregate (line 76), #shared-graph-build-pipeline (line 77), #sift-token-index (line 78)
+[route] drained open closeout for tasks/software/tsift.md before reroute (StalePreflightLockRepaired)
+[route] Pane %42 is in stash window 'stash', rescuing to agent-doc window
+[route] Rescued pane %42 via join-pane
+Error: dispatch-only opencode reopen refused to inject into pane %42 for tasks/software/tsift.md because the pane still shows opencode active turn; restore an idle prompt and retry
+```
+
+### Re: JB error — tsift.md OpenCode reopen refused (active turn) — opus-4-8
+
+I pulled the route trace from `.agent-doc/logs/ops.log` for `tasks/software/tsift.md` (pane `%42`, OpenCode):
+
+```
+route_dispatch_only_blocked ... pane=%42 harness=opencode reason=opencode active turn   (×5, ~15:58–16:01)
+...
+route_dispatch_start_proven  ... pane=%42 harness=opencode proof=pane_state_changed     (16:01:16)
+route_dispatch_only_sent     ... pane=%42 delivery=direct_pane_submit proof=pane_state_changed
+```
+
+**This is route behaving correctly — and it self-resolved.** The OpenCode pane was genuinely mid-turn, so dispatch-only `Run Agent Doc` refused to inject the reopen (injecting into a live OpenCode turn would corrupt it). Each retry was refused while the turn ran; once the turn finished and the pane returned to its idle composer, the very next route attempt **succeeded** (`proof=pane_state_changed` → reopen delivered). It is not a stuck failure, and not a stale-busy false positive — a stale projection would never have flipped to proven-idle and dispatched.
+
+**Same class as the fix I just shipped.** `dispatch-only ... refused ... opencode active turn` matches the JB plugin's `BUSY_RUNNING` classifier, which **0.2.143** now surfaces as an immediate "session still running" Event Log notification instead of the raw `Error:` line (and without the silent retry loop). So once you install 0.2.143, this exact message becomes a clean notification telling you the session is busy — wait for the turn to finish.
+
+**Difference from the Codex case:** the OpenCode active-turn path *already* fails closed loudly (exit 1 + message) — it was never the silent exit-0 `FocusOnly` bug. So no new route fix is needed here; the only gap was the raw-error presentation, which the plugin fix covers.
+
+The `[route] Rescued pane %42 via join-pane` line is also normal: the pane was parked in the `stash` window, so route pulled it back into the `agent-doc` window before dispatching — that rescue succeeded and isn't related to the refusal.
+
+**One optional refinement queued** (`#opencode-active-turn-reopen-auto-retry-on-idle`, recommended): instead of making you re-click after the turn ends, route could watch the pane and auto-fire the bare reopen once it goes idle. Lower priority than the live-verify items.
+<!-- agent:boundary:29b5018f -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
-- ~do [#jb-run-agent-doc-busy-feedback-live-verify]~
 preset #spec-test-build-install-commit-push
 - do [#recovery-drift-apply-live-verify]
 - do [#jb-run-agent-doc-command-route-miss]
@@ -80,20 +114,6 @@ preset #spec-test-build-install-commit-push
 <!-- /agent:queue -->
 ###
 <!--
-```
-[route] debounce OK — file idle for 19.2s and typing indicator idle
-[route] target tmux session: 0
-[preflight] review: 4 item(s), 4 gated
-[repair] repaired stale preflight_started cycle cycle-1780256669054 for tasks/software/tsift.md
-[commit] staged snapshot already matches HEAD for tasks/software/tsift.md — closing cycle as already committed
-[perf] commit total: 9ms
-[session-check] warning: open backlog item(s) also appear outside live agent:backlog: #compact-community-serialization (line 75), #louvain-dedup-aggregate (line 76), #shared-graph-build-pipeline (line 77), #sift-token-index (line 78)
-[route] drained open closeout for tasks/software/tsift.md before reroute (StalePreflightLockRepaired)
-[route] Pane %42 is in stash window 'stash', rescuing to agent-doc window
-[route] Rescued pane %42 via join-pane
-Error: dispatch-only opencode reopen refused to inject into pane %42 for tasks/software/tsift.md because the pane still shows opencode active turn; restore an idle prompt and retry
-```
----
 I ran JB `Run Agent Doc` when the tsift.md session was idle. The "opencode active turn" is false and this state is incorrect. How can we ensure an accurate state using hooks? Can we just use tmux to pass the `/agent-doc .../tsift.md` command regardless of the agent-doc tracking?
 ```
 [route] debounce OK — file idle for 1.4s and typing indicator idle
@@ -126,6 +146,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog priority queue=prepend -->
+- [ ] [#opencode-active-turn-reopen-auto-retry-on-idle] [recommended] When a plain dispatch-only Run Agent Doc reopen is refused because the OpenCode (or Codex) pane shows an active turn, route currently fails closed and the operator must re-click once the turn ends. Optional refinement: watch the pane and auto-fire the bare reopen once it returns to a dispatch-ready/idle composer, so the operator does not have to retry manually. Must stay a plain reopen (no prompt to queue) and respect the existing no-inject-into-active-turn invariant. Lower priority than the live-verify items.
 - [ ] [#recovery-drift-apply-live-verify] [recommended] Live-verify the full one-command recovery (agent-doc repair --apply-recovery) on a real owner pane now that #recovery-drift-authoritative-side landed the authoritative-side determination: reproduce a queue_metadata_drift / sidecar_visible_drift closeout and confirm apply_closeout_recovery restores-from-HEAD for the spurious queue_active:false class and commits-forward otherwise, without the manual cancel->reset->commit sequence. Gated on a live owner pane (risky in a racy multi-session repo). Parent plan: tasks/agent-doc/plan-recursive-repair-state-drift.md.
 - [ ] [#repair-orphan-prefix-bug] Orphan-response repair path prefixes every body line with the user-prompt marker. Live repro 2026-05-31 tsift.md: direct Edit-based patchback triggered orphan repair, which applied the prefix to all assistant body lines. Fix: ensure orphan-repair preserves response body verbatim. Plan: tasks/agent-doc/plan-repair-orphan-prefix-bug.md. Related: #jb-compact-malformed-response-commit, #finalize-retry-ipc-response-duplication.
 - [ ] [#gated-followup-split-enforcement] [recommended] #agent-doc-bug 2026-05-31: when a directed do [#id] cycle keeps a multi-phase item open via --pending-edit (backlog) or --review-edit (review) with text that enumerates several gated/remaining phases, agent-doc neither prompts nor guards splitting those phases into discrete child backlog IDs — the deferred work stays buried in one parent's narrowed description and is not independently trackable/queueable. Repro this session: #recursive-repair-state-drift and #codex-owned-pane-prompt-miss-followups each had 2-4 gated phases folded into parent text; only a user catch prompted splitting them into #recursive-repair-recovery-states/#recursive-repair-apply/#preflight-probe-side-effect-free/#codex-owned-pane-stop-hook-live-verify. Add a session-check/finalize advisory (warn-first, sibling of #blocked-closeout-followup-capture and the SKILL 'one backlog ID per actionable phase' rule) that detects a kept-open item whose body lists multiple gated phases without discrete child IDs and recommends the split. Plan: TBD.

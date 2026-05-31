@@ -129,7 +129,24 @@ Proof:
 - Verification: preflight and plan completed; source/spec lookup confirms `pending_messages` is surfaced but unsupported with the transient queue/raw payload exclusion reason; no source-code change was required.
 - Confidence: high.
 - Escalation: none.
-<!-- agent:boundary:bcc97025 -->
+
+### Re: pending_messages table — gpt-5
+
+Short answer: not as a first-party durable memory table right now.
+
+Tsift would only benefit from a `pending_messages`-style table if tsift itself starts running asynchronous ingestion or retryable background work. The imported `claude-mem.pending_messages` table is not a good model for first-party memory because it mixes queue state with raw tool payloads and in-progress message text, so importing or projecting it would blur durable memory with operational scratch state.
+
+The better boundary is to keep `.tsift/memory.db` focused on durable normalized events, summaries, artifacts, spans, embeddings, and graph links. If tsift needs queued ingestion later, add a separate operational table with a clearer name such as `memory_ingest_queue` or `memory_pending_jobs`, bounded payloads, explicit state transitions, retry metadata, and a retention policy. Completed queue work can then be promoted into `memory_events` after normalization; queue rows should not be exposed as graph or memory retrieval evidence.
+
+So: no for replacing claude-mem memory today; yes later only for tsift-owned async ingestion, and then it should be treated as operational infrastructure rather than memory.
+
+Proof:
+- Changed paths: session document only, through `agent-doc finalize`.
+- Commands: `agent-doc --version`; `tsift status`; `tsift status --fix`; `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/software/tsift.md`; `agent-doc read /home/brian/work/btakita/agent-loop/tasks/software/tsift.md`; `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/software/tsift.md`; `rg -n "pending_messages|unsupported_reason|ClaudeMemTablePlan|memory_events|capture-agent-doc-closeout|CREATE TABLE" src/tsift/SPEC.md src/tsift/packages/tsift-memory/src src/tsift/packages/tsift-cli/src`; `git status --short`.
+- Verification: preflight and plan completed; source/spec lookup confirms `pending_messages` is surfaced but unsupported with the transient queue/raw payload exclusion reason; no source-code change or test run was required for this design answer.
+- Confidence: high.
+- Escalation: none.
+<!-- agent:boundary:dca1a681 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -138,7 +155,8 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+Would tsift benefit from having a `pending_messages` table?
 <!-- /agent:queue -->
 
 ## Backlog

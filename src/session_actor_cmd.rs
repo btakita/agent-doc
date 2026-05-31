@@ -201,6 +201,108 @@ pub fn history(file: &Path) -> Result<()> {
     Ok(())
 }
 
+/// `#closeout-recovery-state-machine` — debug state dump for ALL actors in a
+/// project, cross-referenced with each document's cycle phase and closeout
+/// recovery classification, for investigating state drift. Backed by the
+/// `session_actor::load_all_records_in` API. With `file = None`, scopes to the
+/// current working directory's project root.
+pub fn debug(file: Option<&Path>, json: bool) -> Result<()> {
+    use agent_doc_orchestration::cycle_state::CyclePhase;
+    let base_dir = match file {
+        Some(f) => {
+            let canonical = f.canonicalize().unwrap_or_else(|_| f.to_path_buf());
+            agent_doc_orchestration::snapshot::find_project_root(&canonical).with_context(|| {
+                format!("failed to locate project root for {}", canonical.display())
+            })?
+        }
+        None => {
+            let cwd = std::env::current_dir().context("failed to read current directory")?;
+            agent_doc_orchestration::snapshot::find_project_root(&cwd.join("agent-doc.md"))
+                .unwrap_or(cwd)
+        }
+    };
+
+    let phase_str = |phase: CyclePhase| -> &'static str {
+        match phase {
+            CyclePhase::PreflightStarted => "preflight_started",
+            CyclePhase::ResponseCaptured => "response_captured",
+            CyclePhase::WriteApplied => "write_applied",
+            CyclePhase::Committed => "committed",
+            CyclePhase::Abandoned => "abandoned",
+        }
+    };
+
+    let store = agent_doc_orchestration::session_actor::load_all_records_in(&base_dir)?;
+    let mut rows: Vec<serde_json::Value> = Vec::with_capacity(store.len());
+    for (document_id, record) in &store {
+        let doc_path = Path::new(document_id);
+        let cycle_phase = agent_doc_orchestration::cycle_state::load(doc_path)
+            .ok()
+            .flatten()
+            .map(|s| phase_str(s.phase));
+        let recovery_state =
+            agent_doc_orchestration::flow::closeout::classify_closeout_recovery_state(doc_path);
+        let recovery_command = recovery_state.recovery_command(doc_path);
+        let mut value = serde_json::to_value(record).unwrap_or(serde_json::Value::Null);
+        if let serde_json::Value::Object(map) = &mut value {
+            map.insert(
+                "document_id".into(),
+                serde_json::Value::String(document_id.clone()),
+            );
+            map.insert(
+                "cycle_phase".into(),
+                cycle_phase
+                    .map(|p| serde_json::Value::String(p.to_string()))
+                    .unwrap_or(serde_json::Value::Null),
+            );
+            map.insert(
+                "recovery_state".into(),
+                serde_json::Value::String(recovery_state.as_str().to_string()),
+            );
+            map.insert(
+                "recovery_command".into(),
+                recovery_command
+                    .map(serde_json::Value::String)
+                    .unwrap_or(serde_json::Value::Null),
+            );
+        }
+        rows.push(value);
+    }
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&rows)?);
+        return Ok(());
+    }
+
+    if rows.is_empty() {
+        println!("No actors recorded in {}", base_dir.display());
+        return Ok(());
+    }
+    let field = |row: &serde_json::Value, key: &str| -> String {
+        row.get(key)
+            .and_then(|v| v.as_str())
+            .unwrap_or("-")
+            .to_string()
+    };
+    for row in &rows {
+        let generation = row.get("generation").and_then(|v| v.as_u64()).unwrap_or(0);
+        println!(
+            "{}\n  gen={} pane={} harness={} actor={} cycle={} recovery={}",
+            field(row, "document_id"),
+            generation,
+            field(row, "pane_id"),
+            field(row, "harness"),
+            field(row, "state"),
+            field(row, "cycle_phase"),
+            field(row, "recovery_state"),
+        );
+        if let Some(cmd) = row.get("recovery_command").and_then(|v| v.as_str()) {
+            println!("  recovery: {cmd}");
+        }
+    }
+    Ok(())
+}
+
 pub fn attach(file: &Path, pane: Option<&str>) -> Result<()> {
     let ctx = build_context(file)?;
     let pane_id = resolve_attach_pane(pane)?;

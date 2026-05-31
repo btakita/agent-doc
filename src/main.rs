@@ -1438,6 +1438,16 @@ enum SessionAction {
         #[arg(long)]
         repair: bool,
     },
+    /// Dump the state of ALL actors in a project (actor record + cycle phase +
+    /// closeout recovery classification) for investigating state drift
+    Debug {
+        /// Optional path to a document whose project to inspect (defaults to the
+        /// current working directory's project root)
+        file: Option<PathBuf>,
+        /// Emit a human-readable summary instead of JSON
+        #[arg(long)]
+        human: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -2296,6 +2306,9 @@ fn main() -> anyhow::Result<()> {
             }
             Some(SessionAction::Doctor { file, repair }) => {
                 session_actor_cmd::doctor(&file, repair)
+            }
+            Some(SessionAction::Debug { file, human }) => {
+                session_actor_cmd::debug(file.as_deref(), !human)
             }
             None => session_cmd::show(),
         },

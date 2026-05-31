@@ -156,6 +156,15 @@ fn load_store_in(base_dir: &Path) -> Result<ActorStore> {
     crate::project_controller::load_actor_store(base_dir)
 }
 
+/// `#closeout-recovery-state-machine` debug API: load every actor record in the
+/// project store, keyed by canonical document id. Exposed for state-drift
+/// investigation across all actors (`agent-doc session debug`), where each
+/// record is cross-referenced with its document's cycle phase and closeout
+/// recovery classification.
+pub fn load_all_records_in(base_dir: &Path) -> Result<ActorStore> {
+    load_store_in(base_dir)
+}
+
 fn legacy_generation_for_document(file: &Path, session_id_hint: Option<&str>) -> Result<u64> {
     let Some(canonical) = file.canonicalize().ok() else {
         return Ok(0);
@@ -612,6 +621,49 @@ mod tests {
         assert_eq!(record.pane_id, "%41");
         assert_eq!(record.state, ActorState::Ready);
         assert_eq!(record.harness, "codex");
+    }
+
+    #[test]
+    fn load_all_records_returns_every_bound_actor() {
+        // `#closeout-recovery-state-machine`: the debug API surfaces every actor
+        // in the project store, keyed by canonical document id.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let a = seed_project_file(
+            &tmp,
+            "tasks/a.md",
+            "---\nagent_doc_session: s-a\nagent: codex\n---\nA\n",
+        );
+        let b = seed_project_file(
+            &tmp,
+            "tasks/b.md",
+            "---\nagent_doc_session: s-b\nagent: claude\n---\nB\n",
+        );
+        project_binding_in(
+            tmp.path(),
+            &a.to_string_lossy(),
+            "s-a",
+            "%10",
+            "@1",
+            "route",
+            "dispatch_bind",
+        )
+        .unwrap();
+        project_binding_in(
+            tmp.path(),
+            &b.to_string_lossy(),
+            "s-b",
+            "%20",
+            "@1",
+            "route",
+            "dispatch_bind",
+        )
+        .unwrap();
+
+        let store = load_all_records_in(tmp.path()).unwrap();
+        assert_eq!(store.len(), 2, "expected both actors: {store:?}");
+        let panes: std::collections::BTreeSet<&str> =
+            store.values().map(|r| r.pane_id.as_str()).collect();
+        assert!(panes.contains("%10") && panes.contains("%20"), "{panes:?}");
     }
 
     #[test]

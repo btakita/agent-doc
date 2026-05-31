@@ -333,6 +333,18 @@ single-owner actor controls:
   history from the controller's durable `actor_transitions` store. Legacy
   session-log filtering is only a compatibility fallback when no controller
   transitions exist.
+- `agent-doc session debug [FILE] [--human]` dumps the state of **every** actor
+  in a project for investigating state drift across documents
+  (`#closeout-recovery-state-machine`). It loads the whole actor store via
+  `session_actor::load_all_records_in` (the debug API) and, for each record,
+  cross-references the document's cycle phase (`cycle_state::load`) and closeout
+  recovery classification (`flow::closeout::classify_closeout_recovery_state` +
+  `recovery_command`). Output is a clean JSON array on stdout by default (each
+  entry is the serialized actor record plus `document_id`, `cycle_phase`,
+  `recovery_state`, and `recovery_command`); `--human` prints a per-actor summary
+  line instead. With no `FILE`, it scopes to the current working directory's
+  project root; with a `FILE`, to that document's project root. Diagnostic-only:
+  it never mutates actor, cycle, or document state.
 - `agent-doc session attach <FILE> --pane %123` performs an explicit
   authoritative handoff onto the requested pane through the controller,
   creating a new generation and refreshing the registry projection from that

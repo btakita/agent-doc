@@ -480,7 +480,10 @@ pub enum CloseoutRecoveryState {
     /// from HEAD (no capture, or a captured body not materialized in HEAD).
     MissingResponseBody,
     /// A visible `### Re:` response was patched directly into the document
-    /// outside the binary write path. (Reserved for full detection wiring.)
+    /// outside the binary write path. Detected via
+    /// `session_check::detect_bypassed_response_write` (guarded against the
+    /// jb-cache-conflict-cancel `git::commit`-recoverable shape). Safe recovery:
+    /// `agent-doc write --commit`. (`#closeout-recovery-state-machine`)
     DirectResponsePatchback,
     /// Raw `<!-- agent:NAME -->` component markers were escaped into the
     /// committed exchange instead of applied as `<!-- patch:* -->` blocks.
@@ -489,8 +492,10 @@ pub enum CloseoutRecoveryState {
     /// (boundary / `(HEAD)` markers, answered-prompt-prefix canonicalization).
     /// Safe single recovery: `agent-doc commit`. (`#recursive-repair-state-drift`)
     BoundaryOnlyDrift,
-    /// A reaped/closed item left a nested parent submodule pointer uncommitted.
-    /// (Reserved for full detection wiring.)
+    /// A reaped/closed item left a nested parent submodule pointer uncommitted
+    /// while the document itself is clean. Detected via
+    /// `git::submodule_pointer_drift`. Safe recovery: `agent-doc commit`.
+    /// (`#closeout-recovery-state-machine`)
     NestedParentPointerStale,
     /// An empty `preflight_started` cycle with no capture, response, or pending
     /// mutation — a diagnostic/probe preflight that nothing followed. Safe single
@@ -807,6 +812,22 @@ pub fn classify_closeout_recovery_state(file: &Path) -> CloseoutRecoveryState {
     {
         return CloseoutRecoveryState::MissingResponseBody;
     }
+    // `#closeout-recovery-state-machine`: a visible `### Re:` / `## Assistant`
+    // response was patched into the working document outside the binary write
+    // path. Recover by absorbing it through `write --commit`. Checked before the
+    // generic content-drift fallthrough so the response-specific recovery wins
+    // over `UnsafeUserContentDrift`. The jb-cache-conflict-cancel shape (the
+    // binary write path applied the response but the commit boundary never
+    // landed) is `git::commit`-recoverable, so it must NOT be misread as a direct
+    // patchback — mirror `session_check::detect_uncommitted_closeout_drift`.
+    if !crate::session_check::detect_jb_cache_conflict_cancel_recoverable(file).unwrap_or(false)
+        && crate::session_check::detect_bypassed_response_write(file)
+            .ok()
+            .flatten()
+            .is_some()
+    {
+        return CloseoutRecoveryState::DirectResponsePatchback;
+    }
     // `#recursive-repair-state-drift` / `#recursive-repair-recovery-states`:
     // classify committed-cycle drift by *what* differs so the recovery names one
     // safe command. Order matters — narrowest/safest first, content drift last
@@ -841,6 +862,16 @@ pub fn classify_closeout_recovery_state(file: &Path) -> CloseoutRecoveryState {
             return CloseoutRecoveryState::SidecarVisibleDrift;
         }
         return CloseoutRecoveryState::UnsafeUserContentDrift;
+    }
+    // `#closeout-recovery-state-machine`: the document itself is clean (snapshot
+    // == HEAD == working) but a reaped/closed item left a nested parent submodule
+    // pointer uncommitted — single safe recovery is `agent-doc commit`.
+    if crate::git::submodule_pointer_drift(file)
+        .ok()
+        .flatten()
+        .is_some()
+    {
+        return CloseoutRecoveryState::NestedParentPointerStale;
     }
     CloseoutRecoveryState::Clean
 }
@@ -1280,6 +1311,94 @@ mod tests {
             classify_closeout_recovery_state(&doc),
             CloseoutRecoveryState::UnsafeUserContentDrift
         );
+    }
+
+    #[test]
+    fn classify_recovery_direct_response_patchback_when_visible_response_uncommitted() {
+        // `#closeout-recovery-state-machine`: a `### Re:` response was patched
+        // directly into the working file outside the binary write path (snapshot
+        // and HEAD are clean, the working file gained the response). Classified as
+        // DirectResponsePatchback → recover with `write --commit`, NOT the generic
+        // UnsafeUserContentDrift / SidecarVisibleDrift.
+        let base = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n❯ a question\n<!-- /agent:exchange -->\n",
+        );
+        let (_dir, doc) = setup_git_project_with_doc(base);
+        crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        crate::snapshot::save(&doc, base).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(base), Some(base)).unwrap();
+        // Patch a visible response directly into the working file (bypassing write).
+        let with_response = base.replace(
+            "❯ a question\n",
+            "❯ a question\n### Re: a question — gpt-5\n\nDirect answer.\n",
+        );
+        std::fs::write(&doc, &with_response).unwrap();
+        assert_eq!(
+            classify_closeout_recovery_state(&doc),
+            CloseoutRecoveryState::DirectResponsePatchback
+        );
+        let cmd = CloseoutRecoveryState::DirectResponsePatchback
+            .recovery_command(&doc)
+            .unwrap();
+        assert!(cmd.contains("write --commit"), "{cmd}");
+    }
+
+    #[test]
+    fn classify_recovery_nested_parent_pointer_stale_when_submodule_ahead_of_parent() {
+        // `#closeout-recovery-state-machine`: the document is clean (snapshot ==
+        // HEAD == working) but its submodule HEAD is ahead of the parent repo's
+        // recorded pointer (a reaped item left the parent pointer un-bumped).
+        // Classified as NestedParentPointerStale → recover with `agent-doc commit`.
+        let root = tempfile::TempDir::new().unwrap();
+        let sub_origin = root.path().join("sub_origin");
+        let sup = root.path().join("super");
+        let init_repo = |p: &Path| {
+            std::fs::create_dir_all(p).unwrap();
+            run_git(p, &["init"]);
+            run_git(p, &["config", "user.email", "test@example.com"]);
+            run_git(p, &["config", "user.name", "Test User"]);
+        };
+        // Submodule origin with an initial commit (S1).
+        init_repo(&sub_origin);
+        std::fs::write(sub_origin.join("doc.md"), "---\nsession: t\n---\n\nv1\n").unwrap();
+        run_git(&sub_origin, &["add", "."]);
+        run_git(&sub_origin, &["commit", "-m", "s1", "--no-verify"]);
+        // Super repo records the submodule pointer at S1.
+        init_repo(&sup);
+        run_git(
+            &sup,
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                sub_origin.to_str().unwrap(),
+                "sub",
+            ],
+        );
+        run_git(&sup, &["commit", "-m", "add sub", "--no-verify"]);
+        // Advance the submodule HEAD (S2) WITHOUT bumping the parent pointer.
+        let subwt = sup.join("sub");
+        let content = "---\nsession: t\nagent_doc_format: template\n---\n\nv2\n";
+        std::fs::write(subwt.join("doc.md"), content).unwrap();
+        run_git(&subwt, &["add", "doc.md"]);
+        run_git(&subwt, &["commit", "-m", "s2", "--no-verify"]);
+        // Document itself is clean: snapshot == HEAD == working.
+        let doc = subwt.join("doc.md");
+        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        crate::snapshot::save(&doc, content).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(content), Some(content))
+            .unwrap();
+        assert_eq!(
+            classify_closeout_recovery_state(&doc),
+            CloseoutRecoveryState::NestedParentPointerStale
+        );
+        let cmd = CloseoutRecoveryState::NestedParentPointerStale
+            .recovery_command(&doc)
+            .unwrap();
+        assert!(cmd.contains("agent-doc commit"), "{cmd}");
     }
 
     #[test]

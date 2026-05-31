@@ -16,7 +16,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -56,13 +56,18 @@ Landed a safe, tested **slice 1** and kept the item open with the remainder narr
 
 #### Note on this turn's state
 Last turn's response was archived by a concurrent compaction (`...-170445.md`) within minutes, which surfaced a `stuck_captured_cycle` warning — a false positive of the compaction-vs-stale-capture class (`#stuck-capture-compact-false-positive`), **not** lost work. I did **not** run `write --commit` (it would re-inject the archived response). This racy multi-session environment is also why I gated the live-verification phases above.
-<!-- agent:boundary:ed2db1d0 -->
+<!-- agent:boundary:b69981e3 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
+- do [#gated-followup-split-enforcement]
 preset #spec-test-build-install-commit-push
 - ~do [#recursive-repair-state-drift]~
-- do [#blocked-closeout-followup-capture]
+- ~do [#blocked-closeout-followup-capture]~
+- do [#recursive-repair-recovery-states]
+- do [#recursive-repair-apply]
+- do [#preflight-probe-side-effect-free]
+- do [#codex-owned-pane-stop-hook-live-verify]
 - do [#queue-sync-auto-pending-done-guard-misfire]
 - do [#tagpath-queue-priority-publish-align]
 - do [#codex-owned-pane-prompt-miss-followups]
@@ -107,7 +112,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 
 ## Backlog
 
-<!-- agent:backlog priority queue -->
+<!-- agent:backlog priority queue=prepend -->
 - [ ] [#gated-followup-split-enforcement] [recommended] #agent-doc-bug 2026-05-31: when a directed do [#id] cycle keeps a multi-phase item open via --pending-edit (backlog) or --review-edit (review) with text that enumerates several gated/remaining phases, agent-doc neither prompts nor guards splitting those phases into discrete child backlog IDs — the deferred work stays buried in one parent's narrowed description and is not independently trackable/queueable. Repro this session: #recursive-repair-state-drift and #codex-owned-pane-prompt-miss-followups each had 2-4 gated phases folded into parent text; only a user catch prompted splitting them into #recursive-repair-recovery-states/#recursive-repair-apply/#preflight-probe-side-effect-free/#codex-owned-pane-stop-hook-live-verify. Add a session-check/finalize advisory (warn-first, sibling of #blocked-closeout-followup-capture and the SKILL 'one backlog ID per actionable phase' rule) that detects a kept-open item whose body lists multiple gated phases without discrete child IDs and recommends the split. Plan: TBD.
 - [ ] [#recursive-repair-recovery-states] [recommended] Extend flow::closeout::classify_closeout_recovery_state with the recursive owner-pane recovery states beyond the landed BoundaryOnlyDrift: open_empty_preflight (auto-abandonable empty preflight cycle), sidecar_visible_drift (snapshot/CRDT/baseline stale vs visible file after an accepted metadata-only change), unsafe_user_content_drift (user-authored prompt/response drift -> fail closed, never auto-commit), and queue/queue_active-metadata HEAD drift (distinct from boundary/prompt-prefix; must not auto-commit a user queue prompt edit). Parent: #recursive-repair-state-drift. Plan: tasks/agent-doc/plan-recursive-repair-state-drift.md.
 - [ ] [#recursive-repair-apply] [recommended] Teach agent-doc repair (or a closeout helper) to APPLY the safe recovery states in order as ONE command -- abandon empty preflight cycles, rebuild sidecars when the diff is metadata-only, commit agent-doc-generated metadata HEAD drift -- replacing the manual cancel + reset --from-current + commit sequence; then live-verify the full recursive same-pane recovery path. Parent: #recursive-repair-state-drift. Plan: tasks/agent-doc/plan-recursive-repair-state-drift.md.

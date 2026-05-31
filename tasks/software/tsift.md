@@ -169,7 +169,43 @@ Commits:
 
 Remaining queue items are `#tsiftmemcutover` and `#tsiftmemretire`.
 
-<!-- agent:boundary:39d1c2fc -->
+
+### Re: #tsiftmemcutover — gpt-5
+
+> **Queue prompt:**
+>
+> do [#tsiftmemcutover]
+
+
+Completed `#tsiftmemcutover`.
+
+Preflight had a captured-cycle warning from the prior turn; I repaired it through `agent-doc write --commit` before starting this item and avoided the direct recursive `agent-doc <file>` entrypoint that had stalled this pane before.
+
+Changed `src/tsift` so operator-facing memory retrieval now points at first-party graph retrieval first:
+
+- Added `/tsift-memory-search` to the OpenCode package and `tsift init --opencode` output. It runs `tsift graph-db --path . --json related '<query>'`, asks for a query when empty, and explicitly says not to call direct `claude-mem` or `/mem-search`.
+- Updated `/tsift-memory-status`, CLI help, README/SPEC guidance, and memory command `next_commands` so `graph-db related` is the live retrieval path and `tsift memory import-claude-mem` is only the fallback migration/import path.
+- Added a CLI regression test proving `memory status --json` lists `graph-db --path ... --json related '<query>'` before `memory import-claude-mem` when claude-mem is missing.
+- Corrected the command examples after installed proof caught the invalid `related ... --json` option order; the accepted form is now used everywhere.
+
+Verification:
+
+- `cargo test -p tsift-index init_opencode_creates_command_shortcuts`
+- `cargo test -p tsift-cli memory_status_prefers_graph_db_related_with_claude_mem_fallback`
+- `cargo build -p tsift && cd packages/opencode-tsift && npm test`
+- `make check` passed after the final command-order fix, including clippy, full workspace tests, OpenCode tests, and npm publish dry run.
+- `cargo build --workspace`
+- `cargo install --path . --force`
+- Installed proof: `tsift memory status . --claude-mem-db /tmp/definitely-missing-claude-mem.db --json` now reports `tsift graph-db --path . --json related '<query>'` before the fallback import command.
+- Installed proof: `tsift graph-db --path /home/brian/work/btakita/agent-loop --json related 'claude-mem import tsift memory'` reports semantic readiness `ready`, 5 semantic seeds, and 18 graph nodes.
+- CI for submodule commit `a00627e` passed: `live Convex graph acceptance` and `clippy + test` both succeeded. This repo's CI workflow exposes those two jobs and no separate `tmux-test` job.
+
+Commits:
+
+- `src/tsift`: `a00627e` (`feat(memory): cut over retrieval instructions`), pushed to `origin/main`.
+- parent repo: `4093eb0` (`chore: update tsift submodule`).
+
+<!-- agent:boundary:16fa0721 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -185,14 +221,13 @@ preset #spec-test-build-install-commit-push
 - ~do [#tsiftmemimportall]~
 - ~do [#tsiftmemsemanticgate]~
 - ~do [#tsiftmemparityeval]~
-- do [#tsiftmemcutover]
+- ~do [#tsiftmemcutover]~
 - do [#tsiftmemretire]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#tsiftmemcutover] Replace live memory retrieval call sites and operator instructions that point at direct claude-mem or /mem-search with tsift-memory / graph-db retrieval, while keeping claude-mem as a fallback during the first cutover pass.
 - [ ] [#tsiftmemretire] Retire claude-mem only after full import, semantic retrieval, and parity eval are green; keep a documented rollback path until at least one normal session cycle succeeds without direct claude-mem reads.
 <!-- /agent:backlog -->
 

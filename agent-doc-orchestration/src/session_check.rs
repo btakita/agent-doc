@@ -653,11 +653,17 @@ fn check_snapshot_committed_guard(file: &Path) -> Result<GuardResult> {
 }
 
 fn closeout_recovery_hint(file: &Path) -> String {
-    format!(
-        "Use `agent-doc write --commit {}` once the visible response body is final, then re-run `agent-doc session-check {}`.",
-        file.display(),
-        file.display()
-    )
+    // `#closeout-repair-churn`: render one typed recovery instruction for the
+    // classified state instead of a single static "try write --commit" line.
+    let state = crate::flow::closeout::classify_closeout_recovery_state(file);
+    match state.recovery_command(file) {
+        Some(command) => format!("Recovery [{}]: {}.", state.as_str(), command),
+        None => format!(
+            "Use `agent-doc write --commit {}` once the visible response body is final, then re-run `agent-doc session-check {}`.",
+            file.display(),
+            file.display()
+        ),
+    }
 }
 
 /// `#codex-final-response-not-written`: a completed turn that committed real

@@ -393,6 +393,128 @@ pub fn cycle_phase_name(phase: crate::cycle_state::CyclePhase) -> &'static str {
     }
 }
 
+/// Typed closeout recovery state (`#closeout-repair-churn`). Collapses the
+/// scattered "try finalize / write --commit / commit" diagnostic chain into one
+/// classified state with a single recovery command. The recovery *mechanisms*
+/// already exist (`PatchbackShape::EscapedComponentMarkers` fail-closed,
+/// `write --commit` direct-patchback absorption, `complete_required_closeout`
+/// parent-pointer retry); this is the unifying classifier + instruction table
+/// that `session_check::closeout_recovery_hint` renders for every guard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CloseoutRecoveryState {
+    /// No recovery needed.
+    Clean,
+    /// Cycle still open (preflight_started / response_captured / write_applied).
+    OpenCycle,
+    /// Committed binary-owned work but the assistant response body is missing
+    /// from HEAD (no capture, or a captured body not materialized in HEAD).
+    MissingResponseBody,
+    /// A visible `### Re:` response was patched directly into the document
+    /// outside the binary write path. (Reserved for full detection wiring.)
+    DirectResponsePatchback,
+    /// Raw `<!-- agent:NAME -->` component markers were escaped into the
+    /// committed exchange instead of applied as `<!-- patch:* -->` blocks.
+    EscapedTemplatePatch,
+    /// Working tree differs from HEAD only by boundary / `(HEAD)` markers.
+    /// (Reserved for full detection wiring.)
+    BoundaryOnlyDrift,
+    /// A reaped/closed item left a nested parent submodule pointer uncommitted.
+    /// (Reserved for full detection wiring.)
+    NestedParentPointerStale,
+}
+
+impl CloseoutRecoveryState {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Clean => "clean",
+            Self::OpenCycle => "open_cycle",
+            Self::MissingResponseBody => "missing_response_body",
+            Self::DirectResponsePatchback => "direct_response_patchback",
+            Self::EscapedTemplatePatch => "escaped_template_patch",
+            Self::BoundaryOnlyDrift => "boundary_only_drift",
+            Self::NestedParentPointerStale => "nested_parent_pointer_stale",
+        }
+    }
+
+    /// The single recovery command for this state, or `None` when `Clean`.
+    pub fn recovery_command(self, file: &Path) -> Option<String> {
+        let f = file.display();
+        Some(match self {
+            Self::Clean => return None,
+            Self::OpenCycle => format!(
+                "finish the response, then `agent-doc finalize {f}` (or `agent-doc write --commit {f}` to absorb an already-visible response)"
+            ),
+            Self::MissingResponseBody => format!(
+                "pipe the final response (with `<!-- patch:exchange -->` blocks) through `agent-doc write --commit {f}`, then re-run `agent-doc session-check {f}`"
+            ),
+            Self::DirectResponsePatchback => format!(
+                "`agent-doc write --commit {f}` to absorb the visible `### Re:` response through the snapshot/commit boundary"
+            ),
+            Self::EscapedTemplatePatch => format!(
+                "rewrite the response with real `<!-- patch:exchange -->` blocks and rerun `agent-doc finalize {f}` — escaped component markers must not reach `agent:exchange`"
+            ),
+            Self::BoundaryOnlyDrift => format!(
+                "`agent-doc commit {f}` (boundary / `(HEAD)` marker drift only)"
+            ),
+            Self::NestedParentPointerStale => format!(
+                "`agent-doc commit {f}` to update the nested parent submodule pointer"
+            ),
+        })
+    }
+}
+
+/// Classify the current closeout recovery state for `file`. Reuses the existing
+/// detection primitives so the recovery diagnostic is a single typed instruction
+/// instead of the historical multi-command chain. Conservatively returns `Clean`
+/// when no recovery signal is provable; `DirectResponsePatchback`,
+/// `BoundaryOnlyDrift`, and `NestedParentPointerStale` detection wiring is
+/// tracked as remaining work in the plan.
+pub fn classify_closeout_recovery_state(file: &Path) -> CloseoutRecoveryState {
+    let state = match crate::cycle_state::load(file) {
+        Ok(Some(state)) => state,
+        _ => return CloseoutRecoveryState::Clean,
+    };
+    use crate::cycle_state::CyclePhase;
+    match state.phase {
+        CyclePhase::PreflightStarted
+        | CyclePhase::ResponseCaptured
+        | CyclePhase::WriteApplied => return CloseoutRecoveryState::OpenCycle,
+        CyclePhase::Abandoned => return CloseoutRecoveryState::Clean,
+        CyclePhase::Committed => {}
+    }
+
+    if head_exchange_has_escaped_markers(file) {
+        return CloseoutRecoveryState::EscapedTemplatePatch;
+    }
+    // A captured body that never materialized in HEAD, or a committed
+    // response-write turn with no capture at all, are both the missing-body
+    // shape recovered by `write --commit`.
+    if stuck_captured_cycle(file).is_some() {
+        return CloseoutRecoveryState::MissingResponseBody;
+    }
+    if state.capture_id.is_none()
+        && state.response_sha256.is_none()
+        && state.had_pending_mutations
+    {
+        return CloseoutRecoveryState::MissingResponseBody;
+    }
+    CloseoutRecoveryState::Clean
+}
+
+fn head_exchange_has_escaped_markers(file: &Path) -> bool {
+    let Ok(Some(head)) = crate::git::show_head(file) else {
+        return false;
+    };
+    let Ok(components) = crate::component::parse(&head) else {
+        return false;
+    };
+    let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
+        return false;
+    };
+    let body = exchange.content(&head);
+    body.contains("&lt;!-- agent:") || body.contains("&lt;!-- /agent:")
+}
+
 #[derive(Debug)]
 struct CloseoutTimer<'a> {
     file: &'a Path,
@@ -580,6 +702,86 @@ mod tests {
         .unwrap();
 
         assert!(stuck_captured_cycle(&doc).is_none());
+    }
+
+    #[test]
+    fn recovery_command_maps_each_state_to_one_instruction() {
+        use CloseoutRecoveryState::*;
+        let f = Path::new("tasks/doc.md");
+        assert_eq!(Clean.recovery_command(f), None);
+        for (state, name, needle) in [
+            (OpenCycle, "open_cycle", "agent-doc finalize"),
+            (MissingResponseBody, "missing_response_body", "agent-doc write --commit"),
+            (DirectResponsePatchback, "direct_response_patchback", "absorb the visible"),
+            (EscapedTemplatePatch, "escaped_template_patch", "patch:exchange"),
+            (BoundaryOnlyDrift, "boundary_only_drift", "boundary"),
+            (
+                NestedParentPointerStale,
+                "nested_parent_pointer_stale",
+                "parent submodule pointer",
+            ),
+        ] {
+            assert_eq!(state.as_str(), name);
+            let cmd = state
+                .recovery_command(f)
+                .expect("non-clean states have a command");
+            assert!(cmd.contains(needle), "state {name} command {cmd:?} missing {needle:?}");
+            assert!(cmd.contains("tasks/doc.md"), "command should name the file: {cmd:?}");
+        }
+    }
+
+    #[test]
+    fn classify_recovery_clean_without_cycle_state() {
+        let (_dir, doc) = setup_git_project_with_doc("---\nsession: test\n---\n\nHi\n");
+        assert_eq!(
+            classify_closeout_recovery_state(&doc),
+            CloseoutRecoveryState::Clean
+        );
+    }
+
+    #[test]
+    fn classify_recovery_open_cycle_when_preflight_started() {
+        let base = "---\nsession: test\n---\n\nHi\n";
+        let (_dir, doc) = setup_git_project_with_doc(base);
+        crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        assert_eq!(
+            classify_closeout_recovery_state(&doc),
+            CloseoutRecoveryState::OpenCycle
+        );
+    }
+
+    #[test]
+    fn classify_recovery_missing_response_body_for_stuck_cycle() {
+        let base = "---\nsession: test\n---\n\n## User\n\nHello\n";
+        let response = "### Re: hello — gpt-5\n\nCaptured but never committed.\n";
+        let (_dir, doc) = setup_git_project_with_doc(base);
+        crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        crate::capture::capture_response(&doc, response).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(base), Some(base)).unwrap();
+        assert_eq!(
+            classify_closeout_recovery_state(&doc),
+            CloseoutRecoveryState::MissingResponseBody
+        );
+    }
+
+    #[test]
+    fn classify_recovery_clean_when_response_committed_in_head() {
+        let base = "---\nsession: test\n---\n\n## User\n\nHello\n";
+        let response = "### Re: hello — gpt-5\n\nCommitted response.\n";
+        let full_doc = format!("{base}\n{response}");
+        let (dir, doc) = setup_git_project_with_doc(base);
+        crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        crate::capture::capture_response(&doc, response).unwrap();
+        std::fs::write(&doc, &full_doc).unwrap();
+        crate::snapshot::save(&doc, &full_doc).unwrap();
+        run_git(dir.path(), &["add", "doc.md"]);
+        run_git(dir.path(), &["commit", "-m", "response", "--no-verify"]);
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(&full_doc), Some(&full_doc))
+            .unwrap();
+        assert_eq!(
+            classify_closeout_recovery_state(&doc),
+            CloseoutRecoveryState::Clean
+        );
     }
 
     #[test]

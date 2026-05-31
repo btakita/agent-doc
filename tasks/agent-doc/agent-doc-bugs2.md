@@ -36,11 +36,46 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 1 response topic(s): do #recovery-drift-authoritative-side
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:db8b510e -->
+
+❯ When I call JB `Run Agent Doc` on monsterrodholders.md...nothing seems to happen. No UI feedback. No routing to the open session. Why?
+❯ #spec-test-build-install-commit-push
+
+### Re: JB Run Agent Doc on monsterrodholders.md — no UI feedback — opus-4-8
+
+I pulled the live route trace from `src/boost-client/.agent-doc/logs/ops.log`:
+
+```
+route_wait_for_ready_override file=tasks/monsterrodholders.md harness=codex timeout_secs=60
+route_authoritative_actor_starting_not_ready ... pane=%40 generation=244 actor_state=busy
+   supervisor_health=healthy runtime_state=busy prompt_ready=false
+   last_transition_reason=ipc_inject last_transition_caller=dispatch
+route_wait_for_ready_timeout ... elapsed_ms=60105 timeout_ms=60000
+```
+
+#### Why nothing happened
+
+The Codex pane (`%40`) that owns `monsterrodholders.md` was **mid-turn / busy** (`prompt_ready=false`). JB `Run Agent Doc` shells out `route --dispatch-only --plain-trigger --wait-for-ready 60`. Route waited 60s for the pane to reach a dispatch-ready prompt; it never did. With the actor still busy and **no prompt to queue** (a plain reopen), the action classifier downgraded to **`FocusOnly`** — route focused the pane but **did not inject** the reopen, and the `FocusOnly` arm returned `Ok` → **exit 0**. The JB plugin treats exit 0 as success and shows nothing. On top of that, the plugin had classified the busy case as *retryable*, so it would silently re-run (up to 4 × 60s ≈ 4 minutes) before any notification.
+
+Net: route silently focused-only and reported success → no routing, no feedback. Not a failure to invoke `agent-doc` — a **silent no-dispatch**.
+
+#### Fix (two parts)
+
+1. **Route** (`route.rs` / `routed_reopen.rs`): a plain dispatch-only reopen against a *busy* actor now **fails closed** with the busy-not-ready diagnostic (`route_dispatch_only_authoritative_actor_busy_focus_only_not_dispatched`) after focusing the pane, instead of returning silent success. New pure predicate `dispatch_only_focus_only_should_fail_closed(mode, state)` scopes it to `DispatchOnly + Busy` only (managed mode and non-busy blocker states keep focus-only).
+2. **JB plugin** (`TerminalUtil.kt`, v0.2.143): a `BUSY_RUNNING` (active-turn) failure now notifies the operator **immediately** ("session still running", with `agent-doc session status <file>` guidance) instead of silently re-waiting the ready timeout per retry. Only a still-booting `starting` pane stays a silent retry.
+
+So now: busy pane → route fails closed → the IDE Event Log shows a "session still running" notification right away.
+
+#### Verification
+
+`make check` + `./gradlew test` green. Rust regression `dispatch_only_focus_only_fails_closed_only_for_busy_actor`; Kotlin classifier tests updated (the live `gen 244 / pane %40` message now asserts `BUSY_RUNNING` + not-retried). Spec updated (README, SPEC, specs/08-session-routing). Both binaries rebuilt + installed; plugin **0.2.143** zips built — install `agent-doc-jetbrains-0.2.143-signed.zip` from disk to pick up the notification change.
+
+Closed `#jb-run-agent-doc-command-route-miss`; follow-up `#jb-run-agent-doc-busy-feedback-live-verify` to confirm the notification live on installed 0.2.143.
+<!-- agent:boundary:80c6da1b -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
+- do [#recovery-drift-apply-live-verify]
 - ~do [#recovery-drift-authoritative-side]~
 - do [#jb-run-agent-doc-command-route-miss]
 - do [#repair-orphan-prefix-bug]
@@ -61,6 +96,20 @@ preset #spec-test-build-install-commit-push
 <!-- /agent:queue -->
 ###
 <!--
+```
+[route] debounce OK — file idle for 19.2s and typing indicator idle
+[route] target tmux session: 0
+[preflight] review: 4 item(s), 4 gated
+[repair] repaired stale preflight_started cycle cycle-1780256669054 for tasks/software/tsift.md
+[commit] staged snapshot already matches HEAD for tasks/software/tsift.md — closing cycle as already committed
+[perf] commit total: 9ms
+[session-check] warning: open backlog item(s) also appear outside live agent:backlog: #compact-community-serialization (line 75), #louvain-dedup-aggregate (line 76), #shared-graph-build-pipeline (line 77), #sift-token-index (line 78)
+[route] drained open closeout for tasks/software/tsift.md before reroute (StalePreflightLockRepaired)
+[route] Pane %42 is in stash window 'stash', rescuing to agent-doc window
+[route] Rescued pane %42 via join-pane
+Error: dispatch-only opencode reopen refused to inject into pane %42 for tasks/software/tsift.md because the pane still shows opencode active turn; restore an idle prompt and retry
+```
+---
 I ran JB `Run Agent Doc` when the tsift.md session was idle. The "opencode active turn" is false and this state is incorrect. How can we ensure an accurate state using hooks? Can we just use tmux to pass the `/agent-doc .../tsift.md` command regardless of the agent-doc tracking?
 ```
 [route] debounce OK — file idle for 1.4s and typing indicator idle
@@ -93,8 +142,8 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog priority queue=prepend -->
+- [ ] [#jb-run-agent-doc-busy-feedback-live-verify] [recommended] Live-verify the busy-pane Run Agent Doc feedback fix (#jb-run-agent-doc-command-route-miss) end to end: install JB plugin 0.2.143 (build/distributions/agent-doc-jetbrains-0.2.143-signed.zip) + restart the route-owned agent-doc process to load the new binary, then run Run Agent Doc on a doc whose Codex pane is mid active-turn and confirm an immediate 'session still running' Event Log notification (no silent 60s wait, no 4x retry). Source landed submodule e1735fa2.
 - [ ] [#recovery-drift-apply-live-verify] [recommended] Live-verify the full one-command recovery (agent-doc repair --apply-recovery) on a real owner pane now that #recovery-drift-authoritative-side landed the authoritative-side determination: reproduce a queue_metadata_drift / sidecar_visible_drift closeout and confirm apply_closeout_recovery restores-from-HEAD for the spurious queue_active:false class and commits-forward otherwise, without the manual cancel->reset->commit sequence. Gated on a live owner pane (risky in a racy multi-session repo). Parent plan: tasks/agent-doc/plan-recursive-repair-state-drift.md.
-- [ ] [#jb-run-agent-doc-command-route-miss] [recommended] #agent-doc-bug 2026-05-31: JetBrains `Run Agent Doc` does not route into the opencode console. Route falsely detects "opencode active turn" when the pane is idle. Root cause: `dispatch_blocker_reason` (harness.rs:324-345) scans all lines top-down — completed assistant response text above the idle `>` prompt sets `has_non_idle_content=true` while the prompt detection misses the OpenCode TUI composer shape, yielding a false active turn. Fix: bottom-up prompt detection (skip chrome from bottom, check last non-chrome line for dispatch-ready) + expand `is_dispatch_ready_prompt_line` patterns for OpenCode idle composer. Plan: tasks/agent-doc/plan-jb-run-agent-doc-command-route-miss.md. Related: #route-drain-all-surface-live-verify, #jb-stale-busy-idle-footer, #codex-owned-pane-prompt-miss.
 - [ ] [#repair-orphan-prefix-bug] Orphan-response repair path prefixes every body line with the user-prompt marker. Live repro 2026-05-31 tsift.md: direct Edit-based patchback triggered orphan repair, which applied the prefix to all assistant body lines. Fix: ensure orphan-repair preserves response body verbatim. Plan: tasks/agent-doc/plan-repair-orphan-prefix-bug.md. Related: #jb-compact-malformed-response-commit, #finalize-retry-ipc-response-duplication.
 - [ ] [#gated-followup-split-enforcement] [recommended] #agent-doc-bug 2026-05-31: when a directed do [#id] cycle keeps a multi-phase item open via --pending-edit (backlog) or --review-edit (review) with text that enumerates several gated/remaining phases, agent-doc neither prompts nor guards splitting those phases into discrete child backlog IDs — the deferred work stays buried in one parent's narrowed description and is not independently trackable/queueable. Repro this session: #recursive-repair-state-drift and #codex-owned-pane-prompt-miss-followups each had 2-4 gated phases folded into parent text; only a user catch prompted splitting them into #recursive-repair-recovery-states/#recursive-repair-apply/#preflight-probe-side-effect-free/#codex-owned-pane-stop-hook-live-verify. Add a session-check/finalize advisory (warn-first, sibling of #blocked-closeout-followup-capture and the SKILL 'one backlog ID per actionable phase' rule) that detects a kept-open item whose body lists multiple gated phases without discrete child IDs and recommends the split. Plan: TBD.
 - [ ] [#preflight-probe-side-effect-free] [recommended] Make probe/diagnostic agent-doc preflight side-effect-free or self-abandoning so it never leaves an open preflight_started cycle that later wedges session-check (Proposed-Fix #4 of #recursive-repair-state-drift). Distinguish a dispatch/response-bound preflight from a pure inspection probe. Plan: tasks/agent-doc/plan-recursive-repair-state-drift.md.

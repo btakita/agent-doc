@@ -28,7 +28,40 @@ Prior frontmatter bug fix remains complete. New work this cycle is planning only
 Compacted content:
 - Archived 2 response topic(s): editor-buffer-state-ffi-debounce; editor-buffer-state
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/9b6e92d2...
-<!-- agent:boundary:38b710ec -->
+❯ `project_root_for_doc` is called several times, each requiring disk access. Would lazily-rs be a good fit for caching this?
+
+### Re: lazily-rs for caching project_root_for_doc — gpt-5
+
+Short answer: **not a good fit here.** A `HashMap<PathBuf, Option<PathBuf>>` behind `std::sync::OnceLock` or a function-local `HashMap` is more proportionate if caching is even needed.
+
+Why lazily-rs does not add value:
+
+1. **lazily-rs is a reactive dependency-injection framework** (Context + Slot + Cell with invalidation tracking). `project_root_for_doc` is a pure-ish filesystem walk with no reactive consumers, no dependency graph, and no invalidation semantics needed within a single run.
+2. **agent-doc is sequential per run** (no async, per AGENTS.md). There is no long-lived context object threaded across calls. Introducing a `Context` just to cache one `Option<PathBuf>` per document path is architectural overkill.
+3. **The function is already cheap.** It walks up `file.parent()` calling `.is_dir()` on `.agent-doc` at each level — typically 1-5 `stat(2)` calls. The filesystem dentry cache makes repeated calls for the same path near-zero cost within a single process lifetime.
+
+If you do see measurable overhead (e.g., in a hot `watch` loop), the proportionate fix is:
+
+```rust
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+
+static PROJECT_ROOT_CACHE: Mutex<HashMap<PathBuf, Option<PathBuf>>> = Mutex::new(HashMap::new());
+
+pub fn project_root_for_doc_cached(file: &Path) -> Option<PathBuf> {
+    let key = file.to_path_buf();
+    if let Some(cached) = PROJECT_ROOT_CACHE.lock().unwrap().get(&key) {
+        return cached.clone();
+    }
+    let result = project_root_for_doc(file);
+    PROJECT_ROOT_CACHE.lock().unwrap().insert(key, result.clone());
+    result
+}
+```
+
+Or even simpler: since the result for a given file is immutable within a run, just compute it once at the call site and pass `Option<PathBuf>` down.
+<!-- agent:boundary:40056e3b -->
 <!-- /agent:exchange -->
 
 <!--

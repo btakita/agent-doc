@@ -16,7 +16,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -88,10 +88,37 @@ I kept the implementation in `flow/closeout.rs` + `main.rs` with **no edit to `r
 The authoritative-side determination + full live-verify are split into the discrete follow-up `#recovery-drift-authoritative-side`. Tests: `apply_recovery_clean_is_nothing_to_do`, `apply_recovery_cancels_open_empty_preflight`, `apply_recovery_withholds_queue_metadata_drift`. `make check` green; both binaries rebuilt + installed; CLI verified.
 
 This also closes the loop on the session-long recursive-repair work: classify (slice 1+2) → apply (slice 3). The remaining children are `#preflight-probe-side-effect-free` (root cause of the empty cycles this now cancels) and `#recovery-drift-authoritative-side` (the new gap).
-<!-- agent:boundary:e6e9c645 -->
+❯ In closeout.rs, JB Idea is giving an error `Cannot find type `RecoveryApplication` in this scope [E0412]`. I want to also maintain the rust codebase. Please help my IDE not have an error.
+
+### Re: RecoveryApplication E0412 in closeout.rs — opus-4-8
+
+Good news: **the code is correct** — this is a stale IDE index, not a real compile error. I verified all three:
+
+```
+cargo check -p agent-doc-orchestration   → Finished (clean)
+cargo clippy -p agent-doc-orchestration  → no warnings
+cargo check --bin agent-doc              → Finished (main.rs resolves the type)
+```
+
+`RecoveryApplication` is defined at `closeout.rs:575` (`pub enum RecoveryApplication`) and `apply_closeout_recovery` returns it — `rustc` resolves it fine.
+
+**Why your IDE shows `E0412 [cannot find type RecoveryApplication]`:** the type was added by a commit my CLI session made (`6b5f0bc8`) in a *separate process*. The JetBrains Rust plugin caches a Cargo project model and didn't re-index after that external change, so its resolver still has the pre-existing version of the file. On top of that, your editor's format-on-save left `closeout.rs` with uncommitted rustfmt churn, which can wedge the resolver mid-reindex.
+
+**What I did to give the IDE a clean slate** (commit `06661638`): committed the rustfmt-formatted `closeout.rs` (formatting-only — semantically identical, clippy/check verified), so there's no uncommitted churn and the file on disk is canonical.
+
+**To clear the phantom error in JB** (any one of these, cheapest first):
+1. Cargo tool window → **Refresh Cargo Project** (the ⟳ icon) — re-runs `cargo metadata` + re-indexes.
+2. Right-click `closeout.rs` → **Reload from Disk**, or just edit+save it once.
+3. If it persists: **File → Invalidate Caches… → Invalidate and Restart**.
+
+On Rust-codebase maintenance generally: this repo's gate is `make check` (clippy + tests), not `cargo fmt` — the crate isn't fully rustfmt-clean, so I only formatted the file you're in rather than reformatting the whole crate (which would collide with the concurrent `repair.rs` session). If you'd like, I can add a `cargo fmt --check` step to CI / `make check` so format drift gets caught uniformly going forward.
+<!-- agent:boundary:f435120b -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
+- do [#recovery-drift-authoritative-side]
+- do [#jb-run-agent-doc-command-route-miss]
+- do [#repair-orphan-prefix-bug]
 preset #spec-test-build-install-commit-push
 - ~do [#recursive-repair-state-drift]~
 - ~do [#recursive-repair-recovery-states]~

@@ -326,7 +326,29 @@ Gated on a design decision — plan written at `tasks/agent-doc/plan-backlog-pri
 No code shipped this cycle — the gating decision is the marker syntax + opt-in model. Once confirmed, implementation is bounded (a pure sort fn + parse token + the opt-in attribute + maintenance wiring + tests).
 
 (Closeout note: `--force-disk` — IDE IPC listener still unresponsive this session.)
-<!-- agent:boundary:17552977 -->
+
+### Re: do [#backlog-queue-sync-attribute] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#backlog-queue-sync-attribute]
+
+
+Gated on a design decision — plan at `tasks/agent-doc/plan-backlog-queue-sync-attribute.md`. This one directly collides with an open safety item, so the design must be settled (and likely built atop that fix) before implementation.
+
+**The core conflict.** `queue=sync` *replaces* `agent:queue` content — which is exactly the silent clobber that the open review item `#queue-user-edit-overwrite` exists to prevent (user-authored queue edits being overwritten by queue convergence). A naive every-write replace would reintroduce that bug. So sync must be **deliberate and provenance-aware**, not a blind rewrite.
+
+**Open design questions (the gate).**
+1. **Trigger** — one-shot (the attribute is consumed/cleared after a single regeneration so it can't silently re-fire) vs. an explicit `agent-doc queue sync|append|prepend` command. Every-write is unsafe.
+2. **Clobber safety** — even `sync` should preserve a user-added free-text queue head with no backlog id; `append`/`prepend` set-diff only absent ids so they never remove a user head. Best built on the `#queue-user-edit-overwrite` provenance/epoch tracking.
+3. **Id source** — active `[ ]` only (exclude gated/done), skip already-present/struck-drained ids (interaction with `#drained-done-queue-clear`).
+
+**Recommendation (in the plan).** One-shot, provenance-aware sync; `append`/`prepend` add only absent ids; `sync` reconciles rather than blindly replaces; pairs with `#backlog-priority-attribute` (prioritize first, then emit `do [#id]` in that order). No code shipped — the gate is the trigger model + clobber-safety approach, co-designed with the priority-attribute sibling.
+
+(Side note: the first preflight probe this cycle surfaced a transient `stuck_captured_cycle` that the next pass self-healed — `recovered: true`, prior response confirmed in HEAD — via the `reconcile_compacted_committed_capture` + repair path, exactly as designed. No action needed.)
+
+(Closeout note: `--force-disk` — IDE IPC listener still unresponsive this session.)
+<!-- agent:boundary:6e24df9c -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -346,7 +368,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#next-steps-backlog-capture]~
 - ~do [#ah0s]~
 - ~do [#backlog-priority-attribute]~
-- do [#backlog-queue-sync-attribute]
+- ~do [#backlog-queue-sync-attribute]~
 - do [#preset-item-id-collision]
 <!-- /agent:queue -->
 ###
@@ -384,12 +406,12 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 - [ ] [#do-id-partial-closeout-state] [recommended] Partial-closeout WARN guard landed (check_partial_closeout_state_guard: a do[#id] turn whose response shows shipped + remaining-live-work signals with the directed id still open advises --pending-edit/--pending-gate narrowing; suppressible by a no-partial-closeout-guard response marker; FlowCore guard_ budget 35->40). Remaining: per-id edit-vs-gate tracking in cycle_state, opt-in strict mode, next-phase queue convergence, and the runbook note that #spec-test-commit-push completes a repo phase without a live/deploy item. Plan: tasks/agent-doc/plan-do-id-partial-closeout-state.md.
 - [ ] [#closeout-recovery-state-machine] [recommended] Typed closeout recovery classifier landed: flow::closeout::CloseoutRecoveryState + classify_closeout_recovery_state + recovery_command; session_check::closeout_recovery_hint renders one typed 'Recovery [state]: command' across all nine closeout-guard call sites. Classified today: clean / open_cycle / missing_response_body / escaped_template_patch. Remaining: precise detection for reserved states direct_response_patchback, boundary_only_drift, nested_parent_pointer_stale, and folding each guard's existing diagnostic through the classifier. Plan: tasks/agent-doc/plan-closeout-repair-churn.md.
 - [ ] [#preset-item-id-collision] [recommended] Enforce unique active identities across frontmatter `prompt_presets` keys and active `agent:backlog` / `agent:review` / `agent:icebox` item ids. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `#next-steps` exists both as a prompt preset and as a backlog item, making `do #next-steps` and "top backlog item: #next-steps" ambiguous between preset expansion and backlog execution. Fix with an identity registry, mutation-time rejection, preflight/session-check fail-closed diagnostics, and regressions. Plan: tasks/agent-doc/plan-preset-item-id-collision.md.
-- [ ] [#backlog-queue-sync-attribute] [recommended] Add a queue=sync|append|prepend attribute to agent:backlog / agent:icebox: queue=sync replaces agent:queue content with a do [#id] list for every item; queue=append adds item ids not already in agent:queue; queue=prepend prepends them. Composable with #backlog-priority-attribute (prioritize first, then regenerate the queue), automating the manual 'regenerate the queue to the new priority' step that currently has to be done by hand after a reorder. Requested 2026-05-30.
 <!-- /agent:backlog -->
 
 ## Review
  
 <!-- agent:review -->
+- [/] [#backlog-queue-sync-attribute] [recommended] Add a queue=sync|append|prepend attribute to agent:backlog / agent:icebox: queue=sync replaces agent:queue content with a do [#id] list for every item; queue=append adds item ids not already in agent:queue; queue=prepend prepends them. Composable with #backlog-priority-attribute (prioritize first, then regenerate the queue), automating the manual 'regenerate the queue to the new priority' step that currently has to be done by hand after a reorder. Requested 2026-05-30.
 - [/] [#backlog-priority-attribute] [recommended] Add a priority attribute to agent:backlog / agent:icebox / agent:queue that orders the item list by priority (a component-level priority flag and/or per-item priority markers), so the binary maintains priority order instead of requiring manual --pending-reorder each cycle. Automates the by-hand reprioritization done in #next-steps cycles. Composable with #backlog-queue-sync-attribute; sibling of #ah0s (explicit-position primitives). Requested 2026-05-30.
 - [/] [#stash-session-ttl-prune] [recommended] Optional opt-in hygiene to cap stash-session accumulation: reap agent-doc stash panes whose session has been idle in the stash beyond a configurable TTL. Distinct from the existing orphan reap (resync.rs step 8), which only kills unregistered + no-supervisor + no-owned-file panes; live registered/supervisor-backed sessions are correctly never auto-killed, which is why ~9 agent-loop agent-doc panes accumulate in the shared session-0 stash. Must be opt-in (frontmatter/.agent-doc config) + live-verified before enabling (destructive). Relates to #cross-project-stash-pane-condition and #jb-busy-queue-ux-feedback.
 - [/] [#plugin-cleanup-menu-command] [recommended] Expose session cleanup as agent-doc plugin-menu commands (JetBrains + VS Code): a 'Resync / Fix Sessions' action wrapping agent-doc resync --fix and a 'GC Stale Sessions' action wrapping agent-doc gc, so operators can clear stale routing/registry state and reap orphaned panes from the IDE without dropping to a terminal. Thin event-reporter pattern — the plugin shells the existing CLI/FFI; no cleanup logic in the plugin. Pairs with #stash-session-ttl-prune (auto hygiene) and #jb-busy-queue-ux-feedback (notification classification).

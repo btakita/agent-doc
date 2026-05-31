@@ -60,7 +60,28 @@ Overrode `edges_between_nodes` in `LibsqlGraphStore` with temp-table + EXISTS pu
 - `SPEC.md` — updated pushdown queries section to document the new `edges_between_nodes` override
 
 **Verification:** 8/8 tests pass. Built and pushed as `4693e36`.
-<!-- agent:boundary:c2619ed2 -->
+
+### Re: #compact-community-serialization — glm-5.1
+
+> **Queue prompt:**
+>
+> [#compact-community-serialization]
+
+
+Added `TerseCommunityMember`, `TerseCommunity`, and `TerseCommunityResult` types to `tsift-graph/src/lib.rs` for compact community serialization.
+
+**Types:**
+- `TerseCommunityMember` — `name` + `tagpath_handle` only (strips `file`, `line`, `refs`)
+- `TerseCommunity` — wraps top-N `TerseCommunityMember` slice + `id` + `modularity_contribution`
+- `TerseCommunityResult` — terse result with same aggregate fields as `CommunityResult`
+- `CommunityResult::to_terse(top_n)` — converts full result to truncated terse form
+
+**Tests added:** 4 new tests — field stripping, top-N truncation, `to_terse` from `detect_communities`, member count reduction.
+
+**Spec updated:** Community Detection section + tsift-graph crate listing.
+
+**Verification:** 71/71 tests pass. Built and pushed as `26762b0`.
+<!-- agent:boundary:44a9fae3 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -72,7 +93,7 @@ preset #spec-test-build-install-commit-push
 - ~[#ranked-neighborhood]~
 - ~[#terse-health-early-exit]~
 - ~[#libsql-edges-between-pushdown]~
-- [#compact-community-serialization]
+- ~[#compact-community-serialization]~
 - [#louvain-dedup-aggregate]
 - [#shared-graph-build-pipeline]
 - [#sift-token-index]
@@ -81,7 +102,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#compact-community-serialization] Add TerseCommunityMember/TerseCommunity — name + tagpath_handle only, top-N member slice. ~40-60% community JSON savings. tsift-graph/src/lib.rs:541-572
 - [ ] [#louvain-dedup-aggregate] Add Louvain phase-2 aggregation (super-node coarsening). 5-15% modularity improvement on hierarchical codebases. tsift-graph/src/lib.rs:590-743
 - [ ] [#shared-graph-build-pipeline] Extract shared build_graph() from health.rs to common module; reuse in scc.rs, coupling.rs, dead_code.rs. ~30% analyze wall-time reduction. tsift-algorithms/src/*.rs
 - [ ] [#sift-token-index] Build inverted token index for search pre-filtering — skip files with no matching tokens. 5-50x search speedup on large codebases. tsift-search/src/sift.rs:210-267

@@ -2135,13 +2135,26 @@ fn append_exchange_patch_after_prompt_anchor(
         .map(|idx| boundary_pos + idx + 1)
         .unwrap_or(content_region.len());
     let user_region = &content_region[..boundary_pos];
-    let tail_start = user_region.rfind(&original_tail).with_context(|| {
-        format!(
-            "failed to locate unresolved prompt tail in current exchange for anchored patchback: {}",
+    // `#patchback-prompt-edit-resilience`: the exact-match locate is the fast
+    // path, but it fails when the prompt text drifted between the baseline
+    // (`original_doc`) and the current document — e.g. the operator edits the
+    // prompt (a typo fix, or adding/removing the `❯ ` prefix) after preflight
+    // captured the baseline. Rather than fail closed (which forces manual
+    // baseline-drop + prefix-repair retries), fall back to position-based
+    // anchoring when the unresolved tail is a single prompt block: the boundary
+    // has already been repositioned to the end of the component, so the sole
+    // (possibly edited) prompt is the trailing content of the user region —
+    // anchor the response at its end. Only the ambiguous multi-prompt-edit case
+    // fails closed, now with an actionable refresh-the-baseline diagnostic.
+    let insert_at = match user_region.rfind(&original_tail) {
+        Some(tail_start) => tail_start + anchor.end,
+        None if prompt_blocks.len() == 1 => user_region.trim_end().len(),
+        None => anyhow::bail!(
+            "exchange patchback prompt drifted from the baseline ({} unresolved prompt block(s) in the current tail); re-run `agent-doc preflight` to refresh the baseline before closeout. anchor: {}",
+            prompt_blocks.len(),
             anchor.text.lines().next().unwrap_or("(empty)")
-        )
-    })?;
-    let insert_at = tail_start + anchor.end;
+        ),
+    };
 
     let new_id = crate::id::new_boundary_id();
     let new_marker = crate::id::format_boundary_marker(&new_id);
@@ -4430,6 +4443,86 @@ Existing answer.
             .expect_err("later-matching response should fail closed");
         assert!(
             err.to_string().contains("skip older unresolved prompt"),
+            "unexpected error: {err}"
+        );
+    }
+
+    fn exchange_component(doc: &str) -> Component {
+        component::parse(doc)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.name == "exchange")
+            .unwrap()
+    }
+
+    #[test]
+    fn append_anchor_falls_back_when_single_prompt_edited_after_baseline() {
+        // `#patchback-prompt-edit-resilience`: the operator edited the sole
+        // unresolved prompt (text AND `❯ ` prefix) after the baseline was
+        // captured, so the baseline tail no longer matches the current document
+        // verbatim. The exact-match locate fails, but the single-prompt fallback
+        // anchors the response after the edited prompt instead of failing closed.
+        let original = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- agent:boundary:b1 -->\n",
+            "❯ Why is it still running?\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        // Current: boundary repositioned to the end; prompt edited to drop the
+        // `❯ ` prefix and change "it is" -> "its".
+        let current = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "Why its still running?\n",
+            "<!-- agent:boundary:b2 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let comp = exchange_component(current);
+        let patch = "### Re: still running — gpt-5\n\nBy design.\n";
+        let result = append_exchange_patch_after_prompt_anchor(original, current, &comp, patch)
+            .unwrap()
+            .expect("single edited prompt must anchor via the resilient fallback");
+        let prompt_pos = result.find("Why its still running?").unwrap();
+        let resp_pos = result.find("### Re: still running").unwrap();
+        let boundary_pos = result.rfind("<!-- agent:boundary:").unwrap();
+        assert!(
+            prompt_pos < resp_pos,
+            "response must land after the edited prompt:\n{result}"
+        );
+        assert!(
+            resp_pos < boundary_pos,
+            "new boundary must move behind the response:\n{result}"
+        );
+    }
+
+    #[test]
+    fn append_anchor_fails_closed_when_multiple_prompts_drift_from_baseline() {
+        // With more than one unresolved prompt, an edited baseline is genuinely
+        // ambiguous (we can't tell which edited prompt the response targets), so
+        // it fails closed with an actionable refresh-the-baseline diagnostic
+        // rather than guessing.
+        let original = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- agent:boundary:b1 -->\n",
+            "❯ First original question?\n\n",
+            "❯ Second original question?\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ First EDITED question?\n\n",
+            "❯ Second EDITED question?\n",
+            "<!-- agent:boundary:b2 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let comp = exchange_component(current);
+        let patch = "### Re: answer — gpt-5\n\nBody.\n";
+        let err = append_exchange_patch_after_prompt_anchor(original, current, &comp, patch)
+            .expect_err("ambiguous multi-prompt baseline drift must fail closed");
+        assert!(
+            err.to_string().contains("drifted from the baseline")
+                && err.to_string().contains("refresh the baseline"),
             "unexpected error: {err}"
         );
     }

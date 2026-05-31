@@ -126,7 +126,50 @@ Commits:
 
 Remaining queue items are `#tsiftmemparityeval`, `#tsiftmemcutover`, and `#tsiftmemretire`.
 
-<!-- agent:boundary:dbe9427f -->
+### Re: #tsiftmemparityeval — gpt-5
+
+> **Queue prompt:**
+>
+> do [#tsiftmemparityeval]
+
+
+Done. I reran the queued direct entrypoint, but it stalled after synthesizing the queue prompt, so I killed that process, repaired the stale agent-doc preflight lock with `agent-doc write --commit`, restored the exchanged boundary to the committed value, and continued from a clean preflight/plan for `#tsiftmemparityeval`.
+
+What changed:
+
+- Added an explicit `memory_retrieval_gate` to `tsift dci-benchmark --json` when a fixture declares `claude_mem_api`, `tsift_session_review_context_pack`, and `graph_db_related`.
+- The gate requires each tsift candidate to meet or exceed the claude-mem average useful-hit baseline and have fewer zero-output failures, with equal zero failures accepted when the claude-mem baseline is already zero.
+- Added human and compact CLI output for the gate decision.
+- Extended the memory retrieval fixture test to assert the cutover gate passes, and added a regression test that blocks a candidate with worse useful hits or zero-output behavior.
+- Updated `SPEC.md` to document the memory retrieval cutover gate.
+
+Installed-binary evidence:
+
+- `tsift dci-benchmark --fixture fixtures/memory-retrieval-eval.json --json` reports `top_strategy=graph_db_related` and `memory_retrieval_gate.decision=pass`.
+- Gate rows: `tsift_session_review_context_pack` has `avg_useful_hits=3.5`, `zero_output_failures=0`; `graph_db_related` has `avg_useful_hits=3.75`, `zero_output_failures=0`; the claude-mem baseline is `min_avg_useful_hits=0.25`, `max_zero_output_failures=2`.
+
+Verification passed:
+
+- `tsift index .`
+- `cargo fmt`
+- `cargo test -p tsift-quality memory_retrieval_gate`
+- `cargo test -p tsift-quality dci_benchmark::tests::supports_memory_retrieval_metrics`
+- `cargo test -p tsift-cli dci_benchmark_summarizes_memory_retrieval_eval_fixture`
+- `cargo run -p tsift-cli -- dci-benchmark --fixture fixtures/memory-retrieval-eval.json --json`
+- `make check`
+- `cargo build --workspace`
+- `cargo install --path . --force`
+- `tsift --version` -> `tsift 0.1.62`
+- GitHub Actions `CI` for `d06ded6` passed both jobs: `live Convex graph acceptance` and `clippy + test`.
+
+Commits:
+
+- `src/tsift`: `d06ded6 feat(dci): gate memory retrieval cutover` pushed to `btakita/tsift` `main`.
+- parent repo: `61cfe3feb chore: update tsift submodule` created; I will push it after this document closeout commit lands.
+
+Remaining queue items are `#tsiftmemcutover` and `#tsiftmemretire`.
+
+<!-- agent:boundary:39d1c2fc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -141,7 +184,7 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 preset #spec-test-build-install-commit-push
 - ~do [#tsiftmemimportall]~
 - ~do [#tsiftmemsemanticgate]~
-- do [#tsiftmemparityeval]
+- ~do [#tsiftmemparityeval]~
 - do [#tsiftmemcutover]
 - do [#tsiftmemretire]
 <!-- /agent:queue -->
@@ -149,7 +192,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#tsiftmemparityeval] Run the memory retrieval eval fixture against claude_mem_api, tsift session-review/context-pack, and graph_db_related on known memories; require comparable useful-hit rate and fewer zero-output failures before cutover.
 - [ ] [#tsiftmemcutover] Replace live memory retrieval call sites and operator instructions that point at direct claude-mem or /mem-search with tsift-memory / graph-db retrieval, while keeping claude-mem as a fallback during the first cutover pass.
 - [ ] [#tsiftmemretire] Retire claude-mem only after full import, semantic retrieval, and parity eval are green; keep a documented rollback path until at least one normal session cycle succeeds without direct claude-mem reads.
 <!-- /agent:backlog -->

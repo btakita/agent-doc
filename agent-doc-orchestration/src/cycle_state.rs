@@ -104,6 +104,19 @@ pub struct CycleState {
     /// so a directive cannot clear the queue while leaving its target `[ ]`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub expect_done_or_gate_ids: Vec<String>,
+    /// `#blocked-closeout-followup-capture`: tracked ids moved to the
+    /// review/gated component this cycle via `--pending-gate`. A gate removes an
+    /// id from active `agent:backlog`, so when the response also signals the
+    /// work is blocked / still needs future action, `session-check` requires a
+    /// captured follow-up (kept-open edit, new backlog item, or explicit
+    /// no-follow-up justification) before clean closeout.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_gated_ids: Vec<String>,
+    /// `#blocked-closeout-followup-capture`: true when this cycle added at least
+    /// one follow-up item via any `--pending-add*` primitive (active backlog or
+    /// gated). Satisfies the blocked-closeout follow-up requirement.
+    #[serde(default)]
+    pub pending_added_this_cycle: bool,
     #[serde(default)]
     pub ipc_snapshot_adoption_blocked: bool,
     /// `#exchange-prompt-dropped-on-merge`: user-authored exchange prompt lines
@@ -170,6 +183,8 @@ pub fn start_preflight(
         pending_kept_open_ids: Vec::new(),
         reaped_pending_ids: Vec::new(),
         expect_done_or_gate_ids: Vec::new(),
+        pending_gated_ids: Vec::new(),
+        pending_added_this_cycle: false,
         ipc_snapshot_adoption_blocked: false,
         dropped_exchange_prompts: Vec::new(),
         dropped_queue_prompts: Vec::new(),
@@ -348,6 +363,45 @@ pub fn record_expect_done_or_gate_ids(file: &Path, ids: &[String]) -> Result<Opt
     }
 
     if changed {
+        state.updated_at = now_secs();
+        save(file, &state)?;
+    }
+    Ok(Some(state))
+}
+
+/// `#blocked-closeout-followup-capture`: record tracked ids gated this cycle.
+pub fn record_pending_gated_ids(file: &Path, ids: &[String]) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+
+    let mut changed = false;
+    for id in ids
+        .iter()
+        .map(|id| normalize_pending_id(id))
+        .filter(|id| !id.is_empty())
+    {
+        if !state.pending_gated_ids.iter().any(|existing| existing == &id) {
+            state.pending_gated_ids.push(id);
+            changed = true;
+        }
+    }
+
+    if changed {
+        state.updated_at = now_secs();
+        save(file, &state)?;
+    }
+    Ok(Some(state))
+}
+
+/// `#blocked-closeout-followup-capture`: mark that this cycle added at least one
+/// follow-up backlog item via a `--pending-add*` primitive.
+pub fn mark_pending_added(file: &Path) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+    if !state.pending_added_this_cycle {
+        state.pending_added_this_cycle = true;
         state.updated_at = now_secs();
         save(file, &state)?;
     }
@@ -702,6 +756,8 @@ fn synthetic_state_with_id(
         pending_kept_open_ids: Vec::new(),
         reaped_pending_ids: Vec::new(),
         expect_done_or_gate_ids: Vec::new(),
+        pending_gated_ids: Vec::new(),
+        pending_added_this_cycle: false,
         ipc_snapshot_adoption_blocked: false,
         dropped_exchange_prompts: Vec::new(),
         dropped_queue_prompts: Vec::new(),

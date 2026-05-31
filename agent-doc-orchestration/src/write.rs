@@ -1264,6 +1264,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
             || !options.pending_add_back.is_empty()
         {
             crate::cycle_state::mark_pending_mutations(file)?;
+            crate::cycle_state::mark_pending_added(file)?;
         }
         for pair in &options.pending_edit {
             let (id, text) = pair
@@ -1273,6 +1274,9 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         }
         for id in &options.pending_gate {
             crate::pending_cmd::gate(file, id)?;
+        }
+        if !options.pending_gate.is_empty() {
+            crate::cycle_state::record_pending_gated_ids(file, &options.pending_gate)?;
         }
         for pair in &options.pending_set_gate_type {
             let (id, gt) = pair.split_once('=').with_context(|| {

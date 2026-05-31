@@ -20,6 +20,7 @@ A harness-native `agent-doc` entrypoint (`/agent-doc <FILE>` in Claude Code, `ag
 - Do **not** describe a normal harness-native `agent-doc` turn as successful while also saying the response is still uncommitted, unless the user explicitly requested that exception.
 - After `finalize` returns, do not continue with more long-running task work for that same turn. Only `session-check`, failure recovery, and final reporting should remain.
 - When the turn resolves a `do [#id]` / `do #id` directive whose target is an open `agent:backlog` item, that id must reach a lifecycle outcome in the same closeout (`--done <id>`, `--pending-gate <id>`, or an explicit kept-open `--pending-edit`). `session-check` fails closed if the directive cleared the queue but left the target `[ ]` in `agent:backlog` (`#do-id-closeout-open-backlog`); see `pending-ops.md`.
+- Reserve `--pending-gate <id>` for implementation-complete work awaiting review/external validation. If a `do [#id]` cycle gates its target but the response says the work is blocked / still needs future action, `session-check` fails closed (`#blocked-closeout-followup-capture`) unless the cycle keeps the id open with the narrowed next step (`--pending-edit`), adds a new follow-up (`--pending-add*`), or states an explicit "no additional backlog follow-up is needed because …" justification; see `pending-ops.md`.
 
 ## Explicit Exceptions
 

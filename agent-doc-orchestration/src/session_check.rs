@@ -264,6 +264,7 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
             check_pending_done_guard(file)?,
             check_expect_done_or_gate_guard(file)?,
             check_partial_closeout_state_guard(file)?,
+            check_blocked_closeout_followup_guard(file)?,
         ] {
             match guard {
                 GuardResult::None => {}
@@ -2368,6 +2369,248 @@ fn check_partial_closeout_state_guard(file: &Path) -> Result<GuardResult> {
             edit_hint
         ),
     ]))
+}
+
+/// Tight list of "blocked / still needs future action" phrases that, combined
+/// with a directed id gated this cycle, indicate a `do [#id]` closeout reported
+/// the work is still incomplete and needs more agent execution — distinct from
+/// a clean implementation-complete review gate. Kept narrow (no bare "blocked"
+/// or generic "requires"/"until") so ordinary review/closeout prose does not
+/// trip the guard.
+const BLOCKED_FUTURE_ACTION_PHRASES: &[&str] = &[
+    "remains blocked",
+    "still blocked",
+    "is blocked",
+    "are blocked",
+    "blocked on",
+    "blocked by",
+    "blocked:",
+    "blocked until",
+    "next step to complete",
+    "next steps to complete",
+    "steps to complete",
+    "cannot complete until",
+    "can't complete until",
+    "still needs to",
+    "still need to",
+    "must remove",
+    "must delete",
+    "must expire",
+    "needs to be removed",
+    "no live cutover",
+    "waiting on approval",
+    "awaiting approval",
+    "needs approval before",
+    "requires approval before",
+    "deliberately delete",
+    "get approval",
+];
+
+/// Explicit "no follow-up needed" justifications that satisfy a blocked-shape
+/// closeout for a genuinely review-only gate. Keep aligned with the repair hint.
+const NO_FOLLOWUP_JUSTIFICATION_PHRASES: &[&str] = &[
+    "no additional backlog follow-up",
+    "no additional follow-up is needed",
+    "no follow-up backlog",
+    "no further backlog",
+    "no actionable backlog follow-up",
+    "no remaining backlog work",
+];
+
+fn text_has_blocked_future_action_signal(lower: &str) -> bool {
+    BLOCKED_FUTURE_ACTION_PHRASES
+        .iter()
+        .any(|phrase| lower.contains(phrase))
+}
+
+fn text_has_no_followup_justification(lower: &str) -> bool {
+    NO_FOLLOWUP_JUSTIFICATION_PHRASES
+        .iter()
+        .any(|phrase| lower.contains(phrase))
+}
+
+/// True when a blocked / still-needed-work phrase co-occurs with `#id` inside
+/// the same paragraph of the response. Paragraph-scoping (blank-line separated)
+/// keeps an incidental blocked phrase about unrelated work — or the `### Re:`
+/// heading that always names the id — from tying the signal to the directed id.
+fn blocked_signal_tied_to_id(text: &str, id: &str) -> bool {
+    let needle = format!("#{}", id.to_ascii_lowercase());
+    text.split("\n\n").any(|paragraph| {
+        let lower = paragraph.to_ascii_lowercase();
+        lower.contains(&needle) && text_has_blocked_future_action_signal(&lower)
+    })
+}
+
+/// Open (`[ ]`/gated, not done) ids that currently live in a `review`/gated
+/// component. Used to confirm a directed id gated this cycle is still gated
+/// (not subsequently un-gated or completed) before the blocked-closeout guard
+/// fires.
+fn open_review_ids(file: &Path) -> Result<std::collections::HashSet<String>> {
+    let content = std::fs::read_to_string(file)?;
+    let Ok(components) = crate::component::parse(&content) else {
+        return Ok(std::collections::HashSet::new());
+    };
+    Ok(components
+        .into_iter()
+        .filter(|component| crate::component::is_review_component(&component.name))
+        .flat_map(|component| {
+            let (_, items, _) = crate::pending::parse_items(component.content(&content));
+            items
+        })
+        .filter(|item| !item.is_done())
+        .map(|item| crate::pending::normalize_pending_id(&item.id))
+        .filter(|id| !id.is_empty())
+        .collect())
+}
+
+/// `#blocked-closeout-followup-capture`: a directed `do [#id]` cycle that moves
+/// its target to the review/gated component (`--pending-gate`) while the
+/// response says the work is blocked / still needs future action must capture an
+/// actionable follow-up before clean closeout — otherwise the document explains
+/// the blocker but the active backlog no longer drives the remaining work.
+///
+/// Satisfied by any of: keeping the id open in `agent:backlog`
+/// (`--pending-edit <id>=...`), adding a new follow-up item (`--pending-add*`),
+/// or an explicit no-follow-up justification phrase in the response. A
+/// `<!-- no-blocked-followup-guard -->` marker also suppresses it.
+fn check_blocked_closeout_followup_guard(file: &Path) -> Result<GuardResult> {
+    let mode = resolve_pending_done_guard_mode(file)?;
+    if mode == crate::frontmatter::PendingCaptureGuardMode::Off {
+        return Ok(GuardResult::None);
+    }
+
+    let Some(state) = crate::cycle_state::load(file)? else {
+        return Ok(GuardResult::None);
+    };
+    if state.expect_done_or_gate_ids.is_empty()
+        || state.pending_gated_ids.is_empty()
+        || state.is_open()
+    {
+        return Ok(GuardResult::None);
+    }
+    // A new follow-up backlog/review item was captured this cycle — satisfied.
+    if state.pending_added_this_cycle {
+        return Ok(GuardResult::None);
+    }
+    let Some(capture_id) = state.capture_id.as_deref() else {
+        return Ok(GuardResult::None);
+    };
+    let Some(capture) = crate::capture::load_by_id(file, capture_id)? else {
+        return Ok(GuardResult::None);
+    };
+    if capture.state != crate::capture::CaptureState::Committed {
+        return Ok(GuardResult::None);
+    }
+    if capture
+        .response_body
+        .contains("<!-- no-blocked-followup-guard -->")
+        || capture
+            .response_body
+            .contains("<!-- no-pending-done-guard -->")
+    {
+        return Ok(GuardResult::None);
+    }
+
+    let text = response_text_for_guards(&capture.response_body);
+    let lower = text.to_ascii_lowercase();
+    if !text_has_blocked_future_action_signal(&lower) {
+        return Ok(GuardResult::None);
+    }
+    if text_has_no_followup_justification(&lower) {
+        return Ok(GuardResult::None);
+    }
+
+    let kept_open: std::collections::HashSet<String> = state
+        .pending_kept_open_ids
+        .iter()
+        .map(|id| crate::pending::normalize_pending_id(id))
+        .filter(|id| !id.is_empty())
+        .collect();
+    let done: std::collections::HashSet<String> = state
+        .pending_done_ids
+        .iter()
+        .map(|id| crate::pending::normalize_pending_id(id))
+        .filter(|id| !id.is_empty())
+        .collect();
+    let gated: std::collections::HashSet<String> = state
+        .pending_gated_ids
+        .iter()
+        .map(|id| crate::pending::normalize_pending_id(id))
+        .filter(|id| !id.is_empty())
+        .collect();
+    let still_gated = open_review_ids(file)?;
+
+    let mut unresolved: Vec<String> = Vec::new();
+    for id in state
+        .expect_done_or_gate_ids
+        .iter()
+        .map(|id| crate::pending::normalize_pending_id(id))
+        .filter(|id| !id.is_empty())
+    {
+        if kept_open.contains(&id) || done.contains(&id) {
+            continue;
+        }
+        if !gated.contains(&id) || !still_gated.contains(&id) {
+            continue;
+        }
+        // Tie the blocked signal to the directed id (same paragraph) so an
+        // incidental blocked phrase about unrelated work does not fire.
+        if !blocked_signal_tied_to_id(&text, &id) {
+            continue;
+        }
+        if !unresolved.iter().any(|existing| existing == &id) {
+            unresolved.push(id);
+        }
+    }
+
+    if unresolved.is_empty() {
+        return Ok(GuardResult::None);
+    }
+
+    let ids = unresolved
+        .iter()
+        .map(|id| format!("#{}", id))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let edit_hint = unresolved
+        .iter()
+        .map(|id| format!("--pending-edit \"{}=<remaining next action>\"", id))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let add_after_hint = unresolved
+        .first()
+        .map(|id| format!("--pending-add-after {} \"<id>=<concrete next step>\"", id))
+        .unwrap_or_default();
+    let repair = format!("agent-doc write {} {} --pending-only --commit", file.display(), edit_hint);
+    let warn_line = format!(
+        "[session-check] warn: `do #id` closeout reported blocked / still-needed work but gated tracked target {} out of agent:backlog with no kept-open edit, new follow-up item, or explicit no-follow-up justification — the remaining steps live only in prose",
+        ids
+    );
+
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "blocked_closeout_followup_guard_fired file={} unresolved={}",
+            file.display(),
+            unresolved.join(",")
+        ),
+    );
+
+    Ok(match mode {
+        crate::frontmatter::PendingCaptureGuardMode::Warn => GuardResult::Warn(vec![
+            warn_line,
+            format!(
+                "[session-check] hint: keep the work tracked with `{}`, split a new follow-up via `{}`, add an explicit \"no additional backlog follow-up is needed because ...\" phrase for a true review-only gate, or add `<!-- no-blocked-followup-guard -->`",
+                repair, add_after_hint
+            ),
+        ]),
+        crate::frontmatter::PendingCaptureGuardMode::Strict => GuardResult::Error(format!(
+            "{}\n[session-check] hint: keep the work tracked with `{}`, split a new follow-up via `{}`, add an explicit \"no additional backlog follow-up is needed because ...\" phrase for a true review-only gate, or set pending_done_guard = \"warn\" to downgrade",
+            warn_line.replacen("[session-check] warn:", "[session-check] INTERRUPTED:", 1),
+            repair, add_after_hint
+        )),
+        crate::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
+    })
 }
 
 fn single_open_review_item_id(file: &Path) -> Result<Option<String>> {
@@ -5911,6 +6154,214 @@ Body\n\
             .unwrap();
         crate::capture::mark_committed(&doc).unwrap();
         doc
+    }
+
+    // `#blocked-closeout-followup-capture`: a directed `do [#id]` cycle that
+    // gated its target while reporting blocked/remaining work.
+    #[allow(clippy::too_many_arguments)]
+    fn setup_blocked_closeout_cycle(
+        root: &Path,
+        response: &str,
+        review_body: Option<&str>,
+        backlog_body: Option<&str>,
+        expect_ids: &[&str],
+        gated_ids: &[&str],
+        kept_open_ids: &[&str],
+        added: bool,
+    ) -> std::path::PathBuf {
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        let doc = root.join("doc.md");
+        let mut current = String::from("---\nagent_doc_session: test\n---\n\n## Exchange\n\nHello\n");
+        if let Some(body) = backlog_body {
+            current.push_str("\n<!-- agent:backlog -->\n");
+            current.push_str(body);
+            if !body.ends_with('\n') {
+                current.push('\n');
+            }
+            current.push_str("<!-- /agent:backlog -->\n");
+        }
+        if let Some(body) = review_body {
+            current.push_str("\n<!-- agent:review -->\n");
+            current.push_str(body);
+            if !body.ends_with('\n') {
+                current.push('\n');
+            }
+            current.push_str("<!-- /agent:review -->\n");
+        }
+        fs::write(&doc, &current).unwrap();
+        crate::snapshot::save(&doc, &current).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
+        crate::capture::capture_response(&doc, response).unwrap();
+        if !expect_ids.is_empty() {
+            crate::cycle_state::record_expect_done_or_gate_ids(
+                &doc,
+                &expect_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>(),
+            )
+            .unwrap();
+        }
+        if !gated_ids.is_empty() {
+            crate::cycle_state::record_pending_gated_ids(
+                &doc,
+                &gated_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>(),
+            )
+            .unwrap();
+        }
+        if !kept_open_ids.is_empty() {
+            crate::cycle_state::record_pending_kept_open_ids(
+                &doc,
+                &kept_open_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>(),
+            )
+            .unwrap();
+        }
+        if added {
+            crate::cycle_state::mark_pending_added(&doc).unwrap();
+        }
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(&current), Some(&current))
+            .unwrap();
+        crate::capture::mark_committed(&doc).unwrap();
+        doc
+    }
+
+    const BLOCKED_RESPONSE: &str =
+        "### Re: do #374n — gpt-5\n\nFound a blocker: Merchant Center still has 17 active legacy rows for #374n. Next steps to complete: remove/expire the rows, deliberately delete them through an approved path, or get approval that they are safe blanks.\n";
+
+    #[test]
+    fn blocked_closeout_followup_guard_fails_when_gated_without_followup() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_blocked_closeout_cycle(
+            tmp.path(),
+            BLOCKED_RESPONSE,
+            Some("- [/] [#374n] Removal cleanup\n"),
+            None,
+            &["374n"],
+            &["374n"],
+            &[],
+            false,
+        );
+        match check_blocked_closeout_followup_guard(&doc).unwrap() {
+            GuardResult::Error(message) => {
+                assert!(message.contains("#374n"), "{message}");
+                assert!(message.contains("--pending-edit"), "{message}");
+            }
+            other => panic!("expected strict failure for blocked gate without follow-up, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blocked_closeout_followup_guard_wired_into_inspect() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_blocked_closeout_cycle(
+            tmp.path(),
+            BLOCKED_RESPONSE,
+            Some("- [/] [#374n] Removal cleanup\n"),
+            None,
+            &["374n"],
+            &["374n"],
+            &[],
+            false,
+        );
+        match inspect_with_warnings(&doc).unwrap().status {
+            SessionCheckStatus::Interrupted(message) => assert!(message.contains("#374n"), "{message}"),
+            other => panic!("expected interrupted status, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blocked_closeout_followup_guard_passes_when_new_followup_added() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_blocked_closeout_cycle(
+            tmp.path(),
+            BLOCKED_RESPONSE,
+            Some("- [/] [#374n] Removal cleanup\n"),
+            None,
+            &["374n"],
+            &["374n"],
+            &[],
+            true,
+        );
+        assert!(matches!(
+            check_blocked_closeout_followup_guard(&doc).unwrap(),
+            GuardResult::None
+        ));
+    }
+
+    #[test]
+    fn blocked_closeout_followup_guard_passes_when_kept_open_in_backlog() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // `--pending-edit` keeps the id in agent:backlog and records no gate.
+        let doc = setup_blocked_closeout_cycle(
+            tmp.path(),
+            BLOCKED_RESPONSE,
+            None,
+            Some("- [ ] [#374n] Removal cleanup — remove/expire 17 legacy rows\n"),
+            &["374n"],
+            &[],
+            &["374n"],
+            false,
+        );
+        assert!(matches!(
+            check_blocked_closeout_followup_guard(&doc).unwrap(),
+            GuardResult::None
+        ));
+    }
+
+    #[test]
+    fn blocked_closeout_followup_guard_passes_with_explicit_no_followup_phrase() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_blocked_closeout_cycle(
+            tmp.path(),
+            "### Re: do #374n — gpt-5\n\nImplementation complete for #374n; awaiting code review. No additional backlog follow-up is needed because the remaining rows are still blocked on review only.\n",
+            Some("- [/] [#374n] Removal cleanup\n"),
+            None,
+            &["374n"],
+            &["374n"],
+            &[],
+            false,
+        );
+        assert!(matches!(
+            check_blocked_closeout_followup_guard(&doc).unwrap(),
+            GuardResult::None
+        ));
+    }
+
+    #[test]
+    fn blocked_closeout_followup_guard_passes_for_clean_review_gate() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_blocked_closeout_cycle(
+            tmp.path(),
+            "### Re: do #374n — gpt-5\n\nImplementation complete for #374n and pushed; ready for review.\n",
+            Some("- [/] [#374n] Removal cleanup\n"),
+            None,
+            &["374n"],
+            &["374n"],
+            &[],
+            false,
+        );
+        assert!(matches!(
+            check_blocked_closeout_followup_guard(&doc).unwrap(),
+            GuardResult::None
+        ));
+    }
+
+    #[test]
+    fn blocked_closeout_followup_guard_ignores_blocked_phrase_not_tied_to_id() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // Blocked phrasing exists but does not mention the gated directed id.
+        let doc = setup_blocked_closeout_cycle(
+            tmp.path(),
+            "### Re: do #374n — gpt-5\n\nDone. Separately, an unrelated PR remains blocked on CI but that is not part of this work.\n",
+            Some("- [/] [#374n] Removal cleanup\n"),
+            None,
+            &["374n"],
+            &["374n"],
+            &[],
+            false,
+        );
+        assert!(matches!(
+            check_blocked_closeout_followup_guard(&doc).unwrap(),
+            GuardResult::None
+        ));
     }
 
     #[test]

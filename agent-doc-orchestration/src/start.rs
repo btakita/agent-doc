@@ -4245,6 +4245,8 @@ mod tests {
             pending_kept_open_ids: Vec::new(),
             reaped_pending_ids: Vec::new(),
             expect_done_or_gate_ids: Vec::new(),
+            pending_gated_ids: Vec::new(),
+            pending_added_this_cycle: false,
             ipc_snapshot_adoption_blocked: false,
             dropped_exchange_prompts: Vec::new(),
             dropped_queue_prompts: Vec::new(),

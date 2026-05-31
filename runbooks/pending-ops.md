@@ -199,6 +199,23 @@ plan path into another `.md` file.
   lifecycle outcome: `--done <id>`, `--pending-gate <id>` (code-complete,
   awaiting review/external validation), an explicit kept-open edit, or set
   `pending_done_guard: off` for the document when the item must stay open.
+- **"Review-gated" is not "blocked but still actionable"**
+  (`#blocked-closeout-followup-capture`). `--pending-gate <id>` is for work that
+  is *implementation-complete* and only waiting on review/external validation —
+  no further agent execution step is needed. If a `do [#id]` cycle instead
+  reports the target is blocked / still needs future action (e.g. "next steps to
+  complete", "must remove/expire …", "awaiting approval before …") and gates the
+  id out of `agent:backlog`, closeout fails closed: the document then explains
+  the blocker while the active backlog no longer drives the remaining work.
+  Resolve it one of these ways:
+  - keep the same id open with the narrowed next action —
+    `--pending-edit "<id>=<remaining next step>"`;
+  - split a new actionable follow-up —
+    `--pending-add-after <id> "<new-id>=<concrete next step>"` (or any
+    `--pending-add*`);
+  - for a genuine review-only gate, state it explicitly in the response: an
+    "no additional backlog follow-up is needed because …" phrase satisfies the
+    guard, as does a `<!-- no-blocked-followup-guard -->` marker.
 - If the completed ids are also contiguous head entries in an active
   `agent:queue`, repeating `--done <id>` for each completed id lets closeout
   consume that done-backed queue batch in the same commit. The queue still stops

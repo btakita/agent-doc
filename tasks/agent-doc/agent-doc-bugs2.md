@@ -89,11 +89,40 @@ route_dispatch_only_sent     ... pane=%42 delivery=direct_pane_submit proof=pane
 The `[route] Rescued pane %42 via join-pane` line is also normal: the pane was parked in the `stash` window, so route pulled it back into the `agent-doc` window before dispatching — that rescue succeeded and isn't related to the refusal.
 
 **One optional refinement queued** (`#opencode-active-turn-reopen-auto-retry-on-idle`, recommended): instead of making you re-click after the turn ends, route could watch the pane and auto-fire the bare reopen once it goes idle. Lower priority than the live-verify items.
-<!-- agent:boundary:87943110 -->
+❯ Opencode routing is idle. The "mid-term" analysis indicates there is a bug holding an open run. Why are we deadlocked?
+❯ #spec-test-build-install-commit-push
+
+### Re: OpenCode routing deadlock — committed_without_response_body loop — opus-4-8
+
+You're right, and I was wrong to call it self-resolved — it's a real deadlock. `session-check tasks/software/tsift.md` was **INTERRUPTED**, re-firing every ~90s:
+
+```
+committed_without_response_body_guard_failed cycle_id=cycle-1780257680821
+   last_event=commit_already_current had_pending_mutations=true pending_done=1 reaped=1
+... then every ~90s:  commit_noop (already_current) → session_check failed_closed (interrupted) → repeat
+```
+
+#### Why we were deadlocked
+
+The OpenCode tsift.md run issued a `finalize --done <id>` that **reaped a backlog item already reflected in HEAD** — so the commit was a **no-op** (`commit_already_current`, document byte-identical to HEAD) — but it wrote **no response body**. The `committed_without_response_body` guard (which exists to catch a run that commits side-effect work but forgets to answer the prompt) fired anyway. The catch: the recovery it recommends — `agent-doc write --commit` — is *itself* a no-op here (no response to write, nothing to commit). So the guard fails closed, a closeout poller re-runs every ~90s, and it re-interrupts forever. The cycle could never satisfy the guard and never closed → routing/continuation wedged even though the OpenCode pane was idle.
+
+**The bug:** the guard claimed "cycle committed binary-owned work this turn" while `last_event=commit_already_current` proves **nothing was committed this turn**. A no-op commit has no committed-work-without-a-response shape.
+
+#### Fix
+
+`committed_without_response_body` now skips when the cycle's commit was a no-op (`commit_already_current`, new `cycle_state::is_noop_commit_event`) — it committed no binary-owned work, so no paired response is required (logs `committed_without_response_body_guard_skipped_noop_commit`). A *real* missed response still commits actual side-effect content (`commit_success`/`commit`) and keeps failing closed, so `#codex-final-response-not-written` detection is intact.
+
+#### Verification
+
+`make check` green (incl. the FlowCore budget gate, bumped 49→51 with audit comment). Regression `committed_without_response_body_guard_skips_noop_commit_reap_only_cycle`; the existing fires-on-real-commit test still passes. Spec `07-closeout-commands.md` updated. Both binaries rebuilt + installed, and **verified live**: `session-check tasks/software/tsift.md` now returns `ok` — the ~90s interrupt loop is broken. Submodule `e6504d62`.
+
+Queued `#opencode-reap-only-no-response-finalize-investigate` to chase the upstream (why the OpenCode run did a reap-only no-response finalize, and what re-triggers closeout every ~90s).
+<!-- agent:boundary:cbcd56ea -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
+- do [#opencode-active-turn-reopen-auto-retry-on-idle]
 - do [#recovery-drift-apply-live-verify]
 - do [#jb-run-agent-doc-command-route-miss]
 - do [#repair-orphan-prefix-bug]
@@ -146,6 +175,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog priority queue=prepend -->
+- [ ] [#opencode-reap-only-no-response-finalize-investigate] [recommended] Investigate the upstream of the tsift.md committed_without_response_body deadlock (now fixed defensively): why did the OpenCode tsift.md run issue a finalize --done <id> with an empty response body (reap-only, no ### Re:), and what re-ran the closeout every ~90s (looks like a scheduled task touching .claude/scheduled_tasks.lock). The guard no longer deadlocks on the no-op commit, but the reap-only-no-response finalize + the 90s re-trigger cadence may still be wasteful. Lower priority than the live-verify items.
 - [ ] [#opencode-active-turn-reopen-auto-retry-on-idle] [recommended] When a plain dispatch-only Run Agent Doc reopen is refused because the OpenCode (or Codex) pane shows an active turn, route currently fails closed and the operator must re-click once the turn ends. Optional refinement: watch the pane and auto-fire the bare reopen once it returns to a dispatch-ready/idle composer, so the operator does not have to retry manually. Must stay a plain reopen (no prompt to queue) and respect the existing no-inject-into-active-turn invariant. Lower priority than the live-verify items.
 - [ ] [#recovery-drift-apply-live-verify] [recommended] Live-verify the full one-command recovery (agent-doc repair --apply-recovery) on a real owner pane now that #recovery-drift-authoritative-side landed the authoritative-side determination: reproduce a queue_metadata_drift / sidecar_visible_drift closeout and confirm apply_closeout_recovery restores-from-HEAD for the spurious queue_active:false class and commits-forward otherwise, without the manual cancel->reset->commit sequence. Gated on a live owner pane (risky in a racy multi-session repo). Parent plan: tasks/agent-doc/plan-recursive-repair-state-drift.md.
 - [ ] [#repair-orphan-prefix-bug] Orphan-response repair path prefixes every body line with the user-prompt marker. Live repro 2026-05-31 tsift.md: direct Edit-based patchback triggered orphan repair, which applied the prefix to all assistant body lines. Fix: ensure orphan-repair preserves response body verbatim. Plan: tasks/agent-doc/plan-repair-orphan-prefix-bug.md. Related: #jb-compact-malformed-response-commit, #finalize-retry-ipc-response-duplication.

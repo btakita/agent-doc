@@ -16,7 +16,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -442,24 +442,33 @@ This doc's own backlog now carries `priority queue`, so its `agent:queue` is liv
 - The two gated review items this delivers — `#backlog-queue-sync-attribute` and `#backlog-priority-attribute` — are now code-complete + verified; close them after your review.
 - Earlier design note in this exchange flagged that blind `queue=sync` re-introduces `#queue-user-edit-overwrite`. Mitigation: the **default is append** (non-destructive); only explicit `queue=sync` does a full replace, which is the documented opt-in.
 - Queued `#tagpath-queue-priority-publish-align`: publish tagpath + bump agent-doc's tagpath dep before the next release, since a published agent-doc on tagpath 0.12 would still reject the new attributes.
-<!-- agent:boundary:43366e9f -->
+
+### Re: closeout recovery — queue-sync × pending_done_guard interaction — opus-4-8
+
+
+Recovery note for the `do [#backlog-queue-sync-attr]` closeout (response committed as `a1065509e`).
+
+Populating this doc's `auto` queue from the backlog (the new `queue` sync attribute, append mode) added a `do [#id]` line for every active backlog item **in the same cycle**. Those freshly-synced lines were collected as this cycle's `do`-directive targets, so `pending_done_guard` demanded all 9 remaining items be `--done` — even though only `#backlog-queue-sync-attr` was this turn's actual directive (done) and the rest are queued for the auto-loop, not completed.
+
+Those 9 items are **intentionally deferred to the auto-loop**, not abandoned — hence the per-cycle guard suppression here. I queued `#queue-sync-auto-pending-done-guard-misfire` to fix the root cause: agent-synced queue items must not be treated as user `do`-directives / `expect_done_or_gate_ids`.
+<!-- agent:boundary:12d57633 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue priority auto -->
 - do [#blocked-closeout-followup-capture]
+- do [#codex-owned-pane-auto-queue-stuck]
+- do [#stuck-capture-queue-echo-false-positive]
 - do [#backlog-queue-sync-attr]
 - do [#preset-item-id-collision-enforce]
 - do [#free-text-queue-skip-diagnostic]
-- do [#stuck-capture-queue-echo-false-positive]
 - do [#codex-owned-pane-prompt-miss-followups]
-- do [#codex-owned-pane-auto-queue-stuck]
 - do [#completed-queue-residue-regression]
 - do [#do-id-partial-closeout-state]
 - do [#closeout-recovery-state-machine]
 <!-- /agent:queue -->
 ###
 <!--
-I ran JB `Run Agent Doc` when the tsift.md session was idle. The "opencode active turn" is false and this state is incorrect. How can we ensure an accurate state using hooks?
+I ran JB `Run Agent Doc` when the tsift.md session was idle. The "opencode active turn" is false and this state is incorrect. How can we ensure an accurate state using hooks? Can we just use tmux to pass the `/agent-doc .../tsift.md` command regardless of the agent-doc tracking?
 ```
 [route] debounce OK — file idle for 1.4s and typing indicator idle
 [route] target tmux session: 0
@@ -491,6 +500,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#queue-sync-auto-pending-done-guard-misfire] [recommended] When a queue=sync/append attribute populates an active auto-queue in the same cycle, the freshly-synced do-[#id] entries appear as new do-directives in the cycle diff, so preflight records them all as expect_done_or_gate_ids and pending_done_guard then demands every synced item be --done in the populating cycle (live repro 2026-05-31 agent-doc-bugs2.md: do [#backlog-queue-sync-attr] cycle flagged 9 other freshly-synced queue items). Fix: agent-generated/synced queue items must not be treated as user do-directives; only a genuine user exchange do [#id] or the single consumed queue head should populate expect_done_or_gate_ids. Plan: tasks/agent-doc/plan-queue-sync-auto-pending-done-guard-misfire.md.
 - [ ] [#recursive-repair-state-drift] [recommended] Recursive same-pane owner recovery can leave the document runnable only after a manual expert sequence: abandon an empty preflight cycle, rebuild sidecars from visible content, then commit metadata-only queue/boundary drift. Live repro 2026-05-31 `src/boost-client/tasks/monsterrodholders.md` after recursive direct invocation was blocked: `session-check` moved from open `preflight_started` to snapshot-vs-HEAD drift until `agent-doc cancel`, `agent-doc reset --from-current --preserve-session`, and `agent-doc commit` were run manually. Add a typed repair path that closes cycle/sidecar/HEAD invariants in one safe command and make diagnostic preflight side-effect-free or self-abandoning. Plan: tasks/agent-doc/plan-recursive-repair-state-drift.md.
 - [ ] [#tagpath-queue-priority-publish-align] [recommended] Before the next agent-doc release, publish tagpath (commits b55c305 + 32fd000: backlog/icebox/queue priority + queue sync lint attrs) and bump agent-doc's tagpath dependency past 0.12. Locally agent-doc resolves tagpath via the superproject .cargo/config.toml path patch so the lint-gate accepts the new attributes; a published agent-doc on tagpath 0.12 would reject bare priority/queue as malformed-attr.
 - [ ] [#blocked-closeout-followup-capture] [recommended] A directed `do [#id]` closeout that discovers the item is blocked can move/gate the item out of active backlog without preserving the concrete next steps needed to complete it. Live repro 2026-05-31 `src/boost-client/tasks/monsterrodholders.md`: `#374n-removalcleanup` found 17 active Merchant Center legacy rows and named completion conditions, but no active backlog item captured those next steps. Add a session-check/finalize guard that requires either `--pending-edit <id>` keeping blocked work open, a new follow-up backlog item, or an explicit no-follow-up justification before clean closeout. Plan: tasks/agent-doc/plan-blocked-closeout-followup-capture.md.

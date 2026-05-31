@@ -1,14 +1,15 @@
 ---
 agent_doc_session: 1ef5f0e7-0687-4f35-b9bc-2b9c330d5688
+agent: opencode
+claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
-agent: opencode
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
-claude_model: opus
 prompt_presets:
-  "#spec-test-build-install-commit-push": update spec + tests. build + install for local testing. commit + push
-  "#spec-test-commit-push": update spec + tests. commit + push
+  '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
+  '#spec-test-commit-push': update spec + tests. commit + push
+queue_active: true
 ---
 
 ## Status
@@ -46,7 +47,8 @@ Yes, parallelizing `scan_text_source` calls in `diagnose_cycle` is both safe and
 **Verification:** All 2040+ existing tests pass, including `test_cli_ops_diagnose_gathers_cycle_artifacts` which validates the full diagnose output. `make check` (clippy + full suite) clean. Installed and pushed.
 
 Commit: `84345094` — `parallelize scan_text_source calls in diagnose_cycle via std::thread::scope`
-<!-- agent:boundary:5cbdfadc -->
+Would it be more effective to use tokio or another event loop instead of std::thread::scope?
+<!-- agent:boundary:5a2ef36d -->
 <!-- /agent:exchange -->
 
 <!--
@@ -54,6 +56,10 @@ I want sidekick to have the option to use git commits as well.
 -->
 
 ## Pending / Not Built
+
+<!-- agent:queue auto -->
+- Would it be more effective to use tokio or another event loop instead of std::thread::scope?
+<!-- /agent:queue -->
 
 <!-- agent:backlog -->
 - [ ] [#dtmc] scan_text_source parallelized via std::thread::scope in diagnose_cycle

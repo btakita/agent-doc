@@ -108,22 +108,15 @@ Analyzed the full tsift codebase post-`2bdec90`. 10 follow-up items added to bac
 **Top of backlog: `#terse-ultra-mode`** — highest token savings, directly improves LLM context efficiency across all graph/search/explain envelopes.
 
 Also cleaned up orphaned `#next-steps` post-exchange comment (was causing the `post_exchange_comment_prompt_preset` warning).
-<!-- agent:boundary:7996afdc -->
+re [#terse-ultra-mode]: Does this affect the effectiveness of the searches?
+<!-- agent:boundary:433641bd -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue auto -->
-- What are #next-steps to improve token efficiency along with graph + neighborhood performance & effectiveness.
+- re [#terse-ultra-mode]: Does this affect the effectiveness of the searches?
 <!-- /agent:queue -->
-###
-<!--
-What are #next-steps to improve token efficiency along with graph + neighborhood performance & effectiveness.
----
-What are #next-steps to make the graph faster?
----
-What are #next-steps to make the graph + neighborhoods faster + more effective?
--->
 
 ## Backlog
 

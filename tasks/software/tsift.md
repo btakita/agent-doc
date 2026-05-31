@@ -101,7 +101,33 @@ Added Louvain phase-2 super-node coarsening to `detect_communities` in `tsift-gr
 **Test added:** `communities_hierarchical_phase2_improves_modularity` — 4 clusters of 6 nodes each with bridging edges, verifies ≥ 2 communities and positive modularity.
 
 **Verification:** 72/72 tests pass. Built and pushed as `db4d690`.
-<!-- agent:boundary:0c9627bd -->
+
+### Re: #shared-graph-build-pipeline — glm-5.1
+
+> **Queue prompt:**
+>
+> [#shared-graph-build-pipeline]
+
+
+Extracted shared `graph_builder` module from duplicated graph construction code in health.rs, dead_code.rs, and scc.rs.
+
+**New file: `tsift-algorithms/src/graph_builder.rs`**
+- `Graph` struct — holds `node_vec`, `node_idx`, `out_adj`, `in_adj` with `node_count()`, `edge_count()`, `ensure_nodes()` helpers
+- `build_graph(edges)` — shared directed adjacency construction with self-loop exclusion (replaces 30-line duplicate in health.rs and 28-line duplicate in dead_code.rs)
+- `build_node_index(edges)` — shared node extraction only (replaces 9-line duplicate in scc.rs)
+
+**Refactored files:**
+- `health.rs` — replaced private `build_graph` with `crate::graph_builder::build_graph`; removed ~30 lines
+- `dead_code.rs` — replaced inline graph building with `build_graph` + `ensure_nodes` for entry_points; removed ~28 lines
+- `scc.rs` — replaced inline node extraction with `build_node_index`; removed ~9 lines
+- `lib.rs` — added `pub mod graph_builder` + re-exports for `Graph`, `build_graph`, `build_node_index`
+
+**Tests:** 7 new tests in graph_builder module. All 45/45 tests pass.
+
+**Spec updated:** SPEC.md tsift-algorithms section now lists `graph_builder module`.
+
+**Verification:** Built, installed, committed as `ea0f592`, pushed to main.
+<!-- agent:boundary:03ff3459 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -115,14 +141,13 @@ preset #spec-test-build-install-commit-push
 - ~[#libsql-edges-between-pushdown]~
 - ~[#compact-community-serialization]~
 - ~[#louvain-dedup-aggregate]~
-- [#shared-graph-build-pipeline]
+- ~[#shared-graph-build-pipeline]~
 - [#sift-token-index]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#shared-graph-build-pipeline] Extract shared build_graph() from health.rs to common module; reuse in scc.rs, coupling.rs, dead_code.rs. ~30% analyze wall-time reduction. tsift-algorithms/src/*.rs
 - [ ] [#sift-token-index] Build inverted token index for search pre-filtering — skip files with no matching tokens. 5-50x search speedup on large codebases. tsift-search/src/sift.rs:210-267
 <!-- /agent:backlog -->
 

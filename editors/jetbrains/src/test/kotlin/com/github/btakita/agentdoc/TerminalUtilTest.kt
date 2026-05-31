@@ -233,6 +233,28 @@ class TerminalUtilTest {
     }
 
     @Test
+    fun `queued dispatch mixed with benign cross-project resync info is still queued not a failure`() {
+        // #jb-busy-queue-ux-feedback: a queued-behind-busy route can co-emit
+        // benign cross-project resync info. The benign "registered in its own
+        // project root — skipping kill" preservation line (now routed to ops_log
+        // by #cross-project-stash-pane-condition, but defended here against any
+        // future stderr leak) must NOT tip classification to a PERSISTENT error:
+        // the queued-pending-dispatch line keeps it QUEUED_PENDING (informational,
+        // distinct from real route failures).
+        val relativePath = "tasks/software/tsift.md"
+        val output = """
+            resync: stash pane %32 is registered in its own project root — skipping kill
+            [route] authoritative actor generation 233 for $relativePath is busy on pane %19; queued pending dispatch "What are #next-steps?" in agent:queue auto (appended=true, already_present=false) instead of injecting a duplicate trigger
+        """.trimIndent()
+
+        assertEquals(
+            TerminalUtil.RunAgentDocRouteFailureKind.QUEUED_PENDING,
+            TerminalUtil.classifyRunAgentDocRouteFailure(output),
+        )
+        assertFalse(TerminalUtil.isRetryableRunAgentDocRouteFailure(output))
+    }
+
+    @Test
     fun `starting actor retry backoff uses bounded attempt delays`() {
         assertEquals(4, TerminalUtil.STARTING_ACTOR_ROUTE_MAX_ATTEMPTS)
         assertEquals(2_000L, TerminalUtil.startingActorRouteRetryDelayMillis(1))

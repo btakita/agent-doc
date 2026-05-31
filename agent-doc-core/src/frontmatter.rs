@@ -498,6 +498,19 @@ pub struct Frontmatter {
     /// `do queue`/`run queue`. Cleared when the queue drains to empty.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queue_active: Option<bool>,
+    /// Opt-in length threshold for the `#queue-prompt-echo-in-response` echo.
+    /// When `Some(n)` and a consumed queue prompt is longer than `n` characters,
+    /// the echo records a bounded summary (first line + truncation note + a
+    /// pointer to the full `agent:queue` text) instead of copying the whole
+    /// prompt verbatim. `None` (default) preserves the verbatim copy
+    /// (`#queue-prompt-echo-summary`; the user deferred summarization with "for
+    /// now, let's try copying the entire prompt", so it stays opt-in).
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "agent_doc_queue_prompt_echo_max_chars"
+    )]
+    pub queue_prompt_echo_max_chars: Option<usize>,
     /// Collaboration scope for the document.
     /// `shared` opts the document into stricter cross-document security checks.
     #[serde(
@@ -1224,6 +1237,7 @@ mod tests {
             agent_doc_env_inherit: None,
             cwd: None,
             queue_active: None,
+            queue_prompt_echo_max_chars: None,
             collaboration: None,
             security_review: None,
         };

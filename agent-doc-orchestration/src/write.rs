@@ -2932,7 +2932,13 @@ fn first_nonempty_line(text: &str) -> Option<&str> {
 
 /// Format consumed queue prompt(s) as a labeled blockquote echo so the response
 /// block records the prompt it answered (#queue-prompt-echo-in-response).
-fn format_consumed_prompt_echo(consumed_texts: &[String]) -> String {
+///
+/// `max_chars` is the opt-in `#queue-prompt-echo-summary` threshold: when
+/// `Some(n)` and a prompt exceeds `n` characters, the echo records a bounded
+/// summary (first line truncated + elided-char count + a pointer to the full
+/// `agent:queue` text) instead of the verbatim prompt. `None` (default)
+/// preserves the verbatim copy the user asked to keep "for now".
+fn format_consumed_prompt_echo(consumed_texts: &[String], max_chars: Option<usize>) -> String {
     let mut out = String::from("> **Queue prompt:**\n>\n");
     let mut first_block = true;
     for text in consumed_texts {
@@ -2943,7 +2949,11 @@ fn format_consumed_prompt_echo(consumed_texts: &[String]) -> String {
             out.push_str(">\n");
         }
         first_block = false;
-        for line in text.lines() {
+        let rendered = match max_chars {
+            Some(limit) if text.chars().count() > limit => summarize_consumed_prompt(text, limit),
+            _ => text.clone(),
+        };
+        for line in rendered.lines() {
             if line.trim().is_empty() {
                 out.push_str(">\n");
             } else {
@@ -2954,6 +2964,18 @@ fn format_consumed_prompt_echo(consumed_texts: &[String]) -> String {
         }
     }
     out
+}
+
+/// `#queue-prompt-echo-summary`: a bounded one-line summary of a long consumed
+/// queue prompt — its first non-empty line truncated to `limit` characters on a
+/// char boundary, plus how many characters were elided and a pointer to the full
+/// text preserved in `agent:queue`.
+fn summarize_consumed_prompt(text: &str, limit: usize) -> String {
+    let total = text.chars().count();
+    let first = first_nonempty_line(text).unwrap_or("").trim();
+    let head: String = first.chars().take(limit).collect();
+    let elided = total.saturating_sub(head.chars().count());
+    format!("{head}… (+{elided} more chars; full prompt retained in agent:queue)")
 }
 
 fn line_is_response_heading(trimmed: &str) -> bool {
@@ -3029,7 +3051,12 @@ fn embed_consumed_prompt_in_response(
 
     // Idempotency / manual-turn dedup: if the prompt's first line already appears
     // as an exchange line (user typed it, or a prior echo exists), skip injection.
-    let echo = format_consumed_prompt_echo(consumed_texts);
+    // #queue-prompt-echo-summary: the opt-in length threshold is read from the
+    // document's own frontmatter (default None = verbatim copy).
+    let max_chars = frontmatter::parse(content)
+        .ok()
+        .and_then(|(fm, _)| fm.queue_prompt_echo_max_chars);
+    let echo = format_consumed_prompt_echo(consumed_texts, max_chars);
     if region.contains(echo.trim_end()) {
         return content.to_string();
     }
@@ -20078,6 +20105,51 @@ Can you preserve the second paragraph too?
         let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(log.contains("flow=document_mutation"));
         assert!(log.contains("reason=mixed_duplicate_scaffold_tail"));
+    }
+}
+
+#[cfg(test)]
+mod queue_prompt_echo_summary_tests {
+    use super::*;
+
+    #[test]
+    fn echo_copies_verbatim_when_threshold_is_none() {
+        // #queue-prompt-echo-summary: default (None) preserves the verbatim copy
+        // the user asked to keep "for now".
+        let long = "do [#x] ".to_string() + &"word ".repeat(100);
+        let echo = format_consumed_prompt_echo(std::slice::from_ref(&long), None);
+        assert!(echo.starts_with("> **Queue prompt:**\n>\n"));
+        assert!(echo.contains(long.trim_end()));
+        assert!(!echo.contains("more chars"));
+    }
+
+    #[test]
+    fn echo_copies_verbatim_when_under_threshold() {
+        let short = "do [#x] short prompt".to_string();
+        let echo = format_consumed_prompt_echo(std::slice::from_ref(&short), Some(200));
+        assert!(echo.contains("> do [#x] short prompt"));
+        assert!(!echo.contains("more chars"));
+    }
+
+    #[test]
+    fn echo_summarizes_when_over_threshold() {
+        let long = "First line is the gist.\n".to_string() + &"tail ".repeat(100);
+        let echo = format_consumed_prompt_echo(std::slice::from_ref(&long), Some(40));
+        // The verbatim tail must NOT appear; a bounded summary must.
+        assert!(!echo.contains(&"tail ".repeat(100)));
+        assert!(echo.contains("First line is the gist."));
+        assert!(echo.contains("more chars; full prompt retained in agent:queue"));
+        // Summary is a single quoted line plus the label.
+        assert_eq!(echo.matches("more chars").count(), 1);
+    }
+
+    #[test]
+    fn summarize_truncates_first_line_on_char_boundary() {
+        // Multibyte content must not panic and must truncate on a char boundary.
+        let text = "héllo wörld ".repeat(20);
+        let summary = summarize_consumed_prompt(&text, 5);
+        assert!(summary.starts_with("héllo"));
+        assert!(summary.contains("more chars"));
     }
 }
 

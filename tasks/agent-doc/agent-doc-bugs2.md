@@ -16,7 +16,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -49,15 +49,15 @@ Closing this as an **umbrella, now decomposed** — not claiming the full featur
 - `#preflight-probe-side-effect-free` — diagnostic preflight that never leaves an open `preflight_started` cycle
 
 Those three carry the plan (`tasks/agent-doc/plan-recursive-repair-state-drift.md`) forward. Note: last turn's recovery churn was itself live evidence for all three — `agent-doc write --pending-only` landed items on disk but couldn't commit under IPC-active + snapshot==HEAD, and a diagnostic `preflight` opened a wedged cycle + triggered queue-metadata drift, requiring the `reset --from-current` → `commit` → `cancel` sequence those items exist to eliminate.
-<!-- agent:boundary:8e80cb40 -->
+<!-- agent:boundary:bea3f2ea -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#gated-followup-split-enforcement]
-- do [#recursive-repair-state-drift]
+- ~do [#recursive-repair-state-drift]~
 - do [#recursive-repair-recovery-states]
 - do [#recursive-repair-apply]
+- do [#gated-followup-split-enforcement]
 - do [#preflight-probe-side-effect-free]
 - do [#codex-owned-pane-stop-hook-live-verify]
 - do [#queue-sync-auto-pending-done-guard-misfire]

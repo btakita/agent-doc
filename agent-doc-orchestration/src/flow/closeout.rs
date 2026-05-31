@@ -253,6 +253,76 @@ pub fn stuck_captured_cycle(file: &Path) -> Option<StuckCapturedCycleInfo> {
     })
 }
 
+/// `#stuck-capture-compact-false-positive`: durably reconcile a committed-cycle
+/// capture whose response body is absent from `HEAD` *only because* `compact`
+/// archived it. [`stuck_captured_cycle`] already suppresses the false-positive
+/// warning by re-reading the HEAD-referenced compact archive on every preflight
+/// pass, but that suppression is not durable — if the archive is later GC'd the
+/// same capture would flag stuck again and re-suggest a `write --commit` that
+/// would re-inject an already-archived response. Marking the capture `Discarded`
+/// (the same terminal state `compact` assigns via
+/// [`crate::capture::discard_captures_for_archived_responses`]) settles it once
+/// so the false positive cannot resurface.
+///
+/// `mark_discarded` advances the *active* capture, and the active capture is
+/// loaded by the cycle's own `capture_id`, so this only ever discards the
+/// capture this cycle owns. Returns `true` when a capture was reconciled.
+pub fn reconcile_compacted_committed_capture(file: &Path) -> Result<bool> {
+    let Some(state) = crate::cycle_state::load(file)? else {
+        return Ok(false);
+    };
+    if state.phase != crate::cycle_state::CyclePhase::Committed {
+        return Ok(false);
+    }
+    let Some(capture_id) = state.capture_id.as_deref() else {
+        return Ok(false);
+    };
+    let Some(capture) = crate::capture::load_by_id(file, capture_id)? else {
+        return Ok(false);
+    };
+    if capture.cycle_id != state.cycle_id {
+        return Ok(false);
+    }
+    if let Some(response_sha256) = state.response_sha256.as_deref()
+        && response_sha256 != capture.response_sha256
+    {
+        return Ok(false);
+    }
+    if capture.response_body.trim().is_empty()
+        || matches!(capture.state, crate::capture::CaptureState::Discarded)
+    {
+        return Ok(false);
+    }
+    let Some(head) = crate::git::show_head(file)? else {
+        return Ok(false);
+    };
+    // Present in HEAD → a normal committed response; nothing to reconcile.
+    if crate::write::response_materialized_in_content(&capture.response_body, &head) {
+        return Ok(false);
+    }
+    // Absent from HEAD but present in a HEAD-referenced compact archive → the
+    // response was committed and then intentionally archived. Settle it durably.
+    if !response_materialized_in_head_compact_archive(file, &capture.response_body, &head) {
+        return Ok(false);
+    }
+    crate::capture::mark_discarded(file)?;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "reconcile_compacted_committed_capture file={} capture_id={} cycle_id={}",
+            file.display(),
+            capture.capture_id,
+            state.cycle_id
+        ),
+    );
+    eprintln!(
+        "[preflight] reconciled compacted committed capture {} for {} (response archived out of HEAD; marked discarded so the stuck-capture false positive cannot resurface)",
+        capture.capture_id,
+        file.display()
+    );
+    Ok(true)
+}
+
 fn response_materialized_in_head_compact_archive(
     file: &Path,
     response_body: &str,
@@ -879,6 +949,81 @@ mod tests {
             stuck_captured_cycle(&doc).is_none(),
             "cycle {} should not warn when the captured response is materialized in the compact archive",
             state.cycle_id
+        );
+    }
+
+    #[test]
+    fn reconcile_compacted_committed_capture_discards_and_survives_archive_gc() {
+        // #stuck-capture-compact-false-positive: reconciliation marks the capture
+        // Discarded once the response is proven in the compact archive, so the
+        // false-positive stuck warning cannot resurface even if the archive is
+        // later garbage-collected.
+        let base = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Older response.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let response = "### Re: compacted — gpt-5\n\nArchived response body.\n";
+        let (dir, doc) = setup_git_project_with_doc(base);
+        let archive_dir = dir.path().join(".agent-doc/archives");
+        std::fs::create_dir_all(&archive_dir).unwrap();
+        let archive_path = archive_dir.join("doc-20260527-000000.md");
+        std::fs::write(
+            &archive_path,
+            format!(
+                "---\narchived_from: compact\ncomponent: exchange\ndocument: doc.md\n---\n\n{base}\n{response}"
+            ),
+        )
+        .unwrap();
+        let compacted = format!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n*Compacted. Content archived to `{}`*\n<!-- /agent:exchange -->\n",
+            archive_path.display()
+        );
+
+        crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        crate::capture::capture_response(&doc, response).unwrap();
+        std::fs::write(&doc, &compacted).unwrap();
+        crate::snapshot::save(&doc, &compacted).unwrap();
+        run_git(dir.path(), &["add", "doc.md"]);
+        run_git(dir.path(), &["commit", "-m", "compact", "--no-verify"]);
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(&compacted),
+            Some(&compacted),
+        )
+        .unwrap();
+
+        // Reconcile once: the capture is durably marked Discarded.
+        assert!(
+            reconcile_compacted_committed_capture(&doc).unwrap(),
+            "expected reconciliation to settle the compacted committed capture"
+        );
+        let capture = crate::capture::load_active(&doc).unwrap().unwrap();
+        assert!(
+            matches!(capture.state, crate::capture::CaptureState::Discarded),
+            "capture should be terminally Discarded after reconciliation, got {:?}",
+            capture.state
+        );
+
+        // A second pass is a no-op (already discarded).
+        assert!(
+            !reconcile_compacted_committed_capture(&doc).unwrap(),
+            "reconciliation should be idempotent once the capture is discarded"
+        );
+
+        // Durability: even after the archive is GC'd, the discarded capture must
+        // not resurface as a stuck-capture false positive.
+        std::fs::remove_file(&archive_path).unwrap();
+        assert!(
+            stuck_captured_cycle(&doc).is_none(),
+            "a reconciled (discarded) capture must not flag stuck after the archive is removed"
         );
     }
 }

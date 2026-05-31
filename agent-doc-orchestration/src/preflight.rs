@@ -1661,6 +1661,27 @@ pub fn run(file: &Path) -> Result<()> {
     // warning so the harness can take a recovery path (e.g. force write --commit)
     // instead of silently retrying the same finalize.
     // See tasks/agent-doc/plan-stuck-cycle-causes-duplicated-uncommitted-response.md.
+    // #stuck-capture-compact-false-positive: first durably settle any
+    // committed-cycle capture whose response is absent from HEAD only because
+    // `compact` archived it. This converts the per-pass archive-suppression into
+    // a one-time terminal `Discarded`, so a later archive GC cannot resurface the
+    // false-positive stuck warning. After this, `stuck_captured_cycle` sees a
+    // discarded capture and returns None for the same case.
+    match crate::flow::closeout::reconcile_compacted_committed_capture(file) {
+        Ok(true) => {
+            eprintln!(
+                "[preflight] reconciled compacted committed capture for {}",
+                file.display()
+            );
+        }
+        Ok(false) => {}
+        Err(err) => {
+            eprintln!(
+                "[preflight] warning: failed to reconcile compacted committed capture for {}: {err}",
+                file.display()
+            );
+        }
+    }
     if let Some(info) = crate::flow::closeout::stuck_captured_cycle(file) {
         warnings.push(PreflightWarning {
             code: "stuck_captured_cycle".to_string(),

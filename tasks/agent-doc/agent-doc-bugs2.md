@@ -16,7 +16,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -56,14 +56,13 @@ Landed a safe, tested **slice 1** and kept the item open with the remainder narr
 
 #### Note on this turn's state
 Last turn's response was archived by a concurrent compaction (`...-170445.md`) within minutes, which surfaced a `stuck_captured_cycle` warning — a false positive of the compaction-vs-stale-capture class (`#stuck-capture-compact-false-positive`), **not** lost work. I did **not** run `write --commit` (it would re-inject the archived response). This racy multi-session environment is also why I gated the live-verification phases above.
-<!-- agent:boundary:b69981e3 -->
+<!-- agent:boundary:df8f00bb -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue -->
-- do [#gated-followup-split-enforcement]
+<!-- agent:queue auto -->
+- do [#recursive-repair-state-drift]
 preset #spec-test-build-install-commit-push
-- ~do [#recursive-repair-state-drift]~
-- ~do [#blocked-closeout-followup-capture]~
+- do [#gated-followup-split-enforcement]
 - do [#recursive-repair-recovery-states]
 - do [#recursive-repair-apply]
 - do [#preflight-probe-side-effect-free]

@@ -31,40 +31,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260531-022911.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260531-030113.md`*
 
 Compacted content:
-- Archived 5 response topic(s): closeout-repair-churn; closeout repair queue state; JB Run Agent Doc busy-queue reports; 2 more
+- Archived 1 response topic(s): #spec-test-commit-push-deploy
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: #spec-test-commit-push-deploy — opus-4-8
-
-> **Queue prompt:**
->
-> The response to a queue item should contain the prompt from the queue. If the prompt is long, it may be beneficial to have a summary of the prompt. But for now, let's try copying the entire prompt.
-> #spec-test-commit-push-deploy
-
-
-Done — queue-item responses now copy the originating prompt. This response is the live demo: the blockquote just above was inserted by the binary, not typed by me.
-
-#### What changed
-
-When a closeout consumes one or more queue prompts, the binary embeds the full consumed prompt text as a `> **Queue prompt:**` blockquote immediately after this cycle's `### Re:` heading. It writes into **both** the document and the snapshot so the selective-commit boundary stays consistent (verified: `HEAD` carries the echo and the working tree is clean after a live finalize).
-
-Why the binary and not the skill: an auto/synthetic queue head is never typed into `agent:exchange`, so a consumed queue turn used to record only the answer with no trace of what it answered. Per the project's "all deterministic behavior in the binary" rule, the echo is a guaranteed, agent-independent document mutation rather than something the agent must remember to do.
-
-- **Location** — `plan_queue_prompt_consumption` (`write.rs`); helpers `format_consumed_prompt_echo` / `embed_consumed_prompt_in_response` / `locate_response_heading_offset`. The response heading is located by the captured response body's first line, falling back to the last non-code `### Re:` heading.
-- **Fail-safe** — injection is skipped (content unchanged) when the prompt is empty, the exchange/heading can't be located, the same echo already exists, or the prompt's first line already appears as an exchange line (a user typed it in directly — no double-echo, e.g. the manual `❯ do #fix1` case).
-- **Verbatim** — multi-line prompts and fenced code are quoted as-is ("let's try copying the entire prompt"). The echo lands before the trailing boundary marker, so it is committed history and is never re-detected as an unresolved tail prompt.
-
-#### Verify / deploy
-
-- Tests: added `finalize_echoes_consumed_free_text_queue_prompt_into_response`; updated `finalize_consumes_synthetic_queue_prompt_when_response_topic_targets_head_id` and the two `run_*_queue_continues_until_drained` tests to be queue-scoped (prompt drains from the queue, echo appears in the response). Full workspace `cargo test` + `cargo clippy` green.
-- Spec: `specs/07-orchestration-commands.md` documents the `#queue-prompt-echo-in-response` invariant.
-- Deploy: `cargo build --release` + `cargo install --path .` (both binaries refreshed); committed + pushed in `src/agent-doc` (`c030760e`) with the superproject pointer bump (`6ca3ae899`).
-
-Note: this head carries a trailing `#spec-test-commit-push-deploy` tag, so it consumes as a synthetic/preset head — the response heading had to resolve to exactly that id to strike it, which is existing behavior. Follow-up `[#queue-prompt-echo-summary]` queued for summarizing long prompts.
-<!-- agent:boundary:395445bf -->
+<!-- agent:boundary:c09031ff -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -81,7 +53,7 @@ JB `Run Agent Doc` successfully started a turn and had an error.
 #spec-test-commit-push-deploy
 ---
 preset #spec-test-build-install-commit-push
-- do [#clear-stops-running-process]
+- ~do [#clear-stops-running-process]~
 - do [#stash-pane-promote-on-focus]
 - do [#do-id-partial-closeout-state]
 - do [#closeout-recovery-state-machine]

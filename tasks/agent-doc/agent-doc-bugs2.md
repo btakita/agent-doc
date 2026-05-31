@@ -117,13 +117,34 @@ It's running **by design** — a healthy persistent managed session, not a leak 
 **Tie to the deadlock:** route found this same session mid-turn (`busy`) and correctly queued instead of injecting. Now `ready` (idle) is exactly the transition where the queued prompt *should* drain (Codex `Stop` hook / next route). So `#jb-run-agent-doc-busy-queue-dispatch-deadlock` isn't about "why is it running" (correct) — it's "does the route-appended `agent:queue auto` prompt dispatch on idle, or strand?" That's what the plan targets.
 
 I can scan this session's exchange / ops log to confirm whether the earlier `"Are there any items in review..."` prompt was ever delivered (empirically: deadlocked vs drained).
-<!-- agent:boundary:9cb1fa1d -->
+- do [#closeout-recovery-state-machine]. #spec-test-build-install-commit-push
+- Add debug state apis for all actors so we can investigate state drift.
+
+### Re: do [#closeout-recovery-state-machine] + actor debug APIs — opus-4-8
+
+Both parts done, spec + tests + build + install + commit + push complete.
+
+**Part 1 — `#closeout-recovery-state-machine` (the two reserved states are now detected):**
+
+- **`DirectResponsePatchback`** ← `session_check::detect_bypassed_response_write` (a visible `### Re:` / `## Assistant` response patched into the working file outside the binary path), guarded against the `git::commit`-recoverable jb-cache-conflict-cancel shape so a binary-applied-but-uncommitted response isn't misread as a manual patchback. Checked before the generic content-drift fallthrough so its `write --commit` recovery wins over `unsafe_user_content_drift`.
+- **`NestedParentPointerStale`** ← `git::submodule_pointer_drift` when the document itself is clean (snapshot == HEAD == working) but the submodule HEAD is ahead of the parent repo's recorded pointer; recovery `agent-doc commit`. Checked just before `clean`.
+- Guards already fold through `closeout_recovery_hint` → the classifier, so all eleven states now render `Recovery [state]: command`.
+- Tests: `classify_recovery_direct_response_patchback_when_visible_response_uncommitted`, `classify_recovery_nested_parent_pointer_stale_when_submodule_ahead_of_parent` (file-protocol submodule).
+
+**Part 2 — actor debug API for state-drift investigation:**
+
+- `session_actor::load_all_records_in(base_dir)` — loads every actor record in a project store (the debug API).
+- `agent-doc session debug [FILE] [--human]` — dumps all actors cross-referenced with each document's cycle phase + closeout-recovery classification. Clean JSON on stdout by default; `--human` prints a summary. Diagnostic-only (never mutates). Test: `load_all_records_returns_every_bound_actor`.
+- Smoke-tested live: it immediately surfaced two stale `open_empty_preflight` probe cycles and one `direct_response_patchback` across the 34 actors in this project.
+
+**Verification:** full `make check` green (0 failure markers, exit 0); `cargo build --release` + `cargo install --path .` (both binaries refreshed). **Commits:** submodule `1fa6c4ec` (pushed to `origin/20260422/codex-agent-backend`), superproject pointer `53ff1fa8f` (pushed to `origin/main`). Specs: `07-closeout-commands.md`, `07-session-tmux-commands.md`.
+<!-- agent:boundary:ca333edd -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
+- do [#closeout-recovery-state-machine]
 preset #spec-test-build-install-commit-push
 - do [#jb-run-agent-doc-busy-queue-dispatch-deadlock]
-- do [#closeout-recovery-state-machine]
 - do [#preflight-probe-side-effect-free]
 - do [#gated-followup-split-enforcement]
 - do [#completed-queue-residue-regression]
@@ -175,7 +196,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 - [ ] [#stuck-capture-queue-echo-false-positive] [recommended] Fix landed (submodule 6220379c): response_already_applied matched the captured response as one contiguous block, but queue consumption inserts a > **Queue prompt:** echo blockquote (#queue-prompt-echo-in-response) between the response heading and body, so stuck_captured_cycle falsely warned committed-but-not-in-HEAD after every queue-consumed cycle and re-suggested a write --commit that would re-inject the response. normalized_response_lines now strips the echo blockquote on both sides before matching; unit + closeout regressions added. Verify across a couple more queue-consumed cycles that no preflight emits the false stuck_captured_cycle warning, then mark done.
 - [ ] [#completed-queue-residue-regression] [recommended] Completed queue items can still remain visible in agent:queue after the turn is finished, despite the archived #drained-done-queue-clear fix. Treat as a regression/uncovered route or IPC path: add a committed-state guard for provable completed queue residue, audit finalize/write/preflight/run continuation drain ordering, and verify live editor/snapshot/HEAD convergence. Plan: tasks/agent-doc/plan-completed-queue-residue-regression.md.
 - [ ] [#do-id-partial-closeout-state] [recommended] Partial-closeout WARN guard landed (check_partial_closeout_state_guard: a do[#id] turn whose response shows shipped + remaining-live-work signals with the directed id still open advises --pending-edit/--pending-gate narrowing; suppressible by a no-partial-closeout-guard response marker; FlowCore guard_ budget 35->40). Remaining: per-id edit-vs-gate tracking in cycle_state, opt-in strict mode, next-phase queue convergence, and the runbook note that #spec-test-commit-push completes a repo phase without a live/deploy item. Plan: tasks/agent-doc/plan-do-id-partial-closeout-state.md.
-- [ ] [#closeout-recovery-state-machine] [recommended] Typed closeout recovery classifier landed: flow::closeout::CloseoutRecoveryState + classify_closeout_recovery_state + recovery_command; session_check::closeout_recovery_hint renders one typed 'Recovery [state]: command' across all nine closeout-guard call sites. Classified today: clean / open_cycle / missing_response_body / escaped_template_patch. Remaining: precise detection for reserved states direct_response_patchback, boundary_only_drift, nested_parent_pointer_stale, and folding each guard's existing diagnostic through the classifier. Plan: tasks/agent-doc/plan-closeout-repair-churn.md.
 <!-- /agent:backlog -->
 
 ## Review

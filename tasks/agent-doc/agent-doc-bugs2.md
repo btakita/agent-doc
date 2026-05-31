@@ -77,7 +77,14 @@ Key correctness detail: the unresolved prompt is derived from the cycle's **prom
 Items 2–3 need a Codex session I can't run here: (2) installed Codex guidance reads `owned_pane_self_invocation` to drive an in-pane response + a Stop-hook/guidance regression; (3) live Codex same-pane verification. Plan: tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md.
 
 Commits: agent-doc `1f81d4cc`, superproject `05265b14b` (pushed).
-<!-- agent:boundary:3a558452 -->
+
+### Re: closeout recovery — pending_done_guard misfire (known #queue-sync-auto-pending-done-guard-misfire) — opus-4-8
+
+
+Recovery note for the `do [#codex-owned-pane-prompt-miss-followups]` closeout (response committed as `160455008`; item gated `[/]` in review).
+
+The post-commit `pending_done_guard` flagged `#blocked-closeout-followup-capture` (a later auto-queue item, not this turn's work) — the already-tracked `#queue-sync-auto-pending-done-guard-misfire`: a synced auto-queue surfaces its `do [#id]` entries as cycle do-directives. That item is **deferred to the auto-loop**, not abandoned, so the per-cycle guard suppression applies here. Root-cause fix remains queued.
+<!-- agent:boundary:40703367 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->

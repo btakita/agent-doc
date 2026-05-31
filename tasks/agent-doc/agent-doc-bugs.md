@@ -23,44 +23,12 @@ Prior frontmatter bug fix remains complete. New work this cycle is planning only
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/9b6e92d236cca996f590233b78ee7610f8c87e138c23d521f032418d6629e816-20260531-211807.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/9b6e92d236cca996f590233b78ee7610f8c87e138c23d521f032418d6629e816-20260531-235103.md`*
 
 Compacted content:
-- Archived 3 response topic(s): parallelize scan_text_source; tokio vs std::thread::scope; Is #dtmc complete?
+- Archived 2 response topic(s): editor-buffer-state-ffi-debounce; editor-buffer-state
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/9b6e92d2...
-❯ do [#editor-buffer-state-ffi-debounce]. #spec-test-build-install-commit-push
-
-### Re: editor-buffer-state-ffi-debounce — glm-5.1
-
-Implemented editor-authoritative buffer stability via the FFI bridge. Three files changed:
-
-**`debounce.rs`** — new `EditorBufferState` struct with fields: `path`, `version` (monotonic), `dirty`, `last_edit_timestamp_ms`, `save_timestamp_ms` (optional), `hash` (optional SHA-256), `content_len` (optional), `session_id` (optional). New functions: `record_editor_buffer_state`, `editor_buffer_state`, `editor_buffer_stable`, `await_editor_buffer_stable`. State persisted to `.agent-doc/editor-state/<hash>` JSON sidecar.
-
-**`diff_io.rs`** — `wait_for_stable_content` now checks for editor buffer state first. When present, uses editor-authoritative stability (version/hash match, dirty flag, debounce elapsed). Falls back to the truncation heuristic (`extract_last_added_line` + `looks_truncated`) when no editor state exists. The editor path returns immediately when the buffer hash matches disk content, or waits up to 6s for stability.
-
-**`ffi.rs`** — three new FFI functions:
-- `agent_doc_report_editor_state(file, version, dirty, last_edit_ts, save_ts, hash, len, session_id)` — called by IDE plugins on every document change
-- `agent_doc_get_editor_state(file)` → JSON string of current state
-- `agent_doc_is_editor_stable(file, debounce_ms)` → bool
-
-10 new tests covering: record/read, stable/not-stable, debounce elapsed, overwrite, editor-state path in `wait_for_stable_content`, fallback without editor state. All 58 debounce+diff_io tests pass. `make check` clean. `cargo install --path .` succeeded. Committed and pushed as `8638f751`.
-❯ Did you use the Session Actor in memory state or a file to track the editor buffer state? I don't want an extra file due to concurrency issues. The Session Actor is concurrency safe.
-❯ #spec-test-build-install-commit-push
-
-### Re: editor-buffer-state — glm-5.1
-
-You're right — the prior implementation used file-based sidecars (`.agent-doc/editor-state/<hash>`) which is wrong for the Session Actor pattern. Refactored to use the Session Actor's in-process `Mutex<HashMap>` approach.
-
-**Three files changed:**
-
-**`debounce.rs`** — replaced `EDITOR_STATE_DIR` constant and `editor_state_path()` function with a static `EDITOR_BUFFER_STATES: Mutex<Option<HashMap<PathBuf, EditorBufferState>>>`. This is the same concurrency-safe interior-mutability pattern used by `LAST_CHANGE`. `record_editor_buffer_state` no longer returns `Result` — it writes to the in-memory map. `editor_buffer_state` reads from it. No filesystem I/O.
-
-**`diff_io.rs`** — updated doc comments to reference the in-memory map instead of sidecar files. `wait_for_stable_content_editor` now reads from the Session Actor map.
-
-**`ffi.rs`** — simplified `agent_doc_report_editor_state` since `record_editor_buffer_state` no longer returns `Result`.
-
-All 10 editor buffer state tests pass (updated to not create temp dirs for sidecars). All 2052 orchestration tests pass. `make check` clean. `cargo install --path .` succeeded. Committed and pushed as `069b3599`.
-<!-- agent:boundary:382f86c3 -->
+<!-- agent:boundary:38b710ec -->
 <!-- /agent:exchange -->
 
 <!--

@@ -1,7 +1,38 @@
 # Plan: recursive owner-pane recovery should not leave document state wedged
 
-**Pending:** `#recursive-repair-state-drift`
-**Status:** In progress (typed-recovery slice landed)
+**Pending:** `#recursive-repair-state-drift` (umbrella retired — done; remainder in discrete children)
+**Status:** In progress via children
+
+## Status note (2026-05-31) — slice 2: #recursive-repair-recovery-states LANDED
+
+All four recovery states the plan enumerated are now classified in
+`flow::closeout::classify_closeout_recovery_state`, each with one safe recovery
+command (rendered by `session_check::closeout_recovery_hint`):
+
+- `OpenEmptyPreflight` — empty `preflight_started` cycle (no capture / response
+  hash / pending mutation) → `agent-doc cancel`. Distinguished from a real
+  `OpenCycle` (which has a capture or pending mutation).
+- `QueueMetadataDrift` — committed snapshot differs from HEAD only by queue /
+  `queue_active` / status metadata (content-component signature identical) →
+  `agent-doc commit`. Distinct from `BoundaryOnlyDrift` (boundary/prompt-prefix).
+- `SidecarVisibleDrift` — snapshot matches HEAD but the visible file is stale by
+  metadata only → `agent-doc reset --from-current --preserve-session` + commit.
+- `UnsafeUserContentDrift` — real user/response content differs (content
+  signature differs) → fail closed: preserve via `finalize`/`write --commit`,
+  never auto-commit.
+
+Discrimination uses a new `content_component_signature` (exchange + backlog +
+review + icebox + done, excluding queue/status/frontmatter/boundary). Tests:
+`classify_recovery_open_empty_preflight_when_nothing_followed`,
+`classify_recovery_open_cycle_when_preflight_has_pending_mutations`,
+`classify_recovery_queue_metadata_drift_when_only_queue_differs`,
+`classify_recovery_unsafe_user_content_drift_when_exchange_differs`, plus the
+expanded `recovery_command_maps_each_state_to_one_instruction`. These were
+live-reproduced this session (empty probe cycle + queue-sync metadata drift
+during the #gated-followup-split recovery churn).
+
+Remaining children: `#recursive-repair-apply` (apply the safe states in one
+command + live verify) and `#preflight-probe-side-effect-free`.
 
 ## Status note (2026-05-31) — slice 1: typed metadata-only HEAD-drift recovery
 

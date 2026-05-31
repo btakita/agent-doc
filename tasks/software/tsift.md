@@ -35,7 +35,7 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 3 response topic(s): #libsql-pushdown-edge-incident; #health-dedup-scc -- glm-5.1; test
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:5ab4ce39 -->
+<!-- agent:boundary:f6a06f1f -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -44,7 +44,7 @@ Compacted content:
 preset #spec-test-build-install-commit-push
 - ~[#libsql-pushdown-edge-incident]~
 - ~[#health-dedup-scc]~
-- [#ranked-neighborhood]
+- ~[#ranked-neighborhood]~
 - [#terse-health-early-exit]
 - [#libsql-edges-between-pushdown]
 - [#compact-community-serialization]
@@ -56,6 +56,12 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#terse-health-early-exit] Early-terminated terse health report: stop after top/bottom N scores, skip per-node sub-metrics when only overall is needed. ~30% health compute reduction. tsift-algorithms/src/health.rs:42-71
+- [ ] [#libsql-edges-between-pushdown] Override edges_between_nodes in LibsqlGraphStore with temp-table + EXISTS (parity with SQLite backend). 5-20x neighborhood speedup. tsift-libsql/src/lib.rs
+- [ ] [#compact-community-serialization] Add TerseCommunityMember/TerseCommunity — name + tagpath_handle only, top-N member slice. ~40-60% community JSON savings. tsift-graph/src/lib.rs:541-572
+- [ ] [#louvain-dedup-aggregate] Add Louvain phase-2 aggregation (super-node coarsening). 5-15% modularity improvement on hierarchical codebases. tsift-graph/src/lib.rs:590-743
+- [ ] [#shared-graph-build-pipeline] Extract shared build_graph() from health.rs to common module; reuse in scc.rs, coupling.rs, dead_code.rs. ~30% analyze wall-time reduction. tsift-algorithms/src/*.rs
+- [ ] [#sift-token-index] Build inverted token index for search pre-filtering — skip files with no matching tokens. 5-50x search speedup on large codebases. tsift-search/src/sift.rs:210-267
 <!-- /agent:backlog -->
 
 ## Review

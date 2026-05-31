@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -58,7 +58,17 @@ All 12 queue items implemented, tested, built, installed, committed, and pushed 
 | `#duplicate-callers-fetch` | Fetch callers/callees once, reuse for both display and combined JSON | tsift-cli |
 
 **Verification:** `cargo test` — all 47 package tests pass (tsift-core, tsift-search, tsift-graph, tsift-algorithms, tsift-sqlite, tsift-libsql, tsift-index, tsift-quality, tsift-cli, and reexports). `cargo build --release` + `cargo install --path .` — installed to `~/.cargo/bin/tsift`. Committed as `2bdec90`, pushed to `origin/main`.
-<!-- agent:boundary:57726a13 -->
+
+### Re: queue re-activation — all 12 items verified — glm-5.1
+
+Queue re-activated with 12 items. All were already implemented and pushed in commit `2bdec90` (552 insertions across 8 packages). Verified:
+
+- **Code**: `TerseGraphNode`/`TerseGraphEdge`/`TerseGraphSubgraph` (tsift-core), `TerseDiagnostic` (tsift-sqlite), `TerseSearchHit` (tsift-search), `TerseHealthReport`/`TerseHealthScore` (tsift-algorithms), `edge_key` indexed lookup (tsift-libsql), `graph_counts()` with `COUNT(*)` (tsift-libsql), `(depth, parent_id)` BFS tuples (tsift-core), `ki_in` cache (tsift-graph), SCC condensation (tsift-algorithms), temp table + EXISTS (tsift-sqlite), caller/callee reuse (tsift-cli)
+- **Tests**: `cargo test` — all pass
+- **Commit**: `2bdec90` on `origin/main`
+
+All 12 backlog items already resolved.
+<!-- agent:boundary:8947e7c1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -88,18 +98,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#terse-graph-serial] Add terse serialization mode for GraphNode/GraphEdge in envelope output — strip provenance/freshness, keep id/kind/label/properties subset. ~30-50% token savings across search/explain/neighborhood. `tsift-core/src/lib.rs:48-102`
-- [ ] [#graph-default-edge-lookup] Override default `edge()` in Convex/libsql backends with indexed single-row lookup instead of loading all edges. `tsift-core/src/lib.rs:385-389`
-- [ ] [#neighborhood-per-edge-node] Batch node ID resolution per depth level in default `neighborhood()` — avoid per-edge `node()` calls. `tsift-core/src/lib.rs:499-535`
-- [ ] [#terse-diagnostics] Add compact diagnostic codes for SQLite query plan diagnostics in envelope mode. `tsift-sqlite/src/lib.rs:1525-1540`
-- [ ] [#terse-search-hit] Strip budget/freshness/provenance/coverage from SearchHit in envelope preview mode. `tsift-search/src/sift.rs:68-82`
-- [ ] [#graph-counts-full-scan] Add COUNT queries to each backend instead of deserializing all rows. `tsift-core/src/lib.rs:970-975`
-- [ ] [#shortest-path-depth-walk] Store (depth, parent_id) tuples in BFS parent map to eliminate O(depth) walk per node. `tsift-core/src/lib.rs:1065-1076`
-- [ ] [#louvain-scaling] Pre-compute ki_in incrementally, add hierarchical coarsening (Louvain phase 2). `tsift-graph/src/lib.rs:590-731`
-- [ ] [#health-reachability] Replace per-node BFS with SCC condensation or sampled approximation. `tsift-algorithms/src/health.rs:59-77`
-- [ ] [#edges-between-chunks] Use temp table + JOIN for edges_between_nodes instead of chunked IN queries. `tsift-sqlite/src/lib.rs:2206-2246`
-- [ ] [#duplicate-callers-fetch] Reuse edges already fetched in graph.rs when --callers + --callees + JSON mode. `tsift-cli/src/commands/graph.rs:238-291`
-- [ ] [#terse-health-scores] Emit top-N/bottom-N health scores instead of full vector in envelope mode. `tsift-cli/src/commands/graph.rs:445-460`
 <!-- /agent:backlog -->
 
 ## Review

@@ -751,6 +751,51 @@ mod tests {
     }
 
     #[test]
+    fn stuck_captured_cycle_ignores_queue_prompt_echo_inserted_in_head() {
+        // #stuck-capture-queue-echo-false-positive: when a queue head is consumed,
+        // the binary inserts a `> **Queue prompt:**` echo blockquote between the
+        // response heading and body. The captured response is the raw heading+body,
+        // so the materialized HEAD differs by that echo. stuck_captured_cycle must
+        // still treat the response as present in HEAD (no false-positive warning).
+        let base = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\nOlder response.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let response = "### Re: do [#thing] — gpt-5\n\nShipped the fix.\n";
+        let (dir, doc) = setup_git_project_with_doc(base);
+
+        crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        crate::capture::capture_response(&doc, response).unwrap();
+
+        // Materialize the response into HEAD with the queue-prompt echo inserted
+        // between the heading and body, exactly as queue consumption writes it.
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\nOlder response.\n",
+            "### Re: do [#thing] — gpt-5\n\n",
+            "> **Queue prompt:**\n>\n> do [#thing]\n\n",
+            "Shipped the fix.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        run_git(dir.path(), &["add", "doc.md"]);
+        run_git(dir.path(), &["commit", "-m", "response", "--no-verify"]);
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(committed), Some(committed))
+            .unwrap();
+
+        assert!(
+            stuck_captured_cycle(&doc).is_none(),
+            "queue-prompt echo inserted between heading and body must not flag the cycle stuck"
+        );
+    }
+
+    #[test]
     fn stuck_captured_cycle_ignores_committed_cycle_when_response_is_in_head() {
         let base = "---\nsession: test\n---\n\n## User\n\nHello\n";
         let response = "### Re: hello — gpt-5\n\nCommitted response.\n";

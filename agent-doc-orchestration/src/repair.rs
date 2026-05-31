@@ -1613,10 +1613,33 @@ pub fn response_already_applied_after_prefix_strip(doc: &str, response: &str) ->
 }
 
 fn normalized_response_lines(content: &str) -> Vec<String> {
-    content
-        .lines()
-        .filter_map(normalize_response_line)
-        .collect()
+    // #stuck-capture-queue-echo-false-positive: skip the binary-inserted
+    // `> **Queue prompt:**` echo blockquote (#queue-prompt-echo-in-response).
+    // The echo is decoration written between the response heading and body at
+    // queue-consume time — it is never part of the agent's captured response —
+    // so leaving it in would break the contiguous-block match in
+    // `response_already_applied` and make `response_materialized_in_content`
+    // (and therefore `stuck_captured_cycle`) report a committed response as
+    // missing from HEAD. Stripping it on both the response and document side
+    // keeps "is this response already applied" detection accurate.
+    let mut out = Vec::new();
+    let mut lines = content.lines().peekable();
+    while let Some(line) = lines.next() {
+        if line.trim() == "> **Queue prompt:**" {
+            while let Some(next) = lines.peek() {
+                if next.trim_start().starts_with('>') {
+                    lines.next();
+                } else {
+                    break;
+                }
+            }
+            continue;
+        }
+        if let Some(normalized) = normalize_response_line(line) {
+            out.push(normalized);
+        }
+    }
+    out
 }
 
 fn normalize_response_line(line: &str) -> Option<String> {
@@ -1740,6 +1763,43 @@ mod tests {
         let doc = dir.path().join("test.md");
         std::fs::write(&doc, "# Doc\n\n## User\n\nHello\n").unwrap();
         assert_eq!(run(&doc).unwrap(), RepairOutcome::Noop);
+    }
+
+    #[test]
+    fn response_already_applied_tolerates_queue_prompt_echo_between_heading_and_body() {
+        // #stuck-capture-queue-echo-false-positive: the captured response is the
+        // raw heading+body. At queue-consume time the binary inserts a
+        // `> **Queue prompt:**` echo blockquote between the heading and the body
+        // (#queue-prompt-echo-in-response). The contiguous-block match must still
+        // recognize the response as applied, otherwise stuck_captured_cycle fires
+        // a false positive after every queue-consumed cycle.
+        let captured_response = "### Re: do [#thing] — opus-4-8\n\nShipped the fix.\n";
+        let materialized_doc = concat!(
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: do [#thing] — opus-4-8\n\n",
+            "> **Queue prompt:**\n",
+            ">\n",
+            "> do [#thing]\n\n",
+            "Shipped the fix.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        assert!(
+            response_already_applied(materialized_doc, captured_response),
+            "queue-prompt echo between heading and body must not defeat the applied-response match"
+        );
+
+        // A genuinely absent response must still report not-applied.
+        let other_doc = concat!(
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: do [#other] — opus-4-8\n\nUnrelated.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        assert!(
+            !response_already_applied(other_doc, captured_response),
+            "an unrelated document must not match the captured response"
+        );
     }
 
     #[test]

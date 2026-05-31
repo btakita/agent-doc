@@ -28,7 +28,23 @@ Prior frontmatter bug fix remains complete. New work this cycle is planning only
 Compacted content:
 - Archived 3 response topic(s): parallelize scan_text_source; tokio vs std::thread::scope; Is #dtmc complete?
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/9b6e92d2...
-<!-- agent:boundary:5ef52b6d -->
+❯ do [#editor-buffer-state-ffi-debounce]. #spec-test-build-install-commit-push
+
+### Re: editor-buffer-state-ffi-debounce — glm-5.1
+
+Implemented editor-authoritative buffer stability via the FFI bridge. Three files changed:
+
+**`debounce.rs`** — new `EditorBufferState` struct with fields: `path`, `version` (monotonic), `dirty`, `last_edit_timestamp_ms`, `save_timestamp_ms` (optional), `hash` (optional SHA-256), `content_len` (optional), `session_id` (optional). New functions: `record_editor_buffer_state`, `editor_buffer_state`, `editor_buffer_stable`, `await_editor_buffer_stable`. State persisted to `.agent-doc/editor-state/<hash>` JSON sidecar.
+
+**`diff_io.rs`** — `wait_for_stable_content` now checks for editor buffer state first. When present, uses editor-authoritative stability (version/hash match, dirty flag, debounce elapsed). Falls back to the truncation heuristic (`extract_last_added_line` + `looks_truncated`) when no editor state exists. The editor path returns immediately when the buffer hash matches disk content, or waits up to 6s for stability.
+
+**`ffi.rs`** — three new FFI functions:
+- `agent_doc_report_editor_state(file, version, dirty, last_edit_ts, save_ts, hash, len, session_id)` — called by IDE plugins on every document change
+- `agent_doc_get_editor_state(file)` → JSON string of current state
+- `agent_doc_is_editor_stable(file, debounce_ms)` → bool
+
+10 new tests covering: record/read, stable/not-stable, debounce elapsed, overwrite, editor-state path in `wait_for_stable_content`, fallback without editor state. All 58 debounce+diff_io tests pass. `make check` clean. `cargo install --path .` succeeded. Committed and pushed as `8638f751`.
+<!-- agent:boundary:33f61adb -->
 <!-- /agent:exchange -->
 
 <!--

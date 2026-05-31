@@ -16,7 +16,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -169,29 +169,11 @@ Three bugs reported; the keystone is fixed and shipped, the other two are queued
 **A — `/clear` doesn't stop the running process → backlog `#clear-stops-running-process`.** Confirmed a real gap: Clear should abandon the running agent-doc child / busy actor so the next `Run Agent Doc` isn't blocked. Overlaps `#cancel-orphans-preflight-cycle` and the `operator_clear` busy-projection path; queued for a focused fix.
 
 I shipped C because it was actively bricking the route. A and B are queued with exact repro for their own cycles.
-<!-- agent:boundary:b2cd9970 -->
+<!-- agent:boundary:c2e7afcc -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue -->
----
-JB `Run Agent Doc`, then cancel run directly in the session, then JB `Clear Session Context`, then JB `Run Agent Doc`:
-```
-resync: stash pane %32 is registered in its own project root — skipping kill
-[route] debounce OK — file idle for 7.8s and typing indicator idle
-[route] target tmux session: 0
-[route] authoritative actor generation 96 for tasks/software/tsift.md is busy on pane %36; queued pending dispatch "What are #next-steps to extract tsift crates?" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
-```
-```
-[sync] recovered live pane %40 for session a9421282 via supervisor pid 2462423
-[sync] found alive agent-doc child (pid 2855208) in pane %32 for tasks/monsterrodholders/mrh-project.md
-[sync] recovered live pane %36 for session tsift-v0 via path provenance pid=433924 instance=d60e6829-3864-4edc-b2cf-c06da7fa6866
-resync: stash pane %8 is unregistered but still hosts live supervisor b26b9957-8de6-4eae-bb98-5d7fe4d6b781 — skipping kill
-[route] debounce OK — file idle for 2.4s and typing indicator idle
-[route] target tmux session: 0
-[route] authoritative actor generation 241 for tasks/monsterrodholders.md is busy on pane %40; queued pending dispatch "deploy" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
-```
-#spec-test-build-install-commit-push
----
+<!-- agent:queue auto -->
+~~~done
 JB `Run Agent Doc` error:
 ```
 [route] debounce OK — file idle for 4.3s and typing indicator idle
@@ -199,8 +181,11 @@ JB `Run Agent Doc` error:
 [route] authoritative actor generation 241 for tasks/monsterrodholders.md is busy on pane %40; queued pending dispatch "do [#next-steps-2]. #spec-test-commit-push-deploy" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
 ```
 #spec-test-commit-push-deploy
----
+~~~
 preset #spec-test-build-install-commit-push
+- do [#clear-stops-running-process]
+- do [#stash-pane-promote-on-focus]
+- do [#do-id-partial-closeout-state]
 - do [#closeout-recovery-state-machine]
 - do [#codex-owned-pane-prompt-miss]
 - do [#stuck-capture-compact-false-positive]

@@ -131,7 +131,24 @@ Done — the design decision this item was gated on was already made and impleme
 **Residual.** The broader "JB plugin renders *any* route/resync stderr as an error" concern is already tracked under `#jb-busy-queue-ux-feedback` (still queued), so no new backlog item is needed here.
 
 (Closeout note: the prior finalize attempt hit an IDE IPC ack timeout — exit 75 — and deferred the visible write; recovered through `--force-disk` after clearing the stale live-buffer tracking entry.)
-<!-- agent:boundary:14dca61b -->
+
+### Re: do [#route-drain-all-surface-live-verify] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#route-drain-all-surface-live-verify]
+
+
+Gated — code-complete with passing deterministic coverage; the only remaining work is a live JetBrains IDE action I can't drive from this Claude Code session.
+
+**Implementation verified present.**
+- The all-surface reap (`b239988b`) is live: `drain_open_closeout_before_routed_dispatch` (route.rs:1693) now runs the idempotent `crate::preflight::run_pending_maintenance` (backlog + review + icebox), so a completed `[x]` item left in review/icebox by a prior closeout no longer keeps the post-repair `session-check` interrupted and bails the route. Its deterministic regression `drain_reaps_completed_review_item_across_all_surfaces` passes.
+- The `#pending-gate-snapshot-desync` snapshot re-sync (`ab074710`) is present in `preflight.rs` (re-syncs the snapshot to tracked surfaces on closeout) — the second behavior this item wants to exercise under the route path.
+
+**Why gated, not done.** The item is explicitly *opportunistic live verification*: with the installed binary, stage a closeout that leaves a completed `[x]` item in review/icebox on an IDE-owned doc, then click JB **Run Agent Doc** once and confirm it dispatches without a manual repeat. That requires driving the JetBrains action in a live IDE, which isn't reproducible from here. The deterministic SimWorld coverage stands in for the logic; the live leg stays gated.
+
+(Closeout note: used `--force-disk` proactively — the IDE IPC listener has been ack-timing-out this session, which caused an exit-75 desync on the previous item.)
+<!-- agent:boundary:99de9b7b -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -141,7 +158,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#codex-final-response-live-verify]~
 - ~do [#codex-route-busy-ctrl-g-opens-editor]~
 - ~do [#cross-project-stash-pane-condition]~
-- do [#route-drain-all-surface-live-verify]
+- ~do [#route-drain-all-surface-live-verify]~
 - do [#run-agent-doc-stale-busy-replay]
 - do [#jb-busy-queue-ux-feedback]
 - do [#queue-prompt-echo-summary]
@@ -190,7 +207,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 - [ ] [#closeout-recovery-state-machine] [recommended] Typed closeout recovery classifier landed: flow::closeout::CloseoutRecoveryState + classify_closeout_recovery_state + recovery_command; session_check::closeout_recovery_hint renders one typed 'Recovery [state]: command' across all nine closeout-guard call sites. Classified today: clean / open_cycle / missing_response_body / escaped_template_patch. Remaining: precise detection for reserved states direct_response_patchback, boundary_only_drift, nested_parent_pointer_stale, and folding each guard's existing diagnostic through the classifier. Plan: tasks/agent-doc/plan-closeout-repair-churn.md.
 - [ ] [#free-text-queue-owner-consume] [recommended] Free-text `agent:queue auto` heads can remain live after an owner-pane/direct Codex closeout writes the response but lacks queue-target proof. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `Approve [#shoptiers]. What are #next-steps?` was answered, then reported as not marked done; same-pane `agent-doc <FILE>` refused recursive dispatch and repair finalize logged `[queue] skipped consumption because the active prompt did not target the queue head`. Preserve id-backed queue safety, but record/restore synthetic free-text queue-target proof for recursive-direct repair/finalize paths and add diagnostics/regressions. Plan: tasks/agent-doc/plan-free-text-queue-owner-consume.md.
 - [ ] [#preset-item-id-collision] [recommended] Enforce unique active identities across frontmatter `prompt_presets` keys and active `agent:backlog` / `agent:review` / `agent:icebox` item ids. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `#next-steps` exists both as a prompt preset and as a backlog item, making `do #next-steps` and "top backlog item: #next-steps" ambiguous between preset expansion and backlog execution. Fix with an identity registry, mutation-time rejection, preflight/session-check fail-closed diagnostics, and regressions. Plan: tasks/agent-doc/plan-preset-item-id-collision.md.
-- [ ] [#route-drain-all-surface-live-verify] [recommended] Live-verify the route-drain all-surface reap (submodule b239988b / superproject 4c7b06b7f) resolves the JB Run Agent Doc "completed tracked item blocks dispatch" retry: with the installed binary, reproduce a closeout that leaves a completed [x] item in review or icebox on an IDE-owned doc, then run JB Run Agent Doc once and confirm it dispatches without a manual repeat. Also exercises the #pending-gate-snapshot-desync snapshot re-sync (ab074710) under the route path.
 - [ ] [#run-agent-doc-stale-busy-replay] Follow-up to the #snrun stale-busy-projection fix (submodule 89c99c79): the dispatch-only busy-vs-stale repair is covered by unit tests on the pure decision functions; add a live JB Run Agent Doc replay regression (SimWorld or tmux-ci) exercising a stale busy actor projection + proven ready prompt and asserting dispatch instead of agent:queue auto enqueue. Also still open in #snrun: distinguishing rescued-stash accepted-only proof misses. Plan: tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md.
 - [ ] [#jb-busy-queue-ux-feedback] [recommended] When the authoritative actor is genuinely busy, JB Run Agent Doc correctly queues the dispatch in agent:queue auto instead of injecting a duplicate trigger (monsterrodholders.md, equityfundingsource.md reports), but the plugin surfaces the route/resync log dump as an error. The dump also includes benign cross-project resync info such as `resync: stash pane %N is registered in its own project root — skipping kill` (cross-project stash-pane preservation, resync.rs:771/1303/1793 — a stash-window pane that is the live authoritative pane of a different project root is correctly preserved, not reaped), which is expected and not a failure. Present queued-behind-a-busy-turn and benign route/resync info as informational notifications distinct from real failures so expected behavior does not read as a plugin error.
 - [ ] [#plugin-cleanup-menu-command] [recommended] Expose session cleanup as agent-doc plugin-menu commands (JetBrains + VS Code): a 'Resync / Fix Sessions' action wrapping agent-doc resync --fix and a 'GC Stale Sessions' action wrapping agent-doc gc, so operators can clear stale routing/registry state and reap orphaned panes from the IDE without dropping to a terminal. Thin event-reporter pattern — the plugin shells the existing CLI/FFI; no cleanup logic in the plugin. Pairs with #stash-session-ttl-prune (auto hygiene) and #jb-busy-queue-ux-feedback (notification classification).
@@ -204,6 +220,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Review
  
 <!-- agent:review -->
+- [/] [#route-drain-all-surface-live-verify] [recommended] Live-verify the route-drain all-surface reap (submodule b239988b / superproject 4c7b06b7f) resolves the JB Run Agent Doc "completed tracked item blocks dispatch" retry: with the installed binary, reproduce a closeout that leaves a completed [x] item in review or icebox on an IDE-owned doc, then run JB Run Agent Doc once and confirm it dispatches without a manual repeat. Also exercises the #pending-gate-snapshot-desync snapshot re-sync (ab074710) under the route path.
 - [/] [#codex-final-response-live-verify] [recommended] Opportunistic live re-verification of the #codex-final-response-not-written guard: do a real Codex direct/manual run that commits side-effect work, confirm session-check (via the .codex Stop hook) fails closed with the 'no assistant response body was captured' message + 'agent-doc write --commit' recovery when no ### Re: close-out was written, and that a normal Codex turn with a response stays OK. Guard + deterministic regressions already landed (session_check.rs check_committed_without_response_body_guard).
 - [/] [#codex-owned-pane-prompt-miss] [recommended] Codex-owned `agent-doc <FILE>` direct invocation from the same pane can abandon recursive dispatch without processing unresolved exchange prompts. Live repro 2026-05-30: `src/boost-client/tasks/monsterrodholders.md` contained `Please assist in placing GA4 Analytics credentials in passage.`, but the same-pane recursion guard refused dispatch and no response was written. Fix with earlier owner-pane self-invocation detection, unresolved-prompt preservation, and Codex guidance/final-gate recovery. Plan: tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md.
 - [/] [#stash-pane-promote-on-focus] [recommended] A live-owner pane residing in the stash tmux window must be promoted/reparented into the 0:agent-doc window when the document is focused/selected, not merely selected in place. Live repro 2026-05-30 agent-doc-bugs2.md: pane %8 (live owner) is stuck in the stash window; focus/select does not move it. The focus live-owner fix (submodule e6dafa52) now selects the correct pane but does not reparent it. Tied to #cross-project-stash-pane-condition and #plugin-cleanup-menu-command.

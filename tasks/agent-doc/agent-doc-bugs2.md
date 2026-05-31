@@ -31,50 +31,17 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260531-204547.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260531-205308.md`*
 
 Compacted content:
-- Archived 1 response topic(s): do #opencode-reap-only-no-response-finalize-investigate
+- Archived 1 response topic(s): JB Run Agent Doc deadlock on monsterrodholders.md
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ JB `Run Agent Doc` reached the deadlock:
-```
-[route] debounce OK — file idle for 0.5s and typing indicator idle
-[route] target tmux session: 0
-Error: authoritative actor generation 244 for tasks/monsterrodholders.md owns pane %40 but dispatch-only route will not inject a new trigger because the authoritative actor is busy did not return to a dispatch-ready prompt in the current generation after waiting 8s. Wait for the active turn to finish before rerouting this document.
-```
-❯ #spec-test-build-install-commit-push
-
-### Re: JB Run Agent Doc deadlock on monsterrodholders.md — opus-4-8
-
-Good news first: that error is **my fix working correctly**, not a regression. The bad news is it exposed a real wedge underneath. I checked the live state of pane `%40`:
-
-- `tmux capture-pane %40`: the Codex agent ran `agent-doc .../monsterrodholders.md` **inside its own owner pane**, and is `Working (12s • esc to interrupt)` — genuinely busy, `prompt_ready=false`.
-- `agent-doc session status`: `live_pane: alive-busy ... prompt_ready=false`; `session_log: event=recursive_direct_invocation_blocked — recursive direct invocation would deadlock ... retry from outside the managed pane or restart the owner`.
-
-#### What's actually happening
-
-The auto-queue continuation keeps handing the owner Codex pane its own `agent-doc <FILE>` reopen. The Codex agent runs it as a shell command, which re-enters agent-doc inside the pane that already owns the document → the recursion guard blocks it (`recursive_direct_invocation_blocked`), abandons the empty cycle, and the continuation fires again. The turn never ends, so the pane stays perma-busy. My route fix then correctly refuses to inject ("the active turn is busy") — but because the turn is an infinite self-invocation loop, the active turn never finishes. That perma-busy loop is the deadlock you're seeing.
-
-So: route is behaving correctly (failing closed on a real active turn). The wedge is the **owner-pane recursive-invocation loop**, which is the tracked, gated `#codex-owned-pane-auto-queue-stuck` in review — and this is its live repro.
-
-#### Recovery (breaks the loop now)
-
-Restart the owner from a different pane, exactly as the guard advises:
-
-```
-agent-doc start /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md
-```
-
-That spawns a fresh owner pane and ends the looping turn. **Want me to run it?** It kills the current (non-productive, looping) Codex process for monsterrodholders.md, so I'd rather confirm before touching your live session.
-
-#### Note
-
-I did not ship a code change this turn — the recursion-loop fix is the gated `#codex-owned-pane-auto-queue-stuck` (a careful owner-pane queue-handoff change, not a quick patch), and the only thing wrong with my new message is cosmetic: it says "waiting 8s" when route actually waited 60s (it reports the Codex recovery constant, not the `--wait-for-ready` value). Queued that as `#busy-not-ready-message-reports-actual-wait`.
-<!-- agent:boundary:3c7590da -->
+<!-- agent:boundary:71fe78a4 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
+- do [#busy-not-ready-message-reports-actual-wait]
 - do [#rejected-response-must-block-queue-consume-and-done]
 - do [#opencode-active-turn-reopen-auto-retry-on-idle]
 - do [#recovery-drift-apply-live-verify]

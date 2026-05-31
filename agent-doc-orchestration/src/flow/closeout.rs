@@ -485,8 +485,9 @@ pub enum CloseoutRecoveryState {
     /// Raw `<!-- agent:NAME -->` component markers were escaped into the
     /// committed exchange instead of applied as `<!-- patch:* -->` blocks.
     EscapedTemplatePatch,
-    /// Working tree differs from HEAD only by boundary / `(HEAD)` markers.
-    /// (Reserved for full detection wiring.)
+    /// Snapshot differs from HEAD only by agent-doc-generated exchange artifacts
+    /// (boundary / `(HEAD)` markers, answered-prompt-prefix canonicalization).
+    /// Safe single recovery: `agent-doc commit`. (`#recursive-repair-state-drift`)
     BoundaryOnlyDrift,
     /// A reaped/closed item left a nested parent submodule pointer uncommitted.
     /// (Reserved for full detection wiring.)
@@ -524,7 +525,7 @@ impl CloseoutRecoveryState {
                 "rewrite the response with real `<!-- patch:exchange -->` blocks and rerun `agent-doc finalize {f}` — escaped component markers must not reach `agent:exchange`"
             ),
             Self::BoundaryOnlyDrift => format!(
-                "`agent-doc commit {f}` (boundary / `(HEAD)` marker drift only)"
+                "`agent-doc commit {f}` (boundary / `(HEAD)` marker or answered-prompt-prefix drift only — no response body to write)"
             ),
             Self::NestedParentPointerStale => format!(
                 "`agent-doc commit {f}` to update the nested parent submodule pointer"
@@ -568,7 +569,40 @@ pub fn classify_closeout_recovery_state(file: &Path) -> CloseoutRecoveryState {
     {
         return CloseoutRecoveryState::MissingResponseBody;
     }
+    // `#recursive-repair-state-drift`: a committed cycle whose snapshot differs
+    // from HEAD *only* by agent-doc-generated artifacts (boundary / `(HEAD)`
+    // markers, answered-prompt-prefix canonicalization) is the metadata-only
+    // HEAD drift the recursive owner-pane recovery left behind. The single safe
+    // recovery is `agent-doc commit` — never `write --commit` (there is no
+    // missing response body) — so name it precisely instead of the generic hint.
+    if committed_artifact_only_head_drift(file) {
+        return CloseoutRecoveryState::BoundaryOnlyDrift;
+    }
     CloseoutRecoveryState::Clean
+}
+
+/// True when the committed snapshot differs from HEAD only by agent-doc-generated
+/// exchange artifacts (transient boundary / `(HEAD)` markers and answered-prompt
+/// prefix canonicalization). `verify_snapshot_committed` normalizes only the
+/// transient markers, so prompt-prefix drift on already-answered prompts trips
+/// its snapshot-vs-HEAD guard even though `agent-doc commit` is the safe fix; the
+/// fuller `normalize_committed_exchange_artifacts` equality proves no real
+/// user/response content drift remains. Conservatively `false` on any read error
+/// so a genuine content difference never masquerades as metadata-only.
+fn committed_artifact_only_head_drift(file: &Path) -> bool {
+    let snapshot = match crate::snapshot::load(file) {
+        Ok(Some(snapshot)) => snapshot,
+        _ => return false,
+    };
+    let head = match crate::git::show_head(file) {
+        Ok(Some(head)) => head,
+        _ => return false,
+    };
+    if snapshot == head {
+        return false;
+    }
+    crate::git::normalize_committed_exchange_artifacts(&snapshot)
+        == crate::git::normalize_committed_exchange_artifacts(&head)
 }
 
 fn head_exchange_has_escaped_markers(file: &Path) -> bool {
@@ -897,6 +931,47 @@ mod tests {
             classify_closeout_recovery_state(&doc),
             CloseoutRecoveryState::Clean
         );
+    }
+
+    #[test]
+    fn classify_recovery_boundary_only_drift_for_answered_prompt_prefix() {
+        // `#recursive-repair-state-drift`: snapshot differs from HEAD only by an
+        // answered-prompt-prefix (`❯ do …` vs bare `do …` above a real `### Re:`).
+        // `verify_snapshot_committed` normalizes only transient markers, so this
+        // still trips the snapshot-vs-HEAD guard, but the fuller artifact
+        // normalization proves it is safe metadata-only drift → BoundaryOnlyDrift
+        // → single `agent-doc commit` recovery (never `write --commit`).
+        let head = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "Please rerun the deploy check.\n",
+            "### Re: deploy check — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let snapshot = head.replace("Please rerun the", "❯ Please rerun the");
+        // `setup_git_project_with_doc` already commits `head` to HEAD.
+        let (_dir, doc) = setup_git_project_with_doc(head);
+        crate::cycle_state::start_preflight(&doc, Some(head), Some(head)).unwrap();
+        // Snapshot carries the un-canonicalized prompt prefix; HEAD has the bare
+        // form. Artifact normalization makes them equal; transient does not.
+        crate::snapshot::save(&doc, &snapshot).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(&snapshot), Some(&snapshot))
+            .unwrap();
+        assert_ne!(
+            crate::git::normalize_transient_agent_doc_markers(&snapshot),
+            crate::git::normalize_transient_agent_doc_markers(head),
+            "test precondition: transient normalization must still differ"
+        );
+        assert_eq!(
+            classify_closeout_recovery_state(&doc),
+            CloseoutRecoveryState::BoundaryOnlyDrift
+        );
+        let cmd = CloseoutRecoveryState::BoundaryOnlyDrift
+            .recovery_command(&doc)
+            .unwrap();
+        assert!(cmd.contains("agent-doc commit"), "{cmd}");
+        assert!(!cmd.contains("write --commit"), "{cmd}");
     }
 
     #[test]

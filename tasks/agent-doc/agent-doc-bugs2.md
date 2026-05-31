@@ -78,7 +78,28 @@ The refinement is opt-in: watch the pane and auto-fire the **bare reopen** once 
 Implementation sketch: a pure `flow::routed_reopen` `WaitForIdleThenRetry` classifier (unit-testable) + the route.rs poll/re-dispatch I/O boundary, with SimWorld coverage for the busy→idle transition. The normative spec entry waits until the behavior actually lands (specs describe implemented behavior).
 
 **Gate rationale:** plan-complete, but implementation and live OpenCode/Codex pane verification remain. No source changed this cycle, so no verification suite to run.
-<!-- agent:boundary:f4cc66ca -->
+
+### Re: do [#recovery-drift-apply-live-verify] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#recovery-drift-apply-live-verify]
+
+
+**Gated** — this is an operator-present live-verification task, not autonomous work, and the item itself flags it "Gated on a live owner pane (risky in a racy multi-session repo)." I'm currently running cycles in this exact repo, so reproducing a drift closeout on a live owner pane here would be unsafe.
+
+The implementation under test already landed and is confirmed present:
+
+- `agent-doc repair --apply-recovery` is wired at `src/main.rs:1980` → `agent_doc_orchestration::flow::closeout::apply_closeout_recovery` (`flow/closeout.rs`), returning `RecoveryApplication::{NothingToDo, Applied{state, action}}`.
+- `apply_closeout_recovery` is referenced from `session_check.rs` and `sync.rs`, so the authoritative-side determination from `#recovery-drift-authoritative-side` (commit `30df9c2dc`) and the one-command path from `recursive-repair-apply` (`eb39877eb`) are in place.
+
+**What live-verify still needs (operator, dedicated owner pane):**
+
+1. Reproduce a `queue_metadata_drift` / `sidecar_visible_drift` closeout.
+2. Run `agent-doc repair --apply-recovery <FILE>` and confirm it **restores-from-HEAD** for the spurious `queue_active:false` class and **commits-forward** otherwise — replacing the manual cancel→reset→commit sequence.
+
+Parent plan: `tasks/agent-doc/plan-recursive-repair-state-drift.md`. Staying gated until that live run is done on a quiet owner pane.
+<!-- agent:boundary:e8eaa58f -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -86,7 +107,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#busy-not-ready-message-reports-actual-wait]~
 - ~do [#rejected-response-must-block-queue-consume-and-done]~
 - ~do [#opencode-active-turn-reopen-auto-retry-on-idle]~
-- do [#recovery-drift-apply-live-verify]
+- ~do [#recovery-drift-apply-live-verify]~
 - do [#jb-run-agent-doc-command-route-miss]
 - do [#repair-orphan-prefix-bug]
 - do [#recursive-repair-apply]
@@ -131,7 +152,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog priority queue=prepend -->
-- [ ] [#recovery-drift-apply-live-verify] [recommended] Live-verify the full one-command recovery (agent-doc repair --apply-recovery) on a real owner pane now that #recovery-drift-authoritative-side landed the authoritative-side determination: reproduce a queue_metadata_drift / sidecar_visible_drift closeout and confirm apply_closeout_recovery restores-from-HEAD for the spurious queue_active:false class and commits-forward otherwise, without the manual cancel->reset->commit sequence. Gated on a live owner pane (risky in a racy multi-session repo). Parent plan: tasks/agent-doc/plan-recursive-repair-state-drift.md.
 - [ ] [#repair-orphan-prefix-bug] Orphan-response repair path prefixes every body line with the user-prompt marker. Live repro 2026-05-31 tsift.md: direct Edit-based patchback triggered orphan repair, which applied the prefix to all assistant body lines. Fix: ensure orphan-repair preserves response body verbatim. Plan: tasks/agent-doc/plan-repair-orphan-prefix-bug.md. Related: #jb-compact-malformed-response-commit, #finalize-retry-ipc-response-duplication.
 - [ ] [#gated-followup-split-enforcement] [recommended] #agent-doc-bug 2026-05-31: when a directed do [#id] cycle keeps a multi-phase item open via --pending-edit (backlog) or --review-edit (review) with text that enumerates several gated/remaining phases, agent-doc neither prompts nor guards splitting those phases into discrete child backlog IDs — the deferred work stays buried in one parent's narrowed description and is not independently trackable/queueable. Repro this session: #recursive-repair-state-drift and #codex-owned-pane-prompt-miss-followups each had 2-4 gated phases folded into parent text; only a user catch prompted splitting them into #recursive-repair-recovery-states/#recursive-repair-apply/#preflight-probe-side-effect-free/#codex-owned-pane-stop-hook-live-verify. Add a session-check/finalize advisory (warn-first, sibling of #blocked-closeout-followup-capture and the SKILL 'one backlog ID per actionable phase' rule) that detects a kept-open item whose body lists multiple gated phases without discrete child IDs and recommends the split. Plan: TBD.
 - [ ] [#preflight-probe-side-effect-free] [recommended] Make probe/diagnostic agent-doc preflight side-effect-free or self-abandoning so it never leaves an open preflight_started cycle that later wedges session-check (Proposed-Fix #4 of #recursive-repair-state-drift). Distinguish a dispatch/response-bound preflight from a pure inspection probe. Plan: tasks/agent-doc/plan-recursive-repair-state-drift.md.
@@ -149,6 +169,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Review
  
 <!-- agent:review -->
+- [/] [#recovery-drift-apply-live-verify] [recommended] Live-verify the full one-command recovery (agent-doc repair --apply-recovery) on a real owner pane now that #recovery-drift-authoritative-side landed the authoritative-side determination: reproduce a queue_metadata_drift / sidecar_visible_drift closeout and confirm apply_closeout_recovery restores-from-HEAD for the spurious queue_active:false class and commits-forward otherwise, without the manual cancel->reset->commit sequence. Gated on a live owner pane (risky in a racy multi-session repo). Parent plan: tasks/agent-doc/plan-recursive-repair-state-drift.md.
 - [/] [#opencode-active-turn-reopen-auto-retry-on-idle] [recommended] When a plain dispatch-only Run Agent Doc reopen is refused because the OpenCode (or Codex) pane shows an active turn, route currently fails closed and the operator must re-click once the turn ends. Optional refinement: watch the pane and auto-fire the bare reopen once it returns to a dispatch-ready/idle composer, so the operator does not have to retry manually. Must stay a plain reopen (no prompt to queue) and respect the existing no-inject-into-active-turn invariant. Lower priority than the live-verify items.
 - [/] [#jb-run-agent-doc-busy-feedback-live-verify] [recommended] Live-verify the busy-pane Run Agent Doc feedback fix (#jb-run-agent-doc-command-route-miss) end to end: install JB plugin 0.2.143 (build/distributions/agent-doc-jetbrains-0.2.143-signed.zip) + restart the route-owned agent-doc process to load the new binary, then run Run Agent Doc on a doc whose Codex pane is mid active-turn and confirm an immediate 'session still running' Event Log notification (no silent 60s wait, no 4x retry). Source landed submodule e1735fa2.
 - [/] [#codex-owned-pane-prompt-miss-followups] [recommended] Follow-ups from the #codex-owned-pane-prompt-miss fix. Phase 1 (structured owned_pane_self_invocation preflight result) and phase 2a (in-pane Codex guidance + preflight_emits_owned_pane_self_invocation_for_active_queue_head regression) LANDED 2026-05-31 (submodule 407b0825). Remaining (gated — needs a live Codex pane): (2b) a live Codex Stop-hook regression asserting an in-pane response body before final chat output (the deterministic session-check backstop already landed in phase 1); (3) live-verify a real Codex same-pane run with an unresolved exchange prompt. Plan: tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md.

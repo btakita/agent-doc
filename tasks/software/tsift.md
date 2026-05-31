@@ -46,7 +46,47 @@ No backlog item is complete yet. `#tsiftmemimportall`, `#tsiftmemsemanticgate`, 
 
 I also saw the preflight warning that the post-exchange `#next-steps` note is preserved as a non-executable comment; move it into `agent:exchange` or `agent:queue` if it should run.
 
-<!-- agent:boundary:bd3eea65 -->
+### Re: #tsiftmemimportall — gpt-5
+
+> **Queue prompt:**
+>
+> do [#tsiftmemimportall]
+
+
+Completed the full supported `claude-mem` import work.
+
+Implemented and committed in `src/tsift`:
+- `tsift memory import-claude-mem` now supports `--all` for uncapped supported-table imports while keeping the default 1000-row per-table cap unless `--all` is set.
+- Import reports now include explicit per-table and total reconciliation for `observations`, `session_summaries`, and `user_prompts`: source rows, read/planned rows, imported rows, already-present rows, skipped rows, and `complete`.
+- Apply mode now uses one transactional bulk insert path instead of per-event autocommit; the interrupted live import showed the old path was too slow for the 50k-row migration.
+- Large JSON reports cap `event_ids` at 100 and expose `event_ids_total` plus `event_ids_truncated`, so full imports stay count-proof oriented without enormous output.
+- README, SPEC, and `tsift-memory` docs now describe the full import and compact report contract.
+
+Live migration proof for `/home/brian/work/btakita/agent-loop/.tsift/memory.db` using the installed `tsift` binary:
+- `planned_events=50625`
+- `total_source_rows=50625`
+- `total_read_events=50625`
+- `imported_events=2`
+- `already_present_events=50623`
+- `total_skipped_source_rows=0`
+- `complete=true`
+- `event_ids_total=50625`, `event_ids_truncated=true`
+
+Verification completed:
+- `cargo test -p tsift-memory claude_mem` passed.
+- `make check` passed: clippy, full Rust workspace tests, opencode plugin tests, and npm publish dry run.
+- `cargo build --workspace` passed.
+- `cargo install --path . --force` replaced `/home/brian/.cargo/bin/tsift`.
+- `tsift --version` reports `tsift 0.1.62`.
+- Latest GitHub Actions `CI` run `26696235528` on `main` is green; this repo's CI jobs are `clippy + test` and `live Convex graph acceptance`, with no tmux-specific job listed.
+
+Commits:
+- `d9e3691 feat(memory): reconcile full claude-mem import` in `src/tsift`, pushed to `btakita/tsift` `main`.
+- `763f85dcf chore: update tsift submodule` in the root superproject; root push follows this document closeout.
+
+The remaining queued items stay in order: `#tsiftmemsemanticgate`, `#tsiftmemparityeval`, `#tsiftmemcutover`, and `#tsiftmemretire`.
+
+<!-- agent:boundary:2f9ef562 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -59,7 +99,7 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#tsiftmemimportall]
+- ~do [#tsiftmemimportall]~
 - do [#tsiftmemsemanticgate]
 - do [#tsiftmemparityeval]
 - do [#tsiftmemcutover]
@@ -69,7 +109,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#tsiftmemimportall] Complete a full supported claude-mem migration into .tsift/memory.db with explicit count reconciliation for observations, session_summaries, and user_prompts; add batching/no-cap import support if the current --limit path cannot safely import all rows.
 - [ ] [#tsiftmemsemanticgate] Populate the summary cache, refresh graph-db, and verify graph-db related returns useful tsift-memory hits instead of summary_cache_empty / zero semantic rows.
 - [ ] [#tsiftmemparityeval] Run the memory retrieval eval fixture against claude_mem_api, tsift session-review/context-pack, and graph_db_related on known memories; require comparable useful-hit rate and fewer zero-output failures before cutover.
 - [ ] [#tsiftmemcutover] Replace live memory retrieval call sites and operator instructions that point at direct claude-mem or /mem-search with tsift-memory / graph-db retrieval, while keeping claude-mem as a fallback during the first cutover pass.

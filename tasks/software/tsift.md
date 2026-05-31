@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -127,28 +127,37 @@ Extracted shared `graph_builder` module from duplicated graph construction code 
 **Spec updated:** SPEC.md tsift-algorithms section now lists `graph_builder module`.
 
 **Verification:** Built, installed, committed as `ea0f592`, pushed to main.
-<!-- agent:boundary:03ff3459 -->
+
+### Re: #sift-token-index — glm-5.1
+
+> **Queue prompt:**
+>
+> [#sift-token-index]
+
+
+Added inverted `TokenIndex` for search pre-filtering — skips files with no matching query tokens.
+
+**New types in `tsift-search/src/sift.rs`:**
+- `TokenIndex` — maps tokens to file sets; serializable to JSON for caching
+- `TokenIndex::build(root)` / `load(path)` / `save(path)` / `files_matching_any(tokens)`
+
+**Search changes:**
+- `Sift::search()` calls `load_or_build_token_index()` — loads cached `token-index.json` or builds+persists
+- Pre-filters candidate files; only reads+scores files with matching tokens
+- Empty queries bypass token filter
+
+**Tests:** 8 new tests. All 19/19 pass. Committed as `9047134`, pushed.
+<!-- agent:boundary:95dff547 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~[#libsql-pushdown-edge-incident]~
-- ~[#health-dedup-scc]~
-- ~[#ranked-neighborhood]~
-- ~[#terse-health-early-exit]~
-- ~[#libsql-edges-between-pushdown]~
-- ~[#compact-community-serialization]~
-- ~[#louvain-dedup-aggregate]~
-- ~[#shared-graph-build-pipeline]~
-- [#sift-token-index]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#sift-token-index] Build inverted token index for search pre-filtering — skip files with no matching tokens. 5-50x search speedup on large codebases. tsift-search/src/sift.rs:210-267
 <!-- /agent:backlog -->
 
 ## Review

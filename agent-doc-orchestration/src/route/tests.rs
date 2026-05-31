@@ -551,11 +551,17 @@ fn route_enqueue_dispatch_prompt_preserves_unparseable_queue_instead_of_crashing
     std::fs::write(&doc, content).unwrap();
     crate::snapshot::save(&doc, content).unwrap();
 
-    // Sanity: the raw queue body really is unparseable.
-    assert!(crate::queue::parse("JB `Run Agent Doc` error:\n- do [#existing]\n").is_err());
+    // The polluted free-text line is preserved as a non-actionable Freeform
+    // entry (tolerant parse) rather than failing the consume/dispatch guards.
+    let parsed = crate::queue::parse("JB `Run Agent Doc` error:\n- do [#existing]\n").unwrap();
+    assert!(
+        parsed
+            .iter()
+            .any(|e| matches!(e, crate::queue::QueueEntry::Freeform(_)))
+    );
 
     let outcome = enqueue_route_dispatch_prompt(&doc, "do [#newitem]", "test_busy_actor")
-        .expect("route must not crash on an unparseable agent:queue");
+        .expect("route must not crash on a polluted agent:queue");
     assert!(outcome.appended);
 
     let updated = std::fs::read_to_string(&doc).unwrap();

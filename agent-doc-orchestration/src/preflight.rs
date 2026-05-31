@@ -3551,13 +3551,14 @@ fn strike_done_queue_head_prompts(
                     head_settled = true;
                 }
                 // Already-struck completed prompts and non-prompt entries
-                // (presets, fences) sit in front of the live head and must
-                // not block the scan.
+                // (presets, fences, preserved free-text) sit in front of the
+                // live head and must not block the scan.
                 crate::queue::QueueEntry::Completed(_)
                 | crate::queue::QueueEntry::Preset(_)
                 | crate::queue::QueueEntry::Dispatch(_)
                 | crate::queue::QueueEntry::StartFence(_)
-                | crate::queue::QueueEntry::StopFence => {}
+                | crate::queue::QueueEntry::StopFence
+                | crate::queue::QueueEntry::Freeform(_) => {}
             }
         }
         rewritten.push(entry.clone());

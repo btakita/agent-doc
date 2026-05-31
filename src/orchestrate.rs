@@ -1660,7 +1660,8 @@ fn queue_task_batch(doc: &str) -> Result<ResolvedTaskBatch> {
             }
             agent_doc_orchestration::queue::QueueEntry::Completed(_)
             | agent_doc_orchestration::queue::QueueEntry::StartFence(_)
-            | agent_doc_orchestration::queue::QueueEntry::StopFence => {}
+            | agent_doc_orchestration::queue::QueueEntry::StopFence
+            | agent_doc_orchestration::queue::QueueEntry::Freeform(_) => {}
         }
     }
     Ok(batch)

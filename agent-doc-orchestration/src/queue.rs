@@ -7,6 +7,12 @@
 //! - `~~~prompt` / `---` → multi-line prompt fence
 //! - `--- start [at <datetime>]` / `~~~start` → start fence (activation signal)
 //! - `--- stop` / `~~~stop` → stop fence (breakpoint)
+//! - any other non-empty line → `Freeform`: preserved verbatim and never
+//!   treated as an actionable prompt/dispatch target. `parse` is tolerant of a
+//!   polluted queue (free-text / log dumps merged into the component by an
+//!   earlier corruption) so consume/resume/dispatch guards stay resilient
+//!   instead of bailing; `parse` still fails closed only on a structurally
+//!   broken fence (unclosed `---` / `~~~` block).
 //!
 //! Activation resolution (Phase 2):
 //! - `resolve_activation()` determines whether the queue should be active
@@ -31,6 +37,13 @@ pub enum QueueEntry {
     Dispatch(String),
     StartFence(Option<String>),
     StopFence,
+    /// Unrecognized free-text line preserved verbatim. The queue body can be
+    /// polluted by an earlier corruption that merged prose / log dumps into the
+    /// `agent:queue` component (`#jb-run-agent-doc-response-queue-contamination`).
+    /// Rather than fail every consume/resume/dispatch guard that parses the
+    /// queue, such lines are captured as `Freeform`: rendered back verbatim and
+    /// never treated as an actionable prompt/dispatch target.
+    Freeform(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -255,7 +268,11 @@ pub fn parse(body: &str) -> Result<Vec<QueueEntry>> {
             continue;
         }
 
-        bail!("unexpected content in agent:queue: {:?}", trimmed);
+        // Unrecognized line: preserve verbatim instead of failing the parse so
+        // queue consume/resume/dispatch guards stay resilient to a polluted
+        // queue body (#jb-run-agent-doc-response-queue-contamination). The line
+        // is preserved as-is and never treated as an actionable item.
+        entries.push(QueueEntry::Freeform(line.to_string()));
     }
 
     Ok(entries)
@@ -312,6 +329,10 @@ pub fn render(entries: &[QueueEntry]) -> String {
             }
             QueueEntry::StopFence => {
                 out.push_str("--- stop\n");
+            }
+            QueueEntry::Freeform(line) => {
+                out.push_str(line);
+                out.push('\n');
             }
         }
     }
@@ -746,9 +767,15 @@ mod tests {
     }
 
     #[test]
-    fn parse_error_on_unexpected_content() {
+    fn parse_preserves_unexpected_content_as_freeform() {
+        // Previously this bailed; now unrecognized lines are preserved as
+        // non-actionable Freeform so a polluted queue cannot brick the
+        // consume/resume/dispatch guards that parse it.
         let body = "random text that is not a list item or fence\n";
-        assert!(parse(body).is_err());
+        let entries = parse(body).expect("unexpected content is tolerated as Freeform");
+        assert_eq!(entries.len(), 1);
+        assert!(matches!(entries[0], QueueEntry::Freeform(_)));
+        assert!(prompts(&entries).is_empty());
     }
 
     #[test]
@@ -1167,5 +1194,53 @@ mod tests {
             QueueEntry::StartFence(Some("17:00 ET".to_string())),
         ];
         assert_eq!(time_gate_at_head(&entries), None);
+    }
+
+    #[test]
+    fn parse_preserves_unrecognized_freetext_as_freeform_instead_of_failing() {
+        // A queue polluted with prose (the contamination class) must not fail
+        // every consume/resume guard that parses the queue.
+        let body = "JB `Run Agent Doc` error:\n- do [#existing]\nThe response should contain the prompt.\n";
+        let entries = parse(body).expect("polluted queue must parse, not bail");
+        // The free-text lines are preserved as Freeform.
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|e| matches!(e, QueueEntry::Freeform(_)))
+                .count(),
+            2
+        );
+        // The real prompt item is still recognized and actionable.
+        let prompts = prompts(&entries);
+        assert_eq!(prompts.len(), 1);
+        assert_eq!(prompts[0].text, "do [#existing]");
+    }
+
+    #[test]
+    fn freeform_round_trips_through_render() {
+        let body = "stray prose line\n- do [#real]\n";
+        let rendered = render(&parse(body).unwrap());
+        assert!(rendered.contains("stray prose line"));
+        assert!(rendered.contains("- do [#real]"));
+        // Re-parsing the rendered output is stable.
+        let reparsed = parse(&rendered).unwrap();
+        assert_eq!(prompts(&reparsed).len(), 1);
+        assert_eq!(
+            reparsed
+                .iter()
+                .filter(|e| matches!(e, QueueEntry::Freeform(_)))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn freeform_is_not_an_actionable_prompt() {
+        let entries = vec![
+            QueueEntry::Freeform("just a note".to_string()),
+            QueueEntry::Freeform("another note".to_string()),
+        ];
+        assert!(prompts(&entries).is_empty());
+        assert!(first_prompt(&entries).is_none());
     }
 }

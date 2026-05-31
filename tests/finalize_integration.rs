@@ -2494,7 +2494,14 @@ fn finalize_fails_closed_when_active_queue_component_is_missing() {
 }
 
 #[test]
-fn finalize_fails_closed_when_active_queue_is_malformed() {
+fn finalize_freetext_polluted_queue_parses_but_active_empty_queue_still_fails_closed() {
+    // The user reported that "failed to parse … agent:queue" is a bug: a queue
+    // polluted with free-text must no longer brick the consume guard on a raw
+    // PARSE error. Free-text is preserved as non-actionable Freeform. An active
+    // queue with *no consumable prompt* still fails closed, but now with the
+    // clearer "no prompt to consume" guard rather than an opaque parse error —
+    // a real queue with actionable `do [#id]` entries (plus pollution) is
+    // unaffected and consumes normally.
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
     let doc = tmp.path().join("session.md");
@@ -2517,14 +2524,12 @@ fn finalize_fails_closed_when_active_queue_is_malformed() {
         )
         .assert()
         .failure()
-        .stderr(predicates::str::contains(
-            "queue consume guard: failed to parse document queue",
-        ));
+        .stderr(predicates::str::contains("no prompt to consume"));
 
     let head_text = head_blob(tmp.path());
     assert!(
         !head_text.contains("### Re: describe the project — gpt-5\nResponse text."),
-        "HEAD blob should remain unchanged when required queue closeout cannot prove queue consumption"
+        "HEAD blob should remain unchanged when an active queue has no consumable prompt"
     );
 }
 

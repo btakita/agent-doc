@@ -31,68 +31,20 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260531-154206.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260531-162803.md`*
 
 Compacted content:
-- Archived 21 response topic(s): do [#codex-owned-pane-prompt-miss]; do [#stuck-capture-compact-false-positive]; do [#codex-final-response-live-verify]; 18 more
+- Archived 3 response topic(s): do [#codex-owned-pane-auto-queue-stuck]; do [#codex-owned-pane-prompt-miss-followups]; closeout recovery
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: do [#codex-owned-pane-auto-queue-stuck] — owner-pane auto-queue handoff guard — opus-4-8
-
-Code-complete (the plan's acceptable fail-closed fallback); gated on live Codex same-pane verification.
-
-#### Fix
-
-When a Codex-owned pane re-invokes `agent-doc <FILE>` for the document it already owns **and** a ready active auto-queue head remains, `run.rs` now bails **before** pre-commit / `start_run_cycle` via `queue_continuation::detect` + a new `owned_pane_queue_handoff_diagnostic`. The diagnostic names the live head (and id), the in-owner-turn `finalize` / `write --commit` recovery path, and warns against re-running the same direct command.
-
-Previously this case fell through to the late recursive-deadlock guard: pre-commit baselined queue/boundary drift, then the guard abandoned an empty cycle with the head still stuck. Now: no drift, no abandoned cycle, head stays live and actionable.
-
-An unresolved exchange prompt still takes precedence (handled by the existing `#codex-owned-pane-prompt-miss` guard above this one); the recursive deadlock guard is unchanged for genuine non-queue nested dispatch.
-
-#### Tests
-- `owned_pane_queue_handoff_diagnostic_names_head_and_recovery` (unit).
-- `codex_owned_pane_active_auto_queue_hands_off_without_drift` (integration; replaces the pre-fix recursive-abandon-for-queue test): asserts the early handoff, no opened cycle, byte-identical document.
-- `make check` green; both binaries built+installed.
-
-#### Gated (why `--pending-gate`, not `--done`)
-The plan's *preferable* path — structured `owned_pane_queue_handoff` result for Codex guidance + durable queue-target proof + `session-check --codex-final-gate` abandoned-cycle interrupt — and **live Codex same-pane verification** (plan tests #1–#5) remain. The early bail already keeps the head live so `queue_continuation_required=true` covers much of the final-gate intent. Plan: tasks/agent-doc/plan-codex-owned-pane-auto-queue-stuck.md.
-
-Commits: agent-doc `7aff8ab7`, superproject `1515b416f`.
-
-### Re: do [#codex-owned-pane-prompt-miss-followups] — structured owner-pane self-invocation result — opus-4-8
-
-Phase 1 (structured result) landed; gated on Codex-guidance integration + live Codex verification.
-
-#### What shipped (item 1)
-`preflight` now emits a typed `owned_pane_self_invocation` field (`PreflightOutput` → `run::OwnedPaneSelfInvocation`): file, current pane, session id, actor generation/state, `kind` (`unresolved_prompt` | `active_queue_head`), work excerpt, optional head id, and the exact persistence command. Populated only for a Codex owner-pane self-invocation with unresolved exchange work; null for non-owner panes, non-Codex harnesses, and clean docs.
-
-Key correctness detail: the unresolved prompt is derived from the cycle's **prompt-target diff**, not the boundary-keyed `unresolved_exchange_prompt` detector — preflight's commit inserts a trailing boundary that would otherwise hide the freshly-committed prompt. An unresolved prompt takes precedence over an active auto-queue head.
-
-#### Tests / verification
-- `preflight_emits_owned_pane_self_invocation_for_unresolved_prompt` (simulated Codex env → field present).
-- `preflight_owned_pane_self_invocation_absent_for_non_owner_pane` (non-owner pane → null).
-- `make check` green; both binaries built+installed. Spec: `specs/07-core-commands.md`.
-
-#### Gated (why `--pending-gate`)
-Items 2–3 need a Codex session I can't run here: (2) installed Codex guidance reads `owned_pane_self_invocation` to drive an in-pane response + a Stop-hook/guidance regression; (3) live Codex same-pane verification. Plan: tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md.
-
-Commits: agent-doc `1f81d4cc`, superproject `05265b14b` (pushed).
-
-### Re: closeout recovery — pending_done_guard misfire (known #queue-sync-auto-pending-done-guard-misfire) — opus-4-8
-
-
-Recovery note for the `do [#codex-owned-pane-prompt-miss-followups]` closeout (response committed as `160455008`; item gated `[/]` in review).
-
-The post-commit `pending_done_guard` flagged `#blocked-closeout-followup-capture` (a later auto-queue item, not this turn's work) — the already-tracked `#queue-sync-auto-pending-done-guard-misfire`: a synced auto-queue surfaces its `do [#id]` entries as cycle do-directives. That item is **deferred to the auto-loop**, not abandoned, so the per-cycle guard suppression applies here. Root-cause fix remains queued.
-<!-- agent:boundary:40703367 -->
+<!-- agent:boundary:bdbfc466 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#codex-owned-pane-auto-queue-stuck]~
 - do [#codex-owned-pane-prompt-miss-followups]
-- do [#blocked-closeout-followup-capture]
 - do [#queue-sync-auto-pending-done-guard-misfire]
+- do [#blocked-closeout-followup-capture]
 - do [#recursive-repair-state-drift]
 - do [#tagpath-queue-priority-publish-align]
 - do [#stuck-capture-queue-echo-false-positive]

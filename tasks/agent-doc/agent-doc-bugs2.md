@@ -31,97 +31,17 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260531-200812.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260531-204119.md`*
 
 Compacted content:
-- Archived 1 response topic(s): JB Run Agent Doc on monsterrodholders.md
+- Archived 3 response topic(s): do #jb-run-agent-doc-busy-feedback-live-verify; JB error; OpenCode routing deadlock
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: do #jb-run-agent-doc-busy-feedback-live-verify — opus-4-8
-
-> **Queue prompt:**
->
-> do [#jb-run-agent-doc-busy-feedback-live-verify]
-
-
-Gating this one — it's a live-IDE verification I can't perform autonomously. The code and tests already landed and are green (submodule `e1735fa2`); what remains is the interactive half:
-
-1. Install `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.143-signed.zip` from disk in IntelliJ (Settings → Plugins → ⚙ → Install Plugin from Disk), then restart the IDE.
-2. Restart the route-owned `agent-doc` process so it loads the new binary (the binary fix is already `cargo install`ed; the running pane process may still be the old one).
-3. Run **Run Agent Doc** on a doc whose Codex pane is mid active-turn.
-4. Confirm an **immediate** "session still running" Event Log notification — no silent 60s wait, no 4× retry.
-
-I can't drive the IntelliJ plugin install or read the IDE Event Log from here, so I'm marking it gated (code-complete, awaiting your live verification) rather than reporting a `--done` I didn't actually observe.
-
-If you'd rather I verify the **route half** non-interactively (construct a busy authoritative-actor state and assert `route --dispatch-only --plain-trigger` now exits non-zero with the busy-not-ready message), say so — that part doesn't need the IDE, though reproducing a live busy pane in this multi-session repo is itself racy.
-❯ JB error
-```
-[route] debounce OK — file idle for 19.2s and typing indicator idle
-[route] target tmux session: 0
-[preflight] review: 4 item(s), 4 gated
-[repair] repaired stale preflight_started cycle cycle-1780256669054 for tasks/software/tsift.md
-[commit] staged snapshot already matches HEAD for tasks/software/tsift.md — closing cycle as already committed
-[perf] commit total: 9ms
-[session-check] warning: open backlog item(s) also appear outside live agent:backlog: #compact-community-serialization (line 75), #louvain-dedup-aggregate (line 76), #shared-graph-build-pipeline (line 77), #sift-token-index (line 78)
-[route] drained open closeout for tasks/software/tsift.md before reroute (StalePreflightLockRepaired)
-[route] Pane %42 is in stash window 'stash', rescuing to agent-doc window
-[route] Rescued pane %42 via join-pane
-Error: dispatch-only opencode reopen refused to inject into pane %42 for tasks/software/tsift.md because the pane still shows opencode active turn; restore an idle prompt and retry
-```
-
-### Re: JB error — tsift.md OpenCode reopen refused (active turn) — opus-4-8
-
-I pulled the route trace from `.agent-doc/logs/ops.log` for `tasks/software/tsift.md` (pane `%42`, OpenCode):
-
-```
-route_dispatch_only_blocked ... pane=%42 harness=opencode reason=opencode active turn   (×5, ~15:58–16:01)
-...
-route_dispatch_start_proven  ... pane=%42 harness=opencode proof=pane_state_changed     (16:01:16)
-route_dispatch_only_sent     ... pane=%42 delivery=direct_pane_submit proof=pane_state_changed
-```
-
-**This is route behaving correctly — and it self-resolved.** The OpenCode pane was genuinely mid-turn, so dispatch-only `Run Agent Doc` refused to inject the reopen (injecting into a live OpenCode turn would corrupt it). Each retry was refused while the turn ran; once the turn finished and the pane returned to its idle composer, the very next route attempt **succeeded** (`proof=pane_state_changed` → reopen delivered). It is not a stuck failure, and not a stale-busy false positive — a stale projection would never have flipped to proven-idle and dispatched.
-
-**Same class as the fix I just shipped.** `dispatch-only ... refused ... opencode active turn` matches the JB plugin's `BUSY_RUNNING` classifier, which **0.2.143** now surfaces as an immediate "session still running" Event Log notification instead of the raw `Error:` line (and without the silent retry loop). So once you install 0.2.143, this exact message becomes a clean notification telling you the session is busy — wait for the turn to finish.
-
-**Difference from the Codex case:** the OpenCode active-turn path *already* fails closed loudly (exit 1 + message) — it was never the silent exit-0 `FocusOnly` bug. So no new route fix is needed here; the only gap was the raw-error presentation, which the plugin fix covers.
-
-The `[route] Rescued pane %42 via join-pane` line is also normal: the pane was parked in the `stash` window, so route pulled it back into the `agent-doc` window before dispatching — that rescue succeeded and isn't related to the refusal.
-
-**One optional refinement queued** (`#opencode-active-turn-reopen-auto-retry-on-idle`, recommended): instead of making you re-click after the turn ends, route could watch the pane and auto-fire the bare reopen once it goes idle. Lower priority than the live-verify items.
-❯ Opencode routing is idle. The "mid-term" analysis indicates there is a bug holding an open run. Why are we deadlocked?
-❯ #spec-test-build-install-commit-push
-
-### Re: OpenCode routing deadlock — committed_without_response_body loop — opus-4-8
-
-You're right, and I was wrong to call it self-resolved — it's a real deadlock. `session-check tasks/software/tsift.md` was **INTERRUPTED**, re-firing every ~90s:
-
-```
-committed_without_response_body_guard_failed cycle_id=cycle-1780257680821
-   last_event=commit_already_current had_pending_mutations=true pending_done=1 reaped=1
-... then every ~90s:  commit_noop (already_current) → session_check failed_closed (interrupted) → repeat
-```
-
-#### Why we were deadlocked
-
-The OpenCode tsift.md run issued a `finalize --done <id>` that **reaped a backlog item already reflected in HEAD** — so the commit was a **no-op** (`commit_already_current`, document byte-identical to HEAD) — but it wrote **no response body**. The `committed_without_response_body` guard (which exists to catch a run that commits side-effect work but forgets to answer the prompt) fired anyway. The catch: the recovery it recommends — `agent-doc write --commit` — is *itself* a no-op here (no response to write, nothing to commit). So the guard fails closed, a closeout poller re-runs every ~90s, and it re-interrupts forever. The cycle could never satisfy the guard and never closed → routing/continuation wedged even though the OpenCode pane was idle.
-
-**The bug:** the guard claimed "cycle committed binary-owned work this turn" while `last_event=commit_already_current` proves **nothing was committed this turn**. A no-op commit has no committed-work-without-a-response shape.
-
-#### Fix
-
-`committed_without_response_body` now skips when the cycle's commit was a no-op (`commit_already_current`, new `cycle_state::is_noop_commit_event`) — it committed no binary-owned work, so no paired response is required (logs `committed_without_response_body_guard_skipped_noop_commit`). A *real* missed response still commits actual side-effect content (`commit_success`/`commit`) and keeps failing closed, so `#codex-final-response-not-written` detection is intact.
-
-#### Verification
-
-`make check` green (incl. the FlowCore budget gate, bumped 49→51 with audit comment). Regression `committed_without_response_body_guard_skips_noop_commit_reap_only_cycle`; the existing fires-on-real-commit test still passes. Spec `07-closeout-commands.md` updated. Both binaries rebuilt + installed, and **verified live**: `session-check tasks/software/tsift.md` now returns `ok` — the ~90s interrupt loop is broken. Submodule `e6504d62`.
-
-Queued `#opencode-reap-only-no-response-finalize-investigate` to chase the upstream (why the OpenCode run did a reap-only no-response finalize, and what re-triggers closeout every ~90s).
-<!-- agent:boundary:cbcd56ea -->
+<!-- agent:boundary:7efc3af5 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
+- do [#opencode-reap-only-no-response-finalize-investigate]
 - do [#opencode-active-turn-reopen-auto-retry-on-idle]
 - do [#recovery-drift-apply-live-verify]
 - do [#jb-run-agent-doc-command-route-miss]

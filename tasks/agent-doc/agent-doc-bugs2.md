@@ -58,17 +58,36 @@ An unresolved exchange prompt still takes precedence (handled by the existing `#
 The plan's *preferable* path — structured `owned_pane_queue_handoff` result for Codex guidance + durable queue-target proof + `session-check --codex-final-gate` abandoned-cycle interrupt — and **live Codex same-pane verification** (plan tests #1–#5) remain. The early bail already keeps the head live so `queue_continuation_required=true` covers much of the final-gate intent. Plan: tasks/agent-doc/plan-codex-owned-pane-auto-queue-stuck.md.
 
 Commits: agent-doc `7aff8ab7`, superproject `1515b416f`.
-<!-- agent:boundary:8ec1c2f1 -->
+
+### Re: do [#codex-owned-pane-prompt-miss-followups] — structured owner-pane self-invocation result — opus-4-8
+
+Phase 1 (structured result) landed; gated on Codex-guidance integration + live Codex verification.
+
+#### What shipped (item 1)
+`preflight` now emits a typed `owned_pane_self_invocation` field (`PreflightOutput` → `run::OwnedPaneSelfInvocation`): file, current pane, session id, actor generation/state, `kind` (`unresolved_prompt` | `active_queue_head`), work excerpt, optional head id, and the exact persistence command. Populated only for a Codex owner-pane self-invocation with unresolved exchange work; null for non-owner panes, non-Codex harnesses, and clean docs.
+
+Key correctness detail: the unresolved prompt is derived from the cycle's **prompt-target diff**, not the boundary-keyed `unresolved_exchange_prompt` detector — preflight's commit inserts a trailing boundary that would otherwise hide the freshly-committed prompt. An unresolved prompt takes precedence over an active auto-queue head.
+
+#### Tests / verification
+- `preflight_emits_owned_pane_self_invocation_for_unresolved_prompt` (simulated Codex env → field present).
+- `preflight_owned_pane_self_invocation_absent_for_non_owner_pane` (non-owner pane → null).
+- `make check` green; both binaries built+installed. Spec: `specs/07-core-commands.md`.
+
+#### Gated (why `--pending-gate`)
+Items 2–3 need a Codex session I can't run here: (2) installed Codex guidance reads `owned_pane_self_invocation` to drive an in-pane response + a Stop-hook/guidance regression; (3) live Codex same-pane verification. Plan: tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md.
+
+Commits: agent-doc `1f81d4cc`, superproject `05265b14b` (pushed).
+<!-- agent:boundary:3a558452 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#codex-owned-pane-auto-queue-stuck]
+- ~do [#codex-owned-pane-auto-queue-stuck]~
 - do [#codex-owned-pane-prompt-miss-followups]
+- do [#blocked-closeout-followup-capture]
 - do [#queue-sync-auto-pending-done-guard-misfire]
 - do [#recursive-repair-state-drift]
 - do [#tagpath-queue-priority-publish-align]
-- do [#blocked-closeout-followup-capture]
 - do [#stuck-capture-queue-echo-false-positive]
 - do [#backlog-queue-sync-attr]
 - do [#preset-item-id-collision-enforce]
@@ -118,7 +137,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 - [ ] [#preset-item-id-collision-enforce] [recommended] Escalate #preset-item-id-collision from a preflight warning to hard enforcement (the riskier half, deferred to design carefully against over-blocking live sessions): (1) mutation-time rejection — write --pending-add / --pending-add-after / etc. with an explicit custom id (id=X or [#X]) that collides with a prompt_presets key or an existing active item id fails closed; (2) fail-closed dispatch — preflight/session-check block dispatch on an existing collision with the rename repair hint, surfaced by route/JB as a document-repair error not a generic agent failure; (3) queue generation refuses to emit do [#id] for an ambiguous id. The identity registry + detection + preflight warning + 3 regressions already landed (preflight::detect_identity_collisions). Plan: tasks/agent-doc/plan-preset-item-id-collision.md.
 - [ ] [#free-text-queue-skip-diagnostic] [recommended] Polish from #free-text-queue-owner-consume plan point 4: when queue consumption is skipped, the closeout still prints the generic '[queue] skipped consumption because the active prompt did not target the queue head'. For an id-backed head with no completion flag, name the missing proof source and the supported repair (--done/--pending-gate/--pending-edit <id>); for a free-text head edge case, point to the answered-response path. Replace the single generic line at write.rs ~1460/1469 with a shape-aware diagnostic. Plan: tasks/agent-doc/plan-free-text-queue-owner-consume.md (point 4).
 - [ ] [#stuck-capture-queue-echo-false-positive] [recommended] Fix landed (submodule 6220379c): response_already_applied matched the captured response as one contiguous block, but queue consumption inserts a > **Queue prompt:** echo blockquote (#queue-prompt-echo-in-response) between the response heading and body, so stuck_captured_cycle falsely warned committed-but-not-in-HEAD after every queue-consumed cycle and re-suggested a write --commit that would re-inject the response. normalized_response_lines now strips the echo blockquote on both sides before matching; unit + closeout regressions added. Verify across a couple more queue-consumed cycles that no preflight emits the false stuck_captured_cycle warning, then mark done.
-- [ ] [#codex-owned-pane-prompt-miss-followups] [recommended] Follow-ups deferred from the #codex-owned-pane-prompt-miss fix (fail-closed early guard + session-check backstop landed, submodule dede28d8): (1) the plan's *preferable* path — emit a structured owned_pane_self_invocation result shape in preflight/plan (file path, owner pane/session/actor generation, unresolved prompt excerpt, required persistence command) so Codex guidance drives an in-pane response cycle instead of only reading the bail diagnostic; (2) Codex Stop-hook / installed guidance regression asserting the owned-pane diagnostic forces an in-pane response body before final chat output; (3) live-verify with a real Codex same-pane run that has an unresolved exchange prompt. Plan: tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md.
 - [ ] [#completed-queue-residue-regression] [recommended] Completed queue items can still remain visible in agent:queue after the turn is finished, despite the archived #drained-done-queue-clear fix. Treat as a regression/uncovered route or IPC path: add a committed-state guard for provable completed queue residue, audit finalize/write/preflight/run continuation drain ordering, and verify live editor/snapshot/HEAD convergence. Plan: tasks/agent-doc/plan-completed-queue-residue-regression.md.
 - [ ] [#do-id-partial-closeout-state] [recommended] Partial-closeout WARN guard landed (check_partial_closeout_state_guard: a do[#id] turn whose response shows shipped + remaining-live-work signals with the directed id still open advises --pending-edit/--pending-gate narrowing; suppressible by a no-partial-closeout-guard response marker; FlowCore guard_ budget 35->40). Remaining: per-id edit-vs-gate tracking in cycle_state, opt-in strict mode, next-phase queue convergence, and the runbook note that #spec-test-commit-push completes a repo phase without a live/deploy item. Plan: tasks/agent-doc/plan-do-id-partial-closeout-state.md.
 - [ ] [#closeout-recovery-state-machine] [recommended] Typed closeout recovery classifier landed: flow::closeout::CloseoutRecoveryState + classify_closeout_recovery_state + recovery_command; session_check::closeout_recovery_hint renders one typed 'Recovery [state]: command' across all nine closeout-guard call sites. Classified today: clean / open_cycle / missing_response_body / escaped_template_patch. Remaining: precise detection for reserved states direct_response_patchback, boundary_only_drift, nested_parent_pointer_stale, and folding each guard's existing diagnostic through the classifier. Plan: tasks/agent-doc/plan-closeout-repair-churn.md.
@@ -127,6 +145,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Review
  
 <!-- agent:review -->
+- [/] [#codex-owned-pane-prompt-miss-followups] [recommended] Follow-ups deferred from the #codex-owned-pane-prompt-miss fix (fail-closed early guard + session-check backstop landed, submodule dede28d8): (1) the plan's *preferable* path — emit a structured owned_pane_self_invocation result shape in preflight/plan (file path, owner pane/session/actor generation, unresolved prompt excerpt, required persistence command) so Codex guidance drives an in-pane response cycle instead of only reading the bail diagnostic; (2) Codex Stop-hook / installed guidance regression asserting the owned-pane diagnostic forces an in-pane response body before final chat output; (3) live-verify with a real Codex same-pane run that has an unresolved exchange prompt. Plan: tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md.
 - [/] [#codex-owned-pane-auto-queue-stuck] [recommended] Codex-owned `agent-doc <FILE>` direct invocation from the same pane can leave an active auto-queue turn stuck: the recursive guard avoids child dispatch, but the ready queue head is not handed to the owning Codex turn and no response is written. Live repro 2026-05-31 `src/boost-client/tasks/monsterrodholders.md`: `queue_active: true` + `agent:queue auto` head `re [#374n]...`; same-pane run printed `Submitting to codex...` then `recursive direct invocation would deadlock`, leaving queue/boundary drift and the head unprocessed. Fix with early owner-pane queue handoff, durable queue-target proof, no-drift guard, and Codex final-gate recovery. Plan: tasks/agent-doc/plan-codex-owned-pane-auto-queue-stuck.md.
 - [/] [#backlog-queue-sync-attribute] [recommended] Add a queue=sync|append|prepend attribute to agent:backlog / agent:icebox: queue=sync replaces agent:queue content with a do [#id] list for every item; queue=append adds item ids not already in agent:queue; queue=prepend prepends them. Composable with #backlog-priority-attribute (prioritize first, then regenerate the queue), automating the manual 'regenerate the queue to the new priority' step that currently has to be done by hand after a reorder. Requested 2026-05-30.
 - [/] [#backlog-priority-attribute] [recommended] Add a priority attribute to agent:backlog / agent:icebox / agent:queue that orders the item list by priority (a component-level priority flag and/or per-item priority markers), so the binary maintains priority order instead of requiring manual --pending-reorder each cycle. Automates the by-hand reprioritization done in #next-steps cycles. Composable with #backlog-queue-sync-attribute; sibling of #ah0s (explicit-position primitives). Requested 2026-05-30.

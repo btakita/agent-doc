@@ -257,6 +257,15 @@ Semantics:
   is a recognized backlog/icebox attribute (the `tagpath` agent-doc lint accepts
   bare `queue` and `queue=sync|append|prepend`, warning `agent-doc/invalid-attr-value`
   on an unrecognized mode; preflight's `misplaced_component_attr` mirrors this).
+- **Priority interplay (`#backlog-priority-attribute`).** A bare `priority`
+  attribute on the source backlog/icebox marker stable-sorts its items by their
+  per-item `priority=<1..9>` token before the sync runs (in `run_pending_maintenance`,
+  earlier in the pipeline), so the synced queue inherits the prioritized order. A
+  bare `priority` attribute on the `agent:queue` marker additionally stable-sorts
+  the queue's `do [#id]` prompts by their source item's priority after the sync
+  (`queue::sort_prompts_by_priority`), covering append-built or manually edited
+  queues. `priority` is recognized on backlog/icebox/queue by both the lint and
+  preflight. See `specs/pending-system.md` for the per-item token grammar.
 
 ### Preflight queue behavior
 

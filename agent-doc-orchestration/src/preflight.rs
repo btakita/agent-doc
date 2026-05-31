@@ -723,6 +723,15 @@ fn misplaced_component_attr_warning(file: &Path, content: &str) -> Option<Prefli
                         component.name
                     ));
                 }
+            } else if key == "priority"
+                && matches!(
+                    component.name.as_str(),
+                    "backlog" | "icebox" | "pending" | "queue"
+                )
+            {
+                // `priority` is a recognized backlog/icebox/queue ordering
+                // attribute (#backlog-priority-attribute). It is a bare token;
+                // per-item priority lives in `priority=<1..9>` item tokens.
             } else if !KNOWN_COMPONENT_ATTRS.contains(&key.as_str()) {
                 issues.push(format!(
                     "`{key}` on `agent:{}` is not a recognized component attribute (possible typo)",
@@ -2600,6 +2609,18 @@ pub fn run_pending_maintenance(file: &Path) -> Result<PendingMaintenanceReport> 
             mutated = true;
         }
 
+        // Priority sort (#backlog-priority-attribute): when the component marker
+        // carries `priority`, stable-sort items by their per-item `priority=<1..9>`
+        // token (1 = highest; absent = lowest) so a downstream `agent:queue` sync
+        // inherits the prioritized order.
+        if comp.attrs.contains_key("priority")
+            && let Some(sorted) = crate::pending::sort_by_priority(&current_body)
+        {
+            eprintln!("[preflight] {}: sorted by priority", surface_label);
+            current_body = sorted;
+            mutated = true;
+        }
+
         // Re-sync the snapshot's tracked surface to the file's body whenever the
         // two diverge — even if maintenance made no change to it this pass. The
         // write phase persists --pending-gate / --pending-edit / --review-add to
@@ -2953,6 +2974,26 @@ fn collect_backlog_queue_sync(
     mode.map(|m| (m, ids))
 }
 
+/// Build an id→priority-rank map from active `agent:backlog` / `agent:icebox`
+/// items (`#backlog-priority-attribute`) for ordering a synced `agent:queue`.
+/// First-seen rank wins on duplicate ids across components.
+fn collect_backlog_priority_ranks(
+    components: &[crate::component::Component],
+    content: &str,
+) -> std::collections::HashMap<String, u8> {
+    let mut rank = std::collections::HashMap::new();
+    for comp in components {
+        if !matches!(comp.name.as_str(), "backlog" | "icebox" | "pending") {
+            continue;
+        }
+        let body = &content[comp.open_end..comp.close_start];
+        for (id, r) in crate::pending::active_item_priorities(body) {
+            rank.entry(id).or_insert(r);
+        }
+    }
+    rank
+}
+
 fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> {
     let content = match std::fs::read_to_string(file) {
         Ok(c) => c,
@@ -3001,6 +3042,28 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
         );
         entries = synced;
         mutated = true;
+    }
+
+    // Queue priority ordering (#backlog-priority-attribute): when the queue
+    // marker carries `priority`, stable-sort its do-prompts by the priority of
+    // the matching backlog/icebox item so append-built or manual queues come out
+    // prioritized. The backlog itself is priority-sorted earlier in the pipeline
+    // by run_pending_maintenance, so the rank map read here is already current.
+    if comp.attrs.contains_key("priority") {
+        let rank = collect_backlog_priority_ranks(&components, &content);
+        if !rank.is_empty()
+            && let Some(sorted) = crate::queue::sort_prompts_by_priority(&entries, &rank)
+        {
+            let new_body = crate::queue::render(&sorted);
+            current_content = {
+                let comps = crate::component::parse(&current_content)?;
+                let q = comps.iter().find(|c| c.name == "queue").unwrap();
+                q.replace_content(&current_content, &new_body)
+            };
+            eprintln!("[preflight] queue: sorted do-prompts by backlog priority");
+            entries = sorted;
+            mutated = true;
+        }
     }
 
     // Read current state
@@ -7683,6 +7746,85 @@ mod tests {
                 "recognized queue sync attr must not warn: {marker}"
             );
         }
+    }
+
+    #[test]
+    fn misplaced_component_attr_warning_allows_priority_attr() {
+        // #backlog-priority-attribute: bare `priority` on backlog/icebox/queue
+        // is a recognized ordering attribute and must not warn.
+        for content in [
+            "<!-- agent:backlog priority -->\n- [ ] [#a] x\n<!-- /agent:backlog -->\n",
+            "<!-- agent:backlog priority queue -->\n- [ ] [#a] x\n<!-- /agent:backlog -->\n",
+            "<!-- agent:queue priority -->\n- do [#a]\n<!-- /agent:queue -->\n",
+        ] {
+            assert!(
+                misplaced_component_attr_warning(Path::new("session.md"), content).is_none(),
+                "priority attr must not warn: {content}"
+            );
+        }
+    }
+
+    #[test]
+    fn run_pending_maintenance_sorts_backlog_by_priority() {
+        // #backlog-priority-attribute: a backlog carrying `priority` stable-sorts
+        // items by their per-item priority token each cycle.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "---\n\n",
+            "<!-- agent:backlog priority -->\n",
+            "- [ ] [#low] priority=5 later\n",
+            "- [ ] [#high] priority=1 first\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        run_pending_maintenance(&doc).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        let high = updated.find("[#high]").unwrap();
+        let low = updated.find("[#low]").unwrap();
+        assert!(high < low, "priority=1 item must sort before priority=5:\n{updated}");
+    }
+
+    #[test]
+    fn run_queue_maintenance_orders_synced_queue_by_priority() {
+        // #backlog-priority-attribute + #backlog-queue-sync-attr: a priority queue
+        // synced from a priority backlog comes out prioritized.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "---\n\n",
+            "<!-- agent:queue priority -->\n",
+            "- do [#low]\n",
+            "- do [#high]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] [#low] priority=5 later\n",
+            "- [ ] [#high] priority=1 first\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        run_queue_maintenance(&doc, None).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        let q = updated.find("<!-- agent:queue").unwrap();
+        let qend = updated[q..].find("<!-- /agent:queue").unwrap() + q;
+        let queue_region = &updated[q..qend];
+        let high = queue_region.find("do [#high]").unwrap();
+        let low = queue_region.find("do [#low]").unwrap();
+        assert!(high < low, "priority=1 must sort before priority=5 in queue:\n{queue_region}");
     }
 
     #[test]

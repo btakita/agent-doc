@@ -1299,6 +1299,75 @@ pub fn active_item_ids(body: &str) -> Vec<String> {
         .collect()
 }
 
+/// Rank an item's priority from a `priority=<1..9>` token anywhere in its text
+/// (`#backlog-priority-attribute`). `1` is the highest priority and sorts first;
+/// `9` is the lowest numbered priority. An item with no valid `priority=` token
+/// ranks `10` — below every numbered item — so unprioritized items sort last
+/// while preserving their authored relative order under a stable sort.
+pub const PRIORITY_RANK_UNSET: u8 = 10;
+
+pub fn item_priority_rank(text: &str) -> u8 {
+    for token in text.split_whitespace() {
+        if let Some(value) = token.strip_prefix("priority=")
+            && let Ok(n) = value.parse::<u8>()
+            && (1..=9).contains(&n)
+        {
+            return n;
+        }
+    }
+    PRIORITY_RANK_UNSET
+}
+
+/// Active (open) backlog item ids paired with their priority rank, in document
+/// order. Used to priority-order a synced `agent:queue` (`#backlog-priority-attribute`).
+pub fn active_item_priorities(body: &str) -> Vec<(String, u8)> {
+    PendingLayout::parse(body)
+        .items()
+        .into_iter()
+        .filter(|item| matches!(item.state, PendingState::Open) && !item.id.is_empty())
+        .map(|item| (item.id.clone(), item_priority_rank(&item.text)))
+        .collect()
+}
+
+/// Stable-sort the item lines of a pending body by per-item priority
+/// (`#backlog-priority-attribute`), preserving every non-item segment (blank
+/// lines, prose, ordered-list separators) at its original position. Returns
+/// `Some(new_body)` when the order changes, `None` otherwise (idempotent).
+pub fn sort_by_priority(body: &str) -> Option<String> {
+    let layout = PendingLayout::parse(body);
+    let positions: Vec<usize> = layout
+        .segments
+        .iter()
+        .enumerate()
+        .filter_map(|(i, s)| matches!(s, PendingSegment::Item { .. }).then_some(i))
+        .collect();
+    if positions.len() < 2 {
+        return None;
+    }
+    let mut slots: Vec<(usize, PendingItem)> = positions
+        .iter()
+        .enumerate()
+        .map(|(slot, &pos)| match &layout.segments[pos] {
+            PendingSegment::Item { item, .. } => (slot, item.clone()),
+            _ => unreachable!(),
+        })
+        .collect();
+    let before: Vec<usize> = slots.iter().map(|(slot, _)| *slot).collect();
+    slots.sort_by_key(|(_, item)| item_priority_rank(&item.text));
+    let after: Vec<usize> = slots.iter().map(|(slot, _)| *slot).collect();
+    if before == after {
+        return None;
+    }
+    let mut segments = layout.segments.clone();
+    for (target, &pos) in positions.iter().enumerate() {
+        let item = slots[target].1.clone();
+        if let PendingSegment::Item { has_newline, .. } = layout.segments[pos] {
+            segments[pos] = PendingSegment::Item { item, has_newline };
+        }
+    }
+    Some(PendingLayout { segments }.render())
+}
+
 pub fn extract_pending_ids_from_text(text: &str) -> HashSet<String> {
     let mut ids = HashSet::new();
     let mut rest = text;
@@ -2016,6 +2085,52 @@ mod tests {
     #[test]
     fn active_item_ids_empty_for_empty_body() {
         assert!(active_item_ids("").is_empty());
+    }
+
+    #[test]
+    fn item_priority_rank_parses_token() {
+        assert_eq!(item_priority_rank("priority=1 do the thing"), 1);
+        assert_eq!(item_priority_rank("text priority=5 more"), 5);
+        assert_eq!(item_priority_rank("no token here"), PRIORITY_RANK_UNSET);
+        assert_eq!(item_priority_rank("priority=0 out of range"), PRIORITY_RANK_UNSET);
+        assert_eq!(item_priority_rank("priority=12 out of range"), PRIORITY_RANK_UNSET);
+    }
+
+    #[test]
+    fn sort_by_priority_orders_ascending_stable() {
+        let body = concat!(
+            "- [ ] [#a] priority=3 third\n",
+            "- [ ] [#b] no priority\n",
+            "- [ ] [#c] priority=1 first\n",
+            "- [ ] [#d] priority=1 also first\n",
+        );
+        let sorted = sort_by_priority(body).expect("order should change");
+        // priority=1 items first (stable: c before d), then priority=3, then unset.
+        let ids: Vec<&str> = sorted
+            .lines()
+            .filter_map(|l| l.split("[#").nth(1))
+            .filter_map(|s| s.split(']').next())
+            .collect();
+        assert_eq!(ids, vec!["c", "d", "a", "b"]);
+    }
+
+    #[test]
+    fn sort_by_priority_idempotent_when_ordered() {
+        let body = "- [ ] [#a] priority=1 x\n- [ ] [#b] priority=2 y\n";
+        assert!(sort_by_priority(body).is_none());
+    }
+
+    #[test]
+    fn active_item_priorities_pairs_open_ids_with_rank() {
+        let body = concat!(
+            "- [ ] [#a] priority=2 one\n",
+            "- [/] [#g] priority=1 gated\n",
+            "- [ ] [#b] two\n",
+        );
+        assert_eq!(
+            active_item_priorities(body),
+            vec![("a".to_string(), 2u8), ("b".to_string(), PRIORITY_RANK_UNSET)]
+        );
     }
 
     #[test]

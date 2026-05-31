@@ -474,6 +474,42 @@ pub fn sync_backlog_into_queue(
     }
 }
 
+/// Stable-sort the `Prompt` entries of a queue by the priority `rank` of their
+/// `do [#id]` id (`#backlog-priority-attribute`), preserving every non-prompt
+/// entry (completed, preset, dispatch, fence, freeform) at its original
+/// position. Ids absent from `rank` sort last (rank `u8::MAX`). Returns
+/// `Some(new_entries)` when the order changes, `None` otherwise.
+pub fn sort_prompts_by_priority(
+    entries: &[QueueEntry],
+    rank: &std::collections::HashMap<String, u8>,
+) -> Option<Vec<QueueEntry>> {
+    let positions: Vec<usize> = entries
+        .iter()
+        .enumerate()
+        .filter_map(|(i, e)| matches!(e, QueueEntry::Prompt(_)).then_some(i))
+        .collect();
+    if positions.len() < 2 {
+        return None;
+    }
+    let key = |e: &QueueEntry| -> u8 {
+        entry_do_id(e)
+            .and_then(|id| rank.get(&id).copied())
+            .unwrap_or(u8::MAX)
+    };
+    let mut prompts: Vec<QueueEntry> = positions.iter().map(|&i| entries[i].clone()).collect();
+    let before: Vec<u8> = prompts.iter().map(key).collect();
+    prompts.sort_by_key(key);
+    let after: Vec<u8> = prompts.iter().map(key).collect();
+    if before == after {
+        return None;
+    }
+    let mut out = entries.to_vec();
+    for (slot, &pos) in positions.iter().enumerate() {
+        out[pos] = prompts[slot].clone();
+    }
+    Some(out)
+}
+
 fn parse_completed_inline(text: &str) -> Option<&str> {
     let trimmed = text.trim();
     trimmed
@@ -726,6 +762,37 @@ mod tests {
             sync_backlog_into_queue(&entries, &ids(&["A", "a", "B"]), BacklogQueueSyncMode::Sync)
                 .expect("queue should change");
         assert_eq!(render(&synced), "- do [#a]\n- do [#b]\n");
+    }
+
+    #[test]
+    fn sort_prompts_by_priority_orders_do_prompts() {
+        let entries = parse("- do [#a]\n- do [#b]\n- do [#c]\n").unwrap();
+        let mut rank = std::collections::HashMap::new();
+        rank.insert("a".to_string(), 3u8);
+        rank.insert("b".to_string(), 1u8);
+        rank.insert("c".to_string(), 2u8);
+        let sorted = sort_prompts_by_priority(&entries, &rank).expect("order should change");
+        assert_eq!(render(&sorted), "- do [#b]\n- do [#c]\n- do [#a]\n");
+    }
+
+    #[test]
+    fn sort_prompts_by_priority_keeps_non_prompts_in_place() {
+        let entries = parse("preset spec\n- do [#a]\n- do [#b]\n").unwrap();
+        let mut rank = std::collections::HashMap::new();
+        rank.insert("a".to_string(), 2u8);
+        rank.insert("b".to_string(), 1u8);
+        let sorted = sort_prompts_by_priority(&entries, &rank).expect("order should change");
+        // preset stays at index 0; prompts reorder among themselves.
+        assert_eq!(render(&sorted), "preset spec\n- do [#b]\n- do [#a]\n");
+    }
+
+    #[test]
+    fn sort_prompts_by_priority_idempotent_when_ordered() {
+        let entries = parse("- do [#a]\n- do [#b]\n").unwrap();
+        let mut rank = std::collections::HashMap::new();
+        rank.insert("a".to_string(), 1u8);
+        rank.insert("b".to_string(), 2u8);
+        assert!(sort_prompts_by_priority(&entries, &rank).is_none());
     }
 
     #[test]

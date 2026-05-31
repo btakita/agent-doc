@@ -31,45 +31,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260531-204119.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260531-204547.md`*
 
 Compacted content:
-- Archived 3 response topic(s): do #jb-run-agent-doc-busy-feedback-live-verify; JB error; OpenCode routing deadlock
+- Archived 1 response topic(s): do #opencode-reap-only-no-response-finalize-investigate
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: do #opencode-reap-only-no-response-finalize-investigate — opus-4-8
-
-> **Queue prompt:**
->
-> do [#opencode-reap-only-no-response-finalize-investigate]
-
-
-Both questions answered from the ops log.
-
-#### Q1 — why a reap-only finalize with no response body
-
-It wasn't intentional — the OpenCode response was **rejected as malformed, twice**, while the queue/done bookkeeping still went through:
-
-```
-template_patchback_malformed_rejected source=run_stream markers=1 patches=0 reason=patch_markers_without_closed_blocks   (×2)
-... pre_write_guard blocked reason=pending_done_missing
-... pre_write_guard completed reason=visible_write_typing_apply:queue_consume
-queue_continuation_required head=[#sift-token-index]
-committed_without_response_body_guard_failed ... pending_done=1 reaped=1
-```
-
-The OpenCode agent emitted `<!-- patch:exchange -->` blocks **without the closing `<!-- /patch:exchange -->`** (`patch_markers_without_closed_blocks`), so the response was correctly discarded (`patches=0` — nothing captured). But the closeout still consumed the queue head and recorded `--done`/reap (`pending_done=1 reaped=1`). Result: a cycle with committed bookkeeping but no captured response body — which then fed the no-op-commit guard deadlock I fixed last turn.
-
-So this is the `patch:exchange`-needs-a-close-marker failure surfacing in the OpenCode path: the rejected response and the reap were **not coupled**, so the reap survived a discarded response.
-
-#### Q2 — what re-ran closeout every ~90s
-
-The long-running route-owned supervisor `agent-doc start --route-owned tasks/software/tsift.md` (pid 645383). It does a periodic reconcile commit (`commit_staging → commit_noop (already_current)`) roughly every 90–190s. That's cheap and benign — it was just the **amplifier** that turned the single wedged cycle into a visible ~90s interrupt loop. After the no-op-commit guard fix, those passes are clean (`commit_success` at 1780259315, then `commit_noop` with **no more `committed_without_response_body_guard_failed`**). Not a separate bug.
-
-#### Outcome
-
-The deadlock is fixed (last turn) and the upstream is now root-caused. Queued the actionable systemic fix `#rejected-response-must-block-queue-consume-and-done`: a malformed/rejected response must fail the same-cycle queue-consume + `--done` reap closed together, so a discarded response can never leave committed reap bookkeeping without a body (plus audit the OpenCode SKILL `patch:exchange` examples for the missing close marker). Marking this investigation done.
-<!-- agent:boundary:7e47447a -->
+<!-- agent:boundary:dfbe5712 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -96,14 +63,6 @@ preset #spec-test-build-install-commit-push
 <!-- /agent:queue -->
 ###
 <!--
-JB `Run Agent Doc` reached the deadlock:
-```
-[route] debounce OK — file idle for 0.5s and typing indicator idle
-[route] target tmux session: 0
-Error: authoritative actor generation 244 for tasks/monsterrodholders.md owns pane %40 but dispatch-only route will not inject a new trigger because the authoritative actor is busy did not return to a dispatch-ready prompt in the current generation after waiting 8s. Wait for the active turn to finish before rerouting this document.
-```
-#spec-test-build-install-commit-push
----
 Verify [#ipcfullprompt-recur2]
 ---
 The last run had a code fence stripped away by agent-doc.

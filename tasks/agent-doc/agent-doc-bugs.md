@@ -9,7 +9,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -62,7 +62,33 @@ pub fn project_root_for_doc_cached(file: &Path) -> Option<PathBuf> {
 
 Or even simpler: since the result for a given file is immutable within a run, just compute it once at the call site and pass `Option<PathBuf>` down.
 I plan on having a dependency graph. This is only the first step towards optimizing cachable state.
-<!-- agent:boundary:37f8b9da -->
+
+### Re: lazily-rs dependency graph vision — gpt-5
+
+That reframes the picture significantly. If the end goal is a dependency graph for cachable state — where `project_root_for_doc`, `load_project_for_doc`, `canonicalize`, config parsing, SSH context resolution, frontmatter parsing, etc. all participate as nodes with tracked dependencies and lazy invalidation — then lazily-rs is the right foundation.
+
+The current code has several call chains that recompute downstream results from the same upstream inputs within a single run:
+
+```
+file path → canonicalize → project_root_for_doc → load_project_from → ProjectConfig
+                                                            ↓
+                                              resolve_ssh_context_inputs
+                                                            ↓
+                                              frontmatter parse → SSH targets / harness args
+```
+
+Each arrow is a potential lazily-rs **Slot**: compute once, cache, and automatically invalidate when upstream inputs change. A `Context` threaded through the run would let any function in the chain access cached results without passing them explicitly.
+
+**Where to start:** `project_root_for_doc` is a reasonable first slot — it's a leaf (no deps beyond the file path), it's called from multiple places (`load_project_for_doc`, `resolve_ssh_context_inputs`), and its result is stable per file within a run. From there, build upward:
+
+1. `Slot` for `project_root_for_doc(file: &Path) -> Option<PathBuf>`
+2. `Slot` for `load_project_for_doc(file: &Path) -> ProjectConfig` (depends on #1)
+3. `Slot` for `resolve_ssh_context_inputs(file: &Path)` (depends on #1, #2)
+
+This gives you the graph incrementally without a big-bang refactor. Each slot is testable in isolation.
+
+**Caveat:** agent-doc runs are sequential and short-lived (single CLI invocation). The dependency graph's value isn't reactive updates mid-run — it's **deduplication** (avoiding redundant `stat`/`read`/`parse` for the same file across `preflight → plan → write → commit`) and **structural clarity** (making the data flow explicit rather than scattered function calls). If the graph later spans multiple documents or a long-lived watch/stream daemon, lazily-rs's invalidation tracking becomes more compelling.
+<!-- agent:boundary:11f04cd3 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -70,8 +96,7 @@ I plan on having a dependency graph. This is only the first step towards optimiz
 
 ## Pending / Not Built
 
-<!-- agent:queue auto -->
-- I plan on having a dependency graph. This is only the first step towards optimizing cachable state.
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

@@ -40,12 +40,34 @@ Compacted content:
 ### Re: monsterrodholders Run Agent Doc idle-but-queued stall — opus-4-8
 
 Root cause: route deliberately queued the dispatch because it believed the authoritative actor was busy and the stale-busy repair did not fire. See the committed analysis above.
-<!-- agent:boundary:05a0217d -->
+
+### Re: #closeout-recovery-state-machine — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#closeout-recovery-state-machine]
+
+
+Landed the unifying piece this item was about (the recovery mechanisms already shipped). Narrowed the backlog item to the remaining detection wiring rather than marking it done.
+
+#### What changed
+
+- **`flow::closeout::CloseoutRecoveryState`** (new enum) + `classify_closeout_recovery_state(file)` + `CloseoutRecoveryState::recovery_command(file)` — one classified state maps to exactly one recovery command.
+- **`session_check::closeout_recovery_hint`** previously returned a single static "try write --commit" line and is called from **nine** closeout-guard messages. It now renders `Recovery [<state>]: <command>`, so every guard surfaces one typed next action instead of the scattered "try finalize / write --commit / commit" chain.
+- **Classified today**: `clean`, `open_cycle`, `missing_response_body` (a committed response turn with no capture, or a captured body absent from HEAD via `stuck_captured_cycle`), and `escaped_template_patch` (escaped `agent:` component markers in the committed exchange).
+- **Reserved states** (`direct_response_patchback`, `boundary_only_drift`, `nested_parent_pointer_stale`): in the enum/instruction table but the classifier returns `clean` rather than guessing — their precise detection wiring is the narrowed remaining scope.
+
+#### Verify
+
+- Unit tests: enum→instruction mapping + classifier (clean / open-cycle / missing-response / response-in-HEAD). Full `cargo test` workspace + `cargo clippy` clean; FlowCore hot-path token budget untouched. Spec: `specs/07-closeout-commands.md`. Built + installed; committed + pushed (`src/agent-doc` + pointer) in the prior cycle.
+
+(Re-closed cleanly after last turn's cross-document IPC contamination was recovered to clean HEAD and the route session was reset.)
+<!-- agent:boundary:37d00d73 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#closeout-recovery-state-machine]
+- ~do [#closeout-recovery-state-machine]~
 - do [#codex-owned-pane-prompt-miss]
 - do [#stuck-capture-compact-false-positive]
 - do [#codex-final-response-live-verify]
@@ -94,7 +116,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 - [ ] [#codex-owned-pane-auto-queue-stuck] [recommended] Codex-owned `agent-doc <FILE>` direct invocation from the same pane can leave an active auto-queue turn stuck: the recursive guard avoids child dispatch, but the ready queue head is not handed to the owning Codex turn and no response is written. Live repro 2026-05-31 `src/boost-client/tasks/monsterrodholders.md`: `queue_active: true` + `agent:queue auto` head `re [#374n]...`; same-pane run printed `Submitting to codex...` then `recursive direct invocation would deadlock`, leaving queue/boundary drift and the head unprocessed. Fix with early owner-pane queue handoff, durable queue-target proof, no-drift guard, and Codex final-gate recovery. Plan: tasks/agent-doc/plan-codex-owned-pane-auto-queue-stuck.md.
 - [ ] [#completed-queue-residue-regression] [recommended] Completed queue items can still remain visible in agent:queue after the turn is finished, despite the archived #drained-done-queue-clear fix. Treat as a regression/uncovered route or IPC path: add a committed-state guard for provable completed queue residue, audit finalize/write/preflight/run continuation drain ordering, and verify live editor/snapshot/HEAD convergence. Plan: tasks/agent-doc/plan-completed-queue-residue-regression.md.
 - [ ] [#do-id-partial-closeout-state] [recommended] Partial-closeout WARN guard landed (check_partial_closeout_state_guard: a do[#id] turn whose response shows shipped + remaining-live-work signals with the directed id still open advises --pending-edit/--pending-gate narrowing; suppressible by a no-partial-closeout-guard response marker; FlowCore guard_ budget 35->40). Remaining: per-id edit-vs-gate tracking in cycle_state, opt-in strict mode, next-phase queue convergence, and the runbook note that #spec-test-commit-push completes a repo phase without a live/deploy item. Plan: tasks/agent-doc/plan-do-id-partial-closeout-state.md.
-- [ ] [#closeout-recovery-state-machine] [recommended] Remaining #closeout-repair-churn scope: a unified typed closeout recovery state machine shared by finalize / write --commit / repair / commit (states missing_response_body, direct_response_patchback, escaped_template_patch, boundary_only_drift, reaped_item_pending_parent, nested_parent_pointer_stale) that collapses the scattered 'try finalize / write --commit / commit' diagnostic chain into one typed instruction per state. The escaped-component-marker fail-closed guard already shipped (PatchbackShape::EscapedComponentMarkers). Direct-### Re: absorption and atomic parent-pointer repair are already substantially covered by write --commit absorption and complete_required_closeout retry. Plan: tasks/agent-doc/plan-closeout-repair-churn.md.
+- [ ] [#closeout-recovery-state-machine] [recommended] Typed closeout recovery classifier landed: flow::closeout::CloseoutRecoveryState + classify_closeout_recovery_state + recovery_command; session_check::closeout_recovery_hint renders one typed 'Recovery [state]: command' across all nine closeout-guard call sites. Classified today: clean / open_cycle / missing_response_body / escaped_template_patch. Remaining: precise detection for reserved states direct_response_patchback, boundary_only_drift, nested_parent_pointer_stale, and folding each guard's existing diagnostic through the classifier. Plan: tasks/agent-doc/plan-closeout-repair-churn.md.
 - [ ] [#free-text-queue-owner-consume] [recommended] Free-text `agent:queue auto` heads can remain live after an owner-pane/direct Codex closeout writes the response but lacks queue-target proof. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `Approve [#shoptiers]. What are #next-steps?` was answered, then reported as not marked done; same-pane `agent-doc <FILE>` refused recursive dispatch and repair finalize logged `[queue] skipped consumption because the active prompt did not target the queue head`. Preserve id-backed queue safety, but record/restore synthetic free-text queue-target proof for recursive-direct repair/finalize paths and add diagnostics/regressions. Plan: tasks/agent-doc/plan-free-text-queue-owner-consume.md.
 - [ ] [#preset-item-id-collision] [recommended] Enforce unique active identities across frontmatter `prompt_presets` keys and active `agent:backlog` / `agent:review` / `agent:icebox` item ids. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `#next-steps` exists both as a prompt preset and as a backlog item, making `do #next-steps` and "top backlog item: #next-steps" ambiguous between preset expansion and backlog execution. Fix with an identity registry, mutation-time rejection, preflight/session-check fail-closed diagnostics, and regressions. Plan: tasks/agent-doc/plan-preset-item-id-collision.md.
 - [ ] [#codex-final-response-live-verify] [recommended] Opportunistic live re-verification of the #codex-final-response-not-written guard: do a real Codex direct/manual run that commits side-effect work, confirm session-check (via the .codex Stop hook) fails closed with the 'no assistant response body was captured' message + 'agent-doc write --commit' recovery when no ### Re: close-out was written, and that a normal Codex turn with a response stays OK. Guard + deterministic regressions already landed (session_check.rs check_committed_without_response_body_guard).

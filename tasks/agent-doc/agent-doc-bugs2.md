@@ -36,7 +36,29 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 1 response topic(s): #spec-test-commit-push-deploy
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:c09031ff -->
+
+### Re: #stash-pane-promote-on-focus — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#stash-pane-promote-on-focus]
+
+
+Implemented. Focus now reparents a live-owner pane out of the `stash` window into the session's `agent-doc` window before selecting it, instead of selecting it in place inside the stash.
+
+#### What changed
+
+- **`sync::promote_pane_to_agent_doc_window(tmux, pane_id)`** (new) — when the resolved focus pane sits in a `stash`/`stash-*` window, it `join-pane`s it into an existing `agent-doc` window, or `break-pane`s it into a new window named `agent-doc` when none exists. tmux preserves the pane id across the reparent, so the caller keeps selecting the same pane id. Best-effort and single-pane scoped: a failed move is logged and the pane is still selected in place. It deliberately does **not** run full stash consolidation (that stays in `sync`/`repair_layout`).
+- **`focus.rs`** — added a `promote_and_select` wrapper and routed every resolved-pane selection (explicit `--pane`, actor projection, live-owner override, registry pane, and dead-registry/no-registry recovery) through it. This completes the live-owner fix (`e6dafa52`), which selected the right pane but left it parked in the stash.
+
+#### Verify
+
+- Live-tmux regressions (IsolatedTmux, run via `make tmux-ci`): `promote_pane_to_agent_doc_window_reparents_stash_pane` (stashed pane ends up in the `agent-doc` window, same pane id, still alive) and `promote_pane_to_agent_doc_window_noop_for_non_stash_pane`. Both pass against real tmux locally; the full sync live-tmux suite (92 tests) stays green. Workspace `cargo test` + `cargo clippy` clean.
+- Spec: `specs/07-session-tmux-commands.md` `focus` section documents `#stash-pane-promote-on-focus` and narrows the prior "focus does not own stash rescue" wording to "no full stash consolidation".
+- Built + installed (both binaries); committed + pushed in `src/agent-doc` with the superproject pointer bump.
+
+**Gated** (not done): code-complete and verified against real tmux via IsolatedTmux, but the end-to-end live JB-editor focus→promote path on a genuinely stuck pane is not yet IDE-verified. Related: `#cross-project-stash-pane-condition` (nested-root shared-session stashing — needs a session-model decision) and `#plugin-cleanup-menu-command`.
+<!-- agent:boundary:e4b2081e -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -50,11 +72,10 @@ JB `Run Agent Doc` successfully started a turn and had an error.
 [route] target tmux session: 0
 [route] authoritative actor generation 241 for tasks/monsterrodholders.md is busy on pane %40; queued pending dispatch "do [#netdemand]. #spec-test-commit-push" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
 ```
-#spec-test-commit-push-deploy
+#spec-test-build-install-commit-push
 ---
 preset #spec-test-build-install-commit-push
-- ~do [#clear-stops-running-process]~
-- do [#stash-pane-promote-on-focus]
+- ~do [#stash-pane-promote-on-focus]~
 - do [#do-id-partial-closeout-state]
 - do [#closeout-recovery-state-machine]
 - do [#codex-owned-pane-prompt-miss]
@@ -103,7 +124,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 <!-- agent:backlog -->
 - [ ] [#queue-prompt-echo-summary] [recommended] Summarize long consumed queue prompts in the #queue-prompt-echo-in-response echo instead of copying verbatim. Current behavior embeds the entire prompt as a > **Queue prompt:** blockquote after the response heading; for long prompts a bounded summary plus a pointer to the full queue text would keep the exchange readable. Add a length threshold + summarization path (the user explicitly deferred this: 'for now, let's try copying the entire prompt').
 - [ ] [#completed-queue-residue-regression] [recommended] Completed queue items can still remain visible in agent:queue after the turn is finished, despite the archived #drained-done-queue-clear fix. Treat as a regression/uncovered route or IPC path: add a committed-state guard for provable completed queue residue, audit finalize/write/preflight/run continuation drain ordering, and verify live editor/snapshot/HEAD convergence. Plan: tasks/agent-doc/plan-completed-queue-residue-regression.md.
-- [ ] [#stash-pane-promote-on-focus] [recommended] A live-owner pane residing in the stash tmux window must be promoted/reparented into the 0:agent-doc window when the document is focused/selected, not merely selected in place. Live repro 2026-05-30 agent-doc-bugs2.md: pane %8 (live owner) is stuck in the stash window; focus/select does not move it. The focus live-owner fix (submodule e6dafa52) now selects the correct pane but does not reparent it. Tied to #cross-project-stash-pane-condition and #plugin-cleanup-menu-command.
 - [ ] [#do-id-partial-closeout-state] [recommended] `do [#id]` partial closeouts must rewrite or gate the remaining state instead of leaving a stale open item/queue head. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `do [#shoplabels]. #spec-test-commit-push` completed repo-backed feed-label code/tests/spec/commits/pushes, but deploy + GfW feed sync + live Ads label coverage remained; `#shoplabels` correctly stayed open, but the backlog/queue still looked like the original full task and the user had to ask whether it was done. Require `--pending-edit`, `--pending-gate`, or a typed stays-open marker for partial `do [#id]` closeout. Plan: tasks/agent-doc/plan-do-id-partial-closeout-state.md.
 - [ ] [#closeout-recovery-state-machine] [recommended] Remaining #closeout-repair-churn scope: a unified typed closeout recovery state machine shared by finalize / write --commit / repair / commit (states missing_response_body, direct_response_patchback, escaped_template_patch, boundary_only_drift, reaped_item_pending_parent, nested_parent_pointer_stale) that collapses the scattered 'try finalize / write --commit / commit' diagnostic chain into one typed instruction per state. The escaped-component-marker fail-closed guard already shipped (PatchbackShape::EscapedComponentMarkers). Direct-### Re: absorption and atomic parent-pointer repair are already substantially covered by write --commit absorption and complete_required_closeout retry. Plan: tasks/agent-doc/plan-closeout-repair-churn.md.
 - [ ] [#free-text-queue-owner-consume] [recommended] Free-text `agent:queue auto` heads can remain live after an owner-pane/direct Codex closeout writes the response but lacks queue-target proof. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `Approve [#shoptiers]. What are #next-steps?` was answered, then reported as not marked done; same-pane `agent-doc <FILE>` refused recursive dispatch and repair finalize logged `[queue] skipped consumption because the active prompt did not target the queue head`. Preserve id-backed queue safety, but record/restore synthetic free-text queue-target proof for recursive-direct repair/finalize paths and add diagnostics/regressions. Plan: tasks/agent-doc/plan-free-text-queue-owner-consume.md.
@@ -127,6 +147,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Review
  
 <!-- agent:review -->
+- [/] [#stash-pane-promote-on-focus] [recommended] A live-owner pane residing in the stash tmux window must be promoted/reparented into the 0:agent-doc window when the document is focused/selected, not merely selected in place. Live repro 2026-05-30 agent-doc-bugs2.md: pane %8 (live owner) is stuck in the stash window; focus/select does not move it. The focus live-owner fix (submodule e6dafa52) now selects the correct pane but does not reparent it. Tied to #cross-project-stash-pane-condition and #plugin-cleanup-menu-command.
 - [/] [#clear-stops-running-process] [recommended] JB Clear Session Context / Claude Code /clear must stop the running agent-doc child so a following JB Run Agent Doc is not blocked by a stale busy actor. Live repro 2026-05-30 agent-doc-bugs2.md: after /clear, a still-running process blocked Run Agent Doc. Overlaps #cancel-orphans-preflight-cycle and the operator_clear busy-projection path in session_actor_cmd.rs.
 - [/] [#jb-run-agent-doc-response-queue-contamination] [recommended] JetBrains `Run Agent Doc` can add assistant response prose to `agent:queue auto` after compact/repair drift. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: queue gained `- Yes. I drove the already-authenticated Google Ads browser session...`, copied from `### Re: #gads106demote`, alongside real `do [#nbsearch]`/`#bidstrat`/`#pdpconv` entries. Require queue-source provenance and reject assistant response bodies as queue candidates. Plan: tasks/agent-doc/plan-jb-run-agent-doc-response-queue-contamination.md.
 - [/] [#jb-compact-repair-left-uncommitted] [recommended] Compact-output repair can leave the corrected session document dirty instead of committing through a binary-owned repair boundary. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: visible exchange correction differs from malformed `HEAD`, creating mixed visible/HEAD/snapshot state for later JetBrains actions. Repair should commit atomically or fail closed with an exact recovery path. Plan: tasks/agent-doc/plan-jb-compact-repair-left-uncommitted.md.

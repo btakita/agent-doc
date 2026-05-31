@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -68,7 +68,7 @@ Queue re-activated with 12 items. All were already implemented and pushed in com
 - **Commit**: `2bdec90` on `origin/main`
 
 All 12 backlog items already resolved.
-<!-- agent:boundary:e8bf90b6 -->
+<!-- agent:boundary:def86fc7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -79,20 +79,7 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- [#terse-graph-serial]
-- [#graph-default-edge-lookup]
-- [#neighborhood-per-edge-node]
-- [#terse-diagnostics]
-- [#terse-search-hit]
-- [#graph-counts-full-scan]
-- [#shortest-path-depth-walk]
-- [#louvain-scaling]
-- [#health-reachability]
-- [#edges-between-chunks]
-- [#duplicate-callers-fetch]
-- [#terse-health-scores]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

@@ -367,7 +367,31 @@ Done — the identity registry + collision detection + surfacing shipped (submod
 This was the final `agent:queue auto` item — the queue now drains to empty and the auto-loop ends.
 
 (Closeout note: `--force-disk` throughout — the IDE IPC listener was unresponsive this entire session.)
-<!-- agent:boundary:1be71f9b -->
+
+### Re: backlog marker queue=sync attribute — opus-4-8
+
+That edit added a `queue=sync` attribute to the backlog marker, but `queue` is **not a recognized backlog attribute** — preflight flagged it as `misplaced_component_attr` and **ignored it**. So nothing mutated: the backlog is unchanged, no queue was populated, and no auto-loop started.
+
+**What controls the auto-loop:** only the queue component's opening marker carrying the `auto` attribute. The backlog component never drives the loop on its own. Right now the queue is empty (it drained at the end of the `#preset-item-id-collision` cycle), so there is nothing to process.
+
+**If you wanted to drain the 5 active backlog items through the loop:** the supported move is to populate the queue component with `do [#id]` blockquote lines and put the `auto` attribute on the queue's opening marker — for example `do [#preset-item-id-collision-enforce]` then `do [#codex-owned-pane-auto-queue-stuck]`.
+
+**If the typo was unintentional:** drop `queue=sync` so the marker is the bare backlog marker again and the warning clears.
+
+I queued `#backlog-queue-sync-attr` (recommended) to decide whether `queue=sync` should become a real backlog-to-queue sync attribute or just get a directed "did you mean the auto queue marker?" repair hint — since you clearly tried to express *something* with it.
+
+### Re: backlog marker queue=sync attribute — opus-4-8
+
+That edit added a `queue=sync` attribute to the backlog marker, but `queue` is **not a recognized backlog attribute** — preflight flagged it as `misplaced_component_attr` and **ignored it**. So nothing mutated: the backlog is unchanged, no queue was populated, and no auto-loop started.
+
+**What controls the auto-loop:** only the queue component's opening marker carrying the `auto` attribute. The backlog component never drives the loop on its own. Right now the queue is empty (it drained at the end of the `#preset-item-id-collision` cycle), so there is nothing to process.
+
+**If you wanted to drain the 5 active backlog items through the loop:** the supported move is to populate the queue component with `do [#id]` blockquote lines and put the `auto` attribute on the queue's opening marker — for example `do [#preset-item-id-collision-enforce]` then `do [#codex-owned-pane-auto-queue-stuck]`.
+
+**If the typo was unintentional:** drop `queue=sync` so the marker is the bare backlog marker again and the warning clears.
+
+I queued `#backlog-queue-sync-attr` (recommended) to decide whether `queue=sync` should become a real backlog-to-queue sync attribute or just get a directed repair hint — since you clearly tried to express *something* with it.
+<!-- agent:boundary:2ddf7a9a -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
@@ -398,7 +422,8 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 
 ## Backlog
 
-<!-- agent:backlog -->
+<!-- agent:backlog queue=sync -->
+- [ ] [#backlog-queue-sync-attr] [recommended] queue=sync on the backlog marker is silently ignored (preflight emits misplaced_component_attr, no mutation). Decide intended semantics, then either (a) make it a real attribute that promotes active backlog items into the queue component so the auto-loop drains the backlog, or (b) upgrade the warning to a directed repair hint (did you mean the queue auto marker?). Until then the only auto-loop trigger is the queue component opening marker carrying the auto attribute.
 - [ ] [#preset-item-id-collision-enforce] [recommended] Escalate #preset-item-id-collision from a preflight warning to hard enforcement (the riskier half, deferred to design carefully against over-blocking live sessions): (1) mutation-time rejection — write --pending-add / --pending-add-after / etc. with an explicit custom id (id=X or [#X]) that collides with a prompt_presets key or an existing active item id fails closed; (2) fail-closed dispatch — preflight/session-check block dispatch on an existing collision with the rename repair hint, surfaced by route/JB as a document-repair error not a generic agent failure; (3) queue generation refuses to emit do [#id] for an ambiguous id. The identity registry + detection + preflight warning + 3 regressions already landed (preflight::detect_identity_collisions). Plan: tasks/agent-doc/plan-preset-item-id-collision.md.
 - [ ] [#free-text-queue-skip-diagnostic] [recommended] Polish from #free-text-queue-owner-consume plan point 4: when queue consumption is skipped, the closeout still prints the generic '[queue] skipped consumption because the active prompt did not target the queue head'. For an id-backed head with no completion flag, name the missing proof source and the supported repair (--done/--pending-gate/--pending-edit <id>); for a free-text head edge case, point to the answered-response path. Replace the single generic line at write.rs ~1460/1469 with a shape-aware diagnostic. Plan: tasks/agent-doc/plan-free-text-queue-owner-consume.md (point 4).
 - [ ] [#stuck-capture-queue-echo-false-positive] [recommended] Fix landed (submodule 6220379c): response_already_applied matched the captured response as one contiguous block, but queue consumption inserts a > **Queue prompt:** echo blockquote (#queue-prompt-echo-in-response) between the response heading and body, so stuck_captured_cycle falsely warned committed-but-not-in-HEAD after every queue-consumed cycle and re-suggested a write --commit that would re-inject the response. normalized_response_lines now strips the echo blockquote on both sides before matching; unit + closeout regressions added. Verify across a couple more queue-consumed cycles that no preflight emits the false stuck_captured_cycle warning, then mark done.

@@ -110,8 +110,7 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue auto -->
-- What are #next-steps to improve token efficiency along with graph + neighborhood performance & effectiveness.
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

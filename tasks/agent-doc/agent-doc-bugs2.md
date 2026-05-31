@@ -110,7 +110,28 @@ Done — shipped and live-verified (submodule `9be1c0fc`).
 **Live tmux verification.** Ran the 9 `#[ignore]` tmux busy/interrupt tests with a clean env (`make tmux-ci` equivalent) — all pass, including the reverse-i-search `C-g` recovery (proves the gate still sends `C-g` in the real shell-search case) and the Escape+C-c / fresh-restart paths.
 
 **Spec/docs.** Documented the route-side gating in `specs/07-session-tmux-commands.md` and the `AGENTS.md` convention bullet (`route.rs` now listed alongside `session_actor_cmd.rs`).
-<!-- agent:boundary:0a67e565 -->
+
+### Re: do [#cross-project-stash-pane-condition] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#cross-project-stash-pane-condition]
+
+
+Done — the design decision this item was gated on was already made and implemented (2026-05-30); I verified it's live in the current tree. No new code needed; the backlog text was stale.
+
+**The design decision (resolved to C).** Per `tasks/agent-doc/plan-cross-project-stash-pane-condition.md`, nested project roots (superproject `agent-loop` + submodule `src/boost-client`) auto-detect the *same* tmux session 0 and share one stash window, so superproject sync stashes the submodule's live pane and resync re-discovers it cross-project. Options weighed:
+- **A — nested-root session isolation:** rejected. Per-root sessions fragment the single-session workflow (you'd `prefix+s` to reach a submodule pane; IDE focus would have to follow).
+- **B — per-root stash partitioning:** rejected as unnecessary/mildly harmful — hiding a non-focused foreign-root pane in the shared stash is *correct* layout behavior.
+- **D — reap stale orphaned stash panes:** already implemented (resync.rs step 8); the observed `agent-loop` panes survive because they're legitimately live/registered, not orphans.
+- **C — implemented:** the preservation event is *correct* (the pane must not be killed); the only real defect was emitting it on stderr, which the JB plugin renders as an error.
+
+**Verified in the current tree.** All three resync sweep sites (windowed `resync.rs:~775`, bulk `~1313`, non-stash `~1808`) route `registered in its own project root — skipping kill` through `crate::ops_log::log_op(&current_root, …)` — not `eprintln!` — with comments documenting why. Spec note present at `specs/08-session-routing.md:130` ("Cross-project stash preservation is telemetry, not an error").
+
+**Residual.** The broader "JB plugin renders *any* route/resync stderr as an error" concern is already tracked under `#jb-busy-queue-ux-feedback` (still queued), so no new backlog item is needed here.
+
+(Closeout note: the prior finalize attempt hit an IDE IPC ack timeout — exit 75 — and deferred the visible write; recovered through `--force-disk` after clearing the stale live-buffer tracking entry.)
+<!-- agent:boundary:14dca61b -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -119,7 +140,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#stuck-capture-compact-false-positive]~
 - ~do [#codex-final-response-live-verify]~
 - ~do [#codex-route-busy-ctrl-g-opens-editor]~
-- do [#cross-project-stash-pane-condition]
+- ~do [#cross-project-stash-pane-condition]~
 - do [#route-drain-all-surface-live-verify]
 - do [#run-agent-doc-stale-busy-replay]
 - do [#jb-busy-queue-ux-feedback]
@@ -169,7 +190,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 - [ ] [#closeout-recovery-state-machine] [recommended] Typed closeout recovery classifier landed: flow::closeout::CloseoutRecoveryState + classify_closeout_recovery_state + recovery_command; session_check::closeout_recovery_hint renders one typed 'Recovery [state]: command' across all nine closeout-guard call sites. Classified today: clean / open_cycle / missing_response_body / escaped_template_patch. Remaining: precise detection for reserved states direct_response_patchback, boundary_only_drift, nested_parent_pointer_stale, and folding each guard's existing diagnostic through the classifier. Plan: tasks/agent-doc/plan-closeout-repair-churn.md.
 - [ ] [#free-text-queue-owner-consume] [recommended] Free-text `agent:queue auto` heads can remain live after an owner-pane/direct Codex closeout writes the response but lacks queue-target proof. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `Approve [#shoptiers]. What are #next-steps?` was answered, then reported as not marked done; same-pane `agent-doc <FILE>` refused recursive dispatch and repair finalize logged `[queue] skipped consumption because the active prompt did not target the queue head`. Preserve id-backed queue safety, but record/restore synthetic free-text queue-target proof for recursive-direct repair/finalize paths and add diagnostics/regressions. Plan: tasks/agent-doc/plan-free-text-queue-owner-consume.md.
 - [ ] [#preset-item-id-collision] [recommended] Enforce unique active identities across frontmatter `prompt_presets` keys and active `agent:backlog` / `agent:review` / `agent:icebox` item ids. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `#next-steps` exists both as a prompt preset and as a backlog item, making `do #next-steps` and "top backlog item: #next-steps" ambiguous between preset expansion and backlog execution. Fix with an identity registry, mutation-time rejection, preflight/session-check fail-closed diagnostics, and regressions. Plan: tasks/agent-doc/plan-preset-item-id-collision.md.
-- [ ] [#cross-project-stash-pane-condition] [recommended] resync logs 'stash pane %N registered in its own project root — skipping kill' because nested project roots (superproject agent-loop + submodule src/boost-client) auto-detect the SAME tmux session 0 and share one stash window, so superproject sync stashes the submodule's live session pane and resync re-discovers it cross-project. Not a resync logic error (preservation is correct); root cause is the shared-session layout for nested roots. Live evidence + fix options (A nested-root session isolation [recommended], B per-root stash partitioning, C out-of-scope skip, D reap stale agent-doc stash panes) in tasks/agent-doc/plan-cross-project-stash-pane-condition.md. Needs a session-model design decision before implementing; deferred from blind code change.
 - [ ] [#route-drain-all-surface-live-verify] [recommended] Live-verify the route-drain all-surface reap (submodule b239988b / superproject 4c7b06b7f) resolves the JB Run Agent Doc "completed tracked item blocks dispatch" retry: with the installed binary, reproduce a closeout that leaves a completed [x] item in review or icebox on an IDE-owned doc, then run JB Run Agent Doc once and confirm it dispatches without a manual repeat. Also exercises the #pending-gate-snapshot-desync snapshot re-sync (ab074710) under the route path.
 - [ ] [#run-agent-doc-stale-busy-replay] Follow-up to the #snrun stale-busy-projection fix (submodule 89c99c79): the dispatch-only busy-vs-stale repair is covered by unit tests on the pure decision functions; add a live JB Run Agent Doc replay regression (SimWorld or tmux-ci) exercising a stale busy actor projection + proven ready prompt and asserting dispatch instead of agent:queue auto enqueue. Also still open in #snrun: distinguishing rescued-stash accepted-only proof misses. Plan: tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md.
 - [ ] [#jb-busy-queue-ux-feedback] [recommended] When the authoritative actor is genuinely busy, JB Run Agent Doc correctly queues the dispatch in agent:queue auto instead of injecting a duplicate trigger (monsterrodholders.md, equityfundingsource.md reports), but the plugin surfaces the route/resync log dump as an error. The dump also includes benign cross-project resync info such as `resync: stash pane %N is registered in its own project root — skipping kill` (cross-project stash-pane preservation, resync.rs:771/1303/1793 — a stash-window pane that is the live authoritative pane of a different project root is correctly preserved, not reaped), which is expected and not a failure. Present queued-behind-a-busy-turn and benign route/resync info as informational notifications distinct from real failures so expected behavior does not read as a plugin error.

@@ -282,7 +282,31 @@ Done — resolved by existing, tested enforcement; the item's framing is stale. 
 **Why the item's framing is stale.** Enforcement was added as a **dedicated `backlog_capture_required` guard** (not folded into `pending_done_guard`, which is the right separation — backlog *capture* vs. `do [#id]` *resolution*). And "auto-add" isn't deterministically possible — the binary can't synthesize which recommendations from free-form prose become backlog items — so requiring the agent to add them (and failing closed otherwise) is the correct design, which is exactly what ships.
 
 (Closeout note: `--force-disk` — IDE IPC listener still unresponsive this session.)
-<!-- agent:boundary:f6e807d4 -->
+
+### Re: do [#ah0s] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#ah0s]
+
+
+Done — explicit-position `--pending-add` primitives shipped and fully tested; submodule `26f28d6f`, `make check` green.
+
+**The footgun.** Ordering a multi-item backlog batch depended on implicit prepend-vs-argorder semantics; two agents reversed args expecting a flip and got reverse-of-intended order. The backlog is a priority-ordered **pool** with id-based consumption (not a stack/queue — FIFO lives in `agent:queue`), so position is author intent and should be set explicitly.
+
+**New flags** (also `pending_cmd` helpers):
+- `--pending-add-after <id> "text"` — repeatable `ID TEXT`; chaining `after A "B" --after B "C"` builds A→B→C deterministically (no reorder pass).
+- `--pending-add-before <id> "text"` — symmetric.
+- `--pending-add-back "text"` (alias `--pending-append`) — tail insert for low-priority captures.
+
+`--pending-add` stays the cheap front-insert default.
+
+**Implementation.** Core `pending::op_add_at` + `AddPosition` enum + `PendingLayout` positional inserts (`item_segment_index` / `last_item_index_plus_one` / `insert_item_at`); `op_add` delegates to `First`. Wired through `CommandOptions` + the write/finalize apply path + arg reconstruction + clap (`write` and `finalize`). After/before error on unknown anchor; explicit-position adds run *after* the front-insert default so an anchor added the same cycle resolves.
+
+**Tests.** 5 core `op_add_at` cases (after/before/last/chain/unknown-anchor) + a CLI integration test (`write_pending_add_after_and_back_position_items_explicitly`). **Docs:** `specs/pending-system.md` (priority-pool model + flag table) and `runbooks/pending-ops.md` (prefer explicit-position over prepend+reorder); clap `--help` carries the flag docs. (Installed harness runbook copies regenerate on the next versioned `skill install`; the bundled source + spec + `--help` are the normative surfaces.)
+
+(Closeout note: `--force-disk` — IDE IPC listener still unresponsive this session.)
+<!-- agent:boundary:cc561187 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -300,7 +324,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#plugin-cleanup-menu-command]~
 - ~do [#stash-session-ttl-prune]~
 - ~do [#next-steps-backlog-capture]~
-- do [#ah0s]
+- ~do [#ah0s]~
 - do [#backlog-priority-attribute]
 - do [#backlog-queue-sync-attribute]
 - do [#preset-item-id-collision]
@@ -340,7 +364,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 - [ ] [#do-id-partial-closeout-state] [recommended] Partial-closeout WARN guard landed (check_partial_closeout_state_guard: a do[#id] turn whose response shows shipped + remaining-live-work signals with the directed id still open advises --pending-edit/--pending-gate narrowing; suppressible by a no-partial-closeout-guard response marker; FlowCore guard_ budget 35->40). Remaining: per-id edit-vs-gate tracking in cycle_state, opt-in strict mode, next-phase queue convergence, and the runbook note that #spec-test-commit-push completes a repo phase without a live/deploy item. Plan: tasks/agent-doc/plan-do-id-partial-closeout-state.md.
 - [ ] [#closeout-recovery-state-machine] [recommended] Typed closeout recovery classifier landed: flow::closeout::CloseoutRecoveryState + classify_closeout_recovery_state + recovery_command; session_check::closeout_recovery_hint renders one typed 'Recovery [state]: command' across all nine closeout-guard call sites. Classified today: clean / open_cycle / missing_response_body / escaped_template_patch. Remaining: precise detection for reserved states direct_response_patchback, boundary_only_drift, nested_parent_pointer_stale, and folding each guard's existing diagnostic through the classifier. Plan: tasks/agent-doc/plan-closeout-repair-churn.md.
 - [ ] [#preset-item-id-collision] [recommended] Enforce unique active identities across frontmatter `prompt_presets` keys and active `agent:backlog` / `agent:review` / `agent:icebox` item ids. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `#next-steps` exists both as a prompt preset and as a backlog item, making `do #next-steps` and "top backlog item: #next-steps" ambiguous between preset expansion and backlog execution. Fix with an identity registry, mutation-time rejection, preflight/session-check fail-closed diagnostics, and regressions. Plan: tasks/agent-doc/plan-preset-item-id-collision.md.
-- [ ] [#ah0s] [recommended] Add explicit-position --pending-add primitives so ordered backlog batches never depend on implicit prepend-vs-argorder semantics: --pending-add-after <id>, --pending-add-before <id>, --pending-add-back/--pending-append, keeping --pending-add as the front-insert default. Backlog is a priority pool with ID-based consumption (not a stack/queue; FIFO lives in agent:queue), so position should be author-set explicitly when it matters. Two agents (open-code.md #adcr waves f94e7851c; corky.md crate-split phases fc8d9b3bc) both reversed args expecting prepend-flip and got reverse-of-intended order. Pairs with #pending-add-append-not-prepend (that item finalizes the default-order decision; this adds the explicit escape hatches). Plan: tasks/agent-doc/plan-pending-add-explicit-position.md.
 - [ ] [#backlog-priority-attribute] [recommended] Add a priority attribute to agent:backlog / agent:icebox / agent:queue that orders the item list by priority (a component-level priority flag and/or per-item priority markers), so the binary maintains priority order instead of requiring manual --pending-reorder each cycle. Automates the by-hand reprioritization done in #next-steps cycles. Composable with #backlog-queue-sync-attribute; sibling of #ah0s (explicit-position primitives). Requested 2026-05-30.
 - [ ] [#backlog-queue-sync-attribute] [recommended] Add a queue=sync|append|prepend attribute to agent:backlog / agent:icebox: queue=sync replaces agent:queue content with a do [#id] list for every item; queue=append adds item ids not already in agent:queue; queue=prepend prepends them. Composable with #backlog-priority-attribute (prioritize first, then regenerate the queue), automating the manual 'regenerate the queue to the new priority' step that currently has to be done by hand after a reorder. Requested 2026-05-30.
 <!-- /agent:backlog -->

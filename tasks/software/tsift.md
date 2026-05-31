@@ -35,7 +35,26 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 6 response topic(s): queued claude-mem migration; #tsiftmemimportall; #tsiftmemsemanticgate; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:c4d70980 -->
+❯ Does tsift support memory in opencode, codex, and claude code?
+
+
+### Re: tsift memory harness support — opencode
+
+Yes. tsift memory works across all three harnesses, but the integration layer differs:
+
+| Harness | Integration | Memory access |
+|---------|------------|---------------|
+| **Claude Code** | `PreToolUse` hooks (`tsift-rewrite.sh`) auto-rewrite high-token commands; `UserPromptSubmit` hook auto-reindexes | Hook contract captures `prompt_target`, `tool_result_artifact`, `response_summary`, `closeout_proof`, `session_check` events via agent-doc closeout pipeline |
+| **OpenCode** | `opencode-tsift` npm plugin installs `/tsift-memory-status`, `/tsift-memory-search`, `/tsift-memory-guard` commands | Commands shell out to `tsift memory status`, `tsift graph-db related`, `tsift memory budget-guard` — same `tsift-memory` crate, same `.tsift/memory.db` |
+| **Codex** | `tsift init --codex` installs workspace hooks (`packages/tsift-index/src/init.rs`); no `PreToolUse` hooks, so uses `tsift rewrite --run '<command>'` manually | Same memory DB and graph-db retrieval path; `tsift rewrite --run` provides the bounded-output policy that Claude gets automatically via hooks |
+
+The underlying substrate is identical across all three: the `tsift-memory` crate (`packages/tsift-memory/`) with a SQLite-backed `.tsift/memory.db` storing events (prompt targets, tool call artifacts, response summaries, closeout proofs, session checks, imported observations) linked to the graph DB via `memory_graph_links`. The `MemoryHookSpec` contract (`agent_doc_hook_contract()`) defines the capture schema that agent-doc closeout writes regardless of which harness is active.
+
+Key differences:
+- Claude Code gets automatic hook-driven capture and rewriting
+- OpenCode gets dedicated slash commands via the plugin
+- Codex relies on `tsift init --codex` hooks and `tsift rewrite --run` for the same bounded path
+<!-- agent:boundary:39a3f955 -->
 <!-- /agent:exchange -->
 ###
 <!--

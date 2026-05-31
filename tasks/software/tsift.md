@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -118,13 +118,22 @@ re [#terse-ultra-mode]: Does this affect the effectiveness of the searches?
 
 The only downstream consideration: if the LLM uses snippet text to decide which results to explore further, 80-char truncation could slightly reduce its context. But `label` (typically the symbol name/signature) is preserved and is the primary relevance signal. The full data remains in the database — only the LLM-facing envelope is compacted.
 Can the LLM follow-up with more detail on the ultraterse output?
-<!-- agent:boundary:02922b76 -->
+
+### Re: #terse-ultra-mode — LLM follow-up detail — glm-5.1
+
+**Yes.** The terse types are opt-in serialization modes — the full `GraphNode`/`GraphEdge`/`SearchHit` data always remains in the database. The LLM can:
+
+1. Request a full (non-terse) envelope for any item by ID — `tsift explain <symbol>` returns the complete struct with all properties, provenance, freshness, and snippet fields.
+2. Drill into specific nodes/edges from a terse response — the `id` and `kind` fields are always preserved, enabling targeted follow-up queries.
+3. Toggle terse mode per call — the CLI `--terse` / `--ultra-terse` flags are per-invocation, not global state.
+
+The ultra-terse mode trades initial context breadth for token savings; the LLM can selectively expand any item of interest on demand.
+<!-- agent:boundary:39bd866d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto -->
-- Can the LLM follow-up with more detail on the ultraterse output?
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

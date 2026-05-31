@@ -104,7 +104,20 @@ So testing on it would mean *manufacturing* the busy-pane repro inside a product
 4. Live confirmation on `monsterrodholders.md` only later, at a safe checkpoint, with a benign read-only prompt — and only if you want it.
 
 If you'd rather I just proceed: say **"implement it"** and I'll start the deterministic fix on a scratch repro (this overrides the `#agent-doc-bug` don't-implement note, which you're entitled to do). If you specifically want the live-session test despite the production risk, confirm explicitly and I'll do it as carefully and non-destructively as possible.
-<!-- agent:boundary:90fd6204 -->
+❯ The monsterrodholders.md Codex session is now idle. Why do you think its still running?
+### Re: monsterrodholders.md Codex session is idle — why is it still running? — opus-4-8
+
+It's running **by design** — a healthy persistent managed session, not a leak or hang. Live evidence:
+
+- Pane `%40` (window `@4`) hosts `agent-doc start --route-owned tasks/monsterrodholders.md` (pid 467236, ~68 min uptime) — the **route-owned supervisor**, with the Codex CLI as its child.
+- Actor store (`src/boost-client/.agent-doc/session-actors.json`): gen 245, pane `%40`, harness `codex`, **`state: "ready"`**, last transition `route / dispatch_bind`.
+
+"Idle" and "still running" are both expected at once: **idle** = Codex parked at its composer (actor `ready`); **still running** = supervisor + Codex child stay alive between turns. That persistence keeps the pane bound (gen 245 / `%40`) so a later `Run Agent Doc` / route / queue-dispatch reuses the *same* session instead of cold-starting. The supervisor exits only on explicit quit (`Ctrl+D` / restart) or GC of a stale `starting` actor — not for a healthy idle `ready` session.
+
+**Tie to the deadlock:** route found this same session mid-turn (`busy`) and correctly queued instead of injecting. Now `ready` (idle) is exactly the transition where the queued prompt *should* drain (Codex `Stop` hook / next route). So `#jb-run-agent-doc-busy-queue-dispatch-deadlock` isn't about "why is it running" (correct) — it's "does the route-appended `agent:queue auto` prompt dispatch on idle, or strand?" That's what the plan targets.
+
+I can scan this session's exchange / ops log to confirm whether the earlier `"Are there any items in review..."` prompt was ever delivered (empirically: deadlocked vs drained).
+<!-- agent:boundary:9cb1fa1d -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->

@@ -35,7 +35,7 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 6 response topic(s): queue; queue re-activation; fix preexisting warnings; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:324e2109 -->
+<!-- agent:boundary:8603e415 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -57,7 +57,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#terse-ultra-mode] Ultra-terse envelope mode: strip properties from TerseGraphNode/TerseGraphEdge (keep id/kind/label only), truncate snippets to 80 chars, compact SearchCoverageSnapshot. ~25-40% token savings. tsift-core/lib.rs:145-208, tsift-search/sift.rs:98-131
 - [ ] [#libsql-pushdown-edge-incident] Override edge() and incident_edges() in LibsqlGraphStore with indexed queries (parity with SQLite backend). Currently O(E) per call. tsift-libsql/src/lib.rs
 - [ ] [#health-dedup-scc] Eliminate duplicate SCC computation in composite_health_score — compute_reachability and find_cycles both run Tarjan on the same graph. Share SCC result. ~40% health-score time reduction. tsift-algorithms/src/health.rs:106-147,213-280
 - [ ] [#ranked-neighborhood] Add ranked neighborhood with configurable scoring (BreadthFirst, EdgeKindWeighted, DegreeWeighted) and max_nodes budget. ~30-60% token reduction for explain/neighborhood. tsift-core/lib.rs:598-668

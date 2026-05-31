@@ -350,6 +350,130 @@ pub fn render(entries: &[QueueEntry]) -> String {
     out
 }
 
+/// Backlog→queue sync mode parsed from the `queue` attribute on
+/// `agent:backlog` / `agent:icebox` (`#backlog-queue-sync-attr`).
+///
+/// - `Sync` — the queue body is fully regenerated as the active-backlog
+///   `do [#id]` list, in backlog order. Any other queue content (manual
+///   presets, fences, struck items) is dropped. Use this when the queue should
+///   mirror the backlog exactly each cycle.
+/// - `Append` — add `do [#id]` for active backlog ids not already referenced in
+///   the queue; existing entries and order are preserved. **Default** for a
+///   bare `queue` attribute.
+/// - `Prepend` — like `Append`, but the new prompts are inserted at the front
+///   (in backlog order) instead of appended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BacklogQueueSyncMode {
+    Sync,
+    Append,
+    Prepend,
+}
+
+impl BacklogQueueSyncMode {
+    /// Parse the `queue` attribute value. An empty value (the bare `queue`
+    /// token, e.g. `<!-- agent:backlog queue -->`) defaults to `Append`.
+    /// Returns `None` for an unrecognized value.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim() {
+            "" | "append" => Some(Self::Append),
+            "sync" => Some(Self::Sync),
+            "prepend" => Some(Self::Prepend),
+            _ => None,
+        }
+    }
+}
+
+/// Extract the `#id` from `do [#id]` (or `do #id`) prompt text, normalized to
+/// lowercase. Returns `None` for prompts that do not reference an id.
+fn do_prompt_id(text: &str) -> Option<String> {
+    let marker = text.find('#')?;
+    let id: String = text[marker + 1..]
+        .chars()
+        .take_while(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+        .collect();
+    if id.is_empty() {
+        None
+    } else {
+        Some(id.to_ascii_lowercase())
+    }
+}
+
+/// The backlog `#id` referenced by a queue entry's `do [#id]` text. Matches both
+/// active (`Prompt`) and struck (`Completed`) entries so a synced item is not
+/// re-added by `Append`/`Prepend` after it has been consumed.
+fn entry_do_id(entry: &QueueEntry) -> Option<String> {
+    match entry {
+        QueueEntry::Prompt(p) | QueueEntry::Completed(p) => do_prompt_id(&p.text),
+        _ => None,
+    }
+}
+
+/// Build a single-line `do [#id]` queue prompt entry.
+fn do_prompt_entry(id: &str) -> QueueEntry {
+    QueueEntry::Prompt(QueuePrompt {
+        text: format!("do [#{id}]"),
+        multiline: false,
+    })
+}
+
+/// Regenerate queue entries from active backlog ids per `mode`.
+///
+/// Returns `Some(new_entries)` when the queue changes and `None` when it already
+/// matches (idempotent — safe to run on every preflight cycle). `backlog_ids`
+/// are taken in backlog document order; duplicates and empties are dropped.
+pub fn sync_backlog_into_queue(
+    entries: &[QueueEntry],
+    backlog_ids: &[String],
+    mode: BacklogQueueSyncMode,
+) -> Option<Vec<QueueEntry>> {
+    // Normalize backlog ids: lowercase, drop empties, dedupe (first-seen order).
+    let mut seen = std::collections::HashSet::new();
+    let ordered_ids: Vec<String> = backlog_ids
+        .iter()
+        .map(|id| id.trim().to_ascii_lowercase())
+        .filter(|id| !id.is_empty() && seen.insert(id.clone()))
+        .collect();
+
+    let existing_ids: std::collections::HashSet<String> =
+        entries.iter().filter_map(entry_do_id).collect();
+
+    let new_entries: Vec<QueueEntry> = match mode {
+        BacklogQueueSyncMode::Sync => {
+            // Full mirror: queue body becomes exactly the active-backlog do-list.
+            ordered_ids.iter().map(|id| do_prompt_entry(id)).collect()
+        }
+        BacklogQueueSyncMode::Append => {
+            let mut rebuilt = entries.to_vec();
+            for id in &ordered_ids {
+                if !existing_ids.contains(id) {
+                    rebuilt.push(do_prompt_entry(id));
+                }
+            }
+            rebuilt
+        }
+        BacklogQueueSyncMode::Prepend => {
+            let missing: Vec<QueueEntry> = ordered_ids
+                .iter()
+                .filter(|id| !existing_ids.contains(*id))
+                .map(|id| do_prompt_entry(id))
+                .collect();
+            if missing.is_empty() {
+                entries.to_vec()
+            } else {
+                let mut rebuilt = missing;
+                rebuilt.extend(entries.iter().cloned());
+                rebuilt
+            }
+        }
+    };
+
+    if new_entries == entries {
+        None
+    } else {
+        Some(new_entries)
+    }
+}
+
 fn parse_completed_inline(text: &str) -> Option<&str> {
     let trimmed = text.trim();
     trimmed
@@ -533,6 +657,76 @@ fn first_live_control_or_prompt(entries: &[QueueEntry]) -> Option<&QueueEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn ids(value: &[&str]) -> Vec<String> {
+        value.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn backlog_queue_sync_mode_parse() {
+        use BacklogQueueSyncMode::*;
+        assert_eq!(BacklogQueueSyncMode::parse(""), Some(Append));
+        assert_eq!(BacklogQueueSyncMode::parse("append"), Some(Append));
+        assert_eq!(BacklogQueueSyncMode::parse("sync"), Some(Sync));
+        assert_eq!(BacklogQueueSyncMode::parse("prepend"), Some(Prepend));
+        assert_eq!(BacklogQueueSyncMode::parse(" sync "), Some(Sync));
+        assert_eq!(BacklogQueueSyncMode::parse("nope"), None);
+    }
+
+    #[test]
+    fn sync_mode_fully_mirrors_backlog_order() {
+        let entries = parse("- do [#old]\npreset spec\n").unwrap();
+        let synced = sync_backlog_into_queue(&entries, &ids(&["a", "b"]), BacklogQueueSyncMode::Sync)
+            .expect("queue should change");
+        assert_eq!(render(&synced), "- do [#a]\n- do [#b]\n");
+    }
+
+    #[test]
+    fn sync_mode_idempotent_when_already_mirrored() {
+        let entries = parse("- do [#a]\n- do [#b]\n").unwrap();
+        assert!(
+            sync_backlog_into_queue(&entries, &ids(&["a", "b"]), BacklogQueueSyncMode::Sync)
+                .is_none(),
+            "already-mirrored queue must not re-mutate"
+        );
+    }
+
+    #[test]
+    fn append_mode_adds_only_missing_ids_at_tail() {
+        let entries = parse("- do [#a]\n").unwrap();
+        let synced =
+            sync_backlog_into_queue(&entries, &ids(&["a", "b", "c"]), BacklogQueueSyncMode::Append)
+                .expect("queue should change");
+        assert_eq!(render(&synced), "- do [#a]\n- do [#b]\n- do [#c]\n");
+    }
+
+    #[test]
+    fn append_mode_skips_struck_completed_ids() {
+        // A consumed/struck item must not be re-appended.
+        let entries = parse("- ~do [#a]~\n").unwrap();
+        assert!(
+            sync_backlog_into_queue(&entries, &ids(&["a"]), BacklogQueueSyncMode::Append).is_none(),
+            "struck id should count as present"
+        );
+    }
+
+    #[test]
+    fn prepend_mode_inserts_missing_ids_at_front_in_backlog_order() {
+        let entries = parse("- do [#z]\n").unwrap();
+        let synced =
+            sync_backlog_into_queue(&entries, &ids(&["a", "b", "z"]), BacklogQueueSyncMode::Prepend)
+                .expect("queue should change");
+        assert_eq!(render(&synced), "- do [#a]\n- do [#b]\n- do [#z]\n");
+    }
+
+    #[test]
+    fn sync_dedupes_and_normalizes_case() {
+        let entries: Vec<QueueEntry> = Vec::new();
+        let synced =
+            sync_backlog_into_queue(&entries, &ids(&["A", "a", "B"]), BacklogQueueSyncMode::Sync)
+                .expect("queue should change");
+        assert_eq!(render(&synced), "- do [#a]\n- do [#b]\n");
+    }
 
     #[test]
     fn dedup_live_prompts_collapses_duplicate_live_prompt() {

@@ -1284,6 +1284,21 @@ pub fn detect_dropped_from_history_with_extra_current_ids(
     Ok(DroppedBacklogReport { dropped })
 }
 
+/// Active (open `[ ]`, not gated, not done) backlog item ids in document order.
+///
+/// Used by the `queue` attribute on `agent:backlog` / `agent:icebox` to
+/// regenerate `agent:queue` `do [#id]` prompts (`#backlog-queue-sync-attr`).
+/// Gated (`[/]`) and done (`[x]`) items are excluded — they are not actionable
+/// queue targets. Items without an id are skipped.
+pub fn active_item_ids(body: &str) -> Vec<String> {
+    PendingLayout::parse(body)
+        .items()
+        .into_iter()
+        .filter(|item| matches!(item.state, PendingState::Open) && !item.id.is_empty())
+        .map(|item| item.id.clone())
+        .collect()
+}
+
 pub fn extract_pending_ids_from_text(text: &str) -> HashSet<String> {
     let mut ids = HashSet::new();
     let mut rest = text;
@@ -1985,6 +2000,22 @@ mod tests {
 
     fn ids() -> HashSet<String> {
         HashSet::new()
+    }
+
+    #[test]
+    fn active_item_ids_returns_open_items_in_order() {
+        let body = concat!(
+            "- [ ] [#first] one\n",
+            "- [/] [#gated] blocked\n",
+            "- [x] [#done] finished\n",
+            "- [ ] [#second] two\n",
+        );
+        assert_eq!(active_item_ids(body), vec!["first", "second"]);
+    }
+
+    #[test]
+    fn active_item_ids_empty_for_empty_body() {
+        assert!(active_item_ids("").is_empty());
     }
 
     #[test]

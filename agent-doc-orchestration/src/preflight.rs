@@ -703,11 +703,23 @@ fn misplaced_component_attr_warning(file: &Path, content: &str) -> Option<Prefli
     let components = crate::component::parse(content).ok()?;
     let mut issues: Vec<String> = Vec::new();
     for component in &components {
-        for key in component.attrs.keys() {
+        for (key, value) in &component.attrs {
             if QUEUE_ONLY_COMPONENT_ATTRS.contains(&key.as_str()) {
                 if component.name != "queue" {
                     issues.push(format!(
                         "`{key}` is a queue-only attribute but appears on `agent:{}` (did you mean `<!-- agent:queue {key} -->`?)",
+                        component.name
+                    ));
+                }
+            } else if key == "queue"
+                && matches!(component.name.as_str(), "backlog" | "icebox" | "pending")
+            {
+                // `queue` is a recognized backlog/icebox sync attribute
+                // (#backlog-queue-sync-attr). Surface only an unrecognized mode
+                // value as a typo; the bare token and sync/append/prepend are valid.
+                if crate::queue::BacklogQueueSyncMode::parse(value).is_none() {
+                    issues.push(format!(
+                        "`queue={value}` on `agent:{}` is not a recognized sync mode (use `sync`, `append`, or `prepend`)",
                         component.name
                     ));
                 }
@@ -2910,6 +2922,37 @@ struct QueueState {
 /// The `diff` parameter is optional — only needed for detecting exchange-level
 /// `do queue`/`run queue` triggers. Pass `None` on the first call (before diff
 /// computation) and the exchange trigger will be resolved in a later step.
+/// Collect the backlog→queue sync request from `agent:backlog` / `agent:icebox`
+/// (and the legacy `pending` alias) components carrying a `queue` attribute
+/// (`#backlog-queue-sync-attr`). Returns the effective mode (the first
+/// queue-tagged component's mode wins) and the active item ids from every
+/// queue-tagged source component, in document order. Returns `None` when no
+/// source component carries a recognized `queue` attribute.
+fn collect_backlog_queue_sync(
+    components: &[crate::component::Component],
+    content: &str,
+) -> Option<(crate::queue::BacklogQueueSyncMode, Vec<String>)> {
+    let mut mode: Option<crate::queue::BacklogQueueSyncMode> = None;
+    let mut ids: Vec<String> = Vec::new();
+    for comp in components {
+        if !matches!(comp.name.as_str(), "backlog" | "icebox" | "pending") {
+            continue;
+        }
+        let Some(value) = comp.attrs.get("queue") else {
+            continue;
+        };
+        let Some(comp_mode) = crate::queue::BacklogQueueSyncMode::parse(value) else {
+            continue;
+        };
+        if mode.is_none() {
+            mode = Some(comp_mode);
+        }
+        let body = &content[comp.open_end..comp.close_start];
+        ids.extend(crate::pending::active_item_ids(body));
+    }
+    mode.map(|m| (m, ids))
+}
+
 fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> {
     let content = match std::fs::read_to_string(file) {
         Ok(c) => c,
@@ -2933,19 +2976,42 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
         }
     };
 
+    let mut entries = entries;
+    let mut mutated = false;
+    let mut current_content = content.clone();
+    let mut queue_warnings = Vec::new();
+
+    // Backlog→queue sync (#backlog-queue-sync-attr): when an `agent:backlog` /
+    // `agent:icebox` component carries a `queue` attribute, regenerate the queue
+    // `do [#id]` prompts from its active items BEFORE activation so a freshly
+    // synced queue can auto-activate on the same cycle.
+    if let Some((mode, backlog_ids)) = collect_backlog_queue_sync(&components, &content)
+        && let Some(synced) = crate::queue::sync_backlog_into_queue(&entries, &backlog_ids, mode)
+    {
+        let new_body = crate::queue::render(&synced);
+        current_content = {
+            let comps = crate::component::parse(&current_content)?;
+            let q = comps.iter().find(|c| c.name == "queue").unwrap();
+            q.replace_content(&current_content, &new_body)
+        };
+        eprintln!(
+            "[preflight] queue: synced backlog → queue ({:?}, {} active id(s))",
+            mode,
+            backlog_ids.len()
+        );
+        entries = synced;
+        mutated = true;
+    }
+
     // Read current state
     let has_auto = crate::queue::has_auto_attr(&comp.attrs);
     let exchange_triggered = diff.map(crate::diff::detect_queue_trigger).unwrap_or(false);
-    let (fm, _) = frontmatter::parse(&content).unwrap_or_default();
+    let (fm, _) = frontmatter::parse(&current_content).unwrap_or_default();
     let persisted_active = fm.queue_active.unwrap_or(false);
 
     let mut activation =
         crate::queue::resolve_activation(&entries, has_auto, exchange_triggered, persisted_active);
     let snapshot_was_active = snapshot_proves_queue_was_active(file);
-
-    let mut mutated = false;
-    let mut current_content = content.clone();
-    let mut queue_warnings = Vec::new();
 
     // Collapse duplicate live prompts before any other maintenance. Two
     // identical live queue prompts are never valid; they only appear when a
@@ -4849,6 +4915,73 @@ mod tests {
             state.phase,
             crate::cycle_state::CyclePhase::PreflightStarted,
             "active queue prompt should open a cycle even when the file matches the snapshot"
+        );
+    }
+
+    #[test]
+    fn run_queue_maintenance_syncs_backlog_into_empty_queue() {
+        // #backlog-queue-sync-attr: a backlog carrying `queue=sync` regenerates
+        // the (empty) queue with `do [#id]` for active items; gated/done excluded.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog queue=sync -->\n",
+            "- [ ] [#alpha] first\n",
+            "- [/] [#gated] blocked\n",
+            "- [ ] [#beta] second\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        run_queue_maintenance(&doc, None).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(updated.contains("- do [#alpha]"), "synced queue:\n{updated}");
+        assert!(updated.contains("- do [#beta]"));
+        assert!(
+            !updated.contains("- do [#gated]"),
+            "gated item must not be queued:\n{updated}"
+        );
+    }
+
+    #[test]
+    fn run_queue_maintenance_backlog_sync_is_idempotent() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "---\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#alpha]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog queue=append -->\n",
+            "- [ ] [#alpha] first\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        run_queue_maintenance(&doc, None).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            updated.matches("- do [#alpha]").count(),
+            1,
+            "append must not duplicate an already-queued id:\n{updated}"
         );
     }
 
@@ -7525,6 +7658,74 @@ mod tests {
         assert_eq!(warning.code, "misplaced_component_attr");
         assert!(warning.message.contains("not a recognized component attribute"));
         assert!(warning.message.contains("auot"));
+    }
+
+    #[test]
+    fn misplaced_component_attr_warning_allows_queue_sync_attr_on_backlog() {
+        // #backlog-queue-sync-attr: `queue`, `queue=sync|append|prepend` on the
+        // backlog/icebox are recognized sync attributes and must not warn.
+        for marker in [
+            "<!-- agent:backlog queue -->",
+            "<!-- agent:backlog queue=sync -->",
+            "<!-- agent:backlog queue=append -->",
+            "<!-- agent:icebox queue=prepend -->",
+        ] {
+            let content = format!(
+                "{marker}\n- [ ] [#x1] keep this\n<!-- /agent:{}-->\n",
+                if marker.contains("icebox") {
+                    "icebox "
+                } else {
+                    "backlog "
+                }
+            );
+            assert!(
+                misplaced_component_attr_warning(Path::new("session.md"), &content).is_none(),
+                "recognized queue sync attr must not warn: {marker}"
+            );
+        }
+    }
+
+    #[test]
+    fn misplaced_component_attr_warning_flags_invalid_queue_mode() {
+        let content = concat!(
+            "<!-- agent:backlog queue=nope -->\n",
+            "- [ ] [#x1] keep this\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let warning = misplaced_component_attr_warning(Path::new("session.md"), content)
+            .expect("unrecognized queue mode should warn");
+        assert_eq!(warning.code, "misplaced_component_attr");
+        assert!(warning.message.contains("not a recognized sync mode"));
+        assert!(warning.message.contains("queue=nope"));
+    }
+
+    #[test]
+    fn collect_backlog_queue_sync_reads_mode_and_active_ids() {
+        let content = concat!(
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog queue=sync -->\n",
+            "- [ ] [#a] one\n",
+            "- [/] [#g] gated\n",
+            "- [ ] [#b] two\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let components = crate::component::parse(content).unwrap();
+        let (mode, ids) = collect_backlog_queue_sync(&components, content)
+            .expect("backlog with queue attr should produce a sync request");
+        assert_eq!(mode, crate::queue::BacklogQueueSyncMode::Sync);
+        assert_eq!(ids, vec!["a".to_string(), "b".to_string()]);
+    }
+
+    #[test]
+    fn collect_backlog_queue_sync_none_without_attr() {
+        let content = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#a] one\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let components = crate::component::parse(content).unwrap();
+        assert!(collect_backlog_queue_sync(&components, content).is_none());
     }
 
     #[test]

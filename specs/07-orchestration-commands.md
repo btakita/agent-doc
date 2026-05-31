@@ -220,6 +220,44 @@ The `agent:queue` component batches prompts inside the document.
 - Queue entries are parsed as `Prompt`, `Completed`, `Preset`, `StartFence`, or `StopFence`.
 - Activation resolution considers `auto`, inline start fences, exchange-triggered `do queue` / `run queue`, and persisted `queue_active`.
 
+### Backlog→queue sync (`queue` attribute, `#backlog-queue-sync-attr`)
+
+An `agent:backlog` or `agent:icebox` component may carry a `queue` attribute so
+the binary keeps `agent:queue` populated from the source backlog instead of
+requiring a manual `--pending-reorder` + hand-regenerated queue each cycle:
+
+- `<!-- agent:backlog queue -->` (bare token) — **append** (the default).
+- `<!-- agent:backlog queue=append -->` — add `do [#id]` for active backlog ids
+  not already referenced in `agent:queue`; existing entries and order are
+  preserved. Struck (`Completed`) and active (`Prompt`) `do [#id]` entries both
+  count as already-present, so a consumed id is never re-appended.
+- `<!-- agent:backlog queue=prepend -->` — like `append`, but new prompts are
+  inserted at the front of the queue, in backlog order.
+- `<!-- agent:backlog queue=sync -->` — the queue body is **fully regenerated**
+  as the active-backlog `do [#id]` list, in backlog order. Any other queue
+  content (manual presets, fences, struck items) is dropped; use `append` /
+  `prepend` to preserve manual queue content.
+
+Semantics:
+
+- "Active" backlog items are open `[ ]` items with an id. Gated (`[/]`) and done
+  (`[x]`) items are excluded — they are not actionable queue targets.
+- The sync runs in `run_queue_maintenance` **before** activation resolution, so a
+  freshly synced queue can auto-activate on the same cycle when the queue opening
+  tag carries `auto`. The `queue` attribute populates/maintains the queue; it
+  does **not** itself start the auto-loop — that still requires `agent:queue auto`
+  (or another activation trigger).
+- The sync is idempotent: when the queue already matches the requested shape it
+  mutates nothing, so it is safe to run on every preflight cycle.
+- Both `agent:backlog` and `agent:icebox` (and the legacy `pending` alias) may
+  carry the attribute; the first queue-tagged component's mode wins and active
+  ids from every queue-tagged source are taken in document order.
+- The pure logic lives in `queue::sync_backlog_into_queue` (with
+  `queue::BacklogQueueSyncMode`) and `pending::active_item_ids`. The `queue` key
+  is a recognized backlog/icebox attribute (the `tagpath` agent-doc lint accepts
+  bare `queue` and `queue=sync|append|prepend`, warning `agent-doc/invalid-attr-value`
+  on an unrecognized mode; preflight's `misplaced_component_attr` mirrors this).
+
 ### Preflight queue behavior
 
 Preflight owns queue activation/deactivation and emits queue state fields such as:

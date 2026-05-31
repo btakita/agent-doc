@@ -68,17 +68,9 @@ Queue re-activated with 12 items. All were already implemented and pushed in com
 - **Commit**: `2bdec90` on `origin/main`
 
 All 12 backlog items already resolved.
-<!-- agent:boundary:def86fc7 -->
+Fix the preexisting warnings.
+<!-- agent:boundary:f173156c -->
 <!-- /agent:exchange -->
-###
-<!--
-What are #next-steps to improve token efficiency along with graph + neighborhood performance & effectiveness.
----
-What are #next-steps to make the graph faster?
----
-What are #next-steps to make the graph + neighborhoods faster + more effective?
--->
-
 <!-- agent:queue -->
 <!-- /agent:queue -->
 
@@ -102,9 +94,6 @@ Could FalkorDB help with performance?
 -->
 
 <!-- agent:icebox -->
-- [ ] [#npm-auth-setup] Configure NPM_TOKEN secret + TSIFT_ENABLE_NPM_PUBLISH=true variable in GitHub repo settings
-- [ ] [#npm-publish-verify] After auth configured, tag release and verify publish-opencode-plugin CI job succeeds and opencode-tsift appears on npmjs.org
-- [ ] [#full-e2e-verify] In fresh project: opencode plugin opencode-tsift && opencode then /tsift-status. On success mark #e2e-install done.
 <!-- /agent:icebox -->
 
 ## Completed / Reaped

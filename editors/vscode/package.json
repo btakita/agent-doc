@@ -63,6 +63,14 @@
         "title": "Agent Doc: Copy Session Diagnostics"
       },
       {
+        "command": "agentDoc.resyncFixSessions",
+        "title": "Agent Doc: Resync / Fix Sessions"
+      },
+      {
+        "command": "agentDoc.gcStaleSessions",
+        "title": "Agent Doc: GC Stale Sessions"
+      },
+      {
         "command": "agentDoc.popupMenu",
         "title": "Agent Doc: Menu"
       }

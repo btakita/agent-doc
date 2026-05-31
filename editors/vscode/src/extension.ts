@@ -666,6 +666,43 @@ async function restartSessionAction(): Promise<void> {
     );
 }
 
+// #plugin-cleanup-menu-command: project-level session-hygiene commands. Unlike
+// the file-scoped session commands, `resync --fix` and `gc` operate on the whole
+// session registry, so they run in the project root (the focused .md file's root
+// when one is open, else the first workspace folder). Thin event-reporter: the
+// CLI owns all cleanup logic; this only dispatches and reports the outcome.
+function resolveCleanupCwd(): string | undefined {
+    const editor = vscode.window.activeTextEditor;
+    if (editor && isMarkdown(editor)) {
+        const root = getWorkspaceRoot(editor.document.uri);
+        if (root) return resolveProject(root, editor.document.uri.fsPath).cwd;
+    }
+    return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+}
+
+async function runProjectCleanupCommand(label: string, args: string[]): Promise<void> {
+    const cwd = resolveCleanupCwd();
+    if (!cwd) {
+        showError(`${label}: no workspace folder open`);
+        return;
+    }
+    showHint(`${label}: running agent-doc ${args.join(' ')}…`);
+    try {
+        const output = await runCli(args, cwd, { timeoutMs: 30_000 });
+        showSessionOutput(label, output || 'No changes.');
+    } catch (err: any) {
+        showError(`${label} failed: ${err.message}`);
+    }
+}
+
+async function resyncFixSessionsAction(): Promise<void> {
+    await runProjectCleanupCommand('Resync / Fix Sessions', ['resync', '--fix']);
+}
+
+async function gcStaleSessionsAction(): Promise<void> {
+    await runProjectCleanupCommand('GC Stale Sessions', ['gc']);
+}
+
 async function compactExchangeAction(): Promise<void> {
     const editor = vscode.window.activeTextEditor;
     if (!editor || !isMarkdown(editor)) return;
@@ -1991,6 +2028,14 @@ export function activate(context: vscode.ExtensionContext): void {
 
     context.subscriptions.push(
         vscode.commands.registerCommand('agentDoc.copySessionDiagnostics', copySessionDiagnosticsAction)
+    );
+
+    // #plugin-cleanup-menu-command: project-level session-hygiene commands.
+    context.subscriptions.push(
+        vscode.commands.registerCommand('agentDoc.resyncFixSessions', resyncFixSessionsAction)
+    );
+    context.subscriptions.push(
+        vscode.commands.registerCommand('agentDoc.gcStaleSessions', gcStaleSessionsAction)
     );
 
     // Feature 6: Popup Menu

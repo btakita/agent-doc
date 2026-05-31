@@ -18,7 +18,14 @@ class AgentDocPopupActionTest {
     @Test
     fun `overflow popup actions keep junie and force claim available`() {
         assertEquals(
-            listOf("AgentDoc.RunWithJunie", "AgentDoc.ForceClaim"),
+            listOf(
+                "AgentDoc.RunWithJunie",
+                "AgentDoc.ForceClaim",
+                // #plugin-cleanup-menu-command: operator session-hygiene commands
+                // live in the overflow group (occasional, project-scoped cleanup).
+                "AgentDoc.ResyncFixSessions",
+                "AgentDoc.GcStaleSessions",
+            ),
             AgentDocPopupAction.OVERFLOW_ACTION_IDS,
         )
     }

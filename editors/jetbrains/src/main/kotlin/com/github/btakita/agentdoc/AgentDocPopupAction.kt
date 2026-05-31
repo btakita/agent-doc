@@ -26,6 +26,8 @@ class AgentDocPopupAction : AnAction() {
         internal val OVERFLOW_ACTION_IDS = listOf(
             "AgentDoc.RunWithJunie",
             "AgentDoc.ForceClaim",
+            "AgentDoc.ResyncFixSessions",
+            "AgentDoc.GcStaleSessions",
         )
     }
 

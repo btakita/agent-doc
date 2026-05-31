@@ -148,5 +148,21 @@
             <add-to-group group-id="ToolsMenu" anchor="last"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
+        <action id="AgentDoc.ResyncFixSessions"
+                class="com.github.btakita.agentdoc.ResyncFixSessionsAction"
+                text="Resync / Fix Sessions"
+                description="Run agent-doc resync --fix to repair stale routing/registry state and reap dead panes">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+        </action>
+        <action id="AgentDoc.GcStaleSessions"
+                class="com.github.btakita.agentdoc.GcStaleSessionsAction"
+                text="GC Stale Sessions"
+                description="Run agent-doc gc to reap orphaned panes and prune stale startup/diagnostic state">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+        </action>
     </actions>
 </idea-plugin>

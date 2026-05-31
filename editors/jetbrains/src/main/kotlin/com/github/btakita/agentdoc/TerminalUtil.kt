@@ -489,6 +489,55 @@ object TerminalUtil {
         runRestartSupervisorCommand(project, file, force = false, onComplete = onComplete)
     }
 
+    /**
+     * #plugin-cleanup-menu-command: resolve the project root for a project-level
+     * cleanup command. These commands operate on the whole session registry, not
+     * a single document, so they run in the focused .md file's project root when
+     * one is open, else the IDE project base path.
+     */
+    internal fun cleanupProjectRoot(project: Project): String {
+        val manager = FileEditorManager.getInstance(project)
+        val focused = manager.selectedTextEditor?.virtualFile?.takeIf { it.name.endsWith(".md") }
+            ?: manager.selectedFiles.firstOrNull { it.name.endsWith(".md") }
+        if (focused != null) {
+            return resolveProject(project, focused).first
+        }
+        return project.basePath ?: "."
+    }
+
+    /**
+     * #plugin-cleanup-menu-command: thin wrapper that shells a project-level
+     * `agent-doc` cleanup command (e.g. `resync --fix`, `gc`) in the project root
+     * and surfaces the result as an Event-Log notification. No cleanup logic lives
+     * in the plugin — the CLI owns it; this only reports the outcome.
+     */
+    internal fun runProjectCleanupCommand(project: Project, label: String, args: List<String>) {
+        val projectRoot = cleanupProjectRoot(project)
+        val agentDoc = resolveAgentDoc(projectRoot)
+        showHint(project, "$label: running agent-doc ${args.joinToString(" ")}…")
+        Thread {
+            try {
+                val cmd = listOf(agentDoc) + args
+                val result = SyncLayoutAction.runCommandWithTimeout(cmd, projectRoot)
+                LOG.info("[cleanup] $label exit=${result.exitCode} cmd=${cmd.joinToString(" ")}")
+                if (result.exitCode != 0) {
+                    val reason = if (result.timedOut) "timed out" else "failed (exit ${result.exitCode})"
+                    notifyError(project, "$label $reason:\n${result.output}")
+                } else {
+                    notifyInfo(project, "$label complete.\n${result.output.ifBlank { "No changes." }}")
+                }
+            } catch (e: Exception) {
+                notifyError(project, "$label failed: ${e.message}")
+            }
+        }.start()
+    }
+
+    fun resyncFixSessions(project: Project) =
+        runProjectCleanupCommand(project, "Resync / Fix Sessions", listOf("resync", "--fix"))
+
+    fun gcStaleSessions(project: Project) =
+        runProjectCleanupCommand(project, "GC Stale Sessions", listOf("gc"))
+
     private fun runRestartSupervisorCommand(
         project: Project,
         file: VirtualFile,

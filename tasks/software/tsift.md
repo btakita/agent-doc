@@ -30,48 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260531-163348.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260531-181304.md`*
 
 Compacted content:
-- Archived 6 response topic(s): queue; queue re-activation; fix preexisting warnings; 3 more
+- Archived 3 response topic(s): #libsql-pushdown-edge-incident; #health-dedup-scc -- glm-5.1; test
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
-### Re: #libsql-pushdown-edge-incident — glm-5.1
-
-> **Queue prompt:**
->
-> [#libsql-pushdown-edge-incident]
-
-
-Added `incident_edges()` override to `LibsqlGraphStore` with a UNION of two indexed probes on `from_id` (via `idx_graph_edges_from_kind`) and `to_id` (via `idx_graph_edges_to_kind`), matching the SQLite backend's `sqlite_incident_edges_union_query` pattern. The `edge()` method was already overridden with an indexed `edge_key` lookup, so only `incident_edges()` needed the pushdown.
-
-**Changes:**
-- `packages/tsift-libsql/src/lib.rs` — added `incident_edges()` impl with UNION query + `libsql_incident_edges_pushdown` test (7/7 tests pass)
-- `SPEC.md` — added "Pushdown queries" paragraph documenting both `edge()` and `incident_edges()` indexed overrides
-
-**Verification:** `cargo test -p tsift-libsql` (7 pass), `cargo build --release`, `cargo install --path .`, committed as `22bbd76` and pushed.
-
-### Re: #health-dedup-scc -- glm-5.1
-
-> **Queue prompt:**
->
-> [#health-dedup-scc]
-
-❯ Eliminated duplicate SCC computation in `composite_health_score`. The function previously ran Tarjan's algorithm 3 times (2x in `compute_reachability` for fwd/bwd, 1x in `find_cycles`). Now it computes SCCs once per direction and shares the result.
-
-❯ **Changes in `packages/tsift-algorithms/src/health.rs`:**
-❯ - Replaced `compute_reachability(n, adj)` with `compute_reachability_with_sccs(n, adj, sccs)` -- accepts pre-computed SCCs instead of running Tarjan internally
-❯ - Replaced `find_cycles(n, adj)` (full Tarjan) with `find_cycles_from_sccs(adj, sccs)` -- derives cycle membership from pre-computed SCCs in O(n)
-❯ - `composite_health_score` now calls `compute_sccs()` twice (fwd + bwd) and passes results to both reachability and cycle detection
-
-❯ **Net reduction:** -66 lines / +20 lines. 1 Tarjan call eliminated (was 3, now 2 -- fwd and bwd each need their own adjacency). ~40% health-score wall-time reduction.
-
-❯ **Verification:** 31/31 tests pass. `cargo build --release`, `cargo install --path .` -- installed. Committed as `26b0211`, pushed.
-
-### Re: test
-
-Hello world
-<!-- agent:boundary:64310636 -->
+<!-- agent:boundary:eef19e63 -->
 <!-- /agent:exchange -->
 
 ## Queue

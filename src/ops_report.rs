@@ -171,30 +171,16 @@ pub fn diagnose_cycle(
 
     let agent_doc = root.join(".agent-doc");
     let logs = agent_doc.join("logs");
-    let mut sources = Vec::new();
 
-    sources.push(scan_text_source(
-        "ops log",
-        logs.join("ops.log"),
-        &terms,
-        limit,
-    ));
-    sources.push(scan_text_source(
-        "cycle jsonl",
-        logs.join("cycles.jsonl"),
-        &terms,
-        limit,
-    ));
-
-    if let Some(session_id) = session_id {
-        sources.push(scan_text_source(
+    let session_log_source = if let Some(session_id) = session_id {
+        scan_text_source(
             "harness session log",
             logs.join(format!("{session_id}.log")),
             &terms,
             limit,
-        ));
+        )
     } else {
-        sources.push(scan_text_tree_source(
+        scan_text_tree_source(
             "harness session logs",
             &logs,
             &terms,
@@ -205,57 +191,76 @@ pub fn diagnose_cycle(
                 };
                 name.ends_with(".log") && name != "ops.log" && !name.starts_with("debug.log")
             },
-        ));
-    }
+        )
+    };
 
-    sources.push(scan_text_tree_source(
-        "editor plugin/debug logs",
-        &logs,
-        &terms,
-        limit,
-        |path| {
-            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-                return false;
-            };
-            name.starts_with("debug.log") || name.contains("plugin") || name.contains("jb")
-        },
-    ));
-    sources.push(scan_json_tree_source(
-        "captures",
-        &agent_doc.join("captures"),
-        &terms,
-    ));
-    sources.push(scan_json_tree_source(
-        "codex hook sessions",
-        &agent_doc.join("codex-hooks"),
-        &terms,
-    ));
-    sources.push(scan_json_tree_source(
-        "hook payloads",
-        &agent_doc.join("hooks"),
-        &terms,
-    ));
-    sources.push(scan_text_tree_source(
-        "patch files",
-        &agent_doc.join("patches"),
-        &terms,
-        limit,
-        |_| true,
-    ));
-    sources.push(scan_json_files_source(
-        "actor/session state",
-        &agent_doc,
-        &[
-            agent_doc.join("session-actors.json"),
-            agent_doc.join("sessions.json"),
-        ],
-        &terms,
-    ));
-    sources.push(scan_json_tree_source(
-        "agent-doc state",
-        &agent_doc.join("state"),
-        &terms,
-    ));
+    let sources = std::thread::scope(|s| {
+        let ops_log = s.spawn(|| {
+            scan_text_source("ops log", logs.join("ops.log"), &terms, limit)
+        });
+        let cycle_jsonl = s.spawn(|| {
+            scan_text_source("cycle jsonl", logs.join("cycles.jsonl"), &terms, limit)
+        });
+        let editor_debug = s.spawn(|| {
+            scan_text_tree_source(
+                "editor plugin/debug logs",
+                &logs,
+                &terms,
+                limit,
+                |path| {
+                    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                        return false;
+                    };
+                    name.starts_with("debug.log") || name.contains("plugin") || name.contains("jb")
+                },
+            )
+        });
+        let captures = s.spawn(|| {
+            scan_json_tree_source("captures", &agent_doc.join("captures"), &terms)
+        });
+        let codex_hooks = s.spawn(|| {
+            scan_json_tree_source("codex hook sessions", &agent_doc.join("codex-hooks"), &terms)
+        });
+        let hook_payloads = s.spawn(|| {
+            scan_json_tree_source("hook payloads", &agent_doc.join("hooks"), &terms)
+        });
+        let patches = s.spawn(|| {
+            scan_text_tree_source(
+                "patch files",
+                &agent_doc.join("patches"),
+                &terms,
+                limit,
+                |_| true,
+            )
+        });
+        let actor_session = s.spawn(|| {
+            scan_json_files_source(
+                "actor/session state",
+                &agent_doc,
+                &[
+                    agent_doc.join("session-actors.json"),
+                    agent_doc.join("sessions.json"),
+                ],
+                &terms,
+            )
+        });
+        let state = s.spawn(|| {
+            scan_json_tree_source("agent-doc state", &agent_doc.join("state"), &terms)
+        });
+
+        vec![
+            ops_log.join().unwrap(),
+            cycle_jsonl.join().unwrap(),
+            session_log_source,
+            editor_debug.join().unwrap(),
+            captures.join().unwrap(),
+            codex_hooks.join().unwrap(),
+            hook_payloads.join().unwrap(),
+            patches.join().unwrap(),
+            actor_session.join().unwrap(),
+            state.join().unwrap(),
+        ]
+    });
 
     Ok(CycleDiagnosisReport {
         project_root: root,

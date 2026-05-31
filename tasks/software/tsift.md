@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -35,7 +35,7 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 3 response topic(s): tsift memory harness support; next-steps for token efficiency + graph/neighborhood performance; queue cleanup
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:e3a4efb3 -->
+<!-- agent:boundary:d902bd0b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,20 +46,20 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue -->
-preset #spec-test-commit-push
-[#terse-graph-serial]
-[#graph-default-edge-lookup]
-[#neighborhood-per-edge-node]
-[#terse-diagnostics]
-[#terse-search-hit]
-[#graph-counts-full-scan]
-[#shortest-path-depth-walk]
-[#louvain-scaling]
-[#health-reachability]
-[#edges-between-chunks]
-[#duplicate-callers-fetch]
-[#terse-health-scores]
+<!-- agent:queue auto -->
+preset #spec-test-build-install-commit-push
+- [#terse-graph-serial]
+- [#graph-default-edge-lookup]
+- [#neighborhood-per-edge-node]
+- [#terse-diagnostics]
+- [#terse-search-hit]
+- [#graph-counts-full-scan]
+- [#shortest-path-depth-walk]
+- [#louvain-scaling]
+- [#health-reachability]
+- [#edges-between-chunks]
+- [#duplicate-callers-fetch]
+- [#terse-health-scores]
 <!-- /agent:queue -->
 
 ## Backlog

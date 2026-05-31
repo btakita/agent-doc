@@ -36,16 +36,44 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 4 response topic(s): do [#recursive-repair-state-drift]; do [#recursive-repair-recovery-states]; do [#recursive-repair-apply]; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:cbd25b7f -->
+
+### Re: do #recovery-drift-authoritative-side — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#recovery-drift-authoritative-side]
+
+
+Implemented the authoritative-side determination so `apply_closeout_recovery` can auto-apply `QueueMetadataDrift` and `SidecarVisibleDrift` instead of always returning `NotApplied`.
+
+#### The signal
+
+The classifier already proves the *content* components (exchange / backlog / review / icebox / done) are byte-identical before reaching these states. So the only durable state a metadata-only diff can destroy is an **active queue continuation**. Legitimate consumption of a queue head always surfaces as response/content drift — never as metadata-only drift. Therefore a live `queue_active` continuation present in HEAD but dropped (or re-headed) by the local side **cannot** have been legitimately consumed → HEAD is authoritative. This is exactly the live-observed bug: a spurious `queue_active:false` working-drift (14 items still pending) that the old `agent-doc commit` recovery would have wrongly committed.
+
+#### What landed
+
+- **`queue_continuation::live_continuation_head(file, content)`** — derives, from a document *string* alone (no sidecar round-trip), whether it carries a live continuation: `queue_active: true` + a ready head that is not a stop fence or future time gate, returning the head id.
+- **`metadata_drift_authority(file, local, head)` → `Local | Head | Ambiguous`**:
+  - HEAD live, local dropped it → **Head** → restore-from-HEAD.
+  - Both live, different heads, no consuming response → **Ambiguous** → fail closed.
+  - Same head / no HEAD continuation at risk → **Local** → commit forward.
+- **`apply_closeout_recovery`** routes both metadata-drift states through `apply_metadata_drift_recovery`: commit the local side, or restore the file + snapshot/CRDT sidecars from HEAD (`rebuild_sidecars_from_content`; no new commit since HEAD already holds the authority), or `NotApplied` with the recommended manual command.
+
+#### Verification
+
+`make check` green. Six tests: 3 pure-string `metadata_drift_authority_*` unit tests + `apply_recovery_commits_queue_metadata_drift_when_no_live_continuation`, `apply_recovery_restores_from_head_when_local_drops_live_continuation`, `apply_recovery_withholds_queue_metadata_drift_when_live_heads_diverge`. The old always-withhold test was updated to the new commit-forward behavior. Spec `07-closeout-commands.md` updated (all classified states + the authority rule). Both binaries rebuilt + installed; submodule committed + pushed (`da658c5f`).
+
+#### Remaining
+
+Live-verify the full one-command recovery on a real owner pane — split to `#recovery-drift-apply-live-verify` (gated on a live pane, risky in this racy multi-session repo). Closed `#recovery-drift-authoritative-side`.
+<!-- agent:boundary:80e910da -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
-- do [#recovery-drift-authoritative-side]
+preset #spec-test-build-install-commit-push
+- ~do [#recovery-drift-authoritative-side]~
 - do [#jb-run-agent-doc-command-route-miss]
 - do [#repair-orphan-prefix-bug]
-preset #spec-test-build-install-commit-push
-- ~do [#recursive-repair-state-drift]~
-- ~do [#recursive-repair-recovery-states]~
 - do [#recursive-repair-apply]
 - do [#preflight-probe-side-effect-free]
 - do [#gated-followup-split-enforcement]
@@ -95,7 +123,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog priority queue=prepend -->
-- [ ] [#recovery-drift-authoritative-side] [recommended] Determine the authoritative side for queue/sidecar metadata drift so flow::closeout::apply_closeout_recovery can safely auto-apply QueueMetadataDrift and SidecarVisibleDrift (currently withheld as NotApplied). Live-discovered gap 2026-05-31: a spurious queue_active:false working-drift (with 14 queue items still pending) would be wrongly committed by the 'agent-doc commit' recovery — the snapshot was BEHIND HEAD, not ahead, so HEAD was authoritative and the correct fix was restore-from-HEAD, not commit-snapshot. Need a signal (cycle provenance / queue continuation marker / committed-vs-working precedence) to pick commit-snapshot vs restore-from-HEAD, then live-verify the full one-command recursive recovery path. Parent: #recursive-repair-apply. Plan: tasks/agent-doc/plan-recursive-repair-state-drift.md.
+- [ ] [#recovery-drift-apply-live-verify] [recommended] Live-verify the full one-command recovery (agent-doc repair --apply-recovery) on a real owner pane now that #recovery-drift-authoritative-side landed the authoritative-side determination: reproduce a queue_metadata_drift / sidecar_visible_drift closeout and confirm apply_closeout_recovery restores-from-HEAD for the spurious queue_active:false class and commits-forward otherwise, without the manual cancel->reset->commit sequence. Gated on a live owner pane (risky in a racy multi-session repo). Parent plan: tasks/agent-doc/plan-recursive-repair-state-drift.md.
 - [ ] [#jb-run-agent-doc-command-route-miss] [recommended] #agent-doc-bug 2026-05-31: JetBrains `Run Agent Doc` does not route into the opencode console. Route falsely detects "opencode active turn" when the pane is idle. Root cause: `dispatch_blocker_reason` (harness.rs:324-345) scans all lines top-down — completed assistant response text above the idle `>` prompt sets `has_non_idle_content=true` while the prompt detection misses the OpenCode TUI composer shape, yielding a false active turn. Fix: bottom-up prompt detection (skip chrome from bottom, check last non-chrome line for dispatch-ready) + expand `is_dispatch_ready_prompt_line` patterns for OpenCode idle composer. Plan: tasks/agent-doc/plan-jb-run-agent-doc-command-route-miss.md. Related: #route-drain-all-surface-live-verify, #jb-stale-busy-idle-footer, #codex-owned-pane-prompt-miss.
 - [ ] [#repair-orphan-prefix-bug] Orphan-response repair path prefixes every body line with the user-prompt marker. Live repro 2026-05-31 tsift.md: direct Edit-based patchback triggered orphan repair, which applied the prefix to all assistant body lines. Fix: ensure orphan-repair preserves response body verbatim. Plan: tasks/agent-doc/plan-repair-orphan-prefix-bug.md. Related: #jb-compact-malformed-response-commit, #finalize-retry-ipc-response-duplication.
 - [ ] [#gated-followup-split-enforcement] [recommended] #agent-doc-bug 2026-05-31: when a directed do [#id] cycle keeps a multi-phase item open via --pending-edit (backlog) or --review-edit (review) with text that enumerates several gated/remaining phases, agent-doc neither prompts nor guards splitting those phases into discrete child backlog IDs — the deferred work stays buried in one parent's narrowed description and is not independently trackable/queueable. Repro this session: #recursive-repair-state-drift and #codex-owned-pane-prompt-miss-followups each had 2-4 gated phases folded into parent text; only a user catch prompted splitting them into #recursive-repair-recovery-states/#recursive-repair-apply/#preflight-probe-side-effect-free/#codex-owned-pane-stop-hook-live-verify. Add a session-check/finalize advisory (warn-first, sibling of #blocked-closeout-followup-capture and the SKILL 'one backlog ID per actionable phase' rule) that detects a kept-open item whose body lists multiple gated phases without discrete child IDs and recommends the split. Plan: TBD.

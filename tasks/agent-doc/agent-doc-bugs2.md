@@ -39,6 +39,12 @@ Compacted content:
 
 ### Re: #spec-test-commit-push-deploy — opus-4-8
 
+> **Queue prompt:**
+>
+> The response to a queue item should contain the prompt from the queue. If the prompt is long, it may be beneficial to have a summary of the prompt. But for now, let's try copying the entire prompt.
+> #spec-test-commit-push-deploy
+
+
 Done — queue-item responses now copy the originating prompt. This response is the live demo: the blockquote just above was inserted by the binary, not typed by me.
 
 #### What changed
@@ -58,14 +64,14 @@ Why the binary and not the skill: an auto/synthetic queue head is never typed in
 - Deploy: `cargo build --release` + `cargo install --path .` (both binaries refreshed); committed + pushed in `src/agent-doc` (`c030760e`) with the superproject pointer bump (`6ca3ae899`).
 
 Note: this head carries a trailing `#spec-test-commit-push-deploy` tag, so it consumes as a synthetic/preset head — the response heading had to resolve to exactly that id to strike it, which is existing behavior. Follow-up `[#queue-prompt-echo-summary]` queued for summarizing long prompts.
-<!-- agent:boundary:110f809d -->
+<!-- agent:boundary:395445bf -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
----
+~~~done
 The response to a queue item should contain the prompt from the queue. If the prompt is long, it may be beneficial to have a summary of the prompt. But for now, let's try copying the entire prompt.
 #spec-test-commit-push-deploy
----
+~~~
 JB `Run Agent Doc` successfully started a turn and had an error.
 ```
 [route] debounce OK — file idle for 0.6s and typing indicator idle

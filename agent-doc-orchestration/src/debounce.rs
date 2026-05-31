@@ -15,10 +15,12 @@
 //! - Editor-authoritative buffer state: plugins report `EditorBufferState` through the FFI bridge
 //!   on every document change, including monotonic version, dirty flag, last-edit timestamp,
 //!   optional save timestamp, optional content hash, and optional session ID. This state is
-//!   persisted in `.agent-doc/editor-state/<hash>`. When present, `wait_for_stable_content`
+//!   held in process memory via a `Mutex<HashMap>` (`EDITOR_BUFFER_STATES`), which is
+//!   concurrency-safe within the Session Actor process. When present, `wait_for_stable_content`
 //!   uses version/hash stability instead of the `extract_last_added_line` / `looks_truncated`
 //!   heuristic, eliminating race classes where edits above the last inserted line are missed.
-//!   If no editor state exists, the fallback truncation heuristic is used.
+//!   If no editor state exists, the fallback truncation heuristic is used. No file sidecars
+//!   are written for editor buffer state, avoiding filesystem concurrency issues.
 //! - `is_idle` / `await_idle` operate on in-process state (same process as the plugin).
 //! - `is_typing_via_file` / `await_idle_via_file` operate on the file-based indicator (CLI use).
 //! - Files with no recorded `document_changed` call are considered idle by `is_idle`; this
@@ -33,8 +35,8 @@
 //!   editor-visible buffer digest without passing full document content through FFI.
 //! - `live_buffer_diverges_from_content(file, content)` — returns the latest editor-visible
 //!   digest when it differs from the provided disk/expected content.
-//! - `record_editor_buffer_state(state: &EditorBufferState)` — persists editor-authoritative
-//!   buffer state (version, dirty, hash, timestamps) to `.agent-doc/editor-state/<hash>`.
+//! - `record_editor_buffer_state(state: &EditorBufferState)` — stores editor-authoritative
+//!   buffer state (version, dirty, hash, timestamps) in the in-memory Session Actor map.
 //! - `editor_buffer_state(file) -> Option<EditorBufferState>` — reads the latest state.
 //! - `editor_buffer_stable(file, debounce_ms) -> Option<EditorBufferState>` — returns the state
 //!   when the editor is idle (not dirty or debounce elapsed), `None` otherwise.
@@ -67,8 +69,10 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Instant;
 
-/// Global state: last change timestamp per file.
 static LAST_CHANGE: Mutex<Option<HashMap<PathBuf, Instant>>> = Mutex::new(None);
+
+static EDITOR_BUFFER_STATES: Mutex<Option<HashMap<PathBuf, EditorBufferState>>> =
+    Mutex::new(None);
 
 fn with_state<R>(f: impl FnOnce(&mut HashMap<PathBuf, Instant>) -> R) -> R {
     let mut guard = LAST_CHANGE.lock().unwrap();
@@ -183,9 +187,6 @@ pub struct LiveBufferSnapshot {
     pub timestamp_ms: u128,
 }
 
-/// Directory for editor buffer state sidecars, relative to project root.
-const EDITOR_STATE_DIR: &str = ".agent-doc/editor-state";
-
 /// Editor-authoritative buffer state reported by IDE plugins through the FFI bridge.
 ///
 /// When an editor plugin is attached, it reports this state on every document
@@ -208,25 +209,22 @@ pub struct EditorBufferState {
 /// Record the latest editor buffer state for a document.
 ///
 /// Called by IDE plugins via the FFI bridge on every document change.
-/// Persists to `.agent-doc/editor-state/<hash>` as JSON.
-pub fn record_editor_buffer_state(state: &EditorBufferState) -> std::io::Result<()> {
-    let state_path = editor_state_path(&state.path);
-    if let Some(parent) = state_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let encoded = serde_json::to_string(state)?;
-    std::fs::write(&state_path, encoded)
+/// Stores in the in-memory `EDITOR_BUFFER_STATES` map, which is
+/// concurrency-safe via the Session Actor's Mutex.
+pub fn record_editor_buffer_state(state: &EditorBufferState) {
+    let path = PathBuf::from(&state.path);
+    let mut guard = EDITOR_BUFFER_STATES.lock().unwrap();
+    let map = guard.get_or_insert_with(HashMap::new);
+    map.insert(path, state.clone());
 }
 
 /// Return the latest editor buffer state for a document, if one has been recorded.
 pub fn editor_buffer_state(file: &str) -> Option<EditorBufferState> {
-    let path = editor_state_path(file);
-    let content = std::fs::read_to_string(path).ok()?;
-    let state: EditorBufferState = serde_json::from_str(&content).ok()?;
-    if state.path == file {
-        Some(state)
-    } else {
-        None
+    let path = PathBuf::from(file);
+    let guard = EDITOR_BUFFER_STATES.lock().unwrap();
+    match guard.as_ref() {
+        Some(map) => map.get(&path).cloned(),
+        None => None,
     }
 }
 
@@ -272,28 +270,6 @@ pub fn await_editor_buffer_stable(
             return None;
         }
         std::thread::sleep(poll_interval);
-    }
-}
-
-/// Compute the editor state sidecar path for a document.
-fn editor_state_path(file: &str) -> PathBuf {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    file.hash(&mut hasher);
-    let hash = hasher.finish();
-    let mut dir = PathBuf::from(file);
-    dir.pop();
-    loop {
-        if dir.join(".agent-doc").is_dir() {
-            return dir.join(EDITOR_STATE_DIR).join(format!("{:016x}", hash));
-        }
-        if !dir.pop() {
-            let parent = PathBuf::from(file)
-                .parent()
-                .unwrap_or(std::path::Path::new("."))
-                .to_path_buf();
-            return parent.join(EDITOR_STATE_DIR).join(format!("{:016x}", hash));
-        }
     }
 }
 
@@ -913,15 +889,10 @@ mod tests {
 
     #[test]
     fn editor_buffer_state_records_and_reads() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let state_dir = tmp.path().join(".agent-doc").join("editor-state");
-        std::fs::create_dir_all(&state_dir).unwrap();
-        let doc = tmp.path().join("test-editor-state.md");
-        std::fs::write(&doc, "test").unwrap();
-        let doc_str = doc.to_string_lossy().to_string();
+        let doc_str = "/tmp/test-editor-state-inmem.md";
 
         let state = EditorBufferState {
-            path: doc_str.clone(),
+            path: doc_str.to_string(),
             version: 1,
             dirty: true,
             last_edit_timestamp_ms: 1000,
@@ -930,9 +901,9 @@ mod tests {
             content_len: Some(4),
             session_id: None,
         };
-        record_editor_buffer_state(&state).unwrap();
+        record_editor_buffer_state(&state);
 
-        let read = editor_buffer_state(&doc_str).expect("should read state");
+        let read = editor_buffer_state(doc_str).expect("should read state");
         assert_eq!(read.version, 1);
         assert!(read.dirty);
         assert_eq!(read.hash.as_deref(), Some("abc123"));
@@ -945,12 +916,7 @@ mod tests {
 
     #[test]
     fn editor_buffer_stable_when_not_dirty() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let state_dir = tmp.path().join(".agent-doc").join("editor-state");
-        std::fs::create_dir_all(&state_dir).unwrap();
-        let doc = tmp.path().join("test-stable.md");
-        std::fs::write(&doc, "test").unwrap();
-        let doc_str = doc.to_string_lossy().to_string();
+        let doc_str = "/tmp/test-stable-inmem.md";
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -958,7 +924,7 @@ mod tests {
             .as_millis();
 
         let state = EditorBufferState {
-            path: doc_str.clone(),
+            path: doc_str.to_string(),
             version: 5,
             dirty: false,
             last_edit_timestamp_ms: now,
@@ -967,20 +933,15 @@ mod tests {
             content_len: None,
             session_id: None,
         };
-        record_editor_buffer_state(&state).unwrap();
+        record_editor_buffer_state(&state);
 
-        let stable = editor_buffer_stable(&doc_str, 500).expect("should be stable");
+        let stable = editor_buffer_stable(doc_str, 500).expect("should be stable");
         assert_eq!(stable.version, 5);
     }
 
     #[test]
     fn editor_buffer_stable_when_debounce_elapsed() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let state_dir = tmp.path().join(".agent-doc").join("editor-state");
-        std::fs::create_dir_all(&state_dir).unwrap();
-        let doc = tmp.path().join("test-stable-debounce.md");
-        std::fs::write(&doc, "test").unwrap();
-        let doc_str = doc.to_string_lossy().to_string();
+        let doc_str = "/tmp/test-stable-debounce-inmem.md";
 
         let old_ts = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -989,7 +950,7 @@ mod tests {
             - 2000;
 
         let state = EditorBufferState {
-            path: doc_str.clone(),
+            path: doc_str.to_string(),
             version: 3,
             dirty: true,
             last_edit_timestamp_ms: old_ts,
@@ -998,9 +959,9 @@ mod tests {
             content_len: Some(10),
             session_id: Some("jb-session-1".to_string()),
         };
-        record_editor_buffer_state(&state).unwrap();
+        record_editor_buffer_state(&state);
 
-        let stable = editor_buffer_stable(&doc_str, 500).expect("should be stable after debounce");
+        let stable = editor_buffer_stable(doc_str, 500).expect("should be stable after debounce");
         assert_eq!(stable.version, 3);
         assert!(stable.dirty);
         assert_eq!(stable.session_id.as_deref(), Some("jb-session-1"));
@@ -1008,12 +969,7 @@ mod tests {
 
     #[test]
     fn editor_buffer_not_stable_while_editing() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let state_dir = tmp.path().join(".agent-doc").join("editor-state");
-        std::fs::create_dir_all(&state_dir).unwrap();
-        let doc = tmp.path().join("test-not-stable.md");
-        std::fs::write(&doc, "test").unwrap();
-        let doc_str = doc.to_string_lossy().to_string();
+        let doc_str = "/tmp/test-not-stable-inmem.md";
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1021,7 +977,7 @@ mod tests {
             .as_millis();
 
         let state = EditorBufferState {
-            path: doc_str.clone(),
+            path: doc_str.to_string(),
             version: 2,
             dirty: true,
             last_edit_timestamp_ms: now,
@@ -1030,9 +986,9 @@ mod tests {
             content_len: None,
             session_id: None,
         };
-        record_editor_buffer_state(&state).unwrap();
+        record_editor_buffer_state(&state);
 
-        assert!(editor_buffer_stable(&doc_str, 2000).is_none());
+        assert!(editor_buffer_stable(doc_str, 2000).is_none());
     }
 
     #[test]
@@ -1042,15 +998,10 @@ mod tests {
 
     #[test]
     fn editor_buffer_state_overwrites_on_new_version() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let state_dir = tmp.path().join(".agent-doc").join("editor-state");
-        std::fs::create_dir_all(&state_dir).unwrap();
-        let doc = tmp.path().join("test-overwrite.md");
-        std::fs::write(&doc, "test").unwrap();
-        let doc_str = doc.to_string_lossy().to_string();
+        let doc_str = "/tmp/test-overwrite-inmem.md";
 
         let state_v1 = EditorBufferState {
-            path: doc_str.clone(),
+            path: doc_str.to_string(),
             version: 1,
             dirty: true,
             last_edit_timestamp_ms: 1000,
@@ -1059,10 +1010,10 @@ mod tests {
             content_len: None,
             session_id: None,
         };
-        record_editor_buffer_state(&state_v1).unwrap();
+        record_editor_buffer_state(&state_v1);
 
         let state_v2 = EditorBufferState {
-            path: doc_str.clone(),
+            path: doc_str.to_string(),
             version: 2,
             dirty: false,
             last_edit_timestamp_ms: 2000,
@@ -1071,9 +1022,9 @@ mod tests {
             content_len: Some(20),
             session_id: None,
         };
-        record_editor_buffer_state(&state_v2).unwrap();
+        record_editor_buffer_state(&state_v2);
 
-        let read = editor_buffer_state(&doc_str).unwrap();
+        let read = editor_buffer_state(doc_str).unwrap();
         assert_eq!(read.version, 2);
         assert!(!read.dirty);
         assert_eq!(read.hash.as_deref(), Some("newhash"));

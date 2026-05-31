@@ -414,9 +414,7 @@ pub unsafe extern "C" fn agent_doc_report_editor_state(
         content_len: len,
         session_id: sid,
     };
-    if let Err(e) = agent_doc_orchestration::debounce::record_editor_buffer_state(&state) {
-        eprintln!("[ffi] editor state write failed for {path}: {e}");
-    }
+    agent_doc_orchestration::debounce::record_editor_buffer_state(&state);
 }
 
 /// Get the current editor buffer state for a document as JSON.

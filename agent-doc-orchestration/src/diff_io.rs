@@ -126,7 +126,8 @@ pub fn compute(doc: &Path) -> Result<Option<String>> {
 /// is attached.
 ///
 /// **Editor-authoritative path** (plugin attached): reads the
-/// [`EditorBufferState`] sidecar written by the IDE plugin via the FFI bridge.
+/// [`EditorBufferState`] stored in the Session Actor's in-memory map by the
+/// IDE plugin via the FFI bridge.
 /// Waits until the editor reports a stable version/hash (dirty flag cleared or
 /// debounce elapsed), then reads the file content. If the editor state
 /// includes a content hash that matches the current file, returns immediately.
@@ -149,7 +150,8 @@ pub fn wait_for_stable_content(doc: &Path, previous: &str) -> Result<String> {
 }
 
 /// Editor-authoritative stability: wait for the editor plugin to report a
-/// stable buffer state, then read the file content.
+/// stable buffer state (held in the Session Actor's in-memory map), then read
+/// the file content.
 fn wait_for_stable_content_editor(
     doc: &Path,
     doc_str: &str,
@@ -719,7 +721,6 @@ mod tests {
     fn wait_for_stable_content_uses_editor_state_when_available() {
         let dir = tempfile::TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
-        std::fs::create_dir_all(agent_doc_dir.join("editor-state")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
 
         let doc = dir.path().join("test-editor.md");
@@ -742,7 +743,7 @@ mod tests {
             content_len: Some(content.len()),
             session_id: None,
         };
-        crate::debounce::record_editor_buffer_state(&state).unwrap();
+        crate::debounce::record_editor_buffer_state(&state);
 
         let previous = "";
         let start = std::time::Instant::now();

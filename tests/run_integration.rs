@@ -640,7 +640,12 @@ fn run_heartbeats_are_visible_and_persisted_while_child_is_waiting() {
 }
 
 #[test]
-fn codex_bare_run_inside_owning_pane_fails_before_nested_dispatch() {
+fn codex_bare_run_inside_owning_pane_with_unresolved_prompt_fails_before_pre_commit() {
+    // #codex-owned-pane-prompt-miss: when the owner pane re-invokes
+    // `agent-doc <FILE>` while an unresolved exchange prompt is still pending,
+    // the early guard fails closed BEFORE pre-commit / `start_run_cycle`. It
+    // names the prompt and the in-pane recovery path instead of abandoning an
+    // empty cycle after the prompt was baselined — the prompt stays executable.
     let tmp = TempDir::new().unwrap();
     let doc = tmp.path().join("session.md");
     fs::write(
@@ -664,7 +669,64 @@ fn codex_bare_run_inside_owning_pane_fails_before_nested_dispatch() {
         // Deterministically simulate a Codex harness. `detect_harness()` checks
         // Claude/OpenCode markers before Codex, so an inherited `CLAUDECODE`
         // (e.g. running the suite from inside a Claude Code session) would
-        // otherwise short-circuit the codex recursive-deadlock guard.
+        // otherwise short-circuit the codex owner-pane guard.
+        .env_remove("CLAUDECODE")
+        .env_remove("CLAUDE_CODE")
+        .env_remove("CLAUDE_CODE_SESSION")
+        .env_remove("OPENCODE")
+        .env_remove("OPENCODE_CLIENT")
+        .env("CODEX_SESSION", "codex-session")
+        .env("TMUX_PANE", "%77")
+        .arg(doc.to_str().unwrap())
+        .assert()
+        .failure()
+        .stderr(
+            predicate::str::contains("owned-pane self-invocation with unresolved exchange prompt")
+                .and(predicate::str::contains("Please reply"))
+                .and(predicate::str::contains("agent-doc write --commit")),
+        );
+
+    // No cycle was opened — the early guard bailed before `start_run_cycle`, so
+    // there is no preflight/abandoned cycle to recover and no snapshot advance.
+    let state_dir = tmp.path().join(".agent-doc/state/cycles");
+    let cycle_files = fs::read_dir(&state_dir)
+        .map(|entries| entries.count())
+        .unwrap_or(0);
+    assert_eq!(
+        cycle_files, 0,
+        "early owner-pane prompt-miss guard must not open a run cycle"
+    );
+
+    // The prompt remains in the document (still executable, not consumed).
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(content.contains("Please reply"));
+}
+
+#[test]
+fn codex_bare_run_inside_owning_pane_without_prompt_abandons_recursive_cycle() {
+    // Guard compatibility (#recguard-abandon): when the owner-pane re-invocation
+    // has NO unresolved exchange prompt (only an active queue head drives the
+    // run), the early prompt-miss guard does not fire. The run reaches the late
+    // recursive-deadlock guard, which abandons the empty preflight cycle so the
+    // owner session is not wedged and `session-check` accepts the terminal state.
+    let tmp = TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    let committed = "---\nagent_doc_session: session-recursive\nagent: codex\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nAnswered.\n<!-- agent:boundary:committed -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue auto -->\n- do something\n<!-- /agent:queue -->\n";
+    fs::write(&doc, committed).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    seed_snapshot(tmp.path(), &doc);
+    fs::write(
+        tmp.path().join(".agent-doc/sessions.json"),
+        format!(
+            "{{\n  \"session-recursive\": {{\n    \"pane\": \"%77\",\n    \"pid\": 123,\n    \"cwd\": \"{}\",\n    \"started\": \"2026-05-10T00:00:00Z\",\n    \"session_id\": \"session-recursive\",\n    \"file\": \"{}\",\n    \"window\": \"@7\",\n    \"supervisor_instance_id\": \"test-supervisor\"\n  }}\n}}\n",
+            tmp.path().display(),
+            doc.display()
+        ),
+    )
+    .unwrap();
+
+    agent_doc()
+        .current_dir(tmp.path())
         .env_remove("CLAUDECODE")
         .env_remove("CLAUDE_CODE")
         .env_remove("CLAUDE_CODE_SESSION")
@@ -679,10 +741,6 @@ fn codex_bare_run_inside_owning_pane_fails_before_nested_dispatch() {
             "recursive direct invocation would deadlock",
         ));
 
-    // #recguard-abandon: the recursive guard now marks the empty preflight cycle
-    // terminal (`abandoned`) instead of leaving it `preflight_started`, so the
-    // owner session is not wedged and `session-check` accepts the terminal state
-    // without a manual `agent-doc cancel`.
     let state = read_cycle_state(tmp.path());
     assert_eq!(state["phase"].as_str().unwrap(), "abandoned");
     assert!(

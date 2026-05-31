@@ -262,6 +262,31 @@ fn run_once(
         });
     }
 
+    // #codex-owned-pane-prompt-miss: when a Codex-owned pane re-invokes
+    // `agent-doc <FILE>` for the document it already owns AND an unresolved
+    // exchange prompt is still pending, fail closed *before* pre-commit and
+    // before `start_run_cycle` opens a cycle. The late recursive-deadlock guard
+    // further down would also refuse to dispatch a nested child, but only after
+    // pre-commit baselined the prompt into HEAD — silently losing it as an
+    // executable diff. Bailing here keeps the prompt uncommitted/executable and
+    // tells the operator to answer it in this owner pane. The detector is a
+    // strict subset of the recursive-guard case, so non-recursive runs are
+    // unaffected.
+    if let Some(detail) = owned_pane_self_invocation_detail(file, &session_id, agent_name)
+        && let Some(unresolved) = crate::session_check::unresolved_exchange_prompt(file)?
+    {
+        let diagnostic = owned_pane_prompt_miss_diagnostic(file, &detail, &unresolved);
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "run_owned_pane_prompt_miss file={} {}",
+                file.display(),
+                detail
+            ),
+        );
+        anyhow::bail!("{}", diagnostic);
+    }
+
     // Create branch if requested
     if branch && !no_git {
         git::create_branch(file)?;
@@ -733,7 +758,13 @@ fn abandon_run_recursive_cycle(file: &Path, event: &str, diagnostic: &str) -> Re
     Ok(())
 }
 
-fn recursive_codex_direct_invocation_diagnostic(
+/// Shared owner-pane self-invocation detector. Returns the
+/// `current_pane=… session_id=… actor_*=…` detail string when a Codex
+/// `agent-doc <FILE>` direct invocation is running inside the pane that already
+/// owns the document, else `None`. Both the early `#codex-owned-pane-prompt-miss`
+/// fail-closed guard and the late `#recguard-abandon` deadlock guard key off
+/// this single detector so they cannot disagree about ownership.
+fn owned_pane_self_invocation_detail(
     file: &Path,
     session_id: &str,
     agent_name: &str,
@@ -767,13 +798,48 @@ fn recursive_codex_direct_invocation_diagnostic(
             "actor_generation=<unknown> actor_state=<unknown> actor_pane=<unknown>".to_string()
         });
     Some(format!(
-        "recursive direct invocation would deadlock: `agent-doc {}` is running inside the Codex pane that already owns this document (current_pane={}, session_id={}, {}). The empty preflight cycle has been abandoned (terminal — `session-check` accepts it, no manual `agent-doc cancel` needed); retry from outside the managed pane or restart the owner with `agent-doc start {}`.",
+        "current_pane={} session_id={} {}",
+        current_pane, session_id, actor_detail
+    ))
+}
+
+fn recursive_codex_direct_invocation_diagnostic(
+    file: &Path,
+    session_id: &str,
+    agent_name: &str,
+) -> Option<String> {
+    let detail = owned_pane_self_invocation_detail(file, session_id, agent_name)?;
+    Some(format!(
+        "recursive direct invocation would deadlock: `agent-doc {}` is running inside the Codex pane that already owns this document ({}). The empty preflight cycle has been abandoned (terminal — `session-check` accepts it, no manual `agent-doc cancel` needed); retry from outside the managed pane or restart the owner with `agent-doc start {}`.",
         file.display(),
-        current_pane,
-        session_id,
-        actor_detail,
+        detail,
         file.display()
     ))
+}
+
+/// `#codex-owned-pane-prompt-miss`: structured fail-closed diagnostic for the
+/// case where the owner pane re-invokes `agent-doc <FILE>` while an unresolved
+/// exchange prompt is still pending. Names the prompt and the in-pane recovery
+/// path, and explicitly tells the operator not to retry the same direct command
+/// from the same pane (which would only re-trigger the guard).
+fn owned_pane_prompt_miss_diagnostic(file: &Path, detail: &str, unresolved: &str) -> String {
+    let excerpt: String = unresolved
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or(unresolved)
+        .trim()
+        .chars()
+        .take(200)
+        .collect();
+    format!(
+        "owned-pane self-invocation with unresolved exchange prompt: `agent-doc {}` was run inside the Codex pane that already owns this document ({}), but a user prompt is still unanswered: \"{}\". The recursive same-pane guard refuses to dispatch a nested child here, so this request would be a no-op for that prompt. No pre-commit, snapshot, or queue mutation was made — the prompt stays executable. Recovery: answer the prompt in THIS owner pane's current turn, then persist with `agent-doc finalize {}` (or `agent-doc write --commit {}`). Do NOT re-run `agent-doc {}` from this same pane; that only re-triggers this guard.",
+        file.display(),
+        detail,
+        excerpt,
+        file.display(),
+        file.display(),
+        file.display()
+    )
 }
 
 fn run_dispatch_timeout_diagnostic(file: &Path, agent_name: &str) -> String {

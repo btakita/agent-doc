@@ -1187,6 +1187,38 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
                 file, &state,
             )?));
         }
+        // #codex-owned-pane-prompt-miss: a recursive same-pane direct invocation
+        // that abandoned its empty cycle is terminal, but that abandon is NOT
+        // sufficient closeout if an unresolved exchange prompt still remains with
+        // no later response — the user prompt was never answered. Report a
+        // missed-prompt recovery instead of accepting the abandoned cycle as OK.
+        // (Defense in depth: the run-side early guard now bails before opening a
+        // cycle in this shape, but older abandoned cycles or alternate paths must
+        // still be caught here.)
+        if matches!(state.phase, crate::cycle_state::CyclePhase::Abandoned)
+            && state
+                .last_event
+                .starts_with("recursive_direct_invocation_blocked")
+            && let Some(unresolved) = unresolved_exchange_prompt(file)?
+        {
+            let excerpt: String = unresolved
+                .lines()
+                .find(|line| !line.trim().is_empty())
+                .unwrap_or(&unresolved)
+                .trim()
+                .chars()
+                .take(200)
+                .collect();
+            return Ok(SessionCheckStatus::Interrupted(format!(
+                "[session-check] INTERRUPTED: cycle `{}` was abandoned by the recursive same-pane guard ({}), but an unresolved exchange prompt is still unanswered: \"{}\". Answer it in this owner pane's current turn and persist with `agent-doc finalize {}` (or `agent-doc write --commit {}`); do not re-run `agent-doc {}` from this same pane.",
+                state.cycle_id,
+                state.last_event,
+                excerpt,
+                file.display(),
+                file.display(),
+                file.display()
+            )));
+        }
         if let Some(reason) = crate::git::repair_committed_historical_snapshot_drift(file)? {
             if let Some(prompt_marker) = detect_unstarted_prompt_bearing_diff(file)? {
                 return Ok(SessionCheckStatus::Interrupted(format!(
@@ -6482,6 +6514,81 @@ Body\n\
                 );
             }
             other => panic!("abandoned recursive-guard cycle must pass session-check, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn recursive_abandoned_cycle_with_unresolved_prompt_reports_missed_prompt() {
+        // #codex-owned-pane-prompt-miss: an abandoned recursive-guard cycle is
+        // NOT sufficient closeout when an unresolved exchange prompt still
+        // remains. session-check must fail closed with a missed-prompt recovery
+        // path instead of accepting the abandoned cycle as OK.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        for args in [
+            vec!["init"],
+            vec!["config", "user.email", "test@example.com"],
+            vec!["config", "user.name", "Test"],
+        ] {
+            Command::new("git")
+                .current_dir(root)
+                .args(&args)
+                .output()
+                .unwrap();
+        }
+
+        let doc = root.join("doc.md");
+        // Exchange tail after the boundary is an unanswered user prompt.
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nAnswered.\n",
+            "<!-- agent:boundary:committed -->\n",
+            "Please assist in placing GA4 Analytics credentials in passage.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "doc.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "committed", "--no-verify"])
+            .output()
+            .unwrap();
+
+        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::cycle_state::mark_abandoned(
+            &doc,
+            "recursive_direct_invocation_blocked recursive direct invocation would deadlock",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(
+                    message.contains("unresolved exchange prompt"),
+                    "expected missed-prompt classification: {message}"
+                );
+                assert!(
+                    message.contains("GA4 Analytics"),
+                    "expected the unresolved prompt excerpt in the message: {message}"
+                );
+                assert!(
+                    message.contains("write --commit"),
+                    "expected the recovery path in the message: {message}"
+                );
+            }
+            other => panic!("expected missed-prompt interruption, got {other:?}"),
         }
     }
 

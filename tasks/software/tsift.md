@@ -35,7 +35,18 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 2 response topic(s): Can tsift now replace claude-mem?; What are #next-steps to replace claude-mem?
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:857b8892 -->
+
+❯ Archived 2 response topic(s): Can tsift now replace claude-mem?; What are #next-steps to replace claude-mem?
+
+### Re: queued claude-mem migration — gpt-5
+
+I started the queued migration batch with the requested `#spec-test-build-install-commit-push` preset, but the binary-owned `agent-doc orchestrate` path stalled inside its spawned `codex exec` child for more than ten minutes after running the `src/agent-doc` workspace tests. I interrupted that stuck handoff so the session document would not remain in an open orchestration state.
+
+No backlog item is complete yet. `#tsiftmemimportall`, `#tsiftmemsemanticgate`, `#tsiftmemparityeval`, `#tsiftmemcutover`, and `#tsiftmemretire` should stay open until a fresh cycle can execute them from a clean preflight/plan contract.
+
+I also saw the preflight warning that the post-exchange `#next-steps` note is preserved as a non-executable comment; move it into `agent:exchange` or `agent:queue` if it should run.
+
+<!-- agent:boundary:bd3eea65 -->
 <!-- /agent:exchange -->
 ###
 <!--

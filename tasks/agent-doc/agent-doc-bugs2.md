@@ -148,7 +148,26 @@ Gated — code-complete with passing deterministic coverage; the only remaining 
 **Why gated, not done.** The item is explicitly *opportunistic live verification*: with the installed binary, stage a closeout that leaves a completed `[x]` item in review/icebox on an IDE-owned doc, then click JB **Run Agent Doc** once and confirm it dispatches without a manual repeat. That requires driving the JetBrains action in a live IDE, which isn't reproducible from here. The deterministic SimWorld coverage stands in for the logic; the live leg stays gated.
 
 (Closeout note: used `--force-disk` proactively — the IDE IPC listener has been ack-timing-out this session, which caused an exit-75 desync on the previous item.)
-<!-- agent:boundary:99de9b7b -->
+
+### Re: do [#run-agent-doc-stale-busy-replay] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#run-agent-doc-stale-busy-replay]
+
+
+Done — added the deterministic replay regression this item asked for (submodule `cbf45dde`, `make check` green).
+
+**What was missing.** The `#snrun` stale-busy repair (`busy_projection_repaired_by_ready_prompt`) was covered only by a pure-predicate unit test. There was no end-to-end replay asserting "stale busy projection + proven ready prompt → **dispatch**, not `agent:queue auto` enqueue."
+
+**Added — SimWorld replay (deterministic, runs in `make check`).** Per `specs/12-deterministic-simulation.md`, SimWorld is the deterministic in-memory route/controller actor model (no live tmux). New command `RepairBusyProjectionWithReadyPrompt` + handler `repair_busy_projection_with_ready_prompt`, gated by the **production** predicate `busy_projection_repaired_by_ready_prompt` (not a reimplementation), plus a `busy_projection_ready_repairs` coverage counter wired into the random corpus schedule. Two scenario tests:
+- `route_sim_repairs_stale_busy_projection_with_ready_prompt_then_dispatches`: SupervisorBusy → dispatch fails closed (`busy_dispatch_blocks=1`, 0 acceptances) → repair via ready prompt → dispatch accepted + proven (the exact "dispatch instead of enqueue" assertion).
+- `route_sim_stale_busy_repair_requires_busy_lifecycle`: the repair is fail-closed — it does not fire unless the actor is genuinely projected Busy.
+
+**Residual (tracked, not dropped).** The second thread in this item — distinguishing *rescued-stash accepted-only proof misses* — is already tracked under the `#snrun` review item (implement `plan-run-agent-doc-snappy-auto-remediation.md`: rescued-stash accepted-only misses + active-turn busy collisions + stale starting projections), so no new backlog item is needed.
+
+(Closeout note: `--force-disk` again — the IDE IPC listener remains unresponsive this session.)
+<!-- agent:boundary:f4755e0e -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -159,7 +178,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#codex-route-busy-ctrl-g-opens-editor]~
 - ~do [#cross-project-stash-pane-condition]~
 - ~do [#route-drain-all-surface-live-verify]~
-- do [#run-agent-doc-stale-busy-replay]
+- ~do [#run-agent-doc-stale-busy-replay]~
 - do [#jb-busy-queue-ux-feedback]
 - do [#queue-prompt-echo-summary]
 - do [#free-text-queue-owner-consume]
@@ -207,7 +226,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 - [ ] [#closeout-recovery-state-machine] [recommended] Typed closeout recovery classifier landed: flow::closeout::CloseoutRecoveryState + classify_closeout_recovery_state + recovery_command; session_check::closeout_recovery_hint renders one typed 'Recovery [state]: command' across all nine closeout-guard call sites. Classified today: clean / open_cycle / missing_response_body / escaped_template_patch. Remaining: precise detection for reserved states direct_response_patchback, boundary_only_drift, nested_parent_pointer_stale, and folding each guard's existing diagnostic through the classifier. Plan: tasks/agent-doc/plan-closeout-repair-churn.md.
 - [ ] [#free-text-queue-owner-consume] [recommended] Free-text `agent:queue auto` heads can remain live after an owner-pane/direct Codex closeout writes the response but lacks queue-target proof. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `Approve [#shoptiers]. What are #next-steps?` was answered, then reported as not marked done; same-pane `agent-doc <FILE>` refused recursive dispatch and repair finalize logged `[queue] skipped consumption because the active prompt did not target the queue head`. Preserve id-backed queue safety, but record/restore synthetic free-text queue-target proof for recursive-direct repair/finalize paths and add diagnostics/regressions. Plan: tasks/agent-doc/plan-free-text-queue-owner-consume.md.
 - [ ] [#preset-item-id-collision] [recommended] Enforce unique active identities across frontmatter `prompt_presets` keys and active `agent:backlog` / `agent:review` / `agent:icebox` item ids. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `#next-steps` exists both as a prompt preset and as a backlog item, making `do #next-steps` and "top backlog item: #next-steps" ambiguous between preset expansion and backlog execution. Fix with an identity registry, mutation-time rejection, preflight/session-check fail-closed diagnostics, and regressions. Plan: tasks/agent-doc/plan-preset-item-id-collision.md.
-- [ ] [#run-agent-doc-stale-busy-replay] Follow-up to the #snrun stale-busy-projection fix (submodule 89c99c79): the dispatch-only busy-vs-stale repair is covered by unit tests on the pure decision functions; add a live JB Run Agent Doc replay regression (SimWorld or tmux-ci) exercising a stale busy actor projection + proven ready prompt and asserting dispatch instead of agent:queue auto enqueue. Also still open in #snrun: distinguishing rescued-stash accepted-only proof misses. Plan: tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md.
 - [ ] [#jb-busy-queue-ux-feedback] [recommended] When the authoritative actor is genuinely busy, JB Run Agent Doc correctly queues the dispatch in agent:queue auto instead of injecting a duplicate trigger (monsterrodholders.md, equityfundingsource.md reports), but the plugin surfaces the route/resync log dump as an error. The dump also includes benign cross-project resync info such as `resync: stash pane %N is registered in its own project root — skipping kill` (cross-project stash-pane preservation, resync.rs:771/1303/1793 — a stash-window pane that is the live authoritative pane of a different project root is correctly preserved, not reaped), which is expected and not a failure. Present queued-behind-a-busy-turn and benign route/resync info as informational notifications distinct from real failures so expected behavior does not read as a plugin error.
 - [ ] [#plugin-cleanup-menu-command] [recommended] Expose session cleanup as agent-doc plugin-menu commands (JetBrains + VS Code): a 'Resync / Fix Sessions' action wrapping agent-doc resync --fix and a 'GC Stale Sessions' action wrapping agent-doc gc, so operators can clear stale routing/registry state and reap orphaned panes from the IDE without dropping to a terminal. Thin event-reporter pattern — the plugin shells the existing CLI/FFI; no cleanup logic in the plugin. Pairs with #stash-session-ttl-prune (auto hygiene) and #jb-busy-queue-ux-feedback (notification classification).
 - [ ] [#stash-session-ttl-prune] [recommended] Optional opt-in hygiene to cap stash-session accumulation: reap agent-doc stash panes whose session has been idle in the stash beyond a configurable TTL. Distinct from the existing orphan reap (resync.rs step 8), which only kills unregistered + no-supervisor + no-owned-file panes; live registered/supervisor-backed sessions are correctly never auto-killed, which is why ~9 agent-loop agent-doc panes accumulate in the shared session-0 stash. Must be opt-in (frontmatter/.agent-doc config) + live-verified before enabling (destructive). Relates to #cross-project-stash-pane-condition and #jb-busy-queue-ux-feedback.

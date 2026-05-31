@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -77,10 +77,23 @@ Fixed both warnings:
 1. **`post_exchange_comment_prompt_preset`**: Removed orphaned `#next-steps` HTML comment block outside `agent:exchange`. These prompts were already addressed in the prior queue run.
 
 2. **`preset_item_id_collision`**: Removed duplicate icebox entries (`#full-e2e-verify`, `#npm-auth-setup`, `#npm-publish-verify`) that already exist in `agent:review` with the same IDs. Review is the authoritative tracker; icebox duplicates caused ambiguous `do #id` resolution.
-<!-- agent:boundary:d4efd58d -->
+What are #next-steps to improve token efficiency along with graph + neighborhood performance & effectiveness.
+<!-- agent:boundary:1151d89d -->
 <!-- /agent:exchange -->
-<!-- agent:queue -->
+
+## Queue
+
+<!-- agent:queue auto -->
+- What are #next-steps to improve token efficiency along with graph + neighborhood performance & effectiveness.
 <!-- /agent:queue -->
+###
+<!--
+What are #next-steps to improve token efficiency along with graph + neighborhood performance & effectiveness.
+---
+What are #next-steps to make the graph faster?
+---
+What are #next-steps to make the graph + neighborhoods faster + more effective?
+-->
 
 ## Backlog
 

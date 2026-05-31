@@ -608,6 +608,73 @@ fn post_exchange_comment_prompt_preset_warning(
     })
 }
 
+/// `#preset-item-id-collision`: collect identities that resolve under more than
+/// one active source — a frontmatter `prompt_presets` key, or an active (not
+/// done) `agent:backlog` / `agent:review` / `agent:icebox` item id. When the
+/// same `#id` exists in two sources, `do #id`, queue generation, and
+/// "top backlog item: #id" are ambiguous between preset expansion and item
+/// execution. Ids are normalized by stripping a leading `#`; `agent:done` /
+/// archived ids are intentionally excluded (they are not active lookup targets).
+/// Returns one `#id (sourceA + sourceB)` diagnostic per colliding identity.
+pub fn detect_identity_collisions(content: &str) -> Vec<String> {
+    let mut sources: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+    if let Ok((fm, _)) = crate::frontmatter::parse(content) {
+        for key in fm.prompt_presets.keys() {
+            let norm = key.trim().trim_start_matches('#').to_string();
+            if !norm.is_empty() {
+                sources
+                    .entry(norm)
+                    .or_default()
+                    .push("prompt_presets".to_string());
+            }
+        }
+    }
+    if let Ok(components) = crate::component::parse(content) {
+        for component in &components {
+            let label = if crate::component::is_backlog_component(&component.name) {
+                "agent:backlog"
+            } else if crate::component::is_review_component(&component.name) {
+                "agent:review"
+            } else if crate::component::is_icebox_component(&component.name) {
+                "agent:icebox"
+            } else {
+                continue;
+            };
+            let (_, items, _) = crate::pending::parse_items(component.content(content));
+            for item in items.iter().filter(|item| !item.is_done()) {
+                if !item.id.is_empty() {
+                    sources
+                        .entry(item.id.clone())
+                        .or_default()
+                        .push(label.to_string());
+                }
+            }
+        }
+    }
+    sources
+        .into_iter()
+        .filter(|(_, srcs)| srcs.len() > 1)
+        .map(|(id, srcs)| format!("#{id} ({})", srcs.join(" + ")))
+        .collect()
+}
+
+fn preset_item_id_collision_warning(content: &str) -> Option<PreflightWarning> {
+    let collisions = detect_identity_collisions(content);
+    if collisions.is_empty() {
+        return None;
+    }
+    Some(PreflightWarning {
+        code: "preset_item_id_collision".to_string(),
+        message: format!(
+            "Ambiguous identities — the same #id resolves under multiple active sources: {}. Each #id must have one active meaning per document, so `do #id`, queue generation, and \"top backlog item\" are unambiguous. Rename the colliding prompt preset or tracked item before dispatch. (#preset-item-id-collision)",
+            collisions.join("; ")
+        ),
+        document_agent: None,
+        active_harness: None,
+    })
+}
+
 /// Attributes that are only meaningful on the `agent:queue` component. Seeing
 /// one of these on any other component is a misplaced-attribute mistake.
 const QUEUE_ONLY_COMPONENT_ATTRS: &[&str] = &["auto"];
@@ -2236,6 +2303,10 @@ pub fn run(file: &Path) -> Result<()> {
             warnings.push(warning);
         }
         if let Some(warning) = misplaced_component_attr_warning(file, &content) {
+            eprintln!("[preflight] warning: {}", warning.message);
+            warnings.push(warning);
+        }
+        if let Some(warning) = preset_item_id_collision_warning(&content) {
             eprintln!("[preflight] warning: {}", warning.message);
             warnings.push(warning);
         }
@@ -4183,6 +4254,56 @@ mod tests {
     use std::io::Write;
     use std::process::Command;
     use tempfile::TempDir;
+
+    #[test]
+    fn detect_identity_collisions_flags_preset_vs_backlog_id() {
+        // #preset-item-id-collision: monsterrodholders.md repro — a #next-steps
+        // prompt preset AND an active #next-steps backlog item collide.
+        let content = concat!(
+            "---\n",
+            "prompt_presets:\n",
+            "  '#next-steps': Any follow-up items?\n",
+            "  '#commit-push': commit + push\n",
+            "---\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#next-steps] do the next steps\n",
+            "- [ ] [#other1] unrelated work\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let collisions = detect_identity_collisions(content);
+        assert_eq!(collisions.len(), 1, "{collisions:?}");
+        assert!(collisions[0].contains("#next-steps"), "{collisions:?}");
+        assert!(collisions[0].contains("prompt_presets"), "{collisions:?}");
+        assert!(collisions[0].contains("agent:backlog"), "{collisions:?}");
+    }
+
+    #[test]
+    fn detect_identity_collisions_flags_duplicate_active_ids_across_components() {
+        // The same active id in backlog and review is also ambiguous.
+        let content = concat!(
+            "---\nagent_doc_session: t\n---\n\n",
+            "<!-- agent:backlog -->\n- [ ] [#dup7] in backlog\n<!-- /agent:backlog -->\n\n",
+            "<!-- agent:review -->\n- [/] [#dup7] also gated in review\n<!-- /agent:review -->\n",
+        );
+        let collisions = detect_identity_collisions(content);
+        assert_eq!(collisions.len(), 1, "{collisions:?}");
+        assert!(collisions[0].contains("#dup7"), "{collisions:?}");
+    }
+
+    #[test]
+    fn detect_identity_collisions_ignores_done_ids_and_clean_docs() {
+        // A clean doc (unique ids) and done items must not flag.
+        let content = concat!(
+            "---\nprompt_presets:\n  '#next-steps': x\n---\n\n",
+            "<!-- agent:backlog -->\n- [ ] [#alpha] active\n<!-- /agent:backlog -->\n\n",
+            // A done item reusing the preset name is archived, not an active target.
+            "<!-- agent:review -->\n- [x] [#next-steps] completed long ago\n<!-- /agent:review -->\n",
+        );
+        assert!(
+            detect_identity_collisions(content).is_empty(),
+            "done ids and unique active ids must not collide"
+        );
+    }
 
     #[test]
     fn strike_done_queue_head_prompts_marks_done_items_completed() {

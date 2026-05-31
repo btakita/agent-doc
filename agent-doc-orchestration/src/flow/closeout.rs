@@ -492,6 +492,26 @@ pub enum CloseoutRecoveryState {
     /// A reaped/closed item left a nested parent submodule pointer uncommitted.
     /// (Reserved for full detection wiring.)
     NestedParentPointerStale,
+    /// An empty `preflight_started` cycle with no capture, response, or pending
+    /// mutation — a diagnostic/probe preflight that nothing followed. Safe single
+    /// recovery: `agent-doc cancel`. (`#recursive-repair-recovery-states`)
+    OpenEmptyPreflight,
+    /// Snapshot differs from HEAD only by agent-doc-generated *queue / frontmatter
+    /// / status* metadata (e.g. a `queue` sync-attribute regeneration or
+    /// `queue_active` flip); the user/response and tracked-item content is
+    /// byte-identical. Safe single recovery: `agent-doc commit`.
+    /// (`#recursive-repair-recovery-states`)
+    QueueMetadataDrift,
+    /// The visible/working file is stale relative to its sidecars (or vice versa)
+    /// by metadata only, after an accepted metadata change. Safe single recovery:
+    /// rebuild sidecars from the visible file via
+    /// `agent-doc reset --from-current --preserve-session` then `agent-doc commit`.
+    /// (`#recursive-repair-recovery-states`)
+    SidecarVisibleDrift,
+    /// User-authored prompt/response content drifted vs HEAD. Fail closed: this
+    /// must NOT be auto-committed as metadata; the content has to be preserved and
+    /// closed through the normal response path. (`#recursive-repair-recovery-states`)
+    UnsafeUserContentDrift,
 }
 
 impl CloseoutRecoveryState {
@@ -504,6 +524,10 @@ impl CloseoutRecoveryState {
             Self::EscapedTemplatePatch => "escaped_template_patch",
             Self::BoundaryOnlyDrift => "boundary_only_drift",
             Self::NestedParentPointerStale => "nested_parent_pointer_stale",
+            Self::OpenEmptyPreflight => "open_empty_preflight",
+            Self::QueueMetadataDrift => "queue_metadata_drift",
+            Self::SidecarVisibleDrift => "sidecar_visible_drift",
+            Self::UnsafeUserContentDrift => "unsafe_user_content_drift",
         }
     }
 
@@ -530,6 +554,18 @@ impl CloseoutRecoveryState {
             Self::NestedParentPointerStale => format!(
                 "`agent-doc commit {f}` to update the nested parent submodule pointer"
             ),
+            Self::OpenEmptyPreflight => format!(
+                "`agent-doc cancel {f}` — an empty diagnostic preflight cycle with no captured response; abandoning it leaves no document drift"
+            ),
+            Self::QueueMetadataDrift => format!(
+                "`agent-doc commit {f}` (queue / `queue_active` / status metadata only — user/response content is unchanged, no response body to write)"
+            ),
+            Self::SidecarVisibleDrift => format!(
+                "`agent-doc reset --from-current --preserve-session {f}` then `agent-doc commit {f}` to rebuild stale sidecars from the visible file (metadata-only visible drift)"
+            ),
+            Self::UnsafeUserContentDrift => format!(
+                "preserve the user-authored content and finish through `agent-doc finalize {f}` (or `agent-doc write --commit {f}`) — do NOT `agent-doc commit`, which would commit unreviewed content drift as metadata"
+            ),
         })
     }
 }
@@ -547,6 +583,17 @@ pub fn classify_closeout_recovery_state(file: &Path) -> CloseoutRecoveryState {
     };
     use crate::cycle_state::CyclePhase;
     match state.phase {
+        // `#recursive-repair-recovery-states`: an empty `preflight_started` cycle
+        // (no capture, no captured-response hash, no pending mutation) is a
+        // diagnostic/probe preflight that nothing followed — abandonable with a
+        // single `agent-doc cancel`, distinct from a real in-progress cycle.
+        CyclePhase::PreflightStarted
+            if state.capture_id.is_none()
+                && state.response_sha256.is_none()
+                && !state.had_pending_mutations =>
+        {
+            return CloseoutRecoveryState::OpenEmptyPreflight;
+        }
         CyclePhase::PreflightStarted
         | CyclePhase::ResponseCaptured
         | CyclePhase::WriteApplied => return CloseoutRecoveryState::OpenCycle,
@@ -569,40 +616,70 @@ pub fn classify_closeout_recovery_state(file: &Path) -> CloseoutRecoveryState {
     {
         return CloseoutRecoveryState::MissingResponseBody;
     }
-    // `#recursive-repair-state-drift`: a committed cycle whose snapshot differs
-    // from HEAD *only* by agent-doc-generated artifacts (boundary / `(HEAD)`
-    // markers, answered-prompt-prefix canonicalization) is the metadata-only
-    // HEAD drift the recursive owner-pane recovery left behind. The single safe
-    // recovery is `agent-doc commit` — never `write --commit` (there is no
-    // missing response body) — so name it precisely instead of the generic hint.
-    if committed_artifact_only_head_drift(file) {
-        return CloseoutRecoveryState::BoundaryOnlyDrift;
+    // `#recursive-repair-state-drift` / `#recursive-repair-recovery-states`:
+    // classify committed-cycle drift by *what* differs so the recovery names one
+    // safe command. Order matters — narrowest/safest first, content drift last
+    // (fail closed).
+    let snapshot = crate::snapshot::load(file).ok().flatten();
+    let head = crate::git::show_head(file).ok().flatten();
+    if let (Some(snapshot), Some(head)) = (snapshot.as_deref(), head.as_deref())
+        && snapshot != head
+    {
+        // Boundary / `(HEAD)` / answered-prompt-prefix artifacts only.
+        if crate::git::normalize_committed_exchange_artifacts(snapshot)
+            == crate::git::normalize_committed_exchange_artifacts(head)
+        {
+            return CloseoutRecoveryState::BoundaryOnlyDrift;
+        }
+        // User/response + tracked-item content is byte-identical → the diff is
+        // queue / `queue_active` / status metadata (e.g. a `queue` sync-attribute
+        // regeneration). Safe to `agent-doc commit`.
+        if content_component_signature(snapshot) == content_component_signature(head) {
+            return CloseoutRecoveryState::QueueMetadataDrift;
+        }
+        // Real user/response content differs from HEAD → never auto-commit.
+        return CloseoutRecoveryState::UnsafeUserContentDrift;
+    }
+    // Snapshot matches HEAD but the visible/working file is stale relative to the
+    // sidecars. Metadata-only visible drift → rebuild sidecars from the file;
+    // content drift → preserve it through the normal response path.
+    if let (Some(snapshot), Ok(working)) = (snapshot.as_deref(), std::fs::read_to_string(file))
+        && snapshot != working
+    {
+        if content_component_signature(snapshot) == content_component_signature(&working) {
+            return CloseoutRecoveryState::SidecarVisibleDrift;
+        }
+        return CloseoutRecoveryState::UnsafeUserContentDrift;
     }
     CloseoutRecoveryState::Clean
 }
 
-/// True when the committed snapshot differs from HEAD only by agent-doc-generated
-/// exchange artifacts (transient boundary / `(HEAD)` markers and answered-prompt
-/// prefix canonicalization). `verify_snapshot_committed` normalizes only the
-/// transient markers, so prompt-prefix drift on already-answered prompts trips
-/// its snapshot-vs-HEAD guard even though `agent-doc commit` is the safe fix; the
-/// fuller `normalize_committed_exchange_artifacts` equality proves no real
-/// user/response content drift remains. Conservatively `false` on any read error
-/// so a genuine content difference never masquerades as metadata-only.
-fn committed_artifact_only_head_drift(file: &Path) -> bool {
-    let snapshot = match crate::snapshot::load(file) {
-        Ok(Some(snapshot)) => snapshot,
-        _ => return false,
+/// Normalized signature of the user/response + tracked-item *content* components
+/// (`exchange`, backlog, review, icebox, done), excluding pure agent-doc metadata
+/// (queue, status, frontmatter, boundary markers). Two documents with the same
+/// signature differ only in metadata; a differing signature means real
+/// user/response or tracked-item content changed. Used to split metadata-only
+/// drift (safe to commit) from content drift (fail closed).
+fn content_component_signature(doc: &str) -> String {
+    let normalized = crate::git::normalize_committed_exchange_artifacts(doc);
+    let Ok(components) = crate::component::parse(&normalized) else {
+        return normalized;
     };
-    let head = match crate::git::show_head(file) {
-        Ok(Some(head)) => head,
-        _ => return false,
-    };
-    if snapshot == head {
-        return false;
+    let mut sig = String::new();
+    for c in &components {
+        let is_content = c.name == "exchange"
+            || crate::component::is_backlog_component(&c.name)
+            || crate::component::is_review_component(&c.name)
+            || crate::component::is_icebox_component(&c.name)
+            || crate::component::is_backlog_done_component(&c.name);
+        if is_content {
+            sig.push_str(&c.name);
+            sig.push('\u{0}');
+            sig.push_str(c.content(&normalized).trim());
+            sig.push('\n');
+        }
     }
-    crate::git::normalize_committed_exchange_artifacts(&snapshot)
-        == crate::git::normalize_committed_exchange_artifacts(&head)
+    sig
 }
 
 fn head_exchange_has_escaped_markers(file: &Path) -> bool {
@@ -869,6 +946,18 @@ mod tests {
                 "nested_parent_pointer_stale",
                 "parent submodule pointer",
             ),
+            (OpenEmptyPreflight, "open_empty_preflight", "agent-doc cancel"),
+            (QueueMetadataDrift, "queue_metadata_drift", "agent-doc commit"),
+            (
+                SidecarVisibleDrift,
+                "sidecar_visible_drift",
+                "reset --from-current",
+            ),
+            (
+                UnsafeUserContentDrift,
+                "unsafe_user_content_drift",
+                "do NOT `agent-doc commit`",
+            ),
         ] {
             assert_eq!(state.as_str(), name);
             let cmd = state
@@ -889,13 +978,75 @@ mod tests {
     }
 
     #[test]
-    fn classify_recovery_open_cycle_when_preflight_started() {
+    fn classify_recovery_open_empty_preflight_when_nothing_followed() {
+        // `#recursive-repair-recovery-states`: a bare preflight_started cycle with
+        // no capture / response / pending mutation is an abandonable probe.
         let base = "---\nsession: test\n---\n\nHi\n";
         let (_dir, doc) = setup_git_project_with_doc(base);
         crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
         assert_eq!(
             classify_closeout_recovery_state(&doc),
+            CloseoutRecoveryState::OpenEmptyPreflight
+        );
+        let cmd = CloseoutRecoveryState::OpenEmptyPreflight
+            .recovery_command(&doc)
+            .unwrap();
+        assert!(cmd.contains("agent-doc cancel"), "{cmd}");
+    }
+
+    #[test]
+    fn classify_recovery_open_cycle_when_preflight_has_pending_mutations() {
+        // A preflight_started cycle that already did work (pending mutation) is a
+        // real open cycle to finish, not an abandonable empty probe.
+        let base = "---\nsession: test\n---\n\nHi\n";
+        let (_dir, doc) = setup_git_project_with_doc(base);
+        crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        crate::cycle_state::mark_pending_mutations(&doc).unwrap();
+        assert_eq!(
+            classify_closeout_recovery_state(&doc),
             CloseoutRecoveryState::OpenCycle
+        );
+    }
+
+    #[test]
+    fn classify_recovery_queue_metadata_drift_when_only_queue_differs() {
+        // `#recursive-repair-recovery-states`: snapshot differs from HEAD only by
+        // queue lines (a `queue` sync regeneration); exchange content identical.
+        let head = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n### Re: x — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n- do [#a]\n<!-- /agent:queue -->\n",
+        );
+        let snapshot = head.replace("- do [#a]\n", "- do [#a]\n- do [#b]\n");
+        let (_dir, doc) = setup_git_project_with_doc(head);
+        crate::cycle_state::start_preflight(&doc, Some(head), Some(head)).unwrap();
+        crate::snapshot::save(&doc, &snapshot).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(&snapshot), Some(&snapshot))
+            .unwrap();
+        assert_eq!(
+            classify_closeout_recovery_state(&doc),
+            CloseoutRecoveryState::QueueMetadataDrift
+        );
+    }
+
+    #[test]
+    fn classify_recovery_unsafe_user_content_drift_when_exchange_differs() {
+        // Real user/response content differs from HEAD → must not auto-commit.
+        let head = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n### Re: x — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n",
+        );
+        let snapshot = head.replace("Done.\n", "Done.\n\nReal unreviewed user content.\n");
+        let (_dir, doc) = setup_git_project_with_doc(head);
+        crate::cycle_state::start_preflight(&doc, Some(head), Some(head)).unwrap();
+        crate::snapshot::save(&doc, &snapshot).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(&snapshot), Some(&snapshot))
+            .unwrap();
+        assert_eq!(
+            classify_closeout_recovery_state(&doc),
+            CloseoutRecoveryState::UnsafeUserContentDrift
         );
     }
 

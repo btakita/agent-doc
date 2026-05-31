@@ -121,24 +121,113 @@ pub fn compute(doc: &Path) -> Result<Option<String>> {
     Ok(compute_with_current(doc)?.diff)
 }
 
-/// Wait for stable content by detecting truncated lines and rechecking.
+/// Wait for stable content using editor-authoritative buffer state when
+/// available, falling back to the truncation heuristic when no editor plugin
+/// is attached.
 ///
-/// When the user is mid-typing, the last added line may be incomplete.
-/// This function rechecks the file at short intervals until:
-/// - The last line appears complete (ends with terminal punctuation or newline)
-/// - The content hasn't changed between two consecutive rechecks
-/// - Maximum recheck attempts reached (prevents infinite loops)
+/// **Editor-authoritative path** (plugin attached): reads the
+/// [`EditorBufferState`] sidecar written by the IDE plugin via the FFI bridge.
+/// Waits until the editor reports a stable version/hash (dirty flag cleared or
+/// debounce elapsed), then reads the file content. If the editor state
+/// includes a content hash that matches the current file, returns immediately.
+///
+/// **Fallback path** (no plugin): uses the last-added-line / truncation
+/// heuristic. Rechecks the file at short intervals until the last line looks
+/// complete or content stabilises across consecutive reads.
 ///
 /// Returns the stable file content.
 pub fn wait_for_stable_content(doc: &Path, previous: &str) -> Result<String> {
+    let doc_str = doc.to_string_lossy().to_string();
+
+    // ── Editor-authoritative path ──
+    if let Some(state) = crate::debounce::editor_buffer_state(&doc_str) {
+        return wait_for_stable_content_editor(doc, &doc_str, &state);
+    }
+
+    // ── Fallback: truncation heuristic ──
+    wait_for_stable_content_truncation(doc, previous)
+}
+
+/// Editor-authoritative stability: wait for the editor plugin to report a
+/// stable buffer state, then read the file content.
+fn wait_for_stable_content_editor(
+    doc: &Path,
+    doc_str: &str,
+    initial_state: &crate::debounce::EditorBufferState,
+) -> Result<String> {
+    const EDITOR_DEBOUNCE_MS: u64 = 500;
+    const EDITOR_TIMEOUT_MS: u64 = 6000;
+
+    // If already stable (not dirty, or debounce elapsed), return immediately.
+    if let Some(stable) = crate::debounce::editor_buffer_stable(doc_str, EDITOR_DEBOUNCE_MS) {
+        let current = std::fs::read_to_string(doc)?;
+        if let Some(ref hash) = stable.hash {
+            let expected = crate::debounce::content_hash(&current);
+            if hash.eq_ignore_ascii_case(&expected) {
+                eprintln!(
+                    "[diff] Editor buffer stable (version={}, hash match), returning immediately",
+                    stable.version
+                );
+                return Ok(current);
+            }
+            eprintln!(
+                "[diff] Editor hash mismatch (editor={}, disk={}), using disk content",
+                &hash[..8.min(hash.len())],
+                &expected[..8.min(expected.len())],
+            );
+        }
+        eprintln!(
+            "[diff] Editor buffer stable (version={}, dirty={}), reading disk",
+            stable.version, stable.dirty
+        );
+        return Ok(current);
+    }
+
+    // Wait for editor stability within timeout.
+    eprintln!(
+        "[diff] Editor buffer not yet stable (version={}, dirty={}), waiting up to {}ms",
+        initial_state.version, initial_state.dirty, EDITOR_TIMEOUT_MS
+    );
+    if let Some(stable) =
+        crate::debounce::await_editor_buffer_stable(doc_str, EDITOR_DEBOUNCE_MS, EDITOR_TIMEOUT_MS)
+    {
+        let current = std::fs::read_to_string(doc)?;
+        eprintln!(
+            "[diff] Editor buffer stabilised (version={}, dirty={})",
+            stable.version, stable.dirty
+        );
+        if let Some(ref hash) = stable.hash {
+            let expected = crate::debounce::content_hash(&current);
+            if hash.eq_ignore_ascii_case(&expected) {
+                return Ok(current);
+            }
+            eprintln!(
+                "[diff] Editor hash mismatch after stabilise (editor={}, disk={}), using disk",
+                &hash[..8.min(hash.len())],
+                &expected[..8.min(expected.len())],
+            );
+        }
+        return Ok(current);
+    }
+
+    // Timeout — read whatever is on disk.
+    eprintln!(
+        "[diff] Editor buffer stability timeout, reading current disk content"
+    );
+    let current = std::fs::read_to_string(doc)?;
+    Ok(current)
+}
+
+/// Fallback: truncation-heuristic stability detection.
+///
+/// When no editor plugin is attached, rechecks the file at short intervals
+/// until the last added line looks complete or content stabilises.
+fn wait_for_stable_content_truncation(doc: &Path, previous: &str) -> Result<String> {
     const RECHECK_DELAY_MS: u64 = 500;
-    const MAX_RECHECKS: u32 = 12; // ~6 seconds max
-    const STABLE_CHECKS_REQUIRED: u32 = 3; // require 3 consecutive stable reads
+    const MAX_RECHECKS: u32 = 12;
+    const STABLE_CHECKS_REQUIRED: u32 = 3;
 
     let mut current = std::fs::read_to_string(doc)?;
-    // Track consecutive stable reads across outer iterations — content changes anywhere
-    // (even between outer iterations) must reset the counter so 3 truly consecutive
-    // stable reads are always required, not just 3 within a single outer pass.
     let mut stable_count = 0u32;
 
     for attempt in 0..MAX_RECHECKS {
@@ -154,7 +243,6 @@ pub fn wait_for_stable_content(doc: &Path, previous: &str) -> Result<String> {
                 MAX_RECHECKS,
                 truncate_for_log(line, 60)
             );
-            // Sleep then re-read; count consecutive identical reads across all iterations.
             std::thread::sleep(std::time::Duration::from_millis(RECHECK_DELAY_MS));
             let refreshed = std::fs::read_to_string(doc)?;
             if refreshed == current {
@@ -172,7 +260,6 @@ pub fn wait_for_stable_content(doc: &Path, previous: &str) -> Result<String> {
             }
             continue;
         }
-        // Line looks complete — no recheck needed
         break;
     }
 
@@ -626,5 +713,61 @@ mod tests {
             elapsed.as_millis() < 500,
             "should not delay for complete content"
         );
+    }
+
+    #[test]
+    fn wait_for_stable_content_uses_editor_state_when_available() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("editor-state")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+
+        let doc = dir.path().join("test-editor.md");
+        let content = "Hello from editor.\n";
+        std::fs::write(&doc, content).unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+
+        let state = crate::debounce::EditorBufferState {
+            path: doc_str.clone(),
+            version: 1,
+            dirty: false,
+            last_edit_timestamp_ms: now,
+            save_timestamp_ms: Some(now),
+            hash: Some(crate::debounce::content_hash(content)),
+            content_len: Some(content.len()),
+            session_id: None,
+        };
+        crate::debounce::record_editor_buffer_state(&state).unwrap();
+
+        let previous = "";
+        let start = std::time::Instant::now();
+        let result = wait_for_stable_content(&doc, previous).unwrap();
+        let elapsed = start.elapsed();
+
+        assert_eq!(result, content);
+        assert!(
+            elapsed.as_millis() < 500,
+            "editor-authoritative path should return immediately when stable"
+        );
+    }
+
+    #[test]
+    fn wait_for_stable_content_falls_back_without_editor_state() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+
+        let doc = dir.path().join("test-fallback.md");
+        let content = "Complete sentence.\n";
+        std::fs::write(&doc, content).unwrap();
+
+        let previous = "";
+        let result = wait_for_stable_content(&doc, previous).unwrap();
+        assert_eq!(result, content);
     }
 }

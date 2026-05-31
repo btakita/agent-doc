@@ -27,6 +27,12 @@
 //! - `agent_doc_document_changed(file_path)`: records a change event for debounce tracking.
 //! - `agent_doc_document_changed_digest(file_path, len, hash)`: records typing plus the latest
 //!   editor-visible buffer digest so CLI direct-disk writes can detect idle unsaved drift.
+//! - `agent_doc_report_editor_state(file_path, version, dirty, last_edit_ts, save_ts, hash, len, session_id)`:
+//!   records editor-authoritative buffer state for debounce/stability. When present,
+//!   `wait_for_stable_content` uses version/hash stability instead of the truncation heuristic.
+//! - `agent_doc_get_editor_state(file_path)`: returns the current editor buffer state as JSON.
+//! - `agent_doc_is_editor_stable(file_path, debounce_ms)`: returns whether the editor buffer is
+//!   stable (not dirty or debounce elapsed).
 //! - `agent_doc_is_tracked(file_path)`: returns whether at least one change event has been recorded
 //!   for the file.
 //! - `agent_doc_is_idle(file_path, debounce_ms)`: non-blocking check — returns `true` if no
@@ -341,6 +347,121 @@ pub unsafe extern "C" fn agent_doc_is_busy(file_path: *const c_char) -> i32 {
         Err(_) => return 0,
     };
     agent_doc_orchestration::debounce::is_busy(path) as i32
+}
+
+/// Report the current editor buffer state for a document.
+///
+/// IDE plugins call this on every document change to provide editor-authoritative
+/// buffer stability information. When present, `wait_for_stable_content` uses
+/// this state instead of the truncation heuristic (`extract_last_added_line`).
+///
+/// Parameters:
+/// - `file_path`: canonical document path
+/// - `version`: monotonic editor document version (incremented on each edit)
+/// - `dirty`: whether the buffer has unsaved changes
+/// - `last_edit_timestamp_ms`: Unix epoch milliseconds of the last edit
+/// - `save_timestamp_ms`: Unix epoch milliseconds of last save (0 if never saved)
+/// - `content_hash`: SHA-256 hex digest of the editor-visible buffer (null if unavailable)
+/// - `content_len`: byte length of the editor-visible buffer (-1 if unavailable)
+/// - `session_id`: editor session identifier (null if unavailable)
+///
+/// # Safety
+///
+/// `file_path` must be a valid, NUL-terminated UTF-8 string.
+/// `content_hash` and `session_id` may be null if unavailable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_report_editor_state(
+    file_path: *const c_char,
+    version: u64,
+    dirty: i32,
+    last_edit_timestamp_ms: u64,
+    save_timestamp_ms: u64,
+    content_hash: *const c_char,
+    content_len: i64,
+    session_id: *const c_char,
+) {
+    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let hash = if content_hash.is_null() {
+        None
+    } else {
+        unsafe { CStr::from_ptr(content_hash) }.to_str().ok().map(|s| s.to_string())
+    };
+    let len = if content_len < 0 {
+        None
+    } else {
+        usize::try_from(content_len).ok()
+    };
+    let sid = if session_id.is_null() {
+        None
+    } else {
+        unsafe { CStr::from_ptr(session_id) }.to_str().ok().map(|s| s.to_string())
+    };
+    let save_ts = if save_timestamp_ms == 0 {
+        None
+    } else {
+        Some(save_timestamp_ms as u128)
+    };
+    let state = agent_doc_orchestration::debounce::EditorBufferState {
+        path: path.to_string(),
+        version,
+        dirty: dirty != 0,
+        last_edit_timestamp_ms: last_edit_timestamp_ms as u128,
+        save_timestamp_ms: save_ts,
+        hash,
+        content_len: len,
+        session_id: sid,
+    };
+    if let Err(e) = agent_doc_orchestration::debounce::record_editor_buffer_state(&state) {
+        eprintln!("[ffi] editor state write failed for {path}: {e}");
+    }
+}
+
+/// Get the current editor buffer state for a document as JSON.
+///
+/// Returns a NUL-terminated JSON string with the editor buffer state fields,
+/// or null if no editor state has been recorded. Caller must free with
+/// `agent_doc_free_string`.
+///
+/// # Safety
+///
+/// `file_path` must be a valid, NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_get_editor_state(file_path: *const c_char) -> *mut c_char {
+    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return ptr::null_mut(),
+    };
+    match agent_doc_orchestration::debounce::editor_buffer_state(path) {
+        Some(state) => match serde_json::to_string(&state) {
+            Ok(json) => CString::new(json).unwrap().into_raw(),
+            Err(_) => ptr::null_mut(),
+        },
+        None => ptr::null_mut(),
+    }
+}
+
+/// Check if the editor buffer state indicates a stable (idle) document.
+///
+/// Returns `true` if the editor has reported buffer state and the buffer is
+/// stable (not dirty, or debounce elapsed). Returns `false` if still editing
+/// or no editor state exists.
+///
+/// # Safety
+///
+/// `file_path` must be a valid, NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_is_editor_stable(
+    file_path: *const c_char,
+    debounce_ms: i64,
+) -> i32 {
+    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return 0,
+    };
+    agent_doc_orchestration::debounce::editor_buffer_stable(path, debounce_ms as u64).is_some() as i32
 }
 
 /// Try to acquire the sync lock. Returns `true` if acquired, `false` if already held.

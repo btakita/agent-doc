@@ -12,6 +12,13 @@
 //!   editor drift before mutating the file on disk. The hash is derived from the file path string
 //!   via `DefaultHasher`.
 //!   Cross-process writes are best-effort and never block the caller.
+//! - Editor-authoritative buffer state: plugins report `EditorBufferState` through the FFI bridge
+//!   on every document change, including monotonic version, dirty flag, last-edit timestamp,
+//!   optional save timestamp, optional content hash, and optional session ID. This state is
+//!   persisted in `.agent-doc/editor-state/<hash>`. When present, `wait_for_stable_content`
+//!   uses version/hash stability instead of the `extract_last_added_line` / `looks_truncated`
+//!   heuristic, eliminating race classes where edits above the last inserted line are missed.
+//!   If no editor state exists, the fallback truncation heuristic is used.
 //! - `is_idle` / `await_idle` operate on in-process state (same process as the plugin).
 //! - `is_typing_via_file` / `await_idle_via_file` operate on the file-based indicator (CLI use).
 //! - Files with no recorded `document_changed` call are considered idle by `is_idle`; this
@@ -26,6 +33,13 @@
 //!   editor-visible buffer digest without passing full document content through FFI.
 //! - `live_buffer_diverges_from_content(file, content)` — returns the latest editor-visible
 //!   digest when it differs from the provided disk/expected content.
+//! - `record_editor_buffer_state(state: &EditorBufferState)` — persists editor-authoritative
+//!   buffer state (version, dirty, hash, timestamps) to `.agent-doc/editor-state/<hash>`.
+//! - `editor_buffer_state(file) -> Option<EditorBufferState>` — reads the latest state.
+//! - `editor_buffer_stable(file, debounce_ms) -> Option<EditorBufferState>` — returns the state
+//!   when the editor is idle (not dirty or debounce elapsed), `None` otherwise.
+//! - `await_editor_buffer_stable(file, debounce_ms, timeout_ms) -> Option<EditorBufferState>` —
+//!   blocks until stable or timeout; 100ms poll interval.
 //! - `is_idle(file, debounce_ms) -> bool` — `true` if elapsed ≥ `debounce_ms` or file untracked.
 //! - `is_tracked(file) -> bool` — `true` if at least one `document_changed` was recorded.
 //! - `await_idle(file, debounce_ms, timeout_ms) -> bool` — blocks until idle or timeout; 100 ms
@@ -167,6 +181,120 @@ pub struct LiveBufferSnapshot {
     pub len: usize,
     pub hash: String,
     pub timestamp_ms: u128,
+}
+
+/// Directory for editor buffer state sidecars, relative to project root.
+const EDITOR_STATE_DIR: &str = ".agent-doc/editor-state";
+
+/// Editor-authoritative buffer state reported by IDE plugins through the FFI bridge.
+///
+/// When an editor plugin is attached, it reports this state on every document
+/// change. The debounce/stability layer uses it instead of the truncation
+/// heuristic (`extract_last_added_line` + `looks_truncated`) to detect whether
+/// the user is still typing. This eliminates race classes where edits above the
+/// last inserted line are missed.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EditorBufferState {
+    pub path: String,
+    pub version: u64,
+    pub dirty: bool,
+    pub last_edit_timestamp_ms: u128,
+    pub save_timestamp_ms: Option<u128>,
+    pub hash: Option<String>,
+    pub content_len: Option<usize>,
+    pub session_id: Option<String>,
+}
+
+/// Record the latest editor buffer state for a document.
+///
+/// Called by IDE plugins via the FFI bridge on every document change.
+/// Persists to `.agent-doc/editor-state/<hash>` as JSON.
+pub fn record_editor_buffer_state(state: &EditorBufferState) -> std::io::Result<()> {
+    let state_path = editor_state_path(&state.path);
+    if let Some(parent) = state_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let encoded = serde_json::to_string(state)?;
+    std::fs::write(&state_path, encoded)
+}
+
+/// Return the latest editor buffer state for a document, if one has been recorded.
+pub fn editor_buffer_state(file: &str) -> Option<EditorBufferState> {
+    let path = editor_state_path(file);
+    let content = std::fs::read_to_string(path).ok()?;
+    let state: EditorBufferState = serde_json::from_str(&content).ok()?;
+    if state.path == file {
+        Some(state)
+    } else {
+        None
+    }
+}
+
+/// Check whether the editor buffer state indicates a stable (idle) document.
+///
+/// Returns `Some(stable_state)` when the editor plugin has reported a state
+/// where: the buffer is not dirty, or the last edit timestamp is older than
+/// `debounce_ms`, or the version/hash has been stable across consecutive reads.
+///
+/// Returns `None` when no editor state exists (plugin not attached) or when
+/// the editor is still actively editing.
+pub fn editor_buffer_stable(file: &str, debounce_ms: u64) -> Option<EditorBufferState> {
+    let state = editor_buffer_state(file)?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let elapsed_since_edit = now.saturating_sub(state.last_edit_timestamp_ms);
+    if !state.dirty || elapsed_since_edit >= debounce_ms as u128 {
+        Some(state)
+    } else {
+        None
+    }
+}
+
+/// Block until the editor buffer state indicates stability, or timeout.
+///
+/// Returns `Some(EditorBufferState)` when the editor buffer becomes stable
+/// within `timeout_ms`, or `None` on timeout / no editor state available.
+pub fn await_editor_buffer_stable(
+    file: &str,
+    debounce_ms: u64,
+    timeout_ms: u64,
+) -> Option<EditorBufferState> {
+    let start = Instant::now();
+    let timeout = std::time::Duration::from_millis(timeout_ms);
+    let poll_interval = std::time::Duration::from_millis(100);
+    loop {
+        if let Some(state) = editor_buffer_stable(file, debounce_ms) {
+            return Some(state);
+        }
+        if start.elapsed() >= timeout {
+            return None;
+        }
+        std::thread::sleep(poll_interval);
+    }
+}
+
+/// Compute the editor state sidecar path for a document.
+fn editor_state_path(file: &str) -> PathBuf {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    file.hash(&mut hasher);
+    let hash = hasher.finish();
+    let mut dir = PathBuf::from(file);
+    dir.pop();
+    loop {
+        if dir.join(".agent-doc").is_dir() {
+            return dir.join(EDITOR_STATE_DIR).join(format!("{:016x}", hash));
+        }
+        if !dir.pop() {
+            let parent = PathBuf::from(file)
+                .parent()
+                .unwrap_or(std::path::Path::new("."))
+                .to_path_buf();
+            return parent.join(EDITOR_STATE_DIR).join(format!("{:016x}", hash));
+        }
+    }
 }
 
 /// Write a typing indicator file for the given document path.
@@ -779,5 +907,175 @@ mod tests {
 
         // get_status delegates to file-based check — must find .agent-doc at project root
         assert_eq!(get_status_via_file(&doc_str), "generating");
+    }
+
+    // ── Editor Buffer State tests ──
+
+    #[test]
+    fn editor_buffer_state_records_and_reads() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state_dir = tmp.path().join(".agent-doc").join("editor-state");
+        std::fs::create_dir_all(&state_dir).unwrap();
+        let doc = tmp.path().join("test-editor-state.md");
+        std::fs::write(&doc, "test").unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+
+        let state = EditorBufferState {
+            path: doc_str.clone(),
+            version: 1,
+            dirty: true,
+            last_edit_timestamp_ms: 1000,
+            save_timestamp_ms: None,
+            hash: Some("abc123".to_string()),
+            content_len: Some(4),
+            session_id: None,
+        };
+        record_editor_buffer_state(&state).unwrap();
+
+        let read = editor_buffer_state(&doc_str).expect("should read state");
+        assert_eq!(read.version, 1);
+        assert!(read.dirty);
+        assert_eq!(read.hash.as_deref(), Some("abc123"));
+    }
+
+    #[test]
+    fn editor_buffer_state_returns_none_for_unknown() {
+        assert!(editor_buffer_state("/tmp/no-such-editor-state.md").is_none());
+    }
+
+    #[test]
+    fn editor_buffer_stable_when_not_dirty() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state_dir = tmp.path().join(".agent-doc").join("editor-state");
+        std::fs::create_dir_all(&state_dir).unwrap();
+        let doc = tmp.path().join("test-stable.md");
+        std::fs::write(&doc, "test").unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+
+        let state = EditorBufferState {
+            path: doc_str.clone(),
+            version: 5,
+            dirty: false,
+            last_edit_timestamp_ms: now,
+            save_timestamp_ms: Some(now),
+            hash: None,
+            content_len: None,
+            session_id: None,
+        };
+        record_editor_buffer_state(&state).unwrap();
+
+        let stable = editor_buffer_stable(&doc_str, 500).expect("should be stable");
+        assert_eq!(stable.version, 5);
+    }
+
+    #[test]
+    fn editor_buffer_stable_when_debounce_elapsed() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state_dir = tmp.path().join(".agent-doc").join("editor-state");
+        std::fs::create_dir_all(&state_dir).unwrap();
+        let doc = tmp.path().join("test-stable-debounce.md");
+        std::fs::write(&doc, "test").unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+
+        let old_ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+            - 2000;
+
+        let state = EditorBufferState {
+            path: doc_str.clone(),
+            version: 3,
+            dirty: true,
+            last_edit_timestamp_ms: old_ts,
+            save_timestamp_ms: None,
+            hash: Some("deadbeef".to_string()),
+            content_len: Some(10),
+            session_id: Some("jb-session-1".to_string()),
+        };
+        record_editor_buffer_state(&state).unwrap();
+
+        let stable = editor_buffer_stable(&doc_str, 500).expect("should be stable after debounce");
+        assert_eq!(stable.version, 3);
+        assert!(stable.dirty);
+        assert_eq!(stable.session_id.as_deref(), Some("jb-session-1"));
+    }
+
+    #[test]
+    fn editor_buffer_not_stable_while_editing() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state_dir = tmp.path().join(".agent-doc").join("editor-state");
+        std::fs::create_dir_all(&state_dir).unwrap();
+        let doc = tmp.path().join("test-not-stable.md");
+        std::fs::write(&doc, "test").unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+
+        let state = EditorBufferState {
+            path: doc_str.clone(),
+            version: 2,
+            dirty: true,
+            last_edit_timestamp_ms: now,
+            save_timestamp_ms: None,
+            hash: None,
+            content_len: None,
+            session_id: None,
+        };
+        record_editor_buffer_state(&state).unwrap();
+
+        assert!(editor_buffer_stable(&doc_str, 2000).is_none());
+    }
+
+    #[test]
+    fn editor_buffer_stable_returns_none_when_no_state() {
+        assert!(editor_buffer_stable("/tmp/no-state.md", 500).is_none());
+    }
+
+    #[test]
+    fn editor_buffer_state_overwrites_on_new_version() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state_dir = tmp.path().join(".agent-doc").join("editor-state");
+        std::fs::create_dir_all(&state_dir).unwrap();
+        let doc = tmp.path().join("test-overwrite.md");
+        std::fs::write(&doc, "test").unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+
+        let state_v1 = EditorBufferState {
+            path: doc_str.clone(),
+            version: 1,
+            dirty: true,
+            last_edit_timestamp_ms: 1000,
+            save_timestamp_ms: None,
+            hash: None,
+            content_len: None,
+            session_id: None,
+        };
+        record_editor_buffer_state(&state_v1).unwrap();
+
+        let state_v2 = EditorBufferState {
+            path: doc_str.clone(),
+            version: 2,
+            dirty: false,
+            last_edit_timestamp_ms: 2000,
+            save_timestamp_ms: Some(2000),
+            hash: Some("newhash".to_string()),
+            content_len: Some(20),
+            session_id: None,
+        };
+        record_editor_buffer_state(&state_v2).unwrap();
+
+        let read = editor_buffer_state(&doc_str).unwrap();
+        assert_eq!(read.version, 2);
+        assert!(!read.dirty);
+        assert_eq!(read.hash.as_deref(), Some("newhash"));
     }
 }

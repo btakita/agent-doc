@@ -36,12 +36,45 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 3 response topic(s): do #jb-run-agent-doc-busy-feedback-live-verify; JB error; OpenCode routing deadlock
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:e65cd3f6 -->
+
+### Re: do #opencode-reap-only-no-response-finalize-investigate — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#opencode-reap-only-no-response-finalize-investigate]
+
+
+Both questions answered from the ops log.
+
+#### Q1 — why a reap-only finalize with no response body
+
+It wasn't intentional — the OpenCode response was **rejected as malformed, twice**, while the queue/done bookkeeping still went through:
+
+```
+template_patchback_malformed_rejected source=run_stream markers=1 patches=0 reason=patch_markers_without_closed_blocks   (×2)
+... pre_write_guard blocked reason=pending_done_missing
+... pre_write_guard completed reason=visible_write_typing_apply:queue_consume
+queue_continuation_required head=[#sift-token-index]
+committed_without_response_body_guard_failed ... pending_done=1 reaped=1
+```
+
+The OpenCode agent emitted `<!-- patch:exchange -->` blocks **without the closing `<!-- /patch:exchange -->`** (`patch_markers_without_closed_blocks`), so the response was correctly discarded (`patches=0` — nothing captured). But the closeout still consumed the queue head and recorded `--done`/reap (`pending_done=1 reaped=1`). Result: a cycle with committed bookkeeping but no captured response body — which then fed the no-op-commit guard deadlock I fixed last turn.
+
+So this is the `patch:exchange`-needs-a-close-marker failure surfacing in the OpenCode path: the rejected response and the reap were **not coupled**, so the reap survived a discarded response.
+
+#### Q2 — what re-ran closeout every ~90s
+
+The long-running route-owned supervisor `agent-doc start --route-owned tasks/software/tsift.md` (pid 645383). It does a periodic reconcile commit (`commit_staging → commit_noop (already_current)`) roughly every 90–190s. That's cheap and benign — it was just the **amplifier** that turned the single wedged cycle into a visible ~90s interrupt loop. After the no-op-commit guard fix, those passes are clean (`commit_success` at 1780259315, then `commit_noop` with **no more `committed_without_response_body_guard_failed`**). Not a separate bug.
+
+#### Outcome
+
+The deadlock is fixed (last turn) and the upstream is now root-caused. Queued the actionable systemic fix `#rejected-response-must-block-queue-consume-and-done`: a malformed/rejected response must fail the same-cycle queue-consume + `--done` reap closed together, so a discarded response can never leave committed reap bookkeeping without a body (plus audit the OpenCode SKILL `patch:exchange` examples for the missing close marker). Marking this investigation done.
+<!-- agent:boundary:7e47447a -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#opencode-reap-only-no-response-finalize-investigate]
+- ~do [#opencode-reap-only-no-response-finalize-investigate]~
 - do [#opencode-active-turn-reopen-auto-retry-on-idle]
 - do [#recovery-drift-apply-live-verify]
 - do [#jb-run-agent-doc-command-route-miss]
@@ -63,12 +96,13 @@ preset #spec-test-build-install-commit-push
 <!-- /agent:queue -->
 ###
 <!--
-I ran JB `Run Agent Doc` when the tsift.md session was idle. The "opencode active turn" is false and this state is incorrect. How can we ensure an accurate state using hooks? Can we just use tmux to pass the `/agent-doc .../tsift.md` command regardless of the agent-doc tracking?
+JB `Run Agent Doc` reached the deadlock:
 ```
-[route] debounce OK — file idle for 1.4s and typing indicator idle
+[route] debounce OK — file idle for 0.5s and typing indicator idle
 [route] target tmux session: 0
-Error: dispatch-only opencode reopen refused to inject into pane %42 for tasks/software/tsift.md because the pane still shows opencode active turn; restore an idle prompt and retry
+Error: authoritative actor generation 244 for tasks/monsterrodholders.md owns pane %40 but dispatch-only route will not inject a new trigger because the authoritative actor is busy did not return to a dispatch-ready prompt in the current generation after waiting 8s. Wait for the active turn to finish before rerouting this document.
 ```
+#spec-test-build-install-commit-push
 ---
 Verify [#ipcfullprompt-recur2]
 ---
@@ -95,7 +129,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog priority queue=prepend -->
-- [ ] [#opencode-reap-only-no-response-finalize-investigate] [recommended] Investigate the upstream of the tsift.md committed_without_response_body deadlock (now fixed defensively): why did the OpenCode tsift.md run issue a finalize --done <id> with an empty response body (reap-only, no ### Re:), and what re-ran the closeout every ~90s (looks like a scheduled task touching .claude/scheduled_tasks.lock). The guard no longer deadlocks on the no-op commit, but the reap-only-no-response finalize + the 90s re-trigger cadence may still be wasteful. Lower priority than the live-verify items.
+- [ ] [#rejected-response-must-block-queue-consume-and-done] [recommended] Root-caused from #opencode-reap-only-no-response-finalize-investigate: when a closeout response patch is rejected as malformed (template_patchback_malformed_rejected reason=patch_markers_without_closed_blocks — unclosed <!-- patch:exchange --> with no <!-- /patch:exchange -->), the SAME closeout must NOT still proceed with queue-consume / --done reap. On tsift.md the OpenCode response was rejected twice, but the queue head was consumed and pending_done/reaped still committed, leaving a reap-only no-response cycle (the deadlock class just fixed defensively). Fix: fail the reap/queue-consume closed together with the rejected response so a malformed response cannot leave committed bookkeeping without a captured body. Also audit the installed OpenCode SKILL surface for patch:exchange examples missing the close marker (the likely trigger for the OpenCode agent emitting unclosed blocks).
 - [ ] [#opencode-active-turn-reopen-auto-retry-on-idle] [recommended] When a plain dispatch-only Run Agent Doc reopen is refused because the OpenCode (or Codex) pane shows an active turn, route currently fails closed and the operator must re-click once the turn ends. Optional refinement: watch the pane and auto-fire the bare reopen once it returns to a dispatch-ready/idle composer, so the operator does not have to retry manually. Must stay a plain reopen (no prompt to queue) and respect the existing no-inject-into-active-turn invariant. Lower priority than the live-verify items.
 - [ ] [#recovery-drift-apply-live-verify] [recommended] Live-verify the full one-command recovery (agent-doc repair --apply-recovery) on a real owner pane now that #recovery-drift-authoritative-side landed the authoritative-side determination: reproduce a queue_metadata_drift / sidecar_visible_drift closeout and confirm apply_closeout_recovery restores-from-HEAD for the spurious queue_active:false class and commits-forward otherwise, without the manual cancel->reset->commit sequence. Gated on a live owner pane (risky in a racy multi-session repo). Parent plan: tasks/agent-doc/plan-recursive-repair-state-drift.md.
 - [ ] [#repair-orphan-prefix-bug] Orphan-response repair path prefixes every body line with the user-prompt marker. Live repro 2026-05-31 tsift.md: direct Edit-based patchback triggered orphan repair, which applied the prefix to all assistant body lines. Fix: ensure orphan-repair preserves response body verbatim. Plan: tasks/agent-doc/plan-repair-orphan-prefix-bug.md. Related: #jb-compact-malformed-response-commit, #finalize-retry-ipc-response-duplication.

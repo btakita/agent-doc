@@ -4271,6 +4271,12 @@ pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapsho
     let mut baseline_fence_len = 3usize;
     let mut in_agent_block = false;
     let mut saw_deleted_heading = false;
+    // `#repair-orphan-prefix-bug`: track whether the scanner is inside an
+    // assistant `### Re:` block and whether that block had a body line deleted.
+    // A body REPLACEMENT (delete + insert) under an Equal heading is assistant
+    // content; a pure append after an unchanged response stays a user prompt.
+    let mut in_re_block = false;
+    let mut re_block_saw_body_delete = false;
     for change in diff.iter_all_changes() {
         let line = change.value().trim_end_matches('\n');
         let trimmed = line.trim();
@@ -4280,6 +4286,15 @@ pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapsho
         let was_in_fence = in_baseline_fence;
         if change.tag() == ChangeTag::Delete {
             saw_deleted_heading = !in_baseline_fence && is_heading;
+            if in_re_block
+                && !in_baseline_fence
+                && !is_heading
+                && !trimmed.is_empty()
+                && !trimmed.starts_with("<!--")
+                && fence_open(trimmed).is_none()
+            {
+                re_block_saw_body_delete = true;
+            }
             continue;
         }
         let heading_replaces_deleted_heading =
@@ -4299,6 +4314,12 @@ pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapsho
                 if heading_level(trimmed).is_some() {
                     in_agent_block =
                         change.tag() == ChangeTag::Insert && !heading_replaces_deleted_heading;
+                    // Track whether we are inside an assistant `### Re:` block so
+                    // that a body REPLACEMENT under an already-present (Equal)
+                    // heading is recognized as assistant content rather than a
+                    // user prompt (#repair-orphan-prefix-bug).
+                    in_re_block = trimmed.starts_with("### Re:");
+                    re_block_saw_body_delete = false;
                 } else if in_agent_block && trimmed.is_empty() {
                     // Blank assistant-response lines do not prove the following
                     // prose is user input. Only explicit prompt-run starts below
@@ -4310,15 +4331,29 @@ pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapsho
                 {
                     in_agent_block = false;
                 }
+                // A prompt-run start (or explicit `❯`) after the response body
+                // returns the scanner to user-owned transcript lines, ending the
+                // `### Re:` replacement window.
+                if in_re_block
+                    && (starts_targeted_prompt_repair_after_response(trimmed, true)
+                        || trimmed.starts_with('❯'))
+                {
+                    in_re_block = false;
+                    re_block_saw_body_delete = false;
+                }
             }
         }
         // A line is a fence delimiter if it opens a fence (fence_open), or closes the current
         // one (was_in_fence before update, and matches close pattern).
         let is_fence_delim = fence_open(trimmed).is_some()
             || (was_in_fence && fence_close(trimmed, baseline_fence_char, baseline_fence_len));
+        // Insert body lines that replace deleted body under an existing `### Re:`
+        // heading are assistant content (#repair-orphan-prefix-bug), not prompts.
+        let is_re_block_replacement = in_re_block && re_block_saw_body_delete;
         if change.tag() == ChangeTag::Insert
             && !in_baseline_fence
             && !in_agent_block
+            && !is_re_block_replacement
             && !heading_replaces_deleted_heading
             && !trimmed.is_empty()
             && !trimmed.starts_with('❯')
@@ -4326,7 +4361,7 @@ pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapsho
             && !is_fence_delim
         {
             user_added.insert(line.to_string());
-        } else if change.tag() == ChangeTag::Insert && in_agent_block {
+        } else if change.tag() == ChangeTag::Insert && (in_agent_block || is_re_block_replacement) {
             agent_inserted.insert(line.to_string());
         }
     }
@@ -15737,6 +15772,36 @@ scratch
         assert!(
             result.contains("Agent answer here."),
             "agent response should be preserved: {}",
+            result
+        );
+    }
+
+    #[test]
+    fn normalize_user_prompts_replaced_response_body_under_existing_heading_not_prefixed() {
+        // Regression #repair-orphan-prefix-bug: when an orphaned response is
+        // applied by replacing a placeholder body UNDER AN EXISTING `### Re:`
+        // heading (e.g. a direct Edit-based patchback swapping a "Hello world"
+        // placeholder for the real multi-line body), the heading line is Equal
+        // in the snapshot→baseline diff. The replacement body lines are Insert
+        // lines and must still be recognized as assistant-response body, not
+        // user prompts — they must NOT receive the `❯ ` prefix.
+        let snapshot = "<!-- agent:exchange patch=append -->\n❯ My question\n### Re: topic — opus-4-8\nHello world\n<!-- /agent:exchange -->\n";
+        let baseline = "<!-- agent:exchange patch=append -->\n❯ My question\n### Re: topic — opus-4-8\nReal answer line one.\nReal answer line two.\n<!-- /agent:exchange -->\n";
+        let content = "<!-- agent:exchange patch=append -->\n❯ My question\n### Re: topic — opus-4-8\nReal answer line one.\nReal answer line two.\n<!-- agent:boundary:xyz -->\n<!-- /agent:exchange -->\n";
+        let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
+        assert!(
+            !result.contains("❯ Real answer line one."),
+            "replaced response body line one must NOT get prefix: {}",
+            result
+        );
+        assert!(
+            !result.contains("❯ Real answer line two."),
+            "replaced response body line two must NOT get prefix: {}",
+            result
+        );
+        assert!(
+            result.contains("Real answer line one.") && result.contains("Real answer line two."),
+            "response body must be preserved verbatim: {}",
             result
         );
     }

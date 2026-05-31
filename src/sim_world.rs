@@ -86,6 +86,7 @@ enum SimCommand {
     RepairProjection,
     PromoteStartingPromptReady,
     BusyInterruptRecoveryReady,
+    RepairBusyProjectionWithReadyPrompt,
     SyncProtectedGrowthManual,
     SyncProtectedGrowthPassive,
     SyncProtectedGrowthFocusVisible,
@@ -320,6 +321,7 @@ struct Coverage {
     busy_dispatch_blocks: usize,
     closed_dispatch_blocks: usize,
     busy_interrupt_recoveries: usize,
+    busy_projection_ready_repairs: usize,
     stale_generation_blocks: usize,
     stale_pane_blocks: usize,
     missing_pane_blocks: usize,
@@ -412,6 +414,7 @@ impl Coverage {
         self.busy_dispatch_blocks += other.busy_dispatch_blocks;
         self.closed_dispatch_blocks += other.closed_dispatch_blocks;
         self.busy_interrupt_recoveries += other.busy_interrupt_recoveries;
+        self.busy_projection_ready_repairs += other.busy_projection_ready_repairs;
         self.stale_generation_blocks += other.stale_generation_blocks;
         self.stale_pane_blocks += other.stale_pane_blocks;
         self.missing_pane_blocks += other.missing_pane_blocks;
@@ -462,7 +465,7 @@ impl SimWorld {
         let mut rng = DeterministicRng::new(seed);
         let mut world = Self::new(seed);
         for _ in 0..steps {
-            let command = match rng.next_usize(45) {
+            let command = match rng.next_usize(46) {
                 0 => SimCommand::EditPrompt,
                 1 => SimCommand::EditLaterPrompt,
                 2 => SimCommand::AddMalformedBacklogItem,
@@ -502,6 +505,7 @@ impl SimWorld {
                 41 => SimCommand::SyncProtectedGrowthFocusVisible,
                 42 => SimCommand::SyncDetachableReplaceManual,
                 43 => SimCommand::SyncDetachableReplacePassive,
+                44 => SimCommand::RepairBusyProjectionWithReadyPrompt,
                 _ => SimCommand::SyncVisibleFocusPreserve,
             };
             world.apply(command)?;
@@ -707,6 +711,11 @@ impl SimWorld {
             }
             SimCommand::BusyInterruptRecoveryReady => {
                 if let Err(err) = self.recover_busy_interrupt_to_ready() {
+                    self.coverage.record_block(&err.to_string());
+                }
+            }
+            SimCommand::RepairBusyProjectionWithReadyPrompt => {
+                if let Err(err) = self.repair_busy_projection_with_ready_prompt() {
                     self.coverage.record_block(&err.to_string());
                 }
             }
@@ -1106,6 +1115,42 @@ impl SimWorld {
                 self.trace
             ),
         }
+    }
+
+    /// `#snrun` / `#run-agent-doc-stale-busy-replay`: a dispatch-only reroute
+    /// finds the authoritative actor projected `Busy`, but the live pane proves a
+    /// dispatch-ready prompt on the current generation — the busy/lease projection
+    /// is stale. Direct idle evidence repairs it: promote `Busy` -> `Ready` so the
+    /// next dispatch goes to the proven-ready pane instead of queuing into
+    /// `agent:queue auto`. Gated by the production predicate
+    /// `busy_projection_repaired_by_ready_prompt` (idle evidence repairs; a busy
+    /// projection WITHOUT a proven ready prompt stays fail-closed).
+    fn repair_busy_projection_with_ready_prompt(&mut self) -> Result<()> {
+        self.current_dispatch_pane()?;
+        if self.route.durable.lifecycle != SupervisorLifecycle::Busy {
+            bail!(
+                "stale busy projection repair requires Busy lifecycle; found {:?}; seed={} trace={:?}",
+                self.route.durable.lifecycle,
+                self.seed,
+                self.trace
+            );
+        }
+        // The pane proves a dispatch-ready prompt (prompt_ready=true); defer the
+        // promote-vs-fail-closed decision to the production predicate.
+        let repaired = agent_doc_orchestration::flow::routed_reopen::busy_projection_repaired_by_ready_prompt(
+            agent_doc_orchestration::flow::routed_reopen::ActorDispatchState::Busy,
+            true,
+        );
+        if !repaired {
+            bail!(
+                "production predicate refused stale busy projection repair; seed={} trace={:?}",
+                self.seed,
+                self.trace
+            );
+        }
+        self.transition_supervisor(self.route.durable.generation, SupervisorLifecycle::Ready)?;
+        self.coverage.busy_projection_ready_repairs += 1;
+        Ok(())
     }
 
     fn prove_dispatch_accepted(&mut self) -> Result<()> {
@@ -1968,6 +2013,62 @@ fn route_sim_promotes_starting_prompt_ready_before_dispatch() {
     assert_eq!(world.coverage.starting_prompt_promotions, 1);
     assert_eq!(world.coverage.route_dispatch_acceptances, 1);
     assert_eq!(world.coverage.route_dispatch_proofs, 1);
+}
+
+#[test]
+fn route_sim_repairs_stale_busy_projection_with_ready_prompt_then_dispatches() {
+    // #run-agent-doc-stale-busy-replay / #snrun: a dispatch-only reroute that
+    // finds the actor projected Busy but the live pane proving a dispatch-ready
+    // prompt must repair the stale projection and DISPATCH, not enqueue into
+    // agent:queue auto. Replays the stale-busy projection end-to-end through the
+    // SimWorld actor model (the pure predicate is unit-tested separately).
+    let mut world = SimWorld::new(2_026);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+
+    // Stale busy projection: the actor reports Busy, so a dispatch fails closed
+    // (queues) rather than dispatching.
+    world.apply(SimCommand::SupervisorBusy).unwrap();
+    world.apply(SimCommand::DispatchRoutePrompt).unwrap();
+    assert_eq!(
+        world.coverage.busy_dispatch_blocks, 1,
+        "a busy projection without a proven ready prompt must fail closed (queue)"
+    );
+    assert_eq!(world.coverage.route_dispatch_acceptances, 0);
+
+    // The live pane proves a dispatch-ready prompt on the current generation:
+    // direct idle evidence repairs the stale busy projection to Ready.
+    world
+        .apply(SimCommand::RepairBusyProjectionWithReadyPrompt)
+        .unwrap();
+    assert_eq!(world.coverage.busy_projection_ready_repairs, 1);
+
+    // After repair the reroute dispatches to the proven-ready pane instead of
+    // enqueuing.
+    world.apply(SimCommand::DispatchRoutePrompt).unwrap();
+    world.apply(SimCommand::ProveDispatchAccepted).unwrap();
+    assert_eq!(
+        world.coverage.route_dispatch_acceptances, 1,
+        "after the stale busy projection is repaired the prompt must dispatch, not enqueue"
+    );
+    assert_eq!(world.coverage.route_dispatch_proofs, 1);
+}
+
+#[test]
+fn route_sim_stale_busy_repair_requires_busy_lifecycle() {
+    // The repair is fail-closed: it only promotes a genuinely Busy projection.
+    // A Ready actor is not a stale-busy case, so the repair must be rejected
+    // (recorded as a block) and leave dispatch counts untouched.
+    let mut world = SimWorld::new(2_027);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    world
+        .apply(SimCommand::RepairBusyProjectionWithReadyPrompt)
+        .unwrap();
+    assert_eq!(
+        world.coverage.busy_projection_ready_repairs, 0,
+        "repair must not fire when the actor is not projected Busy"
+    );
 }
 
 #[test]

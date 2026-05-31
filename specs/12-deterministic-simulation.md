@@ -48,6 +48,7 @@ ObserveStalePane
 ObserveMissingPane
 DriftProjection
 RepairProjection
+RepairBusyProjectionWithReadyPrompt
 SyncProtectedGrowthManual
 SyncProtectedGrowthPassive
 SyncProtectedGrowthFocusVisible

@@ -2827,7 +2827,17 @@ fn queue_head_is_free_text_prompt(content: &str) -> Result<bool> {
     let Some(queue_head) = active_queue_head_text(content)? else {
         return Ok(false);
     };
-    if queue_prompt_done_id(&queue_head).is_some() {
+    // #free-text-queue-owner-consume: a head is id-backed (NOT free text, so it
+    // needs an explicit `--done`/`--pending-gate`/`--pending-edit` completion
+    // signal) only when the ENTIRE head resolves to a single id directive —
+    // `#id`, `[#id]`, or `do [#id]`. A free-text head that merely *mentions* a
+    // `#id` in prose — e.g. `Approve [#shoptiers]. What are #next-steps?` — is
+    // still free text and completes on being answered. The old `queue_prompt_done_id(..).is_some()`
+    // test matched any `#id` mention and wrongly left such heads un-strikable,
+    // hanging the auto-queue (they have no single id to `--done`).
+    if let Some(id) = queue_prompt_done_id(&queue_head)
+        && topic_resolves_to_exact_id(&queue_head, &id)
+    {
         return Ok(false);
     }
     if crate::diff::detect_queue_trigger(&queue_head) {
@@ -12388,6 +12398,37 @@ mod tests {
         // Inactive queue → no head → not free text.
         let inactive = doc.replace("queue_active: true", "queue_active: false");
         assert!(!queue_head_is_free_text_prompt(&inactive).unwrap());
+
+        // #free-text-queue-owner-consume: a free-text head that MENTIONS ids in
+        // prose (but is not a pure id directive) is still free text — it has no
+        // single id to `--done`, so it must complete on being answered. This is
+        // the live repro head from src/boost-client/tasks/monsterrodholders.md.
+        let id_mentioning = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- Approve [#shoptiers]. What are #next-steps?\n",
+            "- do [#foo]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert!(
+            queue_head_is_free_text_prompt(id_mentioning).unwrap(),
+            "a free-text head that merely mentions #ids must stay free text (consumable by being answered)"
+        );
+
+        // A leading action verb + bracketed id alone (`re [#id]`) is NOT a pure
+        // `#id`/`[#id]`/`do [#id]` directive, so it is treated as free text and
+        // completes on answer (it still has a single mentioned id, but the verb
+        // makes it prose, not a bare directive).
+        let verb_prefixed = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- Summarize the findings for #report and ship it\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert!(
+            queue_head_is_free_text_prompt(verb_prefixed).unwrap(),
+            "a prose head mentioning a single #id is still free text"
+        );
     }
 
     #[test]

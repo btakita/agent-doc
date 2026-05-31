@@ -3,7 +3,7 @@ agent_doc_session: fcad2407-3ace-4cfb-9fbf-134a6bc91181
 agent_doc_format: template
 agent_doc_write: crdt
 agent: codex
-claude_model: opus
+claude_model: claude-opus-4-6
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 prompt_presets:
@@ -25,7 +25,7 @@ prompt_presets:
 ### Session Summary
 
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/bf77544025b6498b4b3adb22564450277365202aaae611f028b3a133487cde76-20260511-032318.md`*
-<!-- agent:boundary:48604107 -->
+<!-- agent:boundary:2129357f -->
 <!-- /agent:exchange -->
 
 ## Queue

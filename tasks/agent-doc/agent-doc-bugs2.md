@@ -31,52 +31,17 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260531-193945.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260531-200812.md`*
 
 Compacted content:
-- Archived 1 response topic(s): do #recovery-drift-authoritative-side
+- Archived 1 response topic(s): JB Run Agent Doc on monsterrodholders.md
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-❯ When I call JB `Run Agent Doc` on monsterrodholders.md...nothing seems to happen. No UI feedback. No routing to the open session. Why?
-❯ #spec-test-build-install-commit-push
-
-### Re: JB Run Agent Doc on monsterrodholders.md — no UI feedback — opus-4-8
-
-I pulled the live route trace from `src/boost-client/.agent-doc/logs/ops.log`:
-
-```
-route_wait_for_ready_override file=tasks/monsterrodholders.md harness=codex timeout_secs=60
-route_authoritative_actor_starting_not_ready ... pane=%40 generation=244 actor_state=busy
-   supervisor_health=healthy runtime_state=busy prompt_ready=false
-   last_transition_reason=ipc_inject last_transition_caller=dispatch
-route_wait_for_ready_timeout ... elapsed_ms=60105 timeout_ms=60000
-```
-
-#### Why nothing happened
-
-The Codex pane (`%40`) that owns `monsterrodholders.md` was **mid-turn / busy** (`prompt_ready=false`). JB `Run Agent Doc` shells out `route --dispatch-only --plain-trigger --wait-for-ready 60`. Route waited 60s for the pane to reach a dispatch-ready prompt; it never did. With the actor still busy and **no prompt to queue** (a plain reopen), the action classifier downgraded to **`FocusOnly`** — route focused the pane but **did not inject** the reopen, and the `FocusOnly` arm returned `Ok` → **exit 0**. The JB plugin treats exit 0 as success and shows nothing. On top of that, the plugin had classified the busy case as *retryable*, so it would silently re-run (up to 4 × 60s ≈ 4 minutes) before any notification.
-
-Net: route silently focused-only and reported success → no routing, no feedback. Not a failure to invoke `agent-doc` — a **silent no-dispatch**.
-
-#### Fix (two parts)
-
-1. **Route** (`route.rs` / `routed_reopen.rs`): a plain dispatch-only reopen against a *busy* actor now **fails closed** with the busy-not-ready diagnostic (`route_dispatch_only_authoritative_actor_busy_focus_only_not_dispatched`) after focusing the pane, instead of returning silent success. New pure predicate `dispatch_only_focus_only_should_fail_closed(mode, state)` scopes it to `DispatchOnly + Busy` only (managed mode and non-busy blocker states keep focus-only).
-2. **JB plugin** (`TerminalUtil.kt`, v0.2.143): a `BUSY_RUNNING` (active-turn) failure now notifies the operator **immediately** ("session still running", with `agent-doc session status <file>` guidance) instead of silently re-waiting the ready timeout per retry. Only a still-booting `starting` pane stays a silent retry.
-
-So now: busy pane → route fails closed → the IDE Event Log shows a "session still running" notification right away.
-
-#### Verification
-
-`make check` + `./gradlew test` green. Rust regression `dispatch_only_focus_only_fails_closed_only_for_busy_actor`; Kotlin classifier tests updated (the live `gen 244 / pane %40` message now asserts `BUSY_RUNNING` + not-retried). Spec updated (README, SPEC, specs/08-session-routing). Both binaries rebuilt + installed; plugin **0.2.143** zips built — install `agent-doc-jetbrains-0.2.143-signed.zip` from disk to pick up the notification change.
-
-Closed `#jb-run-agent-doc-command-route-miss`; follow-up `#jb-run-agent-doc-busy-feedback-live-verify` to confirm the notification live on installed 0.2.143.
-<!-- agent:boundary:80c6da1b -->
+<!-- agent:boundary:ce0e65ef -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - do [#recovery-drift-apply-live-verify]
-- ~do [#recovery-drift-authoritative-side]~
 - do [#jb-run-agent-doc-command-route-miss]
 - do [#repair-orphan-prefix-bug]
 - do [#recursive-repair-apply]

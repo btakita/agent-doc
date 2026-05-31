@@ -36,7 +36,29 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 5 response topic(s): closeout-repair-churn; closeout repair queue state; JB Run Agent Doc busy-queue reports; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:5aeeb073 -->
+
+### Re: #spec-test-commit-push-deploy — opus-4-8
+
+Done — queue-item responses now copy the originating prompt. This response is the live demo: the blockquote just above was inserted by the binary, not typed by me.
+
+#### What changed
+
+When a closeout consumes one or more queue prompts, the binary embeds the full consumed prompt text as a `> **Queue prompt:**` blockquote immediately after this cycle's `### Re:` heading. It writes into **both** the document and the snapshot so the selective-commit boundary stays consistent (verified: `HEAD` carries the echo and the working tree is clean after a live finalize).
+
+Why the binary and not the skill: an auto/synthetic queue head is never typed into `agent:exchange`, so a consumed queue turn used to record only the answer with no trace of what it answered. Per the project's "all deterministic behavior in the binary" rule, the echo is a guaranteed, agent-independent document mutation rather than something the agent must remember to do.
+
+- **Location** — `plan_queue_prompt_consumption` (`write.rs`); helpers `format_consumed_prompt_echo` / `embed_consumed_prompt_in_response` / `locate_response_heading_offset`. The response heading is located by the captured response body's first line, falling back to the last non-code `### Re:` heading.
+- **Fail-safe** — injection is skipped (content unchanged) when the prompt is empty, the exchange/heading can't be located, the same echo already exists, or the prompt's first line already appears as an exchange line (a user typed it in directly — no double-echo, e.g. the manual `❯ do #fix1` case).
+- **Verbatim** — multi-line prompts and fenced code are quoted as-is ("let's try copying the entire prompt"). The echo lands before the trailing boundary marker, so it is committed history and is never re-detected as an unresolved tail prompt.
+
+#### Verify / deploy
+
+- Tests: added `finalize_echoes_consumed_free_text_queue_prompt_into_response`; updated `finalize_consumes_synthetic_queue_prompt_when_response_topic_targets_head_id` and the two `run_*_queue_continues_until_drained` tests to be queue-scoped (prompt drains from the queue, echo appears in the response). Full workspace `cargo test` + `cargo clippy` green.
+- Spec: `specs/07-orchestration-commands.md` documents the `#queue-prompt-echo-in-response` invariant.
+- Deploy: `cargo build --release` + `cargo install --path .` (both binaries refreshed); committed + pushed in `src/agent-doc` (`c030760e`) with the superproject pointer bump (`6ca3ae899`).
+
+Note: this head carries a trailing `#spec-test-commit-push-deploy` tag, so it consumes as a synthetic/preset head — the response heading had to resolve to exactly that id to strike it, which is existing behavior. Follow-up `[#queue-prompt-echo-summary]` queued for summarizing long prompts.
+<!-- agent:boundary:110f809d -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -101,6 +123,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#queue-prompt-echo-summary] [recommended] Summarize long consumed queue prompts in the #queue-prompt-echo-in-response echo instead of copying verbatim. Current behavior embeds the entire prompt as a > **Queue prompt:** blockquote after the response heading; for long prompts a bounded summary plus a pointer to the full queue text would keep the exchange readable. Add a length threshold + summarization path (the user explicitly deferred this: 'for now, let's try copying the entire prompt').
 - [ ] [#completed-queue-residue-regression] [recommended] Completed queue items can still remain visible in agent:queue after the turn is finished, despite the archived #drained-done-queue-clear fix. Treat as a regression/uncovered route or IPC path: add a committed-state guard for provable completed queue residue, audit finalize/write/preflight/run continuation drain ordering, and verify live editor/snapshot/HEAD convergence. Plan: tasks/agent-doc/plan-completed-queue-residue-regression.md.
 - [ ] [#stash-pane-promote-on-focus] [recommended] A live-owner pane residing in the stash tmux window must be promoted/reparented into the 0:agent-doc window when the document is focused/selected, not merely selected in place. Live repro 2026-05-30 agent-doc-bugs2.md: pane %8 (live owner) is stuck in the stash window; focus/select does not move it. The focus live-owner fix (submodule e6dafa52) now selects the correct pane but does not reparent it. Tied to #cross-project-stash-pane-condition and #plugin-cleanup-menu-command.
 - [ ] [#do-id-partial-closeout-state] [recommended] `do [#id]` partial closeouts must rewrite or gate the remaining state instead of leaving a stale open item/queue head. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `do [#shoplabels]. #spec-test-commit-push` completed repo-backed feed-label code/tests/spec/commits/pushes, but deploy + GfW feed sync + live Ads label coverage remained; `#shoplabels` correctly stayed open, but the backlog/queue still looked like the original full task and the user had to ask whether it was done. Require `--pending-edit`, `--pending-gate`, or a typed stays-open marker for partial `do [#id]` closeout. Plan: tasks/agent-doc/plan-do-id-partial-closeout-state.md.

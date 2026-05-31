@@ -388,6 +388,48 @@ Auto-trigger provenance is lifecycle-bound to a single restart iteration:
 
 This keeps the existing `.agent-doc/logs/<session>.log` contract intact for any downstream tooling (`agent-doc logs`, dashboards) and avoids a second log file to rotate.
 
+### Idle-queue watch (`#jb-run-agent-doc-busy-queue-dispatch-deadlock`)
+
+When a busy-pane `Run Agent Doc` route cannot inject into an active turn, it
+appends the prompt to `agent:queue auto`, sets `queue_active: true`, and returns
+`Ok` (`route.rs` `AuthoritativeActorDispatchAction::DispatchOnlyBusyQueue`). The
+drain is otherwise harness-delegated: the Codex `Stop` hook drains on turn-end,
+and Claude relies on `/loop` or a manual re-trigger. A Claude session not running
+`/loop` therefore has no guaranteed drain, so the queued head can sit forever —
+the operator-perceived "deadlock" that forces an agent restart.
+
+The supervisor closes that gap with a long-lived **idle-queue watch** thread,
+distinct from the one-shot restart auto-trigger:
+
+- It runs for the whole child lifetime (spawned next to the auto-trigger,
+  cancelled + joined on child exit), polling on the same
+  `AUTO_TRIGGER_POLL_INTERVAL`.
+- The drainable head is the shared `queue_continuation::live_continuation_head`
+  definition: frontmatter `queue_active: true`, an active `resolve_activation`,
+  and a ready prompt head. Inactive-residue queues (`queue_active: false`) are
+  never drained.
+- The drain decision is the pure, deterministically tested
+  `idle_queue_drain_decision(prompt_visible, active_head, last_dispatched)`:
+  - `Dispatch` only on a busy→idle transition (`prompt_visible`) with an active
+    head that differs from the last one dispatched.
+  - `SkipNotIdle` whenever the pane is mid-turn — the same
+    no-inject-into-active-turn invariant the route busy path enforces.
+  - `SkipAlreadyDispatched` dedups a head that is still present after a dispatch
+    (cycle not yet consumed, or the dispatch failed to drain), so a stuck head
+    cannot hot-loop the watch every idle tick.
+  - `SkipNoActiveHead` clears the dedup so a later re-enqueue of the same prompt
+    text fires again.
+- On `Dispatch` it injects the harness trigger (`agent-doc <FILE>`) through the
+  same `auto_trigger_inject_command` path (capability-proof gated, actor marked
+  `busy` before bytes), which re-runs preflight and consumes the queue head. A
+  failed inject is not recorded as dispatched, so it retries on the next idle
+  tick. Successful drains log `idle_queue_watch_drain`; failures log
+  `idle_queue_watch_drain_failed`.
+
+Live end-to-end verification (a real busy Codex/Claude pane returning to idle and
+draining the route-appended head with no duplicate injection into the active
+turn) stays operator-gated.
+
 ## Dependencies to Add
 
 - `portable-pty` — pty allocation. Supports Unix pty + Windows ConPTY under one API, which we need because Windows is a supported target.

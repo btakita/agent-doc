@@ -318,6 +318,58 @@ impl AutoTriggerMonitor {
     }
 }
 
+/// Decision for the supervisor idle-queue watch
+/// (`#jb-run-agent-doc-busy-queue-dispatch-deadlock`).
+///
+/// When a busy-pane `Run Agent Doc` route enqueues a prompt into `agent:queue
+/// auto` and returns `Ok`, the drain is harness-delegated. A Claude session not
+/// actively running `/loop` has no guaranteed idle-drain trigger, so the queued
+/// head can sit forever (the operator-perceived "deadlock"). The supervisor
+/// already watches the owned pane for an idle harness prompt for the one-shot
+/// restart auto-trigger; this watch reuses that idle signal to drain a live
+/// active-queue head on the busy→idle transition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IdleQueueDrainDecision {
+    /// Inject the harness trigger so the next cycle drains the active queue head.
+    Dispatch,
+    /// The pane is still busy on an active turn — never inject (no-inject-into-active-turn).
+    SkipNotIdle,
+    /// No active `queue_active: true` head remains to drain.
+    SkipNoActiveHead,
+    /// This exact head was already dispatched and has not advanced/drained yet —
+    /// suppress re-firing so a stuck head cannot spin the watch into a hot loop.
+    SkipAlreadyDispatched,
+}
+
+/// Pure idle-queue drain decision. Kept side-effect free so the busy→idle drain
+/// state machine is deterministically testable without a live pane.
+///
+/// `prompt_visible` is the supervisor's idle signal (a dispatch-ready harness
+/// prompt is on screen). `active_head` is the live `queue_active: true` ready
+/// head (`queue_continuation::live_continuation_head`), and `last_dispatched`
+/// is the head this watch last injected a trigger for.
+fn idle_queue_drain_decision(
+    prompt_visible: bool,
+    active_head: Option<&str>,
+    last_dispatched: Option<&str>,
+) -> IdleQueueDrainDecision {
+    match active_head {
+        // No active head: nothing to drain. The caller clears `last_dispatched`
+        // so a future re-enqueue of the same prompt text fires again.
+        None => IdleQueueDrainDecision::SkipNoActiveHead,
+        // Never inject while the pane is mid-turn — that is the
+        // no-inject-into-active-turn invariant the route busy path enforces.
+        Some(_) if !prompt_visible => IdleQueueDrainDecision::SkipNotIdle,
+        // Dedup against the head we already fired for. A head that is still
+        // present after we dispatched (dispatch failed, or the cycle has not
+        // consumed it yet) must not be re-fired every idle tick.
+        Some(head) if last_dispatched == Some(head) => {
+            IdleQueueDrainDecision::SkipAlreadyDispatched
+        }
+        Some(_) => IdleQueueDrainDecision::Dispatch,
+    }
+}
+
 #[derive(Debug, Default)]
 struct FailedResumeTracker {
     events: VecDeque<Instant>,
@@ -1385,6 +1437,108 @@ fn spawn_auto_trigger_thread(
             }
         })
         .expect("spawn auto-trigger thread")
+}
+
+/// Read the live `queue_active: true` ready head for the owned document, if any.
+///
+/// Thin wrapper over [`crate::queue_continuation::live_continuation_head`] so the
+/// idle-watch and the codex-stop / preflight continuation paths all derive the
+/// drainable head from one shared definition (`queue_active: true` + an active
+/// `resolve_activation` + a ready prompt head).
+fn idle_watch_active_queue_head(file: &Path) -> Option<String> {
+    let content = std::fs::read_to_string(file).ok()?;
+    crate::queue_continuation::live_continuation_head(file, &content)
+}
+
+/// Long-lived idle-queue watch thread for the supervisor
+/// (`#jb-run-agent-doc-busy-queue-dispatch-deadlock`).
+///
+/// Unlike [`spawn_auto_trigger_thread`] (a one-shot restart continuation), this
+/// watch runs for the whole child lifetime. On every busy→idle transition it
+/// drains a live `agent:queue auto` head — including one a busy-pane
+/// `Run Agent Doc` route appended via `enqueue_route_dispatch_prompt` — by
+/// injecting the harness trigger (`agent-doc <FILE>`), which re-runs preflight
+/// and consumes the queue head. It is the supervisor-owned drain guarantee the
+/// route busy path lacked: route enqueues + returns `Ok`, this thread fires the
+/// dispatch once the pane goes idle so the queued prompt is never stranded.
+///
+/// Invariants:
+/// - Never injects while the pane is mid-turn (no-inject-into-active-turn).
+/// - Dedups on the head text so a stuck/undrained head cannot hot-loop.
+/// - Respects the managed capability-proof gate, same as the auto-trigger.
+fn spawn_idle_queue_watch_thread(
+    shared: Arc<SupervisorShared>,
+    stop: Arc<AtomicBool>,
+    file: String,
+    harness: crate::harness::HarnessConfig,
+    mut session_log: Option<std::fs::File>,
+) -> std::thread::JoinHandle<()> {
+    std::thread::Builder::new()
+        .name("idle-queue-watch".into())
+        .spawn(move || {
+            let path = PathBuf::from(&file);
+            let mut last_dispatched: Option<String> = None;
+            loop {
+                if !sleep_with_stop(&stop, AUTO_TRIGGER_POLL_INTERVAL) {
+                    return;
+                }
+                // Gate on the managed capability proof exactly like the
+                // auto-trigger: never dispatch before network/SSH/write-root
+                // proof clears for a managed Codex launch.
+                if shared.capability_proof_gate() == CapabilityProofGate::Pending {
+                    continue;
+                }
+                let active_head = idle_watch_active_queue_head(&path);
+                let prompt_visible = current_child_prompt_visible(&shared, &harness);
+                match idle_queue_drain_decision(
+                    prompt_visible,
+                    active_head.as_deref(),
+                    last_dispatched.as_deref(),
+                ) {
+                    IdleQueueDrainDecision::Dispatch => {
+                        let head = active_head.expect("dispatch implies an active head");
+                        let trigger_cmd = harness.trigger_command(&file);
+                        match auto_trigger_inject_command(&shared, &stop, &trigger_cmd) {
+                            AutoTriggerOutcome::Sent => {
+                                last_dispatched = Some(head);
+                                log_event(
+                                    &mut session_log,
+                                    &format!(
+                                        "idle_queue_watch_drain harness={} cmd=\"{}\"",
+                                        harness.binary, trigger_cmd
+                                    ),
+                                );
+                                eprintln!(
+                                    "[agent-doc] idle-queue watch: drained active queue head via {}",
+                                    trigger_cmd
+                                );
+                            }
+                            AutoTriggerOutcome::Cancelled => return,
+                            outcome => {
+                                // Do NOT record the head: a failed inject must be
+                                // retried on the next idle tick, not suppressed.
+                                log_event(
+                                    &mut session_log,
+                                    &format!(
+                                        "idle_queue_watch_drain_failed harness={} outcome={}",
+                                        harness.binary,
+                                        outcome.as_str()
+                                    ),
+                                );
+                            }
+                        }
+                    }
+                    IdleQueueDrainDecision::SkipNoActiveHead => {
+                        // Head drained (or never present): clear dedup so a later
+                        // re-enqueue of the same prompt text fires again.
+                        last_dispatched = None;
+                    }
+                    IdleQueueDrainDecision::SkipNotIdle
+                    | IdleQueueDrainDecision::SkipAlreadyDispatched => {}
+                }
+            }
+        })
+        .expect("spawn idle-queue watch thread")
 }
 
 fn spawn_managed_capability_proof_thread(
@@ -2970,6 +3124,23 @@ pub fn run_with_reap_policy(
             auto_trigger_thread = Some((trigger_stop, handle));
         }
 
+        // Idle-queue watch (#jb-run-agent-doc-busy-queue-dispatch-deadlock):
+        // a long-lived sibling of the one-shot auto-trigger that drains a live
+        // `agent:queue auto` head (e.g. a busy-pane `Run Agent Doc` route
+        // enqueue) on each busy→idle transition, so the queued prompt is never
+        // stranded waiting for a harness-delegated drain that never comes.
+        let idle_watch_stop = Arc::new(AtomicBool::new(false));
+        let idle_watch_thread = {
+            let watch_log = session_log.as_ref().and_then(|f| f.try_clone().ok());
+            spawn_idle_queue_watch_thread(
+                shared.clone(),
+                idle_watch_stop.clone(),
+                file.to_string_lossy().to_string(),
+                harness.clone(),
+                watch_log,
+            )
+        };
+
         // Block until child exits
         let status = session
             .wait()
@@ -2979,6 +3150,7 @@ pub fn run_with_reap_policy(
         if let Some((stop, _)) = auto_trigger_thread.as_ref() {
             stop.store(true, Ordering::Relaxed);
         }
+        idle_watch_stop.store(true, Ordering::Relaxed);
         writer_stop_flag.store(true, Ordering::Relaxed);
 
         // Stop the stdin→pty writer thread so stdin is free for the restart
@@ -2988,6 +3160,7 @@ pub fn run_with_reap_policy(
         if let Some((_, handle)) = auto_trigger_thread.take() {
             let _ = handle.join();
         }
+        let _ = idle_watch_thread.join();
         if ctrl_d_flag.load(Ordering::Relaxed) {
             shared.ctrl_d_forwarded.store(true, Ordering::Relaxed);
         }
@@ -4604,6 +4777,60 @@ Done.
         assert!(clean_exit_before_prompt_seen(false, false));
         assert!(!clean_exit_before_prompt_seen(false, true));
         assert!(!clean_exit_before_prompt_seen(true, false));
+    }
+
+    // #jb-run-agent-doc-busy-queue-dispatch-deadlock: the supervisor idle-queue
+    // watch must drain a live active-queue head on the busy→idle transition,
+    // never inject mid-turn, and never hot-loop on a stuck head.
+    #[test]
+    fn idle_queue_drain_dispatches_when_idle_with_fresh_active_head() {
+        assert_eq!(
+            idle_queue_drain_decision(true, Some("do [#a]"), None),
+            IdleQueueDrainDecision::Dispatch
+        );
+    }
+
+    #[test]
+    fn idle_queue_drain_skips_when_pane_busy_even_with_active_head() {
+        // No-inject-into-active-turn: a busy pane (no dispatch-ready prompt)
+        // never receives an injected trigger, mirroring the route busy path.
+        assert_eq!(
+            idle_queue_drain_decision(false, Some("do [#a]"), None),
+            IdleQueueDrainDecision::SkipNotIdle
+        );
+    }
+
+    #[test]
+    fn idle_queue_drain_skips_when_no_active_head() {
+        assert_eq!(
+            idle_queue_drain_decision(true, None, None),
+            IdleQueueDrainDecision::SkipNoActiveHead
+        );
+        assert_eq!(
+            idle_queue_drain_decision(false, None, Some("do [#a]")),
+            IdleQueueDrainDecision::SkipNoActiveHead
+        );
+    }
+
+    #[test]
+    fn idle_queue_drain_dedups_already_dispatched_head() {
+        // The head we already fired for is still present (cycle has not consumed
+        // it yet, or the dispatch failed to drain) — suppress re-firing so a
+        // stuck head cannot spin the watch every idle tick.
+        assert_eq!(
+            idle_queue_drain_decision(true, Some("do [#a]"), Some("do [#a]")),
+            IdleQueueDrainDecision::SkipAlreadyDispatched
+        );
+    }
+
+    #[test]
+    fn idle_queue_drain_fires_again_when_head_advances() {
+        // A different head than the last dispatched one re-fires — the queue
+        // advanced to a new prompt that still needs an idle drain.
+        assert_eq!(
+            idle_queue_drain_decision(true, Some("do [#b]"), Some("do [#a]")),
+            IdleQueueDrainDecision::Dispatch
+        );
     }
 
     #[test]

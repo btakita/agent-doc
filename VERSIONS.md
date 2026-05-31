@@ -6,6 +6,36 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Supervisor idle-queue watch drains route-enqueued busy-queue heads
+  (`#jb-run-agent-doc-busy-queue-dispatch-deadlock`).** When a busy-pane
+  `Run Agent Doc` route appends a prompt to `agent:queue auto` and returns `Ok`,
+  the drain was harness-delegated and a Claude session not running `/loop` had no
+  guaranteed trigger, so the queued head could sit forever (operator-perceived
+  "deadlock"). The supervisor now runs a long-lived idle-queue watch alongside
+  the one-shot restart auto-trigger: on each busy→idle transition it drains a
+  live `queue_active: true` ready head (shared
+  `queue_continuation::live_continuation_head`) by injecting the harness trigger
+  through the existing capability-gated `auto_trigger_inject_command` path. The
+  drain decision is the pure, tested `idle_queue_drain_decision` — dispatch only
+  when idle with a fresh head, never inject mid-turn (no-inject-into-active-turn),
+  dedup a still-present head to avoid hot-looping, and clear the dedup once the
+  head drains. Regressions: `idle_queue_drain_dispatches_when_idle_with_fresh_active_head`,
+  `idle_queue_drain_skips_when_pane_busy_even_with_active_head`,
+  `idle_queue_drain_skips_when_no_active_head`,
+  `idle_queue_drain_dedups_already_dispatched_head`,
+  `idle_queue_drain_fires_again_when_head_advances`. Live end-to-end verification
+  on a real busy Codex/Claude pane stays operator-gated.
+- **JetBrains Run Agent Doc retries busy actor wait timeouts.** When
+  `agent-doc route --dispatch-only --wait-for-ready` waits behind an
+  authoritative actor that is busy because another operator command is still
+  draining, the CLI can fail with "dispatch-only route will not inject ... the
+  authoritative actor is busy did not return to a dispatch-ready prompt". The
+  JetBrains action now classifies that timeout as a retryable still-running
+  route outcome instead of a persistent failure, so the existing retry loop can
+  catch the actor when it becomes ready shortly after the first 60s wait.
+  Regression: `dispatch-only busy actor wait timeout is retryable not
+  persistent failure`. JetBrains plugin bumped to `0.2.142` and installed into
+  the local IDEA 2026.1 profiles.
 - **Binary-owned auto-queue continuation final gate (`#codex-auto-queue-stalled-final-gate`).**
   Codex auto-queue continuation previously depended on the `codex-stop` hook finding
   tracked in-memory session state, which the live failure (`monsterrodholders.md`

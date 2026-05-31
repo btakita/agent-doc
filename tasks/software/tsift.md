@@ -30,110 +30,28 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260531-154043.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260531-163348.md`*
 
 Compacted content:
-- Archived 3 response topic(s): tsift memory harness support; next-steps for token efficiency + graph/neighborhood performance; queue cleanup
+- Archived 6 response topic(s): queue; queue re-activation; fix preexisting warnings; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
-### Re: queue — terse-graph-serial through terse-health-scores — glm-5.1
-
-All 12 queue items implemented, tested, built, installed, committed, and pushed to tsift main (`2bdec90`).
-
-**Completed items:**
-
-| ID | Change | Package |
-|---|---|---|
-| `#terse-graph-serial` | `TerseGraphNode`, `TerseGraphEdge`, `TerseGraphSubgraph` — strip provenance/freshness, keep id/kind/label/properties | tsift-core |
-| `#terse-diagnostics` | `TerseDiagnostic` struct with `code`/`index` fields for compact SQLite query plan codes | tsift-sqlite |
-| `#terse-search-hit` | `TerseSearchHit` — strips budget/freshness/provenance/coverage from SearchHit | tsift-search |
-| `#terse-health-scores` | `TerseHealthReport`/`TerseHealthScore` — top-N/bottom-N envelope output | tsift-algorithms |
-| `#graph-default-edge-lookup` | Override `edge()` with indexed `edge_key` lookup in libsql backend | tsift-libsql |
-| `#graph-counts-full-scan` | Override `graph_counts()` with `COUNT(*)` queries in libsql backend | tsift-libsql |
-| `#neighborhood-per-edge-node` | Batch node ID resolution per depth level in default `neighborhood()` | tsift-core |
-| `#shortest-path-depth-walk` | Store `(depth, parent_id)` tuples in BFS — eliminates O(depth) parent walk | tsift-core |
-| `#louvain-scaling` | Pre-compute `ki_in` per node; update incrementally on community moves | tsift-graph |
-| `#health-reachability` | Replace per-node BFS with SCC condensation + DAG BFS | tsift-algorithms |
-| `#edges-between-chunks` | Temp table + EXISTS subqueries for `edges_between_nodes` in SQLite | tsift-sqlite |
-| `#duplicate-callers-fetch` | Fetch callers/callees once, reuse for both display and combined JSON | tsift-cli |
-
-**Verification:** `cargo test` — all 47 package tests pass (tsift-core, tsift-search, tsift-graph, tsift-algorithms, tsift-sqlite, tsift-libsql, tsift-index, tsift-quality, tsift-cli, and reexports). `cargo build --release` + `cargo install --path .` — installed to `~/.cargo/bin/tsift`. Committed as `2bdec90`, pushed to `origin/main`.
-
-### Re: queue re-activation — all 12 items verified — glm-5.1
-
-Queue re-activated with 12 items. All were already implemented and pushed in commit `2bdec90` (552 insertions across 8 packages). Verified:
-
-- **Code**: `TerseGraphNode`/`TerseGraphEdge`/`TerseGraphSubgraph` (tsift-core), `TerseDiagnostic` (tsift-sqlite), `TerseSearchHit` (tsift-search), `TerseHealthReport`/`TerseHealthScore` (tsift-algorithms), `edge_key` indexed lookup (tsift-libsql), `graph_counts()` with `COUNT(*)` (tsift-libsql), `(depth, parent_id)` BFS tuples (tsift-core), `ki_in` cache (tsift-graph), SCC condensation (tsift-algorithms), temp table + EXISTS (tsift-sqlite), caller/callee reuse (tsift-cli)
-- **Tests**: `cargo test` — all pass
-- **Commit**: `2bdec90` on `origin/main`
-
-All 12 backlog items already resolved.
-Fix the preexisting warnings.
-
-### Re: fix preexisting warnings — glm-5.1
-
-Fixed both warnings:
-
-1. **`post_exchange_comment_prompt_preset`**: Removed orphaned `#next-steps` HTML comment block outside `agent:exchange`. These prompts were already addressed in the prior queue run.
-
-2. **`preset_item_id_collision`**: Removed duplicate icebox entries (`#full-e2e-verify`, `#npm-auth-setup`, `#npm-publish-verify`) that already exist in `agent:review` with the same IDs. Review is the authoritative tracker; icebox duplicates caused ambiguous `do #id` resolution.
-What are #next-steps to improve token efficiency along with graph + neighborhood performance & effectiveness.
-
-### Re: #next-steps — token efficiency + graph/neighborhood performance — glm-5.1
-
-Analyzed the full tsift codebase post-`2bdec90`. 10 follow-up items added to backlog in priority order:
-
-#### Token Efficiency
-| # | ID | Impact |
-|---|---|---|
-| 1 | `#terse-ultra-mode` | 25-40% token savings — strip properties, truncate snippets, compact coverage snapshot |
-| 5 | `#terse-health-early-exit` | 30% health compute — stop after top/bottom N, skip sub-metrics |
-| 7 | `#compact-community-serialization` | 40-60% community JSON — TerseCommunityMember with name only |
-
-#### Graph Performance
-| # | ID | Impact |
-|---|---|---|
-| 2 | `#libsql-pushdown-edge-incident` | 10-50x edge lookup — indexed queries in libsql (parity with SQLite) |
-| 3 | `#health-dedup-scc` | 40% health time — share SCC result between reachability and find_cycles |
-| 6 | `#libsql-edges-between-pushdown` | 5-20x neighborhood — temp-table + EXISTS in libsql |
-| 9 | `#shared-graph-build-pipeline` | 30% analyze time — single graph build shared across all algorithms |
-| 10 | `#sift-token-index` | 5-50x search — inverted index pre-filtering |
-
-#### Neighborhood Effectiveness
-| # | ID | Impact |
-|---|---|---|
-| 4 | `#ranked-neighborhood` | 30-60% token reduction — configurable scoring + max_nodes budget |
-| 8 | `#louvain-dedup-aggregate` | 5-15% modularity — phase-2 super-node coarsening |
-
-**Top of backlog: `#terse-ultra-mode`** — highest token savings, directly improves LLM context efficiency across all graph/search/explain envelopes.
-
-Also cleaned up orphaned `#next-steps` post-exchange comment (was causing the `post_exchange_comment_prompt_preset` warning).
-re [#terse-ultra-mode]: Does this affect the effectiveness of the searches?
-
-### Re: #terse-ultra-mode — search effectiveness — glm-5.1
-
-**No, it does not affect search effectiveness.**
-
-`TerseGraphNode`/`TerseGraphEdge`/`TerseSearchHit` are **post-search output structs** — they serialize the *envelope response* sent to the LLM. The search algorithm (`Sift::search()`), scoring, and ranking all operate on the full `SearchHit` with all fields intact. The terse conversion is a lossy serialization step that happens *after* results are found and scored.
-
-The only downstream consideration: if the LLM uses snippet text to decide which results to explore further, 80-char truncation could slightly reduce its context. But `label` (typically the symbol name/signature) is preserved and is the primary relevance signal. The full data remains in the database — only the LLM-facing envelope is compacted.
-Can the LLM follow-up with more detail on the ultraterse output?
-
-### Re: #terse-ultra-mode — LLM follow-up detail — glm-5.1
-
-**Yes.** The terse types are opt-in serialization modes — the full `GraphNode`/`GraphEdge`/`SearchHit` data always remains in the database. The LLM can:
-
-1. Request a full (non-terse) envelope for any item by ID — `tsift explain <symbol>` returns the complete struct with all properties, provenance, freshness, and snippet fields.
-2. Drill into specific nodes/edges from a terse response — the `id` and `kind` fields are always preserved, enabling targeted follow-up queries.
-3. Toggle terse mode per call — the CLI `--terse` / `--ultra-terse` flags are per-invocation, not global state.
-
-The ultra-terse mode trades initial context breadth for token savings; the LLM can selectively expand any item of interest on demand.
-<!-- agent:boundary:39bd866d -->
+<!-- agent:boundary:f2180fa9 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+preset #spec-test-build-install-commit-push
+- [#terse-ultra-mode]
+- [#libsql-pushdown-edge-incident]
+- [#health-dedup-scc]
+- [#ranked-neighborhood]
+- [#terse-health-early-exit]
+- [#libsql-edges-between-pushdown]
+- [#compact-community-serialization]
+- [#louvain-dedup-aggregate]
+- [#shared-graph-build-pipeline]
+- [#sift-token-index]
 <!-- /agent:queue -->
 
 ## Backlog

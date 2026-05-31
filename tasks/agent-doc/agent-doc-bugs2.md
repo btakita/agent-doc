@@ -245,7 +245,24 @@ Both are **project-scoped** (the registry/pane cleanup is project-wide, not tied
 **Why gated.** Per the JB manual-testing gate, the new plugin must be installed-from-disk (signed `0.2.141` zip) and the menu items clicked in a live IDE to confirm they appear and dispatch — that live step is the remaining work. Pairs with the still-queued `#stash-session-ttl-prune` (auto hygiene) and the done `#jb-busy-queue-ux-feedback` (notification classification).
 
 (Closeout note: `--force-disk` — the IDE IPC listener remains unresponsive this session.)
-<!-- agent:boundary:8943ffd7 -->
+
+### Re: do [#stash-session-ttl-prune] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#stash-session-ttl-prune]
+
+
+Gated — landed the safe, non-destructive decision core; the destructive parts are deliberately deferred per the item's own "opt-in + live-verified before enabling" requirement. Submodule `f5ac089c`; plan at `tasks/agent-doc/plan-stash-session-ttl-prune.md`.
+
+**Why not ship the whole thing.** This feature *kills live, registered, supervisor-backed* panes that are merely idle — destructive. And it can't use existing data: the registry's `started` is *start time*, not last-activity, so reaping on it would kill long-running **active** sessions. A correct TTL prune needs a new idle signal (tmux `#{window_activity}`), a config knob, and live verification on a real layout — exactly what the item says to gate. Shipping unverified destructive pane-killing in an autonomous loop is the risk the user's caution is guarding against.
+
+**Landed this cycle (safe, default-inert).** `stash_ttl_prune_candidate` / `stash_ttl_prune_targets` + `StashTtlCandidate` — the reusable pure decision with conservative guards: TTL must be enabled (`0`/unset → reaps nothing), only an agent-doc stash-window pane is eligible, the active/visible pane is **never** reaped, and idle must strictly exceed the TTL. 5 unit tests (disabled-inert, active-never-reaped, agent-doc-only, strict-`>`, multi-candidate filter). `make check` green; binaries built + installed.
+
+**Gated (design + destructive wiring + live verify).** Per the plan: (1) add the `#{window_activity}` idle query; (2) `.agent-doc/config.toml` `stash_session_ttl_secs` (project-level, default unset); (3) **report-only first** — log candidates without killing so the operator confirms detection on the real ~9-pane stash; (4) destructive enable behind a separate explicit flag, default off; (5) live verification + SimWorld/tmux-ci replay. Existing orphan-reap semantics unchanged; registered live sessions stay protected by default. Relates to `#cross-project-stash-pane-condition` (done) and `#jb-busy-queue-ux-feedback` (done).
+
+(Closeout note: `--force-disk` — the IDE IPC listener remains unresponsive this session.)
+<!-- agent:boundary:a228295c -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -261,7 +278,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#queue-prompt-echo-summary]~
 - ~do [#free-text-queue-owner-consume]~
 - ~do [#plugin-cleanup-menu-command]~
-- do [#stash-session-ttl-prune]
+- ~do [#stash-session-ttl-prune]~
 - do [#next-steps-backlog-capture]
 - do [#ah0s]
 - do [#backlog-priority-attribute]
@@ -303,7 +320,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 - [ ] [#do-id-partial-closeout-state] [recommended] Partial-closeout WARN guard landed (check_partial_closeout_state_guard: a do[#id] turn whose response shows shipped + remaining-live-work signals with the directed id still open advises --pending-edit/--pending-gate narrowing; suppressible by a no-partial-closeout-guard response marker; FlowCore guard_ budget 35->40). Remaining: per-id edit-vs-gate tracking in cycle_state, opt-in strict mode, next-phase queue convergence, and the runbook note that #spec-test-commit-push completes a repo phase without a live/deploy item. Plan: tasks/agent-doc/plan-do-id-partial-closeout-state.md.
 - [ ] [#closeout-recovery-state-machine] [recommended] Typed closeout recovery classifier landed: flow::closeout::CloseoutRecoveryState + classify_closeout_recovery_state + recovery_command; session_check::closeout_recovery_hint renders one typed 'Recovery [state]: command' across all nine closeout-guard call sites. Classified today: clean / open_cycle / missing_response_body / escaped_template_patch. Remaining: precise detection for reserved states direct_response_patchback, boundary_only_drift, nested_parent_pointer_stale, and folding each guard's existing diagnostic through the classifier. Plan: tasks/agent-doc/plan-closeout-repair-churn.md.
 - [ ] [#preset-item-id-collision] [recommended] Enforce unique active identities across frontmatter `prompt_presets` keys and active `agent:backlog` / `agent:review` / `agent:icebox` item ids. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `#next-steps` exists both as a prompt preset and as a backlog item, making `do #next-steps` and "top backlog item: #next-steps" ambiguous between preset expansion and backlog execution. Fix with an identity registry, mutation-time rejection, preflight/session-check fail-closed diagnostics, and regressions. Plan: tasks/agent-doc/plan-preset-item-id-collision.md.
-- [ ] [#stash-session-ttl-prune] [recommended] Optional opt-in hygiene to cap stash-session accumulation: reap agent-doc stash panes whose session has been idle in the stash beyond a configurable TTL. Distinct from the existing orphan reap (resync.rs step 8), which only kills unregistered + no-supervisor + no-owned-file panes; live registered/supervisor-backed sessions are correctly never auto-killed, which is why ~9 agent-loop agent-doc panes accumulate in the shared session-0 stash. Must be opt-in (frontmatter/.agent-doc config) + live-verified before enabling (destructive). Relates to #cross-project-stash-pane-condition and #jb-busy-queue-ux-feedback.
 - [ ] [#next-steps-backlog-capture] Agent responses containing #next-steps recommendations do not auto-add items to backlog when prompt preset is present. Agent must manually call `--pending-add` but the planning output `pending_mutations: expect_add` is not enforced by session-check `pending_done_guard`.
 - [ ] [#ah0s] [recommended] Add explicit-position --pending-add primitives so ordered backlog batches never depend on implicit prepend-vs-argorder semantics: --pending-add-after <id>, --pending-add-before <id>, --pending-add-back/--pending-append, keeping --pending-add as the front-insert default. Backlog is a priority pool with ID-based consumption (not a stack/queue; FIFO lives in agent:queue), so position should be author-set explicitly when it matters. Two agents (open-code.md #adcr waves f94e7851c; corky.md crate-split phases fc8d9b3bc) both reversed args expecting prepend-flip and got reverse-of-intended order. Pairs with #pending-add-append-not-prepend (that item finalizes the default-order decision; this adds the explicit escape hatches). Plan: tasks/agent-doc/plan-pending-add-explicit-position.md.
 - [ ] [#backlog-priority-attribute] [recommended] Add a priority attribute to agent:backlog / agent:icebox / agent:queue that orders the item list by priority (a component-level priority flag and/or per-item priority markers), so the binary maintains priority order instead of requiring manual --pending-reorder each cycle. Automates the by-hand reprioritization done in #next-steps cycles. Composable with #backlog-queue-sync-attribute; sibling of #ah0s (explicit-position primitives). Requested 2026-05-30.
@@ -313,6 +329,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Review
  
 <!-- agent:review -->
+- [/] [#stash-session-ttl-prune] [recommended] Optional opt-in hygiene to cap stash-session accumulation: reap agent-doc stash panes whose session has been idle in the stash beyond a configurable TTL. Distinct from the existing orphan reap (resync.rs step 8), which only kills unregistered + no-supervisor + no-owned-file panes; live registered/supervisor-backed sessions are correctly never auto-killed, which is why ~9 agent-loop agent-doc panes accumulate in the shared session-0 stash. Must be opt-in (frontmatter/.agent-doc config) + live-verified before enabling (destructive). Relates to #cross-project-stash-pane-condition and #jb-busy-queue-ux-feedback.
 - [/] [#plugin-cleanup-menu-command] [recommended] Expose session cleanup as agent-doc plugin-menu commands (JetBrains + VS Code): a 'Resync / Fix Sessions' action wrapping agent-doc resync --fix and a 'GC Stale Sessions' action wrapping agent-doc gc, so operators can clear stale routing/registry state and reap orphaned panes from the IDE without dropping to a terminal. Thin event-reporter pattern — the plugin shells the existing CLI/FFI; no cleanup logic in the plugin. Pairs with #stash-session-ttl-prune (auto hygiene) and #jb-busy-queue-ux-feedback (notification classification).
 - [/] [#route-drain-all-surface-live-verify] [recommended] Live-verify the route-drain all-surface reap (submodule b239988b / superproject 4c7b06b7f) resolves the JB Run Agent Doc "completed tracked item blocks dispatch" retry: with the installed binary, reproduce a closeout that leaves a completed [x] item in review or icebox on an IDE-owned doc, then run JB Run Agent Doc once and confirm it dispatches without a manual repeat. Also exercises the #pending-gate-snapshot-desync snapshot re-sync (ab074710) under the route path.
 - [/] [#codex-final-response-live-verify] [recommended] Opportunistic live re-verification of the #codex-final-response-not-written guard: do a real Codex direct/manual run that commits side-effect work, confirm session-check (via the .codex Stop hook) fails closed with the 'no assistant response body was captured' message + 'agent-doc write --commit' recovery when no ### Re: close-out was written, and that a normal Codex turn with a response stays OK. Guard + deterministic regressions already landed (session_check.rs check_committed_without_response_body_guard).

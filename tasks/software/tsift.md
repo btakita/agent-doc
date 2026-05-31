@@ -35,16 +35,44 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 6 response topic(s): archived response summary; do [#tsiftmeminit]; do [#tsiftmemhooks]; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:697b048d -->
+❯ Can tsift now replace claude-mem?
+
+### Re: Can tsift now replace claude-mem? — gpt-5
+
+Not fully yet. It can replace parts of `claude-mem` now, especially first-party `agent-doc` closeout capture and read-only migration staging, but I would not disable `claude-mem` as the only memory source yet.
+
+Current evidence:
+
+- `.tsift/memory.db` is initialized at the workspace root with 3,027 events.
+- Of those, 3,000 are imported from `claude-mem` and 27 are first-party tsift events.
+- The detected `claude-mem` source still has 32,585 observations, 7,412 session summaries, and 10,599 user prompts available for supported import, so the current import is only a slice of durable history.
+- `pending_messages` has 6,561 rows but is intentionally excluded because it is transient queue/tool payload state, not durable replacement memory.
+- `agent-doc` closeout capture is wired to `tsift memory capture-agent-doc-closeout` when `.tsift/memory.db` exists, so new closeouts can be captured by tsift-memory in this workspace.
+- `graph-db` is materialized and freshness-current, but readiness is blocked by `summary_cache_empty`; semantic retrieval currently returns zero rows until `tsift summarize --extract .` and a graph refresh run.
+
+So the practical answer is: use tsift-memory as the new owner in shadow/transition mode, but keep `claude-mem` as a fallback until three gates pass:
+
+1. Run a full supported import from `claude-mem` with an explicit high enough `--limit` or a no-cap import path.
+2. Run `tsift summarize --extract .` and `tsift graph-db --path . refresh --json`, then verify `graph-db related` returns useful memory hits.
+3. Switch live retrieval call sites away from direct `claude-mem`/`/mem-search` ownership and verify comparable recall on a few known memories.
+
+Changed paths: none.  
+Commands: `tsift memory status . --json`, `sqlite3 .tsift/memory.db ...`, `tsift graph-db --path . --json status`, `tsift graph-db --path . --json related "claude mem replacement" --kind all`, plus targeted source inspection.  
+Verification: prompt-only answer; no code or tests changed.  
+Confidence: medium-high for current workspace readiness; lower for global replacement until retrieval parity is tested.  
+Escalation: none.
+<!-- agent:boundary:306ebf55 -->
 <!-- /agent:exchange -->
 ###
 <!--
+What are #next-steps to improve token efficiency along with graph + neighborhood performance & effectiveness.
+---
 What are #next-steps to make the graph faster?
 ---
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

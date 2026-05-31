@@ -44,7 +44,23 @@ Compacted content:
 
 
 Rewrote terse_health_report. All 15 tests pass. Committed as 5cf8093, pushed to main.
-<!-- agent:boundary:9dfadbc9 -->
+
+### Re: #libsql-edges-between-pushdown — glm-5.1
+
+> **Queue prompt:**
+>
+> [#libsql-edges-between-pushdown]
+
+
+Overrode `edges_between_nodes` in `LibsqlGraphStore` with temp-table + EXISTS pushdown, matching the SQLite backend pattern (`tsift-sqlite/src/lib.rs:2235`).
+
+**Changes:**
+- `tsift-libsql/src/lib.rs` — added `edges_between_nodes` override using `CREATE TEMP TABLE _edges_between_ids`, batch inserts (chunks of 450), and `EXISTS` subqueries against `graph_edges`
+- `tsift-libsql/src/lib.rs` — added `libsql_store_edges_between_nodes_pushdown` test verifying scoped filtering, empty set, and single-node edge cases
+- `SPEC.md` — updated pushdown queries section to document the new `edges_between_nodes` override
+
+**Verification:** 8/8 tests pass. Built and pushed as `4693e36`.
+<!-- agent:boundary:c2619ed2 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -55,7 +71,7 @@ preset #spec-test-build-install-commit-push
 - ~[#health-dedup-scc]~
 - ~[#ranked-neighborhood]~
 - ~[#terse-health-early-exit]~
-- [#libsql-edges-between-pushdown]
+- ~[#libsql-edges-between-pushdown]~
 - [#compact-community-serialization]
 - [#louvain-dedup-aggregate]
 - [#shared-graph-build-pipeline]
@@ -65,7 +81,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#libsql-edges-between-pushdown] Override edges_between_nodes in LibsqlGraphStore with temp-table + EXISTS (parity with SQLite backend). 5-20x neighborhood speedup. tsift-libsql/src/lib.rs
 - [ ] [#compact-community-serialization] Add TerseCommunityMember/TerseCommunity — name + tagpath_handle only, top-N member slice. ~40-60% community JSON savings. tsift-graph/src/lib.rs:541-572
 - [ ] [#louvain-dedup-aggregate] Add Louvain phase-2 aggregation (super-node coarsening). 5-15% modularity improvement on hierarchical codebases. tsift-graph/src/lib.rs:590-743
 - [ ] [#shared-graph-build-pipeline] Extract shared build_graph() from health.rs to common module; reuse in scc.rs, coupling.rs, dead_code.rs. ~30% analyze wall-time reduction. tsift-algorithms/src/*.rs

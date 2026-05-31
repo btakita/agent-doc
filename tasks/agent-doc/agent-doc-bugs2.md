@@ -59,13 +59,30 @@ Fixed the owner-pane self-invocation prompt miss and shipped it (submodule `dede
 **Spec/docs.** Updated `README.md` and `specs/07-core-commands.md` with the early-guard + backstop contract.
 
 Gated `#codex-owned-pane-prompt-miss` (code-complete, awaiting a real Codex same-pane live-verify) and queued `#codex-owned-pane-prompt-miss-followups` for the plan's *preferable* enhancements (structured `owned_pane_self_invocation` preflight result shape + Codex guidance/hook regression) plus the live-verify step.
-<!-- agent:boundary:ea8db46b -->
+
+### Re: do [#stuck-capture-compact-false-positive] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#stuck-capture-compact-false-positive]
+
+
+Done — shipped the durable reconciliation (submodule `7cc2ead5`, both binaries built + installed, `make check` green, pushed).
+
+**What was already in place.** The false positive was suppressed at two levels: `compact` discards capture sidecars whose response was archived (`discard_captures_for_archived_responses`), and `stuck_captured_cycle` re-checks the HEAD-referenced compact archive each preflight and returns `None` when the response is materialized there (with a test).
+
+**The remaining gap (the genuine fix).** That preflight suppression was *not durable*: it re-reads the archive on every pass and never settles the capture. If the referenced compact archive were later GC'd, `response_materialized_in_head_compact_archive` would go false again, `stuck_captured_cycle` would re-flag stuck, and preflight would re-suggest a `write --commit` that re-injects the already-archived response — the exact bug class.
+
+**Fix.** `preflight` now runs `reconcile_compacted_committed_capture` *before* the stuck detection: when a committed-cycle capture's body is absent from `HEAD` but proven present in a HEAD-referenced compact archive, it durably marks the capture `Discarded` — the same terminal state compaction assigns — and logs `reconcile_compacted_committed_capture`. It advances only the active capture (loaded by the cycle's own `capture_id`), is idempotent once discarded, and after it runs `stuck_captured_cycle` returns no warning **even if the archive no longer exists**.
+
+**Test.** `reconcile_compacted_committed_capture_discards_and_survives_archive_gc` proves the discard, idempotency, and — the key durability property — that after `std::fs::remove_file(archive)` the capture still does not flag stuck. Spec updated in `07-closeout-commands.md`.
+<!-- agent:boundary:82279d7a -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#codex-owned-pane-prompt-miss]~
-- do [#stuck-capture-compact-false-positive]
+- ~do [#stuck-capture-compact-false-positive]~
 - do [#codex-final-response-live-verify]
 - do [#codex-route-busy-ctrl-g-opens-editor]
 - do [#cross-project-stash-pane-condition]
@@ -118,7 +135,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 - [ ] [#free-text-queue-owner-consume] [recommended] Free-text `agent:queue auto` heads can remain live after an owner-pane/direct Codex closeout writes the response but lacks queue-target proof. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `Approve [#shoptiers]. What are #next-steps?` was answered, then reported as not marked done; same-pane `agent-doc <FILE>` refused recursive dispatch and repair finalize logged `[queue] skipped consumption because the active prompt did not target the queue head`. Preserve id-backed queue safety, but record/restore synthetic free-text queue-target proof for recursive-direct repair/finalize paths and add diagnostics/regressions. Plan: tasks/agent-doc/plan-free-text-queue-owner-consume.md.
 - [ ] [#preset-item-id-collision] [recommended] Enforce unique active identities across frontmatter `prompt_presets` keys and active `agent:backlog` / `agent:review` / `agent:icebox` item ids. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `#next-steps` exists both as a prompt preset and as a backlog item, making `do #next-steps` and "top backlog item: #next-steps" ambiguous between preset expansion and backlog execution. Fix with an identity registry, mutation-time rejection, preflight/session-check fail-closed diagnostics, and regressions. Plan: tasks/agent-doc/plan-preset-item-id-collision.md.
 - [ ] [#codex-final-response-live-verify] [recommended] Opportunistic live re-verification of the #codex-final-response-not-written guard: do a real Codex direct/manual run that commits side-effect work, confirm session-check (via the .codex Stop hook) fails closed with the 'no assistant response body was captured' message + 'agent-doc write --commit' recovery when no ### Re: close-out was written, and that a normal Codex turn with a response stays OK. Guard + deterministic regressions already landed (session_check.rs check_committed_without_response_body_guard).
-- [ ] [#stuck-capture-compact-false-positive] [recommended] stuck_captured_cycle false-positive after compaction: a capture recorded as committed (cycle-1780100032048, response 'gate→done for codex guidance') is later archived by compact, so preflight reports committed-but-not-in-HEAD and suggests `write --commit` recovery — which would re-inject an already-archived response (it lives in .agent-doc/archives/<hash>-*.md). Fix: when a captured-committed body is absent from HEAD because it was compacted (present in the matching archive), reconcile the capture instead of flagging it stuck. Repro 2026-05-29 agent-doc-bugs2.md.
 - [ ] [#codex-route-busy-ctrl-g-opens-editor] [recommended] route.rs busy-pane reroute interrupt (route.rs ~6409) also sends C-g unconditionally to a busy Codex pane before the Escape+C-c fallback — same root cause as #codex-interrupt-clear-ctrl-g-opens-editor: C-g opens the external editor ($EDITOR/nvim) in the normal Codex composer. Gate it on a shell reverse-i-search/history-search capture like send_operator_interrupt_sequence now does (or skip C-g when the busy blocker is an active turn). Tracked separately from the operator interrupt-clear fix because a hard change here alters reroute semantics. Add a route SimWorld regression for the non-search composer case — the existing ctrl-g test (write_mock_busy_registered_agent_doc_recovers_on_ctrl_g) only models reverse-i-search recovery, which is why this regression slipped through.
 - [ ] [#cross-project-stash-pane-condition] [recommended] resync logs 'stash pane %N registered in its own project root — skipping kill' because nested project roots (superproject agent-loop + submodule src/boost-client) auto-detect the SAME tmux session 0 and share one stash window, so superproject sync stashes the submodule's live session pane and resync re-discovers it cross-project. Not a resync logic error (preservation is correct); root cause is the shared-session layout for nested roots. Live evidence + fix options (A nested-root session isolation [recommended], B per-root stash partitioning, C out-of-scope skip, D reap stale agent-doc stash panes) in tasks/agent-doc/plan-cross-project-stash-pane-condition.md. Needs a session-model design decision before implementing; deferred from blind code change.
 - [ ] [#route-drain-all-surface-live-verify] [recommended] Live-verify the route-drain all-surface reap (submodule b239988b / superproject 4c7b06b7f) resolves the JB Run Agent Doc "completed tracked item blocks dispatch" retry: with the installed binary, reproduce a closeout that leaves a completed [x] item in review or icebox on an IDE-owned doc, then run JB Run Agent Doc once and confirm it dispatches without a manual repeat. Also exercises the #pending-gate-snapshot-desync snapshot re-sync (ab074710) under the route path.

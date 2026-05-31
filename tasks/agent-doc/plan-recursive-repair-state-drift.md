@@ -3,6 +3,39 @@
 **Pending:** `#recursive-repair-state-drift` (umbrella retired — done; remainder in discrete children)
 **Status:** In progress via children
 
+## Status note (2026-05-31) — slice 3: #recursive-repair-apply (safe subset) LANDED
+
+`flow::closeout::apply_closeout_recovery(file)` + `agent-doc repair --apply-recovery`
+apply the *unambiguously-safe* recovery in one command, replacing the manual
+`cancel` → `reset --from-current` → `commit` sequence for the common cases:
+
+- `OpenEmptyPreflight` → `crate::repair::cancel_preflight_cycle` (abandon the empty
+  probe cycle — exactly the churn the diagnostic-preflight bug produces).
+- `BoundaryOnlyDrift` → `git::commit` (boundary / answered-prompt-prefix artifacts
+  only; the commit path normalizes them and cannot revert user/response content).
+
+Withheld (return `NotApplied` + recommended command, no mutation):
+- `QueueMetadataDrift` / `SidecarVisibleDrift` — **live-discovered gap**: the safe
+  direction (commit the snapshot vs restore from HEAD) depends on which side is
+  authoritative, which the classifier can't prove. Repro this session: a spurious
+  `queue_active:false` working-drift would have been wrongly committed by the
+  `agent-doc commit` recovery, so a blind auto-apply is unsafe. The
+  authoritative-side determination is the remaining design problem.
+- `UnsafeUserContentDrift` / `OpenCycle` / `MissingResponseBody` / reserved states —
+  need a preserved response, not a metadata op.
+
+Tests: `apply_recovery_clean_is_nothing_to_do`,
+`apply_recovery_cancels_open_empty_preflight`,
+`apply_recovery_withholds_queue_metadata_drift`. CLI wired in `main.rs` with no
+edit to `repair.rs`'s orphan path (avoids the concurrent `#repair-orphan-prefix-bug`
+collision). `make check` green; both binaries rebuilt + installed.
+
+**Remaining for #recursive-repair-apply:** authoritative-side determination so
+queue/sidecar metadata drift can be auto-applied safely (new follow-up:
+`#recovery-drift-authoritative-side`), and live-verify the full one-command
+recovery path. `#preflight-probe-side-effect-free` (the root cause of the empty
+cycles `--apply-recovery` cancels) stays its own child.
+
 ## Status note (2026-05-31) — slice 2: #recursive-repair-recovery-states LANDED
 
 All four recovery states the plan enumerated are now classified in

@@ -768,6 +768,95 @@ fn codex_owned_pane_active_auto_queue_hands_off_without_drift() {
     assert!(content.contains("<!-- agent:queue auto -->"));
 }
 
+fn write_codex_owner_session(root: &Path, doc: &Path) {
+    fs::write(
+        root.join(".agent-doc/sessions.json"),
+        format!(
+            "{{\n  \"session-recursive\": {{\n    \"pane\": \"%77\",\n    \"pid\": 123,\n    \"cwd\": \"{}\",\n    \"started\": \"2026-05-10T00:00:00Z\",\n    \"session_id\": \"session-recursive\",\n    \"file\": \"{}\",\n    \"window\": \"@7\",\n    \"supervisor_instance_id\": \"test-supervisor\"\n  }}\n}}\n",
+            root.display(),
+            doc.display()
+        ),
+    )
+    .unwrap();
+}
+
+#[test]
+fn preflight_emits_owned_pane_self_invocation_for_unresolved_prompt() {
+    // #codex-owned-pane-prompt-miss-followups (item: structured result): preflight
+    // surfaces a typed owned_pane_self_invocation contract when a Codex owner-pane
+    // run still has an unresolved exchange prompt, so Codex guidance can drive an
+    // in-pane response instead of only reading the run-time bail diagnostic.
+    let tmp = TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    fs::write(
+        &doc,
+        "---\nagent_doc_session: session-recursive\nagent: codex\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n❯ Please reply\n<!-- /agent:exchange -->\n",
+    )
+    .unwrap();
+    init_git_repo(tmp.path(), &doc);
+    write_codex_owner_session(tmp.path(), &doc);
+
+    let out = agent_doc()
+        .current_dir(tmp.path())
+        .env_remove("CLAUDECODE")
+        .env_remove("CLAUDE_CODE")
+        .env_remove("CLAUDE_CODE_SESSION")
+        .env_remove("OPENCODE")
+        .env_remove("OPENCODE_CLIENT")
+        .env("CODEX_SESSION", "codex-session")
+        .env("TMUX_PANE", "%77")
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "preflight should succeed");
+    let json: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let osi = &json["owned_pane_self_invocation"];
+    assert!(!osi.is_null(), "owned_pane_self_invocation must be present: {json}");
+    assert_eq!(osi["kind"].as_str().unwrap(), "unresolved_prompt");
+    assert_eq!(osi["current_pane"].as_str().unwrap(), "%77");
+    assert!(osi["work_excerpt"].as_str().unwrap().contains("Please reply"));
+    assert!(
+        osi["persistence_command"]
+            .as_str()
+            .unwrap()
+            .contains("agent-doc finalize")
+    );
+}
+
+#[test]
+fn preflight_owned_pane_self_invocation_absent_for_non_owner_pane() {
+    // Compatibility: a non-owner pane (TMUX_PANE != registered owner) is a normal
+    // dispatch, not a self-invocation — the field stays null.
+    let tmp = TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    fs::write(
+        &doc,
+        "---\nagent_doc_session: session-recursive\nagent: codex\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n❯ Please reply\n<!-- /agent:exchange -->\n",
+    )
+    .unwrap();
+    init_git_repo(tmp.path(), &doc);
+    write_codex_owner_session(tmp.path(), &doc);
+
+    let out = agent_doc()
+        .current_dir(tmp.path())
+        .env_remove("CLAUDECODE")
+        .env_remove("CLAUDE_CODE")
+        .env_remove("CLAUDE_CODE_SESSION")
+        .env_remove("OPENCODE")
+        .env_remove("OPENCODE_CLIENT")
+        .env("CODEX_SESSION", "codex-session")
+        .env("TMUX_PANE", "%99")
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let json: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        json["owned_pane_self_invocation"].is_null(),
+        "non-owner pane must not emit owned_pane_self_invocation: {json}"
+    );
+}
+
 #[test]
 fn orchestrate_handles_already_open_preflight_cycle_for_first_step() {
     let tmp = TempDir::new().unwrap();

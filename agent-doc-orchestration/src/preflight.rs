@@ -223,6 +223,14 @@ pub struct PreflightOutput {
     /// session to respond.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_callbacks: Vec<crate::callback::PendingCallback>,
+    /// Structured owner-pane self-invocation contract
+    /// (`#codex-owned-pane-prompt-miss-followups`). Non-null only when a Codex
+    /// owner-pane re-invocation has unresolved exchange work (an unanswered
+    /// prompt or a ready active auto-queue head) that must be answered in THIS
+    /// owner turn rather than dispatched to a nested child. Codex guidance reads
+    /// this to drive an in-pane response cycle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owned_pane_self_invocation: Option<crate::run::OwnedPaneSelfInvocation>,
     /// Environment variables from frontmatter `env` field (unexpanded).
     /// Values may contain shell expressions like `$(passage ...)` or `$VAR`.
     /// A `null` value means "unset this key" — the skill should emit
@@ -2462,6 +2470,40 @@ pub fn run(file: &Path) -> Result<()> {
     let session_accretion = crate::session_accretion::inspect(file)
         .ok()
         .filter(|report| !report.is_healthy());
+    // #codex-owned-pane-prompt-miss-followups: surface a structured owner-pane
+    // self-invocation contract so Codex guidance can drive an in-pane response
+    // cycle. Non-null only under a Codex owner-pane self-invocation with
+    // unresolved exchange work (an unanswered prompt or a ready auto-queue head).
+    let owned_pane_self_invocation = {
+        // Derive the unresolved prompt from this cycle's diff (prompt-target
+        // change) rather than the boundary-keyed exchange detector: preflight's
+        // commit has already inserted a trailing boundary, which would hide a
+        // freshly-committed prompt from `unresolved_exchange_prompt`.
+        let unresolved_prompt = prompt_bearing_changes
+            .iter()
+            .find(|change| {
+                matches!(change.kind, crate::diff::PromptBearingChangeKind::PromptTarget)
+            })
+            .map(|change| change.text.clone());
+        let current = std::fs::read_to_string(file).unwrap_or_default();
+        match frontmatter::parse_for_file(&current, file) {
+            Ok((owner_fm, _)) => match owner_fm.session.as_deref() {
+                Some(session_id) => {
+                    let agent_name = owner_fm.agent.as_deref().unwrap_or("claude");
+                    crate::run::detect_owned_pane_self_invocation(
+                        file,
+                        session_id,
+                        agent_name,
+                        unresolved_prompt,
+                    )
+                    .unwrap_or(None)
+                }
+                None => None,
+            },
+            Err(_) => None,
+        }
+    };
+
     let output = PreflightOutput {
         warnings,
         layout_issues,
@@ -2498,6 +2540,7 @@ pub fn run(file: &Path) -> Result<()> {
         model_switch: model_switch_name,
         model_switch_tier: model_switch_tier.map(|t| t.to_string()),
         pending_callbacks,
+        owned_pane_self_invocation,
         env: frontmatter_env,
         pending_reordered,
         pending_gated_count,

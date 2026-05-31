@@ -830,6 +830,101 @@ fn owned_pane_self_invocation_detail(
     ))
 }
 
+/// Structured owner-pane self-invocation contract
+/// (`#codex-owned-pane-prompt-miss-followups`, plan item 3 → preflight result).
+///
+/// Emitted by preflight when a Codex owner-pane re-invocation has unresolved
+/// exchange work — an unanswered exchange prompt or a ready active auto-queue
+/// head — that must be answered in THIS owner turn rather than dispatched to a
+/// nested child. Codex guidance reads this to drive an in-pane response cycle
+/// instead of only reading the run-time bail diagnostic.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct OwnedPaneSelfInvocation {
+    pub file: String,
+    pub current_pane: String,
+    pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor_generation: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor_state: Option<String>,
+    /// `"unresolved_prompt"` or `"active_queue_head"`.
+    pub kind: String,
+    /// First non-empty line of the unresolved work, truncated.
+    pub work_excerpt: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head_id: Option<String>,
+    /// The exact persistence command to run after composing the in-pane response.
+    pub persistence_command: String,
+}
+
+fn first_nonempty_excerpt(text: &str, max: usize) -> String {
+    text.lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or(text)
+        .trim()
+        .chars()
+        .take(max)
+        .collect()
+}
+
+/// Detect a structured owner-pane self-invocation contract. An unresolved
+/// exchange prompt takes precedence over an active auto-queue head
+/// (`#prompt-preempts-auto-queue`). Returns `None` when this is not a Codex
+/// owner-pane self-invocation, or when there is no unresolved exchange work.
+///
+/// `unresolved_prompt` is supplied by the caller because the boundary-keyed
+/// [`crate::session_check::unresolved_exchange_prompt`] detector only sees a
+/// prompt *before* the cycle's commit inserts a trailing boundary. The run path
+/// passes that pre-commit detector's result; preflight (which runs after commit)
+/// passes the diff-derived unresolved prompt so the contract survives the
+/// boundary insertion.
+pub fn detect_owned_pane_self_invocation(
+    file: &Path,
+    session_id: &str,
+    agent_name: &str,
+    unresolved_prompt: Option<String>,
+) -> Result<Option<OwnedPaneSelfInvocation>> {
+    if owned_pane_self_invocation_detail(file, session_id, agent_name).is_none() {
+        return Ok(None);
+    }
+    let current_pane = crate::sessions::current_pane().unwrap_or_default();
+    let actor = actor_record_for_file(file).ok().flatten();
+    let actor_generation = actor.as_ref().map(|record| record.generation);
+    let actor_state = actor.as_ref().map(|record| record.state.as_str().to_string());
+    let persistence_command = format!(
+        "agent-doc finalize {} (or agent-doc write --commit {})",
+        file.display(),
+        file.display()
+    );
+    if let Some(unresolved) = unresolved_prompt.filter(|p| !p.trim().is_empty()) {
+        return Ok(Some(OwnedPaneSelfInvocation {
+            file: file.display().to_string(),
+            current_pane,
+            session_id: session_id.to_string(),
+            actor_generation,
+            actor_state,
+            kind: "unresolved_prompt".to_string(),
+            work_excerpt: first_nonempty_excerpt(&unresolved, 200),
+            head_id: None,
+            persistence_command,
+        }));
+    }
+    if let Some(continuation) = crate::queue_continuation::detect(file)? {
+        return Ok(Some(OwnedPaneSelfInvocation {
+            file: file.display().to_string(),
+            current_pane,
+            session_id: session_id.to_string(),
+            actor_generation,
+            actor_state,
+            kind: "active_queue_head".to_string(),
+            work_excerpt: first_nonempty_excerpt(&continuation.head_prompt, 200),
+            head_id: continuation.head_id,
+            persistence_command,
+        }));
+    }
+    Ok(None)
+}
+
 fn recursive_codex_direct_invocation_diagnostic(
     file: &Path,
     session_id: &str,

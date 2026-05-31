@@ -138,12 +138,35 @@ Both parts done, spec + tests + build + install + commit + push complete.
 - Smoke-tested live: it immediately surfaced two stale `open_empty_preflight` probe cycles and one `direct_response_patchback` across the 34 actors in this project.
 
 **Verification:** full `make check` green (0 failure markers, exit 0); `cargo build --release` + `cargo install --path .` (both binaries refreshed). **Commits:** submodule `1fa6c4ec` (pushed to `origin/20260422/codex-agent-backend`), superproject pointer `53ff1fa8f` (pushed to `origin/main`). Specs: `07-closeout-commands.md`, `07-session-tmux-commands.md`.
-<!-- agent:boundary:ca333edd -->
+❯ The last turn took over 7 minnutes to identify the final state of the "The monsterrodholders.md Codex session is now idle. Why do you think its still running?" prompt. Note that the original prompt was "❯ The monsterrodholders.md Codex session is now idle. Why do you think it is still running?" and I edited it.
+
+❯ Please analyze the cause of the thrashing and streamline the identification of the prompt diff.
+
+❯ #spec-test-build-install-commit-push
+
+### Re: analyze the patchback thrashing + streamline prompt-diff identification — opus-4-8
+
+Root-caused and fixed (spec + tests + build + install + commit + push complete).
+
+**Cause of the 7-minute thrash.** The anchored exchange append (`agent-doc-core/src/template.rs` `append_exchange_patch_after_prompt_anchor`) located the insertion point with an **exact substring match** of the baseline's unresolved prompt tail against the current document:
+
+```rust
+let tail_start = user_region.rfind(&original_tail)...?;  // line 2138
+```
+
+`original_tail` came from the baseline (`original_doc`); `user_region` from the current doc. You edited the prompt after preflight captured the baseline (`❯ ...Why do you think it is still running?` → `...Why do you think its still running?` — both a word edit *and* dropping the `❯ ` prefix). The baseline text no longer existed verbatim in the current doc, so `rfind` returned `None` and closeout failed closed with the cryptic *"failed to locate unresolved prompt tail."* That forced the manual recovery dance — drop the stale `--baseline-file` (fixed the anchor *text* to the current "its"), then re-add the `❯ ` prefix (so the post-boundary prompt was recognized) — each step a separate failed `finalize`/`write` attempt.
+
+**The streamlined fix (`#patchback-prompt-edit-resilience`).** Exact match stays the fast path. When it fails and the unresolved tail is a **single prompt block**, anchor **position-based** instead: the boundary is already repositioned to the end of the component, so the sole (edited) prompt is the trailing content of the user region — the response anchors at its end. This is robust to both prompt-text edits and `❯`-prefix changes, so a prompt edit between preflight and closeout no longer thrashes. Only the genuinely ambiguous multi-prompt-edit case fails closed, now with an actionable *"re-run `agent-doc preflight` to refresh the baseline"* message instead of the cryptic one.
+
+**Verification:** new tests `append_anchor_falls_back_when_single_prompt_edited_after_baseline` and `append_anchor_fails_closed_when_multiple_prompts_drift_from_baseline`; full `agent-doc-core` suite (685) + `make check` green (exit 0, 0 failure markers); `cargo build --release` + `cargo install --path .` (both binaries refreshed). Spec: `07-closeout-commands.md`.
+
+**Commits:** submodule `42568d37` → `origin/20260422/codex-agent-backend`; superproject pointer `42a795075` → `origin/main`. (This largely obviates the manual recovery I'd saved to memory for the single-prompt case.)
+<!-- agent:boundary:ff96b1c0 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
-- do [#closeout-recovery-state-machine]
 preset #spec-test-build-install-commit-push
+- ~do [#closeout-recovery-state-machine]~
 - do [#jb-run-agent-doc-busy-queue-dispatch-deadlock]
 - do [#preflight-probe-side-effect-free]
 - do [#gated-followup-split-enforcement]

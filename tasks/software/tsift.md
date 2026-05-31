@@ -61,7 +61,27 @@ Commands: `tsift memory status . --json`, `sqlite3 .tsift/memory.db ...`, `tsift
 Verification: prompt-only answer; no code or tests changed.  
 Confidence: medium-high for current workspace readiness; lower for global replacement until retrieval parity is tested.  
 Escalation: none.
-<!-- agent:boundary:306ebf55 -->
+❯ What are #next-steps to replace claude-mem?
+### Re: What are #next-steps to replace claude-mem? — gpt-5
+
+Top backlog item: `#tsiftmemimportall`.
+
+I added the replacement path to the backlog in this priority order:
+
+1. `#tsiftmemimportall` — complete the full supported `claude-mem` migration into `.tsift/memory.db` and reconcile counts for `observations`, `session_summaries`, and `user_prompts`. Add batching/no-cap import support if the current `--limit` path is not enough.
+2. `#tsiftmemsemanticgate` — populate summaries, refresh graph-db, and verify `graph-db related` returns useful tsift-memory hits instead of `summary_cache_empty` / zero semantic rows.
+3. `#tsiftmemparityeval` — run the memory retrieval eval fixture against `claude_mem_api`, tsift session-review/context-pack, and `graph_db_related`; require comparable useful-hit rate and fewer zero-output failures before cutover.
+4. `#tsiftmemcutover` — switch live retrieval call sites and operator instructions away from direct `claude-mem` / `/mem-search`, with `claude-mem` kept as a fallback during the first pass.
+5. `#tsiftmemretire` — retire `claude-mem` only after import, semantic retrieval, and parity eval are green, with a documented rollback path.
+
+I kept `pending_messages` out of the replacement path because tsift already treats it as transient queue/tool payload state rather than durable memory. The replacement contract should be durable memory plus bounded artifact handles, not raw pending tool payload replay.
+
+Changed paths: session document backlog/exchange only.  
+Commands: `agent-doc orchestrate --from-exchange --plan`, `agent-doc plan`, `tsift memory status . --json`, `tsift graph-db --path . --json status`, targeted `rg` over tsift-memory/agent-doc surfaces.  
+Verification: no code changed; backlog mutation will be checked by `agent-doc finalize` and `session-check`.  
+Confidence: high for prioritization; implementation estimates still depend on the full import and retrieval eval results.  
+Escalation: none.
+<!-- agent:boundary:066a7b6b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -78,6 +98,11 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#tsiftmemimportall] Complete a full supported claude-mem migration into .tsift/memory.db with explicit count reconciliation for observations, session_summaries, and user_prompts; add batching/no-cap import support if the current --limit path cannot safely import all rows.
+- [ ] [#tsiftmemsemanticgate] Populate the summary cache, refresh graph-db, and verify graph-db related returns useful tsift-memory hits instead of summary_cache_empty / zero semantic rows.
+- [ ] [#tsiftmemparityeval] Run the memory retrieval eval fixture against claude_mem_api, tsift session-review/context-pack, and graph_db_related on known memories; require comparable useful-hit rate and fewer zero-output failures before cutover.
+- [ ] [#tsiftmemcutover] Replace live memory retrieval call sites and operator instructions that point at direct claude-mem or /mem-search with tsift-memory / graph-db retrieval, while keeping claude-mem as a fallback during the first cutover pass.
+- [ ] [#tsiftmemretire] Retire claude-mem only after full import, semantic retrieval, and parity eval are green; keep a documented rollback path until at least one normal session cycle succeeds without direct claude-mem reads.
 <!-- /agent:backlog -->
 
 ## Review

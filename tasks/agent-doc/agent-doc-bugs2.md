@@ -31,104 +31,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260531-211014.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260531-214407.md`*
 
 Compacted content:
-- Archived 1 response topic(s): do #busy-not-ready-message-reports-actual-wait
+- Archived 5 response topic(s): do [#rejected-response-must-block-queue-consume-and-done]; do [#opencode-active-turn-reopen-auto-retry-on-idle]; do [#recovery-drift-apply-live-verify]; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: do [#rejected-response-must-block-queue-consume-and-done] — opus-4-8
-
-> **Queue prompt:**
->
-> do [#rejected-response-must-block-queue-consume-and-done]
-
-
-Closeout-recovery cycle — `plan` reported queue-head drift: this target already has a completed `worker_result`, so the fix was implemented in a prior cycle and the active `do` packet just needed reaping. Verified the fix is live, not redispatched.
-
-Fix is in place and tested:
-
-- `agent-doc-orchestration/src/write.rs:1504` — queue consumption / `--done` reap is gated behind `write_result.is_ok()`. The comment is explicit: "consume queue prompt after all other strict closeout gates have passed so a rejected closeout cannot advance the queue early." A malformed-patch rejection sets `write_result = Err`, so the same closeout never reaches Phase 3c queue-consume.
-- `agent-doc-orchestration/src/flow/document_mutation.rs:165` — emits `template_patchback_malformed_rejected reason=patch_markers_without_closed_blocks` and fails closed at `patchback_parse` (`outcome=failed_closed reason=malformed_patch`).
-- `tests/finalize_integration.rs:480-510` — asserts an unclosed `<!-- patch:exchange -->` response is rejected, the body is **not** written, and the cycle fails with `malformed template patchback`.
-
-No new code change this cycle; the unrelated `Cargo.lock` / `VERSIONS.md` working-tree edits stay out of the closeout. Marking `--done`.
-
-### Re: do [#opencode-active-turn-reopen-auto-retry-on-idle] — opus-4-8
-
-> **Queue prompt:**
->
-> do [#opencode-active-turn-reopen-auto-retry-on-idle]
-
-
-Captured the design as a plan and **gated** the item rather than marking it done — this is a live-pane refinement I cannot verify deterministically in this session.
-
-**Plan:** `tasks/agent-doc/plan-opencode-active-turn-reopen-auto-retry-on-idle.md`
-
-Current behavior is the correct safety boundary: a plain dispatch-only reopen (no prompt-bearing work) against a busy authoritative actor fails closed with the busy-not-ready diagnostic after focusing the pane (`route.rs` `dispatch_only_focus_only_should_fail_closed` → `route_dispatch_only_authoritative_actor_busy_focus_only_not_dispatched`; spec invariant in `specs/08-session-routing.md`). The operator re-clicks once the turn ends.
-
-The refinement is opt-in: watch the pane and auto-fire the **bare reopen** once it returns to a dispatch-ready/idle composer. Plan locks the hard invariants so it can't regress:
-
-- plain reopen only — never queue a prompt, never inject prompt text;
-- no-inject-into-active-turn — fire only after the live capture proves a dispatch-ready prompt in the current generation (same `#snrun` direct-evidence gate the busy/starting paths use);
-- bounded + fail-closed on timeout (reuse the harness-specific recovery retry budget);
-- opt-in flag, default off (today's operator-retry contract stays the default);
-- re-resolve the authoritative generation after idle so a superseded pane never receives the reopen.
-
-Implementation sketch: a pure `flow::routed_reopen` `WaitForIdleThenRetry` classifier (unit-testable) + the route.rs poll/re-dispatch I/O boundary, with SimWorld coverage for the busy→idle transition. The normative spec entry waits until the behavior actually lands (specs describe implemented behavior).
-
-**Gate rationale:** plan-complete, but implementation and live OpenCode/Codex pane verification remain. No source changed this cycle, so no verification suite to run.
-
-### Re: do [#recovery-drift-apply-live-verify] — opus-4-8
-
-> **Queue prompt:**
->
-> do [#recovery-drift-apply-live-verify]
-
-
-**Gated** — this is an operator-present live-verification task, not autonomous work, and the item itself flags it "Gated on a live owner pane (risky in a racy multi-session repo)." I'm currently running cycles in this exact repo, so reproducing a drift closeout on a live owner pane here would be unsafe.
-
-The implementation under test already landed and is confirmed present:
-
-- `agent-doc repair --apply-recovery` is wired at `src/main.rs:1980` → `agent_doc_orchestration::flow::closeout::apply_closeout_recovery` (`flow/closeout.rs`), returning `RecoveryApplication::{NothingToDo, Applied{state, action}}`.
-- `apply_closeout_recovery` is referenced from `session_check.rs` and `sync.rs`, so the authoritative-side determination from `#recovery-drift-authoritative-side` (commit `30df9c2dc`) and the one-command path from `recursive-repair-apply` (`eb39877eb`) are in place.
-
-**What live-verify still needs (operator, dedicated owner pane):**
-
-1. Reproduce a `queue_metadata_drift` / `sidecar_visible_drift` closeout.
-2. Run `agent-doc repair --apply-recovery <FILE>` and confirm it **restores-from-HEAD** for the spurious `queue_active:false` class and **commits-forward** otherwise — replacing the manual cancel→reset→commit sequence.
-
-Parent plan: `tasks/agent-doc/plan-recursive-repair-state-drift.md`. Staying gated until that live run is done on a quiet owner pane.
-
-### Re: do [#repair-orphan-prefix-bug] — opus-4-8
-
-> **Queue prompt:**
->
-> do [#repair-orphan-prefix-bug]
-
-
-Fixed and verified. The orphan-repair path no longer prefixes assistant body lines with the `❯ ` user-prompt marker.
-
-**Root cause** (`agent-doc-orchestration/src/write.rs` `normalize_user_prompts_in_exchange`): the function classifies user-typed lines by diffing `snapshot → baseline` and gates them with `in_agent_block`, which was set true **only when a heading is an `Insert`**. When an orphaned response is applied by replacing a *placeholder* body under an **existing** `### Re:` heading (e.g. a direct Edit-based patchback swapping `Hello world` for the real body — the live tsift.md repro), the heading line is `Equal` in the diff, so `in_agent_block` was false and the replacement body lines (`Insert`) were misclassified as user prompts and prefixed.
-
-**Fix:** track whether the scanner is inside a `### Re:` block and whether that block had a body line *deleted*. Insert body lines that **replace** deleted body (delete + insert under an existing heading) are assistant content — excluded from prompt-prefix normalization and from the canonical-diff prompt targets. A pure **append** of new text after an unchanged response still gets the `❯ ` prefix (genuine user follow-up). The distinguishing signal is the preceding delete, so both `normalize_user_prompts_user_text_after_equal_heading` and the new replacement case pass.
-
-**Verification:**
-
-- New regression test `normalize_user_prompts_replaced_response_body_under_existing_heading_not_prefixed` — failed before, passes after.
-- Full `normalize_user_prompts` suite (23 tests) green, including the two append-prompt cases the first (too-broad) attempt regressed.
-- `cargo test -p agent-doc-orchestration`: 2052 passed.
-- `make check`: exit 0, 0 failure markers (checked explicitly, RTK exit-code masking accounted for).
-- Rebuilt both binaries (`cargo build --release` + `cargo install --path .`) so `.bin/agent-doc` and `~/.cargo/bin/agent-doc` (tmux) carry the fix.
-
-**Commits:** submodule `298f6466` (fix + test), superproject pointer `606be03de`. No spec change needed (binary-only, as the plan scoped). Plan: `tasks/agent-doc/plan-repair-orphan-prefix-bug.md`.
-
-### Re: queue drift cleanup — #recursive-repair-apply already landed — opus-4-8
-
-Preflight's queue-head-drift repair struck `do [#recursive-repair-apply]` because the item already has a completed worker_result and landed fix (`eb39877eb` agent-doc(recursive-repair-apply): one-command safe closeout recovery). This is bookkeeping consumption of an already-done item, not new work — committing the cleared queue state. Same shape as the earlier `#jb-run-agent-doc-command-route-miss` strike (impl `e1735fa2`; its live-verify tracked separately as `#jb-run-agent-doc-busy-feedback-live-verify`).
-
-Next actionable head: `#preflight-probe-side-effect-free` (genuine, unimplemented).
-<!-- agent:boundary:7ca8d0d8 -->
+<!-- agent:boundary:f73104db -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -156,12 +64,6 @@ preset #spec-test-build-install-commit-push
 <!-- /agent:queue -->
 ###
 <!--
-```
-[route] debounce OK — file idle for 0.5s and typing indicator idle
-[route] target tmux session: 0
-[route] authoritative actor generation 245 for tasks/monsterrodholders.md is busy on pane %40; queued pending dispatch "Are there any items in review that are actionable right now?" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
-```
----
 Verify [#ipcfullprompt-recur2]
 ---
 The last run had a code fence stripped away by agent-doc.

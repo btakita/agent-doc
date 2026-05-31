@@ -31,41 +31,20 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260531-162803.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260531-170445.md`*
 
 Compacted content:
-- Archived 3 response topic(s): do [#codex-owned-pane-auto-queue-stuck]; do [#codex-owned-pane-prompt-miss-followups]; closeout recovery
+- Archived 2 response topic(s): do [#blocked-closeout-followup-capture]; do [#codex-owned-pane-prompt-miss-followups]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: do [#blocked-closeout-followup-capture] — opus-4-8
-
-Landed. A directed `do [#id]` cycle that gates its target out of `agent:backlog` while the response reports blocked / still-needed work now fails closed (strict) / warns (warn) via `check_blocked_closeout_followup_guard` in `session_check.rs`, wired into the post-commit guard loop.
-
-- **Detection:** the id is in `expect_done_or_gate_ids` (directed this cycle) **and** `pending_gated_ids` (gated this cycle, still present in `agent:review`), the response carries a tight blocked phrase (`BLOCKED_FUTURE_ACTION_PHRASES` — `remains blocked`, `next steps to complete`, `must remove/expire …`, `awaiting approval before …`, `deliberately delete`, …), and that phrase co-occurs with `#id` in the **same paragraph** (so the `### Re:` heading that always names the id, or an incidental blocked phrase about unrelated work, does not false-positive).
-- **Satisfied by:** `--pending-edit` (kept open in backlog), any `--pending-add*` (`pending_added_this_cycle`), an explicit "no additional backlog follow-up is needed because …" phrase, a `<!-- no-blocked-followup-guard -->` / `` marker, or `--done`.
-- **Plumbing:** new `cycle_state` fields `pending_gated_ids` + `pending_added_this_cycle` with `record_pending_gated_ids` / `mark_pending_added`, recorded from `write.rs` on `--pending-gate` and any `--pending-add*`.
-- **Tests:** 7 `blocked_closeout_followup_guard_*` cases (monsterrodholders fail-closed shape, inspect wiring, new-follow-up pass, kept-open pass, explicit-no-follow-up pass, clean review-gate pass, not-tied-to-id false-positive pass). Docs: `runbooks/pending-ops.md`, `runbooks/commit.md`, `specs/07-closeout-commands.md`. FlowCore `guard_` budget 40 → 49.
-
-`make check` green; both binaries rebuilt + `cargo install`ed; harness surfaces synced; `audit-docs` clean. Committed + pushed (submodule `b7eb410e`, superproject pointer bumped).
-
-### Re: do [#codex-owned-pane-prompt-miss-followups] — opus-4-8
-
-Phase 2a landed; this item stays review-gated because the remaining work needs a live Codex pane (external validation only — implementation is complete).
-
-- **Guidance (phase 2a):** new Codex bullet in `runbooks/harness-invocation.md` (mirrored to all four harness surfaces) — when `preflight`/`plan` returns a non-null `owned_pane_self_invocation`, do **not** launch a recursive `agent-doc <FILE>` child; answer the `work_excerpt` (`kind: "unresolved_prompt"`) or continue the `active_queue_head` (`head_id`) in the current turn, persist via the exact `persistence_command` + `session-check`, and never run an auto-queue head ahead of an unresolved exchange prompt.
-- **Regression:** `preflight_emits_owned_pane_self_invocation_for_active_queue_head` locks the queue-head structured contract the guidance depends on (complements the existing `_for_unresolved_prompt` / `_absent_for_non_owner_pane` phase-1 tests).
-- **Still gated:** (2b) a live Codex Stop-hook regression and (3) a live same-pane Codex run with an unresolved exchange prompt. The deterministic session-check backstop (`check_prompt_only_exchange_tail_guard` + `#recguard-abandon`) already landed in phase 1, so the gate is on live verification, not unit coverage.
-
-Committed + pushed (submodule `407b0825`).
-<!-- agent:boundary:c0051e04 -->
+<!-- agent:boundary:3ce9f518 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#queue-sync-auto-pending-done-guard-misfire]
 - do [#recursive-repair-state-drift]
-- do [#tagpath-queue-priority-publish-align]
 - do [#blocked-closeout-followup-capture]
+- do [#queue-sync-auto-pending-done-guard-misfire]
+- do [#tagpath-queue-priority-publish-align]
 - do [#codex-owned-pane-prompt-miss-followups]
 - do [#stuck-capture-queue-echo-false-positive]
 - do [#backlog-queue-sync-attr]

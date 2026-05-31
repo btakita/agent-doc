@@ -36,13 +36,35 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 2 response topic(s): monsterrodholders Run Agent Doc idle-but-queued stall; #closeout-recovery-state-machine
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:1072bc97 -->
+
+### Re: do [#codex-owned-pane-prompt-miss] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#codex-owned-pane-prompt-miss]
+
+
+Fixed the owner-pane self-invocation prompt miss and shipped it (submodule `dede28d8`, both binaries built + installed, `make check` green, pushed).
+
+**Root cause.** The recursive same-pane deadlock guard fired *after* `git::commit()` pre-commit and `start_run_cycle`. So when a Codex-owned pane re-invoked `agent-doc <FILE>` while an unresolved exchange prompt was still pending, pre-commit baselined that prompt into `HEAD`, the guard then abandoned the empty cycle, and the next preflight saw `no_changes` — the user prompt was silently lost.
+
+**Fix (fallback path from the plan — fail-closed, prompt-preserving).**
+
+1. **Early guard in `run.rs`** — a new `owned_pane_self_invocation_detail` detector (shared with the late deadlock guard so they cannot disagree on ownership). When it matches *and* `session_check::unresolved_exchange_prompt` returns a pending prompt, `run` bails **before** pre-commit and before opening a cycle. `owned_pane_prompt_miss_diagnostic` names the prompt and the in-pane recovery path and tells the operator not to re-run the same direct command. The prompt stays uncommitted and executable.
+2. **Late guard unchanged for the no-prompt case** — queue-only / no-unresolved-prompt recursion still reaches the `#recguard-abandon` path and abandons the empty cycle.
+3. **`session_check` backstop** — an abandoned `recursive_direct_invocation_blocked` cycle whose document still carries an unresolved exchange prompt is now reported as a missed-prompt recovery instead of accepted as terminal closeout (defense in depth for older cycles / alternate paths).
+
+**Tests.** Split the old integration test into two: owner-pane + unresolved prompt → early fail-closed before pre-commit (no cycle opened, prompt retained); owner-pane + queue-only/no-prompt → still abandons the recursive cycle. Added a `session_check` unit test for the backstop. `make check` passes.
+
+**Spec/docs.** Updated `README.md` and `specs/07-core-commands.md` with the early-guard + backstop contract.
+
+Gated `#codex-owned-pane-prompt-miss` (code-complete, awaiting a real Codex same-pane live-verify) and queued `#codex-owned-pane-prompt-miss-followups` for the plan's *preferable* enhancements (structured `owned_pane_self_invocation` preflight result shape + Codex guidance/hook regression) plus the live-verify step.
+<!-- agent:boundary:ea8db46b -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- ~do [#closeout-recovery-state-machine]~
-- do [#codex-owned-pane-prompt-miss]
+- ~do [#codex-owned-pane-prompt-miss]~
 - do [#stuck-capture-compact-false-positive]
 - do [#codex-final-response-live-verify]
 - do [#codex-route-busy-ctrl-g-opens-editor]
@@ -50,6 +72,7 @@ preset #spec-test-build-install-commit-push
 - do [#route-drain-all-surface-live-verify]
 - do [#run-agent-doc-stale-busy-replay]
 - do [#jb-busy-queue-ux-feedback]
+- do [#queue-prompt-echo-summary]
 - do [#free-text-queue-owner-consume]
 - do [#plugin-cleanup-menu-command]
 - do [#stash-session-ttl-prune]
@@ -86,6 +109,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#codex-owned-pane-prompt-miss-followups] [recommended] Follow-ups deferred from the #codex-owned-pane-prompt-miss fix (fail-closed early guard + session-check backstop landed, submodule dede28d8): (1) the plan's *preferable* path — emit a structured owned_pane_self_invocation result shape in preflight/plan (file path, owner pane/session/actor generation, unresolved prompt excerpt, required persistence command) so Codex guidance drives an in-pane response cycle instead of only reading the bail diagnostic; (2) Codex Stop-hook / installed guidance regression asserting the owned-pane diagnostic forces an in-pane response body before final chat output; (3) live-verify with a real Codex same-pane run that has an unresolved exchange prompt. Plan: tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md.
 - [ ] [#queue-prompt-echo-summary] [recommended] Summarize long consumed queue prompts in the #queue-prompt-echo-in-response echo instead of copying verbatim. Current behavior embeds the entire prompt as a > **Queue prompt:** blockquote after the response heading; for long prompts a bounded summary plus a pointer to the full queue text would keep the exchange readable. Add a length threshold + summarization path (the user explicitly deferred this: 'for now, let's try copying the entire prompt').
 - [ ] [#codex-owned-pane-auto-queue-stuck] [recommended] Codex-owned `agent-doc <FILE>` direct invocation from the same pane can leave an active auto-queue turn stuck: the recursive guard avoids child dispatch, but the ready queue head is not handed to the owning Codex turn and no response is written. Live repro 2026-05-31 `src/boost-client/tasks/monsterrodholders.md`: `queue_active: true` + `agent:queue auto` head `re [#374n]...`; same-pane run printed `Submitting to codex...` then `recursive direct invocation would deadlock`, leaving queue/boundary drift and the head unprocessed. Fix with early owner-pane queue handoff, durable queue-target proof, no-drift guard, and Codex final-gate recovery. Plan: tasks/agent-doc/plan-codex-owned-pane-auto-queue-stuck.md.
 - [ ] [#completed-queue-residue-regression] [recommended] Completed queue items can still remain visible in agent:queue after the turn is finished, despite the archived #drained-done-queue-clear fix. Treat as a regression/uncovered route or IPC path: add a committed-state guard for provable completed queue residue, audit finalize/write/preflight/run continuation drain ordering, and verify live editor/snapshot/HEAD convergence. Plan: tasks/agent-doc/plan-completed-queue-residue-regression.md.
@@ -95,7 +119,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 - [ ] [#preset-item-id-collision] [recommended] Enforce unique active identities across frontmatter `prompt_presets` keys and active `agent:backlog` / `agent:review` / `agent:icebox` item ids. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `#next-steps` exists both as a prompt preset and as a backlog item, making `do #next-steps` and "top backlog item: #next-steps" ambiguous between preset expansion and backlog execution. Fix with an identity registry, mutation-time rejection, preflight/session-check fail-closed diagnostics, and regressions. Plan: tasks/agent-doc/plan-preset-item-id-collision.md.
 - [ ] [#codex-final-response-live-verify] [recommended] Opportunistic live re-verification of the #codex-final-response-not-written guard: do a real Codex direct/manual run that commits side-effect work, confirm session-check (via the .codex Stop hook) fails closed with the 'no assistant response body was captured' message + 'agent-doc write --commit' recovery when no ### Re: close-out was written, and that a normal Codex turn with a response stays OK. Guard + deterministic regressions already landed (session_check.rs check_committed_without_response_body_guard).
 - [ ] [#stuck-capture-compact-false-positive] [recommended] stuck_captured_cycle false-positive after compaction: a capture recorded as committed (cycle-1780100032048, response 'gate→done for codex guidance') is later archived by compact, so preflight reports committed-but-not-in-HEAD and suggests `write --commit` recovery — which would re-inject an already-archived response (it lives in .agent-doc/archives/<hash>-*.md). Fix: when a captured-committed body is absent from HEAD because it was compacted (present in the matching archive), reconcile the capture instead of flagging it stuck. Repro 2026-05-29 agent-doc-bugs2.md.
-- [ ] [#codex-owned-pane-prompt-miss] [recommended] Codex-owned `agent-doc <FILE>` direct invocation from the same pane can abandon recursive dispatch without processing unresolved exchange prompts. Live repro 2026-05-30: `src/boost-client/tasks/monsterrodholders.md` contained `Please assist in placing GA4 Analytics credentials in passage.`, but the same-pane recursion guard refused dispatch and no response was written. Fix with earlier owner-pane self-invocation detection, unresolved-prompt preservation, and Codex guidance/final-gate recovery. Plan: tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md.
 - [ ] [#codex-route-busy-ctrl-g-opens-editor] [recommended] route.rs busy-pane reroute interrupt (route.rs ~6409) also sends C-g unconditionally to a busy Codex pane before the Escape+C-c fallback — same root cause as #codex-interrupt-clear-ctrl-g-opens-editor: C-g opens the external editor ($EDITOR/nvim) in the normal Codex composer. Gate it on a shell reverse-i-search/history-search capture like send_operator_interrupt_sequence now does (or skip C-g when the busy blocker is an active turn). Tracked separately from the operator interrupt-clear fix because a hard change here alters reroute semantics. Add a route SimWorld regression for the non-search composer case — the existing ctrl-g test (write_mock_busy_registered_agent_doc_recovers_on_ctrl_g) only models reverse-i-search recovery, which is why this regression slipped through.
 - [ ] [#cross-project-stash-pane-condition] [recommended] resync logs 'stash pane %N registered in its own project root — skipping kill' because nested project roots (superproject agent-loop + submodule src/boost-client) auto-detect the SAME tmux session 0 and share one stash window, so superproject sync stashes the submodule's live session pane and resync re-discovers it cross-project. Not a resync logic error (preservation is correct); root cause is the shared-session layout for nested roots. Live evidence + fix options (A nested-root session isolation [recommended], B per-root stash partitioning, C out-of-scope skip, D reap stale agent-doc stash panes) in tasks/agent-doc/plan-cross-project-stash-pane-condition.md. Needs a session-model design decision before implementing; deferred from blind code change.
 - [ ] [#route-drain-all-surface-live-verify] [recommended] Live-verify the route-drain all-surface reap (submodule b239988b / superproject 4c7b06b7f) resolves the JB Run Agent Doc "completed tracked item blocks dispatch" retry: with the installed binary, reproduce a closeout that leaves a completed [x] item in review or icebox on an IDE-owned doc, then run JB Run Agent Doc once and confirm it dispatches without a manual repeat. Also exercises the #pending-gate-snapshot-desync snapshot re-sync (ab074710) under the route path.
@@ -112,6 +135,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Review
  
 <!-- agent:review -->
+- [/] [#codex-owned-pane-prompt-miss] [recommended] Codex-owned `agent-doc <FILE>` direct invocation from the same pane can abandon recursive dispatch without processing unresolved exchange prompts. Live repro 2026-05-30: `src/boost-client/tasks/monsterrodholders.md` contained `Please assist in placing GA4 Analytics credentials in passage.`, but the same-pane recursion guard refused dispatch and no response was written. Fix with earlier owner-pane self-invocation detection, unresolved-prompt preservation, and Codex guidance/final-gate recovery. Plan: tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md.
 - [/] [#stash-pane-promote-on-focus] [recommended] A live-owner pane residing in the stash tmux window must be promoted/reparented into the 0:agent-doc window when the document is focused/selected, not merely selected in place. Live repro 2026-05-30 agent-doc-bugs2.md: pane %8 (live owner) is stuck in the stash window; focus/select does not move it. The focus live-owner fix (submodule e6dafa52) now selects the correct pane but does not reparent it. Tied to #cross-project-stash-pane-condition and #plugin-cleanup-menu-command.
 - [/] [#clear-stops-running-process] [recommended] JB Clear Session Context / Claude Code /clear must stop the running agent-doc child so a following JB Run Agent Doc is not blocked by a stale busy actor. Live repro 2026-05-30 agent-doc-bugs2.md: after /clear, a still-running process blocked Run Agent Doc. Overlaps #cancel-orphans-preflight-cycle and the operator_clear busy-projection path in session_actor_cmd.rs.
 - [/] [#jb-run-agent-doc-response-queue-contamination] [recommended] JetBrains `Run Agent Doc` can add assistant response prose to `agent:queue auto` after compact/repair drift. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: queue gained `- Yes. I drove the already-authenticated Google Ads browser session...`, copied from `### Re: #gads106demote`, alongside real `do [#nbsearch]`/`#bidstrat`/`#pdpconv` entries. Require queue-source provenance and reject assistant response bodies as queue candidates. Plan: tasks/agent-doc/plan-jb-run-agent-doc-response-queue-contamination.md.

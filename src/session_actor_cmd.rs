@@ -417,12 +417,48 @@ pub fn clear(file: &Path) -> Result<()> {
             "/clear",
         )?;
     }
+    // Explicit clear aborts the current turn, so reclaim any orphaned open
+    // preflight cycle the cleared run left behind so the next Run Agent Doc
+    // starts fresh instead of waiting on a stale open cycle.
+    reclaim_orphaned_cycle_on_clear(&ctx.canonical_file);
     println!(
         "Cleared session context for {} (controller stage {}).",
         ctx.canonical_file.display(),
         authorization.accepted_stage
     );
     Ok(())
+}
+
+/// After an explicit clear delivers `/clear` (aborting the current turn),
+/// reclaim any orphaned open preflight cycle the cleared run left behind
+/// (#clear-stops-running-process, mirroring explicit run-cancel
+/// #cancel-orphans-preflight-cycle). An empty `preflight_started` cycle is
+/// abandoned so the next Run Agent Doc starts fresh instead of waiting on a
+/// stale open cycle; a cycle that already captured a response is protected and
+/// left intact. Reclaim failures are non-fatal — the clear itself already
+/// delivered — and surface as a warning.
+fn reclaim_orphaned_cycle_on_clear(
+    file: &Path,
+) -> agent_doc_orchestration::repair::CancelOutcome {
+    match agent_doc_orchestration::repair::cancel_preflight_cycle(file) {
+        Ok(outcome) => {
+            agent_doc_orchestration::ops_log::log_op(
+                file,
+                &format!(
+                    "session_clear_cycle_reclaim file={} outcome={outcome:?}",
+                    file.display()
+                ),
+            );
+            outcome
+        }
+        Err(err) => {
+            eprintln!(
+                "[clear] warning: failed to reclaim orphaned cycle for {}: {err:#}",
+                file.display()
+            );
+            agent_doc_orchestration::repair::CancelOutcome::NoOpenCycle
+        }
+    }
 }
 
 fn supervisor_clear_inject_available(ctx: &SessionContext) -> bool {
@@ -3256,6 +3292,68 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         assert_eq!(
             resolve_direct_submit_pane(&ctx, &iso),
             Some((registry_pane, DirectSubmitPaneSource::Registry))
+        );
+    }
+
+    fn clear_reclaim_project() -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("doc.md");
+        std::fs::write(&doc, "# Doc\n\n## User\n\nDo the thing\n").unwrap();
+        (dir, doc)
+    }
+
+    #[test]
+    fn clear_reclaims_orphaned_empty_preflight_cycle() {
+        let (_dir, doc) = clear_reclaim_project();
+        let content = std::fs::read_to_string(&doc).unwrap();
+        agent_doc_orchestration::cycle_state::start_preflight(&doc, Some(&content), Some(&content))
+            .unwrap();
+
+        // The clear path reclaims the orphaned cycle so the next Run Agent Doc
+        // is not wedged by a stale open cycle.
+        assert_eq!(
+            reclaim_orphaned_cycle_on_clear(&doc),
+            agent_doc_orchestration::repair::CancelOutcome::Abandoned
+        );
+        let state = agent_doc_orchestration::cycle_state::load(&doc)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            state.phase,
+            agent_doc_orchestration::cycle_state::CyclePhase::Abandoned
+        );
+    }
+
+    #[test]
+    fn clear_protects_cycle_that_already_captured_a_response() {
+        let (_dir, doc) = clear_reclaim_project();
+        let content = std::fs::read_to_string(&doc).unwrap();
+        agent_doc_orchestration::cycle_state::start_preflight(&doc, Some(&content), Some(&content))
+            .unwrap();
+        agent_doc_orchestration::capture::capture_response(&doc, "### Re: do — opus-4-8\n\nDone.\n")
+            .unwrap();
+
+        // A cycle that owns a captured response must not be discarded by clear.
+        assert_eq!(
+            reclaim_orphaned_cycle_on_clear(&doc),
+            agent_doc_orchestration::repair::CancelOutcome::Protected
+        );
+        assert!(
+            agent_doc_orchestration::cycle_state::load(&doc)
+                .unwrap()
+                .unwrap()
+                .is_open(),
+            "clear must protect a cycle that already captured a response"
+        );
+    }
+
+    #[test]
+    fn clear_reclaim_is_noop_without_an_open_cycle() {
+        let (_dir, doc) = clear_reclaim_project();
+        assert_eq!(
+            reclaim_orphaned_cycle_on_clear(&doc),
+            agent_doc_orchestration::repair::CancelOutcome::NoOpenCycle
         );
     }
 }

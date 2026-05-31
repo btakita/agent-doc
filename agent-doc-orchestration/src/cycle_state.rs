@@ -791,6 +791,14 @@ fn is_stable_commit_event(event: &str) -> bool {
     )
 }
 
+/// A no-op commit event: the closeout commit found the snapshot already equal to
+/// `HEAD`, so this cycle committed *no* new binary-owned work this turn. Distinct
+/// from `commit` / `commit_success`, which committed real content. Used by
+/// closeout guards that must not treat a no-op commit as committed-work-without-a-response.
+pub fn is_noop_commit_event(event: &str) -> bool {
+    event == "commit_already_current"
+}
+
 fn is_zero(value: &usize) -> bool {
     *value == 0
 }

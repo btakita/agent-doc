@@ -708,6 +708,29 @@ fn check_committed_without_response_body_guard(file: &Path) -> Result<GuardResul
     if !state.had_pending_mutations {
         return Ok(GuardResult::None);
     }
+    // A no-op commit (`commit_already_current`) committed NO new binary-owned work
+    // this turn: the snapshot already equalled `HEAD`, so the pending mutation (a
+    // reap / `--done` of an item already reflected in `HEAD`) left the document
+    // byte-identical and there is nothing a paired response would accompany. Firing
+    // here deadlocks the cycle — the recommended `write --commit` recovery is itself
+    // a no-op (no response body to write, nothing to commit), so a re-running
+    // closeout poller re-interrupts every pass forever. A real
+    // `#codex-final-response-not-written` miss commits actual side-effect content
+    // (`last_event` `commit_success` / `commit`), so it still fires.
+    if crate::cycle_state::is_noop_commit_event(&state.last_event) {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "committed_without_response_body_guard_skipped_noop_commit file={} cycle_id={} last_event={} pending_done={} reaped={}",
+                file.display(),
+                state.cycle_id,
+                state.last_event,
+                state.pending_done_ids.len(),
+                state.reaped_pending_ids.len(),
+            ),
+        );
+        return Ok(GuardResult::None);
+    }
     let side_effects = tracked_side_effect_note(file)?;
     let msg = format!(
         "[session-check] INTERRUPTED: cycle committed binary-owned work this turn but no assistant response body was captured (cycle `{}`, last_event `{}`). The close-out response was never written into `agent:exchange`{}. {}",
@@ -4022,6 +4045,42 @@ Body\n\
         // ordinary already-committed sweeps do not false-fire.
         let dir = tempfile::tempdir().unwrap();
         let doc = write_committed_turn_doc(dir.path(), false, false, &[]);
+        assert!(matches!(
+            check_committed_without_response_body_guard(&doc).unwrap(),
+            GuardResult::None
+        ));
+    }
+
+    #[test]
+    fn committed_without_response_body_guard_skips_noop_commit_reap_only_cycle() {
+        // Deadlock repro (tsift.md cycle-1780257680821): a `finalize --done X` whose
+        // only effect was reaping an item already reflected in HEAD commits a no-op
+        // (`commit_already_current`) and sets `had_pending_mutations`, but writes no
+        // response body. The guard must NOT fire — a no-op commit committed no
+        // binary-owned work this turn, so there is nothing a response would
+        // accompany; firing wedges the cycle in an infinite
+        // session-check-interrupted loop because the `write --commit` recovery is
+        // itself a no-op. A real side-effect commit (`commit_success`) still fires.
+        let _lock = crate::test_support::env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        let doc = root.join("doc.md");
+        let current =
+            "---\nagent_doc_session: test\n---\n\n## Exchange\n\ndo [#nsga4verify]\n".to_string();
+        fs::write(&doc, &current).unwrap();
+        crate::snapshot::save(&doc, &current).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
+        crate::cycle_state::mark_pending_mutations(&doc).unwrap();
+        crate::cycle_state::record_pending_done_ids(&doc, &["nsga4verify".to_string()]).unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_already_current",
+            Some(&current),
+            Some(&current),
+        )
+        .unwrap();
         assert!(matches!(
             check_committed_without_response_body_guard(&doc).unwrap(),
             GuardResult::None

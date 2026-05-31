@@ -269,7 +269,14 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // `blocked_closeout_followup_guard_fired` ops_log diagnostic, and seven
         // `blocked_closeout_followup_guard_*` test names. Same ops_log pattern
         // as the sibling `expect_done_or_gate` / partial-closeout guards.
-        ("agent-doc-orchestration/src/session_check.rs", "guard_") => 49,
+        // +2 for the audited no-op-commit exemption of the
+        // `committed_without_response_body` guard (tsift.md deadlock): the
+        // `committed_without_response_body_guard_skipped_noop_commit` ops_log
+        // diagnostic plus its `..._guard_skips_noop_commit_reap_only_cycle`
+        // regression test name. A no-op commit (`commit_already_current`)
+        // committed no binary-owned work, so the guard skips it instead of
+        // looping the cycle forever.
+        ("agent-doc-orchestration/src/session_check.rs", "guard_") => 51,
         ("agent-doc-orchestration/src/write.rs", "guard_") => 70,
         // +1 for the audited `bare_write_escalated_to_commit ... reason=response_body_placed`
         // ops_log diagnostic on the #bare-write-captured-uncommitted escalation path.

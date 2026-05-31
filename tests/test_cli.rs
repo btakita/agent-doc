@@ -258,7 +258,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // `queue_response_contamination_guard_failed` ops_log diagnostic plus
         // three `queue_contamination_guard_*` test names. All follow the same
         // ops_log pattern as the sibling session-check pending guards.
-        ("agent-doc-orchestration/src/session_check.rs", "guard_") => 35,
+        ("agent-doc-orchestration/src/session_check.rs", "guard_") => 40,
         ("agent-doc-orchestration/src/write.rs", "guard_") => 70,
         // +1 for the audited `bare_write_escalated_to_commit ... reason=response_body_placed`
         // ops_log diagnostic on the #bare-write-captured-uncommitted escalation path.

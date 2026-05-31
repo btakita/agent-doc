@@ -263,6 +263,7 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
             check_pending_capture_guard(file)?,
             check_pending_done_guard(file)?,
             check_expect_done_or_gate_guard(file)?,
+            check_partial_closeout_state_guard(file)?,
         ] {
             match guard {
                 GuardResult::None => {}
@@ -2192,6 +2193,143 @@ fn check_expect_done_or_gate_guard(file: &Path) -> Result<GuardResult> {
         )),
         crate::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
     })
+}
+
+/// Tight list of "deferred live work" phrases that, combined with a shipped
+/// signal, indicate a `do [#id]` turn shipped a repo phase but left live
+/// deploy / sync / verification / approval work for a later phase
+/// (`#do-id-partial-closeout-state`). Kept narrow to avoid false positives on
+/// ordinary closeout prose.
+const PARTIAL_CLOSEOUT_REMAINING_PHRASES: &[&str] = &[
+    "not deployed",
+    "not yet deployed",
+    "deploy remains",
+    "deployment remains",
+    "deploy/",
+    "live verification",
+    "live verify",
+    "live-verify",
+    "external validation remains",
+    "awaiting approval",
+    "awaiting user",
+    "user approval",
+    "sync remains",
+    "feed sync",
+    "merchant center",
+    "live ads",
+    "remains: deploy",
+];
+
+fn text_has_shipped_signal(lower: &str) -> bool {
+    (lower.contains("committed") || lower.contains("commit + push") || lower.contains("commit and push"))
+        && lower.contains("push")
+}
+
+fn text_has_partial_remaining_signal(lower: &str) -> bool {
+    PARTIAL_CLOSEOUT_REMAINING_PHRASES
+        .iter()
+        .any(|phrase| lower.contains(phrase))
+}
+
+/// `#do-id-partial-closeout-state`: a `do [#id]` turn that ships a repo phase
+/// (committed + pushed) while the response also says deploy / sync / live
+/// verification / approval remains, and the directed id is still `[ ]` open,
+/// should narrow the visible backlog item + queue head to the next phase via
+/// `--pending-edit` (or `--pending-gate`) so the next required action is visible
+/// instead of leaving the original full-task text. This is WARN-only by design:
+/// it must never block the closeout (the auto-queue drain depends on this path),
+/// and lacks per-id edit tracking, so it advises rather than enforces. Suppress
+/// with a `<!-- no-partial-closeout-guard -->` marker in the response when the
+/// item was already narrowed.
+fn check_partial_closeout_state_guard(file: &Path) -> Result<GuardResult> {
+    let Some(state) = crate::cycle_state::load(file)? else {
+        return Ok(GuardResult::None);
+    };
+    if state.expect_done_or_gate_ids.is_empty() || state.is_open() {
+        return Ok(GuardResult::None);
+    }
+    let Some(capture_id) = state.capture_id.as_deref() else {
+        return Ok(GuardResult::None);
+    };
+    let Some(capture) = crate::capture::load_by_id(file, capture_id)? else {
+        return Ok(GuardResult::None);
+    };
+    if capture.state != crate::capture::CaptureState::Committed {
+        return Ok(GuardResult::None);
+    }
+    if capture
+        .response_body
+        .contains("<!-- no-partial-closeout-guard -->")
+    {
+        return Ok(GuardResult::None);
+    }
+
+    let text = response_text_for_guards(&capture.response_body);
+    let lower = text.to_ascii_lowercase();
+    if !(text_has_shipped_signal(&lower) && text_has_partial_remaining_signal(&lower)) {
+        return Ok(GuardResult::None);
+    }
+
+    // Only directed ids that are still open in agent:backlog and not resolved
+    // (done/reaped) this cycle are candidates for next-phase narrowing.
+    let resolved: std::collections::HashSet<String> = state
+        .pending_done_ids
+        .iter()
+        .chain(state.reaped_pending_ids.iter())
+        .map(|id| crate::pending::normalize_pending_id(id))
+        .filter(|id| !id.is_empty())
+        .collect();
+    let open_backlog: std::collections::HashSet<String> =
+        open_backlog_ids(file)?.into_iter().collect();
+
+    let mut candidates: Vec<String> = Vec::new();
+    for id in state
+        .expect_done_or_gate_ids
+        .iter()
+        .map(|id| crate::pending::normalize_pending_id(id))
+        .filter(|id| !id.is_empty())
+    {
+        if resolved.contains(&id) || !open_backlog.contains(&id) {
+            continue;
+        }
+        if !candidates.iter().any(|existing| existing == &id) {
+            candidates.push(id);
+        }
+    }
+    if candidates.is_empty() {
+        return Ok(GuardResult::None);
+    }
+
+    let ids = candidates
+        .iter()
+        .map(|id| format!("#{}", id))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let edit_hint = candidates
+        .iter()
+        .map(|id| format!("--pending-edit \"{}=<remaining next-phase scope>\"", id))
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "partial_closeout_state_guard_fired file={} candidates={}",
+            file.display(),
+            candidates.join(",")
+        ),
+    );
+
+    Ok(GuardResult::Warn(vec![
+        format!(
+            "[session-check] warn: partial `do [#id]` closeout — work shipped (committed + pushed) but the response says live deploy/sync/verification work remains, yet tracked target {} still carries its original full-task text in agent:backlog",
+            ids
+        ),
+        format!(
+            "[session-check] hint: narrow the backlog item + queue head to the next phase with `{}` (or `--pending-gate <id>` if only review/external validation remains), or add `<!-- no-partial-closeout-guard -->` when it is already narrowed",
+            edit_hint
+        ),
+    ]))
 }
 
 fn single_open_review_item_id(file: &Path) -> Result<Option<String>> {
@@ -5870,6 +6008,90 @@ Body\n\
 
         assert!(matches!(
             check_expect_done_or_gate_guard(&doc).unwrap(),
+            GuardResult::None
+        ));
+    }
+
+    #[test]
+    fn partial_closeout_state_guard_warns_on_shipped_with_remaining_live_work() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_committed_do_directive_cycle(
+            tmp.path(),
+            None,
+            "### Re: do #nstep2 — gpt-5\n\nCommitted and pushed the repo + tests. Live deploy and live verification remain; not deployed yet.\n",
+            Some("- [ ] [#nstep2] Original full-task text the directive resolved\n"),
+            &["nstep2"],
+            &[],
+            // Kept open (gated/kept) but the item text was not narrowed.
+            &["nstep2"],
+        );
+
+        match check_partial_closeout_state_guard(&doc).unwrap() {
+            GuardResult::Warn(lines) => {
+                let joined = lines.join("\n");
+                assert!(joined.contains("#nstep2"), "{joined}");
+                assert!(joined.contains("--pending-edit"), "{joined}");
+                assert!(joined.contains("next phase") || joined.contains("next-phase"), "{joined}");
+            }
+            other => panic!("expected WARN for partial closeout, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn partial_closeout_state_guard_silent_without_remaining_signal() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_committed_do_directive_cycle(
+            tmp.path(),
+            None,
+            "### Re: do #nstep2 — gpt-5\n\nCommitted and pushed. Completed the full task.\n",
+            Some("- [ ] [#nstep2] Tracked work\n"),
+            &["nstep2"],
+            &[],
+            &["nstep2"],
+        );
+
+        assert!(matches!(
+            check_partial_closeout_state_guard(&doc).unwrap(),
+            GuardResult::None
+        ));
+    }
+
+    #[test]
+    fn partial_closeout_state_guard_suppressed_by_marker() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_committed_do_directive_cycle(
+            tmp.path(),
+            None,
+            "### Re: do #nstep2 — gpt-5\n\nCommitted and pushed; live verification remains.\n<!-- no-partial-closeout-guard -->\n",
+            Some("- [ ] [#nstep2] Narrowed to next phase\n"),
+            &["nstep2"],
+            &[],
+            &["nstep2"],
+        );
+
+        assert!(matches!(
+            check_partial_closeout_state_guard(&doc).unwrap(),
+            GuardResult::None
+        ));
+    }
+
+    #[test]
+    fn partial_closeout_state_guard_silent_when_target_reaped() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // `--done` reaps the item; partial-completion prose must not warn about a
+        // target that is no longer open in agent:backlog.
+        let doc = setup_committed_do_directive_cycle(
+            tmp.path(),
+            None,
+            "### Re: do #nstep2 — gpt-5\n\nCommitted and pushed; not deployed yet.\n",
+            Some("- [ ] [#keep1] Unrelated open item\n"),
+            &["nstep2"],
+            &["nstep2"],
+            &[],
+        );
+
+        assert!(matches!(
+            check_partial_closeout_state_guard(&doc).unwrap(),
             GuardResult::None
         ));
     }

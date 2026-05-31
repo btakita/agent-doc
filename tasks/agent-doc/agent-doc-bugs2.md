@@ -99,7 +99,30 @@ The implementation under test already landed and is confirmed present:
 2. Run `agent-doc repair --apply-recovery <FILE>` and confirm it **restores-from-HEAD** for the spurious `queue_active:false` class and **commits-forward** otherwise — replacing the manual cancel→reset→commit sequence.
 
 Parent plan: `tasks/agent-doc/plan-recursive-repair-state-drift.md`. Staying gated until that live run is done on a quiet owner pane.
-<!-- agent:boundary:e8eaa58f -->
+
+### Re: do [#repair-orphan-prefix-bug] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#repair-orphan-prefix-bug]
+
+
+Fixed and verified. The orphan-repair path no longer prefixes assistant body lines with the `❯ ` user-prompt marker.
+
+**Root cause** (`agent-doc-orchestration/src/write.rs` `normalize_user_prompts_in_exchange`): the function classifies user-typed lines by diffing `snapshot → baseline` and gates them with `in_agent_block`, which was set true **only when a heading is an `Insert`**. When an orphaned response is applied by replacing a *placeholder* body under an **existing** `### Re:` heading (e.g. a direct Edit-based patchback swapping `Hello world` for the real body — the live tsift.md repro), the heading line is `Equal` in the diff, so `in_agent_block` was false and the replacement body lines (`Insert`) were misclassified as user prompts and prefixed.
+
+**Fix:** track whether the scanner is inside a `### Re:` block and whether that block had a body line *deleted*. Insert body lines that **replace** deleted body (delete + insert under an existing heading) are assistant content — excluded from prompt-prefix normalization and from the canonical-diff prompt targets. A pure **append** of new text after an unchanged response still gets the `❯ ` prefix (genuine user follow-up). The distinguishing signal is the preceding delete, so both `normalize_user_prompts_user_text_after_equal_heading` and the new replacement case pass.
+
+**Verification:**
+
+- New regression test `normalize_user_prompts_replaced_response_body_under_existing_heading_not_prefixed` — failed before, passes after.
+- Full `normalize_user_prompts` suite (23 tests) green, including the two append-prompt cases the first (too-broad) attempt regressed.
+- `cargo test -p agent-doc-orchestration`: 2052 passed.
+- `make check`: exit 0, 0 failure markers (checked explicitly, RTK exit-code masking accounted for).
+- Rebuilt both binaries (`cargo build --release` + `cargo install --path .`) so `.bin/agent-doc` and `~/.cargo/bin/agent-doc` (tmux) carry the fix.
+
+**Commits:** submodule `298f6466` (fix + test), superproject pointer `606be03de`. No spec change needed (binary-only, as the plan scoped). Plan: `tasks/agent-doc/plan-repair-orphan-prefix-bug.md`.
+<!-- agent:boundary:43b086ce -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -108,8 +131,8 @@ preset #spec-test-build-install-commit-push
 - ~do [#rejected-response-must-block-queue-consume-and-done]~
 - ~do [#opencode-active-turn-reopen-auto-retry-on-idle]~
 - ~do [#recovery-drift-apply-live-verify]~
-- do [#jb-run-agent-doc-command-route-miss]
-- do [#repair-orphan-prefix-bug]
+- ~do [#jb-run-agent-doc-command-route-miss]~
+- ~do [#repair-orphan-prefix-bug]~
 - do [#recursive-repair-apply]
 - do [#preflight-probe-side-effect-free]
 - do [#gated-followup-split-enforcement]
@@ -127,6 +150,12 @@ preset #spec-test-build-install-commit-push
 <!-- /agent:queue -->
 ###
 <!--
+```
+[route] debounce OK — file idle for 0.5s and typing indicator idle
+[route] target tmux session: 0
+[route] authoritative actor generation 245 for tasks/monsterrodholders.md is busy on pane %40; queued pending dispatch "Are there any items in review that are actionable right now?" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
+```
+---
 Verify [#ipcfullprompt-recur2]
 ---
 The last run had a code fence stripped away by agent-doc.
@@ -152,7 +181,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog priority queue=prepend -->
-- [ ] [#repair-orphan-prefix-bug] Orphan-response repair path prefixes every body line with the user-prompt marker. Live repro 2026-05-31 tsift.md: direct Edit-based patchback triggered orphan repair, which applied the prefix to all assistant body lines. Fix: ensure orphan-repair preserves response body verbatim. Plan: tasks/agent-doc/plan-repair-orphan-prefix-bug.md. Related: #jb-compact-malformed-response-commit, #finalize-retry-ipc-response-duplication.
 - [ ] [#gated-followup-split-enforcement] [recommended] #agent-doc-bug 2026-05-31: when a directed do [#id] cycle keeps a multi-phase item open via --pending-edit (backlog) or --review-edit (review) with text that enumerates several gated/remaining phases, agent-doc neither prompts nor guards splitting those phases into discrete child backlog IDs — the deferred work stays buried in one parent's narrowed description and is not independently trackable/queueable. Repro this session: #recursive-repair-state-drift and #codex-owned-pane-prompt-miss-followups each had 2-4 gated phases folded into parent text; only a user catch prompted splitting them into #recursive-repair-recovery-states/#recursive-repair-apply/#preflight-probe-side-effect-free/#codex-owned-pane-stop-hook-live-verify. Add a session-check/finalize advisory (warn-first, sibling of #blocked-closeout-followup-capture and the SKILL 'one backlog ID per actionable phase' rule) that detects a kept-open item whose body lists multiple gated phases without discrete child IDs and recommends the split. Plan: TBD.
 - [ ] [#preflight-probe-side-effect-free] [recommended] Make probe/diagnostic agent-doc preflight side-effect-free or self-abandoning so it never leaves an open preflight_started cycle that later wedges session-check (Proposed-Fix #4 of #recursive-repair-state-drift). Distinguish a dispatch/response-bound preflight from a pure inspection probe. Plan: tasks/agent-doc/plan-recursive-repair-state-drift.md.
 - [ ] [#codex-owned-pane-stop-hook-live-verify] [recommended] Gated on a live Codex pane -- the remaining phases of #codex-owned-pane-prompt-miss-followups after phase 2a landed: (2b) a live Codex Stop-hook regression asserting the owned_pane_self_invocation diagnostic forces an in-pane response body before final chat output, and (3) live-verify a real Codex same-pane run with an unresolved exchange prompt. Plan: tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md.

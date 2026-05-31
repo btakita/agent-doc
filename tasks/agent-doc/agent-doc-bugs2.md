@@ -16,7 +16,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -169,19 +169,32 @@ Three bugs reported; the keystone is fixed and shipped, the other two are queued
 **A — `/clear` doesn't stop the running process → backlog `#clear-stops-running-process`.** Confirmed a real gap: Clear should abandon the running agent-doc child / busy actor so the next `Run Agent Doc` isn't blocked. Overlaps `#cancel-orphans-preflight-cycle` and the `operator_clear` busy-projection path; queued for a focused fix.
 
 I shipped C because it was actively bricking the route. A and B are queued with exact repro for their own cycles.
-<!-- agent:boundary:e1721ddb -->
+
+### Re: clear-stops-running-process — opus-4-8
+
+**Queue prompt:** `do [#clear-stops-running-process]`
+
+**Clear fix (gated for live verify):** `agent-doc session clear` now reclaims an orphaned open preflight cycle after delivery — reusing the tested `cancel_preflight_cycle` semantics (abandon an empty `preflight_started` cycle, protect a cycle that already captured a response) — so a cleared turn can't wedge the next `Run Agent Doc`. The busy-actor projection was already handled by `reconcile_idle_projection_before_clear`; the orphaned-cycle reclaim was the missing piece. Deterministic tests + spec; submodule `94f8c776`. Gated because I can't reproduce the exact original operator wedge on demand — please run the clear → `Run Agent Doc` sequence on a live session to confirm.
+
+**Also shipped — queue parse no longer bricks finalize/route (the parse failures you flagged as "absolutely a bug"):** my earlier route-only fix didn't cover finalize's queue-consume guard, which hard-failed on this document's polluted `agent:queue` — first on free-text (`failed to parse`), then on an unbalanced `---` separator (`unclosed --- fence`) that was swallowing the real `do [#id]` items. Centralized + completed it: `queue::parse` now preserves any unrecognized line *and any unclosed fence opener* as a non-actionable `Freeform` separator (rendered verbatim, never dispatched), so real items beneath stray separators still parse. parse never bails now; only a structurally well-formed item is ever actionable. Submodules `f7992105` + `cae7e770`. This is what unblocked this very closeout.
+
+**On your queue-response directive** (responses should contain the prompt from the queue): noted and applied — I'm echoing the consumed queue prompt at the top of each queue-item response from here on.
+<!-- agent:boundary:263d9397 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue auto -->
-~~~done
-JB `Run Agent Doc` error:
+<!-- agent:queue -->
+---
+JB `Run Agent Doc` successfully started a turn and had an error.
 ```
-[route] debounce OK — file idle for 4.3s and typing indicator idle
+[route] debounce OK — file idle for 0.6s and typing indicator idle
 [route] target tmux session: 0
-[route] authoritative actor generation 241 for tasks/monsterrodholders.md is busy on pane %40; queued pending dispatch "do [#next-steps-2]. #spec-test-commit-push-deploy" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
+[route] authoritative actor generation 241 for tasks/monsterrodholders.md is busy on pane %40; queued pending dispatch "do [#netdemand]. #spec-test-commit-push" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
 ```
 #spec-test-commit-push-deploy
-~~~
+---
+The response to a queue item should contain the prompt from the queue. If the prompt is long, it may be beneficial to have a summary of the prompt. But for now, let's try copying the entire prompt.
+#spec-test-commit-push-deploy
+---
 preset #spec-test-build-install-commit-push
 - do [#clear-stops-running-process]
 - do [#stash-pane-promote-on-focus]

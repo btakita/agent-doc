@@ -64,11 +64,31 @@ If the busy Codex turn never reaches a clean turn-end Stop — e.g. blocked on `
 **Fix direction** (deferred): guarantee an idle-drain for the busy prompt-bearing case (the prompt-bearing sibling of `#opencode-active-turn-reopen-auto-retry-on-idle`), add explicit JB "deferred — queued" feedback, and add SimWorld/unit coverage for Stop-hook drain of a route-appended busy-queue prompt. Plan: `tasks/agent-doc/plan-jb-run-agent-doc-busy-queue-dispatch-deadlock.md` (committed).
 
 Backlog item `#jb-run-agent-doc-busy-queue-dispatch-deadlock` added.
-<!-- agent:boundary:2510f63e -->
+❯ Should #jb-run-agent-doc-busy-queue-dispatch-deadlock be run using Codex?
+
+### Re: Should #jb-run-agent-doc-busy-queue-dispatch-deadlock be run using Codex? — opus-4-8
+
+Yes — it's a reasonable fit for Codex, with two guardrails.
+
+**Why Codex fits:**
+
+- It's a substantial, well-scoped Rust implementation with the plan already written (`plan-jb-run-agent-doc-busy-queue-dispatch-deadlock.md`) — exactly the "hand a substantial coding task to Codex" case.
+- The bug lives in the Codex subsystem itself: the `Stop`-hook drain (`codex_hook.rs`) and the route busy-queue path (`route.rs:4003`). A Codex session reasoning about its own turn-end/Stop behavior has a mild advantage on the diagnosis dimension.
+
+**Guardrails (agent-agnostic — they hold whoever implements):**
+
+1. **Deterministic-first.** Land the route/Stop-hook fix plus SimWorld/unit coverage (Stop-hook drains a *route-appended* `agent:queue auto` prompt; loop-guard doesn't skip it; JB deferred-queued feedback) before any live run. Don't let "verify live" substitute for deterministic tests — that's how this class regresses silently.
+2. **Live verification stays a separate operator-present gate.** Reproducing the deadlock needs a real Codex pane mid-turn on `monsterrodholders.md`, which is risky in this active multi-session repo. Keep that as a gated, you-present step regardless of agent — same posture as `#recovery-drift-apply-live-verify` and `#codex-owned-pane-stop-hook-live-verify`.
+
+**One caveat specific to Codex here:** the live-verify target *is* a Codex session bound to `monsterrodholders-server` (SSH-gated, `-s danger-full-access`). Running the implementing Codex agent against that same live pane is what triggers the deadlock in the first place — so do the implementation/verification on a **separate scratch doc/pane**, not the live `monsterrodholders.md` session.
+
+If you want, I can dispatch it to the Codex rescue subagent with the plan as the brief (deterministic scope only, live-verify left gated). Say the word and I'll kick it off; otherwise I can keep draining the bugs2 queue.
+<!-- agent:boundary:d95069c5 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
+- do [#jb-run-agent-doc-busy-queue-dispatch-deadlock]
 - do [#closeout-recovery-state-machine]
 - do [#preflight-probe-side-effect-free]
 - do [#gated-followup-split-enforcement]

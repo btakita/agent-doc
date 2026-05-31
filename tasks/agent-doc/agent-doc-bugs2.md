@@ -31,38 +31,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260531-034525.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260531-042017.md`*
 
 Compacted content:
-- Archived 2 response topic(s): #stash-pane-promote-on-focus; #do-id-partial-closeout-state
+- Archived 2 response topic(s): monsterrodholders Run Agent Doc idle-but-queued stall; #closeout-recovery-state-machine
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: monsterrodholders Run Agent Doc idle-but-queued stall — opus-4-8
-
-Root cause: route deliberately queued the dispatch because it believed the authoritative actor was busy and the stale-busy repair did not fire. See the committed analysis above.
-
-### Re: #closeout-recovery-state-machine — opus-4-8
-
-> **Queue prompt:**
->
-> do [#closeout-recovery-state-machine]
-
-
-Landed the unifying piece this item was about (the recovery mechanisms already shipped). Narrowed the backlog item to the remaining detection wiring rather than marking it done.
-
-#### What changed
-
-- **`flow::closeout::CloseoutRecoveryState`** (new enum) + `classify_closeout_recovery_state(file)` + `CloseoutRecoveryState::recovery_command(file)` — one classified state maps to exactly one recovery command.
-- **`session_check::closeout_recovery_hint`** previously returned a single static "try write --commit" line and is called from **nine** closeout-guard messages. It now renders `Recovery [<state>]: <command>`, so every guard surfaces one typed next action instead of the scattered "try finalize / write --commit / commit" chain.
-- **Classified today**: `clean`, `open_cycle`, `missing_response_body` (a committed response turn with no capture, or a captured body absent from HEAD via `stuck_captured_cycle`), and `escaped_template_patch` (escaped `agent:` component markers in the committed exchange).
-- **Reserved states** (`direct_response_patchback`, `boundary_only_drift`, `nested_parent_pointer_stale`): in the enum/instruction table but the classifier returns `clean` rather than guessing — their precise detection wiring is the narrowed remaining scope.
-
-#### Verify
-
-- Unit tests: enum→instruction mapping + classifier (clean / open-cycle / missing-response / response-in-HEAD). Full `cargo test` workspace + `cargo clippy` clean; FlowCore hot-path token budget untouched. Spec: `specs/07-closeout-commands.md`. Built + installed; committed + pushed (`src/agent-doc` + pointer) in the prior cycle.
-
-(Re-closed cleanly after last turn's cross-document IPC contamination was recovered to clean HEAD and the route session was reset.)
-<!-- agent:boundary:37d00d73 -->
+<!-- agent:boundary:1072bc97 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->

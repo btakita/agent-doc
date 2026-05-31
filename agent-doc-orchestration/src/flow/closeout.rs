@@ -551,9 +551,9 @@ impl CloseoutRecoveryState {
             Self::BoundaryOnlyDrift => format!(
                 "`agent-doc commit {f}` (boundary / `(HEAD)` marker or answered-prompt-prefix drift only — no response body to write)"
             ),
-            Self::NestedParentPointerStale => format!(
-                "`agent-doc commit {f}` to update the nested parent submodule pointer"
-            ),
+            Self::NestedParentPointerStale => {
+                format!("`agent-doc commit {f}` to update the nested parent submodule pointer")
+            }
             Self::OpenEmptyPreflight => format!(
                 "`agent-doc cancel {f}` — an empty diagnostic preflight cycle with no captured response; abandoning it leaves no document drift"
             ),
@@ -666,9 +666,9 @@ pub fn classify_closeout_recovery_state(file: &Path) -> CloseoutRecoveryState {
         {
             return CloseoutRecoveryState::OpenEmptyPreflight;
         }
-        CyclePhase::PreflightStarted
-        | CyclePhase::ResponseCaptured
-        | CyclePhase::WriteApplied => return CloseoutRecoveryState::OpenCycle,
+        CyclePhase::PreflightStarted | CyclePhase::ResponseCaptured | CyclePhase::WriteApplied => {
+            return CloseoutRecoveryState::OpenCycle;
+        }
         CyclePhase::Abandoned => return CloseoutRecoveryState::Clean,
         CyclePhase::Committed => {}
     }
@@ -682,9 +682,7 @@ pub fn classify_closeout_recovery_state(file: &Path) -> CloseoutRecoveryState {
     if stuck_captured_cycle(file).is_some() {
         return CloseoutRecoveryState::MissingResponseBody;
     }
-    if state.capture_id.is_none()
-        && state.response_sha256.is_none()
-        && state.had_pending_mutations
+    if state.capture_id.is_none() && state.response_sha256.is_none() && state.had_pending_mutations
     {
         return CloseoutRecoveryState::MissingResponseBody;
     }
@@ -969,8 +967,13 @@ mod tests {
         crate::snapshot::save(&doc, committed).unwrap();
         run_git(dir.path(), &["add", "doc.md"]);
         run_git(dir.path(), &["commit", "-m", "response", "--no-verify"]);
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(committed), Some(committed))
-            .unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
 
         assert!(
             stuck_captured_cycle(&doc).is_none(),
@@ -1009,17 +1012,37 @@ mod tests {
         assert_eq!(Clean.recovery_command(f), None);
         for (state, name, needle) in [
             (OpenCycle, "open_cycle", "agent-doc finalize"),
-            (MissingResponseBody, "missing_response_body", "agent-doc write --commit"),
-            (DirectResponsePatchback, "direct_response_patchback", "absorb the visible"),
-            (EscapedTemplatePatch, "escaped_template_patch", "patch:exchange"),
+            (
+                MissingResponseBody,
+                "missing_response_body",
+                "agent-doc write --commit",
+            ),
+            (
+                DirectResponsePatchback,
+                "direct_response_patchback",
+                "absorb the visible",
+            ),
+            (
+                EscapedTemplatePatch,
+                "escaped_template_patch",
+                "patch:exchange",
+            ),
             (BoundaryOnlyDrift, "boundary_only_drift", "boundary"),
             (
                 NestedParentPointerStale,
                 "nested_parent_pointer_stale",
                 "parent submodule pointer",
             ),
-            (OpenEmptyPreflight, "open_empty_preflight", "agent-doc cancel"),
-            (QueueMetadataDrift, "queue_metadata_drift", "agent-doc commit"),
+            (
+                OpenEmptyPreflight,
+                "open_empty_preflight",
+                "agent-doc cancel",
+            ),
+            (
+                QueueMetadataDrift,
+                "queue_metadata_drift",
+                "agent-doc commit",
+            ),
             (
                 SidecarVisibleDrift,
                 "sidecar_visible_drift",
@@ -1035,8 +1058,14 @@ mod tests {
             let cmd = state
                 .recovery_command(f)
                 .expect("non-clean states have a command");
-            assert!(cmd.contains(needle), "state {name} command {cmd:?} missing {needle:?}");
-            assert!(cmd.contains("tasks/doc.md"), "command should name the file: {cmd:?}");
+            assert!(
+                cmd.contains(needle),
+                "state {name} command {cmd:?} missing {needle:?}"
+            );
+            assert!(
+                cmd.contains("tasks/doc.md"),
+                "command should name the file: {cmd:?}"
+            );
         }
     }
 
@@ -1094,8 +1123,13 @@ mod tests {
         let (_dir, doc) = setup_git_project_with_doc(head);
         crate::cycle_state::start_preflight(&doc, Some(head), Some(head)).unwrap();
         crate::snapshot::save(&doc, &snapshot).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(&snapshot), Some(&snapshot))
-            .unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(&snapshot),
+            Some(&snapshot),
+        )
+        .unwrap();
         assert_eq!(
             classify_closeout_recovery_state(&doc),
             CloseoutRecoveryState::QueueMetadataDrift
@@ -1114,8 +1148,13 @@ mod tests {
         let (_dir, doc) = setup_git_project_with_doc(head);
         crate::cycle_state::start_preflight(&doc, Some(head), Some(head)).unwrap();
         crate::snapshot::save(&doc, &snapshot).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(&snapshot), Some(&snapshot))
-            .unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(&snapshot),
+            Some(&snapshot),
+        )
+        .unwrap();
         assert_eq!(
             classify_closeout_recovery_state(&doc),
             CloseoutRecoveryState::UnsafeUserContentDrift
@@ -1164,10 +1203,17 @@ mod tests {
         let (_dir, doc) = setup_git_project_with_doc(head);
         crate::cycle_state::start_preflight(&doc, Some(head), Some(head)).unwrap();
         crate::snapshot::save(&doc, &snapshot).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(&snapshot), Some(&snapshot))
-            .unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(&snapshot),
+            Some(&snapshot),
+        )
+        .unwrap();
         match apply_closeout_recovery(&doc).unwrap() {
-            RecoveryApplication::NotApplied { state, recommended, .. } => {
+            RecoveryApplication::NotApplied {
+                state, recommended, ..
+            } => {
                 assert_eq!(state, CloseoutRecoveryState::QueueMetadataDrift);
                 assert!(recommended.contains("agent-doc commit"), "{recommended}");
             }
@@ -1201,8 +1247,13 @@ mod tests {
         crate::snapshot::save(&doc, &full_doc).unwrap();
         run_git(dir.path(), &["add", "doc.md"]);
         run_git(dir.path(), &["commit", "-m", "response", "--no-verify"]);
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(&full_doc), Some(&full_doc))
-            .unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(&full_doc),
+            Some(&full_doc),
+        )
+        .unwrap();
         assert_eq!(
             classify_closeout_recovery_state(&doc),
             CloseoutRecoveryState::Clean
@@ -1232,8 +1283,13 @@ mod tests {
         // Snapshot carries the un-canonicalized prompt prefix; HEAD has the bare
         // form. Artifact normalization makes them equal; transient does not.
         crate::snapshot::save(&doc, &snapshot).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(&snapshot), Some(&snapshot))
-            .unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(&snapshot),
+            Some(&snapshot),
+        )
+        .unwrap();
         assert_ne!(
             crate::git::normalize_transient_agent_doc_markers(&snapshot),
             crate::git::normalize_transient_agent_doc_markers(head),

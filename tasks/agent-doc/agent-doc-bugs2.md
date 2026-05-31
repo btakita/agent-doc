@@ -36,7 +36,11 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 2 response topic(s): #stash-pane-promote-on-focus; #do-id-partial-closeout-state
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:597f3dd6 -->
+
+### Re: monsterrodholders Run Agent Doc idle-but-queued stall — opus-4-8
+
+Root cause: route deliberately queued the dispatch because it believed the authoritative actor was busy and the stale-busy repair did not fire. See the committed analysis above.
+<!-- agent:boundary:05a0217d -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->

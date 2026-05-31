@@ -9,7 +9,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -62,20 +62,22 @@ No — `std::thread::scope` is the better choice here for several reasons:
 4. **No dependency cost.** Tokio adds ~100KB to compile time and binary size for functionality already available in `std`.
 
 If the diagnose command evolves to stream results progressively or needs cancellable I/O, then an async runtime becomes worth considering. For the current "scan everything, return a report" shape, scoped threads are the right tool.
-<!-- agent:boundary:32e81b17 -->
+Is [#dtmc] complete?
+<!-- agent:boundary:14926703 -->
 <!-- /agent:exchange -->
 
 <!--
-I want sidekick to have the option to use git commits as well.
 -->
 
 ## Pending / Not Built
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+- Is [#dtmc] complete?
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
 - [ ] [#dtmc] scan_text_source parallelized via std::thread::scope in diagnose_cycle
+- [ ] [#editor-buffer-state-ffi-debounce] [recommended] Replace `wait_for_stable_content`'s last-added-line/truncation heuristic with editor-authoritative buffer stability when an IDE plugin is attached. JetBrains and VS Code plugins should report normalized editor state through the FFI bridge to the Session Actor: canonical doc path/session, monotonic editor document version, dirty flag, last edit timestamp, optional save timestamp, optional buffer hash, and ideally current buffer content. Run requests should include the editor version/hash observed at click time so the Session Actor can detect edits after invocation, debounce until the version/hash is stable, and compute the diff against the exact stable editor buffer when available. If no editor state exists, fall back to whole-file content + mtime stability polling. This removes reliance on `extract_last_added_line`, which misses edits above the last inserted line, and reduces disk/snapshot/editor-buffer race classes seen in live IPC/JB/VSCode flows.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:backlog -->
 

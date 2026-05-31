@@ -31,88 +31,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260531-174012.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260531-191431.md`*
 
 Compacted content:
-- Archived 1 response topic(s): do [#recursive-repair-state-drift]
+- Archived 4 response topic(s): do [#recursive-repair-state-drift]; do [#recursive-repair-recovery-states]; do [#recursive-repair-apply]; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: do [#recursive-repair-state-drift] — opus-4-8
-
-Closing this as an **umbrella, now decomposed** — not claiming the full feature is implemented. Marking it `--done` because (a) its first meaningful slice shipped and is verified, and (b) its entire remaining scope is now tracked as discrete actionable backlog items. Keeping the parent open would just re-present it as a queue head every cycle with no new work attached to *it* — the "one parent ID repeatedly gated" anti-pattern the `one-ID-per-actionable-phase` rule warns against.
-
-**What actually shipped (slice 1, submodule `c0b39846`, CI green):** `flow::closeout::CloseoutRecoveryState::BoundaryOnlyDrift` is wired — a committed cycle whose snapshot differs from HEAD only by agent-doc-generated artifacts (boundary/`(HEAD)` markers + answered-prompt-prefix canonicalization) now gets the single safe `agent-doc commit` recovery hint instead of the generic `write --commit` chain. Test: `classify_recovery_boundary_only_drift_for_answered_prompt_prefix`.
-
-**Remaining feature work — tracked as discrete children, not lost:**
-- `#recursive-repair-recovery-states` — the other recovery states (open_empty_preflight auto-abandon, sidecar_visible_drift, unsafe_user_content_drift fail-closed, queue/`queue_active`-metadata HEAD drift)
-- `#recursive-repair-apply` — teach `agent-doc repair` to *apply* the safe states as one command + live-verify
-- `#preflight-probe-side-effect-free` — diagnostic preflight that never leaves an open `preflight_started` cycle
-
-Those three carry the plan (`tasks/agent-doc/plan-recursive-repair-state-drift.md`) forward. Note: last turn's recovery churn was itself live evidence for all three — `agent-doc write --pending-only` landed items on disk but couldn't commit under IPC-active + snapshot==HEAD, and a diagnostic `preflight` opened a wedged cycle + triggered queue-metadata drift, requiring the `reset --from-current` → `commit` → `cancel` sequence those items exist to eliminate.
-
-### Re: do [#recursive-repair-recovery-states] — opus-4-8
-
-> **Queue prompt:**
->
-> do [#recursive-repair-recovery-states]
-
-
-Done — all four recovery states landed (submodule `d248b211`), each with one safe recovery command rendered by `session_check::closeout_recovery_hint`:
-
-| State | Detects | Recovery |
-|---|---|---|
-| `OpenEmptyPreflight` | empty `preflight_started` (no capture / response hash / pending mutation) | `agent-doc cancel` |
-| `QueueMetadataDrift` | snapshot≠HEAD only by queue / `queue_active` / status metadata (content signature identical) | `agent-doc commit` |
-| `SidecarVisibleDrift` | snapshot==HEAD but visible file stale by metadata only | `reset --from-current --preserve-session` + commit |
-| `UnsafeUserContentDrift` | real user/response content drift (content signature differs) | **fail closed** — preserve via `finalize`/`write --commit`, never auto-commit |
-
-The metadata-vs-content split uses a new `content_component_signature` (exchange + backlog + review + icebox + done components, excluding queue/status/frontmatter/boundary markers). `OpenEmptyPreflight` is distinguished from a real `OpenCycle` (which has a capture or pending mutation), and `QueueMetadataDrift` from `BoundaryOnlyDrift` (boundary/prompt-prefix).
-
-Two of these — the empty probe cycle and queue-sync metadata drift — were **live-reproduced this session** during the `#gated-followup-split` recovery churn, so the classification is grounded in real repros, not just unit fixtures.
-
-Tests: `classify_recovery_open_empty_preflight_when_nothing_followed`, `classify_recovery_open_cycle_when_preflight_has_pending_mutations`, `classify_recovery_queue_metadata_drift_when_only_queue_differs`, `classify_recovery_unsafe_user_content_drift_when_exchange_differs`, plus the expanded `recovery_command_maps_each_state_to_one_instruction`. `make check` green; both binaries rebuilt + installed.
-
-The two remaining recursive-repair children stay open: `#recursive-repair-apply` (apply the safe states as one command + live verify) and `#preflight-probe-side-effect-free` (diagnostic preflight that doesn't leave an open cycle — the root cause behind the `OpenEmptyPreflight` churn).
-
-### Re: do [#recursive-repair-apply] — opus-4-8
-
-Done (core delivered) — `flow::closeout::apply_closeout_recovery` + `agent-doc repair --apply-recovery` apply the unambiguously-safe recovery in one command, replacing the manual `cancel` → `reset --from-current` → `commit` sequence (submodule `6b5f0bc8`):
-
-- `OpenEmptyPreflight` → `cancel_preflight_cycle` (abandon the empty probe cycle — exactly the churn I kept hitting this session)
-- `BoundaryOnlyDrift` → `git::commit` (artifact-only; the commit path normalizes boundary/prompt-prefix and cannot revert content)
-
-**Withheld, by design** (returns `NotApplied` + the recommended command, mutates nothing): `QueueMetadataDrift` / `SidecarVisibleDrift` — because the **live-discovered gap** this session showed the safe *direction* is ambiguous. When the queue came in spuriously deactivated (`queue_active:false`, 14 items pending), the snapshot was *behind* HEAD, so the `agent-doc commit` recovery would have wrongly committed the deactivation; HEAD was authoritative and the right fix was restore-from-HEAD. A blind auto-apply is unsafe until that authoritative-side determination exists. `UnsafeUserContentDrift` / `OpenCycle` / `MissingResponseBody` also fail closed (need a preserved response, not a metadata op).
-
-I kept the implementation in `flow/closeout.rs` + `main.rs` with **no edit to `repair.rs`** so it doesn't collide with the concurrent `#repair-orphan-prefix-bug` session working that file.
-
-The authoritative-side determination + full live-verify are split into the discrete follow-up `#recovery-drift-authoritative-side`. Tests: `apply_recovery_clean_is_nothing_to_do`, `apply_recovery_cancels_open_empty_preflight`, `apply_recovery_withholds_queue_metadata_drift`. `make check` green; both binaries rebuilt + installed; CLI verified.
-
-This also closes the loop on the session-long recursive-repair work: classify (slice 1+2) → apply (slice 3). The remaining children are `#preflight-probe-side-effect-free` (root cause of the empty cycles this now cancels) and `#recovery-drift-authoritative-side` (the new gap).
-❯ In closeout.rs, JB Idea is giving an error `Cannot find type `RecoveryApplication` in this scope [E0412]`. I want to also maintain the rust codebase. Please help my IDE not have an error.
-
-### Re: RecoveryApplication E0412 in closeout.rs — opus-4-8
-
-Good news: **the code is correct** — this is a stale IDE index, not a real compile error. I verified all three:
-
-```
-cargo check -p agent-doc-orchestration   → Finished (clean)
-cargo clippy -p agent-doc-orchestration  → no warnings
-cargo check --bin agent-doc              → Finished (main.rs resolves the type)
-```
-
-`RecoveryApplication` is defined at `closeout.rs:575` (`pub enum RecoveryApplication`) and `apply_closeout_recovery` returns it — `rustc` resolves it fine.
-
-**Why your IDE shows `E0412 [cannot find type RecoveryApplication]`:** the type was added by a commit my CLI session made (`6b5f0bc8`) in a *separate process*. The JetBrains Rust plugin caches a Cargo project model and didn't re-index after that external change, so its resolver still has the pre-existing version of the file. On top of that, your editor's format-on-save left `closeout.rs` with uncommitted rustfmt churn, which can wedge the resolver mid-reindex.
-
-**What I did to give the IDE a clean slate** (commit `06661638`): committed the rustfmt-formatted `closeout.rs` (formatting-only — semantically identical, clippy/check verified), so there's no uncommitted churn and the file on disk is canonical.
-
-**To clear the phantom error in JB** (any one of these, cheapest first):
-1. Cargo tool window → **Refresh Cargo Project** (the ⟳ icon) — re-runs `cargo metadata` + re-indexes.
-2. Right-click `closeout.rs` → **Reload from Disk**, or just edit+save it once.
-3. If it persists: **File → Invalidate Caches… → Invalidate and Restart**.
-
-On Rust-codebase maintenance generally: this repo's gate is `make check` (clippy + tests), not `cargo fmt` — the crate isn't fully rustfmt-clean, so I only formatted the file you're in rather than reformatting the whole crate (which would collide with the concurrent `repair.rs` session). If you'd like, I can add a `cargo fmt --check` step to CI / `make check` so format drift gets caught uniformly going forward.
-<!-- agent:boundary:f435120b -->
+<!-- agent:boundary:a212324e -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->

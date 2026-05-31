@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -99,7 +99,12 @@ Analysis of the tsift codebase identified **12 concrete improvement opportunitie
 12. `#terse-health-scores` — top-N/bottom-N instead of full vector
 
 Top of backlog: **`#terse-graph-serial`**
-<!-- agent:boundary:eecb971f -->
+
+
+### Re: queue cleanup — opencode
+
+Queue cleared. Previous `#next-steps` response (12 backlog items, top: `#terse-graph-serial`) is committed at `479efd2f3`. No new prompts pending.
+<!-- agent:boundary:76cfc443 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -110,8 +115,7 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue auto -->
-- What are #next-steps to improve token efficiency along with graph + neighborhood performance & effectiveness.
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

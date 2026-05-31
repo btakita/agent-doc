@@ -81,7 +81,27 @@ Added `TerseCommunityMember`, `TerseCommunity`, and `TerseCommunityResult` types
 **Spec updated:** Community Detection section + tsift-graph crate listing.
 
 **Verification:** 71/71 tests pass. Built and pushed as `26762b0`.
-<!-- agent:boundary:44a9fae3 -->
+
+### Re: #louvain-dedup-aggregate — glm-5.1
+
+> **Queue prompt:**
+>
+> [#louvain-dedup-aggregate]
+
+
+Added Louvain phase-2 super-node coarsening to `detect_communities` in `tsift-graph/src/lib.rs`.
+
+**Algorithm changes:**
+- Extracted `LouvainGraph` struct with `phase1()` (returns community assignment) and `coarsen()` (collapses communities into weighted super-nodes with self-loops)
+- Phase 2 loop: coarsen graph → run phase 1 on super-nodes → map back to original nodes → repeat up to 10 levels until no improvement
+- Self-loops in coarsened graph carry half the internal edge weight, matching standard Louvain degree accounting
+
+**Spec updated:** Algorithm section now describes the multi-level process (phase 1 local moving, phase 2 coarsening, repeat).
+
+**Test added:** `communities_hierarchical_phase2_improves_modularity` — 4 clusters of 6 nodes each with bridging edges, verifies ≥ 2 communities and positive modularity.
+
+**Verification:** 72/72 tests pass. Built and pushed as `db4d690`.
+<!-- agent:boundary:0c9627bd -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -94,7 +114,7 @@ preset #spec-test-build-install-commit-push
 - ~[#terse-health-early-exit]~
 - ~[#libsql-edges-between-pushdown]~
 - ~[#compact-community-serialization]~
-- [#louvain-dedup-aggregate]
+- ~[#louvain-dedup-aggregate]~
 - [#shared-graph-build-pipeline]
 - [#sift-token-index]
 <!-- /agent:queue -->
@@ -102,7 +122,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#louvain-dedup-aggregate] Add Louvain phase-2 aggregation (super-node coarsening). 5-15% modularity improvement on hierarchical codebases. tsift-graph/src/lib.rs:590-743
 - [ ] [#shared-graph-build-pipeline] Extract shared build_graph() from health.rs to common module; reuse in scc.rs, coupling.rs, dead_code.rs. ~30% analyze wall-time reduction. tsift-algorithms/src/*.rs
 - [ ] [#sift-token-index] Build inverted token index for search pre-filtering — skip files with no matching tokens. 5-50x search speedup on large codebases. tsift-search/src/sift.rs:210-267
 <!-- /agent:backlog -->

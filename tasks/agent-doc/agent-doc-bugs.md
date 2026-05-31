@@ -27,7 +27,7 @@ Prior frontmatter bug fix remains complete. New work this cycle is planning only
 Compacted content:
 - Archived 20 response topic(s): migrate + pre-commit pending capture gate; agent:pending alias retained; add plan phases to backlog + do phase 1; 17 more
 - Prior summary/context: ## Exchange Summary (compacted from ~960 lines) ### Features implemented 1. **Queue orchestration (#queue, Phases 1-3...
-<!-- agent:boundary:4e4c6646 -->
+<!-- agent:boundary:96389406 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -37,10 +37,15 @@ I want sidekick to have the option to use git commits as well.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#pbc1] Commit-boundary reliability for Codex/IPC sessions: fail closed when fresh-start route trigger never fires, and auto-resume commit when write/snapshot succeeded but commit boundary was interrupted. Plan: `tasks/agent-doc/plans/commit-boundary-reliability-codex-ipc.md`
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
 - [ ] [#pdar] [recommended] Evaluate optional binary auto-resolution only for the narrow case where the prompt is explicitly do #id and there is exactly one matching open pending item
 <!-- /agent:icebox -->
+
+## Completed / Reaped
+
+<!-- agent:done -->
+- 2026-05-31 [#pbc1] Commit-boundary reliability for Codex/IPC sessions: fail closed when fresh-start route trigger never fires, and auto-resume commit when write/snapshot succeeded but commit boundary was interrupted. Plan: `tasks/agent-doc/plans/commit-boundary-reliability-codex-ipc.md`
+<!-- /agent:done -->

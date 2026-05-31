@@ -83,7 +83,28 @@ Yes — it's a reasonable fit for Codex, with two guardrails.
 **One caveat specific to Codex here:** the live-verify target *is* a Codex session bound to `monsterrodholders-server` (SSH-gated, `-s danger-full-access`). Running the implementing Codex agent against that same live pane is what triggers the deadlock in the first place — so do the implementation/verification on a **separate scratch doc/pane**, not the live `monsterrodholders.md` session.
 
 If you want, I can dispatch it to the Codex rescue subagent with the plan as the brief (deterministic scope only, live-verify left gated). Say the word and I'll kick it off; otherwise I can keep draining the bugs2 queue.
-<!-- agent:boundary:d95069c5 -->
+❯ The monsterrodholders.md agent-doc is currently running. Should we do the fix now and test on monsterrodholders.md?
+
+### Re: monsterrodholders.md is running — do the fix now and test on it? — opus-4-8
+
+Recommendation: **yes to implementing the fix now; no to testing it on the live `monsterrodholders.md` session.**
+
+I just inspected the live state (read-only). It argues against using it as the test target:
+
+- `queue_active: false`, and `agent:queue auto` currently holds **7 free-text operational next-steps** (HydroWeb/non-brand Search launch gates, Shopping label gate, Ads/Merchant cache watch, Accessories margin) plus a `#spec-test-commit-push` preset. That's **live production marketing work in flight** — injecting deadlock-repro test prompts there risks disrupting real Ads/Merchant launch decisions.
+- The `"Are there any items in review..."` prompt from the route log is **not in the queue anymore**, and `queue_active: false`. So there's **no currently-stuck deadlock to observe** — the live session isn't a clean repro right now, it's a different (related) state: free-text queue items + spurious `queue_active:false` (cf. `#free-text-queue-skip-diagnostic` and `#recovery-drift-apply-live-verify`).
+
+So testing on it would mean *manufacturing* the busy-pane repro inside a production session — high risk, low marginal value over a deterministic repro.
+
+**What I recommend instead, and can start now:**
+
+1. Implement the deterministic fix: route busy-queue idle-drain trigger + Codex `Stop`-hook drain of a route-appended prompt + JB deferred-queued feedback (per the plan).
+2. SimWorld/unit coverage for the busy→idle drain and the loop-guard-doesn't-skip case.
+3. Reproduce/verify on a **throwaway scratch Codex doc/pane**, not `monsterrodholders.md`.
+4. Live confirmation on `monsterrodholders.md` only later, at a safe checkpoint, with a benign read-only prompt — and only if you want it.
+
+If you'd rather I just proceed: say **"implement it"** and I'll start the deterministic fix on a scratch repro (this overrides the `#agent-doc-bug` don't-implement note, which you're entitled to do). If you specifically want the live-session test despite the production risk, confirm explicitly and I'll do it as carefully and non-destructively as possible.
+<!-- agent:boundary:90fd6204 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->

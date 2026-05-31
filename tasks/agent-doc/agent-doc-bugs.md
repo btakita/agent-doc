@@ -44,7 +44,23 @@ Implemented editor-authoritative buffer stability via the FFI bridge. Three file
 - `agent_doc_is_editor_stable(file, debounce_ms)` → bool
 
 10 new tests covering: record/read, stable/not-stable, debounce elapsed, overwrite, editor-state path in `wait_for_stable_content`, fallback without editor state. All 58 debounce+diff_io tests pass. `make check` clean. `cargo install --path .` succeeded. Committed and pushed as `8638f751`.
-<!-- agent:boundary:add5b7d9 -->
+❯ Did you use the Session Actor in memory state or a file to track the editor buffer state? I don't want an extra file due to concurrency issues. The Session Actor is concurrency safe.
+❯ #spec-test-build-install-commit-push
+
+### Re: editor-buffer-state — glm-5.1
+
+You're right — the prior implementation used file-based sidecars (`.agent-doc/editor-state/<hash>`) which is wrong for the Session Actor pattern. Refactored to use the Session Actor's in-process `Mutex<HashMap>` approach.
+
+**Three files changed:**
+
+**`debounce.rs`** — replaced `EDITOR_STATE_DIR` constant and `editor_state_path()` function with a static `EDITOR_BUFFER_STATES: Mutex<Option<HashMap<PathBuf, EditorBufferState>>>`. This is the same concurrency-safe interior-mutability pattern used by `LAST_CHANGE`. `record_editor_buffer_state` no longer returns `Result` — it writes to the in-memory map. `editor_buffer_state` reads from it. No filesystem I/O.
+
+**`diff_io.rs`** — updated doc comments to reference the in-memory map instead of sidecar files. `wait_for_stable_content_editor` now reads from the Session Actor map.
+
+**`ffi.rs`** — simplified `agent_doc_report_editor_state` since `record_editor_buffer_state` no longer returns `Result`.
+
+All 10 editor buffer state tests pass (updated to not create temp dirs for sidecars). All 2052 orchestration tests pass. `make check` clean. `cargo install --path .` succeeded. Committed and pushed as `069b3599`.
+<!-- agent:boundary:382f86c3 -->
 <!-- /agent:exchange -->
 
 <!--

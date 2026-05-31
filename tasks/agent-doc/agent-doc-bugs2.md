@@ -91,7 +91,26 @@ Gated — the code side is complete and verified; the remaining work is a real C
 **Why gated, not done.** This item is explicitly *opportunistic live re-verification* via the `.codex` Stop hook in a real Codex session. That requires driving an actual Codex same-pane run, which isn't reproducible from this Claude Code session. Leaving it gated pending that live run.
 
 **Bonus — fixed a real stuck-capture false positive found while running this cycle.** Preflight flagged the *previous* committed cycle as `stuck_captured_cycle` even though its response is in HEAD. Root cause: queue consumption inserts a `> **Queue prompt:**` echo blockquote between the response heading and body, which broke the contiguous-block match in `response_already_applied`, so `stuck_captured_cycle` falsely warned after every queue-consumed cycle (and re-suggested a `write --commit` that would re-inject the response). Fixed by stripping the echo blockquote in `normalized_response_lines` before matching (submodule `6220379c`, with unit + closeout regressions); queued `#stuck-capture-queue-echo-false-positive` to confirm across a few more cycles. This finalize's own preflight ran on the fixed binary.
-<!-- agent:boundary:a6104d71 -->
+
+### Re: do [#codex-route-busy-ctrl-g-opens-editor] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#codex-route-busy-ctrl-g-opens-editor]
+
+
+Done — shipped and live-verified (submodule `9be1c0fc`).
+
+**Root cause.** `attempt_busy_existing_pane_interrupt_recovery` (route.rs) sent `C-g` *unconditionally* to a busy Codex pane before the Escape+C-c fallback. `C-g` only aborts a shell `reverse-i-search`/history-search; in the normal Codex composer or an active turn it opens the external editor (`$EDITOR`/nvim) — the same root cause as `#codex-interrupt-clear-ctrl-g-opens-editor` in `send_operator_interrupt_sequence`.
+
+**Fix.** The reroute now sends `C-g` only when the pane is in a shell-search state: fast-path on the authoritative `blocker_reason` from the readiness wait, else a fresh **whole-capture** re-classification via `dispatch_only_blocker_reason`. Two subtleties the fix handles (both found via the live test): the readiness wait can return a timeout (`blocker_reason=None`) while the pane is genuinely in reverse-i-search, and the search line can sit *above trailing blank pane rows*, out of the last-few-lines window the normal `dispatch_blocker_reason` inspects — so whole-capture matching is required. Any other busy state goes straight to Escape+C-c and logs `route_busy_existing_pane_interrupt_skipped_ctrl_g`.
+
+**Tests.** Added the deterministic `codex_busy_ctrl_g_gate_only_fires_for_shell_search_blocker` decision test — it covers the non-search composer / active-turn case the existing live reverse-i-search test (`..._recovers_on_ctrl_g`) never modeled, which is exactly why the regression slipped through. `make check` green; FlowCore `reason=` budget bumped +1 with an audit note for the skip diagnostic.
+
+**Live tmux verification.** Ran the 9 `#[ignore]` tmux busy/interrupt tests with a clean env (`make tmux-ci` equivalent) — all pass, including the reverse-i-search `C-g` recovery (proves the gate still sends `C-g` in the real shell-search case) and the Escape+C-c / fresh-restart paths.
+
+**Spec/docs.** Documented the route-side gating in `specs/07-session-tmux-commands.md` and the `AGENTS.md` convention bullet (`route.rs` now listed alongside `session_actor_cmd.rs`).
+<!-- agent:boundary:0a67e565 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -99,7 +118,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#codex-owned-pane-prompt-miss]~
 - ~do [#stuck-capture-compact-false-positive]~
 - ~do [#codex-final-response-live-verify]~
-- do [#codex-route-busy-ctrl-g-opens-editor]
+- ~do [#codex-route-busy-ctrl-g-opens-editor]~
 - do [#cross-project-stash-pane-condition]
 - do [#route-drain-all-surface-live-verify]
 - do [#run-agent-doc-stale-busy-replay]
@@ -150,7 +169,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 - [ ] [#closeout-recovery-state-machine] [recommended] Typed closeout recovery classifier landed: flow::closeout::CloseoutRecoveryState + classify_closeout_recovery_state + recovery_command; session_check::closeout_recovery_hint renders one typed 'Recovery [state]: command' across all nine closeout-guard call sites. Classified today: clean / open_cycle / missing_response_body / escaped_template_patch. Remaining: precise detection for reserved states direct_response_patchback, boundary_only_drift, nested_parent_pointer_stale, and folding each guard's existing diagnostic through the classifier. Plan: tasks/agent-doc/plan-closeout-repair-churn.md.
 - [ ] [#free-text-queue-owner-consume] [recommended] Free-text `agent:queue auto` heads can remain live after an owner-pane/direct Codex closeout writes the response but lacks queue-target proof. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `Approve [#shoptiers]. What are #next-steps?` was answered, then reported as not marked done; same-pane `agent-doc <FILE>` refused recursive dispatch and repair finalize logged `[queue] skipped consumption because the active prompt did not target the queue head`. Preserve id-backed queue safety, but record/restore synthetic free-text queue-target proof for recursive-direct repair/finalize paths and add diagnostics/regressions. Plan: tasks/agent-doc/plan-free-text-queue-owner-consume.md.
 - [ ] [#preset-item-id-collision] [recommended] Enforce unique active identities across frontmatter `prompt_presets` keys and active `agent:backlog` / `agent:review` / `agent:icebox` item ids. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `#next-steps` exists both as a prompt preset and as a backlog item, making `do #next-steps` and "top backlog item: #next-steps" ambiguous between preset expansion and backlog execution. Fix with an identity registry, mutation-time rejection, preflight/session-check fail-closed diagnostics, and regressions. Plan: tasks/agent-doc/plan-preset-item-id-collision.md.
-- [ ] [#codex-route-busy-ctrl-g-opens-editor] [recommended] route.rs busy-pane reroute interrupt (route.rs ~6409) also sends C-g unconditionally to a busy Codex pane before the Escape+C-c fallback — same root cause as #codex-interrupt-clear-ctrl-g-opens-editor: C-g opens the external editor ($EDITOR/nvim) in the normal Codex composer. Gate it on a shell reverse-i-search/history-search capture like send_operator_interrupt_sequence now does (or skip C-g when the busy blocker is an active turn). Tracked separately from the operator interrupt-clear fix because a hard change here alters reroute semantics. Add a route SimWorld regression for the non-search composer case — the existing ctrl-g test (write_mock_busy_registered_agent_doc_recovers_on_ctrl_g) only models reverse-i-search recovery, which is why this regression slipped through.
 - [ ] [#cross-project-stash-pane-condition] [recommended] resync logs 'stash pane %N registered in its own project root — skipping kill' because nested project roots (superproject agent-loop + submodule src/boost-client) auto-detect the SAME tmux session 0 and share one stash window, so superproject sync stashes the submodule's live session pane and resync re-discovers it cross-project. Not a resync logic error (preservation is correct); root cause is the shared-session layout for nested roots. Live evidence + fix options (A nested-root session isolation [recommended], B per-root stash partitioning, C out-of-scope skip, D reap stale agent-doc stash panes) in tasks/agent-doc/plan-cross-project-stash-pane-condition.md. Needs a session-model design decision before implementing; deferred from blind code change.
 - [ ] [#route-drain-all-surface-live-verify] [recommended] Live-verify the route-drain all-surface reap (submodule b239988b / superproject 4c7b06b7f) resolves the JB Run Agent Doc "completed tracked item blocks dispatch" retry: with the installed binary, reproduce a closeout that leaves a completed [x] item in review or icebox on an IDE-owned doc, then run JB Run Agent Doc once and confirm it dispatches without a manual repeat. Also exercises the #pending-gate-snapshot-desync snapshot re-sync (ab074710) under the route path.
 - [ ] [#run-agent-doc-stale-busy-replay] Follow-up to the #snrun stale-busy-projection fix (submodule 89c99c79): the dispatch-only busy-vs-stale repair is covered by unit tests on the pure decision functions; add a live JB Run Agent Doc replay regression (SimWorld or tmux-ci) exercising a stale busy actor projection + proven ready prompt and asserting dispatch instead of agent:queue auto enqueue. Also still open in #snrun: distinguishing rescued-stash accepted-only proof misses. Plan: tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md.

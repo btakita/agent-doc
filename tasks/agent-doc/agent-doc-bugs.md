@@ -9,7 +9,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -61,7 +61,8 @@ pub fn project_root_for_doc_cached(file: &Path) -> Option<PathBuf> {
 ```
 
 Or even simpler: since the result for a given file is immutable within a run, just compute it once at the call site and pass `Option<PathBuf>` down.
-<!-- agent:boundary:40056e3b -->
+I plan on having a dependency graph. This is only the first step towards optimizing cachable state.
+<!-- agent:boundary:37f8b9da -->
 <!-- /agent:exchange -->
 
 <!--
@@ -69,7 +70,8 @@ Or even simpler: since the result for a given file is immutable within a run, ju
 
 ## Pending / Not Built
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+- I plan on having a dependency graph. This is only the first step towards optimizing cachable state.
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

@@ -138,6 +138,18 @@ pub fn run(file: &Path, pane: Option<&str>) -> Result<()> {
     run_with_tmux(file, pane, &Tmux::default_server())
 }
 
+/// Promote a live-owner pane out of the stash window (best-effort) and then
+/// select it, so editor focus surfaces the session in the working agent-doc
+/// layout instead of selecting it in place inside the stash
+/// (`#stash-pane-promote-on-focus`). tmux preserves the pane id across the
+/// reparent, so we select the same pane id either way.
+fn promote_and_select(tmux: &Tmux, pane: &str) -> Result<()> {
+    if let Err(e) = crate::sync::promote_pane_to_agent_doc_window(tmux, pane) {
+        eprintln!("[focus] stash promotion check failed for {}: {}", pane, e);
+    }
+    tmux.select_pane(pane)
+}
+
 pub fn run_with_tmux(file: &Path, pane_override: Option<&str>, tmux: &Tmux) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
@@ -146,7 +158,7 @@ pub fn run_with_tmux(file: &Path, pane_override: Option<&str>, tmux: &Tmux) -> R
     // If an explicit pane was provided, use it directly
     if let Some(p) = pane_override {
         if tmux.pane_alive(p) {
-            tmux.select_pane(p)?;
+            promote_and_select(tmux, p)?;
             eprintln!("Focused pane {} ({})", p, file.display());
             return Ok(());
         } else {
@@ -170,7 +182,7 @@ pub fn run_with_tmux(file: &Path, pane_override: Option<&str>, tmux: &Tmux) -> R
         // it still owns this document. After a reroute / fresh-restart the
         // session may have moved; defer to the live owner when one exists.
         if let Some(owner) = live_owner_override(file, &session_id, &actor_pane, tmux) {
-            tmux.select_pane(&owner)?;
+            promote_and_select(tmux, &owner)?;
             eprintln!(
                 "Focused live-owner pane {} (stale actor projection {}) ({})",
                 owner,
@@ -179,7 +191,7 @@ pub fn run_with_tmux(file: &Path, pane_override: Option<&str>, tmux: &Tmux) -> R
             );
             return Ok(());
         }
-        tmux.select_pane(&actor_pane)?;
+        promote_and_select(tmux, &actor_pane)?;
         eprintln!("Focused pane {} ({})", actor_pane, file.display());
         return Ok(());
     }
@@ -191,7 +203,7 @@ pub fn run_with_tmux(file: &Path, pane_override: Option<&str>, tmux: &Tmux) -> R
             // owns the document — its owner process may be gone while the live
             // session runs in another pane. Prefer the provable live owner.
             if let Some(owner) = live_owner_override(file, &session_id, &pane_id, tmux) {
-                tmux.select_pane(&owner)?;
+                promote_and_select(tmux, &owner)?;
                 eprintln!(
                     "Focused live-owner pane {} (stale registry pane {}) ({})",
                     owner,
@@ -200,7 +212,7 @@ pub fn run_with_tmux(file: &Path, pane_override: Option<&str>, tmux: &Tmux) -> R
                 );
                 return Ok(());
             }
-            tmux.select_pane(&pane_id)?;
+            promote_and_select(tmux, &pane_id)?;
             eprintln!("Focused pane {} ({})", pane_id, file.display());
             Ok(())
         }
@@ -210,7 +222,7 @@ pub fn run_with_tmux(file: &Path, pane_override: Option<&str>, tmux: &Tmux) -> R
             if let Some(owner) = crate::sync::find_live_owner_pane_quiet(tmux, file, &session_id)
                 .filter(|owner| tmux.pane_alive(owner))
             {
-                tmux.select_pane(&owner)?;
+                promote_and_select(tmux, &owner)?;
                 eprintln!(
                     "Focused live-owner pane {} (registered pane {} is dead) ({})",
                     owner,
@@ -227,7 +239,7 @@ pub fn run_with_tmux(file: &Path, pane_override: Option<&str>, tmux: &Tmux) -> R
             if let Some(owner) = crate::sync::find_live_owner_pane_quiet(tmux, file, &session_id)
                 .filter(|owner| tmux.pane_alive(owner))
             {
-                tmux.select_pane(&owner)?;
+                promote_and_select(tmux, &owner)?;
                 eprintln!(
                     "Focused live-owner pane {} (no registry entry) ({})",
                     owner,

@@ -2774,6 +2774,109 @@ fn is_stash_window_name(window_name: &str) -> bool {
     window_name == "stash" || window_name.starts_with("stash-")
 }
 
+/// Promote a live-owner pane out of a `stash` window into its session's
+/// `agent-doc` window so editor focus surfaces it in the working layout instead
+/// of selecting it in place inside the stash (`#stash-pane-promote-on-focus`).
+///
+/// The focus live-owner fix (submodule e6dafa52) selects the correct pane but
+/// leaves it parked in the stash window; this reparents it. tmux preserves the
+/// pane id across `join-pane` / `break-pane`, so callers keep selecting the same
+/// pane id afterward.
+///
+/// Returns `Ok(true)` when the pane was reparented, `Ok(false)` when no
+/// promotion was needed (pane not alive, window unresolved, or not a stash
+/// window) or the move could not be completed. Best-effort: a failed move is
+/// logged and reported as `Ok(false)` so focus still selects the pane in place.
+pub fn promote_pane_to_agent_doc_window(tmux: &Tmux, pane_id: &str) -> Result<bool> {
+    if !tmux.pane_alive(pane_id) {
+        return Ok(false);
+    }
+    let Ok(window_id) = tmux.pane_window(pane_id) else {
+        return Ok(false);
+    };
+    let Some(window_name) = window_name_for_window_id(tmux, &window_id) else {
+        return Ok(false);
+    };
+    if !is_stash_window_name(&window_name) {
+        return Ok(false);
+    }
+    let Ok(session_name) = tmux.pane_session(pane_id) else {
+        return Ok(false);
+    };
+
+    let agent_doc_window = list_session_windows(tmux, &session_name)
+        .into_iter()
+        .find(|(_, _, name)| name == "agent-doc")
+        .map(|(_, id, _)| id);
+
+    if let Some(adw) = agent_doc_window {
+        let target = tmux.largest_pane_in_window(&adw).or_else(|| {
+            tmux.list_window_panes(&adw)
+                .unwrap_or_default()
+                .into_iter()
+                .next()
+        });
+        let Some(target) = target.filter(|t| !t.is_empty()) else {
+            return Ok(false);
+        };
+        sync_log(&format!(
+            "promote_on_focus_action=join-pane src={} dst={} agent_doc_window={}",
+            pane_id, target, adw
+        ));
+        match PaneMoveOp::new(tmux, pane_id, &target).join("-dh") {
+            Ok(()) => {
+                eprintln!(
+                    "[focus] promoted live-owner pane {} from {} into the agent-doc window",
+                    pane_id, window_name
+                );
+                sync_log(&format!(
+                    "promote_on_focus_result=join-pane ok=true src={} dst={}",
+                    pane_id, target
+                ));
+                Ok(true)
+            }
+            Err(e) => {
+                eprintln!(
+                    "[focus] promote join-pane {} → {} failed: {}, leaving in stash",
+                    pane_id, target, e
+                );
+                sync_log(&format!(
+                    "promote_on_focus_result=join-pane ok=false src={} dst={} err={}",
+                    pane_id, target, e
+                ));
+                Ok(false)
+            }
+        }
+    } else {
+        // No agent-doc window exists yet: break the pane into its own window and
+        // name it `agent-doc`, mirroring the stash rescue path.
+        sync_log(&format!(
+            "promote_on_focus_action=break-pane src={} from={}",
+            pane_id, window_name
+        ));
+        if tmux.break_pane(pane_id).is_ok() {
+            if let Ok(new_win) = tmux.pane_window(pane_id) {
+                let _ = tmux.raw_cmd(&["rename-window", "-t", &new_win, "agent-doc"]);
+            }
+            eprintln!(
+                "[focus] promoted live-owner pane {} from {} into a new agent-doc window",
+                pane_id, window_name
+            );
+            sync_log(&format!(
+                "promote_on_focus_result=break-pane ok=true src={}",
+                pane_id
+            ));
+            Ok(true)
+        } else {
+            sync_log(&format!(
+                "promote_on_focus_result=break-pane ok=false src={}",
+                pane_id
+            ));
+            Ok(false)
+        }
+    }
+}
+
 fn list_session_windows(tmux: &Tmux, session_name: &str) -> Vec<(String, String, String)> {
     let Ok(output) = tmux.raw_cmd(&[
         "list-windows",
@@ -7488,6 +7591,58 @@ mod tests {
 
         // The stashed pane should still be alive regardless
         assert!(iso.pane_alive(&pane2), "stashed pane should still be alive");
+    }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn promote_pane_to_agent_doc_window_reparents_stash_pane() {
+        // #stash-pane-promote-on-focus: a live-owner pane parked in the stash
+        // window must be reparented into the agent-doc window on focus.
+        let iso = IsolatedTmux::new("sync-promote-stash");
+        let tmp = tempfile::TempDir::new().unwrap();
+
+        let pane0 = iso.new_session("test", tmp.path()).unwrap();
+        let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
+
+        // A second pane stashed away — the live owner stuck in the stash window.
+        let pane2 = iso.split_window(&pane0, tmp.path(), "-dh").unwrap();
+        iso.stash_pane(&pane2, "test").unwrap();
+
+        let win_before = iso.pane_window(&pane2).unwrap();
+        let name_before = window_name_for_window_id(&iso, &win_before).unwrap();
+        assert!(
+            is_stash_window_name(&name_before),
+            "pane2 should start in a stash window, got {name_before}"
+        );
+
+        let promoted = promote_pane_to_agent_doc_window(&iso, &pane2).unwrap();
+        assert!(promoted, "stash pane should be promoted");
+
+        // tmux preserves the pane id across join-pane, and it now lives in the
+        // agent-doc window.
+        assert!(iso.pane_alive(&pane2), "promoted pane should still be alive");
+        let win_after = iso.pane_window(&pane2).unwrap();
+        let name_after = window_name_for_window_id(&iso, &win_after).unwrap();
+        assert_eq!(
+            name_after, "agent-doc",
+            "pane2 should be in the agent-doc window after promotion"
+        );
+    }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn promote_pane_to_agent_doc_window_noop_for_non_stash_pane() {
+        // A pane already outside the stash must not be reparented.
+        let iso = IsolatedTmux::new("sync-promote-noop");
+        let tmp = tempfile::TempDir::new().unwrap();
+        let pane0 = iso.new_session("test", tmp.path()).unwrap();
+        let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
+
+        let promoted = promote_pane_to_agent_doc_window(&iso, &pane0).unwrap();
+        assert!(
+            !promoted,
+            "a pane already outside the stash should not be promoted"
+        );
     }
 
     #[test]

@@ -107,9 +107,21 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 - Focus must also recover instead of failing closed when the registered pane is
   dead, or no registry entry exists, but the document is still served by a live
   owner in another pane.
+- Stash promotion on focus (`#stash-pane-promote-on-focus`): once focus has
+  resolved the pane it will select, if that pane is parked in a `stash` window it
+  must be reparented into the session's `agent-doc` window before selection, not
+  merely selected in place inside the stash. The live-owner fix selects the
+  correct pane but left it stuck in the stash; promotion `join-pane`s it into an
+  existing `agent-doc` window (or `break-pane`s it into a new one named
+  `agent-doc` when none exists). tmux preserves the pane id across the reparent,
+  so focus selects the same pane id afterward. Promotion is best-effort and
+  single-pane scoped (`sync::promote_pane_to_agent_doc_window`): a failed move is
+  logged and focus still selects the pane in place. It does not run full stash
+  consolidation. Keep this aligned in `focus.rs`, `sync.rs`, and this spec.
 - Editor automatic tab-to-pane sync must not use `focus` as a substitute for
-  passive `sync --no-autostart`; focus does not own stash rescue, safe passive
-  replacement, or preserved-layout reselect proof.
+  passive `sync --no-autostart`; beyond the single-pane stash promotion above,
+  focus does not own full stash consolidation, safe passive replacement, or
+  preserved-layout reselect proof.
 
 ## layout
 

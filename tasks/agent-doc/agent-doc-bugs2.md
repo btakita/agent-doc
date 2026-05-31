@@ -58,14 +58,23 @@ Implemented. Focus now reparents a live-owner pane out of the `stash` window int
 - Built + installed (both binaries); committed + pushed in `src/agent-doc` with the superproject pointer bump.
 
 **Gated** (not done): code-complete and verified against real tmux via IsolatedTmux, but the end-to-end live JB-editor focus→promote path on a genuinely stuck pane is not yet IDE-verified. Related: `#cross-project-stash-pane-condition` (nested-root shared-session stashing — needs a session-model decision) and `#plugin-cleanup-menu-command`.
-<!-- agent:boundary:5189196a -->
+
+### Re: #do-id-partial-closeout-state — opus-4-8
+
+Landed a WARN-only first slice (dogfooded: I'm narrowing this backlog item via `--pending-edit` rather than leaving the full-task text).
+
+`check_partial_closeout_state_guard` (session-check, committed-cycle guard loop) WARNs when a `do [#id]` turn's response shows a shipped signal (committed + pushed) **and** a tight "remaining live work" phrase (not deployed, live verification, external validation remains, awaiting approval, feed sync, merchant center, …) while a directed id is still `[ ]` open in `agent:backlog`. It advises narrowing the item + queue head to the next phase via `--pending-edit`/`--pending-gate`. **WARN-only by design** — it sits on the closeout path the auto-queue drain uses, so it never blocks; suppressed by a `<!-- no-partial-closeout-guard -->` response marker once narrowed. Tests cover warn/silent/suppressed/reaped; spec in `specs/07-closeout-commands.md`; FlowCore `guard_` budget audited 35→40. Committed + pushed (`src/agent-doc` + pointer).
+
+Deferred (see plan): per-id edit-vs-gate tracking in `cycle_state`, opt-in strict mode, and next-phase queue convergence.
+
+**Auto-loop halt — needs your call.** This document has a live route-owned process (PID 2906835, `agent-doc start --route-owned ...agent-doc-bugs2.md`, since May 29) that is concurrently mutating the doc: `queue_active` was flipped to `false` with ~18 live `do [#id]` items still present, the queue was reshaped, and `do [#queue-prompt-echo-summary]` (a backlog-only id) leaked into the queue. That is the `#adoc-queue-ipc-buffer-divergence` / `#completed-queue-residue-regression` class already tracked in this doc's review. Two actors draining one queue races the IPC buffer, so I'm stopping the self-paced loop rather than risk IPC corruption. To resume safely: stop/await the route-owned session, or tell me to drive it (and I'll reactivate the queue) — your call.
+
+<!-- no-partial-closeout-guard -->
+<!-- agent:boundary:b980d3f5 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
-~~~done
-The response to a queue item should contain the prompt from the queue. If the prompt is long, it may be beneficial to have a summary of the prompt. But for now, let's try copying the entire prompt.
-#spec-test-commit-push-deploy
-~~~
+---
 JB `Run Agent Doc` successfully started a turn and had an error.
 ```
 [route] debounce OK — file idle for 0.6s and typing indicator idle
@@ -75,7 +84,7 @@ JB `Run Agent Doc` successfully started a turn and had an error.
 #spec-test-build-install-commit-push
 ---
 preset #spec-test-build-install-commit-push
-- ~do [#stash-pane-promote-on-focus]~
+- do [#queue-prompt-echo-summary]
 - do [#do-id-partial-closeout-state]
 - do [#closeout-recovery-state-machine]
 - do [#codex-owned-pane-prompt-miss]
@@ -123,8 +132,9 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 
 <!-- agent:backlog -->
 - [ ] [#queue-prompt-echo-summary] [recommended] Summarize long consumed queue prompts in the #queue-prompt-echo-in-response echo instead of copying verbatim. Current behavior embeds the entire prompt as a > **Queue prompt:** blockquote after the response heading; for long prompts a bounded summary plus a pointer to the full queue text would keep the exchange readable. Add a length threshold + summarization path (the user explicitly deferred this: 'for now, let's try copying the entire prompt').
+- [ ] [#codex-owned-pane-auto-queue-stuck] [recommended] Codex-owned `agent-doc <FILE>` direct invocation from the same pane can leave an active auto-queue turn stuck: the recursive guard avoids child dispatch, but the ready queue head is not handed to the owning Codex turn and no response is written. Live repro 2026-05-31 `src/boost-client/tasks/monsterrodholders.md`: `queue_active: true` + `agent:queue auto` head `re [#374n]...`; same-pane run printed `Submitting to codex...` then `recursive direct invocation would deadlock`, leaving queue/boundary drift and the head unprocessed. Fix with early owner-pane queue handoff, durable queue-target proof, no-drift guard, and Codex final-gate recovery. Plan: tasks/agent-doc/plan-codex-owned-pane-auto-queue-stuck.md.
 - [ ] [#completed-queue-residue-regression] [recommended] Completed queue items can still remain visible in agent:queue after the turn is finished, despite the archived #drained-done-queue-clear fix. Treat as a regression/uncovered route or IPC path: add a committed-state guard for provable completed queue residue, audit finalize/write/preflight/run continuation drain ordering, and verify live editor/snapshot/HEAD convergence. Plan: tasks/agent-doc/plan-completed-queue-residue-regression.md.
-- [ ] [#do-id-partial-closeout-state] [recommended] `do [#id]` partial closeouts must rewrite or gate the remaining state instead of leaving a stale open item/queue head. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `do [#shoplabels]. #spec-test-commit-push` completed repo-backed feed-label code/tests/spec/commits/pushes, but deploy + GfW feed sync + live Ads label coverage remained; `#shoplabels` correctly stayed open, but the backlog/queue still looked like the original full task and the user had to ask whether it was done. Require `--pending-edit`, `--pending-gate`, or a typed stays-open marker for partial `do [#id]` closeout. Plan: tasks/agent-doc/plan-do-id-partial-closeout-state.md.
+- [ ] [#do-id-partial-closeout-state] [recommended] Partial-closeout WARN guard landed (check_partial_closeout_state_guard: a do[#id] turn whose response shows shipped + remaining-live-work signals with the directed id still open advises --pending-edit/--pending-gate narrowing; suppressible by a no-partial-closeout-guard response marker; FlowCore guard_ budget 35->40). Remaining: per-id edit-vs-gate tracking in cycle_state, opt-in strict mode, next-phase queue convergence, and the runbook note that #spec-test-commit-push completes a repo phase without a live/deploy item. Plan: tasks/agent-doc/plan-do-id-partial-closeout-state.md.
 - [ ] [#closeout-recovery-state-machine] [recommended] Remaining #closeout-repair-churn scope: a unified typed closeout recovery state machine shared by finalize / write --commit / repair / commit (states missing_response_body, direct_response_patchback, escaped_template_patch, boundary_only_drift, reaped_item_pending_parent, nested_parent_pointer_stale) that collapses the scattered 'try finalize / write --commit / commit' diagnostic chain into one typed instruction per state. The escaped-component-marker fail-closed guard already shipped (PatchbackShape::EscapedComponentMarkers). Direct-### Re: absorption and atomic parent-pointer repair are already substantially covered by write --commit absorption and complete_required_closeout retry. Plan: tasks/agent-doc/plan-closeout-repair-churn.md.
 - [ ] [#free-text-queue-owner-consume] [recommended] Free-text `agent:queue auto` heads can remain live after an owner-pane/direct Codex closeout writes the response but lacks queue-target proof. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `Approve [#shoptiers]. What are #next-steps?` was answered, then reported as not marked done; same-pane `agent-doc <FILE>` refused recursive dispatch and repair finalize logged `[queue] skipped consumption because the active prompt did not target the queue head`. Preserve id-backed queue safety, but record/restore synthetic free-text queue-target proof for recursive-direct repair/finalize paths and add diagnostics/regressions. Plan: tasks/agent-doc/plan-free-text-queue-owner-consume.md.
 - [ ] [#preset-item-id-collision] [recommended] Enforce unique active identities across frontmatter `prompt_presets` keys and active `agent:backlog` / `agent:review` / `agent:icebox` item ids. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `#next-steps` exists both as a prompt preset and as a backlog item, making `do #next-steps` and "top backlog item: #next-steps" ambiguous between preset expansion and backlog execution. Fix with an identity registry, mutation-time rejection, preflight/session-check fail-closed diagnostics, and regressions. Plan: tasks/agent-doc/plan-preset-item-id-collision.md.

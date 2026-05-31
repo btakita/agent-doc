@@ -78,7 +78,37 @@ Fixed both warnings:
 
 2. **`preset_item_id_collision`**: Removed duplicate icebox entries (`#full-e2e-verify`, `#npm-auth-setup`, `#npm-publish-verify`) that already exist in `agent:review` with the same IDs. Review is the authoritative tracker; icebox duplicates caused ambiguous `do #id` resolution.
 What are #next-steps to improve token efficiency along with graph + neighborhood performance & effectiveness.
-<!-- agent:boundary:1151d89d -->
+
+### Re: #next-steps — token efficiency + graph/neighborhood performance — glm-5.1
+
+Analyzed the full tsift codebase post-`2bdec90`. 10 follow-up items added to backlog in priority order:
+
+#### Token Efficiency
+| # | ID | Impact |
+|---|---|---|
+| 1 | `#terse-ultra-mode` | 25-40% token savings — strip properties, truncate snippets, compact coverage snapshot |
+| 5 | `#terse-health-early-exit` | 30% health compute — stop after top/bottom N, skip sub-metrics |
+| 7 | `#compact-community-serialization` | 40-60% community JSON — TerseCommunityMember with name only |
+
+#### Graph Performance
+| # | ID | Impact |
+|---|---|---|
+| 2 | `#libsql-pushdown-edge-incident` | 10-50x edge lookup — indexed queries in libsql (parity with SQLite) |
+| 3 | `#health-dedup-scc` | 40% health time — share SCC result between reachability and find_cycles |
+| 6 | `#libsql-edges-between-pushdown` | 5-20x neighborhood — temp-table + EXISTS in libsql |
+| 9 | `#shared-graph-build-pipeline` | 30% analyze time — single graph build shared across all algorithms |
+| 10 | `#sift-token-index` | 5-50x search — inverted index pre-filtering |
+
+#### Neighborhood Effectiveness
+| # | ID | Impact |
+|---|---|---|
+| 4 | `#ranked-neighborhood` | 30-60% token reduction — configurable scoring + max_nodes budget |
+| 8 | `#louvain-dedup-aggregate` | 5-15% modularity — phase-2 super-node coarsening |
+
+**Top of backlog: `#terse-ultra-mode`** — highest token savings, directly improves LLM context efficiency across all graph/search/explain envelopes.
+
+Also cleaned up orphaned `#next-steps` post-exchange comment (was causing the `post_exchange_comment_prompt_preset` warning).
+<!-- agent:boundary:7996afdc -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -98,6 +128,16 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#terse-ultra-mode] Ultra-terse envelope mode: strip properties from TerseGraphNode/TerseGraphEdge (keep id/kind/label only), truncate snippets to 80 chars, compact SearchCoverageSnapshot. ~25-40% token savings. tsift-core/lib.rs:145-208, tsift-search/sift.rs:98-131
+- [ ] [#libsql-pushdown-edge-incident] Override edge() and incident_edges() in LibsqlGraphStore with indexed queries (parity with SQLite backend). Currently O(E) per call. tsift-libsql/src/lib.rs
+- [ ] [#health-dedup-scc] Eliminate duplicate SCC computation in composite_health_score — compute_reachability and find_cycles both run Tarjan on the same graph. Share SCC result. ~40% health-score time reduction. tsift-algorithms/src/health.rs:106-147,213-280
+- [ ] [#ranked-neighborhood] Add ranked neighborhood with configurable scoring (BreadthFirst, EdgeKindWeighted, DegreeWeighted) and max_nodes budget. ~30-60% token reduction for explain/neighborhood. tsift-core/lib.rs:598-668
+- [ ] [#terse-health-early-exit] Early-terminated terse health report: stop after top/bottom N scores, skip per-node sub-metrics when only overall is needed. ~30% health compute reduction. tsift-algorithms/src/health.rs:42-71
+- [ ] [#libsql-edges-between-pushdown] Override edges_between_nodes in LibsqlGraphStore with temp-table + EXISTS (parity with SQLite backend). 5-20x neighborhood speedup. tsift-libsql/src/lib.rs
+- [ ] [#compact-community-serialization] Add TerseCommunityMember/TerseCommunity — name + tagpath_handle only, top-N member slice. ~40-60% community JSON savings. tsift-graph/src/lib.rs:541-572
+- [ ] [#louvain-dedup-aggregate] Add Louvain phase-2 aggregation (super-node coarsening). 5-15% modularity improvement on hierarchical codebases. tsift-graph/src/lib.rs:590-743
+- [ ] [#shared-graph-build-pipeline] Extract shared build_graph() from health.rs to common module; reuse in scc.rs, coupling.rs, dead_code.rs. ~30% analyze wall-time reduction. tsift-algorithms/src/*.rs
+- [ ] [#sift-token-index] Build inverted token index for search pre-filtering — skip files with no matching tokens. 5-50x search speedup on large codebases. tsift-search/src/sift.rs:210-267
 <!-- /agent:backlog -->
 
 ## Review

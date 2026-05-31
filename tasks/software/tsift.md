@@ -50,7 +50,11 @@ Added `incident_edges()` override to `LibsqlGraphStore` with a UNION of two inde
 - `SPEC.md` — added "Pushdown queries" paragraph documenting both `edge()` and `incident_edges()` indexed overrides
 
 **Verification:** `cargo test -p tsift-libsql` (7 pass), `cargo build --release`, `cargo install --path .`, committed as `22bbd76` and pushed.
-<!-- agent:boundary:35570885 -->
+
+### Re: test
+
+Hello world
+<!-- agent:boundary:ba9a8b5b -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -71,7 +75,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#health-dedup-scc] Eliminate duplicate SCC computation in composite_health_score — compute_reachability and find_cycles both run Tarjan on the same graph. Share SCC result. ~40% health-score time reduction. tsift-algorithms/src/health.rs:106-147,213-280
 - [ ] [#ranked-neighborhood] Add ranked neighborhood with configurable scoring (BreadthFirst, EdgeKindWeighted, DegreeWeighted) and max_nodes budget. ~30-60% token reduction for explain/neighborhood. tsift-core/lib.rs:598-668
 - [ ] [#terse-health-early-exit] Early-terminated terse health report: stop after top/bottom N scores, skip per-node sub-metrics when only overall is needed. ~30% health compute reduction. tsift-algorithms/src/health.rs:42-71
 - [ ] [#libsql-edges-between-pushdown] Override edges_between_nodes in LibsqlGraphStore with temp-table + EXISTS (parity with SQLite backend). 5-20x neighborhood speedup. tsift-libsql/src/lib.rs

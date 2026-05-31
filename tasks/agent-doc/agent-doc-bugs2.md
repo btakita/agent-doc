@@ -16,7 +16,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -348,28 +348,29 @@ Gated on a design decision — plan at `tasks/agent-doc/plan-backlog-queue-sync-
 (Side note: the first preflight probe this cycle surfaced a transient `stuck_captured_cycle` that the next pass self-healed — `recovered: true`, prior response confirmed in HEAD — via the `reconcile_compacted_committed_capture` + repair path, exactly as designed. No action needed.)
 
 (Closeout note: `--force-disk` — IDE IPC listener still unresponsive this session.)
-<!-- agent:boundary:6e24df9c -->
+
+### Re: do [#preset-item-id-collision] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#preset-item-id-collision]
+
+
+Done — the identity registry + collision detection + surfacing shipped (submodule `4a3faa46`, `make check` green); the riskier hard-enforcement half is queued as a follow-up.
+
+**The ambiguity.** A `#id` that is both a `prompt_presets` key and an active backlog/review/icebox item makes `do #id`, queue generation, and "top backlog item: #id" ambiguous between preset expansion and item execution (live repro: `monsterrodholders.md` `#next-steps`).
+
+**Landed this cycle.** `preflight::detect_identity_collisions` — an identity registry over frontmatter `prompt_presets` keys plus active (not done) `agent:backlog` / `agent:review` / `agent:icebox` item ids (normalized by stripping `#`; archived/done excluded as non-active lookup targets). When an id resolves under >1 source, preflight emits a `preset_item_id_collision` warning naming each colliding identity, its sources, and the rename repair. Duplicate active ids across tracked components also flag. 3 regressions: the `#next-steps` preset-vs-backlog repro, duplicate-active-ids across components, and clean/done-ignored. Spec note in `07-orchestration-commands.md`.
+
+**Deliberately split off (`#preset-item-id-collision-enforce`, queued).** The plan's hard enforcement — mutation-time rejection of new colliding ids, **fail-closed dispatch block** on existing collisions, and queue-generation refusal — is the riskier half: a hard block must be designed carefully so it doesn't over-block live sessions. The detector + surfacing (this cycle) is the safe, immediately-useful core; the registry it builds is the foundation the enforcement reuses.
+
+This was the final `agent:queue auto` item — the queue now drains to empty and the auto-loop ends.
+
+(Closeout note: `--force-disk` throughout — the IDE IPC listener was unresponsive this entire session.)
+<!-- agent:boundary:1be71f9b -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~do [#codex-owned-pane-prompt-miss]~
-- ~do [#stuck-capture-compact-false-positive]~
-- ~do [#codex-final-response-live-verify]~
-- ~do [#codex-route-busy-ctrl-g-opens-editor]~
-- ~do [#cross-project-stash-pane-condition]~
-- ~do [#route-drain-all-surface-live-verify]~
-- ~do [#run-agent-doc-stale-busy-replay]~
-- ~do [#jb-busy-queue-ux-feedback]~
-- ~do [#queue-prompt-echo-summary]~
-- ~do [#free-text-queue-owner-consume]~
-- ~do [#plugin-cleanup-menu-command]~
-- ~do [#stash-session-ttl-prune]~
-- ~do [#next-steps-backlog-capture]~
-- ~do [#ah0s]~
-- ~do [#backlog-priority-attribute]~
-- ~do [#backlog-queue-sync-attribute]~
-- do [#preset-item-id-collision]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 ###
 <!--
@@ -398,6 +399,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#preset-item-id-collision-enforce] [recommended] Escalate #preset-item-id-collision from a preflight warning to hard enforcement (the riskier half, deferred to design carefully against over-blocking live sessions): (1) mutation-time rejection — write --pending-add / --pending-add-after / etc. with an explicit custom id (id=X or [#X]) that collides with a prompt_presets key or an existing active item id fails closed; (2) fail-closed dispatch — preflight/session-check block dispatch on an existing collision with the rename repair hint, surfaced by route/JB as a document-repair error not a generic agent failure; (3) queue generation refuses to emit do [#id] for an ambiguous id. The identity registry + detection + preflight warning + 3 regressions already landed (preflight::detect_identity_collisions). Plan: tasks/agent-doc/plan-preset-item-id-collision.md.
 - [ ] [#free-text-queue-skip-diagnostic] [recommended] Polish from #free-text-queue-owner-consume plan point 4: when queue consumption is skipped, the closeout still prints the generic '[queue] skipped consumption because the active prompt did not target the queue head'. For an id-backed head with no completion flag, name the missing proof source and the supported repair (--done/--pending-gate/--pending-edit <id>); for a free-text head edge case, point to the answered-response path. Replace the single generic line at write.rs ~1460/1469 with a shape-aware diagnostic. Plan: tasks/agent-doc/plan-free-text-queue-owner-consume.md (point 4).
 - [ ] [#stuck-capture-queue-echo-false-positive] [recommended] Fix landed (submodule 6220379c): response_already_applied matched the captured response as one contiguous block, but queue consumption inserts a > **Queue prompt:** echo blockquote (#queue-prompt-echo-in-response) between the response heading and body, so stuck_captured_cycle falsely warned committed-but-not-in-HEAD after every queue-consumed cycle and re-suggested a write --commit that would re-inject the response. normalized_response_lines now strips the echo blockquote on both sides before matching; unit + closeout regressions added. Verify across a couple more queue-consumed cycles that no preflight emits the false stuck_captured_cycle warning, then mark done.
 - [ ] [#codex-owned-pane-prompt-miss-followups] [recommended] Follow-ups deferred from the #codex-owned-pane-prompt-miss fix (fail-closed early guard + session-check backstop landed, submodule dede28d8): (1) the plan's *preferable* path — emit a structured owned_pane_self_invocation result shape in preflight/plan (file path, owner pane/session/actor generation, unresolved prompt excerpt, required persistence command) so Codex guidance drives an in-pane response cycle instead of only reading the bail diagnostic; (2) Codex Stop-hook / installed guidance regression asserting the owned-pane diagnostic forces an in-pane response body before final chat output; (3) live-verify with a real Codex same-pane run that has an unresolved exchange prompt. Plan: tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md.
@@ -405,7 +407,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 - [ ] [#completed-queue-residue-regression] [recommended] Completed queue items can still remain visible in agent:queue after the turn is finished, despite the archived #drained-done-queue-clear fix. Treat as a regression/uncovered route or IPC path: add a committed-state guard for provable completed queue residue, audit finalize/write/preflight/run continuation drain ordering, and verify live editor/snapshot/HEAD convergence. Plan: tasks/agent-doc/plan-completed-queue-residue-regression.md.
 - [ ] [#do-id-partial-closeout-state] [recommended] Partial-closeout WARN guard landed (check_partial_closeout_state_guard: a do[#id] turn whose response shows shipped + remaining-live-work signals with the directed id still open advises --pending-edit/--pending-gate narrowing; suppressible by a no-partial-closeout-guard response marker; FlowCore guard_ budget 35->40). Remaining: per-id edit-vs-gate tracking in cycle_state, opt-in strict mode, next-phase queue convergence, and the runbook note that #spec-test-commit-push completes a repo phase without a live/deploy item. Plan: tasks/agent-doc/plan-do-id-partial-closeout-state.md.
 - [ ] [#closeout-recovery-state-machine] [recommended] Typed closeout recovery classifier landed: flow::closeout::CloseoutRecoveryState + classify_closeout_recovery_state + recovery_command; session_check::closeout_recovery_hint renders one typed 'Recovery [state]: command' across all nine closeout-guard call sites. Classified today: clean / open_cycle / missing_response_body / escaped_template_patch. Remaining: precise detection for reserved states direct_response_patchback, boundary_only_drift, nested_parent_pointer_stale, and folding each guard's existing diagnostic through the classifier. Plan: tasks/agent-doc/plan-closeout-repair-churn.md.
-- [ ] [#preset-item-id-collision] [recommended] Enforce unique active identities across frontmatter `prompt_presets` keys and active `agent:backlog` / `agent:review` / `agent:icebox` item ids. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `#next-steps` exists both as a prompt preset and as a backlog item, making `do #next-steps` and "top backlog item: #next-steps" ambiguous between preset expansion and backlog execution. Fix with an identity registry, mutation-time rejection, preflight/session-check fail-closed diagnostics, and regressions. Plan: tasks/agent-doc/plan-preset-item-id-collision.md.
 <!-- /agent:backlog -->
 
 ## Review

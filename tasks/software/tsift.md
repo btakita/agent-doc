@@ -69,7 +69,15 @@ Queue re-activated with 12 items. All were already implemented and pushed in com
 
 All 12 backlog items already resolved.
 Fix the preexisting warnings.
-<!-- agent:boundary:f173156c -->
+
+### Re: fix preexisting warnings — glm-5.1
+
+Fixed both warnings:
+
+1. **`post_exchange_comment_prompt_preset`**: Removed orphaned `#next-steps` HTML comment block outside `agent:exchange`. These prompts were already addressed in the prior queue run.
+
+2. **`preset_item_id_collision`**: Removed duplicate icebox entries (`#full-e2e-verify`, `#npm-auth-setup`, `#npm-publish-verify`) that already exist in `agent:review` with the same IDs. Review is the authoritative tracker; icebox duplicates caused ambiguous `do #id` resolution.
+<!-- agent:boundary:d4efd58d -->
 <!-- /agent:exchange -->
 <!-- agent:queue -->
 <!-- /agent:queue -->

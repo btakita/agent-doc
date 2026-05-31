@@ -858,6 +858,50 @@ fn preflight_owned_pane_self_invocation_absent_for_non_owner_pane() {
 }
 
 #[test]
+fn preflight_emits_owned_pane_self_invocation_for_active_queue_head() {
+    // #codex-owned-pane-prompt-miss-followups (guidance): when the Codex owner
+    // pane re-invokes the document with no unresolved exchange prompt but an
+    // active `agent:queue auto` head, preflight surfaces the structured contract
+    // with kind=active_queue_head so the in-pane guidance can drive the next
+    // queue continuation instead of launching a recursive child.
+    let tmp = TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    fs::write(
+        &doc,
+        "---\nagent_doc_session: session-recursive\nagent: codex\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nAnswered.\n<!-- agent:boundary:committed -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue auto -->\n- do something\n<!-- /agent:queue -->\n",
+    )
+    .unwrap();
+    init_git_repo(tmp.path(), &doc);
+    seed_snapshot(tmp.path(), &doc);
+    write_codex_owner_session(tmp.path(), &doc);
+
+    let out = agent_doc()
+        .current_dir(tmp.path())
+        .env_remove("CLAUDECODE")
+        .env_remove("CLAUDE_CODE")
+        .env_remove("CLAUDE_CODE_SESSION")
+        .env_remove("OPENCODE")
+        .env_remove("OPENCODE_CLIENT")
+        .env("CODEX_SESSION", "codex-session")
+        .env("TMUX_PANE", "%77")
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "preflight should succeed");
+    let json: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let osi = &json["owned_pane_self_invocation"];
+    assert!(!osi.is_null(), "owned_pane_self_invocation must be present: {json}");
+    assert_eq!(osi["kind"].as_str().unwrap(), "active_queue_head");
+    assert!(osi["work_excerpt"].as_str().unwrap().contains("do something"));
+    assert!(
+        osi["persistence_command"]
+            .as_str()
+            .unwrap()
+            .contains("agent-doc finalize")
+    );
+}
+
+#[test]
 fn orchestrate_handles_already_open_preflight_cycle_for_first_step() {
     let tmp = TempDir::new().unwrap();
     let doc = tmp.path().join("session.md");

@@ -122,7 +122,13 @@ Fixed and verified. The orphan-repair path no longer prefixes assistant body lin
 - Rebuilt both binaries (`cargo build --release` + `cargo install --path .`) so `.bin/agent-doc` and `~/.cargo/bin/agent-doc` (tmux) carry the fix.
 
 **Commits:** submodule `298f6466` (fix + test), superproject pointer `606be03de`. No spec change needed (binary-only, as the plan scoped). Plan: `tasks/agent-doc/plan-repair-orphan-prefix-bug.md`.
-<!-- agent:boundary:43b086ce -->
+
+### Re: queue drift cleanup — #recursive-repair-apply already landed — opus-4-8
+
+Preflight's queue-head-drift repair struck `do [#recursive-repair-apply]` because the item already has a completed worker_result and landed fix (`eb39877eb` agent-doc(recursive-repair-apply): one-command safe closeout recovery). This is bookkeeping consumption of an already-done item, not new work — committing the cleared queue state. Same shape as the earlier `#jb-run-agent-doc-command-route-miss` strike (impl `e1735fa2`; its live-verify tracked separately as `#jb-run-agent-doc-busy-feedback-live-verify`).
+
+Next actionable head: `#preflight-probe-side-effect-free` (genuine, unimplemented).
+<!-- agent:boundary:7ca8d0d8 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -133,7 +139,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#recovery-drift-apply-live-verify]~
 - ~do [#jb-run-agent-doc-command-route-miss]~
 - ~do [#repair-orphan-prefix-bug]~
-- do [#recursive-repair-apply]
+- ~do [#recursive-repair-apply]~
 - do [#preflight-probe-side-effect-free]
 - do [#gated-followup-split-enforcement]
 - do [#codex-owned-pane-stop-hook-live-verify]

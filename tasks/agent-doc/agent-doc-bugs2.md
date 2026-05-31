@@ -31,42 +31,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260531-191431.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260531-193945.md`*
 
 Compacted content:
-- Archived 4 response topic(s): do [#recursive-repair-state-drift]; do [#recursive-repair-recovery-states]; do [#recursive-repair-apply]; 1 more
+- Archived 1 response topic(s): do #recovery-drift-authoritative-side
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: do #recovery-drift-authoritative-side — opus-4-8
-
-> **Queue prompt:**
->
-> do [#recovery-drift-authoritative-side]
-
-
-Implemented the authoritative-side determination so `apply_closeout_recovery` can auto-apply `QueueMetadataDrift` and `SidecarVisibleDrift` instead of always returning `NotApplied`.
-
-#### The signal
-
-The classifier already proves the *content* components (exchange / backlog / review / icebox / done) are byte-identical before reaching these states. So the only durable state a metadata-only diff can destroy is an **active queue continuation**. Legitimate consumption of a queue head always surfaces as response/content drift — never as metadata-only drift. Therefore a live `queue_active` continuation present in HEAD but dropped (or re-headed) by the local side **cannot** have been legitimately consumed → HEAD is authoritative. This is exactly the live-observed bug: a spurious `queue_active:false` working-drift (14 items still pending) that the old `agent-doc commit` recovery would have wrongly committed.
-
-#### What landed
-
-- **`queue_continuation::live_continuation_head(file, content)`** — derives, from a document *string* alone (no sidecar round-trip), whether it carries a live continuation: `queue_active: true` + a ready head that is not a stop fence or future time gate, returning the head id.
-- **`metadata_drift_authority(file, local, head)` → `Local | Head | Ambiguous`**:
-  - HEAD live, local dropped it → **Head** → restore-from-HEAD.
-  - Both live, different heads, no consuming response → **Ambiguous** → fail closed.
-  - Same head / no HEAD continuation at risk → **Local** → commit forward.
-- **`apply_closeout_recovery`** routes both metadata-drift states through `apply_metadata_drift_recovery`: commit the local side, or restore the file + snapshot/CRDT sidecars from HEAD (`rebuild_sidecars_from_content`; no new commit since HEAD already holds the authority), or `NotApplied` with the recommended manual command.
-
-#### Verification
-
-`make check` green. Six tests: 3 pure-string `metadata_drift_authority_*` unit tests + `apply_recovery_commits_queue_metadata_drift_when_no_live_continuation`, `apply_recovery_restores_from_head_when_local_drops_live_continuation`, `apply_recovery_withholds_queue_metadata_drift_when_live_heads_diverge`. The old always-withhold test was updated to the new commit-forward behavior. Spec `07-closeout-commands.md` updated (all classified states + the authority rule). Both binaries rebuilt + installed; submodule committed + pushed (`da658c5f`).
-
-#### Remaining
-
-Live-verify the full one-command recovery on a real owner pane — split to `#recovery-drift-apply-live-verify` (gated on a live pane, risky in this racy multi-session repo). Closed `#recovery-drift-authoritative-side`.
-<!-- agent:boundary:80e910da -->
+<!-- agent:boundary:061b359e -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->

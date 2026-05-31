@@ -16,7 +16,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -36,20 +36,43 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 5 response topic(s): do [#rejected-response-must-block-queue-consume-and-done]; do [#opencode-active-turn-reopen-auto-retry-on-idle]; do [#recovery-drift-apply-live-verify]; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:f73104db -->
+❯ JB `Run Agent Doc` deadlock with monsterrodholders.md.
+```
+[route] debounce OK — file idle for 0.5s and typing indicator idle
+[route] target tmux session: 0
+[route] authoritative actor generation 245 for tasks/monsterrodholders.md is busy on pane %40; queued pending dispatch "Are there any items in review that are actionable right now?" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
+```
+
+### Re: JB `Run Agent Doc` deadlock with monsterrodholders.md — opus-4-8
+
+Diagnosed and captured as a plan + backlog item (not implemented — `monsterrodholders.md`'s `#agent-doc-bug` preset is "create a plan, add to agent-doc-bugs2 backlog, DO NOT IMPLEMENT", and this is live-pane route behavior that needs a live Codex pane to verify).
+
+**What happened (grounded in the route log + code):** `monsterrodholders.md` is a Codex session. Run Agent Doc hit `route.rs:4003` `DispatchOnlyBusyQueue`: the authoritative actor (gen 245) was busy on pane `%40`, so route correctly refused to inject into the active turn and instead called `enqueue_route_dispatch_prompt` (`route.rs:1806`) — which sets `queue_active: true` and **appends** the prompt to `agent:queue auto` (`appended=true`) — then returned `Ok`. So route itself didn't hang; the prompt is sitting in the queue.
+
+**Why it deadlocks:** route does nothing further to arrange delivery. The queue only drains when a *new* cycle runs against the doc, which is **harness-delegated**:
+- Codex → the `Stop` hook on turn-end (`codex_hook.rs`);
+- Claude Code → the auto-loop while a session is looping.
+
+If the busy Codex turn never reaches a clean turn-end Stop — e.g. blocked on `required_ssh_targets: monsterrodholders-server`, a permission, or a Codex hook-review — the queued prompt is never drained. Compounding it, route returns `Ok` with **no operator-facing "deferred/queued" signal**, so JB reads as a silent success/hang.
+
+**Candidate causes to confirm at implementation** (not yet proven — I can't reproduce the live state, the `%40`/gen-245 actor is gone from the store):
+
+1. No guaranteed idle-drain trigger for a route-appended busy-queue prompt.
+2. Codex `Stop`-hook drain may skip a *route-appended* prompt via the `stop_hook_active`/`last_auto_queue_head` loop-guard (`codex_hook.rs:293`).
+3. JB feedback gap (same family as `#jb-run-agent-doc-command-route-miss`).
+
+**Fix direction** (deferred): guarantee an idle-drain for the busy prompt-bearing case (the prompt-bearing sibling of `#opencode-active-turn-reopen-auto-retry-on-idle`), add explicit JB "deferred — queued" feedback, and add SimWorld/unit coverage for Stop-hook drain of a route-appended busy-queue prompt. Plan: `tasks/agent-doc/plan-jb-run-agent-doc-busy-queue-dispatch-deadlock.md` (committed).
+
+Backlog item `#jb-run-agent-doc-busy-queue-dispatch-deadlock` added.
+<!-- agent:boundary:2510f63e -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
-- ~do [#busy-not-ready-message-reports-actual-wait]~
-- ~do [#rejected-response-must-block-queue-consume-and-done]~
-- ~do [#opencode-active-turn-reopen-auto-retry-on-idle]~
-- ~do [#recovery-drift-apply-live-verify]~
-- ~do [#jb-run-agent-doc-command-route-miss]~
-- ~do [#repair-orphan-prefix-bug]~
-- ~do [#recursive-repair-apply]~
+- do [#closeout-recovery-state-machine]
 - do [#preflight-probe-side-effect-free]
 - do [#gated-followup-split-enforcement]
+- do [#completed-queue-residue-regression]
 - do [#codex-owned-pane-stop-hook-live-verify]
 - do [#queue-sync-auto-pending-done-guard-misfire]
 - do [#tagpath-queue-priority-publish-align]
@@ -58,9 +81,7 @@ preset #spec-test-build-install-commit-push
 - do [#backlog-queue-sync-attr]
 - do [#preset-item-id-collision-enforce]
 - do [#free-text-queue-skip-diagnostic]
-- do [#completed-queue-residue-regression]
 - do [#do-id-partial-closeout-state]
-- do [#closeout-recovery-state-machine]
 <!-- /agent:queue -->
 ###
 <!--
@@ -89,6 +110,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog priority queue=prepend -->
+- [ ] [#jb-run-agent-doc-busy-queue-dispatch-deadlock] JB Run Agent Doc on a busy Codex session (monsterrodholders.md, actor gen 245 pane %40) queues the dispatch into agent:queue auto and returns Ok, but the prompt is never delivered after the pane goes idle (deadlock). route.rs:4003 DispatchOnlyBusyQueue enqueues (queue_active:true) + returns Ok; drain is harness-delegated (Codex Stop hook / Claude auto-loop) with no guaranteed idle trigger, and JB shows no deferred-queued feedback. Plan: tasks/agent-doc/plan-jb-run-agent-doc-busy-queue-dispatch-deadlock.md. Related: #opencode-active-turn-reopen-auto-retry-on-idle (plain-reopen sibling), #jb-run-agent-doc-command-route-miss.
 - [ ] [#gated-followup-split-enforcement] [recommended] #agent-doc-bug 2026-05-31: when a directed do [#id] cycle keeps a multi-phase item open via --pending-edit (backlog) or --review-edit (review) with text that enumerates several gated/remaining phases, agent-doc neither prompts nor guards splitting those phases into discrete child backlog IDs — the deferred work stays buried in one parent's narrowed description and is not independently trackable/queueable. Repro this session: #recursive-repair-state-drift and #codex-owned-pane-prompt-miss-followups each had 2-4 gated phases folded into parent text; only a user catch prompted splitting them into #recursive-repair-recovery-states/#recursive-repair-apply/#preflight-probe-side-effect-free/#codex-owned-pane-stop-hook-live-verify. Add a session-check/finalize advisory (warn-first, sibling of #blocked-closeout-followup-capture and the SKILL 'one backlog ID per actionable phase' rule) that detects a kept-open item whose body lists multiple gated phases without discrete child IDs and recommends the split. Plan: TBD.
 - [ ] [#preflight-probe-side-effect-free] [recommended] Make probe/diagnostic agent-doc preflight side-effect-free or self-abandoning so it never leaves an open preflight_started cycle that later wedges session-check (Proposed-Fix #4 of #recursive-repair-state-drift). Distinguish a dispatch/response-bound preflight from a pure inspection probe. Plan: tasks/agent-doc/plan-recursive-repair-state-drift.md.
 - [ ] [#codex-owned-pane-stop-hook-live-verify] [recommended] Gated on a live Codex pane -- the remaining phases of #codex-owned-pane-prompt-miss-followups after phase 2a landed: (2b) a live Codex Stop-hook regression asserting the owned_pane_self_invocation diagnostic forces an in-pane response body before final chat output, and (3) live-verify a real Codex same-pane run with an unresolved exchange prompt. Plan: tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md.

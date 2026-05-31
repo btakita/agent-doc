@@ -16,7 +16,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -70,22 +70,11 @@ Deferred (see plan): per-id edit-vs-gate tracking in `cycle_state`, opt-in stric
 **Auto-loop halt — needs your call.** This document has a live route-owned process (PID 2906835, `agent-doc start --route-owned ...agent-doc-bugs2.md`, since May 29) that is concurrently mutating the doc: `queue_active` was flipped to `false` with ~18 live `do [#id]` items still present, the queue was reshaped, and `do [#queue-prompt-echo-summary]` (a backlog-only id) leaked into the queue. That is the `#adoc-queue-ipc-buffer-divergence` / `#completed-queue-residue-regression` class already tracked in this doc's review. Two actors draining one queue races the IPC buffer, so I'm stopping the self-paced loop rather than risk IPC corruption. To resume safely: stop/await the route-owned session, or tell me to drive it (and I'll reactivate the queue) — your call.
 
 <!-- no-partial-closeout-guard -->
-<!-- agent:boundary:b980d3f5 -->
+<!-- agent:boundary:540a3154 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue -->
----
-JB `Run Agent Doc` successfully started a turn and had an error.
-```
-[route] debounce OK — file idle for 0.6s and typing indicator idle
-[route] target tmux session: 0
-[route] authoritative actor generation 241 for tasks/monsterrodholders.md is busy on pane %40; queued pending dispatch "do [#netdemand]. #spec-test-commit-push" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
-```
-#spec-test-build-install-commit-push
----
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#queue-prompt-echo-summary]
-- do [#do-id-partial-closeout-state]
 - do [#closeout-recovery-state-machine]
 - do [#codex-owned-pane-prompt-miss]
 - do [#stuck-capture-compact-false-positive]

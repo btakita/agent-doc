@@ -30,83 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260531-151545.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260531-154043.md`*
 
 Compacted content:
-- Archived 6 response topic(s): queued claude-mem migration; #tsiftmemimportall; #tsiftmemsemanticgate; 3 more
+- Archived 3 response topic(s): tsift memory harness support; next-steps for token efficiency + graph/neighborhood performance; queue cleanup
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ Does tsift support memory in opencode, codex, and claude code?
-
-
-### Re: tsift memory harness support — opencode
-
-Yes. tsift memory works across all three harnesses, but the integration layer differs:
-
-| Harness | Integration | Memory access |
-|---------|------------|---------------|
-| **Claude Code** | `PreToolUse` hooks (`tsift-rewrite.sh`) auto-rewrite high-token commands; `UserPromptSubmit` hook auto-reindexes | Hook contract captures `prompt_target`, `tool_result_artifact`, `response_summary`, `closeout_proof`, `session_check` events via agent-doc closeout pipeline |
-| **OpenCode** | `opencode-tsift` npm plugin installs `/tsift-memory-status`, `/tsift-memory-search`, `/tsift-memory-guard` commands | Commands shell out to `tsift memory status`, `tsift graph-db related`, `tsift memory budget-guard` — same `tsift-memory` crate, same `.tsift/memory.db` |
-| **Codex** | `tsift init --codex` installs workspace hooks (`packages/tsift-index/src/init.rs`); no `PreToolUse` hooks, so uses `tsift rewrite --run '<command>'` manually | Same memory DB and graph-db retrieval path; `tsift rewrite --run` provides the bounded-output policy that Claude gets automatically via hooks |
-
-The underlying substrate is identical across all three: the `tsift-memory` crate (`packages/tsift-memory/`) with a SQLite-backed `.tsift/memory.db` storing events (prompt targets, tool call artifacts, response summaries, closeout proofs, session checks, imported observations) linked to the graph DB via `memory_graph_links`. The `MemoryHookSpec` contract (`agent_doc_hook_contract()`) defines the capture schema that agent-doc closeout writes regardless of which harness is active.
-
-Key differences:
-- Claude Code gets automatic hook-driven capture and rewriting
-- OpenCode gets dedicated slash commands via the plugin
-- Codex relies on `tsift init --codex` hooks and `tsift rewrite --run` for the same bounded path
-What are #next-steps to improve token efficiency along with graph + neighborhood performance & effectiveness.
-
-
-### Re: next-steps for token efficiency + graph/neighborhood performance — opencode
-
-Analysis of the tsift codebase identified **12 concrete improvement opportunities** across two dimensions. Below is the prioritized backlog.
-
-#### Token Efficiency (4 items)
-
-| ID | Issue | Location | Impact |
-|----|-------|----------|--------|
-| `#terse-graph-serial` | GraphNode/GraphEdge include full provenance/freshness in every envelope response | `tsift-core/src/lib.rs:48-102` | ~30-50% of graph output tokens |
-| `#terse-search-hit` | SearchHit carries budget/freshness/provenance/coverage per hit | `tsift-search/src/sift.rs:68-82` | ~200 extra tokens per hit |
-| `#terse-diagnostics` | SQLite query plan diagnostics are verbose English strings | `tsift-sqlite/src/lib.rs:1525-1540` | 300-500 tokens per paged query |
-| `#terse-health-scores` | GraphAnalysisReport includes per-node HealthScore vector | `tsift-cli/src/commands/graph.rs:445-460` | ~120 chars * node_count |
-
-#### Graph + Neighborhood Performance (8 items)
-
-| ID | Issue | Location | Impact |
-|----|-------|----------|--------|
-| `#graph-default-edge-lookup` | `edge()` loads all edges for single-ID lookup | `tsift-core/src/lib.rs:385-389` | O(N) per edge query on Convex/libsql |
-| `#graph-counts-full-scan` | `graph_counts()` deserializes all rows for a COUNT | `tsift-core/src/lib.rs:970-975` | O(N) for a count |
-| `#neighborhood-per-edge-node` | `neighborhood()` calls `node()` per traversed edge | `tsift-core/src/lib.rs:499-535` | O(edges * nodes) on Convex |
-| `#shortest-path-depth-walk` | `parent_depth()` O(depth) per BFS node | `tsift-core/src/lib.rs:1065-1076` | O(N * max_hops) total |
-| `#louvain-scaling` | Community detection O(n*m) per iteration, single-phase | `tsift-graph/src/lib.rs:590-731` | Poor scaling past ~1K nodes |
-| `#health-reachability` | Per-node BFS for reachability in health algo | `tsift-algorithms/src/health.rs:59-77` | O(N^2) total |
-| `#edges-between-chunks` | `edges_between_nodes` does O(chunks^2) queries | `tsift-sqlite/src/lib.rs:2206-2246` | Many round-trips for large node sets |
-| `#duplicate-callers-fetch` | callers/callees fetched twice in JSON mode | `tsift-cli/src/commands/graph.rs:238-291` | 2x edge queries |
-
-#### Priority Order
-
-1. `#terse-graph-serial` — highest token savings, broadest impact across all graph/search/explain output
-2. `#graph-default-edge-lookup` — foundational perf fix, unblocks all Convex/libsql backends
-3. `#neighborhood-per-edge-node` — neighborhood is the hot path for memory retrieval
-4. `#terse-diagnostics` — easy win, self-contained in SQLite module
-5. `#terse-search-hit` — second-highest token savings per-query
-6. `#graph-counts-full-scan` — quick fix, add COUNT queries to each backend
-7. `#shortest-path-depth-walk` — store depth alongside parent in BFS
-8. `#louvain-scaling` — incremental ki_in, add phase 2 coarsening
-9. `#health-reachability` — SCC condensation or sampled approximation
-10. `#edges-between-chunks` — temp table approach
-11. `#duplicate-callers-fetch` — reuse edges already fetched
-12. `#terse-health-scores` — top-N/bottom-N instead of full vector
-
-Top of backlog: **`#terse-graph-serial`**
-The only change is the queue cleanup from the previous session — the consumed queue item was already answered and committed. No new prompt to respond to. Let me finalize this as a no-op closeout.
-Session is clean. The previous `#next-steps` response (12 backlog items, top: `#terse-graph-serial`) was already committed at `479efd2f3`. Queue is now empty. No new prompts pending.
-
-
-### Re: queue cleanup — opencode
-
-Queue cleared. Previous `#next-steps` response (12 backlog items, top: `#terse-graph-serial`) is committed at `479efd2f3`. No new prompts pending.
-<!-- agent:boundary:db03201c -->
+<!-- agent:boundary:e3a4efb3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -118,6 +47,19 @@ What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
 <!-- agent:queue -->
+preset #spec-test-commit-push
+[#terse-graph-serial]
+[#graph-default-edge-lookup]
+[#neighborhood-per-edge-node]
+[#terse-diagnostics]
+[#terse-search-hit]
+[#graph-counts-full-scan]
+[#shortest-path-depth-walk]
+[#louvain-scaling]
+[#health-reachability]
+[#edges-between-chunks]
+[#duplicate-callers-fetch]
+[#terse-health-scores]
 <!-- /agent:queue -->
 
 ## Backlog

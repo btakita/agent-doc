@@ -49,16 +49,40 @@ Closing this as an **umbrella, now decomposed** — not claiming the full featur
 - `#preflight-probe-side-effect-free` — diagnostic preflight that never leaves an open `preflight_started` cycle
 
 Those three carry the plan (`tasks/agent-doc/plan-recursive-repair-state-drift.md`) forward. Note: last turn's recovery churn was itself live evidence for all three — `agent-doc write --pending-only` landed items on disk but couldn't commit under IPC-active + snapshot==HEAD, and a diagnostic `preflight` opened a wedged cycle + triggered queue-metadata drift, requiring the `reset --from-current` → `commit` → `cancel` sequence those items exist to eliminate.
-<!-- agent:boundary:bea3f2ea -->
+
+### Re: do [#recursive-repair-recovery-states] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#recursive-repair-recovery-states]
+
+
+Done — all four recovery states landed (submodule `d248b211`), each with one safe recovery command rendered by `session_check::closeout_recovery_hint`:
+
+| State | Detects | Recovery |
+|---|---|---|
+| `OpenEmptyPreflight` | empty `preflight_started` (no capture / response hash / pending mutation) | `agent-doc cancel` |
+| `QueueMetadataDrift` | snapshot≠HEAD only by queue / `queue_active` / status metadata (content signature identical) | `agent-doc commit` |
+| `SidecarVisibleDrift` | snapshot==HEAD but visible file stale by metadata only | `reset --from-current --preserve-session` + commit |
+| `UnsafeUserContentDrift` | real user/response content drift (content signature differs) | **fail closed** — preserve via `finalize`/`write --commit`, never auto-commit |
+
+The metadata-vs-content split uses a new `content_component_signature` (exchange + backlog + review + icebox + done components, excluding queue/status/frontmatter/boundary markers). `OpenEmptyPreflight` is distinguished from a real `OpenCycle` (which has a capture or pending mutation), and `QueueMetadataDrift` from `BoundaryOnlyDrift` (boundary/prompt-prefix).
+
+Two of these — the empty probe cycle and queue-sync metadata drift — were **live-reproduced this session** during the `#gated-followup-split` recovery churn, so the classification is grounded in real repros, not just unit fixtures.
+
+Tests: `classify_recovery_open_empty_preflight_when_nothing_followed`, `classify_recovery_open_cycle_when_preflight_has_pending_mutations`, `classify_recovery_queue_metadata_drift_when_only_queue_differs`, `classify_recovery_unsafe_user_content_drift_when_exchange_differs`, plus the expanded `recovery_command_maps_each_state_to_one_instruction`. `make check` green; both binaries rebuilt + installed.
+
+The two remaining recursive-repair children stay open: `#recursive-repair-apply` (apply the safe states as one command + live verify) and `#preflight-probe-side-effect-free` (diagnostic preflight that doesn't leave an open cycle — the root cause behind the `OpenEmptyPreflight` churn).
+<!-- agent:boundary:2273868b -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#recursive-repair-state-drift]~
-- do [#recursive-repair-recovery-states]
+- ~do [#recursive-repair-recovery-states]~
 - do [#recursive-repair-apply]
-- do [#gated-followup-split-enforcement]
 - do [#preflight-probe-side-effect-free]
+- do [#gated-followup-split-enforcement]
 - do [#codex-owned-pane-stop-hook-live-verify]
 - do [#queue-sync-auto-pending-done-guard-misfire]
 - do [#tagpath-queue-priority-publish-align]
@@ -105,8 +129,8 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog priority queue=prepend -->
+- [ ] [#repair-orphan-prefix-bug] Orphan-response repair path prefixes every body line with the user-prompt marker. Live repro 2026-05-31 tsift.md: direct Edit-based patchback triggered orphan repair, which applied the prefix to all assistant body lines. Fix: ensure orphan-repair preserves response body verbatim. Plan: tasks/agent-doc/plan-repair-orphan-prefix-bug.md. Related: #jb-compact-malformed-response-commit, #finalize-retry-ipc-response-duplication.
 - [ ] [#gated-followup-split-enforcement] [recommended] #agent-doc-bug 2026-05-31: when a directed do [#id] cycle keeps a multi-phase item open via --pending-edit (backlog) or --review-edit (review) with text that enumerates several gated/remaining phases, agent-doc neither prompts nor guards splitting those phases into discrete child backlog IDs — the deferred work stays buried in one parent's narrowed description and is not independently trackable/queueable. Repro this session: #recursive-repair-state-drift and #codex-owned-pane-prompt-miss-followups each had 2-4 gated phases folded into parent text; only a user catch prompted splitting them into #recursive-repair-recovery-states/#recursive-repair-apply/#preflight-probe-side-effect-free/#codex-owned-pane-stop-hook-live-verify. Add a session-check/finalize advisory (warn-first, sibling of #blocked-closeout-followup-capture and the SKILL 'one backlog ID per actionable phase' rule) that detects a kept-open item whose body lists multiple gated phases without discrete child IDs and recommends the split. Plan: TBD.
-- [ ] [#recursive-repair-recovery-states] [recommended] Extend flow::closeout::classify_closeout_recovery_state with the recursive owner-pane recovery states beyond the landed BoundaryOnlyDrift: open_empty_preflight (auto-abandonable empty preflight cycle), sidecar_visible_drift (snapshot/CRDT/baseline stale vs visible file after an accepted metadata-only change), unsafe_user_content_drift (user-authored prompt/response drift -> fail closed, never auto-commit), and queue/queue_active-metadata HEAD drift (distinct from boundary/prompt-prefix; must not auto-commit a user queue prompt edit). Parent: #recursive-repair-state-drift. Plan: tasks/agent-doc/plan-recursive-repair-state-drift.md.
 - [ ] [#recursive-repair-apply] [recommended] Teach agent-doc repair (or a closeout helper) to APPLY the safe recovery states in order as ONE command -- abandon empty preflight cycles, rebuild sidecars when the diff is metadata-only, commit agent-doc-generated metadata HEAD drift -- replacing the manual cancel + reset --from-current + commit sequence; then live-verify the full recursive same-pane recovery path. Parent: #recursive-repair-state-drift. Plan: tasks/agent-doc/plan-recursive-repair-state-drift.md.
 - [ ] [#preflight-probe-side-effect-free] [recommended] Make probe/diagnostic agent-doc preflight side-effect-free or self-abandoning so it never leaves an open preflight_started cycle that later wedges session-check (Proposed-Fix #4 of #recursive-repair-state-drift). Distinguish a dispatch/response-bound preflight from a pure inspection probe. Plan: tasks/agent-doc/plan-recursive-repair-state-drift.md.
 - [ ] [#codex-owned-pane-stop-hook-live-verify] [recommended] Gated on a live Codex pane -- the remaining phases of #codex-owned-pane-prompt-miss-followups after phase 2a landed: (2b) a live Codex Stop-hook regression asserting the owned_pane_self_invocation diagnostic forces an in-pane response body before final chat output, and (3) live-verify a real Codex same-pane run with an unresolved exchange prompt. Plan: tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md.

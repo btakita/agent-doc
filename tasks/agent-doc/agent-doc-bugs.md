@@ -9,7 +9,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -48,7 +48,21 @@ Yes, parallelizing `scan_text_source` calls in `diagnose_cycle` is both safe and
 
 Commit: `84345094` — `parallelize scan_text_source calls in diagnose_cycle via std::thread::scope`
 Would it be more effective to use tokio or another event loop instead of std::thread::scope?
-<!-- agent:boundary:5a2ef36d -->
+
+### Re: tokio vs std::thread::scope — glm-5.1
+
+No — `std::thread::scope` is the better choice here for several reasons:
+
+1. **The binary is synchronous by convention** (`AGENTS.md`: "No async — sequential per-run"). Introducing tokio for one function would pull in an async runtime for no systemic benefit and violate the established architecture.
+
+2. **The workload is I/O-bound file reads, not event-driven I/O.** `std::thread::scope` lets each thread do blocking `std::fs::read_to_string` calls directly. With tokio you'd need `tokio::fs` (which spawns blocking threads under the hood anyway) or wrap the sync calls in `spawn_blocking` — adding indirection for the same result.
+
+3. **No lifetime of the computation outlives the call.** Tokio's advantage is managing long-lived concurrent tasks, cancellation, and async resource pooling. Here we spawn N threads, they all join, and we're done. `std::thread::scope` expresses exactly that pattern with zero overhead.
+
+4. **No dependency cost.** Tokio adds ~100KB to compile time and binary size for functionality already available in `std`.
+
+If the diagnose command evolves to stream results progressively or needs cancellable I/O, then an async runtime becomes worth considering. For the current "scan everything, return a report" shape, scoped threads are the right tool.
+<!-- agent:boundary:32e81b17 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -57,8 +71,7 @@ I want sidekick to have the option to use git commits as well.
 
 ## Pending / Not Built
 
-<!-- agent:queue auto -->
-- Would it be more effective to use tokio or another event loop instead of std::thread::scope?
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

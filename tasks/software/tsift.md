@@ -99,7 +99,7 @@ Analysis of the tsift codebase identified **12 concrete improvement opportunitie
 12. `#terse-health-scores` — top-N/bottom-N instead of full vector
 
 Top of backlog: **`#terse-graph-serial`**
-<!-- agent:boundary:7769af81 -->
+<!-- agent:boundary:eecb971f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -110,7 +110,8 @@ What are #next-steps to make the graph faster?
 What are #next-steps to make the graph + neighborhoods faster + more effective?
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+- What are #next-steps to improve token efficiency along with graph + neighborhood performance & effectiveness.
 <!-- /agent:queue -->
 
 ## Backlog

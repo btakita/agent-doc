@@ -16,7 +16,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -58,10 +58,10 @@ Implemented. Focus now reparents a live-owner pane out of the `stash` window int
 - Built + installed (both binaries); committed + pushed in `src/agent-doc` with the superproject pointer bump.
 
 **Gated** (not done): code-complete and verified against real tmux via IsolatedTmux, but the end-to-end live JB-editor focus→promote path on a genuinely stuck pane is not yet IDE-verified. Related: `#cross-project-stash-pane-condition` (nested-root shared-session stashing — needs a session-model decision) and `#plugin-cleanup-menu-command`.
-<!-- agent:boundary:e4b2081e -->
+<!-- agent:boundary:5189196a -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 ~~~done
 The response to a queue item should contain the prompt from the queue. If the prompt is long, it may be beneficial to have a summary of the prompt. But for now, let's try copying the entire prompt.
 #spec-test-commit-push-deploy

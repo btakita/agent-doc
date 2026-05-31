@@ -31,32 +31,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260531-170445.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260531-174012.md`*
 
 Compacted content:
-- Archived 2 response topic(s): do [#blocked-closeout-followup-capture]; do [#codex-owned-pane-prompt-miss-followups]
+- Archived 1 response topic(s): do [#recursive-repair-state-drift]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: do [#recursive-repair-state-drift] — opus-4-8
-
-> **Queue prompt:**
->
-> do [#recursive-repair-state-drift]
-
-
-Landed a safe, tested **slice 1** and kept the item open with the remainder narrowed — this is a large delicate state-machine feature with an explicit "never auto-commit user content" non-goal, so I shipped the provably-safe part and gated the risky parts rather than rushing the whole thing in a racy multi-session repo.
-
-**Slice 1 (landed, submodule `c0b39846`):** extended the existing `flow::closeout::CloseoutRecoveryState` machine (the plan says *extend* `#closeout-recovery-state-machine`, not bypass) by wiring the previously-reserved `BoundaryOnlyDrift` state.
-
-- A committed cycle whose snapshot differs from HEAD **only** by agent-doc-generated exchange artifacts — transient boundary / `(HEAD)` markers and answered-prompt-prefix canonicalization — is now classified `BoundaryOnlyDrift`, and `session_check::closeout_recovery_hint` names the single safe recovery `agent-doc commit <file>` instead of the generic `write --commit` chain. That directly serves the plan's "name one safe command, not a multi-step manual recipe."
-- Detection (`committed_artifact_only_head_drift`) proves no real content drift via `normalize_committed_exchange_artifacts` equality — which is *fuller* than `verify_snapshot_committed`'s transient-only normalization, so it's exactly the reachable gap where prompt-prefix drift trips the snapshot-vs-HEAD guard but `agent-doc commit` is the right fix. Conservative: any read error → `false`, so genuine content drift never masquerades as metadata-only (honors the non-goal).
-- Test: `classify_recovery_boundary_only_drift_for_answered_prompt_prefix`. `make check` green; both binaries rebuilt + `cargo install`ed.
-
-**Gated remainder** (kept open in backlog via `--pending-edit`): the other recovery states (`open_empty_preflight` auto-abandon, `sidecar_visible_drift`, `unsafe_user_content_drift` fail-closed, queue/`queue_active`-metadata HEAD drift), teaching `agent-doc repair` to *apply* the safe states as one command, making probe `preflight` side-effect-free, and live same-pane recovery verification.
-
-#### Note on this turn's state
-Last turn's response was archived by a concurrent compaction (`...-170445.md`) within minutes, which surfaced a `stuck_captured_cycle` warning — a false positive of the compaction-vs-stale-capture class (`#stuck-capture-compact-false-positive`), **not** lost work. I did **not** run `write --commit` (it would re-inject the archived response). This racy multi-session environment is also why I gated the live-verification phases above.
-<!-- agent:boundary:df8f00bb -->
+<!-- agent:boundary:cf2cd52e -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->

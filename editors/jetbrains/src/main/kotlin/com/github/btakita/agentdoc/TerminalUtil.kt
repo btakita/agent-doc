@@ -1061,14 +1061,20 @@ object TerminalUtil {
     }
 
     private fun isRetryableRunAgentDocRouteFailure(kind: RunAgentDocRouteFailureKind): Boolean {
-        return kind == RunAgentDocRouteFailureKind.RETRYABLE_STARTING ||
-            kind == RunAgentDocRouteFailureKind.BUSY_RUNNING
+        // Only a still-starting/booting pane is worth a silent retry — it reaches a
+        // dispatch-ready prompt within a few short backoffs. A BUSY_RUNNING failure
+        // means the authoritative actor is mid active-turn; retrying re-waits the
+        // full ready timeout per attempt (up to ~4 minutes of silence), which is the
+        // "nothing seems to happen / no UI feedback" the operator reported
+        // (#jb-run-agent-doc-command-route-miss). Notify immediately instead.
+        return kind == RunAgentDocRouteFailureKind.RETRYABLE_STARTING
     }
 
     internal fun classifyRunAgentDocRouteFailure(output: String): RunAgentDocRouteFailureKind {
         return when {
             isRunAgentDocRouteQueued(output) -> RunAgentDocRouteFailureKind.QUEUED_PENDING
             isDispatchOnlyActiveTurnBlocked(output) -> RunAgentDocRouteFailureKind.BUSY_RUNNING
+            isDispatchOnlyBusyActorWaitTimeout(output) -> RunAgentDocRouteFailureKind.BUSY_RUNNING
             isLatestRunStillBootingBusy(output) -> RunAgentDocRouteFailureKind.BUSY_RUNNING
             isStartingActorRouteFailure(output) || isLatestRunStillBootingRetryable(output) ->
                 RunAgentDocRouteFailureKind.RETRYABLE_STARTING
@@ -1092,6 +1098,13 @@ object TerminalUtil {
         return lower.contains("dispatch-only") &&
             lower.contains("pane still shows") &&
             (lower.contains("opencode active turn") || lower.contains("active codex turn"))
+    }
+
+    private fun isDispatchOnlyBusyActorWaitTimeout(output: String): Boolean {
+        val lower = output.lowercase()
+        return lower.contains("dispatch-only route will not inject a new trigger") &&
+            lower.contains("the authoritative actor is busy") &&
+            lower.contains("did not return to a dispatch-ready prompt")
     }
 
     private fun isLatestRunStillBootingShape(lower: String): Boolean {

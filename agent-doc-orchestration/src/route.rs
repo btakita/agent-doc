@@ -168,6 +168,7 @@ use crate::flow::routed_reopen::{
     decide_authoritative_reopen, degraded_authoritative_actor_direct_submit_log_message,
     direct_pane_submit_outcome as flow_direct_pane_submit_outcome,
     dispatch_only_dispatch_start_proof_required as flow_dispatch_only_dispatch_start_proof_required,
+    dispatch_only_focus_only_should_fail_closed,
     dispatch_only_sent_console_message, dispatch_only_sent_log_message,
     dispatch_only_starting_pane_ready_retry_budget,
     dispatch_only_starting_pane_recovery_retry_budget, log_dispatch_proof_failed,
@@ -3400,6 +3401,16 @@ fn starting_actor_timeout_record_matches(
     file_path: &str,
     facts: &AuthoritativeActorReadyFacts,
 ) -> bool {
+    if facts.actor_state != ActorDispatchState::Starting {
+        return false;
+    }
+    starting_actor_timeout_record_identity_matches(file_path, facts)
+}
+
+fn starting_actor_timeout_record_identity_matches(
+    file_path: &str,
+    facts: &AuthoritativeActorReadyFacts,
+) -> bool {
     load_starting_actor_timeout_record(file_path).is_some_and(|record| {
         record.pane_id == facts.pane_id && record.generation == facts.generation
     })
@@ -3485,6 +3496,21 @@ fn wait_for_authoritative_actor_ready(
         current_generation_ready_prompt_proven(tmux, initial, harness),
     );
     let start = Instant::now();
+    if last_facts.actor_state != ActorDispatchState::Starting
+        && starting_actor_timeout_record_identity_matches(file_path, &last_facts)
+    {
+        clear_starting_actor_timeout_record(file_path);
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_starting_actor_timeout_cleared_nonstarting file={} pane={} generation={} actor_state={}",
+                file.display(),
+                last_facts.pane_id,
+                last_facts.generation,
+                last_facts.actor_state.as_str()
+            ),
+        );
+    }
     if starting_actor_timeout_record_matches(file_path, &last_facts) {
         mark_starting_actor_timeout_blocked(file, file_path, session_id, &last_facts);
         let file_display = file.display().to_string();
@@ -3568,37 +3594,45 @@ fn wait_for_authoritative_actor_ready(
         elapsed,
         &last_facts,
     );
-    match record_starting_actor_timeout(file_path, &last_facts, &log_line) {
-        Ok(StartingActorTimeoutLogDecision::NewTimeout) => {
-            crate::ops_log::log_op(file, &log_line);
-            log_prompt_ready_barrier_failed(file, RoutedReopenGuardReason::StartingActorNotReady);
-            mark_starting_actor_timeout_blocked(file, file_path, session_id, &last_facts);
+    if last_facts.actor_state == ActorDispatchState::Starting {
+        match record_starting_actor_timeout(file_path, &last_facts, &log_line) {
+            Ok(StartingActorTimeoutLogDecision::NewTimeout) => {
+                crate::ops_log::log_op(file, &log_line);
+                log_prompt_ready_barrier_failed(
+                    file,
+                    RoutedReopenGuardReason::StartingActorNotReady,
+                );
+                mark_starting_actor_timeout_blocked(file, file_path, session_id, &last_facts);
+            }
+            Ok(StartingActorTimeoutLogDecision::DuplicateTimeout) => {
+                mark_starting_actor_timeout_blocked(file, file_path, session_id, &last_facts);
+                let file_display = file.display().to_string();
+                crate::ops_log::log_op(
+                    file,
+                    &starting_actor_timeout_coalesced_log_line(
+                        file_display.as_str(),
+                        harness.binary.as_str(),
+                        elapsed,
+                        &last_facts,
+                    ),
+                );
+            }
+            Err(err) => {
+                eprintln!(
+                    "[route] warning: failed to persist starting actor timeout for {}: {}",
+                    file.display(),
+                    err
+                );
+                crate::ops_log::log_op(file, &log_line);
+                log_prompt_ready_barrier_failed(
+                    file,
+                    RoutedReopenGuardReason::StartingActorNotReadyUnpersisted,
+                );
+            }
         }
-        Ok(StartingActorTimeoutLogDecision::DuplicateTimeout) => {
-            mark_starting_actor_timeout_blocked(file, file_path, session_id, &last_facts);
-            let file_display = file.display().to_string();
-            crate::ops_log::log_op(
-                file,
-                &starting_actor_timeout_coalesced_log_line(
-                    file_display.as_str(),
-                    harness.binary.as_str(),
-                    elapsed,
-                    &last_facts,
-                ),
-            );
-        }
-        Err(err) => {
-            eprintln!(
-                "[route] warning: failed to persist starting actor timeout for {}: {}",
-                file.display(),
-                err
-            );
-            crate::ops_log::log_op(file, &log_line);
-            log_prompt_ready_barrier_failed(
-                file,
-                RoutedReopenGuardReason::StartingActorNotReadyUnpersisted,
-            );
-        }
+    } else {
+        clear_starting_actor_timeout_record(file_path);
+        crate::ops_log::log_op(file, &log_line);
     }
     if override_timeout.is_some() {
         crate::ops_log::log_op(
@@ -3910,6 +3944,43 @@ fn route_via_authoritative_actor(
 
     match action {
         AuthoritativeActorDispatchAction::FocusOnly => {
+            // A plain dispatch-only reopen (IDE `Run Agent Doc`) against a busy
+            // authoritative actor focuses the pane but never injects the trigger.
+            // Returning Ok reports a routed run to the IDE even though nothing was
+            // submitted, so the operator saw no feedback after a long wait
+            // (`#jb-run-agent-doc-command-route-miss`). Fail closed with the same
+            // busy-not-ready message the IDE classifies as a "session still
+            // running" notification instead of silently succeeding. The pane was
+            // already focused above (blocker states select the pane before this
+            // match), so the operator still lands on the in-flight turn.
+            if dispatch_only_focus_only_should_fail_closed(reopen_mode, actor_dispatch_state) {
+                let reason = actor_dispatch_blocker_reason(actor_dispatch_state)
+                    .unwrap_or("actor not ready");
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "route_dispatch_only_authoritative_actor_busy_focus_only_not_dispatched file={} pane={} harness={} generation={} actor_state={}",
+                        file.display(),
+                        dispatch_pane,
+                        harness.binary,
+                        actor.record.generation,
+                        actor_state.as_str()
+                    ),
+                );
+                log_prompt_ready_barrier_failed(
+                    file,
+                    RoutedReopenGuardReason::DispatchOnlyBusyActorNotReady,
+                );
+                anyhow::bail!(
+                    "authoritative actor generation {} for {} owns pane {} but dispatch-only route will not inject a new trigger because {} did not return to a dispatch-ready prompt in the current generation after waiting {}s. {}",
+                    actor.record.generation,
+                    file.display(),
+                    dispatch_pane,
+                    reason,
+                    dispatch_only_starting_pane_recovery_timeout(Some(harness)).as_secs(),
+                    authoritative_actor_dispatch_recovery_hint(actor_state, file)
+                );
+            }
             eprintln!(
                 "[route] authoritative actor for {} remains in state {} on pane {} — focusing without injecting a duplicate reopen",
                 file.display(),

@@ -167,7 +167,7 @@ class TerminalUtilTest {
     }
 
     @Test
-    fun `latest run booting route failures are retryable only for transient busy shapes`() {
+    fun `only the still-booting timed-out shape is retried while active-turn busy is notified immediately`() {
         val activeTurn = """
             Error: dispatch-only codex reopen refused to inject into pane %42 for tasks/professional/equityfundingsource.md because the latest run is still booting and never reached a dispatch-ready prompt (active codex turn); wait for the pane to become ready and reroute again
         """.trimIndent()
@@ -181,7 +181,10 @@ class TerminalUtilTest {
         assertEquals(TerminalUtil.RunAgentDocRouteFailureKind.BUSY_RUNNING, TerminalUtil.classifyRunAgentDocRouteFailure(activeTurn))
         assertEquals(TerminalUtil.RunAgentDocRouteFailureKind.RETRYABLE_STARTING, TerminalUtil.classifyRunAgentDocRouteFailure(timedOut))
         assertEquals(TerminalUtil.RunAgentDocRouteFailureKind.PERSISTENT, TerminalUtil.classifyRunAgentDocRouteFailure(shellSearch))
-        assertTrue(TerminalUtil.isRetryableRunAgentDocRouteFailure(activeTurn))
+        // An active-turn busy pane is NOT silently retried (each retry re-waits the
+        // full ready timeout) — it is notified immediately. Only a still-booting
+        // timed_out pane reaches a ready prompt within a few short backoffs.
+        assertFalse(TerminalUtil.isRetryableRunAgentDocRouteFailure(activeTurn))
         assertTrue(TerminalUtil.isRetryableRunAgentDocRouteFailure(timedOut))
         assertFalse(TerminalUtil.isRetryableRunAgentDocRouteFailure(shellSearch))
         assertFalse(TerminalUtil.isRetryableRunAgentDocRouteFailure("[agent-doc] proof-timeout: accepted but unproven"))
@@ -211,6 +214,26 @@ class TerminalUtilTest {
         val message = TerminalUtil.buildRunAgentDocStillRunningMessage(relativePath)
 
         assertEquals(TerminalUtil.RunAgentDocRouteFailureKind.BUSY_RUNNING, TerminalUtil.classifyRunAgentDocRouteFailure(output))
+        assertTrue(message.contains("still running"))
+        assertTrue(message.contains(relativePath))
+        assertFalse(message.contains("route failed"))
+        assertFalse(message.contains("Saved exact route output"))
+    }
+
+    @Test
+    fun `dispatch-only busy actor wait timeout notifies still-running immediately, not retried`() {
+        // The exact live-repro shape (#jb-run-agent-doc-command-route-miss): a plain
+        // Run Agent Doc on a busy Codex pane. The route now fails closed with this
+        // message instead of silently succeeding, and the plugin notifies the
+        // operator immediately rather than silently re-waiting the ready timeout.
+        val relativePath = "tasks/monsterrodholders.md"
+        val output = """
+            Error: authoritative actor generation 244 for $relativePath owns pane %40 but dispatch-only route will not inject a new trigger because the authoritative actor is busy did not return to a dispatch-ready prompt in the current generation after waiting 60s. Run `agent-doc session status $relativePath` and wait for an idle prompt.
+        """.trimIndent()
+        val message = TerminalUtil.buildRunAgentDocStillRunningMessage(relativePath)
+
+        assertEquals(TerminalUtil.RunAgentDocRouteFailureKind.BUSY_RUNNING, TerminalUtil.classifyRunAgentDocRouteFailure(output))
+        assertFalse(TerminalUtil.isRetryableRunAgentDocRouteFailure(output))
         assertTrue(message.contains("still running"))
         assertTrue(message.contains(relativePath))
         assertFalse(message.contains("route failed"))

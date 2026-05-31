@@ -526,6 +526,22 @@ pub fn classify_authoritative_actor_dispatch_action(
     }
 }
 
+/// A plain dispatch-only reopen (IDE `Run Agent Doc`, no prompt-bearing work)
+/// against a *busy* authoritative actor classifies as [`AuthoritativeActorDispatchAction::FocusOnly`]:
+/// it focuses the pane but never injects the reopen trigger. Returning success
+/// there reports a routed run to the IDE caller even though nothing was
+/// submitted, so the operator sees no feedback (`#jb-run-agent-doc-command-route-miss`).
+/// In that exact shape the route must fail closed with the busy-not-ready signal
+/// instead, so the IDE surfaces a "session still running" notification. Managed
+/// reopens and non-busy blocker states (`WaitingInput` / `Blocked` / `Closed`,
+/// which have their own recovery/terminal handling) keep the focus-only success.
+pub fn dispatch_only_focus_only_should_fail_closed(
+    mode: ReopenMode,
+    actor_state: ActorDispatchState,
+) -> bool {
+    mode == ReopenMode::DispatchOnly && actor_state == ActorDispatchState::Busy
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PromptReadyBarrierFacts {
     pub actor_state: ActorDispatchState,
@@ -1035,6 +1051,35 @@ mod tests {
             }),
             AuthoritativeActorDispatchAction::FocusOnly
         );
+    }
+
+    #[test]
+    fn dispatch_only_focus_only_fails_closed_only_for_busy_actor() {
+        // `#jb-run-agent-doc-command-route-miss`: a plain dispatch-only reopen on a
+        // BUSY actor classifies as FocusOnly but must fail closed (not silently
+        // succeed) so the IDE surfaces a "still running" notification.
+        assert!(dispatch_only_focus_only_should_fail_closed(
+            ReopenMode::DispatchOnly,
+            ActorDispatchState::Busy
+        ));
+        // Managed reopens keep the focus-only success.
+        assert!(!dispatch_only_focus_only_should_fail_closed(
+            ReopenMode::Managed,
+            ActorDispatchState::Busy
+        ));
+        // Non-busy blocker states keep their own recovery/terminal handling.
+        for state in [
+            ActorDispatchState::WaitingInput,
+            ActorDispatchState::Blocked,
+            ActorDispatchState::Closed,
+            ActorDispatchState::Starting,
+            ActorDispatchState::Ready,
+        ] {
+            assert!(!dispatch_only_focus_only_should_fail_closed(
+                ReopenMode::DispatchOnly,
+                state
+            ));
+        }
     }
 
     #[test]

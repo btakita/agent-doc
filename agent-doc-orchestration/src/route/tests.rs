@@ -10506,6 +10506,43 @@ fn starting_actor_timeout_record_matches_same_generation_and_pane() {
 }
 
 #[test]
+fn starting_actor_timeout_record_does_not_match_nonstarting_actor_state() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("tasks/agent-doc/timeout-busy.md");
+    std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+    std::fs::write(&doc, "body").unwrap();
+    let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+    let starting = AuthoritativeActorReadyFacts {
+        pane_id: "%7".to_string(),
+        generation: 3,
+        actor_state: ActorDispatchState::Starting,
+        supervisor_health: "healthy".to_string(),
+        runtime_state: "starting".to_string(),
+        prompt_ready: false,
+        last_transition_reason: "session_start".to_string(),
+        last_transition_caller: "start".to_string(),
+    };
+
+    record_starting_actor_timeout(&file_path, &starting, "first timeout").unwrap();
+
+    let mut busy = starting.clone();
+    busy.actor_state = ActorDispatchState::Busy;
+    busy.runtime_state = "busy".to_string();
+    busy.last_transition_reason = "ipc_inject".to_string();
+    busy.last_transition_caller = "dispatch".to_string();
+
+    assert!(
+        starting_actor_timeout_record_identity_matches(&file_path, &busy),
+        "the stale timeout has the same pane and generation as the post-clear busy projection"
+    );
+    assert!(
+        !starting_actor_timeout_record_matches(&file_path, &busy),
+        "a cached starting timeout must not short-circuit a later busy wait for the same generation"
+    );
+}
+
+#[test]
 fn starting_actor_timeout_record_clears_after_ready_or_terminal_refresh() {
     let dir = tempfile::TempDir::new().unwrap();
     std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();

@@ -287,6 +287,33 @@ fn run_once(
         anyhow::bail!("{}", diagnostic);
     }
 
+    // #codex-owned-pane-auto-queue-stuck: when a Codex-owned pane re-invokes
+    // `agent-doc <FILE>` for the document it already owns AND a ready active
+    // auto-queue head remains (an unresolved exchange prompt takes precedence and
+    // is handled by the guard above), fail closed *before* pre-commit and child
+    // dispatch. The late recursive-deadlock guard further down would otherwise
+    // let pre-commit baseline queue/boundary drift and leave the head unprocessed
+    // with no owner-pane handoff, so the operator gets a retry loop. Bailing here
+    // keeps the queue head live/executable and tells the operator to run the head
+    // in THIS owner turn rather than re-running the same direct command. The
+    // detector is a strict subset of the recursive-guard case, so non-owner and
+    // non-Codex runs are unaffected.
+    if let Some(detail) = owned_pane_self_invocation_detail(file, &session_id, agent_name)
+        && let Some(continuation) = crate::queue_continuation::detect(file)?
+    {
+        let diagnostic = owned_pane_queue_handoff_diagnostic(file, &detail, &continuation);
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "run_owned_pane_queue_handoff file={} head_id={} {}",
+                file.display(),
+                continuation.head_id.as_deref().unwrap_or("<none>"),
+                detail
+            ),
+        );
+        anyhow::bail!("{}", diagnostic);
+    }
+
     // Create branch if requested
     if branch && !no_git {
         git::create_branch(file)?;
@@ -842,6 +869,43 @@ fn owned_pane_prompt_miss_diagnostic(file: &Path, detail: &str, unresolved: &str
     )
 }
 
+/// `#codex-owned-pane-auto-queue-stuck`: structured fail-closed diagnostic for
+/// the owner pane re-invoking `agent-doc <FILE>` while a ready active auto-queue
+/// head remains. Names the head (and id when known) plus the in-pane recovery
+/// path, and tells the operator to run the head in THIS owner turn instead of
+/// re-running the same direct command — which would only baseline queue/boundary
+/// drift and re-trigger the recursive guard.
+fn owned_pane_queue_handoff_diagnostic(
+    file: &Path,
+    detail: &str,
+    continuation: &crate::queue_continuation::QueueContinuation,
+) -> String {
+    let head_excerpt: String = continuation
+        .head_prompt
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or(&continuation.head_prompt)
+        .trim()
+        .chars()
+        .take(200)
+        .collect();
+    let id_note = continuation
+        .head_id
+        .as_deref()
+        .map(|id| format!(" (id #{id})"))
+        .unwrap_or_default();
+    format!(
+        "owned-pane self-invocation with active auto-queue head: `agent-doc {}` was run inside the Codex pane that already owns this document ({}), and a ready queue head is still live: \"{}\"{}. The recursive same-pane guard refuses to dispatch a nested child here, so this request would baseline queue/boundary drift and leave the head unprocessed. No pre-commit, snapshot, or queue mutation was made — the head stays live. Recovery: run the queue head in THIS owner pane's current turn, then persist with `agent-doc finalize {}` (or `agent-doc write --commit {}`) so the head is consumed and the next queue prompt is exposed. Do NOT re-run `agent-doc {}` from this same pane; that only re-triggers the recursive guard.",
+        file.display(),
+        detail,
+        head_excerpt,
+        id_note,
+        file.display(),
+        file.display(),
+        file.display()
+    )
+}
+
 fn run_dispatch_timeout_diagnostic(file: &Path, agent_name: &str) -> String {
     let state = crate::cycle_state::load(file).ok().flatten();
     let actor = actor_record_for_file(file).ok().flatten();
@@ -1173,6 +1237,30 @@ mod tests {
     use crate::config::Config;
     use std::sync::{Arc, Barrier};
     use tempfile::TempDir;
+
+    #[test]
+    fn owned_pane_queue_handoff_diagnostic_names_head_and_recovery() {
+        // #codex-owned-pane-auto-queue-stuck: the fail-closed handoff diagnostic
+        // must name the live head + id, the in-owner-turn recovery path, and warn
+        // against re-running the same direct command.
+        let continuation = crate::queue_continuation::QueueContinuation {
+            head_prompt: "do [#codex-owned-pane-auto-queue-stuck]".to_string(),
+            head_id: Some("codex-owned-pane-auto-queue-stuck".to_string()),
+            reason: "active `agent:queue auto` still has a ready head prompt".to_string(),
+        };
+        let msg = owned_pane_queue_handoff_diagnostic(
+            Path::new("tasks/x.md"),
+            "current_pane=%9 session_id=sess actor_generation=3 actor_state=alive-busy actor_pane=%9",
+            &continuation,
+        );
+        assert!(msg.contains("active auto-queue head"));
+        assert!(msg.contains("do [#codex-owned-pane-auto-queue-stuck]"));
+        assert!(msg.contains("(id #codex-owned-pane-auto-queue-stuck)"));
+        assert!(msg.contains("THIS owner pane"));
+        assert!(msg.contains("agent-doc finalize tasks/x.md"));
+        assert!(msg.contains("Do NOT re-run"));
+        assert!(msg.contains("No pre-commit, snapshot, or queue mutation was made"));
+    }
 
     #[test]
     fn build_prompt_defaults_to_template_mode() {

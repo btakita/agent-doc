@@ -703,12 +703,14 @@ fn codex_bare_run_inside_owning_pane_with_unresolved_prompt_fails_before_pre_com
 }
 
 #[test]
-fn codex_bare_run_inside_owning_pane_without_prompt_abandons_recursive_cycle() {
-    // Guard compatibility (#recguard-abandon): when the owner-pane re-invocation
-    // has NO unresolved exchange prompt (only an active queue head drives the
-    // run), the early prompt-miss guard does not fire. The run reaches the late
-    // recursive-deadlock guard, which abandons the empty preflight cycle so the
-    // owner session is not wedged and `session-check` accepts the terminal state.
+fn codex_owned_pane_active_auto_queue_hands_off_without_drift() {
+    // #codex-owned-pane-auto-queue-stuck: when the owner pane re-invokes
+    // `agent-doc <FILE>` while a ready active auto-queue head remains (and no
+    // unresolved exchange prompt), the early handoff guard fails closed BEFORE
+    // pre-commit / `start_run_cycle`. It names the live head and the in-owner-turn
+    // recovery path, opens no cycle, and leaves the queue/boundary state
+    // un-drifted — rather than letting pre-commit baseline drift and the late
+    // recursive-deadlock guard abandon an empty cycle with the head still stuck.
     let tmp = TempDir::new().unwrap();
     let doc = tmp.path().join("session.md");
     let committed = "---\nagent_doc_session: session-recursive\nagent: codex\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nAnswered.\n<!-- agent:boundary:committed -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue auto -->\n- do something\n<!-- /agent:queue -->\n";
@@ -737,18 +739,33 @@ fn codex_bare_run_inside_owning_pane_without_prompt_abandons_recursive_cycle() {
         .arg(doc.to_str().unwrap())
         .assert()
         .failure()
-        .stderr(predicate::str::contains(
-            "recursive direct invocation would deadlock",
-        ));
+        .stderr(
+            predicate::str::contains("owned-pane self-invocation with active auto-queue head")
+                .and(predicate::str::contains("do something"))
+                .and(predicate::str::contains("agent-doc finalize"))
+                .and(predicate::str::contains("Do NOT re-run")),
+        );
 
-    let state = read_cycle_state(tmp.path());
-    assert_eq!(state["phase"].as_str().unwrap(), "abandoned");
-    assert!(
-        state["last_event"]
-            .as_str()
-            .unwrap()
-            .contains("recursive_direct_invocation_blocked")
+    // No cycle was opened — the early handoff guard bailed before
+    // `start_run_cycle`, so there is no preflight/abandoned cycle to recover.
+    let state_dir = tmp.path().join(".agent-doc/state/cycles");
+    let cycle_files = fs::read_dir(&state_dir)
+        .map(|entries| entries.count())
+        .unwrap_or(0);
+    assert_eq!(
+        cycle_files, 0,
+        "early owner-pane queue handoff guard must not open a run cycle"
     );
+
+    // No drift: the document is byte-identical to the committed state — no
+    // pre-commit, queue, or boundary mutation — and the head stays live.
+    let content = fs::read_to_string(&doc).unwrap();
+    assert_eq!(
+        content, committed,
+        "owner-pane queue handoff must not mutate the document"
+    );
+    assert!(content.contains("- do something"));
+    assert!(content.contains("<!-- agent:queue auto -->"));
 }
 
 #[test]

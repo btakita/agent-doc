@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 4602f467-ef2a-4094-a750-5eb533368988
-agent: codex
+agent: opencode
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -164,7 +164,40 @@ Changed paths:
 Escalation: no approval prompts were needed; the publish, tag, and push operations were authorized by the document prompt `publish 0.12.0`. Existing unrelated agent-loop worktree changes were left untouched.
 
 Confidence: high.
-<!-- agent:boundary:ffad1ad5 -->
+❯ Is the latest version published? If not, publish.
+
+### Re: publish 0.12.1 — glm-5.1
+
+Published `tagpath` `0.12.1`.
+
+- Published `tagpath-core 0.12.1` and `tagpath 0.12.1` to crates.io
+- Tagged and pushed `v0.12.1` in `btakita/tagpath`; GitHub release at https://github.com/btakita/tagpath/releases/tag/v0.12.1
+- Updated `VERSIONS.md` with the v0.12.1 changelog entry
+- Updated test expectations in `test_core_split_plan.rs` for the new version
+- Committed agent-loop superproject submodule pointer update as `59086ccb7`
+
+Three unreleased commits were on top of `v0.12.0`: new lint rules for bare `queue`/`priority`/`auto` attributes on backlog/icebox/queue markers, plus the `agent-doc/invalid-attr-value` warning rule.
+
+Verification:
+
+- `cargo clippy --workspace --all-targets -- -D warnings` clean
+- `cargo test --workspace` — 284 tests pass
+- `cargo test -p tagpath-core --no-default-features` pass
+- `cargo test -p tagpath --lib --no-default-features` pass (77 tests)
+- `cargo build --target wasm32-unknown-unknown --no-default-features --features wasm` success
+- `scripts/check-release.sh` passed after `tagpath-core` publish
+- `cargo search tagpath --limit 3` and `cargo search tagpath-core --limit 3` both show `0.12.1`
+
+Changed paths:
+
+- `Cargo.toml`, `crates/tagpath-core/Cargo.toml`, `tests/test_core_split_plan.rs`, `VERSIONS.md`, `SPEC.md` in the tagpath repo
+- `src/tagpath` submodule pointer in agent-loop
+- this session document via `agent-doc finalize`
+
+Escalation: none. Publish and push were authorized by the document prompt.
+
+Confidence: high.
+<!-- agent:boundary:55853765 -->
 <!-- /agent:exchange -->
 ###
 <!--

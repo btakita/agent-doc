@@ -16,7 +16,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -89,10 +89,10 @@ route_dispatch_only_sent     ... pane=%42 delivery=direct_pane_submit proof=pane
 The `[route] Rescued pane %42 via join-pane` line is also normal: the pane was parked in the `stash` window, so route pulled it back into the `agent-doc` window before dispatching — that rescue succeeded and isn't related to the refusal.
 
 **One optional refinement queued** (`#opencode-active-turn-reopen-auto-retry-on-idle`, recommended): instead of making you re-click after the turn ends, route could watch the pane and auto-fire the bare reopen once it goes idle. Lower priority than the live-verify items.
-<!-- agent:boundary:29b5018f -->
+<!-- agent:boundary:87943110 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - do [#recovery-drift-apply-live-verify]
 - do [#jb-run-agent-doc-command-route-miss]

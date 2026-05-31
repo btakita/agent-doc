@@ -2925,6 +2925,145 @@ fn normalize_queue_prompt_text(text: &str) -> String {
         .to_ascii_lowercase()
 }
 
+/// First non-empty, trimmed line of `text`, or `None` when blank.
+fn first_nonempty_line(text: &str) -> Option<&str> {
+    text.lines().map(str::trim).find(|l| !l.is_empty())
+}
+
+/// Format consumed queue prompt(s) as a labeled blockquote echo so the response
+/// block records the prompt it answered (#queue-prompt-echo-in-response).
+fn format_consumed_prompt_echo(consumed_texts: &[String]) -> String {
+    let mut out = String::from("> **Queue prompt:**\n>\n");
+    let mut first_block = true;
+    for text in consumed_texts {
+        if text.trim().is_empty() {
+            continue;
+        }
+        if !first_block {
+            out.push_str(">\n");
+        }
+        first_block = false;
+        for line in text.lines() {
+            if line.trim().is_empty() {
+                out.push_str(">\n");
+            } else {
+                out.push_str("> ");
+                out.push_str(line);
+                out.push('\n');
+            }
+        }
+    }
+    out
+}
+
+fn line_is_response_heading(trimmed: &str) -> bool {
+    trimmed == "## Assistant"
+        || trimmed.starts_with("### Re:")
+        || trimmed.starts_with("#### Re:")
+        || trimmed.starts_with("##### Re:")
+        || trimmed.starts_with("###### Re:")
+}
+
+/// Normalize a prompt line for "already present in exchange" comparison:
+/// trim and strip a leading `❯` prompt marker.
+fn normalize_prompt_line(line: &str) -> String {
+    line.trim().trim_start_matches('❯').trim().to_string()
+}
+
+/// Locate, within `region` (the exchange content), the byte offset of the line
+/// where this cycle's response heading begins. Prefers the captured response's
+/// first line; falls back to the last non-code `### Re:` heading. `region_base`
+/// is the absolute offset of `region` within the full document, used to skip
+/// matches inside fenced code blocks.
+fn locate_response_heading_offset(
+    region: &str,
+    region_base: usize,
+    response_first_line: Option<&str>,
+    code_ranges: &[(usize, usize)],
+) -> Option<usize> {
+    let in_code = |rel: usize| {
+        let abs = region_base + rel;
+        code_ranges.iter().any(|&(cs, ce)| abs >= cs && abs < ce)
+    };
+
+    if let Some(target) = response_first_line.map(str::trim).filter(|t| !t.is_empty()) {
+        let mut offset = 0usize;
+        for line in region.split_inclusive('\n') {
+            if line.trim() == target && !in_code(offset) {
+                return Some(offset);
+            }
+            offset += line.len();
+        }
+    }
+
+    let mut offset = 0usize;
+    let mut found = None;
+    for line in region.split_inclusive('\n') {
+        if line_is_response_heading(line.trim()) && !in_code(offset) {
+            found = Some(offset);
+        }
+        offset += line.len();
+    }
+    found
+}
+
+/// Embed the consumed queue prompt echo immediately after this cycle's response
+/// heading inside the `exchange` component. Returns `content` unchanged (fail-safe)
+/// when the exchange/heading cannot be located, the prompt is empty, or the prompt
+/// already appears in the exchange (e.g. a user typed it in directly).
+fn embed_consumed_prompt_in_response(
+    content: &str,
+    consumed_texts: &[String],
+    response_first_line: Option<&str>,
+) -> String {
+    if consumed_texts.iter().all(|t| t.trim().is_empty()) {
+        return content.to_string();
+    }
+    let Ok(components) = component::parse(content) else {
+        return content.to_string();
+    };
+    let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
+        return content.to_string();
+    };
+    let region = &content[exchange.open_end..exchange.close_start];
+
+    // Idempotency / manual-turn dedup: if the prompt's first line already appears
+    // as an exchange line (user typed it, or a prior echo exists), skip injection.
+    let echo = format_consumed_prompt_echo(consumed_texts);
+    if region.contains(echo.trim_end()) {
+        return content.to_string();
+    }
+    let already_present = consumed_texts.iter().filter_map(|t| first_nonempty_line(t)).any(|first| {
+        let needle = normalize_prompt_line(first);
+        !needle.is_empty()
+            && region
+                .lines()
+                .any(|l| normalize_prompt_line(l) == needle)
+    });
+    if already_present {
+        return content.to_string();
+    }
+
+    let code_ranges = component::find_code_ranges(content);
+    let Some(heading_rel) =
+        locate_response_heading_offset(region, exchange.open_end, response_first_line, &code_ranges)
+    else {
+        return content.to_string();
+    };
+    let Some(nl) = region[heading_rel..].find('\n') else {
+        return content.to_string();
+    };
+    let insert_abs = exchange.open_end + heading_rel + nl + 1;
+
+    let mut result = String::with_capacity(content.len() + echo.len() + 2);
+    result.push_str(&content[..insert_abs]);
+    result.push('\n');
+    result.push_str(&echo);
+    result.push('\n');
+    result.push_str(&content[insert_abs..]);
+    result
+}
+
 fn plan_queue_prompt_consumption(
     file: &Path,
     content: &str,
@@ -3052,6 +3191,28 @@ fn plan_queue_prompt_consumption(
         }
         new_snap = frontmatter::merge_fields(&new_snap, "queue_active: false")?;
     }
+
+    // #queue-prompt-echo-in-response: an auto/synthetic queue head is never typed
+    // into `agent:exchange`, so a consumed queue turn would otherwise record only
+    // the `### Re:` answer with no trace of the originating prompt. Embed the
+    // consumed prompt text into this cycle's response block (in BOTH the document
+    // and the snapshot, so the selective-commit boundary stays consistent) when
+    // the prompt is not already present in the exchange. Fail-safe: any locator
+    // miss leaves the content unchanged rather than risk corrupting the exchange.
+    let response_first_line = crate::capture::load_active(file)
+        .ok()
+        .flatten()
+        .and_then(|c| first_nonempty_line(&c.response_body).map(str::to_string));
+    current = embed_consumed_prompt_in_response(
+        &current,
+        &consumed_texts,
+        response_first_line.as_deref(),
+    );
+    new_snap = embed_consumed_prompt_in_response(
+        &new_snap,
+        &consumed_texts,
+        response_first_line.as_deref(),
+    );
 
     if new_snap != snap {
         return Ok(Some(QueueConsumptionPlan {

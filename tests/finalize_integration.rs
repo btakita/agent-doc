@@ -2101,9 +2101,14 @@ fn finalize_consumes_synthetic_queue_prompt_when_response_topic_targets_head_id(
         .stderr(predicates::str::contains("[queue] consumed"));
 
     let content = fs::read_to_string(&doc).unwrap();
+    let queue_section = content
+        .split_once("<!-- agent:queue")
+        .and_then(|(_, rest)| rest.split_once("<!-- /agent:queue -->"))
+        .map(|(body, _)| body.to_string())
+        .unwrap_or_default();
     assert!(
-        !content.contains("JB `Run Agent Doc` on tsift.md add the prompt into agent:queue"),
-        "queue head should drain when the response topic targets its preset id:\n{content}"
+        !queue_section.contains("JB `Run Agent Doc` on tsift.md add the prompt into agent:queue"),
+        "queue head should drain from the queue when the response topic targets its preset id:\n{content}"
     );
     assert!(
         content.contains("queue_active: false"),
@@ -2112,6 +2117,73 @@ fn finalize_consumes_synthetic_queue_prompt_when_response_topic_targets_head_id(
     assert!(
         content.contains("### Re: #spec-test-build-install-commit-push"),
         "response should still be written:\n{content}"
+    );
+    // #queue-prompt-echo-in-response: the consumed synthetic queue prompt is
+    // embedded into the response block so the turn records what it answered.
+    assert!(
+        content.contains("> **Queue prompt:**"),
+        "response should echo the consumed queue prompt:\n{content}"
+    );
+    assert!(
+        content.contains("> JB `Run Agent Doc` on tsift.md add the prompt into agent:queue"),
+        "response echo should quote the originating queue prompt text:\n{content}"
+    );
+}
+
+#[test]
+fn finalize_echoes_consumed_free_text_queue_prompt_into_response() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let queue_head =
+        "Make queue responses copy the originating prompt.\nThis line documents the request.";
+    let content = format!(
+        "---\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n### Re: older\nOld response.\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue auto -->\n---\n{queue_head}\n---\n<!-- /agent:queue -->\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n"
+    );
+    fs::write(&doc, &content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    let baseline = write_baseline(tmp.path(), &content);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--baseline-file",
+            baseline.to_str().unwrap(),
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: queue prompt copy — gpt-5\nImplemented and verified.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success()
+        .stderr(predicates::str::contains("[queue] consumed"));
+
+    let content = fs::read_to_string(&doc).unwrap();
+    // The free-text head drains from the queue once answered.
+    assert!(
+        content.contains("queue_active: false"),
+        "drained free-text queue should clear active state:\n{content}"
+    );
+    // The consumed prompt is embedded into THIS cycle's response block, after
+    // its heading and before any older content.
+    let echo_pos = content
+        .find("> **Queue prompt:**")
+        .unwrap_or_else(|| panic!("response should echo the consumed prompt:\n{content}"));
+    let heading_pos = content
+        .find("### Re: queue prompt copy")
+        .expect("response heading present");
+    assert!(
+        heading_pos < echo_pos,
+        "echo must follow this cycle's response heading:\n{content}"
+    );
+    assert!(
+        content.contains("> Make queue responses copy the originating prompt."),
+        "echo should quote the first prompt line:\n{content}"
+    );
+    assert!(
+        content.contains("> This line documents the request."),
+        "echo should quote the full multi-line prompt:\n{content}"
     );
 }
 

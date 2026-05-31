@@ -372,10 +372,24 @@ fn run_auto_queue_continues_until_drained() {
         "queue should clear active state after all prompts are consumed"
     );
     assert!(!content.contains("agent:queue auto"));
-    assert!(!content.contains("do #fix1"));
-    assert!(!content.contains("do #fix2"));
-    assert!(!content.contains("do #fix3"));
+    // #queue-prompt-echo-in-response: consumed prompts are drained from the queue
+    // but embedded (blockquoted) into their response blocks.
+    let queue_section = queue_section_of(&content);
+    assert!(!queue_section.contains("do #fix1"), "queue:\n{queue_section}");
+    assert!(!queue_section.contains("do #fix2"), "queue:\n{queue_section}");
+    assert!(!queue_section.contains("do #fix3"), "queue:\n{queue_section}");
+    assert!(content.contains("> do #fix1"), "response echo:\n{content}");
+    assert!(content.contains("> do #fix2"), "response echo:\n{content}");
+    assert!(content.contains("> do #fix3"), "response echo:\n{content}");
     assert_eq!(fs::read_to_string(counter).unwrap(), "3");
+}
+
+fn queue_section_of(content: &str) -> String {
+    content
+        .split_once("<!-- agent:queue")
+        .and_then(|(_, rest)| rest.split_once("<!-- /agent:queue -->"))
+        .map(|(body, _)| body.to_string())
+        .unwrap_or_default()
 }
 
 fn active_persisted_queue_doc() -> String {
@@ -427,9 +441,12 @@ fn run_persisted_active_queue_continues_until_drained_without_auto() {
         content.contains("queue_active: false"),
         "queue should clear active state after all prompts are consumed"
     );
-    assert!(!content.contains("do #fix1"));
-    assert!(!content.contains("do #fix2"));
-    assert!(!content.contains("do #fix3"));
+    let queue_section = queue_section_of(&content);
+    assert!(!queue_section.contains("do #fix1"), "queue:\n{queue_section}");
+    assert!(!queue_section.contains("do #fix2"), "queue:\n{queue_section}");
+    assert!(!queue_section.contains("do #fix3"), "queue:\n{queue_section}");
+    assert!(content.contains("> do #fix1"), "response echo:\n{content}");
+    assert!(content.contains("> do #fix3"), "response echo:\n{content}");
     assert_eq!(fs::read_to_string(counter).unwrap(), "3");
 }
 

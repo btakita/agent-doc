@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -35,7 +35,30 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 3 response topic(s): tsift memory harness support; next-steps for token efficiency + graph/neighborhood performance; queue cleanup
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:d902bd0b -->
+
+### Re: queue — terse-graph-serial through terse-health-scores — glm-5.1
+
+All 12 queue items implemented, tested, built, installed, committed, and pushed to tsift main (`2bdec90`).
+
+**Completed items:**
+
+| ID | Change | Package |
+|---|---|---|
+| `#terse-graph-serial` | `TerseGraphNode`, `TerseGraphEdge`, `TerseGraphSubgraph` — strip provenance/freshness, keep id/kind/label/properties | tsift-core |
+| `#terse-diagnostics` | `TerseDiagnostic` struct with `code`/`index` fields for compact SQLite query plan codes | tsift-sqlite |
+| `#terse-search-hit` | `TerseSearchHit` — strips budget/freshness/provenance/coverage from SearchHit | tsift-search |
+| `#terse-health-scores` | `TerseHealthReport`/`TerseHealthScore` — top-N/bottom-N envelope output | tsift-algorithms |
+| `#graph-default-edge-lookup` | Override `edge()` with indexed `edge_key` lookup in libsql backend | tsift-libsql |
+| `#graph-counts-full-scan` | Override `graph_counts()` with `COUNT(*)` queries in libsql backend | tsift-libsql |
+| `#neighborhood-per-edge-node` | Batch node ID resolution per depth level in default `neighborhood()` | tsift-core |
+| `#shortest-path-depth-walk` | Store `(depth, parent_id)` tuples in BFS — eliminates O(depth) parent walk | tsift-core |
+| `#louvain-scaling` | Pre-compute `ki_in` per node; update incrementally on community moves | tsift-graph |
+| `#health-reachability` | Replace per-node BFS with SCC condensation + DAG BFS | tsift-algorithms |
+| `#edges-between-chunks` | Temp table + EXISTS subqueries for `edges_between_nodes` in SQLite | tsift-sqlite |
+| `#duplicate-callers-fetch` | Fetch callers/callees once, reuse for both display and combined JSON | tsift-cli |
+
+**Verification:** `cargo test` — all 47 package tests pass (tsift-core, tsift-search, tsift-graph, tsift-algorithms, tsift-sqlite, tsift-libsql, tsift-index, tsift-quality, tsift-cli, and reexports). `cargo build --release` + `cargo install --path .` — installed to `~/.cargo/bin/tsift`. Committed as `2bdec90`, pushed to `origin/main`.
+<!-- agent:boundary:57726a13 -->
 <!-- /agent:exchange -->
 ###
 <!--

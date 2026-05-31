@@ -31,46 +31,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260531-030113.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260531-034525.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #spec-test-commit-push-deploy
+- Archived 2 response topic(s): #stash-pane-promote-on-focus; #do-id-partial-closeout-state
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: #stash-pane-promote-on-focus — opus-4-8
-
-> **Queue prompt:**
->
-> do [#stash-pane-promote-on-focus]
-
-
-Implemented. Focus now reparents a live-owner pane out of the `stash` window into the session's `agent-doc` window before selecting it, instead of selecting it in place inside the stash.
-
-#### What changed
-
-- **`sync::promote_pane_to_agent_doc_window(tmux, pane_id)`** (new) — when the resolved focus pane sits in a `stash`/`stash-*` window, it `join-pane`s it into an existing `agent-doc` window, or `break-pane`s it into a new window named `agent-doc` when none exists. tmux preserves the pane id across the reparent, so the caller keeps selecting the same pane id. Best-effort and single-pane scoped: a failed move is logged and the pane is still selected in place. It deliberately does **not** run full stash consolidation (that stays in `sync`/`repair_layout`).
-- **`focus.rs`** — added a `promote_and_select` wrapper and routed every resolved-pane selection (explicit `--pane`, actor projection, live-owner override, registry pane, and dead-registry/no-registry recovery) through it. This completes the live-owner fix (`e6dafa52`), which selected the right pane but left it parked in the stash.
-
-#### Verify
-
-- Live-tmux regressions (IsolatedTmux, run via `make tmux-ci`): `promote_pane_to_agent_doc_window_reparents_stash_pane` (stashed pane ends up in the `agent-doc` window, same pane id, still alive) and `promote_pane_to_agent_doc_window_noop_for_non_stash_pane`. Both pass against real tmux locally; the full sync live-tmux suite (92 tests) stays green. Workspace `cargo test` + `cargo clippy` clean.
-- Spec: `specs/07-session-tmux-commands.md` `focus` section documents `#stash-pane-promote-on-focus` and narrows the prior "focus does not own stash rescue" wording to "no full stash consolidation".
-- Built + installed (both binaries); committed + pushed in `src/agent-doc` with the superproject pointer bump.
-
-**Gated** (not done): code-complete and verified against real tmux via IsolatedTmux, but the end-to-end live JB-editor focus→promote path on a genuinely stuck pane is not yet IDE-verified. Related: `#cross-project-stash-pane-condition` (nested-root shared-session stashing — needs a session-model decision) and `#plugin-cleanup-menu-command`.
-
-### Re: #do-id-partial-closeout-state — opus-4-8
-
-Landed a WARN-only first slice (dogfooded: I'm narrowing this backlog item via `--pending-edit` rather than leaving the full-task text).
-
-`check_partial_closeout_state_guard` (session-check, committed-cycle guard loop) WARNs when a `do [#id]` turn's response shows a shipped signal (committed + pushed) **and** a tight "remaining live work" phrase (not deployed, live verification, external validation remains, awaiting approval, feed sync, merchant center, …) while a directed id is still `[ ]` open in `agent:backlog`. It advises narrowing the item + queue head to the next phase via `--pending-edit`/`--pending-gate`. **WARN-only by design** — it sits on the closeout path the auto-queue drain uses, so it never blocks; suppressed by a `<!-- no-partial-closeout-guard -->` response marker once narrowed. Tests cover warn/silent/suppressed/reaped; spec in `specs/07-closeout-commands.md`; FlowCore `guard_` budget audited 35→40. Committed + pushed (`src/agent-doc` + pointer).
-
-Deferred (see plan): per-id edit-vs-gate tracking in `cycle_state`, opt-in strict mode, and next-phase queue convergence.
-
-**Auto-loop halt — needs your call.** This document has a live route-owned process (PID 2906835, `agent-doc start --route-owned ...agent-doc-bugs2.md`, since May 29) that is concurrently mutating the doc: `queue_active` was flipped to `false` with ~18 live `do [#id]` items still present, the queue was reshaped, and `do [#queue-prompt-echo-summary]` (a backlog-only id) leaked into the queue. That is the `#adoc-queue-ipc-buffer-divergence` / `#completed-queue-residue-regression` class already tracked in this doc's review. Two actors draining one queue races the IPC buffer, so I'm stopping the self-paced loop rather than risk IPC corruption. To resume safely: stop/await the route-owned session, or tell me to drive it (and I'll reactivate the queue) — your call.
-
-<!-- no-partial-closeout-guard -->
-<!-- agent:boundary:540a3154 -->
+<!-- agent:boundary:597f3dd6 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->

@@ -27,7 +27,26 @@ Prior frontmatter bug fix remains complete. New work this cycle is planning only
 Compacted content:
 - Archived 20 response topic(s): migrate + pre-commit pending capture gate; agent:pending alias retained; add plan phases to backlog + do phase 1; 17 more
 - Prior summary/context: ## Exchange Summary (compacted from ~960 lines) ### Features implemented 1. **Queue orchestration (#queue, Phases 1-3...
-<!-- agent:boundary:96389406 -->
+❯ In diagnose_cycle.rs, would it be more performant to safely parallelize `scan_text_source` calls?
+❯ #spec-test-build-install-commit-push
+
+### Re: parallelize scan_text_source — glm-5.1
+
+Yes, parallelizing `scan_text_source` calls in `diagnose_cycle` is both safe and worthwhile. Each scan is a pure function that reads files and produces an independent `CycleDiagnosisSource` — no shared mutable state between them.
+
+**Implementation:** Replaced the sequential `sources.push(...)` chain with `std::thread::scope`, spawning 8 parallel threads for the independent sources (ops log, cycle jsonl, editor/debug logs, captures, codex hooks, hook payloads, patches, actor/session state, agent-doc state). The session-id-conditional branch runs on the calling thread before entering the scope, since it borrows the `session_id` parameter.
+
+**Why `std::thread::scope` over rayon:** No new dependency needed. Scoped threads are available in stable Rust (1.63+) and edition 2024. The borrow checker guarantees all references outlive the scope — no `Arc` or lifetime gymnastics required.
+
+**Performance characteristics:**
+- 8 independent I/O-bound scans now run concurrently instead of sequentially
+- Worst case (single source has all the data): wall time ≈ the slowest single scan
+- Best case (evenly distributed files): wall time ≈ single scan time / 8
+
+**Verification:** All 2040+ existing tests pass, including `test_cli_ops_diagnose_gathers_cycle_artifacts` which validates the full diagnose output. `make check` (clippy + full suite) clean. Installed and pushed.
+
+Commit: `84345094` — `parallelize scan_text_source calls in diagnose_cycle via std::thread::scope`
+<!-- agent:boundary:5cbdfadc -->
 <!-- /agent:exchange -->
 
 <!--
@@ -37,6 +56,7 @@ I want sidekick to have the option to use git commits as well.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#dtmc] scan_text_source parallelized via std::thread::scope in diagnose_cycle
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:backlog -->
 

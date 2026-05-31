@@ -35,7 +35,16 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): #ranked-neighborhood
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:d6dbd9cb -->
+
+### Re: #terse-health-early-exit — glm-5.1
+
+> **Queue prompt:**
+>
+> [#terse-health-early-exit]
+
+
+Rewrote terse_health_report. All 15 tests pass. Committed as 5cf8093, pushed to main.
+<!-- agent:boundary:9dfadbc9 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -45,7 +54,7 @@ preset #spec-test-build-install-commit-push
 - ~[#libsql-pushdown-edge-incident]~
 - ~[#health-dedup-scc]~
 - ~[#ranked-neighborhood]~
-- [#terse-health-early-exit]
+- ~[#terse-health-early-exit]~
 - [#libsql-edges-between-pushdown]
 - [#compact-community-serialization]
 - [#louvain-dedup-aggregate]
@@ -56,7 +65,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#terse-health-early-exit] Early-terminated terse health report: stop after top/bottom N scores, skip per-node sub-metrics when only overall is needed. ~30% health compute reduction. tsift-algorithms/src/health.rs:42-71
 - [ ] [#libsql-edges-between-pushdown] Override edges_between_nodes in LibsqlGraphStore with temp-table + EXISTS (parity with SQLite backend). 5-20x neighborhood speedup. tsift-libsql/src/lib.rs
 - [ ] [#compact-community-serialization] Add TerseCommunityMember/TerseCommunity — name + tagpath_handle only, top-N member slice. ~40-60% community JSON savings. tsift-graph/src/lib.rs:541-572
 - [ ] [#louvain-dedup-aggregate] Add Louvain phase-2 aggregation (super-node coarsening). 5-15% modularity improvement on hierarchical codebases. tsift-graph/src/lib.rs:590-743

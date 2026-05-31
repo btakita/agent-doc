@@ -31,158 +31,18 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260530-210909.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260531-022911.md`*
 
 Compacted content:
-- Archived 1 response topic(s): auto-add backlog tasks to ungate review items
+- Archived 5 response topic(s): closeout-repair-churn; closeout repair queue state; JB Run Agent Doc busy-queue reports; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-The full picture is now confirmed. The dispatched item `#closeout-repair-churn` is **already complete and committed** — and not by me. The evidence:
-
-**Source (committed by the authoritative route-owned agent-doc process):**
-- Submodule commit `6da30a9d` *"fix(closeout): reject raw-component patchback before commit (#closeout-repair-churn)"* contains my exact changes — `PatchbackShape::EscapedComponentMarkers`, the `flow/document_mutation` classifier + `parse_template_patchback` rejection, the write-path integration test, and the `specs/07-closeout-commands.md` invariant.
-- Superproject pointer for `src/agent-doc` already bumped to `6da30a9d` (matches submodule HEAD), and `tasks/agent-doc/plan-closeout-repair-churn.md` is committed.
-
-**Session document (written by the authoritative actor):**
-- `### Re: closeout-repair-churn — opus-4-8` response is in the exchange (line 39).
-- Queue head `~do [#closeout-repair-churn]~` is struck through / consumed; the head has auto-advanced to `do [#codex-owned-pane-prompt-miss]`.
-- The backlog item was reaped and replaced with a scoped follow-up `#closeout-recovery-state-machine` for the unified state-machine remainder (plan fixes #1/#5) — exactly the phased-backlog split I was going to propose.
-
-What this means: a **concurrent authoritative agent-doc session** (the route-owned auto-loop draining this queue) did the identical work — we both read the same plan and produced the same fix — and it finalized first. My local edits matched byte-for-byte, which is why `git diff` showed clean: the commit absorbed them.
-
-I verified the work is correct and consistent regardless of who committed it:
-- `make check` green (clippy `-D warnings` + full test suite, including my 6 new tests).
-- Both binaries rebuilt + installed (`cargo build --release`, `cargo install --path .`) and the cdylib `lib-install`ed for JB hot-reload — `agent-doc 0.34.0` live.
-- Submodule HEAD = superproject pointer = `6da30a9d`; plan tracked.
-
-**I am not issuing a competing `finalize`.** Per the closeout contract — *"when preflight/commit says the prior response is already committed and no new assistant body exists, recover through the binary, don't rerun an empty response cycle"* — there is no new assistant body for me to write (the response already landed) and the queue has advanced to a different, large task that the authoritative actor owns. Running a finalize now would race that active auto-loop and risk exactly the closeout-churn/duplication class this fix addresses. I'm letting the authoritative session continue draining the queue.
-
-`#closeout-repair-churn` is done: escaped-component-marker patchback now fails closed before commit, with tests, spec, and live binaries in place.
-
-### Re: closeout-repair-churn — opus-4-8
-
-Shipped the highest-value piece of the plan: raw-component patchback now fails closed **before** commit, closing the worst symptom (escaped `agent:exchange` directives committed into the live exchange).
-
-**What changed**
-- New `PatchbackShape::EscapedComponentMarkers` in `flow::document_mutation`: a patch-free response carrying fully-formed `&lt;!-- agent:NAME --&gt;` … `&lt;!-- /agent:NAME --&gt;` component blocks is classified distinctly and rejected in `parse_template_patchback` before any snapshot save or commit. This guards every template write path (`run_template`, `run_stream`, `run_ipc`, `apply_template_from_string`).
-❯ - The typed diagnostic points at the supported `patch:exchange` block form, or at rerunning `agent-doc write --commit <FILE>` to absorb an already-visible `### Re:` response.
-❯ - Boundary markers (the `agent:boundary:<hex>` comment form, no close) and markers inside code fences do not trip the guard — it reuses the validated `component::parse`. Emits an ops-log line + a typed `FailedClosed` flow event.
-- Spec invariant added to `specs/07-closeout-commands.md`.
-
-**Tests** (all green under `make check`): classifier precedence (valid patches win over incidental component blocks), `raw_component_block_count` ignores plain `### Re:` and bare boundary markers, `parse_template_patchback` rejects the raw-template form with the patch-form hint, plain responses still accepted, and a write-path integration test asserting the document and HEAD stay byte-for-byte unchanged on rejection.
-
-**Live**: built release + `cargo install` + `lib-install` (JB cdylib refresh); smoke-tested the installed binary — piping the raw component form to `write --commit` fails closed and leaves the doc untouched.
-
-**Commit note**: the submodule held ~1627 lines of *previously-uncommitted* source from earlier auto-loop cycles (compact validation, compact uncommitted-state warning, queue contamination guard, review ungate-tasks, missing-response/preflight guards) that committed only their session doc. Those rode into submodule `6da30a9d` alongside this fix — all green. Superproject pointer `5f0636739`.
-
-**Remaining scope** → `#closeout-recovery-state-machine`: the unified typed recovery state machine across finalize/write/repair/commit plus the single-instruction diagnostic (plan fixes #1/#5). Plan fixes #3 (direct-`### Re:` absorption) and #4 (atomic parent-pointer) are already substantially covered by existing `write --commit` absorption and `complete_required_closeout` retry.
-
-### Re: closeout repair queue state — gpt-5
-
-Recovered the closeout state after the delegated `agent-doc` run. `#closeout-repair-churn` is already complete and committed by the authoritative route-owned session, while `#closeout-recovery-state-machine` remains open in the backlog and should not have been consumed as done.
-
-I restored the queue head to `do [#closeout-recovery-state-machine]`; preflight halted auto-queue consumption as `item_modified`, which is the right fail-closed behavior for this repair. The two prior `❯`-prefixed diagnostic bullets are assistant-body corruption from the earlier closeout, not new user prompts.
-
-Proof:
-- Changed paths: `tasks/agent-doc/agent-doc-bugs2.md` only through `agent-doc finalize`.
-- Commands: `agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`; `agent-doc write --commit /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`; `agent-doc claim --pane %36 --force /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`; `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`; `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`.
-- Verification: preflight and plan completed after reclaim; no source-code change was made in this repair cycle.
-- Confidence: high for queue-state normalization; source-code verification belongs to the already-committed authoritative `#closeout-repair-churn` cycle.
-- Escalation: none.
-Done. Triaged the two JB `Run Agent Doc` reports you pasted and committed the response (`2a1634d69`); session-check is clean and the auto-loop stayed off (`queue_active: false`).
-
-**Triage conclusion — both reports show correct behavior, no new bug:**
-
-1. The busy-actor enqueues (`gen 96 tsift.md`, `gen 241 monsterrodholders.md` queuing `"deploy"` / `"do [#next-steps-2]"`) are the **intended** path — route enqueues into `agent:queue auto` instead of injecting a duplicate trigger.
-2. `stash pane %8 ... hosts live supervisor b26b9957-…` is **this document's own session** — resync correctly refused to reap our live pane.
-3. The `registered in its own project root — skipping kill` lines are correct nested-root stash preservation.
-
-**The only real defect is presentation:** the plugin renders these benign route/resync log dumps as an *error*. That's already tracked as `#jb-busy-queue-ux-feedback` (notification reclassification), with `#cross-project-stash-pane-condition` and `#stash-session-ttl-prune` covering the shared-session/stash-accumulation angle. No new backlog item was warranted — the evidence maps onto existing `[recommended]` items.
-
-I followed the binary's contract for the turn (`plan` → `task_class: prompt_response`, `repo_actions: []`, `handoff: none`), so no source change. Two things to flag:
-
-- The log blocks are sitting in `agent:queue` as free-text (preflight warned `unexpected content in agent:queue`). I left them rather than silently rewrite the queue. **Say the word and I'll relocate them into the `#jb-busy-queue-ux-feedback` evidence trail and clean the queue** — worth doing before you re-activate the queue, since free-text will choke queue-auto parsing.
-- To actually fix the UX, re-activate the queue or tell me `do [#jb-busy-queue-ux-feedback]` — that's a JetBrains/VS Code plugin notification-classification change.
-
-### Re: JB Run Agent Doc busy-queue reports — opus-4-8
-
-Triaged the two JB `Run Agent Doc` reports you pasted into `agent:queue`. **Both show correct routing/resync behavior — neither is a new bug.** They are additional live evidence for items already queued, so I'm not opening new root-cause work or starting an implementation cycle this turn (`queue_active: false`, and `plan` classifies this as `prompt_response` with no `repo_actions`).
-
-**Report 1 — cancel → Clear Session Context → Run Agent Doc**
-- `authoritative actor generation 96 for tsift.md is busy on pane %36; queued pending dispatch "..." instead of injecting a duplicate trigger` — this is the **intended** busy-actor path: when the owning actor is mid-turn, route enqueues into `agent:queue auto` rather than double-triggering. Same for `gen 241 ... monsterrodholders.md ... queued "deploy"`.
-- `resync: stash pane %32 ... registered in its own project root — skipping kill` maps to `#cross-project-stash-pane-condition` (nested superproject+submodule sharing tmux session 0). Preservation is correct.
-- `resync: stash pane %8 is unregistered but still hosts live supervisor b26b9957-… — skipping kill` — that supervisor id **is this document's own session** (`agent_doc_session: b26b9957-…`). resync correctly refused to reap our live pane. Working as designed.
-
-#1 should not have happened b/c it happened after a `/clear`. `/clear` should stop whatever was running so JB `Run Agent Doc` can run without being blocked.
-
-#spec-test-build-install-commit-push
-
-**Report 2 — "JB Run Agent Doc error"**
-- `gen 241 ... busy on pane %40; queued pending dispatch "do [#next-steps-2]. #spec-test-commit-push-deploy" instead of injecting a duplicate trigger` — identical busy then enqueue path. Correct.
-
-**The one real defect is presentation, not routing:** the plugin surfaces these benign route/resync log dumps as an **error** notification. That is exactly `#jb-busy-queue-ux-feedback` (already in the backlog, `[recommended]`): present "queued behind a busy turn" and benign resync info (`registered in its own project root — skipping kill`, live-supervisor preservation) as *informational* notifications distinct from real failures. The stash-pane accumulation these logs show is tracked by `#cross-project-stash-pane-condition` and `#stash-session-ttl-prune`.
-
-So: no new item needed — the pasted evidence maps cleanly onto `#jb-busy-queue-ux-feedback` (UX classification) + `#cross-project-stash-pane-condition` (shared nested-root session) + `#stash-session-ttl-prune` (accumulation hygiene). To act on it, re-activate the queue or run `do [#jb-busy-queue-ux-feedback]`; that is a JetBrains/VS Code plugin notification-classification change, not a routing change.
-
-Two housekeeping notes:
-- The log blocks currently sit in `agent:queue` as free-text (preflight flagged `unexpected content in agent:queue`). I left them in place rather than silently rewrite user queue content (`#queue-user-edit-overwrite` class). If you want them out of the queue, say so and I will relocate them into the `#jb-busy-queue-ux-feedback` evidence trail.
-- Your new `#do-id-partial-closeout-state` backlog item is captured and committed.
-
-Proof:
-- Changed paths: `tasks/agent-doc/agent-doc-bugs2.md` only, through `agent-doc finalize`.
-- Commands: `agent-doc preflight bugs2.md`; `agent-doc plan bugs2.md`.
-- Verification: triage only — no source change this turn; `plan` returned `repo_actions: []`, `handoff: none`.
-- Confidence: high — logs show intended busy then enqueue and correct stash-preservation; defect is UX classification, already tracked.
-- Escalation: none.
-The tmux pane associated with this document is stuck in the stash tmux window. The tmux pane does not move into the agent-doc tmux window when selected.
-
-JB `Run Agent Doc` has an error. This is absolutely a bug:
-```
-[sync] recovered live pane %31 for session 584ef929 via supervisor pid 1283722
-[sync] recovered live pane %33 for session db08a891 via supervisor pid 3429014
-[sync] recovered live pane %27 for session e48b3024 via supervisor pid 392796
-[sync] recovered live pane %3 for session 62fe1f41 via supervisor pid 134565
-[sync] recovered live pane %35 for session 4602f467 via supervisor pid 1903596
-[sync] recovered live pane %20 for session 25032905 via supervisor pid 2005091
-[sync] recovered live pane %21 for session 892a6a1f via supervisor pid 2012688
-[sync] recovered live pane %4 for session 7910a62f via supervisor pid 138671
-[sync] recovered live pane %34 for session f9fe252d via supervisor pid 3651470
-[sync] recovered live pane %8 for session b26b9957 via supervisor pid 2906835
-resync: stash pane %8 is unregistered but still owns /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md — skipping kill
-[route] debounce OK — file idle for 1.2s and typing indicator idle
-[route] target tmux session: 0
-Error: route queue dispatch: failed to parse existing agent:queue
-
-Caused by:
-    unexpected content in agent:queue: "JB `Run Agent Doc` error:"
-```
-
-#spec-test-commit-push-deploy
-
-### Re: route/queue + clear + stash-pane bugs — opus-4-8
-
-Three bugs reported; the keystone is fixed and shipped, the other two are queued with concrete repro.
-
-**C — `route queue dispatch: failed to parse existing agent:queue` (FIXED + shipped).** Root cause: an earlier corruption merged free-text prose / log dumps into this document's `agent:queue` component, so `queue::parse` bailed on the first bare line and `enqueue_route_dispatch_prompt` propagated it fatally — bricking every JB `Run Agent Doc` reroute for the doc. Fix: the enqueue path now preserves an unparseable queue body verbatim and appends the new pending dispatch beneath it (idempotently), logging `route_queue_dispatch_unparseable_preserved` instead of crashing. Regression test + spec invariant added; `make check` green; built + installed. Submodule `77840c9c`, pointer `295a33b38`. This was also the keystone blocking clean closeout on this very document.
-
-**B — pane stuck in the stash window, doesn't move on select → backlog `#stash-pane-promote-on-focus`.** The live owner pane (`%8`) lives in the stash window. The prior focus fix (`e6dafa52`) now *selects* the correct live pane, but selecting it doesn't *reparent* it into the `0:agent-doc` window. Promoting a stash-resident live-owner pane on focus/sync is a distinct change entangled with the stash-pane preservation rules (`#cross-project-stash-pane-condition`), so I queued it rather than touch the stash reaping logic blind this turn.
-
-**A — `/clear` doesn't stop the running process → backlog `#clear-stops-running-process`.** Confirmed a real gap: Clear should abandon the running agent-doc child / busy actor so the next `Run Agent Doc` isn't blocked. Overlaps `#cancel-orphans-preflight-cycle` and the `operator_clear` busy-projection path; queued for a focused fix.
-
-I shipped C because it was actively bricking the route. A and B are queued with exact repro for their own cycles.
-
-### Re: clear-stops-running-process — opus-4-8
-
-**Queue prompt:** `do [#clear-stops-running-process]`
-
-**Clear fix (gated for live verify):** `agent-doc session clear` now reclaims an orphaned open preflight cycle after delivery — reusing the tested `cancel_preflight_cycle` semantics (abandon an empty `preflight_started` cycle, protect a cycle that already captured a response) — so a cleared turn can't wedge the next `Run Agent Doc`. The busy-actor projection was already handled by `reconcile_idle_projection_before_clear`; the orphaned-cycle reclaim was the missing piece. Deterministic tests + spec; submodule `94f8c776`. Gated because I can't reproduce the exact original operator wedge on demand — please run the clear → `Run Agent Doc` sequence on a live session to confirm.
-
-**Also shipped — queue parse no longer bricks finalize/route (the parse failures you flagged as "absolutely a bug"):** my earlier route-only fix didn't cover finalize's queue-consume guard, which hard-failed on this document's polluted `agent:queue` — first on free-text (`failed to parse`), then on an unbalanced `---` separator (`unclosed --- fence`) that was swallowing the real `do [#id]` items. Centralized + completed it: `queue::parse` now preserves any unrecognized line *and any unclosed fence opener* as a non-actionable `Freeform` separator (rendered verbatim, never dispatched), so real items beneath stray separators still parse. parse never bails now; only a structurally well-formed item is ever actionable. Submodules `f7992105` + `cae7e770`. This is what unblocked this very closeout.
-
-**On your queue-response directive** (responses should contain the prompt from the queue): noted and applied — I'm echoing the consumed queue prompt at the top of each queue-item response from here on.
-<!-- agent:boundary:263d9397 -->
+<!-- agent:boundary:5f505b23 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+---
+The response to a queue item should contain the prompt from the queue. If the prompt is long, it may be beneficial to have a summary of the prompt. But for now, let's try copying the entire prompt.
+#spec-test-commit-push-deploy
 ---
 JB `Run Agent Doc` successfully started a turn and had an error.
 ```
@@ -190,9 +50,6 @@ JB `Run Agent Doc` successfully started a turn and had an error.
 [route] target tmux session: 0
 [route] authoritative actor generation 241 for tasks/monsterrodholders.md is busy on pane %40; queued pending dispatch "do [#netdemand]. #spec-test-commit-push" in agent:queue auto (appended=true, already_present=false, superseded=false) instead of injecting a duplicate trigger
 ```
-#spec-test-commit-push-deploy
----
-The response to a queue item should contain the prompt from the queue. If the prompt is long, it may be beneficial to have a summary of the prompt. But for now, let's try copying the entire prompt.
 #spec-test-commit-push-deploy
 ---
 preset #spec-test-build-install-commit-push

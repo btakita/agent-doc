@@ -661,6 +661,11 @@ enum Commands {
     Repair {
         /// Path to the session document
         file: PathBuf,
+        /// Apply the unambiguously-safe closeout recovery for the classified
+        /// drift state in one step (abandon empty preflight cycle / commit
+        /// boundary-artifact drift), instead of orphaned-response repair.
+        #[arg(long)]
+        apply_recovery: bool,
     },
     /// Run all pre-agent steps (repair, commit, claims, diff, document HEAD) and output JSON
     Preflight {
@@ -1970,7 +1975,39 @@ fn main() -> anyhow::Result<()> {
             println!("{}", serde_json::to_string_pretty(&info)?);
             Ok(())
         }
-        Commands::Repair { file } => {
+        Commands::Repair {
+            file,
+            apply_recovery,
+        } => {
+            if apply_recovery {
+                use agent_doc_orchestration::flow::closeout::RecoveryApplication;
+                match agent_doc_orchestration::flow::closeout::apply_closeout_recovery(&file)? {
+                    RecoveryApplication::NothingToDo => {
+                        eprintln!("[repair] {} is clean — no recovery needed", file.display());
+                    }
+                    RecoveryApplication::Applied { state, action } => {
+                        eprintln!(
+                            "[repair] applied recovery [{}]: {} for {}",
+                            state.as_str(),
+                            action,
+                            file.display()
+                        );
+                    }
+                    RecoveryApplication::NotApplied {
+                        state,
+                        reason,
+                        recommended,
+                    } => {
+                        eprintln!(
+                            "[repair] recovery [{}] not auto-applied: {}\n[repair] run: {}",
+                            state.as_str(),
+                            reason,
+                            recommended
+                        );
+                    }
+                }
+                return Ok(());
+            }
             let outcome = agent_doc_orchestration::repair::repair(&file)?;
             if !outcome.repaired() {
                 eprintln!("[repair] No pending response found for {}", file.display());

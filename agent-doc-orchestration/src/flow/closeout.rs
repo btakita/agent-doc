@@ -570,6 +570,78 @@ impl CloseoutRecoveryState {
     }
 }
 
+/// Outcome of [`apply_closeout_recovery`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RecoveryApplication {
+    /// `Clean` — no recovery needed.
+    NothingToDo,
+    /// A provably-safe recovery action was performed.
+    Applied {
+        state: CloseoutRecoveryState,
+        action: String,
+    },
+    /// The state is recoverable but not *unambiguously* safe to auto-apply (the
+    /// authoritative side is ambiguous, or a response body must be preserved), so
+    /// nothing was mutated. Carries the recommended manual command.
+    NotApplied {
+        state: CloseoutRecoveryState,
+        reason: String,
+        recommended: String,
+    },
+}
+
+/// `#recursive-repair-apply`: apply the *unambiguously safe* closeout recovery for
+/// `file` in one call, replacing the manual `cancel` → `reset --from-current` →
+/// `commit` expert sequence for the common cases.
+///
+/// Only states whose recovery cannot lose or revert real content are
+/// auto-applied:
+/// - `OpenEmptyPreflight` → abandon the empty preflight cycle
+///   ([`crate::repair::cancel_preflight_cycle`]).
+/// - `BoundaryOnlyDrift` → `git::commit` (agent-doc-generated boundary /
+///   prompt-prefix artifacts only; the commit path normalizes them and cannot
+///   revert user/response content).
+///
+/// `QueueMetadataDrift` / `SidecarVisibleDrift` are *not* auto-applied: their safe
+/// direction (commit the snapshot vs restore from HEAD) depends on which side is
+/// authoritative, which the classifier cannot prove (live-observed: a spurious
+/// `queue_active:false` working-drift would be wrongly committed). They return
+/// `NotApplied` with the recommended command. `UnsafeUserContentDrift`,
+/// `OpenCycle`, `MissingResponseBody`, and the reserved states also fail closed
+/// because they need a preserved response, not a metadata commit.
+pub fn apply_closeout_recovery(file: &Path) -> Result<RecoveryApplication> {
+    let state = classify_closeout_recovery_state(file);
+    match state {
+        CloseoutRecoveryState::Clean => Ok(RecoveryApplication::NothingToDo),
+        CloseoutRecoveryState::OpenEmptyPreflight => {
+            crate::repair::cancel_preflight_cycle(file)?;
+            Ok(RecoveryApplication::Applied {
+                state,
+                action: "abandoned the empty preflight cycle".to_string(),
+            })
+        }
+        CloseoutRecoveryState::BoundaryOnlyDrift => {
+            crate::git::commit(file)?;
+            Ok(RecoveryApplication::Applied {
+                state,
+                action: "committed boundary / answered-prompt-prefix artifact drift".to_string(),
+            })
+        }
+        CloseoutRecoveryState::QueueMetadataDrift | CloseoutRecoveryState::SidecarVisibleDrift => {
+            Ok(RecoveryApplication::NotApplied {
+                state,
+                reason: "auto-apply withheld — the authoritative side (commit the snapshot vs restore from HEAD) is ambiguous for queue/metadata drift; resolve direction first".to_string(),
+                recommended: state.recovery_command(file).unwrap_or_default(),
+            })
+        }
+        other => Ok(RecoveryApplication::NotApplied {
+            state: other,
+            reason: "auto-apply withheld — recovery requires a preserved response body or open-cycle resolution, not a metadata operation".to_string(),
+            recommended: other.recovery_command(file).unwrap_or_default(),
+        }),
+    }
+}
+
 /// Classify the current closeout recovery state for `file`. Reuses the existing
 /// detection primitives so the recovery diagnostic is a single typed instruction
 /// instead of the historical multi-command chain. Conservatively returns `Clean`
@@ -1048,6 +1120,59 @@ mod tests {
             classify_closeout_recovery_state(&doc),
             CloseoutRecoveryState::UnsafeUserContentDrift
         );
+    }
+
+    #[test]
+    fn apply_recovery_clean_is_nothing_to_do() {
+        let (_dir, doc) = setup_git_project_with_doc("---\nsession: test\n---\n\nHi\n");
+        assert_eq!(
+            apply_closeout_recovery(&doc).unwrap(),
+            RecoveryApplication::NothingToDo
+        );
+    }
+
+    #[test]
+    fn apply_recovery_cancels_open_empty_preflight() {
+        // `#recursive-repair-apply`: the safe action for an empty probe cycle is to
+        // abandon it — exactly the churn the diagnostic-preflight bug produces.
+        let base = "---\nsession: test\n---\n\nHi\n";
+        let (_dir, doc) = setup_git_project_with_doc(base);
+        crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        match apply_closeout_recovery(&doc).unwrap() {
+            RecoveryApplication::Applied { state, .. } => {
+                assert_eq!(state, CloseoutRecoveryState::OpenEmptyPreflight);
+            }
+            other => panic!("expected Applied for empty preflight, got {other:?}"),
+        }
+        // The cycle is now abandoned, so re-classification is Clean.
+        assert_eq!(
+            classify_closeout_recovery_state(&doc),
+            CloseoutRecoveryState::Clean
+        );
+    }
+
+    #[test]
+    fn apply_recovery_withholds_queue_metadata_drift() {
+        // Ambiguous-direction queue metadata drift must NOT be auto-committed.
+        let head = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n### Re: x — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n- do [#a]\n<!-- /agent:queue -->\n",
+        );
+        let snapshot = head.replace("- do [#a]\n", "- do [#a]\n- do [#b]\n");
+        let (_dir, doc) = setup_git_project_with_doc(head);
+        crate::cycle_state::start_preflight(&doc, Some(head), Some(head)).unwrap();
+        crate::snapshot::save(&doc, &snapshot).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(&snapshot), Some(&snapshot))
+            .unwrap();
+        match apply_closeout_recovery(&doc).unwrap() {
+            RecoveryApplication::NotApplied { state, recommended, .. } => {
+                assert_eq!(state, CloseoutRecoveryState::QueueMetadataDrift);
+                assert!(recommended.contains("agent-doc commit"), "{recommended}");
+            }
+            other => panic!("expected NotApplied for queue metadata drift, got {other:?}"),
+        }
     }
 
     #[test]

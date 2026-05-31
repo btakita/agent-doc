@@ -6414,6 +6414,48 @@ fn busy_existing_pane_auto_fix_outcome(
     })
 }
 
+/// `#codex-route-busy-ctrl-g-opens-editor`: pure decision for whether the
+/// busy-pane reroute may send `C-g`. `C-g` safely aborts a shell
+/// `reverse-i-search` / history-search, but in any other Codex state (normal
+/// composer, active turn) it opens the external editor. The busy classification
+/// already came from [`HarnessConfig::dispatch_blocker_reason`] via
+/// [`wait_for_agent_ready_outcome`], so we gate on that authoritative
+/// `blocker_reason` rather than re-capturing (which races the wait loop's
+/// 2-poll blocker streak). Any non-shell-search reason — including an unknown
+/// timeout (`None`) — fails closed to the editor-safe Escape + C-c path.
+fn is_codex_shell_search_blocker(blocker_reason: Option<&str>) -> bool {
+    matches!(
+        blocker_reason,
+        Some("interactive shell reverse-i-search") | Some("interactive shell history search")
+    )
+}
+
+/// Whether the busy-pane reroute may send `C-g`. Fast-path on the authoritative
+/// `blocker_reason` from the readiness wait; otherwise re-classify a fresh
+/// capture. The wait loop can report a timeout (`blocker_reason == None`) even
+/// while the pane is genuinely in reverse-i-search (its 2-poll blocker streak
+/// may not have latched), so we re-scan with [`dispatch_only_blocker_reason`],
+/// which matches the whole capture rather than only the last few lines —
+/// critical here because the shell-search line sits above trailing blank pane
+/// rows, out of the window `HarnessConfig::dispatch_blocker_reason` inspects.
+fn codex_pane_in_shell_search_state(
+    tmux: &Tmux,
+    pane: &str,
+    harness: &HarnessConfig,
+    blocker_reason: Option<&str>,
+) -> bool {
+    if harness.binary != "codex" {
+        return false;
+    }
+    if is_codex_shell_search_blocker(blocker_reason) {
+        return true;
+    }
+    let Ok(captured) = crate::sessions::capture_pane(tmux, pane) else {
+        return false;
+    };
+    is_codex_shell_search_blocker(dispatch_only_blocker_reason(harness, &captured).as_deref())
+}
+
 fn attempt_busy_existing_pane_interrupt_recovery(
     tmux: &Tmux,
     file: &Path,
@@ -6450,20 +6492,41 @@ fn attempt_busy_existing_pane_interrupt_recovery(
         file.display()
     );
 
-    let _ = tmux.send_keys_raw(pane, "C-g");
-    std::thread::sleep(Duration::from_millis(100));
-    let ctrl_g_probe = wait_for_agent_ready_outcome(tmux, pane, Duration::from_secs(2), harness);
-    if ctrl_g_probe.is_ready() {
+    // #codex-route-busy-ctrl-g-opens-editor: `C-g` only aborts a shell
+    // reverse-i-search / history-search. In the normal Codex composer (or an
+    // active turn) `C-g` opens the external editor ($EDITOR/nvim) instead of
+    // interrupting — the same root cause as
+    // `#codex-interrupt-clear-ctrl-g-opens-editor` in
+    // `send_operator_interrupt_sequence`. Only send `C-g` when the live capture
+    // proves a shell-search state; otherwise fall straight through to the
+    // Escape + C-c interrupt below so a busy active turn is never sent into the
+    // editor.
+    if codex_pane_in_shell_search_state(tmux, pane, harness, blocker_reason) {
+        let _ = tmux.send_keys_raw(pane, "C-g");
+        std::thread::sleep(Duration::from_millis(100));
+        let ctrl_g_probe = wait_for_agent_ready_outcome(tmux, pane, Duration::from_secs(2), harness);
+        if ctrl_g_probe.is_ready() {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_busy_existing_pane_interrupt_finished file={} pane={} harness={} recovered=true outcome=ready stage=ctrl_g_probe",
+                    file.display(),
+                    pane,
+                    harness.binary,
+                ),
+            );
+            return Ok(BusyPaneInterruptRecoveryOutcome::Recovered);
+        }
+    } else {
         crate::ops_log::log_op(
             file,
             &format!(
-                "route_busy_existing_pane_interrupt_finished file={} pane={} harness={} recovered=true outcome=ready stage=ctrl_g_probe",
+                "route_busy_existing_pane_interrupt_skipped_ctrl_g file={} pane={} harness={} reason=not_shell_search",
                 file.display(),
                 pane,
                 harness.binary,
             ),
         );
-        return Ok(BusyPaneInterruptRecoveryOutcome::Recovered);
     }
 
     let _ = tmux.send_keys_raw(pane, "Escape");

@@ -16,6 +16,45 @@ fn env_lock() -> crate::test_support::ProcessGlobalLockGuard {
     crate::test_support::env_lock()
 }
 
+// #codex-route-busy-ctrl-g-opens-editor: the busy-pane reroute must only send
+// `C-g` when the live capture proves a shell reverse-i-search / history-search.
+// The pre-existing live ctrl-g test only models the reverse-i-search recovery,
+// so this deterministic decision test covers the non-search composer / active
+// turn case that previously received an editor-opening `C-g`.
+#[test]
+fn codex_busy_ctrl_g_gate_only_fires_for_shell_search_blocker() {
+    // C-g is allowed only for the two shell-search blocker reasons that
+    // HarnessConfig::dispatch_blocker_reason emits and that wait_for_agent_ready_outcome
+    // records as the authoritative busy reason.
+    assert!(is_codex_shell_search_blocker(Some(
+        "interactive shell reverse-i-search"
+    )));
+    assert!(is_codex_shell_search_blocker(Some(
+        "interactive shell history search"
+    )));
+
+    // The exact regression class: a busy active turn is not a shell search, so
+    // it must NOT receive C-g (which would open $EDITOR). An unknown timeout
+    // (None) likewise fails closed to the Escape + C-c path.
+    assert!(!is_codex_shell_search_blocker(Some("active codex turn")));
+    assert!(!is_codex_shell_search_blocker(Some("queued draft in composer")));
+    assert!(!is_codex_shell_search_blocker(Some("active permission prompt")));
+    assert!(!is_codex_shell_search_blocker(None));
+
+    // Linkage check: dispatch_blocker_reason actually classifies a shell-search
+    // capture as one of the gated reasons (so the busy path feeds the gate the
+    // string it expects).
+    let codex = HarnessConfig::codex();
+    let reverse_i_search = "Working...\nreverse-i-search: bugs enter accept · esc cancel\n";
+    assert!(is_codex_shell_search_blocker(
+        codex.dispatch_blocker_reason(reverse_i_search).as_deref()
+    ));
+    let active_turn = "• Working (12s • esc to interrupt)\n";
+    assert!(!is_codex_shell_search_blocker(
+        codex.dispatch_blocker_reason(active_turn).as_deref()
+    ));
+}
+
 fn tmux_start_lock() -> std::sync::MutexGuard<'static, ()> {
     TMUX_START_MUTEX
         .lock()

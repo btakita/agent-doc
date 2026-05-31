@@ -391,7 +391,16 @@ single-owner actor controls:
   (`$EDITOR`, e.g. nvim) instead of interrupting; any other Codex state (idle
   composer, active turn) receives only `Escape` + `C-c`
   (`#codex-interrupt-clear-ctrl-g-opens-editor`). The same gating applies to the
-  `session restart-supervisor <FILE> --force` busy-pane interrupt. If the interrupt
+  `session restart-supervisor <FILE> --force` busy-pane interrupt and to the
+  `route` busy-existing-pane reroute interrupt
+  (`attempt_busy_existing_pane_interrupt_recovery`, `#codex-route-busy-ctrl-g-opens-editor`):
+  the reroute sends `C-g` only when the pane's authoritative busy `blocker_reason`
+  is a shell `reverse-i-search` / history-search, or a fresh whole-capture
+  re-classification proves that state (the readiness wait can report a timeout
+  with no latched reason, and the search line can sit above trailing blank pane
+  rows, out of the last-few-lines window the normal busy classifier inspects);
+  any other busy state goes straight to `Escape` + `C-c` and logs
+  `route_busy_existing_pane_interrupt_skipped_ctrl_g ... reason=not_shell_search`. If the interrupt
   opens a Vim/Neovim editor prompt in the managed pane, the discard path must
   attempt one forced editor quit before continuing the idle/closed wait; if the
   pane still does not settle, the ops event and error must name the final

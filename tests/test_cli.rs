@@ -248,7 +248,12 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // when the existing agent:queue is polluted/unparseable the route
         // preserves it and appends the new dispatch instead of bailing fatally
         // (the "route queue dispatch: failed to parse existing agent:queue" bug).
-        ("agent-doc-orchestration/src/route.rs", "reason=") => 11,
+        // +1 for the audited `#codex-route-busy-ctrl-g-opens-editor` diagnostic
+        // `route_busy_existing_pane_interrupt_skipped_ctrl_g ... reason=not_shell_search`:
+        // the busy-pane reroute now logs when it skips the editor-opening `C-g`
+        // because the live Codex pane is not in a shell reverse-i-search /
+        // history-search state, and goes straight to the Escape + C-c path.
+        ("agent-doc-orchestration/src/route.rs", "reason=") => 12,
         // +8 for the audited `#do-id-closeout-open-backlog` guard:
         // `expect_done_or_gate_guard_fired` ops_log diagnostic plus seven
         // `expect_done_or_gate_guard_*` test names. +1 for the audited

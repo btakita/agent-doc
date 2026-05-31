@@ -184,7 +184,28 @@ Done — both concerns are addressed (the bulk by prior fixes), strengthened wit
 **Added this cycle.** A regression for the one untested shape — a queued-behind-busy route that *co-emits* the benign resync preservation line must still classify `QUEUED_PENDING` (the queued line keeps it informational; the benign line must not tip it to `PERSISTENT`/error). Test-only; the classification logic was already correct, so no plugin rebuild/version bump. The JB `TerminalUtilTest` suite passes.
 
 The remaining live-IDE rendering (WARNING balloon vs error) is a thin display of this deterministically-tested classification.
-<!-- agent:boundary:3632d739 -->
+
+### Re: do [#queue-prompt-echo-summary] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#queue-prompt-echo-summary]
+
+
+Done — implemented as **opt-in** to honor the recorded deferral; submodule `362ad175`, `make check` green.
+
+**Respecting the deferral.** This item carried an explicit user decision: *"for now, let's try copying the entire prompt."* So summarization is NOT forced on. The default behavior is unchanged (verbatim copy); the capability is gated behind a new frontmatter flag.
+
+**What landed.** New frontmatter `agent_doc_queue_prompt_echo_max_chars: <n>` (default `None` = verbatim). When set and a consumed queue prompt exceeds `n` characters, the `#queue-prompt-echo-in-response` echo records a bounded summary — the prompt's first line truncated to `n` chars (on a char boundary) + the count of elided characters + a pointer noting the full prompt is retained in `agent:queue` — instead of the full verbatim text.
+
+**Where.**
+- `frontmatter.rs`: `queue_prompt_echo_max_chars: Option<usize>` (skipped when None).
+- `write.rs`: `format_consumed_prompt_echo` takes the threshold; new `summarize_consumed_prompt`; the threshold is read from the document's own frontmatter inside `embed_consumed_prompt_in_response`, and the dedup/idempotency check uses the **same** rendered echo so a summarized echo is still recognized as already-embedded on re-runs.
+- 4 unit tests: verbatim when None, verbatim when under threshold, summary when over threshold, and char-boundary-safe truncation for multibyte prompts.
+- Spec updated in `07-orchestration-commands.md`.
+
+This is why this very turn's echo (and every queue-consumed cycle's) still copies the prompt verbatim — the default is preserved; enabling summarization is now a one-line frontmatter opt-in when the user is ready.
+<!-- agent:boundary:f060f22e -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -197,7 +218,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#route-drain-all-surface-live-verify]~
 - ~do [#run-agent-doc-stale-busy-replay]~
 - ~do [#jb-busy-queue-ux-feedback]~
-- do [#queue-prompt-echo-summary]
+- ~do [#queue-prompt-echo-summary]~
 - do [#free-text-queue-owner-consume]
 - do [#plugin-cleanup-menu-command]
 - do [#stash-session-ttl-prune]
@@ -236,7 +257,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 <!-- agent:backlog -->
 - [ ] [#stuck-capture-queue-echo-false-positive] [recommended] Fix landed (submodule 6220379c): response_already_applied matched the captured response as one contiguous block, but queue consumption inserts a > **Queue prompt:** echo blockquote (#queue-prompt-echo-in-response) between the response heading and body, so stuck_captured_cycle falsely warned committed-but-not-in-HEAD after every queue-consumed cycle and re-suggested a write --commit that would re-inject the response. normalized_response_lines now strips the echo blockquote on both sides before matching; unit + closeout regressions added. Verify across a couple more queue-consumed cycles that no preflight emits the false stuck_captured_cycle warning, then mark done.
 - [ ] [#codex-owned-pane-prompt-miss-followups] [recommended] Follow-ups deferred from the #codex-owned-pane-prompt-miss fix (fail-closed early guard + session-check backstop landed, submodule dede28d8): (1) the plan's *preferable* path — emit a structured owned_pane_self_invocation result shape in preflight/plan (file path, owner pane/session/actor generation, unresolved prompt excerpt, required persistence command) so Codex guidance drives an in-pane response cycle instead of only reading the bail diagnostic; (2) Codex Stop-hook / installed guidance regression asserting the owned-pane diagnostic forces an in-pane response body before final chat output; (3) live-verify with a real Codex same-pane run that has an unresolved exchange prompt. Plan: tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md.
-- [ ] [#queue-prompt-echo-summary] [recommended] Summarize long consumed queue prompts in the #queue-prompt-echo-in-response echo instead of copying verbatim. Current behavior embeds the entire prompt as a > **Queue prompt:** blockquote after the response heading; for long prompts a bounded summary plus a pointer to the full queue text would keep the exchange readable. Add a length threshold + summarization path (the user explicitly deferred this: 'for now, let's try copying the entire prompt').
 - [ ] [#codex-owned-pane-auto-queue-stuck] [recommended] Codex-owned `agent-doc <FILE>` direct invocation from the same pane can leave an active auto-queue turn stuck: the recursive guard avoids child dispatch, but the ready queue head is not handed to the owning Codex turn and no response is written. Live repro 2026-05-31 `src/boost-client/tasks/monsterrodholders.md`: `queue_active: true` + `agent:queue auto` head `re [#374n]...`; same-pane run printed `Submitting to codex...` then `recursive direct invocation would deadlock`, leaving queue/boundary drift and the head unprocessed. Fix with early owner-pane queue handoff, durable queue-target proof, no-drift guard, and Codex final-gate recovery. Plan: tasks/agent-doc/plan-codex-owned-pane-auto-queue-stuck.md.
 - [ ] [#completed-queue-residue-regression] [recommended] Completed queue items can still remain visible in agent:queue after the turn is finished, despite the archived #drained-done-queue-clear fix. Treat as a regression/uncovered route or IPC path: add a committed-state guard for provable completed queue residue, audit finalize/write/preflight/run continuation drain ordering, and verify live editor/snapshot/HEAD convergence. Plan: tasks/agent-doc/plan-completed-queue-residue-regression.md.
 - [ ] [#do-id-partial-closeout-state] [recommended] Partial-closeout WARN guard landed (check_partial_closeout_state_guard: a do[#id] turn whose response shows shipped + remaining-live-work signals with the directed id still open advises --pending-edit/--pending-gate narrowing; suppressible by a no-partial-closeout-guard response marker; FlowCore guard_ budget 35->40). Remaining: per-id edit-vs-gate tracking in cycle_state, opt-in strict mode, next-phase queue convergence, and the runbook note that #spec-test-commit-push completes a repo phase without a live/deploy item. Plan: tasks/agent-doc/plan-do-id-partial-closeout-state.md.

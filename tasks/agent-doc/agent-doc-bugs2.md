@@ -169,7 +169,7 @@ Three bugs reported; the keystone is fixed and shipped, the other two are queued
 **A — `/clear` doesn't stop the running process → backlog `#clear-stops-running-process`.** Confirmed a real gap: Clear should abandon the running agent-doc child / busy actor so the next `Run Agent Doc` isn't blocked. Overlaps `#cancel-orphans-preflight-cycle` and the `operator_clear` busy-projection path; queued for a focused fix.
 
 I shipped C because it was actively bricking the route. A and B are queued with exact repro for their own cycles.
-<!-- agent:boundary:59408e1f -->
+<!-- agent:boundary:e1721ddb -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -231,6 +231,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#completed-queue-residue-regression] [recommended] Completed queue items can still remain visible in agent:queue after the turn is finished, despite the archived #drained-done-queue-clear fix. Treat as a regression/uncovered route or IPC path: add a committed-state guard for provable completed queue residue, audit finalize/write/preflight/run continuation drain ordering, and verify live editor/snapshot/HEAD convergence. Plan: tasks/agent-doc/plan-completed-queue-residue-regression.md.
 - [ ] [#stash-pane-promote-on-focus] [recommended] A live-owner pane residing in the stash tmux window must be promoted/reparented into the 0:agent-doc window when the document is focused/selected, not merely selected in place. Live repro 2026-05-30 agent-doc-bugs2.md: pane %8 (live owner) is stuck in the stash window; focus/select does not move it. The focus live-owner fix (submodule e6dafa52) now selects the correct pane but does not reparent it. Tied to #cross-project-stash-pane-condition and #plugin-cleanup-menu-command.
 - [ ] [#do-id-partial-closeout-state] [recommended] `do [#id]` partial closeouts must rewrite or gate the remaining state instead of leaving a stale open item/queue head. Live repro 2026-05-30 `src/boost-client/tasks/monsterrodholders.md`: `do [#shoplabels]. #spec-test-commit-push` completed repo-backed feed-label code/tests/spec/commits/pushes, but deploy + GfW feed sync + live Ads label coverage remained; `#shoplabels` correctly stayed open, but the backlog/queue still looked like the original full task and the user had to ask whether it was done. Require `--pending-edit`, `--pending-gate`, or a typed stays-open marker for partial `do [#id]` closeout. Plan: tasks/agent-doc/plan-do-id-partial-closeout-state.md.
 - [ ] [#closeout-recovery-state-machine] [recommended] Remaining #closeout-repair-churn scope: a unified typed closeout recovery state machine shared by finalize / write --commit / repair / commit (states missing_response_body, direct_response_patchback, escaped_template_patch, boundary_only_drift, reaped_item_pending_parent, nested_parent_pointer_stale) that collapses the scattered 'try finalize / write --commit / commit' diagnostic chain into one typed instruction per state. The escaped-component-marker fail-closed guard already shipped (PatchbackShape::EscapedComponentMarkers). Direct-### Re: absorption and atomic parent-pointer repair are already substantially covered by write --commit absorption and complete_required_closeout retry. Plan: tasks/agent-doc/plan-closeout-repair-churn.md.

@@ -101,6 +101,34 @@ whose assistant closeout body is missing or directly patched:
 5. Re-running the recovery command after success is a no-op: no new repair
    commits, no boundary churn, no done-archive duplication.
 
+## Landed (typed recovery classifier, 2026-05-30)
+
+- `flow::closeout::CloseoutRecoveryState` enum + `classify_closeout_recovery_state`
+  + `recovery_command` instruction table: one classified state → one recovery
+  command, replacing the static recovery hint. Classified today: `clean`,
+  `open_cycle`, `missing_response_body` (no-capture committed response turn, or a
+  captured body absent from HEAD via `stuck_captured_cycle`), and
+  `escaped_template_patch` (escaped `<!-- agent: -->` markers in the committed
+  exchange).
+- `session_check::closeout_recovery_hint` now renders `Recovery [<state>]:
+  <command>` for all nine closeout-guard call sites at once (was a single static
+  line). Spec: `specs/07-closeout-commands.md`.
+- Unit tests: enum→instruction mapping; classifier for clean/open-cycle/
+  missing-response/response-in-HEAD. `make check` green; FlowCore hot-path token
+  budget untouched (the enum lives in `flow/closeout.rs`, not a budgeted file).
+
+## Remaining (deferred)
+
+- Precise detection wiring for the reserved enum states
+  `direct_response_patchback`, `boundary_only_drift`, and
+  `nested_parent_pointer_stale` (the mechanisms exist; the classifier currently
+  returns `clean` for them rather than guessing).
+- Items 2–5 of the proposed fix (raw-template fallback fail-before-commit,
+  direct-patchback absorption, atomic reaped-item/parent-pointer) are already
+  substantially covered by `PatchbackShape::EscapedComponentMarkers`,
+  `write --commit` absorption, and `complete_required_closeout`; remaining work
+  is folding their diagnostics through the typed classifier.
+
 ## Acceptance
 
 - The monsterrodholders closeout shape can be reduced to one deterministic

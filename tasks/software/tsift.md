@@ -35,15 +35,29 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 6 response topic(s): queue; queue re-activation; fix preexisting warnings; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:8603e415 -->
+
+### Re: #libsql-pushdown-edge-incident — glm-5.1
+
+> **Queue prompt:**
+>
+> [#libsql-pushdown-edge-incident]
+
+
+Added `incident_edges()` override to `LibsqlGraphStore` with a UNION of two indexed probes on `from_id` (via `idx_graph_edges_from_kind`) and `to_id` (via `idx_graph_edges_to_kind`), matching the SQLite backend's `sqlite_incident_edges_union_query` pattern. The `edge()` method was already overridden with an indexed `edge_key` lookup, so only `incident_edges()` needed the pushdown.
+
+**Changes:**
+- `packages/tsift-libsql/src/lib.rs` — added `incident_edges()` impl with UNION query + `libsql_incident_edges_pushdown` test (7/7 tests pass)
+- `SPEC.md` — added "Pushdown queries" paragraph documenting both `edge()` and `incident_edges()` indexed overrides
+
+**Verification:** `cargo test -p tsift-libsql` (7 pass), `cargo build --release`, `cargo install --path .`, committed as `22bbd76` and pushed.
+<!-- agent:boundary:35570885 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- [#terse-ultra-mode]
-- [#libsql-pushdown-edge-incident]
+- ~[#libsql-pushdown-edge-incident]~
 - [#health-dedup-scc]
 - [#ranked-neighborhood]
 - [#terse-health-early-exit]
@@ -57,7 +71,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#libsql-pushdown-edge-incident] Override edge() and incident_edges() in LibsqlGraphStore with indexed queries (parity with SQLite backend). Currently O(E) per call. tsift-libsql/src/lib.rs
 - [ ] [#health-dedup-scc] Eliminate duplicate SCC computation in composite_health_score — compute_reachability and find_cycles both run Tarjan on the same graph. Share SCC result. ~40% health-score time reduction. tsift-algorithms/src/health.rs:106-147,213-280
 - [ ] [#ranked-neighborhood] Add ranked neighborhood with configurable scoring (BreadthFirst, EdgeKindWeighted, DegreeWeighted) and max_nodes budget. ~30-60% token reduction for explain/neighborhood. tsift-core/lib.rs:598-668
 - [ ] [#terse-health-early-exit] Early-terminated terse health report: stop after top/bottom N scores, skip per-node sub-metrics when only overall is needed. ~30% health compute reduction. tsift-algorithms/src/health.rs:42-71

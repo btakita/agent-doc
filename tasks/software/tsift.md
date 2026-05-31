@@ -35,7 +35,25 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 3 response topic(s): #libsql-pushdown-edge-incident; #health-dedup-scc -- glm-5.1; test
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:f6a06f1f -->
+
+### Re: #ranked-neighborhood — glm-5.1
+
+Implemented scored neighborhood traversal with configurable strategies and `max_nodes` budget.
+
+**Changes** (`608c9d7`, pushed to main):
+
+- `packages/tsift-core/src/lib.rs`:
+  - Added `NeighborhoodScoring` enum: `BreadthFirst` (depth-based decay), `EdgeKindWeighted` (depth + edge kind weights), `DegreeWeighted` (depth + low-degree bonus)
+  - Added `RankedNeighborhoodOptions` struct with `depth`, `max_nodes`, `scoring`, and optional `edge_kind` filter
+  - Added `RankedNeighborhoodResult` with `nodes`, `edges`, `pruned_count`, and `total_discovered` diagnostics
+  - Added `GraphStore::ranked_neighborhood()` using a `BinaryHeap` priority queue that scores neighbors during traversal and prunes low-scoring nodes before expanding them
+  - Added 8 unit tests covering all strategies, missing center, edge-kind filtering, and max_nodes budgeting
+  - Fixed pre-existing clippy `collapsible_if` in the original `neighborhood()` method
+
+- `SPEC.md`: Added ranked neighborhood contract with strategy table and token-reduction rationale
+
+**Verification**: `cargo test -p tsift-core` — 15 passed; `cargo clippy -p tsift-core --all-targets -- -D warnings` — clean; `cargo build --release` + `cargo install` — green.
+<!-- agent:boundary:b89ef854 -->
 <!-- /agent:exchange -->
 
 ## Queue

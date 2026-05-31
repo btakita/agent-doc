@@ -53,8 +53,13 @@ Added `incident_edges()` override to `LibsqlGraphStore` with a UNION of two inde
 
 ### Re: test
 
+> **Queue prompt:**
+>
+> [#health-dedup-scc]
+
+
 Hello world
-<!-- agent:boundary:ba9a8b5b -->
+<!-- agent:boundary:4b0b879d -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -62,7 +67,7 @@ Hello world
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~[#libsql-pushdown-edge-incident]~
-- [#health-dedup-scc]
+- ~[#health-dedup-scc]~
 - [#ranked-neighborhood]
 - [#terse-health-early-exit]
 - [#libsql-edges-between-pushdown]

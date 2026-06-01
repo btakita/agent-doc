@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -136,23 +136,47 @@ Verification:
 ### Re: #surreal-native-adapter queue repair — gpt-5
 
 Repaired the document closeout state for `#surreal-native-adapter`: the implementation response was already written and committed, and the queue component is now reaped so `#surreal-promotion-gate` is the next live queue item.
-<!-- agent:boundary:76f00d41 -->
+
+### Re: #surreal-promotion-gate — gpt-5
+
+> **Queue prompt:**
+>
+> [#surreal-promotion-gate]
+
+
+Ran the SurrealDB native-adapter promotion evidence and left the promotion gate unchanged.
+
+The repeated backend-eval samples completed for the required default workloads, covering real, synthetic high-degree, and synthetic deep-chain datasets:
+
+- `tart-5ccdb7da79`: `for sample in 1 2 3; do target/debug/tsift graph-db --path . --json backend-eval --candidate surrealdb; done | target/debug/tsift metric-digest --baseline fixtures/graph-db-performance-history.json --json --top 8`
+
+The repeated full-projection samples also completed with cache-hit proof:
+
+- `tart-f2fa12fc49`: `for sample in 1 2 3; do target/debug/tsift graph-db --path . --json backend-eval --candidate surrealdb --full-projection; done | target/debug/tsift metric-digest --baseline fixtures/graph-db-performance-history.json --json --top 8`
+- Latest full-projection cache metrics: `full_projection.cache.hit=1`, `full_projection.cache.disk_bytes=3233926`, `full_projection.cache.compression_ratio=0.21222778981092985`.
+
+SurrealDB preserves the backend-eval measurement surface, but it does not beat SQLite on the required workloads, so it is not promotion-eligible:
+
+- Default real total: SQLite `5611us`, SurrealDB `22671443us`.
+- Default synthetic high-degree total: SQLite `42289us`, SurrealDB `712114us`.
+- Default synthetic deep-chain total: SQLite `45001us`, SurrealDB `1599612us`.
+- Full-projection total: SQLite `1821531us`, SurrealDB `22924553us`.
+- Full-projection required operations also miss the speed gate, including `neighborhood` (`4100us` SQLite vs `2087997us` SurrealDB), `path_max_hops` (`194us` vs `291734us`), `evidence` (`234us` vs `69542us`), and `conflict_matrix` (`85us` vs `26997us`).
+
+Install portability evidence from the adapter cycle still applies: default `cargo build` (`tart-c6cdc0ac34`) and default `cargo install --path . --force` (`tart-e2f44e7862`) completed without pulling SurrealDB into the default dependency graph. The backend-eval report still records the multi-process/read-only lock semantics requirement as a promotion hold for SurrealDB; since the repeated timing gate already fails, I did not add a new promotion-gate edit.
+
+No repository files changed for this queue item. Latest GitHub Actions CI for `btakita/tsift@2a6d8cb` is green (`26784235057`). Marked `#surreal-promotion-gate` done.
+<!-- agent:boundary:8b7f9f18 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~[#surreal-backend-eval]~
-- ~[#surreal-parity-suite]~
-- ~[#surreal-native-adapter]~
-- [#surreal-promotion-gate]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#surreal-promotion-gate] Run repeated real, full-projection, synthetic high-degree, and synthetic deep-chain backend-eval samples for the SurrealDB adapter, including install portability and multi-process/read-only lock behavior, then update the promotion gate only if it preserves SQLite parity and beats SQLite on every required workload.
 <!-- /agent:backlog -->
 
 ## Review

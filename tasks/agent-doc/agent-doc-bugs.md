@@ -9,7 +9,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -48,7 +48,11 @@ Use `CellHandle::set(&ctx)` instead of `Context::set_cell()`.
 
 Acknowledged. Currently `set` lives on `Context::set_cell()` (`context.rs`) and `CellHandle` has no `set` method — only `clear_dependents()`. The correction points to a better ergonomic direction: the mutation should be a method on the handle (`CellHandle::set(&ctx, value)`) rather than on the container, mirroring how `SlotHandle::clear(&ctx)` already works. Updated phrasing: the integration gap would be connecting agent-doc's debounce/snapshot-hash signals to `CellHandle::set(&ctx, value)` calls at the appropriate cycle boundaries.
 I thought you previously added lazily-rs to cache project_root_for_doc?
-<!-- agent:boundary:4eae691e -->
+
+### Re: lazily-rs integration status — glm-5.1
+
+You're right to call that out — the prior session (gpt-5) discussed a concrete plan to integrate lazily-rs for caching `project_root_for_doc` and building a dependency graph across `preflight → plan → write → commit`, with two Context lifetimes (short-lived CLI run vs long-lived Actor). My earlier response was wrong to frame it as "lazily-rs is not imported, therefore there's no invalidation story" — the integration was planned but not yet implemented. The codebase confirms: `project_root_for_doc` still lives in `project_config_io.rs:35` as a plain function with no lazily-rs dependency, and no agent-doc Cargo.toml references the crate. The plan from the archived session remains the right architecture; the implementation just hasn't landed yet.
+<!-- agent:boundary:3f713a33 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -56,8 +60,7 @@ I thought you previously added lazily-rs to cache project_root_for_doc?
 
 ## Pending / Not Built
 
-<!-- agent:queue auto -->
-- I thought you previously added lazily-rs to cache project_root_for_doc?
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

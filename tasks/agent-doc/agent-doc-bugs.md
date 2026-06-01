@@ -9,7 +9,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -94,7 +94,31 @@ Implemented #lr-found-1: added lazily-rs dependency and created agent-doc-orches
 **Slot graph:** file_path → canonical_path → project_root → config_path → project_config → ssh_context; project_root → snapshot_path; canonical_path + project_root → doc_relative. ProjectConfig wrapped in Arc since it lacks Clone.
 
 **Verification:** cargo test -p agent-doc-orchestration — 2084 passed, 0 failed. cargo clippy — clean. cargo install — release build + install successful.
-<!-- agent:boundary:28617005 -->
+
+### Re: Phase 2 — consolidate find_project_root — glm-5.1
+
+> **Queue prompt:**
+>
+> do [#lr-dedup-2]
+
+
+Implemented `#lr-dedup-2`: replaced 7 of 8 duplicate `find_project_root` implementations with delegation to `fs_util::find_project_root`.
+
+**Changes:**
+- `fs_util.rs` — added `find_project_root_canonical(path)` convenience wrapper that canonicalizes then delegates
+- `project_config_io.rs` — `project_root_for_doc` now delegates to `fs_util::find_project_root`
+- `watch.rs` — removed private duplicate, callers use `fs_util::find_project_root` directly
+- `supervisor/cwd.rs` — private `find_project_root` delegates to `fs_util::find_project_root`
+- `gc.rs` — `find_project_root_from_cwd` replaced body with `current_dir()` + `fs_util::find_project_root`
+- `compact.rs` — private `find_project_root` delegates to `fs_util::find_project_root_canonical` with parent fallback
+- `notify.rs` — private `find_project_root` delegates to `fs_util::find_project_root_canonical`
+- `ffi.rs` — `find_project_root_ffi` delegates to `fs_util::find_project_root`
+- `graph.rs` — fixed missing `use std::path::Path` in test module (from prior cycle)
+
+**Retained:** `archive_index.rs` in `agent-doc-sqlite` cannot import from orchestration (dep graph: sqlite -> core <- orchestration). Will need `project_root` parameter threading or moving the base function to core in a later phase.
+
+**Verification:** `cargo test` — 2156 passed (2089 orchestration + 67 main), 0 failed. `cargo clippy` — clean. `cargo install` — release build successful.
+<!-- agent:boundary:12ee49d0 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -104,15 +128,14 @@ Implemented #lr-found-1: added lazily-rs dependency and created agent-doc-orches
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#lr-found-1]
-- do [#lr-dedup-2]
+- ~do [#lr-found-1]~
+- ~do [#lr-dedup-2]~
 - do [#lr-config-3]
 - do [#lr-fmt-4]
 - do [#lr-actor-5]
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
-- [ ] [#lr-dedup-2] Phase 2: Deduplicate project_root_for_doc — consolidate 8+ find_project_root implementations into single graph slot. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-config-3] Phase 3: Move load_project_for_doc and resolve_ssh_context_inputs into graph slots. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-fmt-4] Phase 4: Move parse_for_file into graph slot. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-actor-5] Phase 5: Wire ActorContext into watch daemon and supervisor with invalidation on file/config change events. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
@@ -130,4 +153,5 @@ preset #spec-test-build-install-commit-push
 - 2026-05-31 [#dtmc] scan_text_source parallelized via std::thread::scope in diagnose_cycle
 - 2026-05-31 [#editor-buffer-state-ffi-debounce] [recommended] Replace `wait_for_stable_content`'s last-added-line/truncation heuristic with editor-authoritative buffer stability when an IDE plugin is attached. JetBrains and VS Code plugins should report normalized editor state through the FFI bridge to the Session Actor: canonical doc path/session, monotonic editor document version, dirty flag, last edit timestamp, optional save timestamp, optional buffer hash, and ideally current buffer content. Run requests should include the editor version/hash observed at click time so the Session Actor can detect edits after invocation, debounce until the version/hash is stable, and compute the diff against the exact stable editor buffer when available. If no editor state exists, fall back to whole-file content + mtime stability polling. This removes reliance on `extract_last_added_line`, which misses edits above the last inserted line, and reduces disk/snapshot/editor-buffer race classes seen in live IPC/JB/VSCode flows.
 - 2026-05-31 [#lr-found-1] Phase 1: Add lazily-rs dependency + define graph types in agent-doc-orchestration/src/graph.rs (RunContext, slot/cell handles, compute closures, unit tests). Plan: tasks/agent-doc/plans/lazily-rs-integration.md
+- 2026-05-31 [#lr-dedup-2] Phase 2: Deduplicate project_root_for_doc — consolidate 8+ find_project_root implementations into single graph slot. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 <!-- /agent:done -->

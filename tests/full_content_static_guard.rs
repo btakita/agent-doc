@@ -121,9 +121,18 @@ fn production_receivers_only_allow_parser_or_diagnostic_full_content_refs() {
 fn full_content_values_are_not_reintroduced_into_visible_write_apis() {
     let forbidden = [
         ("agent-doc-orchestration/src/write.rs", "\"fullContent\":"),
-        ("agent-doc-orchestration/src/write.rs", "payload[\"fullContent\"]"),
-        ("agent-doc-orchestration/src/write.rs", "socket_payload[\"fullContent\"]"),
-        ("agent-doc-orchestration/src/write.rs", "ipc_payload[\"fullContent\"]"),
+        (
+            "agent-doc-orchestration/src/write.rs",
+            "payload[\"fullContent\"]",
+        ),
+        (
+            "agent-doc-orchestration/src/write.rs",
+            "socket_payload[\"fullContent\"]",
+        ),
+        (
+            "agent-doc-orchestration/src/write.rs",
+            "ipc_payload[\"fullContent\"]",
+        ),
         (
             "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt",
             "document.setText(patch.fullContent)",

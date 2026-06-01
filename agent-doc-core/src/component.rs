@@ -2002,7 +2002,9 @@ Fix applied to skip non-agent <!-- sequences.
         let result =
             exchange.append_with_caret(doc, "❯ expand the Confidential AI Startup section", None);
         assert_eq!(
-            result.matches("expand the Confidential AI Startup section").count(),
+            result
+                .matches("expand the Confidential AI Startup section")
+                .count(),
             1,
             "prefixed synthesized patch must not duplicate the already-typed prompt:\n{result}"
         );

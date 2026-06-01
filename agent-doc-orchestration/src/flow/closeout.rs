@@ -686,9 +686,7 @@ pub fn metadata_drift_authority(file: &Path, local: &str, head: &str) -> Metadat
         // Both sides carry a live continuation but with different ready heads, and
         // (content-equal) no response consumed the old head → the next prompt
         // diverged without proof. Genuinely ambiguous → fail closed.
-        (Some(local_id), Some(head_id)) if local_id != head_id => {
-            MetadataDriftAuthority::Ambiguous
-        }
+        (Some(local_id), Some(head_id)) if local_id != head_id => MetadataDriftAuthority::Ambiguous,
         // Same live head, HEAD has no live continuation at risk, or neither side
         // does → committing the local side forward loses no continuation.
         _ => MetadataDriftAuthority::Local,
@@ -1517,7 +1515,12 @@ mod tests {
             other => panic!("expected Applied for queue metadata drift, got {other:?}"),
         }
         // HEAD now carries the committed queue item, and re-classification is Clean.
-        assert!(crate::git::show_head(&doc).unwrap().unwrap().contains("- do [#b]"));
+        assert!(
+            crate::git::show_head(&doc)
+                .unwrap()
+                .unwrap()
+                .contains("- do [#b]")
+        );
         assert_eq!(
             classify_closeout_recovery_state(&doc),
             CloseoutRecoveryState::Clean

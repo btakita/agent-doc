@@ -172,7 +172,9 @@ fn process_global_test_mutations_share_session_check_lock() {
         "test_support must route env and cwd test guards through a reentrant shared process-global lock"
     );
 
-    let session_check = fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/session_check.rs")).unwrap();
+    let session_check =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/session_check.rs"))
+            .unwrap();
     assert!(
         session_check.contains("fn inspect(file: &std::path::Path)")
             && session_check.contains("fn inspect_with_warnings(file: &std::path::Path)")
@@ -180,7 +182,9 @@ fn process_global_test_mutations_share_session_check_lock() {
         "session_check test inspection helpers must use the crate-wide process-global lock"
     );
 
-    let pty = fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/supervisor/pty.rs")).unwrap();
+    let pty =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/supervisor/pty.rs"))
+            .unwrap();
     assert!(
         pty.contains("struct EnvGuard")
             && pty.contains("AGENT_DOC_PTY_PARENT_LEAK")
@@ -768,10 +772,14 @@ fn test_preflight_active_auto_queue_head_is_not_user_intent() {
         serde_json::from_slice(&output.stdout).expect("preflight stdout must be JSON");
 
     assert_eq!(
-        parsed["queue_active"], serde_json::Value::Bool(true),
+        parsed["queue_active"],
+        serde_json::Value::Bool(true),
         "queue should be active: {parsed}"
     );
-    let queue_prompts = parsed["queue_prompts"].as_array().cloned().unwrap_or_default();
+    let queue_prompts = parsed["queue_prompts"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     assert!(
         !queue_prompts.is_empty(),
         "active queue must still expose its head as work: {parsed}"

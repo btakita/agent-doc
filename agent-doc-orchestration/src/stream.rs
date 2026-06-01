@@ -488,12 +488,7 @@ fn stream_loop(
 /// When a JetBrains/VS Code plugin is active (`.agent-doc/patches/` directory
 /// exists), attempts IPC first to avoid "externally modified" dialogs. Falls
 /// back to direct write on IPC timeout.
-pub fn flush_to_document(
-    file: &Path,
-    text: &str,
-    target: &str,
-    _baseline: &str,
-) -> Result<()> {
+pub fn flush_to_document(file: &Path, text: &str, target: &str, _baseline: &str) -> Result<()> {
     // Build a patch block targeting the component
     let patch_response = format!(
         "<!-- patch:{} -->\n{}\n<!-- /patch:{} -->\n",

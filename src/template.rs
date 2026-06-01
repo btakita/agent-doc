@@ -11,4 +11,6 @@
 //! unchanged.
 
 pub use agent_doc_core::template::*;
-pub use agent_doc_orchestration::template_io::{apply_patches, apply_patches_with_overrides, template_info};
+pub use agent_doc_orchestration::template_io::{
+    apply_patches, apply_patches_with_overrides, template_info,
+};

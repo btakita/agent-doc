@@ -640,7 +640,8 @@ fn test_status_file_write_includes_current_timestamp() {
 #[test]
 fn test_preflight_timing_1500ms_is_configurable() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let preflight_src = std::fs::read_to_string(root.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let preflight_src =
+        std::fs::read_to_string(root.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
 
     assert!(
         preflight_src.contains(".and_then(|(fm, _)| fm.debounce_ms)"),
@@ -672,7 +673,8 @@ fn test_preflight_timing_1500ms_is_configurable() {
 #[test]
 fn test_preflight_3s_timeout_is_sufficient_for_debounce() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let preflight_src = std::fs::read_to_string(root.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let preflight_src =
+        std::fs::read_to_string(root.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
 
     assert!(
         preflight_src.contains("if debounce_ms > 3000"),
@@ -705,8 +707,10 @@ fn test_timing_constants_are_documented() {
     // - Each constant should have a docstring or comment block explaining it
 
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let debounce_src = std::fs::read_to_string(root.join("agent-doc-orchestration/src/debounce.rs")).unwrap();
-    let preflight_src = std::fs::read_to_string(root.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let debounce_src =
+        std::fs::read_to_string(root.join("agent-doc-orchestration/src/debounce.rs")).unwrap();
+    let preflight_src =
+        std::fs::read_to_string(root.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
     assert!(
         debounce_src.contains("1500")
             && preflight_src.contains("3000")

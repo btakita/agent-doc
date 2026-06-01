@@ -1347,9 +1347,7 @@ fn is_safe_user_only_follow_up_after_committed_head(head_doc: &str, current_doc:
     saw_exchange
 }
 
-pub fn repair_committed_historical_snapshot_drift(
-    file: &Path,
-) -> Result<Option<&'static str>> {
+pub fn repair_committed_historical_snapshot_drift(file: &Path) -> Result<Option<&'static str>> {
     let Some(snapshot_doc) = crate::snapshot::load(file)? else {
         return Ok(None);
     };
@@ -2023,8 +2021,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             // a clean closeout still owes an `agent:queue auto` continuation,
             // clear it otherwise. Binary-owned proof that survives missing Codex
             // hook session state. (#codex-auto-queue-stalled-final-gate)
-            if let Some(continuation) =
-                crate::queue_continuation::reconcile_marker(file, "commit")
+            if let Some(continuation) = crate::queue_continuation::reconcile_marker(file, "commit")
             {
                 crate::ops_log::log_op(
                     file,

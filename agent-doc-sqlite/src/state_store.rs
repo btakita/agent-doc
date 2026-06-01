@@ -259,7 +259,8 @@ pub fn actor_record_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ActorR
     Ok(ActorRecord {
         document_id: row.get("document_id")?,
         session_id: row.get("session_id")?,
-        generation: sqlite_u64(generation, "generation").map_err(|_| rusqlite::Error::InvalidQuery)?,
+        generation: sqlite_u64(generation, "generation")
+            .map_err(|_| rusqlite::Error::InvalidQuery)?,
         pane_id: row.get("pane_id")?,
         window_id: row.get("window_id")?,
         harness: row.get("harness_id")?,

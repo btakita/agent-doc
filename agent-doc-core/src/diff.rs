@@ -440,10 +440,7 @@ pub fn line_looks_like_prompt_prefix_repair_start(trimmed: &str, is_target: bool
         || line_looks_like_soft_prompt_request(unprefixed)
 }
 
-pub fn line_looks_like_targeted_prompt_prefix_repair_start(
-    trimmed: &str,
-    is_target: bool,
-) -> bool {
+pub fn line_looks_like_targeted_prompt_prefix_repair_start(trimmed: &str, is_target: bool) -> bool {
     if !is_target {
         return false;
     }
@@ -2242,7 +2239,6 @@ fn starts_with_imperative_verb(line: &str) -> bool {
     matches!((first, words.next()), ("clean", Some("up")))
 }
 
-
 /// Detect whether the diff between snapshot and document is a stale snapshot
 /// (previous cycle wrote the response but didn't update the snapshot).
 ///
@@ -2703,7 +2699,6 @@ mod tests {
         assert_eq!(none, none, "both None should allow recovery");
     }
 
-
     // --- Code-aware comment stripping tests ---
 
     #[test]
@@ -2761,7 +2756,6 @@ Please fix the bug.\n\
             "inline edits after backtick-comment text must be detected"
         );
     }
-
 
     // --- classify_diff tests ---
 

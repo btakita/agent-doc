@@ -330,9 +330,9 @@ impl PendingLayout {
     /// Segment index of the item whose id matches `id` (already normalized by
     /// the caller), or `None` when no such item exists.
     fn item_segment_index(&self, id: &str) -> Option<usize> {
-        self.segments.iter().position(|segment| {
-            matches!(segment, PendingSegment::Item { item, .. } if item.id == id)
-        })
+        self.segments.iter().position(
+            |segment| matches!(segment, PendingSegment::Item { item, .. } if item.id == id),
+        )
     }
 
     /// Segment index just past the last item (before any trailing postlude
@@ -999,10 +999,7 @@ pub fn preserves_non_item_structure(lhs: &str, rhs: &str) -> bool {
         == trim_boundary_blank_segments(PendingLayout::parse(rhs).non_item_segments())
 }
 
-pub fn merge_partial_backlog_prefix(
-    current_body: &str,
-    target_body: &str,
-) -> Option<String> {
+pub fn merge_partial_backlog_prefix(current_body: &str, target_body: &str) -> Option<String> {
     let current = PendingLayout::parse(current_body);
     let target = PendingLayout::parse(target_body);
 
@@ -2092,8 +2089,14 @@ mod tests {
         assert_eq!(item_priority_rank("priority=1 do the thing"), 1);
         assert_eq!(item_priority_rank("text priority=5 more"), 5);
         assert_eq!(item_priority_rank("no token here"), PRIORITY_RANK_UNSET);
-        assert_eq!(item_priority_rank("priority=0 out of range"), PRIORITY_RANK_UNSET);
-        assert_eq!(item_priority_rank("priority=12 out of range"), PRIORITY_RANK_UNSET);
+        assert_eq!(
+            item_priority_rank("priority=0 out of range"),
+            PRIORITY_RANK_UNSET
+        );
+        assert_eq!(
+            item_priority_rank("priority=12 out of range"),
+            PRIORITY_RANK_UNSET
+        );
     }
 
     #[test]
@@ -2129,7 +2132,10 @@ mod tests {
         );
         assert_eq!(
             active_item_priorities(body),
-            vec![("a".to_string(), 2u8), ("b".to_string(), PRIORITY_RANK_UNSET)]
+            vec![
+                ("a".to_string(), 2u8),
+                ("b".to_string(), PRIORITY_RANK_UNSET)
+            ]
         );
     }
 
@@ -2625,7 +2631,8 @@ mod tests {
     fn op_add_at_after_chains_build_deterministic_order() {
         // #ah0s: chaining after A then after B builds A→B→C with no reorder pass.
         let body = "- [ ] [#a1b2] A\n";
-        let (b1, _) = op_add_at(body, "id=bbbb B", DOC_ID, false, AddPosition::After("a1b2")).unwrap();
+        let (b1, _) =
+            op_add_at(body, "id=bbbb B", DOC_ID, false, AddPosition::After("a1b2")).unwrap();
         let (b2, _) = op_add_at(&b1, "C", DOC_ID, false, AddPosition::After("bbbb")).unwrap();
         let lines: Vec<&str> = b2.lines().collect();
         assert!(lines[0].contains(" A"), "{b2}");

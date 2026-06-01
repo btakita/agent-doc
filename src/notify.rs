@@ -43,8 +43,8 @@ use anyhow::{Context, Result, bail};
 use std::path::Path;
 use std::process::Command;
 
-use agent_doc_orchestration::{pending, pending_cmd, snapshot};
 use crate::{component, component::is_backlog_component};
+use agent_doc_orchestration::{pending, pending_cmd, snapshot};
 
 /// Format an ISO-8601 timestamp using the system `date` command.
 fn iso_timestamp() -> String {

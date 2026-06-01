@@ -244,9 +244,7 @@ impl VisibleWriteDecision {
     }
 }
 
-pub fn decide_visible_write_after_typing(
-    facts: VisibleWriteTypingFacts,
-) -> VisibleWriteDecision {
+pub fn decide_visible_write_after_typing(facts: VisibleWriteTypingFacts) -> VisibleWriteDecision {
     let _timeout_ms = facts.timeout_ms;
     if facts.idle_reached {
         VisibleWriteDecision::Apply
@@ -335,9 +333,7 @@ impl FullContentSourceProof {
     }
 }
 
-pub fn full_content_source_proof(
-    before_content: Option<&str>,
-) -> Option<FullContentSourceProof> {
+pub fn full_content_source_proof(before_content: Option<&str>) -> Option<FullContentSourceProof> {
     before_content.map(FullContentSourceProof::from_content)
 }
 

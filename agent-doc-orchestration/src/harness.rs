@@ -1216,9 +1216,9 @@ mod tests {
     #[test]
     fn claude_status_chrome_line_is_ignorable_but_composer_is_not() {
         let h = HarnessConfig::claude();
-        assert!(
-            h.is_ignorable_output_line("  Opus 4.8 ctx:40% ~/work/btakita/agent-loop main brian@host")
-        );
+        assert!(h.is_ignorable_output_line(
+            "  Opus 4.8 ctx:40% ~/work/btakita/agent-loop main brian@host"
+        ));
         assert!(h.is_ignorable_output_line("Opus 4.8 (1M context) ctx:23% ~/x/resume main b@h"));
         // The composer and permissions lines must NEVER be ignorable.
         assert!(!h.is_ignorable_output_line("❯"));

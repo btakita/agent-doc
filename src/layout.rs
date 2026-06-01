@@ -61,9 +61,9 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
-use agent_doc_orchestration::sessions::{PaneMoveOp, Tmux};
-use agent_doc_orchestration::sessions;
 use crate::frontmatter;
+use agent_doc_orchestration::sessions;
+use agent_doc_orchestration::sessions::{PaneMoveOp, Tmux};
 
 /// Split direction for the mirror window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

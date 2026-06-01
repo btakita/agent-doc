@@ -3,5 +3,5 @@
 //! and is re-exported here so callers can use `diff::compute(file)` etc.
 //! unchanged.
 
-pub use agent_doc_core::diff::*;
 pub use crate::diff_io::*;
+pub use agent_doc_core::diff::*;

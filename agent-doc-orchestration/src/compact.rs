@@ -1061,8 +1061,8 @@ fn is_leap_year(y: i64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_doc_core::topic::parse_topic_sections;
     use crate::component::is_backlog_component;
+    use agent_doc_core::topic::parse_topic_sections;
 
     #[test]
     fn parse_exchanges_basic() {
@@ -2217,10 +2217,17 @@ mod tests {
             "---\nagent_doc_session: test\n---\n\n",
             "<!-- agent:exchange -->\n❯ *Compacted. Content archived to `x.md`*\n<!-- /agent:exchange -->\n",
         );
-        let err = apply_compacted_document(&file, malformed_compacted, malformed_compacted, source, false)
-            .unwrap_err();
+        let err = apply_compacted_document(
+            &file,
+            malformed_compacted,
+            malformed_compacted,
+            source,
+            false,
+        )
+        .unwrap_err();
         assert!(
-            err.to_string().contains("post-compact exchange is malformed"),
+            err.to_string()
+                .contains("post-compact exchange is malformed"),
             "{err}"
         );
         // The malformed content must NOT have been written.
@@ -2261,7 +2268,10 @@ mod tests {
         .unwrap();
 
         let after = std::fs::read_to_string(&file).unwrap();
-        assert!(after.contains("Compacted summary."), "doc should be compacted");
+        assert!(
+            after.contains("Compacted summary."),
+            "doc should be compacted"
+        );
         let ops_log = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             ops_log.contains("compact_left_uncommitted"),

@@ -67,7 +67,10 @@ mod tests {
 
     #[test]
     fn new_boundary_id_with_summary_empty() {
-        assert_eq!(new_boundary_id_with_summary(Some("")).len(), BOUNDARY_ID_LEN);
+        assert_eq!(
+            new_boundary_id_with_summary(Some("")).len(),
+            BOUNDARY_ID_LEN
+        );
     }
 
     #[test]

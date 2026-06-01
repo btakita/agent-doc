@@ -811,11 +811,7 @@ pub fn prompt_requests_clear(prompt: &str) -> bool {
     prompt.trim() == "/clear"
 }
 
-pub fn record_external_prompt_for_file(
-    file: &Path,
-    session_id: &str,
-    prompt: &str,
-) -> Result<()> {
+pub fn record_external_prompt_for_file(file: &Path, session_id: &str, prompt: &str) -> Result<()> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let state = SessionState {
         session_id: session_id.to_string(),
@@ -831,9 +827,7 @@ pub fn record_external_prompt_for_file(
     Ok(())
 }
 
-pub fn load_active_session_for_current_file(
-    file: &Path,
-) -> Result<Option<ActiveSessionState>> {
+pub fn load_active_session_for_current_file(file: &Path) -> Result<Option<ActiveSessionState>> {
     let Some(session_id) = current_session_id() else {
         return Ok(None);
     };
@@ -2067,8 +2061,7 @@ agent-doc {}\n",
         let doc = write_auto_queue_doc(&dir, &["do [#seopdp] deploy product page"]);
         init_git_repo(dir.path(), &doc);
         // Prior clean closeout wrote the durable marker.
-        crate::queue_continuation::reconcile_marker(&doc, "commit")
-            .expect("continuation required");
+        crate::queue_continuation::reconcile_marker(&doc, "commit").expect("continuation required");
 
         // Untracked session id → load_state_any returns None.
         let response = apply_stop(&StopInput {
@@ -2083,7 +2076,10 @@ agent-doc {}\n",
         match response {
             StopResponse::Block { reason, .. } => {
                 assert!(reason.contains("durable"), "{reason}");
-                assert!(reason.contains("do [#seopdp] deploy product page"), "{reason}");
+                assert!(
+                    reason.contains("do [#seopdp] deploy product page"),
+                    "{reason}"
+                );
                 assert!(reason.contains("do not send the final answer"), "{reason}");
             }
             other => panic!("expected durable-marker continuation block, got {other:?}"),

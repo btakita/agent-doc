@@ -33,5 +33,7 @@ pub use diff::{
     DiffClassification, DiffType, OrchestrationRequest, OrchestrationRequestMode,
     ParsedSlashCommands, PromptBearingChange, PromptBearingChangeKind,
 };
-pub use id::{BOUNDARY_ID_LEN, format_boundary_marker, new_boundary_id, new_boundary_id_with_summary};
+pub use id::{
+    BOUNDARY_ID_LEN, format_boundary_marker, new_boundary_id, new_boundary_id_with_summary,
+};
 pub use template::{ComponentInfo, PatchBlock, TemplateInfo};

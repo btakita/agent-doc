@@ -26,9 +26,9 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use crate::frontmatter;
 use agent_doc_orchestration::sessions::Tmux;
 use agent_doc_orchestration::snapshot;
-use crate::frontmatter;
 
 /// Configuration for a deep run.
 pub struct ParallelConfig {
@@ -174,9 +174,10 @@ pub fn run(file: &Path, config: ParallelConfig) -> Result<()> {
         let cmd_str = format!("{}{}", env_prefix, cmd_parts.join(" "));
 
         // Send the command to the pane
-        agent_doc_orchestration::sessions::send_submitted_text(&tmux, &pane_id, &cmd_str).with_context(|| {
-            format!("failed to send keys to pane {} for task {}", pane_id, i + 1)
-        })?;
+        agent_doc_orchestration::sessions::send_submitted_text(&tmux, &pane_id, &cmd_str)
+            .with_context(|| {
+                format!("failed to send keys to pane {} for task {}", pane_id, i + 1)
+            })?;
 
         // Stash the pane so it doesn't clutter the user's view
         if let Err(e) = tmux.stash_pane(&pane_id, &session_name) {

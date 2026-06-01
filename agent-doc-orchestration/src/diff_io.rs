@@ -213,9 +213,7 @@ fn wait_for_stable_content_editor(
     }
 
     // Timeout — read whatever is on disk.
-    eprintln!(
-        "[diff] Editor buffer stability timeout, reading current disk content"
-    );
+    eprintln!("[diff] Editor buffer stability timeout, reading current disk content");
     let current = std::fs::read_to_string(doc)?;
     Ok(current)
 }

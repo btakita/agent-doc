@@ -1059,7 +1059,6 @@ mod tests {
         assert!(body.contains("# Doc"));
     }
 
-
     #[test]
     fn parse_model_tier_high() {
         let content = "---\nagent_doc_model_tier: high\n---\nBody\n";

@@ -953,7 +953,9 @@ fn append_tail_to_exchange_end(prefix: &str, tail: &str) -> Result<String> {
     }
     new_content.push_str(tail.trim_end());
     new_content.push('\n');
-    new_content.push_str(&crate::id::format_boundary_marker(&crate::id::new_boundary_id()));
+    new_content.push_str(&crate::id::format_boundary_marker(
+        &crate::id::new_boundary_id(),
+    ));
     new_content.push('\n');
     Ok(exchange.replace_content(&prefix_without_boundaries, &new_content))
 }
@@ -2920,7 +2922,6 @@ fn strip_leading_overlap<'a>(existing: &str, new_content: &'a str) -> &'a str {
     }
 }
 
-
 /// Find `needle` in `haystack` starting at `from`, skipping occurrences inside code ranges.
 /// Returns the byte offset of the match within `haystack` (absolute, not relative to `from`).
 fn find_outside_code(
@@ -3150,7 +3151,6 @@ All green.
         assert!(!is_template_mode(None));
     }
 
-
     #[test]
     fn parse_patches_ignores_markers_in_fenced_code_block() {
         let response = "\
@@ -3359,7 +3359,6 @@ Interstitial text.
         assert!(!result.contains("old\n"));
     }
 
-
     #[test]
     fn no_inline_attr_no_config_falls_back_to_default() {
         // No inline attr, no config → built-in defaults
@@ -3422,7 +3421,6 @@ Interstitial text.
     }
 
     #[test]
-
     #[test]
     fn stream_override_beats_inline_attr() {
         // Stream mode overrides should still beat inline attrs
@@ -3439,7 +3437,8 @@ Interstitial text.
         let mut overrides = std::collections::HashMap::new();
         overrides.insert("exchange".to_string(), "replace".to_string());
         let result =
-            apply_patches_with_overrides_via_path(doc, &patches, "", &doc_path, &overrides).unwrap();
+            apply_patches_with_overrides_via_path(doc, &patches, "", &doc_path, &overrides)
+                .unwrap();
         // Stream override (replace) should win over inline attr (append)
         assert!(result.contains("new\n"));
         assert!(!result.contains("old\n"));
@@ -3454,9 +3453,14 @@ Interstitial text.
 
         let mut overrides = std::collections::HashMap::new();
         overrides.insert("exchange".to_string(), "replace".to_string());
-        let result =
-            apply_patches_with_overrides_via_path(doc, &[], "Compacted summary.\n", &doc_path, &overrides)
-                .unwrap();
+        let result = apply_patches_with_overrides_via_path(
+            doc,
+            &[],
+            "Compacted summary.\n",
+            &doc_path,
+            &overrides,
+        )
+        .unwrap();
 
         assert!(result.contains("Compacted summary.\n"));
         assert!(!result.contains("old\n"));
@@ -3476,9 +3480,14 @@ Interstitial text.
         }];
         let mut overrides = std::collections::HashMap::new();
         overrides.insert("exchange".to_string(), "replace".to_string());
-        let result =
-            apply_patches_with_overrides_via_path(doc, &patches, "trailing note", &doc_path, &overrides)
-                .unwrap();
+        let result = apply_patches_with_overrides_via_path(
+            doc,
+            &patches,
+            "trailing note",
+            &doc_path,
+            &overrides,
+        )
+        .unwrap();
 
         assert!(result.contains("Compacted summary.\n"));
         assert!(result.contains("trailing note"));
@@ -4180,7 +4189,6 @@ body b
     }
 
     #[test]
-
     #[test]
     fn max_lines_inline_beats_toml() {
         let dir = setup_project();
@@ -4357,9 +4365,14 @@ Existing answer.
             content: "### Re: latest — gpt-5\n\nFresh answer.\n".to_string(),
             attrs: Default::default(),
         }];
-        let result =
-            apply_patches_with_overrides_via_path(doc, &patches, "", &doc_path, &Default::default())
-                .unwrap();
+        let result = apply_patches_with_overrides_via_path(
+            doc,
+            &patches,
+            "",
+            &doc_path,
+            &Default::default(),
+        )
+        .unwrap();
 
         assert!(
             result.contains("### Re: earlier — gpt-5\n"),
@@ -4396,9 +4409,14 @@ Existing answer.
             content: "### Re: #wcup1 — gpt-5\n\nAlready complete.\n".to_string(),
             attrs: Default::default(),
         }];
-        let result =
-            apply_patches_with_overrides_via_path(doc, &patches, "", &doc_path, &Default::default())
-                .unwrap();
+        let result = apply_patches_with_overrides_via_path(
+            doc,
+            &patches,
+            "",
+            &doc_path,
+            &Default::default(),
+        )
+        .unwrap();
 
         let wcup1_prompt = result.find("❯ do #wcup1. spec-test-commit-push").unwrap();
         let wcup1_response = result.find("### Re: #wcup1 — gpt-5 (HEAD)").unwrap();
@@ -4439,8 +4457,14 @@ Existing answer.
             content: "### Re: #wcx1 — gpt-5\n\nNot done yet.\n".to_string(),
             attrs: Default::default(),
         }];
-        let err = apply_patches_with_overrides_via_path(doc, &patches, "", &doc_path, &Default::default())
-            .expect_err("later-matching response should fail closed");
+        let err = apply_patches_with_overrides_via_path(
+            doc,
+            &patches,
+            "",
+            &doc_path,
+            &Default::default(),
+        )
+        .expect_err("later-matching response should fail closed");
         assert!(
             err.to_string().contains("skip older unresolved prompt"),
             "unexpected error: {err}"

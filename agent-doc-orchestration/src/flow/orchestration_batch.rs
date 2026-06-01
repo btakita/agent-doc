@@ -39,10 +39,7 @@ pub fn classify_batch_progress(
     BatchProgressDecision::Continue
 }
 
-pub fn batch_should_continue(
-    source_changed_after_child: bool,
-    child: &BatchChildResult,
-) -> bool {
+pub fn batch_should_continue(source_changed_after_child: bool, child: &BatchChildResult) -> bool {
     classify_batch_progress(source_changed_after_child, child) == BatchProgressDecision::Continue
 }
 

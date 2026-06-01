@@ -918,8 +918,12 @@ impl SimWorld {
     }
 
     fn repair_ipc_snapshot_duplicate_prompts(&mut self, before: &str, file: &Path) -> Result<()> {
-        let (repaired, changed) =
-            agent_doc_orchestration::write::dedupe_ipc_snapshot_content(file, Some(before), &self.doc, "sim_ipc")?;
+        let (repaired, changed) = agent_doc_orchestration::write::dedupe_ipc_snapshot_content(
+            file,
+            Some(before),
+            &self.doc,
+            "sim_ipc",
+        )?;
         if changed {
             self.doc = repaired;
             self.coverage.prompt_duplicate_repairs += 1;
@@ -963,8 +967,12 @@ impl SimWorld {
     fn stale_full_content_visible_replacement(
         &mut self,
         source: FullContentReplacementSource,
-    ) -> agent_doc_orchestration::flow::document_mutation::FullContentVisibleReplacementDecision {
-        let proof = agent_doc_orchestration::flow::document_mutation::FullContentSourceProof::from_content(&self.doc);
+    ) -> agent_doc_orchestration::flow::document_mutation::FullContentVisibleReplacementDecision
+    {
+        let proof =
+            agent_doc_orchestration::flow::document_mutation::FullContentSourceProof::from_content(
+                &self.doc,
+            );
         let replacement = template_doc(&format!(
             "### Re: replacement from {} — gpt-5\n\nDone.\n",
             source.as_str()
@@ -992,7 +1000,10 @@ impl SimWorld {
         content_ours: &str,
         normalize_prefix_lines: &[String],
     ) {
-        if !agent_doc_orchestration::write::verify_sidecar_normalization(sidecar, normalize_prefix_lines) {
+        if !agent_doc_orchestration::write::verify_sidecar_normalization(
+            sidecar,
+            normalize_prefix_lines,
+        ) {
             let fallback = agent_doc_orchestration::write::normalize_exchange_prefixes_for_targets(
                 content_ours,
                 normalize_prefix_lines,
@@ -1042,18 +1053,20 @@ impl SimWorld {
                 self.trace
             );
         }
-        let Some(diff_text) = agent_doc_orchestration::diff::unified_diff_from_contents(&self.snapshot, &self.doc)
+        let Some(diff_text) =
+            agent_doc_orchestration::diff::unified_diff_from_contents(&self.snapshot, &self.doc)
         else {
             return Ok(());
         };
-        let has_follow_up = agent_doc_orchestration::diff::classify_prompt_bearing_changes(&diff_text)
-            .into_iter()
-            .any(|change| {
-                matches!(
-                    change.kind,
-                    agent_doc_orchestration::diff::PromptBearingChangeKind::PromptTarget
-                )
-            });
+        let has_follow_up =
+            agent_doc_orchestration::diff::classify_prompt_bearing_changes(&diff_text)
+                .into_iter()
+                .any(|change| {
+                    matches!(
+                        change.kind,
+                        agent_doc_orchestration::diff::PromptBearingChangeKind::PromptTarget
+                    )
+                });
         if has_follow_up {
             self.coverage.post_commit_follow_up_handoffs += 1;
         }
@@ -1173,10 +1186,11 @@ impl SimWorld {
         }
         // The pane proves a dispatch-ready prompt (prompt_ready=true); defer the
         // promote-vs-fail-closed decision to the production predicate.
-        let repaired = agent_doc_orchestration::flow::routed_reopen::busy_projection_repaired_by_ready_prompt(
-            agent_doc_orchestration::flow::routed_reopen::ActorDispatchState::Busy,
-            true,
-        );
+        let repaired =
+            agent_doc_orchestration::flow::routed_reopen::busy_projection_repaired_by_ready_prompt(
+                agent_doc_orchestration::flow::routed_reopen::ActorDispatchState::Busy,
+                true,
+            );
         if !repaired {
             bail!(
                 "production predicate refused stale busy projection repair; seed={} trace={:?}",
@@ -1413,7 +1427,9 @@ impl SimWorld {
             .iter()
             .filter(|component| crate::component::is_tracked_work_component(&component.name))
             .flat_map(|component| {
-                agent_doc_orchestration::pending::detect_malformed_item_lines(component.content(&self.doc))
+                agent_doc_orchestration::pending::detect_malformed_item_lines(
+                    component.content(&self.doc),
+                )
             })
             .collect::<Vec<_>>();
         if !malformed.is_empty() {
@@ -1425,18 +1441,20 @@ impl SimWorld {
             bail!("malformed tracked checklist item(s): {refs}");
         }
 
-        if let Some(diff_text) = agent_doc_orchestration::diff::unified_diff_from_contents(&self.snapshot, &self.doc)
+        if let Some(diff_text) =
+            agent_doc_orchestration::diff::unified_diff_from_contents(&self.snapshot, &self.doc)
         {
-            let prompt_targets = agent_doc_orchestration::diff::classify_prompt_bearing_changes(&diff_text)
-                .into_iter()
-                .filter(|change| {
-                    matches!(
-                        change.kind,
-                        agent_doc_orchestration::diff::PromptBearingChangeKind::PromptTarget
-                    )
-                })
-                .map(|change| change.text)
-                .collect::<Vec<_>>();
+            let prompt_targets =
+                agent_doc_orchestration::diff::classify_prompt_bearing_changes(&diff_text)
+                    .into_iter()
+                    .filter(|change| {
+                        matches!(
+                            change.kind,
+                            agent_doc_orchestration::diff::PromptBearingChangeKind::PromptTarget
+                        )
+                    })
+                    .map(|change| change.text)
+                    .collect::<Vec<_>>();
             if !prompt_targets.is_empty() {
                 bail!(
                     "unresolved prompt_target(s) after closeout: {}; seed={} trace={:?}",
@@ -1857,12 +1875,13 @@ fn post_exchange_comment_ownership_sim_covers_cleanup_and_handoff_paths() {
         "preflight-style recovery must not delete visible scratch comments"
     );
 
-    let direct_write = agent_doc_orchestration::write::normalize_template_structure_or_fail_preserving(
-        &world.doc,
-        file,
-        Some(&world.snapshot),
-    )
-    .unwrap();
+    let direct_write =
+        agent_doc_orchestration::write::normalize_template_structure_or_fail_preserving(
+            &world.doc,
+            file,
+            Some(&world.snapshot),
+        )
+        .unwrap();
     assert_owned_scratch_comment_preserved(&direct_write, prompt);
 
     let (ipc_handoff, changed) = agent_doc_orchestration::write::dedupe_ipc_snapshot_content(
@@ -1881,12 +1900,13 @@ fn post_exchange_comment_ownership_sim_covers_cleanup_and_handoff_paths() {
     let mut repair_world = world;
     repair_world.captured_response = Some(response_patch("comment ownership"));
     repair_world.apply_captured_response().unwrap();
-    let repaired_write = agent_doc_orchestration::write::normalize_template_structure_or_fail_preserving(
-        &repair_world.doc,
-        file,
-        Some(&repair_world.snapshot),
-    )
-    .unwrap();
+    let repaired_write =
+        agent_doc_orchestration::write::normalize_template_structure_or_fail_preserving(
+            &repair_world.doc,
+            file,
+            Some(&repair_world.snapshot),
+        )
+        .unwrap();
     assert_owned_scratch_comment_preserved(&repaired_write, prompt);
 
     let compacted_exchange = "### Session Summary\n\nCompacted content archived.\n";
@@ -2929,7 +2949,10 @@ fn halt_response_does_not_strike_queue_head_but_done_flag_does() {
     assert_eq!(outcome.remaining, 1);
     let after = std::fs::read_to_string(&doc).unwrap();
     assert!(after.contains("- ~do [#alpha]~"), "alpha struck:\n{after}");
-    assert!(after.contains("- do [#beta]"), "beta remains the head:\n{after}");
+    assert!(
+        after.contains("- do [#beta]"),
+        "beta remains the head:\n{after}"
+    );
 }
 
 // -------- #adoc-bdauc-simworld: deterministic SimWorld coverage for baseline
@@ -2954,7 +2977,9 @@ fn baseline_drift_benign_user_commit_outside_response_auto_refreshes() {
     agent_doc_orchestration::capture::validate_replay(&doc, &capture)
         .expect("benign user commit outside response must auto-refresh");
 
-    let refreshed = agent_doc_orchestration::capture::load_active(&doc).unwrap().unwrap();
+    let refreshed = agent_doc_orchestration::capture::load_active(&doc)
+        .unwrap()
+        .unwrap();
     assert_eq!(
         refreshed.file_hash.as_deref(),
         Some(agent_doc_orchestration::ops_log::content_hash(&world.doc).as_str()),
@@ -3009,7 +3034,9 @@ fn baseline_drift_user_edit_matches_normalized_response_adopts() {
     agent_doc_orchestration::capture::validate_replay(&doc, &capture)
         .expect("user-normalized response body should be adopted");
 
-    let refreshed = agent_doc_orchestration::capture::load_active(&doc).unwrap().unwrap();
+    let refreshed = agent_doc_orchestration::capture::load_active(&doc)
+        .unwrap()
+        .unwrap();
     assert_eq!(
         refreshed.file_hash.as_deref(),
         Some(agent_doc_orchestration::ops_log::content_hash(&world.doc).as_str()),

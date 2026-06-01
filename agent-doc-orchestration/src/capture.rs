@@ -949,8 +949,8 @@ mod tests {
         crate::cycle_state::start_preflight(&doc, Some("body"), Some("body")).unwrap();
 
         // Capture A — a committed response that compaction is about to archive.
-        let archived = capture_response(&doc, "### Re: old — opus-4-8\n\nArchived answer A.\n")
-            .unwrap();
+        let archived =
+            capture_response(&doc, "### Re: old — opus-4-8\n\nArchived answer A.\n").unwrap();
         // Capture B — a distinct response NOT in the archive (e.g. still pending).
         let mut live = archived.clone();
         live.capture_id = "cycle-live-distinct".to_string();
@@ -960,12 +960,19 @@ mod tests {
         live.discarded_at = None;
         write_record(&doc, &live).unwrap();
 
-        let archived_text = "Preamble.\n### Re: old — opus-4-8\n\nArchived answer A.\nmore archive\n";
+        let archived_text =
+            "Preamble.\n### Re: old — opus-4-8\n\nArchived answer A.\nmore archive\n";
         let discarded = discard_captures_for_archived_responses(&doc, archived_text).unwrap();
-        assert_eq!(discarded, 1, "only the archived capture should be discarded");
+        assert_eq!(
+            discarded, 1,
+            "only the archived capture should be discarded"
+        );
 
         assert_eq!(
-            load_by_id(&doc, &archived.capture_id).unwrap().unwrap().state,
+            load_by_id(&doc, &archived.capture_id)
+                .unwrap()
+                .unwrap()
+                .state,
             CaptureState::Discarded,
         );
         assert_eq!(

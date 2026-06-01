@@ -5136,11 +5136,7 @@ pub fn find_live_owner_pane_quiet(tmux: &Tmux, file: &Path, session_id: &str) ->
     find_live_owner_pane_excluding_with_logging(tmux, file, session_id, None, false)
 }
 
-pub fn find_normal_path_owner_pane(
-    tmux: &Tmux,
-    file: &Path,
-    session_id: &str,
-) -> Option<String> {
+pub fn find_normal_path_owner_pane(tmux: &Tmux, file: &Path, session_id: &str) -> Option<String> {
     find_normal_path_owner_pane_excluding(tmux, file, session_id, None)
 }
 
@@ -5801,9 +5797,11 @@ fn cmdline_is_agent_doc_owner_session(cmdline: &str) -> bool {
 
 /// True when `cmdline` references at least one `.md` document path token.
 fn cmdline_references_md_document(cmdline: &str) -> bool {
-    cmdline
-        .split_whitespace()
-        .any(|token| token.trim_matches(|c| c == '"' || c == '\'').ends_with(".md"))
+    cmdline.split_whitespace().any(|token| {
+        token
+            .trim_matches(|c| c == '"' || c == '\'')
+            .ends_with(".md")
+    })
 }
 
 /// True when `cmdline` is a live agent-doc/codex owner session for a document
@@ -7834,7 +7832,10 @@ mod tests {
 
         // tmux preserves the pane id across join-pane, and it now lives in the
         // agent-doc window.
-        assert!(iso.pane_alive(&pane2), "promoted pane should still be alive");
+        assert!(
+            iso.pane_alive(&pane2),
+            "promoted pane should still be alive"
+        );
         let win_after = iso.pane_window(&pane2).unwrap();
         let name_after = window_name_for_window_id(&iso, &win_after).unwrap();
         assert_eq!(

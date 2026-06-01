@@ -37,9 +37,7 @@ pub struct FinalizePendingMutation<'a> {
     pub target_files: &'a [String],
 }
 
-pub fn prompt_targets_from_changes(
-    changes: &[crate::diff::PromptBearingChange],
-) -> Vec<String> {
+pub fn prompt_targets_from_changes(changes: &[crate::diff::PromptBearingChange]) -> Vec<String> {
     changes
         .iter()
         .filter(|change| change.kind == crate::diff::PromptBearingChangeKind::PromptTarget)

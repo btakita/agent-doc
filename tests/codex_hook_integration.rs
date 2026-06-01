@@ -81,11 +81,7 @@ fn session_check_codex_final_gate_blocks_on_active_auto_queue() {
     // Strict Codex final gate: continuation required → nonzero exit.
     agent_doc()
         .current_dir(tmp.path())
-        .args([
-            "session-check",
-            doc.to_str().unwrap(),
-            "--codex-final-gate",
-        ])
+        .args(["session-check", doc.to_str().unwrap(), "--codex-final-gate"])
         .assert()
         .failure()
         .stdout(predicate::str::contains("queue_continuation_required=true"));

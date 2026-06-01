@@ -2572,10 +2572,7 @@ mod stash_ttl_prune_tests {
     fn disabled_ttl_never_prunes() {
         // ttl_secs == 0 (unset/disabled) keeps the feature inert.
         assert!(!stash_ttl_prune_candidate(99_999, 0, false, true));
-        let targets = stash_ttl_prune_targets(
-            &[candidate("%1", 99_999, false, true)],
-            0,
-        );
+        let targets = stash_ttl_prune_targets(&[candidate("%1", 99_999, false, true)], 0);
         assert!(targets.is_empty(), "disabled TTL must reap nothing");
     }
 
@@ -2598,9 +2595,9 @@ mod stash_ttl_prune_tests {
     #[test]
     fn targets_filters_only_eligible_panes() {
         let candidates = vec![
-            candidate("%idle-old", 1_000, false, true),  // eligible
-            candidate("%active", 1_000, true, true),     // active → skip
-            candidate("%fresh", 100, false, true),       // under TTL → skip
+            candidate("%idle-old", 1_000, false, true),   // eligible
+            candidate("%active", 1_000, true, true),      // active → skip
+            candidate("%fresh", 100, false, true),        // under TTL → skip
             candidate("%not-stash", 1_000, false, false), // not agent-doc stash → skip
         ];
         let targets = stash_ttl_prune_targets(&candidates, 300);

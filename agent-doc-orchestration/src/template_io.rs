@@ -15,8 +15,7 @@ use std::path::Path;
 
 use agent_doc_core::component;
 use agent_doc_core::template::{
-    ComponentInfo, PatchBlock, TemplateInfo, apply_patches_pure,
-    apply_patches_with_overrides_pure,
+    ComponentInfo, PatchBlock, TemplateInfo, apply_patches_pure, apply_patches_with_overrides_pure,
 };
 
 use crate::project_config;

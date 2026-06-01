@@ -375,9 +375,18 @@ fn run_auto_queue_continues_until_drained() {
     // #queue-prompt-echo-in-response: consumed prompts are drained from the queue
     // but embedded (blockquoted) into their response blocks.
     let queue_section = queue_section_of(&content);
-    assert!(!queue_section.contains("do #fix1"), "queue:\n{queue_section}");
-    assert!(!queue_section.contains("do #fix2"), "queue:\n{queue_section}");
-    assert!(!queue_section.contains("do #fix3"), "queue:\n{queue_section}");
+    assert!(
+        !queue_section.contains("do #fix1"),
+        "queue:\n{queue_section}"
+    );
+    assert!(
+        !queue_section.contains("do #fix2"),
+        "queue:\n{queue_section}"
+    );
+    assert!(
+        !queue_section.contains("do #fix3"),
+        "queue:\n{queue_section}"
+    );
     assert!(content.contains("> do #fix1"), "response echo:\n{content}");
     assert!(content.contains("> do #fix2"), "response echo:\n{content}");
     assert!(content.contains("> do #fix3"), "response echo:\n{content}");
@@ -442,9 +451,18 @@ fn run_persisted_active_queue_continues_until_drained_without_auto() {
         "queue should clear active state after all prompts are consumed"
     );
     let queue_section = queue_section_of(&content);
-    assert!(!queue_section.contains("do #fix1"), "queue:\n{queue_section}");
-    assert!(!queue_section.contains("do #fix2"), "queue:\n{queue_section}");
-    assert!(!queue_section.contains("do #fix3"), "queue:\n{queue_section}");
+    assert!(
+        !queue_section.contains("do #fix1"),
+        "queue:\n{queue_section}"
+    );
+    assert!(
+        !queue_section.contains("do #fix2"),
+        "queue:\n{queue_section}"
+    );
+    assert!(
+        !queue_section.contains("do #fix3"),
+        "queue:\n{queue_section}"
+    );
     assert!(content.contains("> do #fix1"), "response echo:\n{content}");
     assert!(content.contains("> do #fix3"), "response echo:\n{content}");
     assert_eq!(fs::read_to_string(counter).unwrap(), "3");
@@ -811,10 +829,18 @@ fn preflight_emits_owned_pane_self_invocation_for_unresolved_prompt() {
     assert!(out.status.success(), "preflight should succeed");
     let json: Value = serde_json::from_slice(&out.stdout).unwrap();
     let osi = &json["owned_pane_self_invocation"];
-    assert!(!osi.is_null(), "owned_pane_self_invocation must be present: {json}");
+    assert!(
+        !osi.is_null(),
+        "owned_pane_self_invocation must be present: {json}"
+    );
     assert_eq!(osi["kind"].as_str().unwrap(), "unresolved_prompt");
     assert_eq!(osi["current_pane"].as_str().unwrap(), "%77");
-    assert!(osi["work_excerpt"].as_str().unwrap().contains("Please reply"));
+    assert!(
+        osi["work_excerpt"]
+            .as_str()
+            .unwrap()
+            .contains("Please reply")
+    );
     assert!(
         osi["persistence_command"]
             .as_str()
@@ -890,9 +916,17 @@ fn preflight_emits_owned_pane_self_invocation_for_active_queue_head() {
     assert!(out.status.success(), "preflight should succeed");
     let json: Value = serde_json::from_slice(&out.stdout).unwrap();
     let osi = &json["owned_pane_self_invocation"];
-    assert!(!osi.is_null(), "owned_pane_self_invocation must be present: {json}");
+    assert!(
+        !osi.is_null(),
+        "owned_pane_self_invocation must be present: {json}"
+    );
     assert_eq!(osi["kind"].as_str().unwrap(), "active_queue_head");
-    assert!(osi["work_excerpt"].as_str().unwrap().contains("do something"));
+    assert!(
+        osi["work_excerpt"]
+            .as_str()
+            .unwrap()
+            .contains("do something")
+    );
     assert!(
         osi["persistence_command"]
             .as_str()

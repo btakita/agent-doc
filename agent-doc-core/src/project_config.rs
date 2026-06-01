@@ -148,8 +148,6 @@ pub fn parse_project_toml(content: &str) -> Result<ProjectConfig> {
 /// Parse a legacy `components.toml` body (flat `[name]` tables of
 /// [`ComponentConfig`] fields) into a map. Used by the file-based migrator
 /// in `crate::project_config_io`.
-pub fn parse_legacy_components_toml(
-    content: &str,
-) -> Result<BTreeMap<String, ComponentConfig>> {
+pub fn parse_legacy_components_toml(content: &str) -> Result<BTreeMap<String, ComponentConfig>> {
     toml::from_str(content).map_err(anyhow::Error::from)
 }

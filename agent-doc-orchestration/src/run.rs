@@ -152,7 +152,9 @@ pub fn run(
     no_git: bool,
     config: &Config,
 ) -> Result<()> {
-    run_with_context(file, branch, agent_name, model, dry_run, no_git, config, None)
+    run_with_context(
+        file, branch, agent_name, model, dry_run, no_git, config, None,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -914,7 +916,9 @@ pub fn detect_owned_pane_self_invocation(
     let current_pane = crate::sessions::current_pane().unwrap_or_default();
     let actor = actor_record_for_file(file).ok().flatten();
     let actor_generation = actor.as_ref().map(|record| record.generation);
-    let actor_state = actor.as_ref().map(|record| record.state.as_str().to_string());
+    let actor_state = actor
+        .as_ref()
+        .map(|record| record.state.as_str().to_string());
     let persistence_command = format!(
         "agent-doc finalize {} (or agent-doc write --commit {})",
         file.display(),

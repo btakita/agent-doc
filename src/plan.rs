@@ -43,12 +43,12 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-use agent_doc_orchestration::{diff, pending, security};
 use crate::{
     component,
     component::{is_backlog_component, is_tracked_work_component},
     frontmatter,
 };
+use agent_doc_orchestration::{diff, pending, security};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -199,9 +199,11 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     };
 
     let prompt_bearing_changes = diff::classify_prompt_bearing_changes(&prompt_diff_text);
-    let prompt_targets =
-        agent_doc_orchestration::flow::session_cycle::prompt_targets_from_changes(&prompt_bearing_changes);
-    let added_diff_lines = agent_doc_orchestration::prompt_contract::collect_added_diff_lines(&prompt_diff_text);
+    let prompt_targets = agent_doc_orchestration::flow::session_cycle::prompt_targets_from_changes(
+        &prompt_bearing_changes,
+    );
+    let added_diff_lines =
+        agent_doc_orchestration::prompt_contract::collect_added_diff_lines(&prompt_diff_text);
 
     let execution_scope = execution_scope_for_prompt_targets(
         &prompt_targets,
@@ -402,7 +404,9 @@ fn execution_scope_for_prompt_targets(
         agent_doc_orchestration::flow::session_cycle::SessionExecutionScope::PlanBacklogOnly => {
             ExecutionScope::PlanBacklogOnly
         }
-        agent_doc_orchestration::flow::session_cycle::SessionExecutionScope::Normal => ExecutionScope::Normal,
+        agent_doc_orchestration::flow::session_cycle::SessionExecutionScope::Normal => {
+            ExecutionScope::Normal
+        }
     }
 }
 
@@ -428,11 +432,13 @@ fn finalize_placeholder_commands(
             },
         )
         .collect::<Vec<_>>();
-    vec![agent_doc_orchestration::flow::session_cycle::finalize_command(
-        file,
-        fm.resolve_mode(),
-        &pending,
-    )]
+    vec![
+        agent_doc_orchestration::flow::session_cycle::finalize_command(
+            file,
+            fm.resolve_mode(),
+            &pending,
+        ),
+    ]
 }
 
 struct RoutingFields {
@@ -659,8 +665,13 @@ fn pending_mutations_for_doc(
         }
     }
 
-    let auto_done = agent_doc_orchestration::session_check::resolve_auto_done(file).unwrap_or(false);
-    for id in agent_doc_orchestration::session_check::inline_done_signal_ids(file, prompt_targets, auto_done)? {
+    let auto_done =
+        agent_doc_orchestration::session_check::resolve_auto_done(file).unwrap_or(false);
+    for id in agent_doc_orchestration::session_check::inline_done_signal_ids(
+        file,
+        prompt_targets,
+        auto_done,
+    )? {
         push_resolve_existing_mutation(&mut pending_mutations, &items, &id);
     }
 
@@ -678,12 +689,13 @@ fn pending_mutations_for_doc(
         .into_iter()
         .map(|path| path.display().to_string())
         .collect();
-        let issue_units = agent_doc_orchestration::prompt_contract::ordered_issue_units_for_agent_doc_bug(
-            prompt_targets,
-            added_diff_lines,
-            &fm.prompt_presets,
-            prompt_bearing_changes,
-        );
+        let issue_units =
+            agent_doc_orchestration::prompt_contract::ordered_issue_units_for_agent_doc_bug(
+                prompt_targets,
+                added_diff_lines,
+                &fm.prompt_presets,
+                prompt_bearing_changes,
+            );
         if issue_units.len() > 1 {
             eprintln!(
                 "[plan] #agent-doc-bug declaration_order={} final_insert_order={}",
@@ -834,7 +846,10 @@ mod tests {
         }
     }
 
-    fn write_cycles_log(doc: &std::path::Path, entries: &[agent_doc_orchestration::ops_log::CycleEntry]) {
+    fn write_cycles_log(
+        doc: &std::path::Path,
+        entries: &[agent_doc_orchestration::ops_log::CycleEntry],
+    ) {
         let log_path = doc.parent().unwrap().join(".agent-doc/logs/cycles.jsonl");
         std::fs::create_dir_all(log_path.parent().unwrap()).unwrap();
         let mut file = std::fs::File::create(log_path).unwrap();
@@ -2747,7 +2762,8 @@ do #cmpclr. spec-test-build-install-commit-push
                 },
             ],
         );
-        agent_doc_orchestration::session_accretion::record_recent_exchange_compaction(&doc).unwrap();
+        agent_doc_orchestration::session_accretion::record_recent_exchange_compaction(&doc)
+            .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -2805,7 +2821,8 @@ do #aftercmp. spec-test-build-install-commit-push
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         std::fs::write(&doc, current).unwrap();
         snapshot::save(&doc, baseline).unwrap();
-        agent_doc_orchestration::session_accretion::record_recent_exchange_compaction(&doc).unwrap();
+        agent_doc_orchestration::session_accretion::record_recent_exchange_compaction(&doc)
+            .unwrap();
         write_cycles_log(
             &doc,
             &[

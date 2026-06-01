@@ -437,7 +437,11 @@ pub fn record_pending_gated_ids(file: &Path, ids: &[String]) -> Result<Option<Cy
         .map(|id| normalize_pending_id(id))
         .filter(|id| !id.is_empty())
     {
-        if !state.pending_gated_ids.iter().any(|existing| existing == &id) {
+        if !state
+            .pending_gated_ids
+            .iter()
+            .any(|existing| existing == &id)
+        {
             state.pending_gated_ids.push(id);
             changed = true;
         }

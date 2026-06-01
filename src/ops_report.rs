@@ -180,50 +180,37 @@ pub fn diagnose_cycle(
             limit,
         )
     } else {
-        scan_text_tree_source(
-            "harness session logs",
-            &logs,
-            &terms,
-            limit,
-            |path| {
-                let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-                    return false;
-                };
-                name.ends_with(".log") && name != "ops.log" && !name.starts_with("debug.log")
-            },
-        )
+        scan_text_tree_source("harness session logs", &logs, &terms, limit, |path| {
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                return false;
+            };
+            name.ends_with(".log") && name != "ops.log" && !name.starts_with("debug.log")
+        })
     };
 
     let sources = std::thread::scope(|s| {
-        let ops_log = s.spawn(|| {
-            scan_text_source("ops log", logs.join("ops.log"), &terms, limit)
-        });
-        let cycle_jsonl = s.spawn(|| {
-            scan_text_source("cycle jsonl", logs.join("cycles.jsonl"), &terms, limit)
-        });
+        let ops_log = s.spawn(|| scan_text_source("ops log", logs.join("ops.log"), &terms, limit));
+        let cycle_jsonl =
+            s.spawn(|| scan_text_source("cycle jsonl", logs.join("cycles.jsonl"), &terms, limit));
         let editor_debug = s.spawn(|| {
-            scan_text_tree_source(
-                "editor plugin/debug logs",
-                &logs,
+            scan_text_tree_source("editor plugin/debug logs", &logs, &terms, limit, |path| {
+                let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                    return false;
+                };
+                name.starts_with("debug.log") || name.contains("plugin") || name.contains("jb")
+            })
+        });
+        let captures =
+            s.spawn(|| scan_json_tree_source("captures", &agent_doc.join("captures"), &terms));
+        let codex_hooks = s.spawn(|| {
+            scan_json_tree_source(
+                "codex hook sessions",
+                &agent_doc.join("codex-hooks"),
                 &terms,
-                limit,
-                |path| {
-                    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-                        return false;
-                    };
-                    name.starts_with("debug.log") || name.contains("plugin") || name.contains("jb")
-                },
             )
         });
-        let captures = s.spawn(|| {
-            scan_json_tree_source("captures", &agent_doc.join("captures"), &terms)
-        });
-        let codex_hooks = s.spawn(|| {
-            scan_json_tree_source("codex hook sessions", &agent_doc.join("codex-hooks"), &terms)
-        });
-        let hook_payloads = s.spawn(|| {
-            scan_json_tree_source("hook payloads", &agent_doc.join("hooks"), &terms)
-        });
+        let hook_payloads =
+            s.spawn(|| scan_json_tree_source("hook payloads", &agent_doc.join("hooks"), &terms));
         let patches = s.spawn(|| {
             scan_text_tree_source(
                 "patch files",
@@ -244,9 +231,8 @@ pub fn diagnose_cycle(
                 &terms,
             )
         });
-        let state = s.spawn(|| {
-            scan_json_tree_source("agent-doc state", &agent_doc.join("state"), &terms)
-        });
+        let state =
+            s.spawn(|| scan_json_tree_source("agent-doc state", &agent_doc.join("state"), &terms));
 
         vec![
             ops_log.join().unwrap(),
@@ -475,7 +461,10 @@ fn scan_text_files_source(
                     path: file.clone(),
                     line: Some(idx + 1),
                     kind: "text".to_string(),
-                    text: Some(truncate_text(&agent_doc_orchestration::secret_redact::redact(line), 700)),
+                    text: Some(truncate_text(
+                        &agent_doc_orchestration::secret_redact::redact(line),
+                        700,
+                    )),
                     json: None,
                 });
             }

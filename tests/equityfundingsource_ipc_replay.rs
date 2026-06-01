@@ -347,7 +347,9 @@ fn equityfundingsource_socket_ipc_replays_typing_during_finalize() {
 
     run_finalize(&project, "EFS socket replay", 0, &[]);
 
-    let _ = fs::remove_file(agent_doc_orchestration::ipc_socket::socket_path(project.root()));
+    let _ = fs::remove_file(agent_doc_orchestration::ipc_socket::socket_path(
+        project.root(),
+    ));
     drop(server);
 
     let payload = seen_payload

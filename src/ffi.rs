@@ -212,7 +212,8 @@ pub unsafe extern "C" fn agent_doc_is_idle(file_path: *const c_char, debounce_ms
     // plugin restart), also check the file-based indicator so cross-process typing state
     // from another plugin instance isn't silently lost.
     if !agent_doc_orchestration::debounce::is_tracked(path) {
-        return (!agent_doc_orchestration::debounce::is_typing_via_file(path, debounce_ms as u64)) as i32;
+        return (!agent_doc_orchestration::debounce::is_typing_via_file(path, debounce_ms as u64))
+            as i32;
     }
     1
 }
@@ -238,10 +239,14 @@ pub unsafe extern "C" fn agent_doc_await_idle(
     // When the file is untracked in-process (e.g., after plugin restart), bridge to
     // file-based indicator so cross-process typing state isn't silently ignored.
     if !agent_doc_orchestration::debounce::is_tracked(path) {
-        return agent_doc_orchestration::debounce::await_idle_via_file(path, debounce_ms as u64, timeout_ms as u64)
-            as i32;
+        return agent_doc_orchestration::debounce::await_idle_via_file(
+            path,
+            debounce_ms as u64,
+            timeout_ms as u64,
+        ) as i32;
     }
-    agent_doc_orchestration::debounce::await_idle(path, debounce_ms as u64, timeout_ms as u64) as i32
+    agent_doc_orchestration::debounce::await_idle(path, debounce_ms as u64, timeout_ms as u64)
+        as i32
 }
 
 /// Check if a plugin in another process has typed recently (cross-process).
@@ -288,7 +293,11 @@ pub unsafe extern "C" fn agent_doc_await_idle_via_file(
         Ok(s) => s,
         Err(_) => return 1, // Invalid path — don't block
     };
-    agent_doc_orchestration::debounce::await_idle_via_file(path, debounce_ms as u64, timeout_ms as u64) as i32
+    agent_doc_orchestration::debounce::await_idle_via_file(
+        path,
+        debounce_ms as u64,
+        timeout_ms as u64,
+    ) as i32
 }
 
 /// Set the response status for a file (Option B: in-process).
@@ -387,7 +396,10 @@ pub unsafe extern "C" fn agent_doc_report_editor_state(
     let hash = if content_hash.is_null() {
         None
     } else {
-        unsafe { CStr::from_ptr(content_hash) }.to_str().ok().map(|s| s.to_string())
+        unsafe { CStr::from_ptr(content_hash) }
+            .to_str()
+            .ok()
+            .map(|s| s.to_string())
     };
     let len = if content_len < 0 {
         None
@@ -397,7 +409,10 @@ pub unsafe extern "C" fn agent_doc_report_editor_state(
     let sid = if session_id.is_null() {
         None
     } else {
-        unsafe { CStr::from_ptr(session_id) }.to_str().ok().map(|s| s.to_string())
+        unsafe { CStr::from_ptr(session_id) }
+            .to_str()
+            .ok()
+            .map(|s| s.to_string())
     };
     let save_ts = if save_timestamp_ms == 0 {
         None
@@ -459,7 +474,8 @@ pub unsafe extern "C" fn agent_doc_is_editor_stable(
         Ok(s) => s,
         Err(_) => return 0,
     };
-    agent_doc_orchestration::debounce::editor_buffer_stable(path, debounce_ms as u64).is_some() as i32
+    agent_doc_orchestration::debounce::editor_buffer_stable(path, debounce_ms as u64).is_some()
+        as i32
 }
 
 /// Try to acquire the sync lock. Returns `true` if acquired, `false` if already held.
@@ -1032,9 +1048,8 @@ fn force_link_core_ffi_symbols() {
         agent_doc_apply_patch_with_boundary, agent_doc_apply_patch_with_caret,
         agent_doc_converge_queue_auto, agent_doc_crdt_merge, agent_doc_free_state,
         agent_doc_free_string, agent_doc_merge_crdt, agent_doc_merge_frontmatter,
-        agent_doc_normalize_template_structure,
-        agent_doc_parse_components, agent_doc_reposition_boundary_to_end,
-        agent_doc_reposition_boundary_to_end_preserve_head,
+        agent_doc_normalize_template_structure, agent_doc_parse_components,
+        agent_doc_reposition_boundary_to_end, agent_doc_reposition_boundary_to_end_preserve_head,
         agent_doc_reposition_boundary_to_end_preserve_head_with_id,
         agent_doc_reposition_boundary_to_end_with_id, agent_doc_visual_tokens_json,
     };

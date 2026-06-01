@@ -31,8 +31,8 @@
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
-use agent_doc_orchestration::{snapshot, write};
 use crate::component;
+use agent_doc_orchestration::{snapshot, write};
 
 pub fn run(files: &[PathBuf], all: bool, dry_run: bool) -> Result<()> {
     let targets = if all {
@@ -135,8 +135,10 @@ fn migrate_legacy_gated_backlog_items(content: &str) -> Result<String> {
         return Ok(content.to_string());
     };
     let backlog_body = backlog.content(content);
-    let (new_backlog, gated_items) =
-        agent_doc_orchestration::pending::op_take_items_by_state(backlog_body, agent_doc_orchestration::pending::PendingState::Gated);
+    let (new_backlog, gated_items) = agent_doc_orchestration::pending::op_take_items_by_state(
+        backlog_body,
+        agent_doc_orchestration::pending::PendingState::Gated,
+    );
     if gated_items.is_empty() {
         return Ok(content.to_string());
     }

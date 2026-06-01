@@ -165,16 +165,16 @@ use crate::flow::routed_reopen::{
     accepted_only_dispatch_start_log_message, accepted_only_dispatch_start_refusal_message,
     actor_dispatch_blocker_reason, actor_recovery_hint,
     authoritative_actor_dispatch_guard_reason as flow_authoritative_actor_dispatch_guard_reason,
-    authoritative_actor_ready_retry_budget, busy_projection_repaired_by_ready_prompt,
+    authoritative_actor_ready_retry_budget,
     busy_existing_pane_auto_fix_outcome as flow_busy_existing_pane_auto_fix_outcome,
-    can_use_degraded_authoritative_actor, classify_authoritative_actor_dispatch_action,
-    classify_authoritative_prompt_ready_barrier, classify_dispatch_start_proof,
-    decide_authoritative_reopen, degraded_authoritative_actor_direct_submit_log_message,
+    busy_projection_repaired_by_ready_prompt, can_use_degraded_authoritative_actor,
+    classify_authoritative_actor_dispatch_action, classify_authoritative_prompt_ready_barrier,
+    classify_dispatch_start_proof, decide_authoritative_reopen,
+    degraded_authoritative_actor_direct_submit_log_message,
     direct_pane_submit_outcome as flow_direct_pane_submit_outcome,
     dispatch_only_dispatch_start_proof_required as flow_dispatch_only_dispatch_start_proof_required,
-    dispatch_only_focus_only_should_fail_closed,
-    dispatch_only_sent_console_message, dispatch_only_sent_log_message,
-    dispatch_only_starting_pane_ready_retry_budget,
+    dispatch_only_focus_only_should_fail_closed, dispatch_only_sent_console_message,
+    dispatch_only_sent_log_message, dispatch_only_starting_pane_ready_retry_budget,
     dispatch_only_starting_pane_recovery_retry_budget, log_dispatch_proof_failed,
     log_prompt_ready_barrier_failed,
     should_print_dispatch_only_unproven_progress as flow_should_print_dispatch_only_unproven_progress,
@@ -1603,7 +1603,8 @@ pub fn run_with_tmux(
     }
 
     let rc = crate::graph::RunContext::new(file.to_path_buf());
-    let fm = frontmatter::parse_for_file_with_context(&updated_content, file, &rc).map(|(f, _)| f)?;
+    let fm =
+        frontmatter::parse_for_file_with_context(&updated_content, file, &rc).map(|(f, _)| f)?;
     let global_config = crate::config::load().unwrap_or_default();
     let mut harness = HarnessConfig::from_context(&fm, &global_config);
     if plain_trigger {
@@ -1904,9 +1905,7 @@ fn enqueue_route_dispatch_prompt(
                 ));
                 // Dedup against the raw body so a repeated dispatch into an
                 // already-polluted queue stays idempotent.
-                if body
-                    .lines()
-                    .any(|line| line.trim() == new_rendered.trim())
+                if body.lines().any(|line| line.trim() == new_rendered.trim())
                     || body.contains(prompt_text.as_str())
                 {
                     already_present = true;
@@ -3518,9 +3517,7 @@ fn busy_dispatch_only_should_wait_for_ready(
     actor_state: crate::session_actor::ActorState,
     has_queue_fallback: bool,
 ) -> bool {
-    dispatch_only
-        && actor_state == crate::session_actor::ActorState::Busy
-        && !has_queue_fallback
+    dispatch_only && actor_state == crate::session_actor::ActorState::Busy && !has_queue_fallback
 }
 
 fn wait_for_authoritative_actor_ready(
@@ -4036,7 +4033,9 @@ fn route_via_authoritative_actor(
                     file.display(),
                     dispatch_pane,
                     reason,
-                    dispatch_only_busy_refusal_wait_secs(dispatch_only_starting_pane_recovery_timeout(Some(harness))),
+                    dispatch_only_busy_refusal_wait_secs(
+                        dispatch_only_starting_pane_recovery_timeout(Some(harness))
+                    ),
                     authoritative_actor_dispatch_recovery_hint(actor_state, file)
                 );
             }
@@ -4087,7 +4086,9 @@ fn route_via_authoritative_actor(
                     file.display(),
                     dispatch_pane,
                     reason,
-                    dispatch_only_busy_refusal_wait_secs(dispatch_only_starting_pane_recovery_timeout(Some(harness))),
+                    dispatch_only_busy_refusal_wait_secs(
+                        dispatch_only_starting_pane_recovery_timeout(Some(harness))
+                    ),
                     authoritative_actor_dispatch_recovery_hint(actor_state, file)
                 )
             }
@@ -4181,7 +4182,9 @@ fn route_via_authoritative_actor(
             let wait_context = failclosed_wait_context(
                 harness,
                 busy_cue.as_deref(),
-                dispatch_only_busy_refusal_wait_secs(dispatch_only_starting_pane_recovery_timeout(Some(harness))),
+                dispatch_only_busy_refusal_wait_secs(dispatch_only_starting_pane_recovery_timeout(
+                    Some(harness),
+                )),
             );
             anyhow::bail!(
                 "authoritative actor generation {} for {} owns pane {} but route will not inject a new trigger because {} ({}){}. {}",
@@ -6638,7 +6641,8 @@ fn attempt_busy_existing_pane_interrupt_recovery(
     if codex_pane_in_shell_search_state(tmux, pane, harness, blocker_reason) {
         let _ = tmux.send_keys_raw(pane, "C-g");
         std::thread::sleep(Duration::from_millis(100));
-        let ctrl_g_probe = wait_for_agent_ready_outcome(tmux, pane, Duration::from_secs(2), harness);
+        let ctrl_g_probe =
+            wait_for_agent_ready_outcome(tmux, pane, Duration::from_secs(2), harness);
         if ctrl_g_probe.is_ready() {
             crate::ops_log::log_op(
                 file,
@@ -8353,8 +8357,8 @@ fn await_idle(file: &Path, debounce: Duration) -> Result<()> {
 }
 
 fn await_idle_with_max_wait(file: &Path, debounce: Duration, max_wait: Duration) -> Result<()> {
-    use std::time::Instant;
     use crate::debounce::TypingIndicatorStatus;
+    use std::time::Instant;
 
     let poll_interval = Duration::from_millis(100);
     let start = Instant::now();

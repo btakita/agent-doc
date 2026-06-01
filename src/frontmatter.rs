@@ -6,4 +6,6 @@
 //! Thin re-export shim. All `crate::frontmatter::*` call sites continue to resolve.
 
 pub use agent_doc_core::frontmatter::*;
-pub use agent_doc_orchestration::frontmatter_io::{ensure_session_for_file, parse_for_file, read_session_id};
+pub use agent_doc_orchestration::frontmatter_io::{
+    ensure_session_for_file, parse_for_file, read_session_id,
+};

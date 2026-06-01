@@ -233,9 +233,7 @@ pub fn parse(body: &str) -> Result<Vec<QueueEntry>> {
             // separator and the following lines parse normally, so a polluted
             // queue (stray ``` / ~~~ from merged prose) cannot swallow the real
             // queue items beneath it (#jb-run-agent-doc-response-queue-contamination).
-            if let Some(close_idx) =
-                (i + 1..lines.len()).find(|&j| lines[j].trim() == closer)
-            {
+            if let Some(close_idx) = (i + 1..lines.len()).find(|&j| lines[j].trim() == closer) {
                 let text = lines[i + 1..close_idx].join("\n");
                 if !text.trim().is_empty() {
                     let prompt = QueuePrompt {
@@ -260,9 +258,7 @@ pub fn parse(body: &str) -> Result<Vec<QueueEntry>> {
             // A bare `---` is a fence only when a closing `---` follows;
             // otherwise it is a stray separator preserved as `Freeform` so the
             // remaining lines (presets, real `do [#id]` items) still parse.
-            if let Some(close_idx) =
-                (i + 1..lines.len()).find(|&j| lines[j].trim() == "---")
-            {
+            if let Some(close_idx) = (i + 1..lines.len()).find(|&j| lines[j].trim() == "---") {
                 let text = lines[i + 1..close_idx].join("\n");
                 if !text.trim().is_empty() {
                     entries.push(QueueEntry::Prompt(QueuePrompt {
@@ -670,9 +666,9 @@ pub fn detect_head_prompt_modified(
             // (edited in place or removed). Otherwise a concurrent prepend/reorder
             // would strand every remaining live prompt as inactive residue
             // instead of letting the auto-queue advance to the new head.
-            let snap_head_still_present = file_entries.iter().any(|entry| {
-                matches!(entry, QueueEntry::Prompt(p) if p.text == s.text)
-            });
+            let snap_head_still_present = file_entries
+                .iter()
+                .any(|entry| matches!(entry, QueueEntry::Prompt(p) if p.text == s.text));
             !snap_head_still_present
         }
         (None, None) => false,
@@ -728,8 +724,9 @@ mod tests {
     #[test]
     fn sync_mode_fully_mirrors_backlog_order() {
         let entries = parse("- do [#old]\npreset spec\n").unwrap();
-        let synced = sync_backlog_into_queue(&entries, &ids(&["a", "b"]), BacklogQueueSyncMode::Sync)
-            .expect("queue should change");
+        let synced =
+            sync_backlog_into_queue(&entries, &ids(&["a", "b"]), BacklogQueueSyncMode::Sync)
+                .expect("queue should change");
         assert_eq!(render(&synced), "- do [#a]\n- do [#b]\n");
     }
 
@@ -746,9 +743,12 @@ mod tests {
     #[test]
     fn append_mode_adds_only_missing_ids_at_tail() {
         let entries = parse("- do [#a]\n").unwrap();
-        let synced =
-            sync_backlog_into_queue(&entries, &ids(&["a", "b", "c"]), BacklogQueueSyncMode::Append)
-                .expect("queue should change");
+        let synced = sync_backlog_into_queue(
+            &entries,
+            &ids(&["a", "b", "c"]),
+            BacklogQueueSyncMode::Append,
+        )
+        .expect("queue should change");
         assert_eq!(render(&synced), "- do [#a]\n- do [#b]\n- do [#c]\n");
     }
 
@@ -765,9 +765,12 @@ mod tests {
     #[test]
     fn prepend_mode_inserts_missing_ids_at_front_in_backlog_order() {
         let entries = parse("- do [#z]\n").unwrap();
-        let synced =
-            sync_backlog_into_queue(&entries, &ids(&["a", "b", "z"]), BacklogQueueSyncMode::Prepend)
-                .expect("queue should change");
+        let synced = sync_backlog_into_queue(
+            &entries,
+            &ids(&["a", "b", "z"]),
+            BacklogQueueSyncMode::Prepend,
+        )
+        .expect("queue should change");
         assert_eq!(render(&synced), "- do [#a]\n- do [#b]\n- do [#z]\n");
     }
 
@@ -828,7 +831,13 @@ mod tests {
             1,
             "duplicate live prompt collapses to one: {deduped:?}"
         );
-        assert_eq!(deduped.iter().filter(|e| matches!(e, QueueEntry::Completed(_))).count(), 1);
+        assert_eq!(
+            deduped
+                .iter()
+                .filter(|e| matches!(e, QueueEntry::Completed(_)))
+                .count(),
+            1
+        );
         assert!(deduped.iter().any(|e| matches!(e, QueueEntry::Preset(_))));
     }
 
@@ -1073,11 +1082,7 @@ mod tests {
         let body = "~~~prompt\nSome content without closing fence\n";
         let entries = parse(body).expect("unclosed fence is tolerated");
         assert!(prompts(&entries).is_empty());
-        assert!(
-            entries
-                .iter()
-                .any(|e| matches!(e, QueueEntry::Freeform(_)))
-        );
+        assert!(entries.iter().any(|e| matches!(e, QueueEntry::Freeform(_))));
     }
 
     #[test]

@@ -310,7 +310,8 @@ mod tests {
     fn detect_no_prior_headings_is_empty() {
         // No prior response blocks → nothing to protect, no findings.
         let prior = "<!-- agent:exchange -->\njust a prompt\n<!-- /agent:exchange -->\n";
-        let current = "<!-- agent:exchange -->\n### Re: x — opus-4-8\nhi\n<!-- /agent:exchange -->\n";
+        let current =
+            "<!-- agent:exchange -->\n### Re: x — opus-4-8\nhi\n<!-- /agent:exchange -->\n";
         assert!(detect_response_block_corruption(prior, current).is_empty());
     }
 

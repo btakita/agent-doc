@@ -217,8 +217,8 @@ fn sync_after_autoclaim_in(
 mod tests {
     use super::*;
     use agent_doc_orchestration::sessions::{SessionEntry, SessionRegistry};
-    use tmux_router::IsolatedTmux;
     use tempfile::TempDir;
+    use tmux_router::IsolatedTmux;
 
     fn env_lock() -> crate::test_support::ProcessGlobalLockGuard {
         crate::test_support::env_lock()

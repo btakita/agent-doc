@@ -18,8 +18,8 @@ use anyhow::Result;
 use std::path::Path;
 
 use agent_doc_core::frontmatter::{
-    Frontmatter, SshResolverContext, contextualize_parse_error,
-    ensure_session_with_ssh_resolver, parse, parse_with_ssh_resolver,
+    Frontmatter, SshResolverContext, contextualize_parse_error, ensure_session_with_ssh_resolver,
+    parse, parse_with_ssh_resolver,
 };
 
 use crate::graph::RunContext;

@@ -352,7 +352,10 @@ pub fn cancel_preflight_cycle(file: &Path) -> Result<CancelOutcome> {
     if !state.is_open() {
         return Ok(CancelOutcome::NoOpenCycle);
     }
-    if !matches!(state.phase, crate::cycle_state::CyclePhase::PreflightStarted) {
+    if !matches!(
+        state.phase,
+        crate::cycle_state::CyclePhase::PreflightStarted
+    ) {
         return Ok(CancelOutcome::Protected);
     }
     if crate::capture::load_by_id(file, &state.cycle_id)?.is_some() {
@@ -662,10 +665,7 @@ pub fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome
     Ok(RepairOutcome::Noop)
 }
 
-pub fn recover_missing_commit_boundary(
-    file: &Path,
-    event: &str,
-) -> Result<Option<&'static str>> {
+pub fn recover_missing_commit_boundary(file: &Path, event: &str) -> Result<Option<&'static str>> {
     let state = crate::cycle_state::load(file)?;
     let has_open_commit_boundary = state.as_ref().is_some_and(|state| {
         matches!(

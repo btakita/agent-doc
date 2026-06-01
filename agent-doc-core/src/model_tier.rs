@@ -574,7 +574,10 @@ pub fn parse_model_arg(
     }
     // For opencode, reject bare model names (no provider prefix).
     if harness == "opencode" && !is_bare_model_name(trimmed) {
-        return Some((Tier::Auto, canonical_model_name(trimmed, harness, model_config)));
+        return Some((
+            Tier::Auto,
+            canonical_model_name(trimmed, harness, model_config),
+        ));
     }
     // Unknown — accept the name but leave tier as Auto so it doesn't gate.
     None
@@ -855,10 +858,7 @@ mod tests {
     #[test]
     fn canonical_model_name_warns_on_bare_opencode_name() {
         let cfg = ModelConfig::default();
-        assert_eq!(
-            canonical_model_name("glm-5.1", "opencode", &cfg),
-            "glm-5.1"
-        );
+        assert_eq!(canonical_model_name("glm-5.1", "opencode", &cfg), "glm-5.1");
         assert_eq!(
             canonical_model_name("zai-coding-plan/glm-5.1", "opencode", &cfg),
             "zai-coding-plan/glm-5.1"

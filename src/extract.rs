@@ -35,12 +35,12 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use agent_doc_orchestration::{security, snapshot, write};
 use crate::{
     component,
     component::{is_backlog_component, is_icebox_component},
     frontmatter,
 };
+use agent_doc_orchestration::{security, snapshot, write};
 
 /// Check pane ownership for the target file. Returns Ok if no conflict or if
 /// the target has no active session. Returns Err suggesting --bypass-claim

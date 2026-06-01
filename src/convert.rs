@@ -43,11 +43,11 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
-use agent_doc_orchestration::{snapshot, write};
 use crate::{
     AgentDocMode,
     frontmatter::{self, AgentDocFormat, AgentDocWrite},
 };
+use agent_doc_orchestration::{snapshot, write};
 
 pub fn run(
     file: &Path,

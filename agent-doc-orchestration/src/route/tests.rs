@@ -37,8 +37,12 @@ fn codex_busy_ctrl_g_gate_only_fires_for_shell_search_blocker() {
     // it must NOT receive C-g (which would open $EDITOR). An unknown timeout
     // (None) likewise fails closed to the Escape + C-c path.
     assert!(!is_codex_shell_search_blocker(Some("active codex turn")));
-    assert!(!is_codex_shell_search_blocker(Some("queued draft in composer")));
-    assert!(!is_codex_shell_search_blocker(Some("active permission prompt")));
+    assert!(!is_codex_shell_search_blocker(Some(
+        "queued draft in composer"
+    )));
+    assert!(!is_codex_shell_search_blocker(Some(
+        "active permission prompt"
+    )));
     assert!(!is_codex_shell_search_blocker(None));
 
     // Linkage check: dispatch_blocker_reason actually classifies a shell-search
@@ -2347,8 +2351,16 @@ fn busy_dispatch_only_skips_ready_wait_when_queue_fallback_exists() {
         "without a queue fallback the bounded ready wait is still the only recourse before bailing"
     );
     // Not dispatch-only, or not busy → the busy-wait guard does not apply.
-    assert!(!busy_dispatch_only_should_wait_for_ready(false, ActorState::Busy, false));
-    assert!(!busy_dispatch_only_should_wait_for_ready(true, ActorState::Ready, false));
+    assert!(!busy_dispatch_only_should_wait_for_ready(
+        false,
+        ActorState::Busy,
+        false
+    ));
+    assert!(!busy_dispatch_only_should_wait_for_ready(
+        true,
+        ActorState::Ready,
+        false
+    ));
 }
 
 #[test]

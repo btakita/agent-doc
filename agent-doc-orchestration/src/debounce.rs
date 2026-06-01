@@ -71,8 +71,7 @@ use std::time::Instant;
 
 static LAST_CHANGE: Mutex<Option<HashMap<PathBuf, Instant>>> = Mutex::new(None);
 
-static EDITOR_BUFFER_STATES: Mutex<Option<HashMap<PathBuf, EditorBufferState>>> =
-    Mutex::new(None);
+static EDITOR_BUFFER_STATES: Mutex<Option<HashMap<PathBuf, EditorBufferState>>> = Mutex::new(None);
 
 fn with_state<R>(f: impl FnOnce(&mut HashMap<PathBuf, Instant>) -> R) -> R {
     let mut guard = LAST_CHANGE.lock().unwrap();

@@ -160,7 +160,8 @@ impl ServeState {
                 auth,
             })
         } else {
-            let root = agent_doc_orchestration::snapshot::find_project_root(&canonical).unwrap_or(canonical);
+            let root = agent_doc_orchestration::snapshot::find_project_root(&canonical)
+                .unwrap_or(canonical);
             Ok(Self {
                 root,
                 default_doc: None,
@@ -625,7 +626,11 @@ fn list_sessions(state: &ServeState) -> Result<Vec<ServeSession>> {
     Ok(by_path.into_values().collect())
 }
 
-fn registry_entry_path(root: &Path, key: &str, entry: &agent_doc_orchestration::sessions::SessionEntry) -> PathBuf {
+fn registry_entry_path(
+    root: &Path,
+    key: &str,
+    entry: &agent_doc_orchestration::sessions::SessionEntry,
+) -> PathBuf {
     if !entry.file.is_empty() {
         let file = Path::new(&entry.file);
         if file.is_absolute() {
@@ -874,7 +879,9 @@ fn doc_event_payload(doc: &Path, fingerprint: &DocFingerprint) -> serde_json::Va
     })
 }
 
-fn active_partial_response(doc: &Path) -> Result<Option<agent_doc_orchestration::capture::PartialCaptureRecord>> {
+fn active_partial_response(
+    doc: &Path,
+) -> Result<Option<agent_doc_orchestration::capture::PartialCaptureRecord>> {
     let Some(state) = agent_doc_orchestration::cycle_state::load(doc)? else {
         return Ok(None);
     };
@@ -895,7 +902,9 @@ fn partial_response_fingerprint(
     }
 }
 
-fn partial_response_payload(record: &agent_doc_orchestration::capture::PartialCaptureRecord) -> serde_json::Value {
+fn partial_response_payload(
+    record: &agent_doc_orchestration::capture::PartialCaptureRecord,
+) -> serde_json::Value {
     serde_json::json!({
         "path": record.file,
         "cycle_id": record.cycle_id,
@@ -1382,9 +1391,12 @@ mod tests {
         );
         std::fs::write(&doc, content).unwrap();
         agent_doc_orchestration::snapshot::save(&doc, content).unwrap();
-        agent_doc_orchestration::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
-        let mut writer =
-            agent_doc_orchestration::capture::PartialCheckpointWriter::with_interval(&doc, Duration::ZERO);
+        agent_doc_orchestration::cycle_state::start_preflight(&doc, Some(content), Some(content))
+            .unwrap();
+        let mut writer = agent_doc_orchestration::capture::PartialCheckpointWriter::with_interval(
+            &doc,
+            Duration::ZERO,
+        );
         writer
             .maybe_checkpoint("### Re: live — gpt-5\n\nPartial response")
             .unwrap();
@@ -1408,11 +1420,20 @@ mod tests {
         std::fs::write(&doc, "# Session\n").unwrap();
 
         assert!(!active_cycle_in_scope(&doc).unwrap());
-        agent_doc_orchestration::cycle_state::start_preflight(&doc, Some("# Session\n"), Some("# Session\n"))
-            .unwrap();
+        agent_doc_orchestration::cycle_state::start_preflight(
+            &doc,
+            Some("# Session\n"),
+            Some("# Session\n"),
+        )
+        .unwrap();
         assert!(active_cycle_in_scope(&doc).unwrap());
-        agent_doc_orchestration::cycle_state::mark_committed(&doc, "test", Some("# Session\n"), Some("# Session\n"))
-            .unwrap();
+        agent_doc_orchestration::cycle_state::mark_committed(
+            &doc,
+            "test",
+            Some("# Session\n"),
+            Some("# Session\n"),
+        )
+        .unwrap();
         assert!(!active_cycle_in_scope(&doc).unwrap());
     }
 

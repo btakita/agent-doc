@@ -122,11 +122,7 @@ pub fn run_fetch(
     Ok(())
 }
 
-pub fn render_prompt_toc(
-    file: &Path,
-    doc: &str,
-    prompt_targets: &[String],
-) -> Option<String> {
+pub fn render_prompt_toc(file: &Path, doc: &str, prompt_targets: &[String]) -> Option<String> {
     let filters = PromptFilters::from_prompt_targets(prompt_targets);
     let live_entries = live_entries(
         doc,

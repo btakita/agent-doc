@@ -1680,8 +1680,15 @@ fn main() -> anyhow::Result<()> {
             route_owned,
             route_owned_reap_policy,
         } => match route_owned_reap_policy {
-            agent_doc_orchestration::start::RouteOwnedReapPolicy::Auto => agent_doc_orchestration::start::run(&file, force, route_owned),
-            policy => agent_doc_orchestration::start::run_with_reap_policy(&file, force, route_owned, policy),
+            agent_doc_orchestration::start::RouteOwnedReapPolicy::Auto => {
+                agent_doc_orchestration::start::run(&file, force, route_owned)
+            }
+            policy => agent_doc_orchestration::start::run_with_reap_policy(
+                &file,
+                force,
+                route_owned,
+                policy,
+            ),
         },
         Commands::Route {
             file,
@@ -1730,13 +1737,17 @@ fn main() -> anyhow::Result<()> {
         Commands::Cancel { file } => {
             match agent_doc_orchestration::repair::cancel_preflight_cycle(&file)? {
                 agent_doc_orchestration::repair::CancelOutcome::Abandoned => {
-                    println!("[cancel] abandoned orphaned preflight_started cycle; next dispatch starts fresh");
+                    println!(
+                        "[cancel] abandoned orphaned preflight_started cycle; next dispatch starts fresh"
+                    );
                 }
                 agent_doc_orchestration::repair::CancelOutcome::NoOpenCycle => {
                     println!("[cancel] no open cycle to reclaim");
                 }
                 agent_doc_orchestration::repair::CancelOutcome::Protected => {
-                    println!("[cancel] open cycle owns real work (advanced past preflight or has a response capture); left intact");
+                    println!(
+                        "[cancel] open cycle owns real work (advanced past preflight or has a response capture); left intact"
+                    );
                 }
             }
             Ok(())
@@ -1756,7 +1767,9 @@ fn main() -> anyhow::Result<()> {
             force,
             isolate,
         ),
-        Commands::Focus { file, pane } => agent_doc_orchestration::focus::run(&file, pane.as_deref()),
+        Commands::Focus { file, pane } => {
+            agent_doc_orchestration::focus::run(&file, pane.as_deref())
+        }
         Commands::Layout {
             files,
             split,
@@ -1789,7 +1802,11 @@ fn main() -> anyhow::Result<()> {
                         focus.as_deref(),
                     )
                 } else {
-                    agent_doc_orchestration::sync::run_layout_only(&columns, window.as_deref(), focus.as_deref())
+                    agent_doc_orchestration::sync::run_layout_only(
+                        &columns,
+                        window.as_deref(),
+                        focus.as_deref(),
+                    )
                 }
             } else {
                 agent_doc_orchestration::sync::run(&columns, window.as_deref(), focus.as_deref())
@@ -1829,7 +1846,9 @@ fn main() -> anyhow::Result<()> {
                 agent_doc_orchestration::resync::run(false, session.as_deref(), file.as_deref())
             }
         }
-        Commands::Fix { file, session } => agent_doc_orchestration::resync::run_fix(file.as_deref(), session.as_deref()),
+        Commands::Fix { file, session } => {
+            agent_doc_orchestration::resync::run_fix(file.as_deref(), session.as_deref())
+        }
         Commands::Skill { command } => {
             match command {
                 SkillCommands::Install {
@@ -1883,7 +1902,10 @@ fn main() -> anyhow::Result<()> {
         Commands::Write { args, commit } => {
             let lint_override = match args.lint.as_deref() {
                 None => None,
-                Some(s) => Some(agent_doc_orchestration::lint_gate::LintCliMode::parse(s).map_err(|e| anyhow::anyhow!(e))?),
+                Some(s) => Some(
+                    agent_doc_orchestration::lint_gate::LintCliMode::parse(s)
+                        .map_err(|e| anyhow::anyhow!(e))?,
+                ),
             };
             agent_doc_orchestration::write::run_command(
                 agent_doc_orchestration::write::CommandOptions {
@@ -1927,7 +1949,10 @@ fn main() -> anyhow::Result<()> {
         Commands::Finalize { args } => {
             let lint_override = match args.lint.as_deref() {
                 None => None,
-                Some(s) => Some(agent_doc_orchestration::lint_gate::LintCliMode::parse(s).map_err(|e| anyhow::anyhow!(e))?),
+                Some(s) => Some(
+                    agent_doc_orchestration::lint_gate::LintCliMode::parse(s)
+                        .map_err(|e| anyhow::anyhow!(e))?,
+                ),
             };
             agent_doc_orchestration::write::run_command(
                 agent_doc_orchestration::write::CommandOptions {
@@ -1973,7 +1998,10 @@ fn main() -> anyhow::Result<()> {
             lint,
         } => {
             let lint_override = match lint.as_deref() {
-                Some(s) => Some(agent_doc_orchestration::lint_gate::LintCliMode::parse(s).map_err(|e| anyhow::anyhow!(e))?),
+                Some(s) => Some(
+                    agent_doc_orchestration::lint_gate::LintCliMode::parse(s)
+                        .map_err(|e| anyhow::anyhow!(e))?,
+                ),
                 None => None,
             };
             agent_doc_orchestration::stream::run(
@@ -2085,7 +2113,13 @@ fn main() -> anyhow::Result<()> {
             query,
             limit,
             json,
-        } => agent_doc_orchestration::response_toc::run_toc(&file, backlog_id.as_deref(), query.as_deref(), limit, json),
+        } => agent_doc_orchestration::response_toc::run_toc(
+            &file,
+            backlog_id.as_deref(),
+            query.as_deref(),
+            limit,
+            json,
+        ),
         Commands::ResponseFetch {
             file,
             locator,
@@ -2093,7 +2127,9 @@ fn main() -> anyhow::Result<()> {
             after,
             json,
         } => agent_doc_orchestration::response_toc::run_fetch(&file, &locator, before, after, json),
-        Commands::ArchiveIndex { file, rebuild } => agent_doc_orchestration::archive_index::run_index(&file, rebuild),
+        Commands::ArchiveIndex { file, rebuild } => {
+            agent_doc_orchestration::archive_index::run_index(&file, rebuild)
+        }
         Commands::ArchiveSearch {
             file,
             query,
@@ -2264,7 +2300,9 @@ fn main() -> anyhow::Result<()> {
             &pending_add_gated,
             no_create_pending,
         ),
-        Commands::Boundary { file, component } => agent_doc_orchestration::boundary::run(&file, component.as_deref()),
+        Commands::Boundary { file, component } => {
+            agent_doc_orchestration::boundary::run(&file, component.as_deref())
+        }
         Commands::Terminal { file, session } => terminal::run(&file, session.as_deref()),
         Commands::Autoclaim => autoclaim::run(),
         Commands::Upgrade => upgrade::run(),
@@ -2327,7 +2365,10 @@ fn main() -> anyhow::Result<()> {
             ControllerAction::Status {
                 project_root,
                 ensure,
-            } => agent_doc_orchestration::project_controller::run_status(project_root.as_deref(), ensure),
+            } => agent_doc_orchestration::project_controller::run_status(
+                project_root.as_deref(),
+                ensure,
+            ),
             ControllerAction::Serve {
                 project_root,
                 launch_mode,
@@ -2360,14 +2401,17 @@ fn main() -> anyhow::Result<()> {
             HookAction::Listen { root } => hook_cmd::listen(root.as_deref()),
             HookAction::Gc { root } => hook_cmd::gc(root.as_deref()),
             HookAction::CheckCallbacks { root } => {
-                let pending = agent_doc_orchestration::callback::scan_pending_callbacks(root.as_deref())?;
+                let pending =
+                    agent_doc_orchestration::callback::scan_pending_callbacks(root.as_deref())?;
                 let json = serde_json::to_string_pretty(
                     &serde_json::json!({"pending_callbacks": pending}),
                 )?;
                 println!("{}", json);
                 Ok(())
             }
-            HookAction::CodexUserPromptSubmit => agent_doc_orchestration::codex_hook::handle_user_prompt_submit(),
+            HookAction::CodexUserPromptSubmit => {
+                agent_doc_orchestration::codex_hook::handle_user_prompt_submit()
+            }
             HookAction::CodexStop => agent_doc_orchestration::codex_hook::handle_stop(),
         },
         Commands::Cleanup {
@@ -2377,8 +2421,12 @@ fn main() -> anyhow::Result<()> {
             fallback_model,
         } => cleanup_cmd::run(&file, timeout, poll_interval, &fallback_model),
         Commands::Backlog { file, action } => match action {
-            PendingAction::Add { item } => agent_doc_orchestration::pending_cmd::add(&file, &item, false),
-            PendingAction::AddGated { item } => agent_doc_orchestration::pending_cmd::add(&file, &item, true),
+            PendingAction::Add { item } => {
+                agent_doc_orchestration::pending_cmd::add(&file, &item, false)
+            }
+            PendingAction::AddGated { item } => {
+                agent_doc_orchestration::pending_cmd::add(&file, &item, true)
+            }
             PendingAction::Remove { target, contains } => {
                 agent_doc_orchestration::pending_cmd::remove(&file, &target, contains)
             }
@@ -2386,7 +2434,9 @@ fn main() -> anyhow::Result<()> {
             PendingAction::Reap => agent_doc_orchestration::pending_cmd::reap(&file),
             PendingAction::Backfill => agent_doc_orchestration::pending_cmd::backfill(&file),
             PendingAction::Done { id } => agent_doc_orchestration::pending_cmd::done(&file, &id),
-            PendingAction::Edit { id, text } => agent_doc_orchestration::pending_cmd::edit(&file, &id, &text),
+            PendingAction::Edit { id, text } => {
+                agent_doc_orchestration::pending_cmd::edit(&file, &id, &text)
+            }
             PendingAction::Clear => agent_doc_orchestration::pending_cmd::clear(&file),
             PendingAction::Reorder { ids } => {
                 let ids: Vec<String> = ids
@@ -2406,7 +2456,8 @@ fn main() -> anyhow::Result<()> {
         },
         Commands::Review { action } => match action {
             ReviewAction::UngateTasks { file } => {
-                let report = agent_doc_orchestration::pending_cmd::add_ungate_tasks_for_review(&file)?;
+                let report =
+                    agent_doc_orchestration::pending_cmd::add_ungate_tasks_for_review(&file)?;
                 println!("  scanned review: {} gated item(s)", report.scanned);
                 println!("  added {} backlog ungate task(s)", report.added.len());
                 println!("  (skipped {} already-tracked)", report.skipped.len());
@@ -2421,7 +2472,8 @@ fn main() -> anyhow::Result<()> {
                 let cwd = std::env::current_dir()?;
                 agent_doc_orchestration::snapshot::find_project_root(&cwd).unwrap_or(cwd)
             };
-            let total = agent_doc_orchestration::pending_cmd::resolve_gate_scan(&gate_type, &scan_root)?;
+            let total =
+                agent_doc_orchestration::pending_cmd::resolve_gate_scan(&gate_type, &scan_root)?;
             if total == 0 {
                 eprintln!(
                     "[resolve-gate] no [/{}] items found under {}",
@@ -2444,7 +2496,12 @@ fn main() -> anyhow::Result<()> {
                 ttl,
             } => {
                 let ops: Vec<&str> = operations.split(',').map(|s| s.trim()).collect();
-                let request = agent_doc_orchestration::callback::create_request(&file, &ops, context.as_deref(), ttl)?;
+                let request = agent_doc_orchestration::callback::create_request(
+                    &file,
+                    &ops,
+                    context.as_deref(),
+                    ttl,
+                )?;
                 println!("{}", serde_json::to_string_pretty(&request)?);
                 Ok(())
             }
@@ -2466,7 +2523,13 @@ fn main() -> anyhow::Result<()> {
                 status,
                 summary,
             } => {
-                agent_doc_orchestration::callback::write_response(&file, &request_id, &status, &summary, None)?;
+                agent_doc_orchestration::callback::write_response(
+                    &file,
+                    &request_id,
+                    &status,
+                    &summary,
+                    None,
+                )?;
                 eprintln!("[callback] response written for request {}", request_id);
                 Ok(())
             }

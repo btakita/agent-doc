@@ -65,7 +65,10 @@ fn detect_in_content(file: &Path, content: &str) -> Result<Option<QueueContinuat
         return Ok(None);
     }
     let components = crate::component::parse(content)?;
-    let Some(queue_component) = components.iter().find(|component| component.name == "queue") else {
+    let Some(queue_component) = components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
         return Ok(None);
     };
     // `auto` is a start trigger only — continuation is gated on `queue_active:
@@ -169,12 +172,15 @@ fn extract_head_id(prompt: &str) -> Option<String> {
             return Some(id.to_string());
         }
     }
-    prompt.split_whitespace().find_map(|token| {
-        token.strip_prefix('#').map(|rest| {
-            rest.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '-' && c != '_')
-                .to_string()
+    prompt
+        .split_whitespace()
+        .find_map(|token| {
+            token.strip_prefix('#').map(|rest| {
+                rest.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '-' && c != '_')
+                    .to_string()
+            })
         })
-    }).filter(|id| !id.is_empty())
+        .filter(|id| !id.is_empty())
 }
 
 /// Durable on-disk proof that a closed-out document still owes an auto-queue
@@ -254,8 +260,7 @@ pub fn write_marker(
         return Ok(());
     };
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("create {}", parent.display()))?;
+        std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
     // Preserve the last continuation request across reconciles so the Stop-hook
     // non-advancing-head guard still works after a re-detect.
@@ -269,8 +274,7 @@ pub fn write_marker(
         commit_head: head_oid(file),
         last_requested_head,
     };
-    let json = serde_json::to_string_pretty(&marker)
-        .context("serialize continuation marker")?;
+    let json = serde_json::to_string_pretty(&marker).context("serialize continuation marker")?;
     std::fs::write(&path, json).with_context(|| format!("write {}", path.display()))?;
     Ok(())
 }
@@ -401,7 +405,12 @@ mod tests {
     #[test]
     fn detect_returns_head_for_active_auto_queue() {
         let dir = tempfile::tempdir().unwrap();
-        let doc = write_doc(dir.path(), &["do [#seopdp] next", "do [#third]"], true, true);
+        let doc = write_doc(
+            dir.path(),
+            &["do [#seopdp] next", "do [#third]"],
+            true,
+            true,
+        );
         let continuation = detect(&doc).unwrap().expect("ready auto-queue head");
         assert_eq!(continuation.head_prompt, "do [#seopdp] next");
         assert_eq!(continuation.head_id.as_deref(), Some("seopdp"));
@@ -413,7 +422,12 @@ mod tests {
         // (queue_active: true) without the `auto` attribute still owes
         // continuation — `auto` is a start trigger only.
         let dir = tempfile::tempdir().unwrap();
-        let doc = write_doc(dir.path(), &["do [#persisted] next", "do [#third]"], true, false);
+        let doc = write_doc(
+            dir.path(),
+            &["do [#persisted] next", "do [#third]"],
+            true,
+            false,
+        );
         let continuation = detect(&doc).unwrap().expect("ready persisted-active head");
         assert_eq!(continuation.head_prompt, "do [#persisted] next");
         assert_eq!(continuation.head_id.as_deref(), Some("persisted"));
@@ -452,10 +466,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let doc = write_doc(dir.path(), &["-- stop placeholder"], true, true);
         // Replace the queue body with a real stop fence at the head.
-        let content = std::fs::read_to_string(&doc).unwrap().replace(
-            "- -- stop placeholder\n",
-            "--- stop\n- do [#x]\n",
-        );
+        let content = std::fs::read_to_string(&doc)
+            .unwrap()
+            .replace("- -- stop placeholder\n", "--- stop\n- do [#x]\n");
         std::fs::write(&doc, &content).unwrap();
         crate::snapshot::save(&doc, &content).unwrap();
         // A stop fence at the head must not force continuation.
@@ -465,7 +478,10 @@ mod tests {
     #[test]
     fn extract_head_id_handles_bracket_and_bare() {
         assert_eq!(extract_head_id("do [#abc] thing").as_deref(), Some("abc"));
-        assert_eq!(extract_head_id("#bare-id do it").as_deref(), Some("bare-id"));
+        assert_eq!(
+            extract_head_id("#bare-id do it").as_deref(),
+            Some("bare-id")
+        );
         assert_eq!(extract_head_id("no id here"), None);
     }
 

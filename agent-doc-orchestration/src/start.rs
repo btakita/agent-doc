@@ -3895,7 +3895,8 @@ mod tests {
             base_args.extend(args.split_whitespace().map(String::from));
         }
         if !base_args.iter().any(|a| a == "--model") {
-            let harness_key = agent_doc_core::model_tier::harness_key_for_agent_name(&harness.binary);
+            let harness_key =
+                agent_doc_core::model_tier::harness_key_for_agent_name(&harness.binary);
             if let Some(model) = fm.resolve_harness_model(&harness_key) {
                 base_args.push("--model".into());
                 base_args.push(agent_doc_core::model_tier::canonical_model_name(

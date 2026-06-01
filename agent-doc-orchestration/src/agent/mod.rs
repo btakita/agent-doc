@@ -268,10 +268,7 @@ pub fn run_agent_timeout() -> Duration {
     Duration::from_secs(secs.max(1))
 }
 
-pub fn wait_with_output_timeout(
-    mut child: Child,
-    timeout: Duration,
-) -> std::io::Result<Output> {
+pub fn wait_with_output_timeout(mut child: Child, timeout: Duration) -> std::io::Result<Output> {
     let mut stdout = child.stdout.take();
     let mut stderr = child.stderr.take();
     let stdout_handle = std::thread::spawn(move || {

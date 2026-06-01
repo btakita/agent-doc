@@ -303,12 +303,10 @@ pub fn add_ungate_tasks_for_review(file: &Path) -> Result<UngateTasksReport> {
         let task_text = ungate_task_text(&id);
         let id_marker = format!("#{}", id);
         let already_tracked = backlog_text.contains(&task_text)
-            || backlog_text
-                .lines()
-                .any(|line| {
-                    let lower = line.to_ascii_lowercase();
-                    lower.contains("ungate") && line.contains(&id_marker)
-                });
+            || backlog_text.lines().any(|line| {
+                let lower = line.to_ascii_lowercase();
+                lower.contains("ungate") && line.contains(&id_marker)
+            });
         if already_tracked {
             report.skipped.push(id);
         } else {

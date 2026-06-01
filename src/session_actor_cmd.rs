@@ -539,9 +539,7 @@ pub fn clear(file: &Path) -> Result<()> {
 /// stale open cycle; a cycle that already captured a response is protected and
 /// left intact. Reclaim failures are non-fatal — the clear itself already
 /// delivered — and surface as a warning.
-fn reclaim_orphaned_cycle_on_clear(
-    file: &Path,
-) -> agent_doc_orchestration::repair::CancelOutcome {
+fn reclaim_orphaned_cycle_on_clear(file: &Path) -> agent_doc_orchestration::repair::CancelOutcome {
     match agent_doc_orchestration::repair::cancel_preflight_cycle(file) {
         Ok(outcome) => {
             agent_doc_orchestration::ops_log::log_op(
@@ -615,7 +613,10 @@ fn reconcile_idle_projection_before_clear(ctx: &SessionContext, tmux: &Tmux) -> 
         clean_exit_prompt,
         busy_reason.is_some(),
     );
-    agent_doc_orchestration::flow::operator_clear::log_clear_guard_event(&ctx.canonical_file, clear_state);
+    agent_doc_orchestration::flow::operator_clear::log_clear_guard_event(
+        &ctx.canonical_file,
+        clear_state,
+    );
 
     match clear_state {
         OperatorClearInputState::IdlePrompt => {
@@ -902,7 +903,9 @@ fn harness_for_evidence(
         .current_command
         .as_deref()
         .and_then(agent_doc_orchestration::harness::HarnessConfig::from_pane_command)
-        .unwrap_or_else(|| agent_doc_orchestration::harness::HarnessConfig::from_agent_name(&ctx.harness))
+        .unwrap_or_else(|| {
+            agent_doc_orchestration::harness::HarnessConfig::from_agent_name(&ctx.harness)
+        })
 }
 
 fn protected_clear_refusal_message(
@@ -1087,15 +1090,16 @@ fn terminal_editor_command(command: &str) -> bool {
 }
 
 fn send_clear_to_pane(tmux: &Tmux, pane: &str, file: &Path, harness: &str) -> Result<()> {
-    agent_doc_orchestration::sessions::send_submitted_text_for_harness(tmux, pane, "/clear", harness).with_context(
-        || {
-            format!(
-                "failed to send `/clear` to authoritative pane {} for {}",
-                pane,
-                file.display()
-            )
-        },
+    agent_doc_orchestration::sessions::send_submitted_text_for_harness(
+        tmux, pane, "/clear", harness,
     )
+    .with_context(|| {
+        format!(
+            "failed to send `/clear` to authoritative pane {} for {}",
+            pane,
+            file.display()
+        )
+    })
 }
 
 /// Ordered interrupt keys for an operator interrupt-clear / force-restart on a
@@ -1327,9 +1331,11 @@ fn resolve_direct_submit_pane(
         return Some((pane.to_string(), DirectSubmitPaneSource::AuthoritativeActor));
     }
 
-    if let Some(pane) =
-        agent_doc_orchestration::sync::find_normal_path_owner_pane(tmux, &ctx.canonical_file, &ctx.session_id)
-    {
+    if let Some(pane) = agent_doc_orchestration::sync::find_normal_path_owner_pane(
+        tmux,
+        &ctx.canonical_file,
+        &ctx.session_id,
+    ) {
         return Some((pane, DirectSubmitPaneSource::LiveOwner));
     }
 
@@ -1633,22 +1639,27 @@ fn build_context(file: &Path) -> Result<SessionContext> {
                 .and_then(|(fm, _)| fm.session)
         })
         .with_context(|| format!("{} has no agent_doc_session", canonical_file.display()))?;
-    let base_dir = agent_doc_orchestration::snapshot::find_project_root(&canonical_file).with_context(|| {
-        format!(
-            "failed to locate project root for {}",
-            canonical_file.display()
-        )
-    })?;
+    let base_dir = agent_doc_orchestration::snapshot::find_project_root(&canonical_file)
+        .with_context(|| {
+            format!(
+                "failed to locate project root for {}",
+                canonical_file.display()
+            )
+        })?;
     let harness = agent_doc_orchestration::session_actor::detect_document_harness_in(
         &base_dir,
         &canonical_file.to_string_lossy(),
     );
-    let operator_status =
-        agent_doc_orchestration::project_controller::session_operator_status(&base_dir, &canonical_file)?;
+    let operator_status = agent_doc_orchestration::project_controller::session_operator_status(
+        &base_dir,
+        &canonical_file,
+    )?;
     let registry_entry = lookup_registry_entry(&base_dir, &session_id, &canonical_file)?;
     let startup_miss = agent_doc_orchestration::startup_miss::load(&canonical_file)?;
-    let log_status = agent_doc_orchestration::startup_miss::session_log_status(&canonical_file, &session_id)?;
-    let supervisor_socket = agent_doc_orchestration::supervisor::ipc::socket_path(&base_dir, &session_id);
+    let log_status =
+        agent_doc_orchestration::startup_miss::session_log_status(&canonical_file, &session_id)?;
+    let supervisor_socket =
+        agent_doc_orchestration::supervisor::ipc::socket_path(&base_dir, &session_id);
     let supervisor_runtime = query_supervisor_runtime(&supervisor_socket);
     let operator_status = reconcile_controller_lease_with_supervisor_runtime(
         &base_dir,
@@ -1861,7 +1872,8 @@ fn live_pane_evidence_for_pane(
     }
 
     let harness = agent_doc_orchestration::harness::HarnessConfig::from_agent_name(&ctx.harness);
-    let captured = agent_doc_orchestration::sessions::capture_pane(tmux, &pane_id).unwrap_or_default();
+    let captured =
+        agent_doc_orchestration::sessions::capture_pane(tmux, &pane_id).unwrap_or_default();
     let prompt_ready = live_pane_prompt_ready(&harness, &captured);
     LivePaneEvidence {
         pane_id: Some(pane_id.clone()),
@@ -1895,7 +1907,10 @@ fn live_evidence_target(ctx: &SessionContext) -> (Option<String>, &'static str) 
     (None, "none")
 }
 
-fn live_pane_prompt_ready(harness: &agent_doc_orchestration::harness::HarnessConfig, captured: &str) -> bool {
+fn live_pane_prompt_ready(
+    harness: &agent_doc_orchestration::harness::HarnessConfig,
+    captured: &str,
+) -> bool {
     if harness.has_busy_cue(captured) {
         return false;
     }
@@ -2019,16 +2034,18 @@ fn parse_actor_state(raw: &str) -> Option<ActorState> {
 fn format_controller_transition(
     transition: &agent_doc_orchestration::project_controller::ActorTransitionStatus,
 ) -> String {
-    agent_doc_orchestration::session_actor::format_transition_event(agent_doc_orchestration::session_actor::OwnershipTransitionEvent {
-        caller: &transition.caller,
-        reason: &transition.reason,
-        prior_generation: transition.prior_generation,
-        new_generation: transition.new_generation,
-        old_pane: transition.old_pane.as_deref(),
-        new_pane: &transition.new_pane,
-        old_window: transition.old_window.as_deref(),
-        new_window: transition.new_window.as_deref(),
-    })
+    agent_doc_orchestration::session_actor::format_transition_event(
+        agent_doc_orchestration::session_actor::OwnershipTransitionEvent {
+            caller: &transition.caller,
+            reason: &transition.reason,
+            prior_generation: transition.prior_generation,
+            new_generation: transition.new_generation,
+            old_pane: transition.old_pane.as_deref(),
+            new_pane: &transition.new_pane,
+            old_window: transition.old_window.as_deref(),
+            new_window: transition.new_window.as_deref(),
+        },
+    )
 }
 
 fn print_status_summary(ctx: &SessionContext) {
@@ -2050,7 +2067,9 @@ fn print_status_summary(ctx: &SessionContext) {
                 record.last_transition.reason,
                 record.last_transition.prior_generation,
                 record.last_transition.new_generation,
-                agent_doc_orchestration::startup_miss::format_timestamp(record.last_transition.timestamp)
+                agent_doc_orchestration::startup_miss::format_timestamp(
+                    record.last_transition.timestamp
+                )
             );
         }
         None => println!("actor: missing"),
@@ -2380,12 +2399,14 @@ mod tests {
         runtime: SupervisorRuntime,
         lease_state: Option<&str>,
     ) -> SessionContext {
-        let lease = lease_state.map(|state| agent_doc_orchestration::project_controller::SupervisorLeaseStatus {
-            generation: 7,
-            supervisor_pid: Some(100),
-            supervisor_socket: Some("/tmp/supervisor.sock".to_string()),
-            last_heartbeat: Some(1),
-            runtime_state: Some(state.to_string()),
+        let lease = lease_state.map(|state| {
+            agent_doc_orchestration::project_controller::SupervisorLeaseStatus {
+                generation: 7,
+                supervisor_pid: Some(100),
+                supervisor_socket: Some("/tmp/supervisor.sock".to_string()),
+                last_heartbeat: Some(1),
+                runtime_state: Some(state.to_string()),
+            }
         });
         SessionContext {
             canonical_file: PathBuf::from("/tmp/doc.md"),
@@ -3034,13 +3055,15 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             operator_status: agent_doc_orchestration::project_controller::SessionOperatorStatus {
                 record: Some(record),
                 transitions: Vec::new(),
-                supervisor_lease: Some(agent_doc_orchestration::project_controller::SupervisorLeaseStatus {
-                    generation: 7,
-                    supervisor_pid: Some(100),
-                    supervisor_socket: Some("/tmp/supervisor.sock".to_string()),
-                    last_heartbeat: Some(1),
-                    runtime_state: Some("busy".to_string()),
-                }),
+                supervisor_lease: Some(
+                    agent_doc_orchestration::project_controller::SupervisorLeaseStatus {
+                        generation: 7,
+                        supervisor_pid: Some(100),
+                        supervisor_socket: Some("/tmp/supervisor.sock".to_string()),
+                        last_heartbeat: Some(1),
+                        runtime_state: Some("busy".to_string()),
+                    },
+                ),
                 dispatch_attempts: Vec::new(),
                 projection_diagnostics: Vec::new(),
             },
@@ -3092,8 +3115,14 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             "---\nagent_doc_session: session-status\nagent: codex\n---\nBody\n",
         )
         .unwrap();
-        agent_doc_orchestration::session_actor::record_session_start_direct(&doc, "session-status", "%41", "@1", 1)
-            .unwrap();
+        agent_doc_orchestration::session_actor::record_session_start_direct(
+            &doc,
+            "session-status",
+            "%41",
+            "@1",
+            1,
+        )
+        .unwrap();
         agent_doc_orchestration::session_actor::transition_state_direct(
             &doc,
             "session-status",
@@ -3118,24 +3147,30 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         )
         .unwrap();
 
-        let sock = agent_doc_orchestration::supervisor::ipc::SupervisorIpc::start(dir.path(), "session-status", {
-            move |method| match method {
-                IpcMethod::State => agent_doc_orchestration::supervisor::ipc::IpcResponse::ok(serde_json::json!({
-                    "running": true,
-                    "state": "healthy",
-                    "actor_state": "ready",
-                    "actor_session_id": "session-status",
-                    "actor_pane_id": "%41",
-                    "actor_generation": 1,
-                    "restart_count": 0,
-                    "supervisor_pid": 1001,
-                    "supervisor_instance_id": "sup-status",
-                    "child_pid": 1002,
-                    "cwd_source": "config",
-                })),
-                _ => agent_doc_orchestration::supervisor::ipc::IpcResponse::ok_empty(),
-            }
-        })
+        let sock = agent_doc_orchestration::supervisor::ipc::SupervisorIpc::start(
+            dir.path(),
+            "session-status",
+            {
+                move |method| match method {
+                    IpcMethod::State => agent_doc_orchestration::supervisor::ipc::IpcResponse::ok(
+                        serde_json::json!({
+                            "running": true,
+                            "state": "healthy",
+                            "actor_state": "ready",
+                            "actor_session_id": "session-status",
+                            "actor_pane_id": "%41",
+                            "actor_generation": 1,
+                            "restart_count": 0,
+                            "supervisor_pid": 1001,
+                            "supervisor_instance_id": "sup-status",
+                            "child_pid": 1002,
+                            "cwd_source": "config",
+                        }),
+                    ),
+                    _ => agent_doc_orchestration::supervisor::ipc::IpcResponse::ok_empty(),
+                }
+            },
+        )
         .unwrap();
 
         let ctx = build_context(&doc).unwrap();
@@ -3237,27 +3272,40 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         .unwrap();
         let captured = Arc::new(Mutex::new(Vec::<String>::new()));
         let captured_for_ipc = captured.clone();
-        let sock = agent_doc_orchestration::supervisor::ipc::SupervisorIpc::start(dir.path(), "session-clear", {
-            move |method| match method {
-                IpcMethod::Inject { bytes } => {
-                    captured_for_ipc.lock().unwrap().push(bytes);
-                    agent_doc_orchestration::supervisor::ipc::IpcResponse::ok_empty()
+        let sock = agent_doc_orchestration::supervisor::ipc::SupervisorIpc::start(
+            dir.path(),
+            "session-clear",
+            {
+                move |method| match method {
+                    IpcMethod::Inject { bytes } => {
+                        captured_for_ipc.lock().unwrap().push(bytes);
+                        agent_doc_orchestration::supervisor::ipc::IpcResponse::ok_empty()
+                    }
+                    IpcMethod::State => agent_doc_orchestration::supervisor::ipc::IpcResponse::ok(
+                        serde_json::json!({
+                            "running": true,
+                            "state": "healthy",
+                            "actor_state": "ready",
+                            "restart_count": 0,
+                        }),
+                    ),
+                    _ => agent_doc_orchestration::supervisor::ipc::IpcResponse::ok_empty(),
                 }
-                IpcMethod::State => agent_doc_orchestration::supervisor::ipc::IpcResponse::ok(serde_json::json!({
-                    "running": true,
-                    "state": "healthy",
-                    "actor_state": "ready",
-                    "restart_count": 0,
-                })),
-                _ => agent_doc_orchestration::supervisor::ipc::IpcResponse::ok_empty(),
-            }
-        })
+            },
+        )
         .unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let pane_window = iso.pane_window(&pane).unwrap();
-        agent_doc_orchestration::sessions::register("session-clear", &pane, &doc.to_string_lossy()).unwrap();
-        agent_doc_orchestration::session_actor::record_session_start(&doc, "session-clear", &pane, &pane_window, 1)
+        agent_doc_orchestration::sessions::register("session-clear", &pane, &doc.to_string_lossy())
             .unwrap();
+        agent_doc_orchestration::session_actor::record_session_start(
+            &doc,
+            "session-clear",
+            &pane,
+            &pane_window,
+            1,
+        )
+        .unwrap();
         clear(&doc).unwrap();
         let latest = agent_doc_orchestration::codex_hook::load_latest_prompt_for_file(&doc)
             .unwrap()
@@ -3433,8 +3481,11 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         let content = std::fs::read_to_string(&doc).unwrap();
         agent_doc_orchestration::cycle_state::start_preflight(&doc, Some(&content), Some(&content))
             .unwrap();
-        agent_doc_orchestration::capture::capture_response(&doc, "### Re: do — opus-4-8\n\nDone.\n")
-            .unwrap();
+        agent_doc_orchestration::capture::capture_response(
+            &doc,
+            "### Re: do — opus-4-8\n\nDone.\n",
+        )
+        .unwrap();
 
         // A cycle that owns a captured response must not be discarded by clear.
         assert_eq!(

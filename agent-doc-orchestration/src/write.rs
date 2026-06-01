@@ -1237,18 +1237,16 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         // the front-insert default so anchor ids added this same cycle resolve.
         for pair in options.pending_add_after.chunks(2) {
             if let [anchor, text] = pair {
-                crate::pending_cmd::add_after(file, anchor, text).with_context(|| {
-                    format!("failed to apply --pending-add-after {anchor}")
-                })?;
+                crate::pending_cmd::add_after(file, anchor, text)
+                    .with_context(|| format!("failed to apply --pending-add-after {anchor}"))?;
             } else {
                 anyhow::bail!("--pending-add-after expects repeated ID TEXT pairs");
             }
         }
         for pair in options.pending_add_before.chunks(2) {
             if let [anchor, text] = pair {
-                crate::pending_cmd::add_before(file, anchor, text).with_context(|| {
-                    format!("failed to apply --pending-add-before {anchor}")
-                })?;
+                crate::pending_cmd::add_before(file, anchor, text)
+                    .with_context(|| format!("failed to apply --pending-add-before {anchor}"))?;
             } else {
                 anyhow::bail!("--pending-add-before expects repeated ID TEXT pairs");
             }
@@ -2550,9 +2548,7 @@ pub fn consume_queue_prompt(file: &Path) -> Result<bool> {
     Ok(consume_queue_prompt_with_outcome(file)?.is_some())
 }
 
-pub fn consume_queue_prompt_with_outcome(
-    file: &Path,
-) -> Result<Option<QueueConsumptionOutcome>> {
+pub fn consume_queue_prompt_with_outcome(file: &Path) -> Result<Option<QueueConsumptionOutcome>> {
     consume_queue_prompts_with_outcome(file, &[])
 }
 
@@ -2614,10 +2610,7 @@ fn consume_queue_prompts_with_outcome(
     Ok(Some(outcome))
 }
 
-pub fn should_consume_queue_prompt_for_diff(
-    file: &Path,
-    diff_text: Option<&str>,
-) -> Result<bool> {
+pub fn should_consume_queue_prompt_for_diff(file: &Path, diff_text: Option<&str>) -> Result<bool> {
     let content =
         std::fs::read_to_string(file).context("queue consume guard: failed to read document")?;
     should_consume_queue_prompt_for_diff_content(file, &content, diff_text)
@@ -2797,10 +2790,7 @@ fn queue_prompt_text_matches(prompt_change: &str, queue_head: &str) -> bool {
     normalize_queue_prompt_text(prompt_change) == normalize_queue_prompt_text(queue_head)
 }
 
-pub fn response_explicitly_targets_active_queue_head(
-    file: &Path,
-    response: &str,
-) -> Result<bool> {
+pub fn response_explicitly_targets_active_queue_head(file: &Path, response: &str) -> Result<bool> {
     let content =
         std::fs::read_to_string(file).context("queue consume guard: failed to read document")?;
     let Some(queue_head) = active_queue_head_text(&content)? else {
@@ -3153,21 +3143,24 @@ fn embed_consumed_prompt_in_response(
     if region.contains(echo.trim_end()) {
         return content.to_string();
     }
-    let already_present = consumed_texts.iter().filter_map(|t| first_nonempty_line(t)).any(|first| {
-        let needle = normalize_prompt_line(first);
-        !needle.is_empty()
-            && region
-                .lines()
-                .any(|l| normalize_prompt_line(l) == needle)
-    });
+    let already_present = consumed_texts
+        .iter()
+        .filter_map(|t| first_nonempty_line(t))
+        .any(|first| {
+            let needle = normalize_prompt_line(first);
+            !needle.is_empty() && region.lines().any(|l| normalize_prompt_line(l) == needle)
+        });
     if already_present {
         return content.to_string();
     }
 
     let code_ranges = component::find_code_ranges(content);
-    let Some(heading_rel) =
-        locate_response_heading_offset(region, exchange.open_end, response_first_line, &code_ranges)
-    else {
+    let Some(heading_rel) = locate_response_heading_offset(
+        region,
+        exchange.open_end,
+        response_first_line,
+        &code_ranges,
+    ) else {
         return content.to_string();
     };
     let Some(nl) = region[heading_rel..].find('\n') else {
@@ -3377,10 +3370,7 @@ fn plan_queue_prompt_consumption(
 ///
 /// Phase 3 inversion (2026-04-14): the default is now reject. Library callers
 /// (FFI, tests, future SDK consumers) must opt in explicitly.
-pub fn enforce_no_replace_pending(
-    patches: &[template::PatchBlock],
-    allow: bool,
-) -> Result<()> {
+pub fn enforce_no_replace_pending(patches: &[template::PatchBlock], allow: bool) -> Result<()> {
     if allow {
         return Ok(());
     }
@@ -8728,11 +8718,8 @@ fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
     // edits. Record the dropped `do [#id]` queue lines now; session-check
     // filters them against committed HEAD (preserved or consumed → cleared,
     // silently deleted → fail closed).
-    let dropped_queue = dropped_queue_prompt_lines_after_content_ours(
-        base,
-        &decision.snapshot_content,
-        ours,
-    );
+    let dropped_queue =
+        dropped_queue_prompt_lines_after_content_ours(base, &decision.snapshot_content, ours);
     if !dropped_queue.is_empty() {
         if let Err(e) = crate::cycle_state::record_dropped_queue_prompts(file, &dropped_queue) {
             eprintln!(
@@ -12374,9 +12361,7 @@ mod tests {
     #[test]
     fn explicit_signal_halt_without_flag_does_not_consume() {
         // (a) Halt response, no --done/--pending-gate/--pending-edit → no consume.
-        assert!(
-            !queue_head_has_explicit_completion_signal(HALT_QUEUE_DOC, &[], &[], &[]).unwrap()
-        );
+        assert!(!queue_head_has_explicit_completion_signal(HALT_QUEUE_DOC, &[], &[], &[]).unwrap());
     }
 
     #[test]
@@ -12435,13 +12420,8 @@ mod tests {
     fn explicit_signal_none_when_queue_inactive() {
         let inactive = HALT_QUEUE_DOC.replace("queue_active: true", "queue_active: false");
         assert!(
-            !queue_head_has_explicit_completion_signal(
-                &inactive,
-                &["foo".to_string()],
-                &[],
-                &[],
-            )
-            .unwrap()
+            !queue_head_has_explicit_completion_signal(&inactive, &["foo".to_string()], &[], &[],)
+                .unwrap()
         );
     }
 
@@ -12571,9 +12551,10 @@ mod tests {
             "<!-- /agent:queue -->\n",
         );
         let free_text_message = queue_skip_diagnostic_for_content(free_text).unwrap();
-        assert!(free_text_message.contains(
-            "[queue] kept free-text head `Review the queue diagnostics`"
-        ));
+        assert!(
+            free_text_message
+                .contains("[queue] kept free-text head `Review the queue diagnostics`")
+        );
         assert!(free_text_message.contains("answered-response path"));
     }
 
@@ -12586,7 +12567,10 @@ mod tests {
         assert!(response_topic_matches_queue_head("#foo", "do [#foo]"));
         // Halt/modifier headings must NOT count as completion (#queue-strike-on-halt).
         assert!(!response_topic_matches_queue_head("#foo halt", "do [#foo]"));
-        assert!(!response_topic_matches_queue_head("#foo deferred", "do [#foo]"));
+        assert!(!response_topic_matches_queue_head(
+            "#foo deferred",
+            "do [#foo]"
+        ));
     }
 
     #[test]
@@ -13236,7 +13220,10 @@ scratch
 
         // The document must be untouched — no escaped markers committed.
         let after = fs::read_to_string(&doc).unwrap();
-        assert_eq!(after, content, "rejected patchback must not mutate the document");
+        assert_eq!(
+            after, content,
+            "rejected patchback must not mutate the document"
+        );
         assert!(!after.contains("### Re: churn"));
     }
 
@@ -14208,7 +14195,13 @@ scratch
             "## Queue\n<!-- agent:queue -->\n<!-- /agent:queue -->\n",
         );
 
-        log_ipcfullprompt_corruption_if_any(&doc, "socket_ack_content", Some("pid-x"), None, candidate);
+        log_ipcfullprompt_corruption_if_any(
+            &doc,
+            "socket_ack_content",
+            Some("pid-x"),
+            None,
+            candidate,
+        );
 
         let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(

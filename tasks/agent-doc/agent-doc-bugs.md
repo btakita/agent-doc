@@ -99,6 +99,11 @@ Implemented #lr-found-1: added lazily-rs dependency and created agent-doc-orches
 
 > **Queue prompt:**
 >
+> do [#lr-config-3]
+
+
+> **Queue prompt:**
+>
 > do [#lr-dedup-2]
 
 
@@ -118,7 +123,7 @@ Implemented `#lr-dedup-2`: replaced 7 of 8 duplicate `find_project_root` impleme
 **Retained:** `archive_index.rs` in `agent-doc-sqlite` cannot import from orchestration (dep graph: sqlite -> core <- orchestration). Will need `project_root` parameter threading or moving the base function to core in a later phase.
 
 **Verification:** `cargo test` — 2156 passed (2089 orchestration + 67 main), 0 failed. `cargo clippy` — clean. `cargo install` — release build successful.
-<!-- agent:boundary:12ee49d0 -->
+<!-- agent:boundary:4877360a -->
 <!-- /agent:exchange -->
 
 <!--
@@ -130,13 +135,12 @@ Implemented `#lr-dedup-2`: replaced 7 of 8 duplicate `find_project_root` impleme
 preset #spec-test-build-install-commit-push
 - ~do [#lr-found-1]~
 - ~do [#lr-dedup-2]~
-- do [#lr-config-3]
+- ~do [#lr-config-3]~
 - do [#lr-fmt-4]
 - do [#lr-actor-5]
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
-- [ ] [#lr-config-3] Phase 3: Move load_project_for_doc and resolve_ssh_context_inputs into graph slots. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-fmt-4] Phase 4: Move parse_for_file into graph slot. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-actor-5] Phase 5: Wire ActorContext into watch daemon and supervisor with invalidation on file/config change events. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
@@ -154,4 +158,5 @@ preset #spec-test-build-install-commit-push
 - 2026-05-31 [#editor-buffer-state-ffi-debounce] [recommended] Replace `wait_for_stable_content`'s last-added-line/truncation heuristic with editor-authoritative buffer stability when an IDE plugin is attached. JetBrains and VS Code plugins should report normalized editor state through the FFI bridge to the Session Actor: canonical doc path/session, monotonic editor document version, dirty flag, last edit timestamp, optional save timestamp, optional buffer hash, and ideally current buffer content. Run requests should include the editor version/hash observed at click time so the Session Actor can detect edits after invocation, debounce until the version/hash is stable, and compute the diff against the exact stable editor buffer when available. If no editor state exists, fall back to whole-file content + mtime stability polling. This removes reliance on `extract_last_added_line`, which misses edits above the last inserted line, and reduces disk/snapshot/editor-buffer race classes seen in live IPC/JB/VSCode flows.
 - 2026-05-31 [#lr-found-1] Phase 1: Add lazily-rs dependency + define graph types in agent-doc-orchestration/src/graph.rs (RunContext, slot/cell handles, compute closures, unit tests). Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - 2026-05-31 [#lr-dedup-2] Phase 2: Deduplicate project_root_for_doc — consolidate 8+ find_project_root implementations into single graph slot. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
+- 2026-05-31 [#lr-config-3] Phase 3: Move load_project_for_doc and resolve_ssh_context_inputs into graph slots. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 <!-- /agent:done -->

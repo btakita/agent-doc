@@ -37,7 +37,41 @@ queue_active: true
 Compacted content:
 - Archived 5 response topic(s): Memo guard utility, IPC corruption logged; Slot invalidation vs recomputation; Updated #fzaf backlog item; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:29f73b78 -->
+
+### Re: #rx9y — gpt-5
+
+> **Queue prompt:**
+>
+> [#rx9y]
+
+
+Completed `#rx9y`: `ctx.batch(|ctx| { ... })` is implemented in `lazily-rs` and published.
+
+Changed paths:
+- `src/lazily-rs/src/context.rs` adds the nested batch guard, queued changed-cell roots, queued explicit slot clears, and one effect flush at the outermost batch boundary.
+- `src/lazily-rs/src/slot.rs` defers direct `SlotHandle::clear` effect flushing while a batch is open.
+- `src/lazily-rs/SPEC.md`, `src/lazily-rs/README.md`, and `src/lazily-rs/tests/spec_compliance.rs` document and test batch behavior, including nested batches, coalesced effect reruns, deferred slot clears, and deferred `cell.clear_dependents`.
+- `src/lazily-rs/AGENTS.md` and `.gitignore` were updated for the current test counts and local tsift metadata hygiene.
+
+Commit/push evidence:
+- `lazily-rs` remote `main` contains `ddbb78c` (`feat: add batch updates`). My initial local commit was equivalent and was skipped during rebase because the remote already had the same patch.
+- `agent-loop` parent repo commit `bbf6631ef` (`chore: update lazily-rs batch updates`) updates the `src/lazily-rs` submodule pointer and was pushed to `origin/main`.
+
+Verification:
+- `cargo fmt --check` passed in `src/lazily-rs`.
+- `cargo test` passed in `src/lazily-rs` after the final test set was present.
+- `cargo clippy` passed in `src/lazily-rs`.
+- `cargo build` passed in `src/lazily-rs`; it only emitted existing workspace patch warnings for unused local patches.
+- `cargo test -- --list` reports 13 integration tests and 51 spec compliance tests, 64 total.
+- `make check` passed from `/home/brian/work/btakita/agent-loop`.
+- Latest `Agent Doc` workflow run `26737409904` was successful, including the `tmux-ci` job. There is no workflow named `CI` in either the `lazily-rs` submodule or the superproject.
+
+Install/escalation notes:
+- `cargo install --path .` is not applicable because `lazily` is a library-only crate; Cargo reports `no packages found with binaries or examples`.
+- No escalated shell permissions were required.
+
+Preflight warning carried forward: `agent-doc preflight` reported pending-shadow copies for `#rx9y`, `#fzaf`, `#dpzd`, and `#45rh`; `#rx9y` is now completed through the normal `--done rx9y` closeout path.
+<!-- agent:boundary:c71c0eb7 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -46,7 +80,7 @@ Compacted content:
 preset #spec-test-build-install-commit-push
 - ~[#n12s]~
 - ~[#exfd]~
-- [#rx9y]
+- ~[#rx9y]~
 - [#fzaf]
 - [#dpzd]
 - [#45rh]
@@ -55,7 +89,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#rx9y] #batch-updates ctx.batch(|ctx| { ... }) to defer invalidation until the batch completes
 - [ ] [#fzaf] #memo-guard Memoization guard — prevent unnecessary downstream cascade during invalidation when recomputed value equals prior value (slots are already lazy: invalidated only, recomputed on get())
 - [ ] [#dpzd] #api-ergonomics ctx.computed() alias and DX improvements
 - [ ] [#45rh] #release-publish Release + publish after effect system lands
@@ -76,4 +109,5 @@ preset #spec-test-build-install-commit-push
 <!-- agent:done -->
 - 2026-06-01 [#n12s] #ipc-corruption-live-repro-lazily-rs Logged as #zpc2 in agent-doc-bugs2.md backlog. Live repro of scaffold duplication during finalize --stream. Document manually repaired.
 - 2026-06-01 [#exfd] #effect-system Phase 4: Effect system — ctx.effect(|ctx| { ... }) with auto-tracking, scheduling, cleanup, and disposal
+- 2026-06-01 [#rx9y] #batch-updates ctx.batch(|ctx| { ... }) to defer invalidation until the batch completes
 <!-- /agent:done -->

@@ -376,7 +376,46 @@ Verification passed:
 CI/tmux evidence: there is no GitHub Actions workflow named `CI`. The latest pushed `Agent Doc` run I inspected, `26771332149`, had `tmux-ci` completed successfully while `check` was still in progress; local root `make check` passed before this closeout.
 
 I left unrelated workspace state out of the lazily-rs commit and parent pointer commit.
-<!-- agent:boundary:25cbd710 -->
+
+### Re: #tokio-async async computation design — gpt-5
+
+> **Queue prompt:**
+>
+> [#tokio-async]
+
+
+Completed `#tokio-async` as a design/spec item.
+
+I did not implement true async computations or effects in this cycle. The work records the contract that a future implementation must satisfy, and keeps it separate from the already-landed sync-on-Tokio feature.
+
+Changed in lazily-rs:
+- `SPEC.md` adds a `Future async computations/effects design` section with an `AsyncContext` API sketch and required semantics for in-flight future deduplication, cancellation, dependency tracking across `.await`, stale future completion, async cleanup ordering, batching interaction, and separate `Send` versus `LocalSet` surfaces.
+- `README.md` now points from the Tokio sync feature to the separate `AsyncContext` design and explicitly names the async semantics still deferred.
+- `src/lib.rs` adds a compile-fail async contract doctest showing that the current sync graph does not await async slot callbacks.
+- `AGENTS.md` updates the doctest count to 2.
+
+Commits:
+- lazily-rs `9873900` `docs: design async context semantics` pushed to `origin/main`.
+- parent repo `3c90cf805` records the lazily-rs submodule pointer update.
+
+Verification passed:
+- `cargo fmt --check`
+- `cargo check`
+- `cargo test`
+- `cargo test --all-features`
+- `cargo test -- --list` reports 13 integration tests, 68 spec tests, 0 default Tokio tests, and 2 doctests
+- `cargo test --features tokio -- --list` reports the same default tests plus 2 Tokio sync tests and 2 doctests
+- `cargo build`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo package --allow-dirty`
+- root `make check`
+
+`cargo install --path . --force` still fails for the expected library-crate reason: there are no binaries to install.
+
+CI/tmux evidence: there is no GitHub Actions workflow named `CI`. The latest pushed `Agent Doc` run I inspected, `26771726546`, had `tmux-ci` completed successfully while `check` was still in progress; local root `make check` passed on the final state before this closeout.
+
+Escalation/confidence: implementation is intentionally deferred; the design is now explicit enough to drive future tests and implementation without mixing sync Tokio scheduling with true async reactive semantics.
+<!-- agent:boundary:17570a62 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -387,14 +426,13 @@ preset #spec-test-build-install-commit-push
 - ~[#thr-core]~
 - ~[#thr-tests]~
 - ~[#tokio-sync]~
-- [#tokio-async]
+- ~[#tokio-async]~
 - Would a lock-free mechanism (e.g. CAS) perform better than a lock-backed context state? If yes, create a plan with #mermaid diagrams to evaluate performance and concurrency characteristics. Ensure the parallelism/concurrency is provably safe.
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#tokio-async] #tokio Design true async computations/effects only after #tokio-sync: in-flight future deduplication, cancellation, stale future completion, cleanup ordering, and Send vs LocalSet semantics
 <!-- /agent:backlog -->
 
 ## Review
@@ -415,4 +453,5 @@ preset #spec-test-build-install-commit-push
 - 2026-06-01 [#thr-core] #parallelism Implement the thread-safe core after the spec: lock-backed context state, Send + Sync cached values and compute/effect callbacks, safe dependency tracking, and re-entrant user callback boundaries
 - 2026-06-01 [#thr-tests] #parallelism Add thread contention coverage: concurrent first get, concurrent set_cell, batch flush ordering, clear/dispose races, effect coalescing, and deadlock/regression checks modeled after lazily-zig thread_safe tests
 - 2026-06-01 [#tokio-sync] #tokio Add optional Tokio integration after thread safety is sound: async tests and examples that share the synchronous context across tokio::spawn/spawn_blocking without introducing async compute semantics
+- 2026-06-01 [#tokio-async] #tokio Design true async computations/effects only after #tokio-sync: in-flight future deduplication, cancellation, stale future completion, cleanup ordering, and Send vs LocalSet semantics
 <!-- /agent:done -->

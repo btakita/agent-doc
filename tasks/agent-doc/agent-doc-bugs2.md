@@ -63,7 +63,7 @@ I gated `#6cmx`; it still needs a live operator capture, not a source-code chang
 This item requires a live JetBrains/plugin session with `#com.github.btakita.agentdoc` debug logging enabled, followed by typing into a document during `finalize --stream` so the exact `setText` payload can be captured. I cannot produce that capture from this Codex pane, and I am not going to mark it done without the live proof.
 
 Changed paths: session document only. Commands run: `agent-doc preflight`, `agent-doc plan`, and `agent-doc write --commit --pending-gate 6cmx`. Verification: no source changes, so no build/test suite was required. Confidence: high that this belongs in gated live-capture state. Escalation: run the capture from the live JetBrains session when ready.
-<!-- agent:boundary:99c802f6 -->
+<!-- agent:boundary:3bf0da91 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
@@ -99,6 +99,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog priority queue=prepend -->
+- [ ] [#jb-tsift-pane-sync] [recommended] JetBrains navigation to `tasks/software/tsift.md` and manual `Sync Tmux Layout` did not immediately surface this pane. Plan and fix the regression where automatic selection plus explicit manual sync can leave a live/hidden/stashed target pane invisible or silently deferred; manual sync must either make the focused pane visible or report the exact blocker. Plan: tasks/agent-doc/plan-jb-tsift-pane-sync-regression.md.
 - [ ] [#qasm] [recommended] Path C - continue the no-live-pane implementable review items in priority order, starting with the queue-provenance cluster (#prompt-preempts-auto-queue, #queue-user-edit-overwrite, #jb-run-agent-doc-response-queue-contamination), then the Option-A fixes (#cancel-orphans-preflight-cycle, #exchange-prompt-dropped-on-merge, #duplicate-response-after-commit), closeout-guard hardening (#do-id-partial-closeout-state, #preset-item-id-collision-enforce, #queue-clear-unrun-items), the feature pair (#backlog-priority-attribute, #backlog-queue-sync-attribute), then hygiene/UX (#stash-session-ttl-prune, #plugin-cleanup-menu-command, #stash-pane-promote-on-focus, #clear-stops-running-process, #jb-stale-busy-idle-footer, #snrun).
 <!-- /agent:backlog -->
 

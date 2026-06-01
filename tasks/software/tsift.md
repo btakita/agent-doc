@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -37,18 +37,53 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 2 response topic(s): lazily-rs cache contracts and SurrealDB; SurrealDB parity next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:dfad38fb -->
+
+### Re: #surreal-backend-eval — gpt-5
+
+> **Queue prompt:**
+>
+> [#surreal-backend-eval]
+
+
+Implemented and pushed `surrealdb` as a `graph-db backend-eval` candidate while keeping it held behind the experimental promotion gate.
+
+- Added `GraphDbExperimentalBackend::Surrealdb`, parser aliases (`surrealdb`, `surreal`, `surreal-db`), default candidate inclusion, CLI help, graph-db schema text, adapter-spike listing, and native-adapter-required promotion checks.
+- Kept the implementation on the existing provider-neutral read-only row snapshot path so `--candidate surrealdb` loads the same rows and compares signatures against SQLite.
+- Extended backend-eval conformance coverage to assert SurrealDB read-only metadata, operation success, SQLite parity, metrics, adapter-spike presence, and hold-gate checks.
+- Updated `README.md` and `SPEC.md` so SurrealDB appears in backend-eval candidate/spec surfaces.
+
+Verification passed:
+
+- `cargo test -p tsift-cli cli_parses_graph_db_backend_eval_surrealdb_candidate`
+- `cargo test -p tsift-cli --test graph_db_conformance graph_db_backend_eval_benchmarks_candidate_stores_against_sqlite`
+- `make check`
+- `cargo build`
+- `cargo install --path . --force`
+
+`cargo build` and `cargo install` only emitted the existing unused local patch warnings for `agent-kit`, `tagpath`, and `tmux-router`.
+
+CI check: latest GitHub Actions CI run `26769887559` was already red on `main`, but both jobs failed before test steps ran. The annotations on both check runs report GitHub runner `No space left on device` writing runner diagnostics, so there was no CI test/clippy failure to reproduce locally. This repo has only `CI` and `Release` workflows and no `make tmux-ci` target.
+
+Commits pushed:
+
+- `btakita/tsift@074e7b4` (`feat(graph): add surrealdb backend-eval candidate`)
+- `btakita/agent-loop@a3576dc3b` (`chore: update tsift submodule`)
+<!-- agent:boundary:98031817 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+preset #spec-test-build-install-commit-push
+- ~[#surreal-backend-eval]~
+- [#surreal-parity-suite]
+- [#surreal-native-adapter]
+- [#surreal-promotion-gate]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#surreal-backend-eval] Add SurrealDB as a graph-db backend-eval candidate before exposing it as a normal GraphDbBackend: extend GraphDbExperimentalBackend parsing/defaults/help/spec so 'tsift graph-db --json backend-eval --candidate surrealdb' loads provider-neutral rows and reports SQLite parity signatures.
 - [ ] [#surreal-parity-suite] Extend graph_db_conformance backend-eval coverage for SurrealDB candidate parity across status/counts, edge lookup, edge property scans, incident scans, neighborhood, related retrieval, path tiers, evidence, conflict-matrix, and dispatch-trace.
 - [ ] [#surreal-native-adapter] Spike a feature-gated optional SurrealDB adapter crate that writes provider-neutral projection rows to an embedded/file-backed SurrealDB store without adding SurrealDB to the default cargo build/install path.
 - [ ] [#surreal-promotion-gate] Run repeated real, full-projection, synthetic high-degree, and synthetic deep-chain backend-eval samples for the SurrealDB adapter, including install portability and multi-process/read-only lock behavior, then update the promotion gate only if it preserves SQLite parity and beats SQLite on every required workload.

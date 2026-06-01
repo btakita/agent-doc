@@ -9,7 +9,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -150,7 +150,8 @@ impl WatchActor {
 The watch daemon's reactive file-watching (zero debounce for CRDT docs) becomes a natural invalidation trigger — `inotify`/`poll` event → `slot.clear()` → next access recomputes. No redundant `stat` walks between events for the same path.
 
 **Migration path:** Define the slot functions in `agent-doc-core` (no `std::fs` — slot bodies call the existing I/O wrappers). CLI `main.rs` creates a throwaway context. Actor structs hold a persistent one. The existing function signatures stay available as non-context entry points for backward compat during migration.
-<!-- agent:boundary:60995c9b -->
+Add #next-steps to begin integration of lazily-rs. Find areas where lazily-rs can help with performance.
+<!-- agent:boundary:aa8b4caa -->
 <!-- /agent:exchange -->
 
 <!--
@@ -158,7 +159,8 @@ The watch daemon's reactive file-watching (zero debounce for CRDT docs) becomes 
 
 ## Pending / Not Built
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+- Add #next-steps to begin integration of lazily-rs. Find areas where lazily-rs can help with performance.
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

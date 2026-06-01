@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 
@@ -415,19 +415,25 @@ Verification passed:
 CI/tmux evidence: there is no GitHub Actions workflow named `CI`. The latest pushed `Agent Doc` run I inspected, `26771726546`, had `tmux-ci` completed successfully while `check` was still in progress; local root `make check` passed on the final state before this closeout.
 
 Escalation/confidence: implementation is intentionally deferred; the design is now explicit enough to drive future tests and implementation without mixing sync Tokio scheduling with true async reactive semantics.
-<!-- agent:boundary:17570a62 -->
+
+### Re: lock-free/CAS evaluation plan — gpt-5
+
+> **Queue prompt:**
+>
+> Would a lock-free mechanism (e.g. CAS) perform better than a lock-backed context state? If yes, create a plan with #mermaid diagrams to evaluate performance and concurrency characteristics. Ensure the parallelism/concurrency is provably safe.
+
+
+A lock-free mechanism such as CAS could perform better than the current lock-backed context for narrow hot paths, but I would not replace the whole graph state with a lock-free design without benchmarks and model-check proof first. The safe path is to keep `ThreadSafeContext` as the correctness baseline and evaluate targeted CAS only where the operation has a clear linearization point.
+
+I created the plan here: [plan-lazily-rs-lock-free-context.md](/home/brian/work/btakita/agent-loop/tasks/software/plan-lazily-rs-lock-free-context.md:1). It includes Mermaid diagrams for the decision flow, slot state model, concurrent get/set race, and safety test matrix, plus benchmark workloads and proof obligations for memory ordering, ABA avoidance, dependency consistency, effect coalescing, cleanup ordering, and batch boundaries.
+
+No lazily-rs runtime code changed for this prompt. I committed the plan as `dcb22dc09` (`docs: plan lazily-rs lock-free evaluation`). Verification: root `make check` passed. GitHub has no workflow named `CI`; the relevant `Agent Doc` run `26772048032` has `tmux-ci` completed successfully, while its `check` job was still in progress when inspected. The previous `Agent Doc` runs `26771726546` and `26771332149` were successful.
+<!-- agent:boundary:fa06cb69 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~[#thr-spec]~
-- ~[#thr-core]~
-- ~[#thr-tests]~
-- ~[#tokio-sync]~
-- ~[#tokio-async]~
-- Would a lock-free mechanism (e.g. CAS) perform better than a lock-backed context state? If yes, create a plan with #mermaid diagrams to evaluate performance and concurrency characteristics. Ensure the parallelism/concurrency is provably safe.
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

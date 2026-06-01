@@ -98,7 +98,7 @@ Commands: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `tsift --en
 Verification: source tests not run because this was a backlog/planning response with no code changes. `agent-doc finalize` will run the document write/commit/session-check closeout.
 Escalation: none.
 Confidence: high for the ordering; medium for SurrealDB production suitability until the new backend-eval evidence exists.
-<!-- agent:boundary:bce12581 -->
+<!-- agent:boundary:a36cfb54 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -109,7 +109,7 @@ Confidence: high for the ordering; medium for SurrealDB production suitability u
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#surreal-backend-eval] Add SurrealDB as a graph-db backend-eval candidate before exposing it as a normal GraphDbBackend: extend GraphDbExperimentalBackend parsing/defaults/help/spec so  loads provider-neutral rows and reports SQLite parity signatures.
+- [ ] [#surreal-backend-eval] Add SurrealDB as a graph-db backend-eval candidate before exposing it as a normal GraphDbBackend: extend GraphDbExperimentalBackend parsing/defaults/help/spec so 'tsift graph-db --json backend-eval --candidate surrealdb' loads provider-neutral rows and reports SQLite parity signatures.
 - [ ] [#surreal-parity-suite] Extend graph_db_conformance backend-eval coverage for SurrealDB candidate parity across status/counts, edge lookup, edge property scans, incident scans, neighborhood, related retrieval, path tiers, evidence, conflict-matrix, and dispatch-trace.
 - [ ] [#surreal-native-adapter] Spike a feature-gated optional SurrealDB adapter crate that writes provider-neutral projection rows to an embedded/file-backed SurrealDB store without adding SurrealDB to the default cargo build/install path.
 - [ ] [#surreal-promotion-gate] Run repeated real, full-projection, synthetic high-degree, and synthetic deep-chain backend-eval samples for the SurrealDB adapter, including install portability and multi-process/read-only lock behavior, then update the promotion gate only if it preserves SQLite parity and beats SQLite on every required workload.

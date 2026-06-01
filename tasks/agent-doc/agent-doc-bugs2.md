@@ -36,6 +36,34 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 6 response topic(s): JB `Run Agent Doc` deadlock on this document; do [#j0k8] (queue continuation); making agent-doc opt-in for plain .md files; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
+❯ JB `Run Agent Doc` on monsterrodholders.md stalled. The exchange prompt moved to the queue then stalled. Calling JB `Run Agent Doc` produced this error:
+```
+[sync] found alive agent-doc child (pid 3761722) in pane %40 for tasks/monsterrodholders.md
+resync: stash pane %48 is unregistered but still hosts live supervisor 9386d273-2288-498c-b9fc-207f224f9fdb — skipping kill
+[sync] found alive agent-doc child (pid 3761722) in pane %40 for tasks/monsterrodholders.md
+resync: stash pane %35 is unregistered but still hosts live supervisor 4602f467-ef2a-4094-a750-5eb533368988 — skipping kill
+[sync] found alive agent-doc child (pid 3761722) in pane %40 for tasks/monsterrodholders.md
+resync: stash pane %54 is unregistered but still hosts live supervisor 3af2ebc5-cc8e-487f-b92c-f5bf3f7e9e00 — skipping kill
+[sync] found alive agent-doc child (pid 3761722) in pane %40 for tasks/monsterrodholders.md
+resync: stash pane %56 is unregistered but still hosts live supervisor ee25d7aa-b238-46a1-83cf-db5b91a8bf9e — skipping kill
+[sync] found alive agent-doc child (pid 3761722) in pane %40 for tasks/monsterrodholders.md
+resync: stash pane %42 is unregistered but still hosts live supervisor tsift-v0.1 — skipping kill
+[sync] found alive agent-doc child (pid 3761722) in pane %40 for tasks/monsterrodholders.md
+resync: stash pane %52 is unregistered but still hosts live supervisor 30228743-ea38-4ec6-b89f-96d384d9f285 — skipping kill
+[route] debounce OK — file idle for 8.3s and no editor typing indicator
+[route] target tmux session: 0
+[route] authoritative actor generation 249 for tasks/monsterrodholders.md is busy on pane %40; queued pending dispatch "Do we have any actionable insights from the ad campaigns?" in agent:queue auto (appended=false, already_present=true, superseded=false) instead of injecting a duplicate trigger
+```
+❯ #spec-test-build-install-commit-push
+
+### Re: do [#6cmx] — gpt-5
+
+I gated `#6cmx`; it still needs a live operator capture, not a source-code change from this pane.
+
+This item requires a live JetBrains/plugin session with `#com.github.btakita.agentdoc` debug logging enabled, followed by typing into a document during `finalize --stream` so the exact `setText` payload can be captured. I cannot produce that capture from this Codex pane, and I am not going to mark it done without the live proof.
+
+Changed paths: session document only. Commands run: `agent-doc preflight`, `agent-doc plan`, and `agent-doc write --commit --pending-gate 6cmx`. Verification: no source changes, so no build/test suite was required. Confidence: high that this belongs in gated live-capture state. Escalation: run the capture from the live JetBrains session when ready.
+<!-- agent:boundary:99c802f6 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->

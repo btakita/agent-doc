@@ -82,10 +82,26 @@ Resolve the ownership collision before continuing the queue on this doc:
 3. Then re-dispatch `agent-doc tasks/agent-doc/agent-doc-bugs2.md` from the single surviving pane — it'll get a clean preflight.
 
 Net: `#completed-queue-residue-regression`'s fix is **landed, installed, and live-verified**; it just needs its closeout recorded by whichever single session owns the document. I'm not going to be that session while the authoritative cycle is live.
-<!-- agent:boundary:632add25 -->
+
+### Re: JB `Run Agent Doc` on this file deadlocked — opus-4-8
+
+Root-caused and fixed. The hang was the `--wait-for-ready 60` override (JB passes it for slow supervisor startup) being applied to the wrong case.
+
+**Root cause** (`route.rs`): on a dispatch-only `Run Agent Doc`, when the authoritative actor is **Busy** (mid active turn — e.g. this very Claude session), `wait_for_authoritative_actor_ready` honored the 60s start-override *before* reaching the `DispatchOnlyBusyQueue` enqueue path. A busy active turn never becomes dispatch-ready by waiting, so the action blocked the full 60s per click. The ops log shows it: two `route_wait_for_ready_override ... harness=claude timeout_secs=60` (~27s apart) with no enqueue between.
+
+**Fix** — submodule `89c357d5` (pushed `9362c8f8..89c357d5`); superproject pointer `aa9a64261`:
+
+- `busy_dispatch_only_should_wait_for_ready()` — skip the start-oriented ready wait when a queue-prompt fallback exists, so a busy actor queues to `agent:queue auto` immediately and the supervisor idle-queue watch (from `4b3f4835`) drains it on busy→idle. A stale-busy-but-actually-ready projection is still repaired by the later direct-pane-evidence check (`#snrun`), so genuinely-idle panes still dispatch directly.
+- `dispatch_active_turn_queue_source()` — added the `("claude", "active claude turn")` case so the dispatch-only *reopen* path enqueues a busy Claude turn instead of bailing; it previously handled only codex/opencode.
+
+**spec/test/build/install/commit/push:** 2 unit regressions; full `make check` green; `cargo build --release` + `cargo install --path . --force` — both binaries live; committed + pushed.
+
+Remaining: live-verify on an actual busy pane — queued as a `[recommended]` follow-up. The auto-queue tail (`do [#completed-queue-residue-regression]`, …) is untouched and still pending.
+<!-- agent:boundary:40b07968 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
+- do [#zpc2]
 preset #spec-test-build-install-commit-push
 - do [#completed-queue-residue-regression]
 - do [#codex-owned-pane-stop-hook-live-verify]
@@ -124,6 +140,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog priority queue=prepend -->
+- [ ] [#t41j] [recommended] #jb-run-agent-doc-busy-wait-deadlock live-verify (gated on a live busy pane): fix landed (submodule 89c357d5 — busy_dispatch_only_should_wait_for_ready skips the --wait-for-ready start override on a busy active turn + the (claude, active claude turn) case in dispatch_active_turn_queue_source). With the installed binary, click JB Run Agent Doc on a doc whose Claude actor is mid active-turn (not running /loop) and confirm it returns immediately (no 60s route_wait_for_ready_override block), appends the prompt to agent:queue auto, and the supervisor idle-queue watch drains the head on busy->idle. Check ops.log for the enqueue and the absence of a 60s wait.
 - [ ] [#zpc2] #ipc-corruption-live-repro-lazily-rs [recommended] Live repro of IPC scaffold duplication on tasks/software/lazily-rs.md while typing during finalize --stream. Full Backlog/Queue/Review duplicated plus two escaped exchange-close markers. Partial user typing embedded in wrong positions. Matches detect_duplicated_scaffold(). Plans: tasks/agent-doc/plan-full-document-ipc-corruption-typing-prompt.md, tasks/agent-doc/plan-prompt-duplicated-while-typing.md.
 - [ ] [#codex-owned-pane-stop-hook-live-verify] [recommended] Gated on a live Codex pane -- the remaining phases of #codex-owned-pane-prompt-miss-followups after phase 2a landed: (2b) a live Codex Stop-hook regression asserting the owned_pane_self_invocation diagnostic forces an in-pane response body before final chat output, and (3) live-verify a real Codex same-pane run with an unresolved exchange prompt. Plan: tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md.
 - [ ] [#queue-sync-auto-pending-done-guard-misfire] [recommended] When a queue=sync/append attribute populates an active auto-queue in the same cycle, the freshly-synced do-[#id] entries appear as new do-directives in the cycle diff, so preflight records them all as expect_done_or_gate_ids and pending_done_guard then demands every synced item be --done in the populating cycle (live repro 2026-05-31 agent-doc-bugs2.md: do [#backlog-queue-sync-attr] cycle flagged 9 other freshly-synced queue items). Fix: agent-generated/synced queue items must not be treated as user do-directives; only a genuine user exchange do [#id] or the single consumed queue head should populate expect_done_or_gate_ids. Plan: tasks/agent-doc/plan-queue-sync-auto-pending-done-guard-misfire.md.

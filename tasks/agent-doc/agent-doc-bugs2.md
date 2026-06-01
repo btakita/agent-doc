@@ -31,17 +31,50 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260601-042354.md`*
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260601-044459.md`*
 
 Compacted content:
+❯ - Archived 3 response topic(s): do [#queue-clear-unrun-items]; do [#r5q6]; finish [#r5q6]
+❯ - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
+### Re: JB `Run Agent Doc` on this file deadlocked — opus-4-8
+I've confirmed what I need, and the right call is clear. Here's my honest assessment — I'm **not** going to finalize a competing response onto this document, and the reason is directly tied to `#zpc2` itself.
+
+> **Queue prompt:**
+>
+> do [#t41j]
+
+
+## `do [#zpc2]` triage
+
+`#zpc2` is a live-repro of full-document IPC scaffold duplication (duplicated Backlog/Queue/Review + escaped exchange-close markers) while typing during `finalize --stream`. Current state in HEAD:
+
+- **Detection + write-time guard already exist:** `ipc_corruption::detect_duplicated_scaffold(candidate)` is wired into the write path (`write.rs:8869`). The duplicated-scaffold *symptom* is already caught before it commits.
+- **The open work is prevention, and it's gated.** Stopping the editor buffer from producing the duplication at the source (`PatchWatcher.setText`) is `#ipcfullprompt-recur2`, explicitly **gated on capturing the exact `setText` payload from `idea.log`** (JB debug logging for `#com.github.btakita.agentdoc`). That capture requires the live IDE — I cannot produce it from here, so I can't land a real prevention fix this turn without fabricating one.
+
+**Mechanism — and why I won't finalize:** I have direct, fresh evidence of this exact corruption class. On my last two turns my `finalize` hit **torn reads** (`opened backlog … closed exchange`, a half-written duplicated structure) because a *concurrent writer was modifying the document while finalize read/wrote it*. That is the same race as "typing during `finalize --stream`": `PatchWatcher.setText` (or a second actor) writing into the buffer while a finalize is mid-flight. **Finalizing a `#zpc2` response right now — onto a document another `agent-doc` actor is actively draining — is the single most likely way to reproduce `#zpc2` corruption.** So standing down here is not avoidance; it's the correct handling of the very bug.
+
+Two more facts that say this isn't mine to close this turn:
+- The auto-queue **head is now `do [#t41j]`**, not `do [#zpc2]` — the authoritative actor inserted its deadlock-fix live-verify ahead. `#zpc2` isn't even the head.
+- That authoritative actor just landed the deadlock fix (`89c357d5`) and is competently draining the queue; preflight succeeded for me only because I caught a momentary gap between its cycles.
+
+## The actual blocker (root cause of six turns of this)
+
+This one document is being driven by **two `agent-doc` actors sharing the same queue** — the route-owned authoritative Claude cycle and this session. The same `agent:queue auto` is feeding both, which is why every turn I find work already committed, race a live cycle, or hit torn reads. That contention is the real problem, and it's a superset of `#zpc2`.
+
+**Recommendation (unchanged, now more urgent):**
+1. Consolidate to **one** owner of `agent-doc-bugs2.md`. Stop the secondary session (or this one) so a single pane drains `agent:queue auto`.
+2. `#zpc2` next step (for whichever session owns it, with the live IDE): enable JB debug logging, reproduce on `lazily-rs.md`, capture the `setText` payload → unblocks the `#ipcfullprompt-recur2` prevention. The detection/guard already protects against committing the corruption in the meantime.
+
+`#zpc2` stays gated on that payload capture — I'm not marking it done or inventing a prevention fix I can't verify.
 - Archived 2 response topic(s): do [#r5q6]; JB `Run Agent Doc` on this file deadlocked
 - Prior summary/context: ### Session Summary ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039...
-<!-- agent:boundary:4aa98e2b -->
+<!-- agent:boundary:fdd4cc1b -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#t41j]
+- ~do [#t41j]~
 - do [#zpc2]
 - do [#completed-queue-residue-regression]
 - do [#codex-owned-pane-stop-hook-live-verify]

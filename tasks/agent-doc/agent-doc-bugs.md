@@ -9,7 +9,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -225,7 +225,85 @@ file: Path
 5. Deduplicate the 8+ copies of `find_project_root` into the single slot
 6. Add persistent `Context` to `SupervisorShared` and `WatchEntry` (P2)
 How can we detect any changes to the document that may invalidate the slots or cells?
-<!-- agent:boundary:8932f68c -->
+
+### Re: detecting slot/cell invalidation — gpt-5
+
+lazily-rs invalidation is driven by **Cells** (mutable inputs) and propagated automatically through the dependency graph. The question is what agent-doc events update those Cells.
+
+#### Two invalidation models
+
+**CLI runs — no invalidation needed.** The process is sequential and short-lived. A fresh `Context` is created in `main()`, all slots compute at most once, and the entire context drops on exit.
+
+**Actor/watch processes — event-driven invalidation.** Long-lived processes detect changes and update Cells, which cascades to dependent Slots.
+
+#### Cell → Slot graph
+
+```
+Cells (mutable inputs — updated by events):
+  canonical_path_cell: Cell<PathBuf>
+  file_content_cell: Cell<String>
+  project_tree_version: Cell<u64>        // bumped on any file-tree change
+  config_version: Cell<u64>              // bumped on config.toml change
+
+Slots (computed — auto-invalidated when upstream Cells change):
+  canonical_path ← canonical_path_cell
+  project_root   ← project_tree_version, canonical_path
+  doc_hash       ← canonical_path
+  global_config  ← config_version
+  project_config ← project_root, config_version
+  frontmatter    ← file_content_cell
+  ssh_context    ← canonical_path, project_config
+  snapshot_path  ← doc_hash, project_root
+```
+
+When `file_content_cell.set(new_content)` is called, only `frontmatter` and its downstream slots are recomputed on next access. `doc_hash`, `project_root`, `global_config` remain cached.
+
+#### What triggers each Cell update
+
+| Event | Cell updated | Detection mechanism |
+|-------|-------------|-------------------|
+| File content edit | `file_content_cell` | `notify` crate inotify/poll → `wait_for_stable_content` → `cell.set(content)` |
+| File rename | `canonical_path_cell` | `try_migrate_renamed` detects path change → `cell.set(new_path)` |
+| `.agent-doc/` created/removed | `project_tree_version` | Watch on parent dirs via `notify` → `cell.bump()` |
+| `config.toml` modified | `config_version` | Watch on `~/.config/agent-doc/` + `.agent-doc/config.toml` → `cell.bump()` |
+| CRDT merge conflict | `file_content_cell` | CRDT merge produces new content → `cell.set(merged)` |
+| SIGHUP | `config_version` | Signal handler → `cell.bump()` |
+
+agent-doc already has the detection infrastructure — the `notify` crate in `watch.rs`, `wait_for_stable_content` debounce, and CRDT merge in `write.rs`. The integration point is connecting those existing event sources to lazily-rs Cells instead of (or in addition to) the current ad-hoc recomputation.
+
+#### Concrete wiring example (watch daemon)
+
+```rust
+struct WatchActor {
+    ctx: Context,
+    cells: WatchCells,
+}
+
+struct WatchCells {
+    file_content: Cell<String>,
+    tree_version: Cell<u64>,
+    config_version: Cell<u64>,
+}
+
+impl WatchActor {
+    fn on_file_event(&self, event: FileEvent) {
+        match event.kind {
+            EventKind::Modify(_) => {
+                let content = std::fs::read_to_string(&event.path).unwrap();
+                self.cells.file_content.set(content);
+            }
+            EventKind::Create(_) | EventKind::Remove(_) => {
+                self.cells.tree_version.set(self.cells.tree_version.get() + 1);
+            }
+        }
+        // Slots are lazy — they recompute on next access, not eagerly
+        self.process(&event.path);
+    }
+}
+```
+
+The key insight: **Cells are updated by the same events agent-doc already handles.** No new detection layer is needed — just wire existing event handlers to `Cell::set()` instead of invalidating local variables or re-calling functions directly.
+<!-- agent:boundary:5f3ed925 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -233,8 +311,7 @@ How can we detect any changes to the document that may invalidate the slots or c
 
 ## Pending / Not Built
 
-<!-- agent:queue auto -->
-- How can we detect any changes to the document that may invalidate the slots or cells?
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

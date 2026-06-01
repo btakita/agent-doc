@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 
@@ -37,14 +37,47 @@ queue_active: false
 Compacted content:
 - Archived 1 response topic(s): lazily-rs performance next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:80900c6d -->
+
+### Re: #perf-bench — gpt-5
+
+> **Queue prompt:**
+>
+> [#perf-bench]
+
+
+Completed `#perf-bench`.
+
+Added a Criterion benchmark target for `lazily-rs` covering the requested public API paths: cached reads, cold first `get`, dependency fan-out, memo equality suppression, effect flushing, batch storms, and `ThreadSafeContext` contention at 1/2/4/8/16 workers. The suite lives in `benches/context.rs`; `Cargo.toml` now declares the bench target and a dev-only Criterion dependency.
+
+I also updated `SPEC.md` with the benchmark contract and adjusted the dependency wording in `SPEC.md` / `README.md` to distinguish zero mandatory runtime dependencies from optional Tokio and dev-only Criterion.
+
+During full verification, `cargo test --features tokio` exposed an existing `ThreadSafeContext` race: a getter could refresh a slot, then another thread could clear that slot before the final read, causing a panic on a transient unset state. I fixed `ThreadSafeContext::get_slot` to retry while the slot still exists but has no cached value.
+
+Verification:
+
+- `cargo fmt -- --check`
+- `cargo bench --no-run`
+- `cargo test`
+- `cargo test --features tokio`
+- `cargo test --features tokio threading_contract::thread_safe_clear_and_dispose_races_remain_consistent -- --exact`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo build`
+- CI check: `gh run list --workflow CI --limit 1` found no `CI` workflow, and `gh workflow list` returned no workflows for `lazily-rs`
+- `make check` was not run because `src/lazily-rs` has no `Makefile`
+- `cargo install --path .` is not applicable because `cargo metadata` shows no package binary target
+
+Commits pushed:
+
+- `src/lazily-rs`: `baae170` (`perf: add benchmark suite`) to `btakita/lazily-rs main`
+- `agent-loop`: `e7eaa33bf` (`chore: update lazily-rs benchmark pointer`) to `btakita/agent-loop main`
+<!-- agent:boundary:2f9d16af -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- [#perf-bench]
+- ~[#perf-bench]~
 - [#perf-profile]
 - [#perf-layout]
 - [#perf-thread-dedup]
@@ -54,7 +87,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#perf-bench] #performance Add a Criterion benchmark suite for Context and ThreadSafeContext covering cached reads, cold first get, dependency fan-out, memo equality suppression, effect flushing, batch storms, and threaded contention at 1/2/4/8/16 workers
 - [ ] [#perf-profile] #performance Add lightweight benchmark instrumentation for recompute counts, duplicate speculative computes, dependency edge churn, effect queue depth, allocations, and ThreadSafeContext lock wait/hold time
 - [ ] [#perf-layout] #performance Use benchmark results to optimize single-threaded Context storage and edge maintenance, starting with node storage locality and avoiding unnecessary HashSet/HashMap churn without changing public semantics
 - [ ] [#perf-thread-dedup] #performance Prototype ThreadSafeContext in-flight recompute deduplication so concurrent first get callers share one computation when benchmarks show duplicate work is material

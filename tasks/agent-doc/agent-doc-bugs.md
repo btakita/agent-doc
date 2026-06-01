@@ -119,7 +119,44 @@ Short answer: not in its current form, but the idea of replacing tmux with an ag
 #### Recommendation
 
 Keep tmux. Extract the `Multiplexer` trait from `tmux-router`'s existing `hybrid.rs` backend traits when the backlog reaches that item. Watch herdr's socket API and control surface for ideas, but do not add it as a dependency until it can demonstrate stable support for the specific tmux primitives agent-doc requires (control mode, hex sends, pane PID, session-scoped registry, break-pane preservation).
-<!-- agent:boundary:75feb267 -->
+❯ How many LoC are the following projects?
+❯ - agent-doc
+❯ - tsift
+❯ - tagpath
+❯ - lazily-rs
+❯ - module-harness
+❯ - skill-harness
+❯ - existence-lang
+❯ - any other of my projects in my current agent-loop stack
+
+### Re: LoC across agent-loop projects — glm-5.1
+
+Rust `.rs` lines (excluding `target/`), unless noted:
+
+| Project | LoC |
+|---------|-----|
+| agent-doc | 224,558 |
+| agent-doc-js | 195,969 (TS/JS) |
+| session-share | 107,679 |
+| tsift | 98,842 |
+| tmux-router | 8,627 |
+| tagpath | 18,583 |
+| lazily-rs | 2,387 |
+| agent-kit | 2,304 |
+| existence-lang | 1,905 |
+| skill-harness | 1,511 |
+| module-harness | 1,302 |
+| instruction-files | 1,169 |
+| agent-runbooks | 1,090 |
+| agent-rules | 999 |
+| eval-runner | 954 |
+| agent-memories | 687 |
+| agent-resume | 683 |
+
+**Total: ~669,199 LoC** across all tracked projects.
+
+agent-doc alone is 34% of the stack. The top three (agent-doc, agent-doc-js, session-share) account for 79%.
+<!-- agent:boundary:5405b06c -->
 <!-- /agent:exchange -->
 
 <!--

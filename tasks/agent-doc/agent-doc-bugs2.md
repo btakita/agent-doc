@@ -255,7 +255,25 @@ The shared `src/agent-doc` tree has **806 lines of uncommitted concurrent work a
 
 #### Not auto-looping the rest of the queue
 The queue still holds `do [#ipcaa-scaf]`, `do [#submodule-response-commit-proof]`, `do [#qasm]`, each with `#spec-test-build-install-commit-push`. Each is a full build+install code cycle that would re-clobber the concurrent session's live binary. You approved that tradeoff for *this* item only, so I'm pausing the auto-loop — re-invoke `/agent-doc <FILE>` (or tell me to continue) to run the next item.
-<!-- agent:boundary:abcd0eae -->
+❯ Please resolve the existing dirty files. Can we commit the changes or is more work needed? Look in the Codex session history for additional context?
+
+### Re: resolve the dirty files — committed, make check green — opus-4-8
+
+Done — the dirty tree is **resolved and committed**, and the answer is **yes, committable** (no more work needed for it to be a valid tested state).
+
+#### What I did differently from the earlier gpt-5 turns
+Those turns correctly *declined* to reconcile because `agent-doc session clear tsift.md` reported the owner **alive-busy**. That condition changed: pane `%60` is now **`alive-idle` / `prompt_ready=true`** (direct evidence; the supervisor/lease projection is stale-`busy`, which the direct-evidence rule overrides). With the owner idle and not mid-edit, I verified and committed:
+
+- `make check` on the exact dirty tree → **GREEN**: compiles, no clippy warnings, full suite passes (incl. the WIP's own `tests/run_integration.rs` additions).
+- Committed `7135ffa5` (submodule branch `20260422/codex-agent-backend`, pushed) — the full 68-file / 957-insertion set as one interdependent checkpoint (a subset wouldn't compile). Working tree is now **clean**.
+
+#### Codex session history context
+The WIP is the **`tasks/software/tsift.md` Codex (gpt-5.5) session's** work — that session was running *this* document (the cross-document contamination from the top of this doc) and implementing agent-doc backlog items in `src/agent-doc`. It never committed (zero Codex commits; `codex_capability_proof: failed`; `committed_after_latest_run=false`), which is why the tree sat dirty. The commit message attributes primary authorship to that session; my commit only preserves/reconciles it behind a green suite. I did **not** author or hand-verify the intent of those 957 lines — they're committed because the suite proves they're functional, not because I can vouch for the design.
+
+#### Two things to note
+1. **The tsift.md session is NOT canceled** — you said you canceled it, but pane `%60` is alive (idle now; its context grew 11%→16% in ~5 min, so it's intermittently active). Until you `agent-doc session interrupt-clear tasks/software/tsift.md` (or stop routing it), it will keep contaminating this doc and re-dirtying the tree. That's the root cause worth closing.
+2. **Installed binary is stale vs HEAD** — `~/.cargo/bin/agent-doc` and `.bin` are at `bda2e1d2` (my guard, no WIP); HEAD is now `7135ffa5`. I did not rebuild/install this 957-line WIP (you didn't ask, and it's the Codex session's to validate). Say the word and I'll `cargo install` HEAD.
+<!-- agent:boundary:ce6a05ca -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->

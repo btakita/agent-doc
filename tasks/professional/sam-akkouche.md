@@ -70,7 +70,26 @@ Short answer: **describe it as a generic capability, not as their product — an
 Want me to add a generic "real-time voice / generative media" capability phrase to the Confidential AI Startup clause? I'll keep it skills-only and re-verify the Dreamable leak check stays 0.
 
 (Noted your edit merging the "Changes:" line in the prior response — left as-is.) Still uncommitted across `resume/` + `mail/`; exchange still at `block`-level accretion.
-<!-- agent:boundary:b63b907c -->
+❯ Use the safe description.
+
+### Re: Use the safe description — opus-4-8
+
+Done — added the capability-level voice/generative phrasing to the Confidential AI Startup line in `resume/data.toml` and rebuilt the PDF. The entry now reads:
+
+> **Confidential AI Startup** — Real-time AI systems engineering (Apr–May 2026): built **real-time voice AI and generative media pipelines** — low-latency streaming inference and agent-harness analysis tooling — and delivered investor-facing demos under tight timelines. Rust, Python, TypeScript, LiveKit, WebRTC, CopilotKit.
+
+**Kept it skills-only:** "real-time voice AI and generative media pipelines" reads as transferable expertise (the kind many AI teams build), not as a description of their specific product. Added `voice AI` and `generative media` to the entry's tags too.
+
+**Confidentiality verification:**
+- `dreamable` leak = **0**
+- "voice agent" (their product phrasing) = **0**
+- "on-demand asset" (their feature phrasing) = **0**
+- Name still rendered only as "Confidential AI Startup"
+
+So you get the voice/generative signal for Sam without narrating Dreamable's product. As noted before, if you ever want to go more specific, check it against the actual NDA first — verbal detail to Sam under his agency's confidentiality is the safer channel.
+
+Still uncommitted across `resume/` + `mail/` — no `#commit-push`. Exchange remains at `block`-level accretion (compaction offer stands).
+<!-- agent:boundary:2e5e5f68 -->
 <!-- /agent:exchange -->
 
 ## Queue

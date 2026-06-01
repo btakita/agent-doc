@@ -84,7 +84,34 @@ You resolved all four. This is ready to send.
 - A few "+" remain where prose would read smoother as "and": "Jetbrains + VSCode", "Software engineering principles + architecture", "strengths/weaknesses". Leave them if you like the terse feel — not worth blocking on.
 
 None of these change the outcome. Sign the NDA, fix the one missing space if you're being thorough, and send it.
-<!-- agent:boundary:a86559c9 -->
+❯ Please review this NDA https://dochub.com/jan-qell5f/gYzM7mBwDB83ZbpKqJ6EoO/awear-nda-brian-takita-pdf
+❯ Anything out of the ordinary? Anything to be aware of?
+
+### Re: NDA review — anything out of the ordinary? — opus-4-8
+
+I read the full document in the open DocHub tab (the PDF body renders to canvas, so I pulled it page-by-page via chromium-bridge — 3 pages, captured and read each). Here's the read.
+
+##### What it is
+A standard **one-way (unilateral) NDA**. Awear Inc. (Delaware corp; the "1209 Orange St, Wilmington" is just the Corporation Trust registered-agent address, not a real office) is the **Discloser**; you are the **Recipient**. It only protects *their* confidential information — nothing you tell them is covered. That's normal for a candidate/pre-engagement NDA. Effective date 5/23/2026; already signed by Ash Saulsbury (CEO) on their side. You still owe 4 fields: page initials + your signature + date (Title can be left blank or "N/A" — you're signing as an individual).
+
+##### Nothing alarming — the protective carve-outs you'd want are present
+- **§4(d) independent development** — info you develop independently, without use of or reference to their Confidential Information, is carved out. This is the important one for you: it protects your own tooling (agent-doc, etc.) as long as you don't build it *from* their materials.
+- **§4** also has the usual prior-possession, third-party-source, public-knowledge, and compelled-by-law (with notice) carve-outs.
+- **No non-compete, no non-solicit, no general invention/IP assignment** of your pre-existing or independent work. Good.
+
+##### Two clauses to be aware of
+1. **§7 Existence of Discussions** — neither party may, without the other's prior written consent, disclose, acknowledge, or confirm *that the discussions exist* or describe their subject matter. **This is the one that touches your workflow directly: do not name Awear or reference these talks on a livestream or any public channel without their written OK.** Private session docs are fine; public streams are not. Worth a conscious guard since you stream coding sessions.
+2. **§11 Feedback assignment** — any "Feedback" (enhancements, corrections, suggestions) you give them *in connection with their Confidential Information* is voluntary, royalty-free, and you **assign all rights in it to them**. It's scoped to feedback about their confidential materials, not your general IP, so it's not a grab — but it's an *assignment*, not just a license. Practical takeaway: during the exploratory/interview phase, don't hand over substantive product or architecture contributions expecting to retain rights in them. Keep your own work clearly your own.
+
+##### Minor nuances (not blockers)
+- **Survival is long.** The 3-year "term" (§6) is only the window during which disclosures are covered. Obligations survive **5 years after termination** for ordinary confidential info and **indefinitely for anything that qualifies as a trade secret**.
+- **"Executed as a sealed instrument"** (signature block) — in some states a sealed instrument carries a longer statute of limitations than an ordinary contract. Combined with the trade-secret survival, breach claims have a long tail. Standard boilerplate, just be aware the obligations don't quietly expire.
+- **Broad CI definition** (§2): includes the catch-all "(c) would be apparent to a reasonable person … is of a proprietary or confidential nature" — so not everything has to be marked "Confidential" for the obligation to attach. Standard, but it means treat anything non-public they show you as covered.
+- Governing law: **Delaware**. Remedies clause (§8) gives them injunctive relief / specific performance — standard.
+
+##### Bottom line
+Nothing predatory, nothing unusual for a candidate NDA — it's a clean, fairly standard unilateral agreement with the carve-outs that matter (especially independent development) intact. **Safe to sign.** The only two behavioral commitments to actually internalize: (1) **don't publicly disclose you're talking to Awear** (§7) — relevant to your streaming, and (2) **don't gift them substantive IP as "feedback"** during discussions (§11). Sign, initial the three pages, date it, and return.
+<!-- agent:boundary:c549baac -->
 <!-- /agent:exchange -->
 
 ## Queue

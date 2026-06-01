@@ -9,7 +9,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -419,7 +419,8 @@ Implemented Option A and pushed to `lazily-rs` (`f4f6b2c`).
 | `cell_handle_clear_dependents_cascades` | Clears transitive dependents (cell → slot → slot → slot) |
 
 **Verification:** 54 tests pass (13 integration + 41 spec compliance). `cargo build --release` clean.
-<!-- agent:boundary:95833f00 -->
+publish and release lazily-rs
+<!-- agent:boundary:1a4b7705 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -427,7 +428,8 @@ Implemented Option A and pushed to `lazily-rs` (`f4f6b2c`).
 
 ## Pending / Not Built
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+- publish and release lazily-rs
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

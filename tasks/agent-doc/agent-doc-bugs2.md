@@ -151,7 +151,29 @@ The shared `agent-doc` crate working tree is **full of uncommitted concurrent de
 2. **Consolidate to one owner** of `agent-doc-bugs2.md` so a single pane drains the queue.
 
 I'm not finalizing a competing write — the queue already advanced to a release-gated item, the working tree is mid-development by another actor, and a finalize now would race it. My fix is done and verified; it needs a clean working tree to commit into.
-<!-- agent:boundary:3426b5d7 -->
+
+### Re: do [#queue-sync-auto-pending-done-guard-misfire] — gpt-5
+
+Implemented the synced-queue pending-done fix in `src/agent-doc`.
+
+What changed:
+- `run_queue_maintenance` now carries `synced_queue_ids` in `QueueState`, computed as only the `do [#id]` entries newly inserted by backlog/icebox queue sync during that maintenance pass.
+- `expect_done_or_gate_ids` subtracts only those newly inserted ids, so freshly synced siblings do not false-trigger `pending_done_guard`, while an already-present consumed queue head remains a required done/gate target.
+- Added regressions for empty sync, idempotent sync, the existing-head-plus-new-siblings case, and the expect-done filter behavior.
+- Updated `specs/07-closeout-commands.md` to document the narrower exclusion invariant.
+
+Verification:
+- `cargo test -p agent-doc-orchestration filter_expect_done_or_gate -- --nocapture` passed.
+- `cargo test -p agent-doc-orchestration run_queue_maintenance_records_only_newly_synced_ids -- --nocapture` passed.
+- `cargo test -p agent-doc-orchestration run_queue_maintenance_sync -- --nocapture` passed.
+- `make check` passed.
+- `cargo install --path .` passed; installed CLI reports `agent-doc 0.34.0`.
+- Latest GitHub Actions CI run `26735506117` is green, including `Run make tmux-ci`.
+
+Commits:
+- `src/agent-doc`: `e7306701` (`Fix synced queue pending-done accounting`) pushed to `origin/20260422/codex-agent-backend`.
+- Superproject gitlink commit `751bec20` is created; per agent-doc closeout ordering, I will push `main` after this document commit lands.
+<!-- agent:boundary:c91eed0a -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -160,7 +182,6 @@ preset #spec-test-build-install-commit-push
 - ~do [#tagpath-queue-priority-publish-align]~
 - ~do [#codex-owned-pane-prompt-miss-followups]~
 - do [#stuck-capture-queue-echo-false-positive]
-- do [#backlog-queue-sync-attr]
 - do [#preset-item-id-collision-enforce]
 - do [#free-text-queue-skip-diagnostic]
 - do [#do-id-partial-closeout-state]
@@ -201,7 +222,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
  
 <!-- agent:review -->
 - [/] [#tagpath-queue-priority-publish-align] [recommended] Before the next agent-doc release, publish tagpath (commits b55c305 + 32fd000: backlog/icebox/queue priority + queue sync lint attrs) and bump agent-doc's tagpath dependency past 0.12. Locally agent-doc resolves tagpath via the superproject .cargo/config.toml path patch so the lint-gate accepts the new attributes; a published agent-doc on tagpath 0.12 would reject bare priority/queue as malformed-attr.
-- [/] [#queue-sync-auto-pending-done-guard-misfire] [recommended] When a queue=sync/append attribute populates an active auto-queue in the same cycle, the freshly-synced do-[#id] entries appear as new do-directives in the cycle diff, so preflight records them all as expect_done_or_gate_ids and pending_done_guard then demands every synced item be --done in the populating cycle (live repro 2026-05-31 agent-doc-bugs2.md: do [#backlog-queue-sync-attr] cycle flagged 9 other freshly-synced queue items). Fix: agent-generated/synced queue items must not be treated as user do-directives; only a genuine user exchange do [#id] or the single consumed queue head should populate expect_done_or_gate_ids. Plan: tasks/agent-doc/plan-queue-sync-auto-pending-done-guard-misfire.md.
 - [/] [#codex-owned-pane-stop-hook-live-verify] [recommended] Gated on a live Codex pane -- the remaining phases of #codex-owned-pane-prompt-miss-followups after phase 2a landed: (2b) a live Codex Stop-hook regression asserting the owned_pane_self_invocation diagnostic forces an in-pane response body before final chat output, and (3) live-verify a real Codex same-pane run with an unresolved exchange prompt. Plan: tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md.
 - [/] [#zpc2] #ipc-corruption-live-repro-lazily-rs [recommended] Live repro of IPC scaffold duplication on tasks/software/lazily-rs.md while typing during finalize --stream. Full Backlog/Queue/Review duplicated plus two escaped exchange-close markers. Partial user typing embedded in wrong positions. Matches detect_duplicated_scaffold(). Plans: tasks/agent-doc/plan-full-document-ipc-corruption-typing-prompt.md, tasks/agent-doc/plan-prompt-duplicated-while-typing.md.
 - [/] [#t41j] [recommended] #jb-run-agent-doc-busy-wait-deadlock live-verify (gated on a live busy pane): fix landed (submodule 89c357d5 — busy_dispatch_only_should_wait_for_ready skips the --wait-for-ready start override on a busy active turn + the (claude, active claude turn) case in dispatch_active_turn_queue_source). With the installed binary, click JB Run Agent Doc on a doc whose Claude actor is mid active-turn (not running /loop) and confirm it returns immediately (no 60s route_wait_for_ready_override block), appends the prompt to agent:queue auto, and the supervisor idle-queue watch drains the head on busy->idle. Check ops.log for the enqueue and the absence of a 60s wait.

@@ -37,7 +37,23 @@ queue_active: false
 Compacted content:
 - Archived 14 response topic(s): #rx9y; #fzaf; #fzaf memo guard; 11 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:8b5ef6b3 -->
+❯ What are #next-steps to improve performance of lazily-rs?
+### Re: lazily-rs performance next steps — gpt-5
+
+Top backlog item: `#perf-bench`.
+
+I added five performance follow-ups to the backlog in priority order. The right first move is measurement, not an optimization rewrite: add benchmarks for the current single-threaded and thread-safe paths, then add instrumentation so later changes can prove whether they reduce real work or only move overhead around.
+
+Priority order:
+
+1. `#perf-bench` — baseline benchmark suite for cached reads, cold first get, dependency fan-out, memo suppression, effect flushing, batch storms, and threaded contention.
+2. `#perf-profile` — lightweight counters for recomputes, duplicate speculative computes, dependency edge churn, effect queue depth, allocations, and lock wait/hold time.
+3. `#perf-layout` — single-threaded storage/edge-maintenance optimizations driven by benchmark results.
+4. `#perf-thread-dedup` — thread-safe in-flight recompute deduplication if duplicate concurrent first-get work is material.
+5. `#perf-lock-eval` — RwLock, sharded-lock, or targeted-CAS evaluation only after contention is proven and modeled with Loom/Shuttle.
+
+No code changed in this cycle; this was a backlog/recommendation update. Verification is `agent-doc finalize` plus follow-up `session-check`.
+<!-- agent:boundary:c6e503e7 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -48,6 +64,11 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#perf-bench] #performance Add a Criterion benchmark suite for Context and ThreadSafeContext covering cached reads, cold first get, dependency fan-out, memo equality suppression, effect flushing, batch storms, and threaded contention at 1/2/4/8/16 workers
+- [ ] [#perf-profile] #performance Add lightweight benchmark instrumentation for recompute counts, duplicate speculative computes, dependency edge churn, effect queue depth, allocations, and ThreadSafeContext lock wait/hold time
+- [ ] [#perf-layout] #performance Use benchmark results to optimize single-threaded Context storage and edge maintenance, starting with node storage locality and avoiding unnecessary HashSet/HashMap churn without changing public semantics
+- [ ] [#perf-thread-dedup] #performance Prototype ThreadSafeContext in-flight recompute deduplication so concurrent first get callers share one computation when benchmarks show duplicate work is material
+- [ ] [#perf-lock-eval] #performance Evaluate RwLock, sharded locks, or targeted CAS only after baseline data identifies lock contention, and require Loom/Shuttle safety models before adopting concurrency changes
 <!-- /agent:backlog -->
 
 ## Review

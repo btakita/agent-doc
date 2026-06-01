@@ -32,91 +32,12 @@ queue_active: true
 <!-- agent:exchange -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260601-042343.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260601-081258.md`*
 
 Compacted content:
-- Archived 1 response topic(s): Next steps, derived signals vs effect system
+- Archived 5 response topic(s): Memo guard utility, IPC corruption logged; Slot invalidation vs recomputation; Updated #fzaf backlog item; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-
-### Re: Memo guard utility, IPC corruption logged — glm-5.1
-
-**Yes, the memo guard is useful** — but it's a performance optimization, not a correctness feature. The current behavior (recompute every time cache is invalidated) is correct. The memo guard adds:
-
-1. **Skip redundant recomputation** — if `ctx.get(&slot)` triggers recomputation but all dependency values resolve to the same result, the slot returns cached value. Matters for expensive computations downstream of frequently-toggled cells.
-2. **Reduced invalidation cascade** — a memo guard at intermediate nodes prevents cascading through the whole graph when intermediate values don't change.
-
-Trade-off: requires storing dependency value copies for comparison. Worth doing after the effect system, since effects are where cascading recomputation hurts most.
-
-**IPC corruption logged** as `#zpc2` in `tasks/agent-doc/agent-doc-bugs2.md`. This is a new live repro of `#ipcfullprompt-recur2` / `#prompt-duplicated-while-typing`. The corrupted lazily-rs.md had full scaffold duplication (2x Backlog/Queue/Review + 2x `&lt;!-- /agent:exchange --&gt;` + partial typing "re [#fzaf]: W" / "re [#fzaf]: Would" embedded in wrong positions). Manually repaired — removed duplicate tail sections.
-
-### Re: Slot invalidation vs recomputation — glm-5.1
-
-**You're correct — slots are only invalidated, not recomputed.** My previous wording was imprecise. Here's the exact flow from the code:
-
-1. `set_cell()` (`context.rs:249-283`) — changes cell value, then calls `clear_slot()` on each dependent
-2. `clear_slot()` (`context.rs:288-305`) — sets `slot.value = None` (pure invalidation), then recursively clears *its* dependents. No recomputation happens here.
-3. `get_slot()` (`context.rs:116-208`) — checks `slot.value.is_some()`. If cached, returns immediately. If `None` (invalidated), recomputes. **This is the only place recomputation happens, and only on access.**
-
-So the flow is: cell change → cascade of `value = None` through the dependency graph → nothing else until someone calls `get()`. Fully lazy.
-
-**What the memo guard would actually do:** It's not about skipping recomputation (that's already lazy). It's about preventing *unnecessary downstream cascade* during step 2. Currently `clear_slot` recursively clears all dependents regardless of whether the recomputed value would actually change. A memo guard would:
-
-- After recomputation in `get_slot()`, compare the new value with the prior value
-- If unchanged, skip re-clearing dependents (they were already cleared, but the memo guard would restore their cached values or mark them as still-valid)
-
-This matters when: Cell A → Slot B → Slot C. If A changes but B would compute to the same value, C was cleared unnecessarily. The memo guard at B would prevent C from needing recomputation.
-
-IPC corruption bug already tracked as `#zpc2` in `agent-doc-bugs2.md`. Plans: `tasks/agent-doc/plan-full-document-ipc-corruption-typing-prompt.md`, `tasks/agent-doc/plan-prompt-duplicated-while-typing.md`.
-
-### Re: Updated #fzaf backlog item — glm-5.1
-
-Updated `#fzaf` to reflect that slots are already lazy (invalidated only, recomputed on `get()`). The memo guard is about preventing unnecessary downstream cascade — when a slot recomputes to the same value, its dependents were already cleared but didn't need to be.
-
-New text: `#memo-guard Memoization guard — prevent unnecessary downstream cascade during invalidation when recomputed value equals prior value (slots are already lazy: invalidated only, recomputed on get())`
-
-### Re: Queue head #n12s — gpt-5
-
-> **Queue prompt:**
->
-> [#n12s]
-
-
-I expanded the active queue and handled `#n12s` as the current head. This item is bookkeeping for the lazily-rs document: the live IPC scaffold-duplication repro has already been logged in `tasks/agent-doc/agent-doc-bugs2.md` as `#zpc2`, and this document was manually repaired in the prior cycle.
-
-I did not change lazily-rs source, specs, or tests for `#n12s` because the remaining prevention work is owned by the agent-doc bug thread (`#zpc2` / `#ipcfullprompt-recur2`) and is still gated on capturing the live JetBrains `PatchWatcher.setText` payload. I verified `src/lazily-rs` is clean and marked `#n12s` done here so the auto queue can advance to the next real lazily-rs implementation item.
-
-### Re: Queue head #exfd — gpt-5
-
-> **Queue prompt:**
->
-> [#exfd]
-
-
-Implemented Phase 4 effects for `lazily-rs` and marked `#exfd` complete.
-
-What changed:
-- Added `Context::effect(...)` and `EffectHandle` with immediate execution, dependency auto-tracking, scheduled reruns, coalescing, disposal, and cleanup closures.
-- Wired effect invalidation through cells and slots, including dynamic dependency replacement and nested initial-run invalidation without losing cleanup state.
-- Updated `SPEC.md`, `README.md`, and `AGENTS.md` for effect semantics and the current 59-test baseline.
-- Added spec coverage for cell/slot tracking, diamond coalescing, cleanup ordering, disposal, dynamic dependencies, and nested scheduling.
-
-Commits pushed:
-- `src/lazily-rs`: `7a25f8c` (`feat: add reactive effects`)
-- superproject: `da2173de7` (`feat: add lazily reactive effects`)
-- Current `origin/main` is also pushed through `190da40b7`, which includes concurrent agent-doc-bugs2 follow-up commits and the final CI checkout fix.
-
-Verification:
-- `cargo check` passed in `src/lazily-rs`.
-- `cargo fmt` completed.
-- `cargo test` passed: 13 integration tests, 46 spec tests, 0 doctests.
-- `cargo clippy --all-targets -- -D warnings` passed.
-- `cargo build` passed.
-- `cargo package --allow-dirty` passed.
-- `cargo install --path . --force` is not applicable because `lazily` is a library crate with no binaries or examples.
-- Root `make check` passed.
-- Local `make tmux-ci` passed in `src/agent-doc`.
-- GitHub `Agent Doc` run `26736541070` passed both `check` and `tmux-ci`.
-<!-- agent:boundary:ca43f79d -->
+<!-- agent:boundary:29f73b78 -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -149,7 +149,7 @@ My recommendation: **leave the Career Highlight bullet dateless and metric-forwa
 Net: keep the bullet as the crisp metric, reflect recency/ongoing in Experience + conversation. I'd do #1 (the consistency fix) and skip dates on the bullet.
 
 Still uncommitted across `resume/` + `mail/` — no `#commit-push` invoked.
-<!-- agent:boundary:c93e990d -->
+<!-- agent:boundary:67692064 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -160,6 +160,7 @@ Still uncommitted across `resume/` + `mail/` — no `#commit-push` invoked.
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#j52j] [recommended] Sync MonsterRodHolders growth story into resume/data.toml Experience accomplishment (add SEO + Google Ads + 50% MRR result; optional (2026) recency tag) so it backs up the Career Highlight bullet
 <!-- /agent:backlog -->
 
 ## Icebox

@@ -16,7 +16,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -58,13 +58,34 @@ It's **WARN-only** — never blocks closeout — and suppressed by `<!-- no-gate
 **Drift observed + recovered (not committed).** When I re-ran `preflight` to capture the baseline for this closeout, queue-maintenance deactivated the active queue to inactive residue (`queue_active: false`), and on the first pass mangled the opening tag to `&lt;!-- agent:queue au--&gt;` (a corrupted `auto` strip). HEAD was clean and correct, so I restored it (`git checkout HEAD` + `reset --from-current`) rather than committing the corruption. Two concerns worth tracking separately: (1) this active queue (head `#gated-followup-split-enforcement`, with completed heads struck `~...~`) keeps being deactivated to residue instead of advancing — the `#completed-queue-residue-regression` / queue-auto-no-continue family; (2) the `au-->` tag corruption from `strip_auto_from_tag` under this state. Neither is in scope for this item, but both reproduced live this turn.
 
 **Shipped:** submodule `dc29f28f`; superproject pointer bumped. Marked `#gated-followup-split-enforcement` done.
-<!-- agent:boundary:c9cb3964 -->
+
+### Re: fix the queue-drift regressions first — opus-4-8
+
+Found and fixed the root cause of the queue stranding. Per your pick, I prioritized the regression over the `#queue-audit-partial-completion` feature.
+
+**Root cause (reproduced + fixed).** `detect_head_prompt_modified` (`queue.rs`) compared only the *first* queue prompt's text. So when a new item was inserted — or an existing one reordered — **ahead of** the still-present in-flight head, it read as an in-place `item_modified` edit. Preflight then halted the queue, stripped `auto`, set `queue_active: false`, and stranded **every** remaining live `do [#id]` as inactive residue — the auto-queue stopped instead of advancing. That's exactly what kept happening to this document each turn (`#completed-queue-residue-regression` / `#queue-auto-no-continue`).
+
+Minimal repro confirmed against the old binary:
+- snapshot head `do [#bbb]`; insert `do [#ccc]` ahead → `queue_active: false`, `halted: item_modified`, all prompts stranded.
+
+**Fix.** A head change now counts as `item_modified` **only when the snapshot head prompt is genuinely gone** from the current queue (edited in place / removed). A prepend or reorder of a still-present head is a re-prioritization → the queue advances to the new head and stays active. After the fix the same repro yields `queue_active: true`, `halted: None`, `prompts: [#ccc, #bbb, #ddd]`.
+
+**On the `au-->` corruption.** `strip_auto_from_tag` is `tag.replace(" auto", "")`, which is correct for a clean `&lt;!-- agent:queue auto --&gt;` (→ `&lt;!-- agent:queue --&gt;`). It did not reproduce this turn. The one-off `au-->` last turn was almost certainly a live IPC/CRDT buffer-merge artifact (the `#adoc-queue-ipc-buffer-divergence` family), not this code path — I did not chase it down, so I'm leaving it as an unconfirmed separate observation rather than claiming a fix.
+
+**Verification + an important caveat.**
+- Verified in a clean `git worktree` (HEAD + the queue.rs change): 169 queue tests pass + 4 new `head_prompt_modified_*` regressions + the end-to-end repro.
+- **CI green** on submodule `1bcaaac6`.
+- ⚠️ **Not built/installed live.** The shared `agent-doc-orchestration` crate currently will not compile on the main tree because a **concurrent session left an untracked `graph.rs`** (+ uncommitted `lib.rs`/`Cargo.toml`) with `ProjectConfig`/`SshContextValue: Clone` errors. I did **not** touch that other session's work, so I could not `cargo build --release` / `cargo install`. The fix is committed + CI-green but **won't take effect in this live session's binary until that graph.rs work compiles and someone rebuilds/installs** — which is also why this very closeout's queue maintenance (old binary) still deactivated the queue.
+
+**Shipped:** submodule `1bcaaac6` (+ pointer). Narrowed `#completed-queue-residue-regression` to the remaining build/install (blocked) → live-verify → committed-state-guard phases.
+<!-- agent:boundary:dde90864 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#jb-run-agent-doc-busy-queue-dispatch-deadlock]~
 - ~do [#preflight-probe-side-effect-free]~
+- do [#queue-audit-partial-completion]
 - do [#gated-followup-split-enforcement]
 - do [#completed-queue-residue-regression]
 - do [#codex-owned-pane-stop-hook-live-verify]
@@ -111,7 +132,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 - [ ] [#preset-item-id-collision-enforce] [recommended] Escalate #preset-item-id-collision from a preflight warning to hard enforcement (the riskier half, deferred to design carefully against over-blocking live sessions): (1) mutation-time rejection — write --pending-add / --pending-add-after / etc. with an explicit custom id (id=X or [#X]) that collides with a prompt_presets key or an existing active item id fails closed; (2) fail-closed dispatch — preflight/session-check block dispatch on an existing collision with the rename repair hint, surfaced by route/JB as a document-repair error not a generic agent failure; (3) queue generation refuses to emit do [#id] for an ambiguous id. The identity registry + detection + preflight warning + 3 regressions already landed (preflight::detect_identity_collisions). Plan: tasks/agent-doc/plan-preset-item-id-collision.md.
 - [ ] [#free-text-queue-skip-diagnostic] [recommended] Polish from #free-text-queue-owner-consume plan point 4: when queue consumption is skipped, the closeout still prints the generic '[queue] skipped consumption because the active prompt did not target the queue head'. For an id-backed head with no completion flag, name the missing proof source and the supported repair (--done/--pending-gate/--pending-edit <id>); for a free-text head edge case, point to the answered-response path. Replace the single generic line at write.rs ~1460/1469 with a shape-aware diagnostic. Plan: tasks/agent-doc/plan-free-text-queue-owner-consume.md (point 4).
 - [ ] [#stuck-capture-queue-echo-false-positive] [recommended] Fix landed (submodule 6220379c): response_already_applied matched the captured response as one contiguous block, but queue consumption inserts a > **Queue prompt:** echo blockquote (#queue-prompt-echo-in-response) between the response heading and body, so stuck_captured_cycle falsely warned committed-but-not-in-HEAD after every queue-consumed cycle and re-suggested a write --commit that would re-inject the response. normalized_response_lines now strips the echo blockquote on both sides before matching; unit + closeout regressions added. Verify across a couple more queue-consumed cycles that no preflight emits the false stuck_captured_cycle warning, then mark done.
-- [ ] [#completed-queue-residue-regression] [recommended] Completed queue items can still remain visible in agent:queue after the turn is finished, despite the archived #drained-done-queue-clear fix. Treat as a regression/uncovered route or IPC path: add a committed-state guard for provable completed queue residue, audit finalize/write/preflight/run continuation drain ordering, and verify live editor/snapshot/HEAD convergence. Plan: tasks/agent-doc/plan-completed-queue-residue-regression.md.
+- [ ] [#completed-queue-residue-regression] [recommended] Insert-ahead halt stranding FIXED (submodule 1bcaaac6, CI green): detect_head_prompt_modified no longer treats a new item prepended/reordered ahead of a still-present in-flight head as item_modified, so the auto-queue advances to the new head and stays active instead of deactivating + stranding every remaining live do[#id] as inactive residue (also resolves #queue-auto-no-continue). Remaining: build+install the fix (BLOCKED on a concurrent session's untracked broken graph.rs in the shared agent-doc-orchestration crate); then live-verify the queue advances on this doc; then the broader committed-state residue guard + finalize/write/preflight/run drain-ordering audit. Plan: tasks/agent-doc/plan-completed-queue-residue-regression.md.
 - [ ] [#do-id-partial-closeout-state] [recommended] Partial-closeout WARN guard landed (check_partial_closeout_state_guard: a do[#id] turn whose response shows shipped + remaining-live-work signals with the directed id still open advises --pending-edit/--pending-gate narrowing; suppressible by a no-partial-closeout-guard response marker; FlowCore guard_ budget 35->40). Remaining: per-id edit-vs-gate tracking in cycle_state, opt-in strict mode, next-phase queue convergence, and the runbook note that #spec-test-commit-push completes a repo phase without a live/deploy item. Plan: tasks/agent-doc/plan-do-id-partial-closeout-state.md.
 <!-- /agent:backlog -->
 

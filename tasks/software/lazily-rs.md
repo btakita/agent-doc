@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 
@@ -217,28 +217,74 @@ Commands: `agent-doc preflight`; `agent-doc read`; `agent-doc plan`; `tsift stat
 Verification: no source code changed; this is a planning/backlog update, so I did not run the crate test suite.
 Confidence: medium-high. The sequence is based on current local source inspection; exact API naming should be decided in `#thr-spec`.
 Escalation: none.
-<!-- agent:boundary:e6b52bee -->
+
+### Re: #thr-spec threading contract — gpt-5
+
+> **Queue prompt:**
+>
+> [#thr-spec]
+
+
+Completed `#thr-spec`: the `lazily-rs` thread/concurrency contract is now specified, tested, committed, and pushed.
+
+What changed:
+- `SPEC.md` now defines the current local-thread `Context`, the planned explicit `ThreadSafeContext` API shape, `Send + Sync + 'static` bounds, lock/re-entrancy rules, lazily-zig parity points, and the staged Tokio path.
+- `README.md` now has a threading roadmap and clarifies that shared-context parallelism is planned as explicit API work rather than a silent change to `Context`.
+- `src/lib.rs` adds a compile-fail doctest showing that the current `Context` cannot be moved into `std::thread::spawn`.
+- `tests/spec_compliance.rs` adds threading-contract coverage for portable handle traits and independent contexts running on separate OS threads.
+- `AGENTS.md` test counts are updated to 13 integration tests, 57 spec tests, and 1 doctest.
+
+Changed paths:
+- `src/lazily-rs/AGENTS.md`
+- `src/lazily-rs/README.md`
+- `src/lazily-rs/SPEC.md`
+- `src/lazily-rs/src/lib.rs`
+- `src/lazily-rs/tests/spec_compliance.rs`
+- parent submodule pointer `src/lazily-rs`
+- session document; I also repaired a duplicated queue/backlog scaffold before preflight could parse the document.
+
+Commits/push:
+- `src/lazily-rs` `3060680` (`docs: specify threading contract`) pushed to `origin/main`.
+- parent `agent-loop` `5b1a49573` (`chore: update lazily-rs threading contract`) pushed to `origin/main`.
+
+Verification:
+- `cargo fmt --check` passed in `src/lazily-rs`.
+- `cargo test` passed in `src/lazily-rs`.
+- `cargo test -- --list` reports 13 integration tests, 57 spec compliance tests, and 1 doctest.
+- `cargo build` passed in `src/lazily-rs` with only existing unused workspace patch warnings.
+- `cargo clippy --all-targets --all-features -- -D warnings` passed in `src/lazily-rs`.
+- `cargo package --allow-dirty` passed.
+- `cargo install --path . --force` remains not applicable because `lazily` is library-only; Cargo reports `no packages found with binaries or examples`.
+- Root `make check` passed.
+- GitHub has no workflow named `CI` in the submodule or root. Latest root `Agent Doc` run `26768336727` passed, including `check` and `tmux-ci`.
+
+Queue closeout: marked `#thr-spec` done. The next queue head should be `#thr-core`.
+
+Confidence: high. The change is spec/test-only for the current item and keeps the current single-threaded implementation unchanged.
+
+Escalation: none.
+<!-- agent:boundary:3a6d1a45 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+preset #spec-test-build-install-commit-push
+- ~[#thr-spec]~
+- [#thr-core]
+- [#thr-tests]
+- [#tokio-sync]
+- [#tokio-async]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#thr-spec] #parallelism Specify the thread-safe contract for lazily-rs: API shape, Send/Sync bounds, lock/re-entrancy rules, single-threaded fast path compatibility, and parity/differences with lazily-zig's mutex-first design
 - [ ] [#thr-core] #parallelism Implement the thread-safe core after the spec: lock-backed context state, Send + Sync cached values and compute/effect callbacks, safe dependency tracking, and re-entrant user callback boundaries
 - [ ] [#thr-tests] #parallelism Add thread contention coverage: concurrent first get, concurrent set_cell, batch flush ordering, clear/dispose races, effect coalescing, and deadlock/regression checks modeled after lazily-zig thread_safe tests
 - [ ] [#tokio-sync] #tokio Add optional Tokio integration after thread safety is sound: async tests and examples that share the synchronous context across tokio::spawn/spawn_blocking without introducing async compute semantics
 - [ ] [#tokio-async] #tokio Design true async computations/effects only after #tokio-sync: in-flight future deduplication, cancellation, stale future completion, cleanup ordering, and Send vs LocalSet semantics
 <!-- /agent:backlog -->
-
-## Queue
-
-<!-- agent:queue -->
-<!-- /agent:queue -->
 
 ## Review
 
@@ -254,4 +300,5 @@ Escalation: none.
 - 2026-06-01 [#fzaf] #memo-guard Memoization guard — prevent unnecessary downstream cascade during invalidation when recomputed value equals prior value (slots are already lazy: invalidated only, recomputed on get())
 - 2026-06-01 [#dpzd] #api-ergonomics ctx.computed() alias and DX improvements
 - 2026-06-01 [#45rh] #release-publish Release + publish after effect system lands
+- 2026-06-01 [#thr-spec] #parallelism Specify the thread-safe contract for lazily-rs: API shape, Send/Sync bounds, lock/re-entrancy rules, single-threaded fast path compatibility, and parity/differences with lazily-zig's mutex-first design
 <!-- /agent:done -->

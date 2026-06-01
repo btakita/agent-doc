@@ -285,7 +285,7 @@ Before emitting queue state, preflight may:
 - persist `queue_active`
 - halt on a stop fence
 - halt on a future time gate
-- halt when the current head prompt was edited since the snapshot for a queue that was already active
+- halt when the current head prompt was **edited in place** since the snapshot for a queue that was already active — i.e. the snapshot head prompt is no longer present anywhere in the current queue (`detect_head_prompt_modified`). A new item inserted (or reordered) ahead of a still-present in-flight head is a re-prioritization, **not** an `item_modified` edit: the queue advances to the new head and stays active rather than halting and stranding the remaining live prompts as inactive residue (`#completed-queue-residue-regression` / `#queue-auto-no-continue`).
 - snapshot a newly activated queue body as the closeout baseline instead of treating the changed head as an edit to in-flight work
 
 ### Post-commit queue consumption

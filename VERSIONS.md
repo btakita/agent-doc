@@ -6,6 +6,21 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Auto-queue no longer strands live items when a new head is inserted
+  (`#completed-queue-residue-regression` / `#queue-auto-no-continue`).**
+  `detect_head_prompt_modified` compared only the first queue prompt's text, so
+  inserting (or reordering) a new item ahead of the still-present in-flight head
+  registered as an in-place `item_modified` edit. Preflight then halted the
+  queue, stripped `auto`, set `queue_active: false`, and stranded every remaining
+  live `do [#id]` as inactive residue — the auto-queue stopped instead of
+  advancing. Now a head change only counts as a modification when the snapshot
+  head prompt is genuinely gone from the current queue (edited in place or
+  removed); a prepend/reorder of a still-present head is treated as a
+  re-prioritization and the queue advances to the new head, staying active.
+  Regressions: `head_prompt_modified_false_when_new_item_inserted_ahead_of_present_head`,
+  `head_prompt_modified_false_on_reorder_promoting_existing_item`,
+  `head_prompt_modified_true_when_head_text_edited_in_place`,
+  `head_prompt_modified_false_when_head_unchanged`.
 - **Gated-phase split advisory (`#gated-followup-split-enforcement`, WARN-only).**
   When a directed `do [#id]` cycle keeps a tracked item open (`--pending-edit` /
   `--review-edit` / `--pending-gate`) whose body enumerates multiple

@@ -658,7 +658,23 @@ pub fn detect_head_prompt_modified(
     let snap_head = first_prompt(snapshot_entries);
     let file_head = first_prompt(file_entries);
     match (snap_head, file_head) {
-        (Some(s), Some(f)) => s.text != f.text,
+        (Some(s), Some(f)) => {
+            if s.text == f.text {
+                return false;
+            }
+            // `#completed-queue-residue-regression` / `#queue-auto-no-continue`:
+            // a NEW item inserted (or reordered) ahead of the still-present
+            // in-flight head is a re-prioritization, not an in-place edit of the
+            // head. Only treat the head as modified — and halt the queue — when
+            // the snapshot head prompt is genuinely gone from the current queue
+            // (edited in place or removed). Otherwise a concurrent prepend/reorder
+            // would strand every remaining live prompt as inactive residue
+            // instead of letting the auto-queue advance to the new head.
+            let snap_head_still_present = file_entries.iter().any(|entry| {
+                matches!(entry, QueueEntry::Prompt(p) if p.text == s.text)
+            });
+            !snap_head_still_present
+        }
         (None, None) => false,
         _ => true,
     }
@@ -1261,6 +1277,47 @@ mod tests {
             text: text.to_string(),
             multiline: false,
         })
+    }
+
+    // `#completed-queue-residue-regression` / `#queue-auto-no-continue`: a new
+    // item inserted/reordered ahead of the still-present in-flight head is a
+    // re-prioritization, not an in-place head edit, so it must NOT register as
+    // `item_modified` (which would halt + strand the whole queue as residue).
+    #[test]
+    fn head_prompt_modified_false_when_new_item_inserted_ahead_of_present_head() {
+        let snapshot = vec![make_prompt("do [#bbb]"), make_prompt("do [#ddd]")];
+        let file = vec![
+            make_prompt("do [#ccc]"),
+            make_prompt("do [#bbb]"),
+            make_prompt("do [#ddd]"),
+        ];
+        assert!(!detect_head_prompt_modified(&snapshot, &file));
+    }
+
+    #[test]
+    fn head_prompt_modified_false_on_reorder_promoting_existing_item() {
+        // Operator promoted #ddd above #bbb; #bbb is still present → reprioritize.
+        let snapshot = vec![make_prompt("do [#bbb]"), make_prompt("do [#ddd]")];
+        let file = vec![make_prompt("do [#ddd]"), make_prompt("do [#bbb]")];
+        assert!(!detect_head_prompt_modified(&snapshot, &file));
+    }
+
+    #[test]
+    fn head_prompt_modified_true_when_head_text_edited_in_place() {
+        // The snapshot head text is gone from the queue (edited in place) → halt.
+        let snapshot = vec![make_prompt("do [#bbb]"), make_prompt("do [#ddd]")];
+        let file = vec![
+            make_prompt("do [#bbb] with extra operator notes"),
+            make_prompt("do [#ddd]"),
+        ];
+        assert!(detect_head_prompt_modified(&snapshot, &file));
+    }
+
+    #[test]
+    fn head_prompt_modified_false_when_head_unchanged() {
+        let snapshot = vec![make_prompt("do [#bbb]"), make_prompt("do [#ddd]")];
+        let file = vec![make_prompt("do [#bbb]"), make_prompt("do [#ddd]")];
+        assert!(!detect_head_prompt_modified(&snapshot, &file));
     }
 
     #[test]

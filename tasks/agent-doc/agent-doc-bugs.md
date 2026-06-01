@@ -9,7 +9,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -304,7 +304,53 @@ impl WatchActor {
 
 The key insight: **Cells are updated by the same events agent-doc already handles.** No new detection layer is needed — just wire existing event handlers to `Cell::set()` instead of invalidating local variables or re-calling functions directly.
 Do Slots also have an api to be invalidated?
-<!-- agent:boundary:f7fcbe98 -->
+
+### Re: slot invalidation API — gpt-5
+
+Currently **no.** `clear_slot()` on Context is private (`fn`, not `pub`). Slots can only be invalidated indirectly by changing an upstream Cell via `set_cell()`.
+
+The cascade path from `context.rs:249-305`:
+
+```
+set_cell(handle, new_value)
+  → PartialEq check: old != new?
+    → yes: update value, collect dependents
+    → for each dependent slot:
+        → clear_slot(id): set value = None, recurse into its dependents
+```
+
+**If a Slot has no Cell dependencies**, it will never be invalidated — it computes once and caches forever. This is by design for the current lazily-rs API.
+
+#### Forcing recomputation without a direct Slot API
+
+Two patterns work today:
+
+**Pattern 1: Version Cell as a dummy dependency**
+```rust
+let version = ctx.cell(0u64);
+let my_slot = ctx.slot(|ctx| {
+    let _ = ctx.get_cell(&version); // registers dependency
+    expensive_computation()
+});
+// Force recompute:
+ctx.set_cell(&version, version_val + 1);
+```
+
+This is what the watch daemon `tree_version` / `config_version` Cells from the previous response already do — they exist solely to trigger downstream recomputation.
+
+**Pattern 2: Expose `clear_slot` publicly**
+
+If the agent-doc integration needs direct slot invalidation (e.g., "I know this file's snapshot is stale, clear it"), the API addition is small:
+
+```rust
+// In context.rs, add:
+pub fn invalidate<T: 'static>(&self, handle: &SlotHandle<T>) {
+    self.clear_slot(handle.id);
+}
+```
+
+This is safe to expose — `clear_slot` already handles the "already cleared" early return and recursive cascade. Whether to add it depends on whether version Cells cover all invalidation needs or whether some Slots genuinely have no logical Cell input but still need explicit refresh.
+<!-- agent:boundary:c0f44e67 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -312,8 +358,7 @@ Do Slots also have an api to be invalidated?
 
 ## Pending / Not Built
 
-<!-- agent:queue auto -->
-- Do Slots also have an api to be invalidated?
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

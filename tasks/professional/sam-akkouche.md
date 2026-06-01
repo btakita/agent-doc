@@ -61,7 +61,25 @@ Built a tailored resume: **`resume/BrianTakita-sam-akkouche.pdf`**.
 **Left uncommitted** (no `#commit-push` invoked): the new `resume/profiles/sam-akkouche.toml` and `resume/BrianTakita-sam-akkouche.pdf` are in the `resume/` submodule working tree, plus the earlier `mail/` contact. Say the word and I'll commit + push.
 
 One gap: the profile leans on public web data for Sam's role since LinkedIn was auth-walled — if you learn specifics before the call (exact role/team, what they're hiring for), I can re-tailor in minutes.
-<!-- agent:boundary:f778b2ed -->
+❯ I need to update my summary for a more agentic workflow. Mention PresenceAI but focus more on recent agentic experience at Dreamable and agent-doc.
+
+### Re: More agentic summary (focus Dreamable + agent-doc, mention PresenceAI) — opus-4-8
+
+Rewrote the summary and rebuilt **`resume/BrianTakita-sam-akkouche.pdf`**. New summary reads:
+
+> Builds **agentic** developer infrastructure where humans and agents work in parallel. Most recently at a **Confidential AI Startup**, engineered real-time AI systems and **closed-loop agentic workflows**. In open source, created **agent-doc** — a document-as-interface for persistent AI sessions with an agent-agnostic core and pluggable LLM backends — plus corky (git-native correspondence) and tagpath, all in **Rust**. Earlier architected a production real-time multimodal AI avatar pipeline at **Presence AI** on NVIDIA H100 GPUs via WebRTC. A decade of context engineering ... event-driven architecture, reactive programming, and collaborative intelligence workflows.
+
+**How it's scoped:**
+- **Agentic-first:** opens on agentic dev infrastructure (humans + agents in parallel), then your recent agentic work — the Confidential AI Startup engagement and **agent-doc** lead the body.
+- **Presence AI retained but demoted** to an "Earlier ..." clause so it supports rather than leads.
+- Done via a per-profile `[[replace]]` in `resume/profiles/sam-akkouche.toml` (the build's `apply_replacements` hook), so the global `data.toml` summary — used by every other profile — is untouched.
+
+**Confidentiality:** still renders as "Confidential AI Startup," never the product name — `pdftotext | grep -ic dreamable` = **0**. (You wrote "Dreamable" in the prompt; the resume keeps it anonymized per the standing rule.)
+
+**Verification:** clean rebuild; summary shows 3 "agentic" mentions, agent-doc + Confidential AI Startup + Presence AI all present.
+
+Still uncommitted in the `resume/` and `mail/` submodule working trees — no `#commit-push` invoked yet.
+<!-- agent:boundary:fc4d9aca -->
 <!-- /agent:exchange -->
 
 ## Queue

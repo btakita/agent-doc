@@ -108,7 +108,26 @@ Implemented and pushed (`f454216`).
 
 **lazily-rs integration deferred** to a follow-up item (`#lazily-tsift-status-cache`). Adding lazily-rs as a dependency requires workspace-level Cargo.toml changes and a dedicated integration plan beyond the scope of this status auto-fix.
 recovery sync
+`tsift status` should auto-fix stale indexes by default. Deprecate `--fix`. Add `--no-fix` to skip auto-fixing.
 <!-- agent:boundary:782ef24b -->
+### Re: auto-fix by default, deprecate --fix, add --no-fix — glm-5.1
+
+Implemented.
+
+**What changed:**
+- `packages/tsift-cli/src/cli.rs` — Added `--no-fix` flag to skip auto-fixing. `--fix` is hidden and deprecated.
+- `packages/tsift-cli/src/commands/infra.rs` — `cmd_status` now auto-fixes stale indexes by default (no `--json` required). The condition changed from `fix || (json_output && needs_auto_fix)` to `auto_fix && needs_auto_fix` where `auto_fix = !no_fix`. Passing `--fix` prints a deprecation warning to stderr.
+- `packages/tsift-cli/src/lib.rs` — Updated dispatch to pass both `fix` and `no_fix` flags; updated unit test call signatures.
+- `SPEC.md` — Updated status documentation: examples now show `--no-fix` instead of `--fix`; prose reflects auto-fix-by-default behavior.
+- `AGENTS.md` / `CLAUDE.md` — Updated Code Navigation instructions to note `tsift status` auto-fixes by default.
+
+**Tests (all passing):**
+- `status_auto_fixes_stale_index_by_default` — confirms `tsift status` (no flags) auto-fixes a stale index
+- `status_no_fix_skips_auto_fix` — confirms `--no-fix` preserves stale state in JSON output
+- `status_deprecated_fix_flag_shows_warning` — confirms `--fix` emits deprecation warning
+- `status_json_auto_fixes_stale_index_without_fix_flag` — still passes (behavior unchanged)
+- `status_fix_refreshes_stale_index_before_reporting_json` — still passes (deprecated `--fix` still works)
+- `status_fix_refreshes_stale_instructions_after_version_bump_in_json` — still passes
 <!-- /agent:exchange -->
 
 ## Queue

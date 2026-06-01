@@ -94,8 +94,6 @@ Backlog items in priority order:
 5. **`#lazily-summary`** — Summary cache enrichment: Slots keyed by `(file, content_hash)` that compute LLM summaries on first access and auto-invalidate via Cell-backed content hash tracking. Replaces the scattered "check if cached, else compute" pattern.
 
 **Top of backlog: `#lazily-tsift-plan`**
-`tsift status --json` should automatically fix the index if stale. Use lazily-rs to avoid redundant I/O.
-#spec-test-build-install-commit-push
 
 
 ### Re: status --json auto-fix stale index — glm-5.1
@@ -114,11 +112,7 @@ Implemented and pushed (`f454216`).
 
 ## Queue
 
-<!-- agent:queue auto -->
----
-`tsift status --json` should automatically fix the index if stale. Use lazily-rs to avoid redundant I/O.
-#spec-test-build-install-commit-push
----
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

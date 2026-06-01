@@ -35,12 +35,13 @@ prompt_presets:
 
 Compacted content:
 - Archived 2 response topic(s): Update README, audit docs, release; Docs updated, pushed
-<!-- agent:boundary:986853aa -->
+<!-- agent:boundary:d629eae9 -->
 <!-- /agent:exchange -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+release + publish
 <!-- /agent:backlog -->
 
 ## Queue

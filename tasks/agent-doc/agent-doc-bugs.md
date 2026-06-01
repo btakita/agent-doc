@@ -9,7 +9,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -351,7 +351,49 @@ pub fn invalidate<T: 'static>(&self, handle: &SlotHandle<T>) {
 
 This is safe to expose — `clear_slot` already handles the "already cleared" early return and recursive cascade. Whether to add it depends on whether version Cells cover all invalidation needs or whether some Slots genuinely have no logical Cell input but still need explicit refresh.
 Can we have SlotHandle.clear(&ctx) instead?
-<!-- agent:boundary:5a34e727 -->
+
+### Re: SlotHandle.clear(&ctx) — gpt-5
+
+Yes. It's a cleaner API — the invalidation lives on the thing being invalidated rather than on the container. The implementation is three lines since `clear_slot` already exists and handles the recursive cascade:
+
+```rust
+// slot.rs
+impl<T> SlotHandle<T> {
+    pub fn clear(&self, ctx: &Context) {
+        ctx.clear_slot(self.id);
+    }
+}
+```
+
+The only change needed is making `clear_slot` accessible. Two options:
+
+**Option A: `pub(crate)` on `clear_slot`** (keeps external consumers out, allows handle methods)
+
+```rust
+// context.rs — change fn to pub(crate)
+pub(crate) fn clear_slot(&self, id: SlotId) { ... }
+```
+
+**Option B: keep `clear_slot` private, add a thin wrapper** (full encapsulation)
+
+```rust
+// context.rs
+pub fn invalidate_slot<T: 'static>(&self, handle: &SlotHandle<T>) {
+    self.clear_slot(handle.id);
+}
+
+// slot.rs
+impl<T> SlotHandle<T> {
+    pub fn clear(&self, ctx: &Context) {
+        ctx.invalidate_slot(self);
+    }
+}
+```
+
+Option A is simpler and the handle already has privileged access to the `SlotId`. Option B adds an indirection layer that doesn't add much since `SlotHandle` is already a context-owned concept. I'd go with **Option A**.
+
+Worth adding the same for `CellHandle`? A `CellHandle.clear_dependents(&ctx)` that clears all downstream slots without changing the cell value could be useful for "I know the cached derivations are stale but the input hasn't changed" cases. Same implementation pattern.
+<!-- agent:boundary:2e16f5b2 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -359,8 +401,7 @@ Can we have SlotHandle.clear(&ctx) instead?
 
 ## Pending / Not Built
 
-<!-- agent:queue auto -->
-- Can we have SlotHandle.clear(&ctx) instead?
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

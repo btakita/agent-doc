@@ -83,7 +83,36 @@ So I gated it (`[/]`, code-complete / live-verify pending) to advance the queue 
 **Remaining queue is the same shape:** `#jkvs` (Path A — consolidated live busy-pane session), `#qasm` (Path C — no-live-pane implementable review items), `#6cmx` (Path B — IPC/typing-corruption live-capture). `#qasm` is the one batch that's actually implementable without a live pane — say the word and I'll work that one. The two `Path A/B` items need a live session you drive.
 
 To live-verify `#j0k8` when you're ready: open a fresh doc from inside a pane already running another document's submodule session and watch the log for `[claim] pane ... runs a live agent-doc/codex session for another document` + a new pane being provisioned.
-<!-- agent:boundary:1c541a35 -->
+re #j0k8, I may want to have a md file that is not an agent doc. But the agent-doc template auto-generates. How can we make this opt-in?
+
+### Re: making agent-doc opt-in for plain .md files — opus-4-8
+
+Good catch — today **every `.md` is auto-treated as a session**, and there's no opt-in gate. Here's exactly where it happens and how to make it opt-in.
+
+#### Why it auto-generates today
+`route` / `run` / `write` unconditionally call `frontmatter::ensure_session_for_file` (`agent-doc-orchestration/src/frontmatter_io.rs:58` → `ensure_session`, `agent-doc-core/src/frontmatter.rs:860`). For a `.md` with no frontmatter it **injects `session: <uuid>`**, and template-mode defaults then scaffold `agent:exchange` / `agent:queue` / `agent:backlog` on first write. The JB plugin compounds it: `SubmitAction.update` enables **Run Agent Doc** for *any* file whose extension is `md`. So one stray Run (or a watch/sync touch) converts a notes/README file into a session.
+
+#### Opt-in design (proposed — plan written)
+A single fail-closed predicate, `is_agent_doc_document(path, content, config)`, true when **any** of:
+1. **Frontmatter marker** — `agent_doc_format` / `agent_doc_write` / `agent_doc_mode` / an existing `session:`.
+2. **Project-config glob** — `.agent-doc/config.toml` `[documents] include = ["tasks/**/*.md", "plan.md"]`.
+3. **Escape hatch** — `auto_session_for_all_md = true` (default `false`) restores today's behavior.
+
+Then:
+- `ensure_session_for_file` returns a typed `NotAnAgentDocDocument` error for a non-opted-in `.md` instead of injecting frontmatter; `route`/`run`/`write` **fail closed without mutating the file**, printing: *"`<file>` is not an agent-doc document. Run `agent-doc init <file>` or add `agent_doc_format: template` to opt in."*
+- `agent-doc init <file>` stays the explicit per-file opt-in (scaffolds).
+- New FFI `agent_doc_is_session_document(path)` (Shared Foundation) lets the JB/VS Code plugins gate `SubmitAction.update`, so **Run Agent Doc** doesn't even appear on a plain `.md`.
+
+**Back-compat:** existing docs already carry `session:`/`agent_doc_format:`, so they stay sessions — only new plain `.md` change behavior.
+
+Full plan: `tasks/agent-doc/plan-opt-in-agent-doc-documents.md`; queued as a `[recommended]` backlog item.
+
+#### Two choices I need from you before implementing
+1. **Opt-in surface:** per-file frontmatter only, project-config glob only, or **both** (my recommendation: both, frontmatter wins)?
+2. Should `agent-doc init` also offer to add a `[documents]` glob, or stay purely per-file?
+
+Say the word (with `#spec-test-build-install-commit-push` if you want it shipped this cycle) and I'll implement against the plan.
+<!-- agent:boundary:b867510a -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
@@ -95,6 +124,10 @@ To live-verify `#j0k8` when you're ready: open a fresh doc from inside a pane al
 <!-- /agent:queue -->
 ###
 <!--
+```
+agent-doc command failed (exit 1): Error: managed Codex capability proof failed; prompt dispatch is disabled: codex child network probe timed out after 45s; stderr=Reading prompt from stdin... 2026-06-01T05:23:03.072189Z ERROR codex_core::tools::router: error=apply_patch verification failed: Failed to find expected lines in /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md: - ~do [#preset-item-id-collision-enforce]~ - ~do [#free-text-queue-skip-diagnostic]~ - do [#do-id-partial-closeout-state] 2026-06-01T05:29:43.727680Z ERROR codex_core::tools::router: error=apply_patch verification failed: Failed to find expected lines in /home/brian/work/btakita/agent-loop/src/agent-doc/agent-doc-orchestration/src/write.rs: } fn should_consume_queue_prompt_for_diff_content( 2026-06-01T05:30:40.447726Z ERROR codex_core::tools::router: error=apply_patch verification failed: Failed to find expected lines in /home/brian/work/btakita/agent-loop/src/agent-doc/tests/finalize_integration.rs: ); } #[test] fn write_commit_empty_stdin_repair_preserves_active_auto_queue_and_owned_scratch_comment() {
+```
+---
 Verify [#ipcfullprompt-recur2]
 ---
 The last run had a code fence stripped away by agent-doc.
@@ -119,6 +152,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog priority queue=prepend -->
+- [ ] [#4a6p] [recommended] Make agent-doc documents opt-in so a plain .md is not auto-converted into a session. Add is_agent_doc_document(path, content, config) gate (frontmatter field OR .agent-doc config [documents] glob OR auto_session_for_all_md escape hatch); ensure_session_for_file/route/run/write fail closed with an opt-in message instead of injecting session: frontmatter; FFI agent_doc_is_session_document for JB/VSCode SubmitAction.update gating. Plan: tasks/agent-doc/plan-opt-in-agent-doc-documents.md.
 - [ ] [#jkvs] [recommended] Path A — run one consolidated live busy-pane verification session to batch-close the live-verify-gated review items: install the current signed JB plugin + restart the route-owned agent-doc process, then drive one mid-active-turn pane through #t41j, #jb-busy-queue-deadlock-live-verify, #jb-run-agent-doc-busy-feedback-live-verify, #route-drain-all-surface-live-verify, #codex-owned-pane-stop-hook-live-verify, #codex-owned-pane-prompt-miss-followups (2b/3), #codex-final-response-live-verify, #recovery-drift-apply-live-verify, #jb-load-tmux-window-verify.
 - [ ] [#qasm] [recommended] Path C — work the no-live-pane implementable review items in priority order: #free-text-queue-skip-diagnostic, #queue-auto-no-continue, then the queue-provenance cluster (#prompt-preempts-auto-queue, #queue-user-edit-overwrite, #jb-run-agent-doc-response-queue-contamination), the Option-A fixes (#cancel-orphans-preflight-cycle, #exchange-prompt-dropped-on-merge, #duplicate-response-after-commit), closeout-guard hardening (#do-id-partial-closeout-state, #preset-item-id-collision-enforce, #queue-clear-unrun-items), the feature pair (#backlog-priority-attribute, #backlog-queue-sync-attribute), then hygiene/UX (#stash-session-ttl-prune, #plugin-cleanup-menu-command, #stash-pane-promote-on-focus, #clear-stops-running-process, #jb-stale-busy-idle-footer, #snrun).
 - [ ] [#6cmx] [recommended] Path B — run one IPC/typing-corruption live-capture session: enable #com.github.btakita.agentdoc debug logging, then type into a doc during finalize --stream to capture the exact setText payload that unblocks the duplication family #ipcfullprompt-recur2, #ipc-dup-tracking-double-merge, #adoc-queue-ipc-buffer-divergence, #prompt-duplicated-while-typing, #finalize-retry-ipc-response-duplication, #zpc2.

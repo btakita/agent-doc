@@ -31,46 +31,15 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260531-233005.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260601-002307.md`*
 
 Compacted content:
-- Archived 6 response topic(s): JB `Run Agent Doc` deadlock with monsterrodholders.md; Should #jb-run-agent-doc-busy-queue-dispatch-deadlock be run using Codex?; monsterrodholders.md is running; 3 more
+- Archived 1 response topic(s): JB `Run Agent Doc` deadlocked on this file
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ JB `Run Agent Doc` deadlocked on this file before I restarted the agent.
-❯ #spec-test-build-install-commit-push
-
-### Re: JB `Run Agent Doc` deadlocked on this file — opus-4-8
-
-Fixed and shipped (`#spec-test-build-install-commit-push`). Root cause and the chosen fix:
-
-**Root cause.** When a busy-pane `Run Agent Doc` route hits an authoritative actor mid active-turn, `route.rs` `AuthoritativeActorDispatchAction::DispatchOnlyBusyQueue` correctly refuses to inject into the active turn — it appends the prompt to `agent:queue auto`, sets `queue_active: true`, and returns `Ok`. But the drain is **harness-delegated**: the Codex `Stop` hook drains on turn-end, and Claude relies on `/loop` or a manual re-trigger. A Claude session (like this one) not running `/loop` has **no guaranteed idle-drain trigger**, so the queued head sits forever — the "deadlock" you saw, which forced the restart. The JB plugin already surfaces a "queued behind active turn" notification, so the gap was purely the missing drain, not operator feedback.
-
-**Fix — supervisor idle-queue watch (the option you picked).** The supervisor already polls the owned pane for an idle harness prompt to fire its one-shot restart auto-trigger. I added a long-lived sibling, `spawn_idle_queue_watch_thread`, that runs for the whole child lifetime and drains a live `queue_active: true` ready head on every busy→idle transition by injecting `agent-doc <FILE>` through the existing capability-gated `auto_trigger_inject_command` path (which re-runs preflight and consumes the head).
-
-The drain logic is a pure, deterministically-tested decision, `idle_queue_drain_decision(prompt_visible, active_head, last_dispatched)`:
-
-- **Dispatch** only when idle (`prompt_visible`) with an active head that differs from the last one fired.
-- **SkipNotIdle** whenever the pane is mid-turn — same no-inject-into-active-turn invariant the route busy path enforces.
-- **SkipAlreadyDispatched** dedups a head still present after a dispatch, so a stuck/undrained head can't hot-loop the watch every tick.
-- **SkipNoActiveHead** clears the dedup so a later re-enqueue of the same prompt text fires again.
-
-The drainable head comes from the shared `queue_continuation::live_continuation_head` definition (`queue_active: true` + active `resolve_activation` + ready prompt), so inactive-residue queues (`queue_active: false`, like the leftover items in this doc) are never drained.
-
-**Note on the prior plan.** `plan-jb-run-agent-doc-busy-queue-dispatch-deadlock.md` was marked "plan only — gated on a live pane." That gate is now narrowed to the live end-to-end verification only; the deterministic implementation is landed.
-
-**Verification.**
-- `make check` green locally; 5 new unit tests pass (`idle_queue_drain_*`).
-- Also fixed a pre-existing CI-only failure that was red on the parent commit: `classify_recovery_nested_parent_pointer_stale...` committed inside a checked-out submodule worktree without setting git identity (passed locally only because the dev machine has a global identity; exit 128 in CI's clean sandbox). Set identity in the submodule worktree.
-- GitHub Actions CI green on the test-fix commit (`aaf8fcbf`).
-- Built `--release` + `cargo install --path .` (both binaries refreshed).
-
-**Shipped:** submodule `4b3f4835` (idle-queue watch) + `aaf8fcbf` (CI test-identity fix); superproject pointers `a30496287` + `ca798971c`.
-
-Marked `#jb-run-agent-doc-busy-queue-dispatch-deadlock` done and added `#jb-busy-queue-deadlock-live-verify` to review — the live busy-pane e2e is the only remaining gated step.
-<!-- agent:boundary:7a2d73e5 -->
+<!-- agent:boundary:227a490a -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - do [#jb-run-agent-doc-busy-queue-dispatch-deadlock]
 - do [#preflight-probe-side-effect-free]

@@ -273,7 +273,33 @@ The WIP is the **`tasks/software/tsift.md` Codex (gpt-5.5) session's** work — 
 #### Two things to note
 1. **The tsift.md session is NOT canceled** — you said you canceled it, but pane `%60` is alive (idle now; its context grew 11%→16% in ~5 min, so it's intermittently active). Until you `agent-doc session interrupt-clear tasks/software/tsift.md` (or stop routing it), it will keep contaminating this doc and re-dirtying the tree. That's the root cause worth closing.
 2. **Installed binary is stale vs HEAD** — `~/.cargo/bin/agent-doc` and `.bin` are at `bda2e1d2` (my guard, no WIP); HEAD is now `7135ffa5`. I did not rebuild/install this 957-line WIP (you didn't ask, and it's the Codex session's to validate). Say the word and I'll `cargo install` HEAD.
-<!-- agent:boundary:ce6a05ca -->
+❯ Is there a way to fix the internal state so each tmux pane claims only 1 agent-doc session? Please test on the current runtime state.
+
+### Re: fix internal state so each pane claims only 1 agent-doc session — tested on live runtime — opus-4-8
+
+Yes — the mechanism exists, and **I tested the current runtime: it's already 1:1 clean.** No pane owns two sessions right now.
+
+#### Test results (live state, just now)
+Three independent checks all agree — each pane owns exactly one document:
+
+| Pane | Live process (`ps`) | sessions.json | 
+|------|--------------------|---------------|
+| `%50` | `agent-doc start --route-owned …/agent-doc-bugs2.md` (me) | 1 doc |
+| `%57` | `agent-doc start --route-owned …/lazily-rs.md` | 1 doc |
+| `%60` | `agent-doc start --route-owned …/tsift.md` | 1 doc |
+
+`agent-doc resync` (dry-run) found **0 wrong-process / wrong-session issues** — only two cosmetic stash-window placements (`%57`, `%60` parked in the `stash` window), which is unrelated to ownership. So the earlier contamination (tsift's Codex running bugs2) is **not present** in the current state; `%60` correctly owns tsift again.
+
+#### The "fix internal state" stack (what keeps it 1:1)
+1. **Detection + repair:** `agent-doc resync --fix` detects `WrongProcess` panes (pane registered to doc A but whose process runs doc B) and **deregisters** them, and kills wrong-session panes (`detect_wrong_process_pane` / `resync.rs`). This is the command to run if the state ever *is* contaminated.
+2. **Prevention on claim:** `cmdline_owns_other_document` (822688d0) — a new doc cannot alias onto a pane already owning another doc.
+3. **Prevention on focus/sync/autostart:** `reject_cross_document_owner_pane` (`bda2e1d2`, **live now** in `~/.cargo/bin` — confirmed the guard string is in the running binary) — navigation/sync won't surface or reuse a pane that owns a different doc.
+
+#### Honest caveat on the residual vector
+The earlier contamination — tsift's owner *committing to bugs2* — is **not** an ownership-aliasing bug (pane `%60` owns tsift correctly), so `resync`'s wrong-process check wouldn't catch it. It looks more like a **dispatch/route** path feeding bugs2's cycle into the tsift owner pane, which the ownership guards above don't cover. I can't reproduce it from the current clean state, so I won't guess the exact vector. If you want belt-and-suspenders, the concrete follow-up is to gate the `route`/dispatch path on `pane_runs_other_document_owner` too (the same primitive, applied at dispatch time) — say the word and I'll implement + test it.
+
+**To stop any recurrence now:** the live tsift.md session (`%60`) is what kept getting re-routed onto bugs2. It's correctly scoped right now; if it drifts again, `agent-doc session interrupt-clear tasks/software/tsift.md` stops it cleanly.
+<!-- agent:boundary:08496021 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->

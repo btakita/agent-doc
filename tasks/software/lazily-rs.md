@@ -428,7 +428,43 @@ A lock-free mechanism such as CAS could perform better than the current lock-bac
 I created the plan here: [plan-lazily-rs-lock-free-context.md](/home/brian/work/btakita/agent-loop/tasks/software/plan-lazily-rs-lock-free-context.md:1). It includes Mermaid diagrams for the decision flow, slot state model, concurrent get/set race, and safety test matrix, plus benchmark workloads and proof obligations for memory ordering, ABA avoidance, dependency consistency, effect coalescing, cleanup ordering, and batch boundaries.
 
 No lazily-rs runtime code changed for this prompt. I committed the plan as `dcb22dc09` (`docs: plan lazily-rs lock-free evaluation`). Verification: root `make check` passed. GitHub has no workflow named `CI`; the relevant `Agent Doc` run `26772048032` has `tmux-ci` completed successfully, while its `check` job was still in progress when inspected. The previous `Agent Doc` runs `26771726546` and `26771332149` were successful.
-<!-- agent:boundary:fa06cb69 -->
+❯ publish + release
+
+### Re: publish + release — gpt-5
+
+Published and released `lazily v0.4.0`.
+
+Changed paths:
+- `src/lazily-rs/Cargo.toml` and `src/lazily-rs/Cargo.lock` bumped the crate from `0.3.0` to `0.4.0`.
+- Root `src/lazily-rs` submodule pointer advanced to the release commit.
+
+Release artifacts:
+- crates.io now reports `lazily = "0.4.0"`.
+- `lazily-rs` commit `8478c6b` (`chore: release v0.4.0`) was pushed to `main`.
+- `lazily-rs` tag `v0.4.0` was created and pushed.
+- Root commit `028f6f7d4` (`chore: release lazily-rs v0.4.0`) records the `src/lazily-rs` pointer update.
+
+Commands and verification:
+- `cargo fmt --check`
+- `cargo check`
+- `cargo check --features tokio`
+- `cargo test`
+- `cargo test --features tokio`
+- `cargo test --all-features`
+- `cargo build`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo package --allow-dirty`
+- `cargo publish --dry-run --allow-dirty`
+- `cargo publish`
+- root `make check`
+- `cargo search lazily --limit 1` confirmed `0.4.0`
+
+GitHub Actions: there is no workflow named `CI`; the latest relevant `Agent Doc` runs checked before this root commit were successful. Tmux evidence from the latest prior `Agent Doc` run was green.
+
+One related integration note: root `make check` updated `src/agent-doc/Cargo.lock` to record the path dependency as `lazily 0.4.0`; I committed and pushed that one-line submodule commit as `adba3213`. I intentionally did not stage the root `src/agent-doc` pointer because it already contained pre-existing unrelated commits and this release closeout should not absorb them.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:330b48b0 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -448,7 +484,7 @@ No lazily-rs runtime code changed for this prompt. I committed the plan as `dcb2
 
 ## Completed / Reaped
 
-<!-- agent:done -->
+<!-- agent:done archive=tasks/ -->
 - 2026-06-01 [#n12s] #ipc-corruption-live-repro-lazily-rs Logged as #zpc2 in agent-doc-bugs2.md backlog. Live repro of scaffold duplication during finalize --stream. Document manually repaired.
 - 2026-06-01 [#exfd] #effect-system Phase 4: Effect system — ctx.effect(|ctx| { ... }) with auto-tracking, scheduling, cleanup, and disposal
 - 2026-06-01 [#rx9y] #batch-updates ctx.batch(|ctx| { ... }) to defer invalidation until the batch completes

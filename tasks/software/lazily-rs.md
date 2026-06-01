@@ -89,7 +89,37 @@ Verification passed:
 `cargo install --path .` is not applicable because `lazily` is a library-only crate with no binary/example targets.
 
 `agent-doc session-check` passed and reports the next queue head is `#fzaf`. The root branch is synced with `origin/main`; unrelated dirty files remain in the superproject, and `src/lazily-rs` itself is clean.
-<!-- agent:boundary:2cd14a91 -->
+
+### Re: #fzaf — gpt-5
+
+> **Queue prompt:**
+>
+> [#fzaf]
+
+
+Completed `#fzaf`: the memoization guard is implemented, documented, tested, committed, and pushed.
+
+Changed paths:
+- `src/lazily-rs/src/context.rs` adds `ctx.memo()`, dirty-slot validation, equal-value suppression for downstream slot/effect work, and fresh-only `ctx.is_set()` reporting.
+- `src/lazily-rs/tests/spec_compliance.rs` covers equal intermediate memo recomputation, effect skip behavior, hard clear behavior, batched set+clear transitive clearing, and the 54-test spec suite.
+- `src/lazily-rs/README.md`, `src/lazily-rs/SPEC.md`, and `src/lazily-rs/AGENTS.md` document memo slots, dirty validation, hard clear versus lazy invalidation, fresh-cache status, and the current test counts.
+
+Commit/push evidence:
+- `lazily-rs` `4612dfa` (`feat: add memoization guard`) implements the guard.
+- `lazily-rs` `b8cc781` (`fix: report only fresh slots as set`) keeps compatibility with older `agent-doc` cache-status expectations while preserving lazy dirty caches internally.
+- Parent `agent-loop` `91aa9739d` and `5c8dbeef2` update the `src/lazily-rs` submodule pointer; both were pushed to `origin/main`.
+
+Verification:
+- `cargo fmt --check` passed in `src/lazily-rs`.
+- `cargo test --test spec_compliance` passed: 54 tests.
+- `cargo test` passed: 13 integration tests plus 54 spec tests.
+- `cargo clippy` passed in `src/lazily-rs`.
+- `cargo build` passed in `src/lazily-rs`.
+- Root `make check` passed from `/home/brian/work/btakita/agent-loop`.
+- GitHub `Agent Doc` run `26745360067` passed: `tmux-ci` in 2m59s and `check` in 7m1s. There is no workflow named `CI`; `Agent Doc` is the project workflow.
+
+`cargo install --path .` remains not applicable because `lazily` is a library-only crate with no binary/example targets. No escalated shell permissions were required. Confidence is high; `src/lazily-rs` is clean, and unrelated dirty parent-repo files were left untouched.
+<!-- agent:boundary:ee2d1ce8 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -99,7 +129,7 @@ preset #spec-test-build-install-commit-push
 - ~[#n12s]~
 - ~[#exfd]~
 - ~[#rx9y]~
-- [#fzaf]
+- ~[#fzaf]~
 - [#dpzd]
 - [#45rh]
 <!-- /agent:queue -->

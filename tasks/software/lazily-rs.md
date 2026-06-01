@@ -196,7 +196,28 @@ Commits: `src/lazily-rs` `acb1633` (`chore: release v0.3.0`), `src/agent-doc` `f
 Verification: `cargo fmt --check`; `tsift rewrite --run 'cargo test'`; `tsift rewrite --run 'cargo build'`; `tsift rewrite --run 'cargo clippy --all-targets --all-features -- -D warnings'`; `cargo package --allow-dirty`; `cargo publish --dry-run`; `cargo publish`; `cargo search lazily --limit 1`; root `make check`; GitHub Actions `Agent Doc` run `26746914026` passed both `check` and `tmux-ci`. The expected library-only `cargo install --path . --force` check still reports `no packages found with binaries or examples`.
 
 Confidence: high. Escalation: none; unrelated dirty edits already present in `src/agent-doc` were preserved and not included.
-<!-- agent:boundary:04a5c46a -->
+❯ What are #next-steps for lazily-rs to support parallelism (Threads) and concurrency (Tokio)? See lazily-zig for a reference.
+
+### Re: threads and Tokio next steps — gpt-5
+
+Top backlog item: `#thr-spec`.
+
+Recommended order:
+
+1. `#thr-spec` Spec the thread-safe contract before touching internals. `lazily-rs` is currently deliberately local: `Context` owns `RefCell<HashMap<...>>`, callbacks are `Box<dyn Fn>`, cached values are `Box<dyn Any>`, and effect cleanups are `Box<dyn FnOnce()>`. The useful `lazily-zig` reference pattern is one context-level mutex, a thread-local tracking stack, and explicit unlock boundaries before user callbacks that may re-enter the context.
+2. `#thr-core` Build a lock-backed thread-safe context path. Prefer a new `ThreadSafeContext`/feature or internal `ContextInner` split over silently changing the current `Context` semantics. Require `Send + Sync + 'static` for cached values and compute/effect closures on this path, while preserving the existing single-threaded fast path unless the spec decides thread safety should become default.
+3. `#thr-tests` Add contention/regression tests before API polish: concurrent first `get`, concurrent `set_cell`, batch flush ordering, clear/dispose races, effect scheduling coalescing, and re-entrant effects. This should mirror `lazily-zig`'s `thread_safe` coverage, but assert Rust-level invariants instead of only proving no deadlock/crash.
+4. `#tokio-sync` Add Tokio as an optional integration after sync thread safety is sound. Start with sharing the synchronous context across `tokio::spawn`/`spawn_blocking` and async tests under a `tokio` feature; this proves `Send`/`Sync` bounds and scheduler interaction without introducing async cache state.
+5. `#tokio-async` Only then design true async computations/effects. That needs explicit semantics for in-flight future deduplication, cancellation, dependency tracking across `.await`, stale future completion, cleanup ordering, and `Send` vs `LocalSet` futures.
+
+I added these as backlog items in that priority order. My recommendation is to start with `#thr-spec`; it is the smallest step that prevents Tokio decisions from leaking into the lower-level locking model too early.
+
+Changed paths: session document only.
+Commands: `agent-doc preflight`; `agent-doc read`; `agent-doc plan`; `tsift status` in root and both submodules; inspected `src/lazily-rs` and `src/lazily-zig` README/SPEC/source/test files.
+Verification: no source code changed; this is a planning/backlog update, so I did not run the crate test suite.
+Confidence: medium-high. The sequence is based on current local source inspection; exact API naming should be decided in `#thr-spec`.
+Escalation: none.
+<!-- agent:boundary:e6b52bee -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -207,6 +228,11 @@ Confidence: high. Escalation: none; unrelated dirty edits already present in `sr
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#thr-spec] #parallelism Specify the thread-safe contract for lazily-rs: API shape, Send/Sync bounds, lock/re-entrancy rules, single-threaded fast path compatibility, and parity/differences with lazily-zig's mutex-first design
+- [ ] [#thr-core] #parallelism Implement the thread-safe core after the spec: lock-backed context state, Send + Sync cached values and compute/effect callbacks, safe dependency tracking, and re-entrant user callback boundaries
+- [ ] [#thr-tests] #parallelism Add thread contention coverage: concurrent first get, concurrent set_cell, batch flush ordering, clear/dispose races, effect coalescing, and deadlock/regression checks modeled after lazily-zig thread_safe tests
+- [ ] [#tokio-sync] #tokio Add optional Tokio integration after thread safety is sound: async tests and examples that share the synchronous context across tokio::spawn/spawn_blocking without introducing async compute semantics
+- [ ] [#tokio-async] #tokio Design true async computations/effects only after #tokio-sync: in-flight future deduplication, cancellation, stale future completion, cleanup ordering, and Send vs LocalSet semantics
 <!-- /agent:backlog -->
 
 ## Queue

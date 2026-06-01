@@ -71,7 +71,25 @@ Install/escalation notes:
 - No escalated shell permissions were required.
 
 Preflight warning carried forward: `agent-doc preflight` reported pending-shadow copies for `#rx9y`, `#fzaf`, `#dpzd`, and `#45rh`; `#rx9y` is now completed through the normal `--done rx9y` closeout path.
-<!-- agent:boundary:c71c0eb7 -->
+Completed the `#rx9y` agent-doc cycle.
+
+`lazily-rs` batch updates are implemented and pushed:
+- `lazily-rs`: `ddbb78c` (`feat: add batch updates`)
+- parent `agent-loop` submodule pointer: `bbf6631ef`
+- session closeout commit: `cd1590a1d`
+
+Verification passed:
+- `cargo fmt --check`
+- `cargo test`
+- `cargo clippy`
+- `cargo build`
+- root `make check`
+- latest `Agent Doc` workflow run, including `tmux-ci`, was green
+
+`cargo install --path .` is not applicable because `lazily` is a library-only crate with no binary/example targets.
+
+`agent-doc session-check` passed and reports the next queue head is `#fzaf`. The root branch is synced with `origin/main`; unrelated dirty files remain in the superproject, and `src/lazily-rs` itself is clean.
+<!-- agent:boundary:f2f10e42 -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -111,7 +111,30 @@ A standard **one-way (unilateral) NDA**. Awear Inc. (Delaware corp; the "1209 Or
 
 ##### Bottom line
 Nothing predatory, nothing unusual for a candidate NDA — it's a clean, fairly standard unilateral agreement with the carve-outs that matter (especially independent development) intact. **Safe to sign.** The only two behavioral commitments to actually internalize: (1) **don't publicly disclose you're talking to Awear** (§7) — relevant to your streaming, and (2) **don't gift them substantive IP as "feedback"** during discussions (§11). Sign, initial the three pages, date it, and return.
-<!-- agent:boundary:c549baac -->
+❯ Should I leave this out?
+❯ > I'm working on making agent-doc a truly realtime dynamic agent interface that can be used in a collaborative environment...and to raise visibility into the agentic pipeline.
+### Re: Should I leave the agent-doc vision line out? — opus-4-8
+
+First, the NDA angle since you just signed it: **this line is safe** — it describes *your own* project, not Awear's confidential information, so §7 (existence of discussions) and §11 (feedback assignment) don't reach it. §4(d) independent-development keeps agent-doc yours. So this is purely a recruiting-judgment call, not a legal one.
+
+On the judgment call: **I'd soften it, not cut it.** The substance — that you build and dogfood your own AI-native harness — is your single strongest differentiator and you should keep it. The problem is the *framing* of this specific sentence.
+
+##### Why this wording works against you
+- **"that can be used in a collaborative environment"** reads like you're building a **product for other people** — i.e., a startup. To a company *hiring* you, that raises the two questions you don't want in a screen: *is your attention divided?* and *is this a competing venture / IP conflict?* Awear is an AI company; a candidate pitching their own collaborative-agent product is ambiguous at best.
+- **"raise visibility into the agentic pipeline"** is mission/product language. It sounds like you're describing a company's pitch, not how you work.
+
+##### What to do instead
+Reframe it as **your engineering practice**, not a product roadmap. Something like:
+
+> I dogfood my own harness (agent-doc) hard — it's how I push how far AI-native development can actually go, and it keeps me at the edge of the workflow rather than just using off-the-shelf tools.
+
+That keeps 100% of the signal you want (you build serious tooling, you're AI-native, you have judgment) and drops the parts that read as "I'm running a startup on the side."
+
+##### When to keep your original
+Only if you *want* to surface agent-doc as a venture and gauge their reaction — e.g., if you're weighing this role against doing your own thing, or you'd want them to know up front. That's a legitimate strategy, but it changes the conversation from "hire this engineer" to "what's your relationship with this person's other project," so do it deliberately, not by default.
+
+**Bottom line:** don't delete the agent-doc mention — it's your edge. Just strip the product/collaborative-platform framing for this screen. Keep it about how you work, not what you're shipping.
+<!-- agent:boundary:c427dc85 -->
 <!-- /agent:exchange -->
 
 ## Queue

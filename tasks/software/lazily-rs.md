@@ -89,7 +89,7 @@ Verification passed:
 `cargo install --path .` is not applicable because `lazily` is a library-only crate with no binary/example targets.
 
 `agent-doc session-check` passed and reports the next queue head is `#fzaf`. The root branch is synced with `origin/main`; unrelated dirty files remain in the superproject, and `src/lazily-rs` itself is clean.
-<!-- agent:boundary:f2f10e42 -->
+<!-- agent:boundary:2cd14a91 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -107,7 +107,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#fzaf] #memo-guard Memoization guard — prevent unnecessary downstream cascade during invalidation when recomputed value equals prior value (slots are already lazy: invalidated only, recomputed on get())
 - [ ] [#dpzd] #api-ergonomics ctx.computed() alias and DX improvements
 - [ ] [#45rh] #release-publish Release + publish after effect system lands
 <!-- /agent:backlog -->
@@ -128,4 +127,5 @@ preset #spec-test-build-install-commit-push
 - 2026-06-01 [#n12s] #ipc-corruption-live-repro-lazily-rs Logged as #zpc2 in agent-doc-bugs2.md backlog. Live repro of scaffold duplication during finalize --stream. Document manually repaired.
 - 2026-06-01 [#exfd] #effect-system Phase 4: Effect system — ctx.effect(|ctx| { ... }) with auto-tracking, scheduling, cleanup, and disposal
 - 2026-06-01 [#rx9y] #batch-updates ctx.batch(|ctx| { ... }) to defer invalidation until the batch completes
+- 2026-06-01 [#fzaf] #memo-guard Memoization guard — prevent unnecessary downstream cascade during invalidation when recomputed value equals prior value (slots are already lazy: invalidated only, recomputed on get())
 <!-- /agent:done -->

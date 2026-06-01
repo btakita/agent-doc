@@ -173,7 +173,7 @@ Verification:
 Commits:
 - `src/agent-doc`: `e7306701` (`Fix synced queue pending-done accounting`) pushed to `origin/20260422/codex-agent-backend`.
 - Superproject gitlink commit `751bec20` is created; per agent-doc closeout ordering, I will push `main` after this document commit lands.
-<!-- agent:boundary:c91eed0a -->
+<!-- agent:boundary:b921e7ce -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -221,7 +221,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Review
  
 <!-- agent:review -->
-- [/] [#tagpath-queue-priority-publish-align] [recommended] Before the next agent-doc release, publish tagpath (commits b55c305 + 32fd000: backlog/icebox/queue priority + queue sync lint attrs) and bump agent-doc's tagpath dependency past 0.12. Locally agent-doc resolves tagpath via the superproject .cargo/config.toml path patch so the lint-gate accepts the new attributes; a published agent-doc on tagpath 0.12 would reject bare priority/queue as malformed-attr.
 - [/] [#codex-owned-pane-stop-hook-live-verify] [recommended] Gated on a live Codex pane -- the remaining phases of #codex-owned-pane-prompt-miss-followups after phase 2a landed: (2b) a live Codex Stop-hook regression asserting the owned_pane_self_invocation diagnostic forces an in-pane response body before final chat output, and (3) live-verify a real Codex same-pane run with an unresolved exchange prompt. Plan: tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md.
 - [/] [#zpc2] #ipc-corruption-live-repro-lazily-rs [recommended] Live repro of IPC scaffold duplication on tasks/software/lazily-rs.md while typing during finalize --stream. Full Backlog/Queue/Review duplicated plus two escaped exchange-close markers. Partial user typing embedded in wrong positions. Matches detect_duplicated_scaffold(). Plans: tasks/agent-doc/plan-full-document-ipc-corruption-typing-prompt.md, tasks/agent-doc/plan-prompt-duplicated-while-typing.md.
 - [/] [#t41j] [recommended] #jb-run-agent-doc-busy-wait-deadlock live-verify (gated on a live busy pane): fix landed (submodule 89c357d5 — busy_dispatch_only_should_wait_for_ready skips the --wait-for-ready start override on a busy active turn + the (claude, active claude turn) case in dispatch_active_turn_queue_source). With the installed binary, click JB Run Agent Doc on a doc whose Claude actor is mid active-turn (not running /loop) and confirm it returns immediately (no 60s route_wait_for_ready_override block), appends the prompt to agent:queue auto, and the supervisor idle-queue watch drains the head on busy->idle. Check ops.log for the enqueue and the absence of a 60s wait.

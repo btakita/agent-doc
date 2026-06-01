@@ -218,7 +218,22 @@ Nothing has changed about the one decision that's yours, from last turn — and 
 - **Interrupt-clear tsift.md:** if you want *me* to be the one implementing `#ipcaa-scaf` (and the rest of `#qasm`), authorize `agent-doc session interrupt-clear tasks/software/tsift.md` so that actor stops, I reconcile its 69-file tree (build + `make check` → commit if coherent, else stash), and then implement on a clean, single-owner tree.
 
 I'm not comingling a `write.rs` edit into a live actor's working tree, and not duplicating an item that owner is about to land. Tell me **wait** or **interrupt-clear**, and I'll act accordingly. Until then `#ipcaa-scaf` is correctly left to the single live owner that's already committing this backlog.
-<!-- agent:boundary:994ee172 -->
+State is unchanged from last turn — HEAD still `bda2e1d2`, tree still **69 files dirty** (the live tsift.md Codex turn's WIP), `session clear tsift.md` still **refused (alive-busy)**.
+
+> **Queue prompt:**
+>
+> do [#submodule-response-commit-proof]
+
+
+`do [#submodule-response-commit-proof]` is implementable (make nested-repo commit ownership explicit in `session-check`/final diagnostics; fail closed on unverified manual submodule fallback), but it's **blocked on the same unresolved decision** — I can't edit the crate without comingling into the live Codex actor's working tree, and it'll likely land this item itself as it's draining the backlog.
+
+I'm holding, not repeating the full analysis. **One thing unblocks every remaining queue item** (`#submodule-response-commit-proof`, `#ipcaa-scaf`, `#qasm`): your call on the live tsift.md session —
+
+- **wait** (let the Codex owner keep draining; it's committing clean work), or
+- **interrupt-clear tsift.md** (`agent-doc session interrupt-clear tasks/software/tsift.md`) so I reconcile its tree and take over as sole owner.
+
+The auto-loop has advanced past this question three times now. Until you answer, every head I'm handed is either in-flight by that live owner or un-landable from here. Reply **wait** or **interrupt** and I'll act.
+<!-- agent:boundary:482c8218 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -226,7 +241,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#jb-tsift-pane-sync]~
 - ~The dirty files were from the tsift.md session...which I canceled. Please reconcile the dirty changes.~
 - ~do [#ipcaa-scaf]~
-- do [#submodule-response-commit-proof]
+- ~do [#submodule-response-commit-proof]~
 - do [#qasm]
 <!-- /agent:queue -->
 ###

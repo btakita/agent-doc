@@ -64,7 +64,27 @@ Thread state: Ashley sent the pre-interview questions Mon 5/26, you forwarded it
 - Confirm "next week" explicitly on the availability so there's no ambiguity (you gave ET times, which is good — Ashley asked for EDT).
 
 **Net:** ship it after edits 1–4. The content already clears the bar; those four changes remove the only handholds for a "no." Want me to produce a revised draft incorporating all of this so you can review side-by-side before sending?
-<!-- agent:boundary:4a923b96 -->
+❯ I made the changes. Will sign the NDA before sending in the morning.
+❯ Please review and provide feedback.
+
+### Re: Re-review of the revised draft — opus-4-8
+
+You resolved all four. This is ready to send.
+
+- **Engagement line** → "I just wrapped a project and have good availability now." Clean, forward-looking, no opening for "why did it end." Fixed.
+- **PresenceAI weakness** → "Coordinating a multi-modal realtime stack across a distributed team from the West Coast to Europe to SouthEast Asia was the hard part; alignment across roles was a recurring cost." This is the biggest improvement — it's neutral, it's technical, and the West-Coast-to-Europe-to-SEA detail actually *upgrades* the answer by showing the scope you operated across. No grievance smell. Fixed.
+- **AI weakness** → "parallel work with a codebase growing in complexity can cause the agents to not solve some issues despite spending many turns on it. Such problems require undivided attention, review, and analysis." This is a real, credible failure-mode answer and exactly the judgment Awear is screening for. It also quietly signals you run parallel agents at scale, which is a plus. Fixed.
+- **NDA** → "I have signed the NDA" in the opening. Closes the loop she flagged twice.
+
+**One caveat on the NDA:** the sentence is past-tense ("I have signed"). Your note says you'll sign in the morning before sending — just make sure the signature is actually returned *before* you hit send, so the statement is true at send time. If there's any chance it slips, soften to "I'm returning the signed NDA today."
+
+**Trivial leftovers (optional, ~30 seconds):**
+- Still one run-together space: "all (>99%) my development.The feedback loop" → add the space after the period.
+- "PresenceAI was written in Python (finishing at ~190k LoC)" — "finishing at" still reads present-tense for a past company; "~190k LoC" alone is cleaner. Minor.
+- A few "+" remain where prose would read smoother as "and": "Jetbrains + VSCode", "Software engineering principles + architecture", "strengths/weaknesses". Leave them if you like the terse feel — not worth blocking on.
+
+None of these change the outcome. Sign the NDA, fix the one missing space if you're being thorough, and send it.
+<!-- agent:boundary:a86559c9 -->
 <!-- /agent:exchange -->
 
 ## Queue

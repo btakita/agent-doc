@@ -36,16 +36,26 @@ prompt_presets:
 Compacted content:
 - Archived 1 response topic(s): Next steps, derived signals vs effect system
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:bce7852f -->
+
+### Re: Memo guard utility, IPC corruption logged — glm-5.1
+
+**Yes, the memo guard is useful** — but it's a performance optimization, not a correctness feature. The current behavior (recompute every time cache is invalidated) is correct. The memo guard adds:
+
+1. **Skip redundant recomputation** — if `ctx.get(&slot)` triggers recomputation but all dependency values resolve to the same result, the slot returns cached value. Matters for expensive computations downstream of frequently-toggled cells.
+2. **Reduced invalidation cascade** — a memo guard at intermediate nodes prevents cascading through the whole graph when intermediate values don't change.
+
+Trade-off: requires storing dependency value copies for comparison. Worth doing after the effect system, since effects are where cascading recomputation hurts most.
+
+**IPC corruption logged** as `#zpc2` in `tasks/agent-doc/agent-doc-bugs2.md`. This is a new live repro of `#ipcfullprompt-recur2` / `#prompt-duplicated-while-typing`. The corrupted lazily-rs.md had full scaffold duplication (2x Backlog/Queue/Review + 2x `&lt;!-- /agent:exchange --&gt;` + partial typing "re [#fzaf]: W" / "re [#fzaf]: Would" embedded in wrong positions). Manually repaired — removed duplicate tail sections.
+<!-- agent:boundary:18a11b55 -->
 <!-- /agent:exchange -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-release + publish
-release + publish
+- [ ] [#n12s] #ipc-corruption-live-repro-lazily-rs Logged as #zpc2 in agent-doc-bugs2.md backlog. Live repro of scaffold duplication during finalize --stream. Document manually repaired.
 - [ ] [#exfd] #effect-system Phase 4: Effect system — ctx.effect(|ctx| { ... }) with auto-tracking, scheduling, cleanup, and disposal
-- [ ] [#rx9y] #batch-updates ctx.batch(|ctx| { ... }) to defer invalidation until batch completes
+- [ ] [#rx9y] #batch-updates ctx.batch(|ctx| { ... }) to defer invalidation until the batch completes
 - [ ] [#fzaf] #memo-guard Memoization guard — skip recomputation when dependency values haven't changed
 - [ ] [#dpzd] #api-ergonomics ctx.computed() alias and DX improvements
 - [ ] [#45rh] #release-publish Release + publish after effect system lands

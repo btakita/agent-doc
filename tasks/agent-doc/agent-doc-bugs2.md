@@ -79,13 +79,13 @@ The fix itself is already code-complete, CI-green, and **installed live** (submo
 I'm deliberately **not** self-routing `route --dispatch-only --wait-for-ready 60` into this session's own busy pane to synthesize the check — that injects into the document I'm actively editing and risks compounding the live `#zpc2` IPC churn already destabilizing this doc.
 
 **Gating** `#t41j` → review (un-gate after the operator live-verify). The auto-queue tail (`#completed-queue-residue-regression`, …) is untouched.
-<!-- agent:boundary:e5d318d5 -->
+<!-- agent:boundary:af3af6d6 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#t41j]~
-- do [#zpc2]
+- ~do [#zpc2]~
 - do [#completed-queue-residue-regression]
 - do [#codex-owned-pane-stop-hook-live-verify]
 - do [#queue-sync-auto-pending-done-guard-misfire]

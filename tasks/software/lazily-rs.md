@@ -464,7 +464,12 @@ GitHub Actions: there is no workflow named `CI`; the latest relevant `Agent Doc`
 One related integration note: root `make check` updated `src/agent-doc/Cargo.lock` to record the path dependency as `lazily 0.4.0`; I committed and pushed that one-line submodule commit as `adba3213`. I intentionally did not stage the root `src/agent-doc` pointer because it already contained pre-existing unrelated commits and this release closeout should not absorb them.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:330b48b0 -->
+❯ Add implementing the lock-free/CAS evaluation plan to the icebox.
+
+### Re: publish + release closeout repair — gpt-5
+
+I repaired the session document closeout metadata after the publish response committed: `agent:done archive=tasks/` now points at `tasks/software/lazily-rs.done.md`, matching the document's `.done.md` archive requirement. No additional lazily-rs release artifacts changed after the published `0.4.0` closeout above.
+<!-- agent:boundary:f0dc8e72 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -479,12 +484,17 @@ Confidence: high. Escalation: none.
 
 ## Review
 
-<!-- agent:review archive=tasks/software/lazily-rs.done.md -->
+<!-- agent:review -->
 <!-- /agent:review -->
+
+## Icebox
+
+<!-- agent:icebox -->
+<!-- /agent:icebox -->
 
 ## Completed / Reaped
 
-<!-- agent:done archive=tasks/ -->
+<!-- agent:done archive=tasks/software/lazily-rs.done.md -->
 - 2026-06-01 [#n12s] #ipc-corruption-live-repro-lazily-rs Logged as #zpc2 in agent-doc-bugs2.md backlog. Live repro of scaffold duplication during finalize --stream. Document manually repaired.
 - 2026-06-01 [#exfd] #effect-system Phase 4: Effect system — ctx.effect(|ctx| { ... }) with auto-tracking, scheduling, cleanup, and disposal
 - 2026-06-01 [#rx9y] #batch-updates ctx.batch(|ctx| { ... }) to defer invalidation until the batch completes

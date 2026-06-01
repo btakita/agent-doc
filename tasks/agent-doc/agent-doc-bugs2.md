@@ -66,7 +66,39 @@ Shipped as a test + spec guard (plan write-scope = `specs/` + `tests/`):
 - **commit/push** — `agent-doc@a15ff6e6` on `20260422/codex-agent-backend`, pushed. `make check` green (clippy `-D warnings`, fast + medium corpus, full bin suite 450 passed). CI run `26738606274` queued; prior run green.
 
 The deep live-tmux root cause of the actual duplicate (pane-id churn in the claim path) still needs reproduction under real tmux — queued as a recommended follow-up. The SimWorld guard covers the projection layer only.
-<!-- agent:boundary:88f191c7 -->
+❯ do [#n9zf]. #spec-test-build-install-commit-push
+### Re: do [#n9zf] — root-cause + fix the live duplicate editor pane — opus-4-8
+
+Done — root-caused, fixed, and shipped. `#n9zf` is closed.
+
+#### Root cause (verified, not inferred)
+
+The auto-start pre-sync pass (`agent-doc-orchestration/src/sync.rs:3392`) built `all_files` from `col_args` with **no dedup**, then ran the reuse/auto-start decision once per occurrence:
+
+```rust
+let all_files: Vec<PathBuf> = col_args.iter()
+    .flat_map(|arg| arg.split(','))
+    .map(|s| PathBuf::from(s.trim()))
+    .collect();          // ← same document can appear twice
+```
+
+When a document is requested in more than one column, occurrence #1 cold-starts a fresh pane via `route::provision_pane`, but that new pane has **not yet recorded a registry / session-log binding**. So occurrence #2's `lookup_registry_entry_for_file_session` *and* `find_associated_panes` both miss it → it cold-starts a **second** pane for the same document. That's the "3 tmux panes with 2 editor panes." It is *not* the `duplicate_live_pane_claim` path (that's for two *different* files and is correct), which is why the earlier projection-layer guard didn't catch it.
+
+#### Fix
+
+Factored the candidate construction into `auto_start_candidate_files(col_args)`, which dedups by path in first-seen order (column/focus precedence preserved), and wired it into the pass. This closes the same-run, not-yet-discoverable window that `find_associated_panes` structurally cannot cover (it only sees panes that already advertise a binding).
+
+#### Why the guard is a deterministic test, not a live tmux test
+
+A faithful live reproduction needs a real harness spawned inside the provisioned pane — the **reuse** path (existing live owner) re-resolves to the same pane and cannot duplicate; only the **cold-start** path duplicates. Spawning a harness per test is heavy and flaky, and spec 12's deterministic-first policy says cardinality belongs in pure traces. So coverage is the pure unit test on the candidate-dedup helper + the SimWorld cardinality invariant, with the existing live `find_associated_panes` tests covering already-discoverable dedup.
+
+#### #spec-test-build-install-commit-push
+
+- **spec** — `specs/07-session-tmux-commands.md` (one-pane-decision-per-document auto-start invariant) + `specs/12-deterministic-simulation.md` (cold-start guard now named, coverage mapping).
+- **test** — `auto_start_candidate_files_dedupes_repeated_documents_preserving_order` + `_keeps_distinct_documents` (deterministic).
+- **build/install** — `cargo build --release` + `cargo install --path .` both clean (refreshes `.bin/` and `~/.cargo/bin/`).
+- **commit/push** — `agent-doc@aa747a62` on `20260422/codex-agent-backend`, pushed. `make check` green (clippy `-D warnings`, orchestration 2113 passed, fast + medium corpus, bin suite). CI `26739534513` queued; last cycle's run `26738606274` is now green.
+<!-- agent:boundary:46f14bfd -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
@@ -97,7 +129,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog priority queue=prepend -->
-- [ ] [#n9zf] [recommended] Root-cause the live 'duplicate editor pane' in agent-doc-orchestration::sync claim path (claimed_sync_panes conflict → distinct-pane rehydration) under real tmux; promote the pane-id-churn case (vs doc-identity) into make tmux-ci coverage. SimWorld seed 3005 + cardinality invariant guard the projection layer only.
 <!-- /agent:backlog -->
 
 ## Review

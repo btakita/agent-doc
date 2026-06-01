@@ -36,10 +36,40 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 3 response topic(s): JB `Run Agent Doc` dispatch latency; do [#j0k8]; do [#j0k8]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:9875e947 -->
+❯ JB `Run Agent Doc` on this document is deadlocked.
+❯ #spec-test-build-install-commit-push
+
+### Re: JB `Run Agent Doc` deadlock on this document — opus-4-8
+
+Root-caused and fixed. This document's owner pane is **this Claude session (`%50`)**, and the deadlock is a stale-busy projection vs. the `--wait-for-ready` timeout.
+
+#### What was happening (from `ops.log`)
+```
+route_wait_for_ready_override ... timeout_secs=60
+route_authoritative_actor_starting_not_ready ... actor_state=busy ... prompt_ready=true last_transition_reason=live_pane_idle
+route_wait_for_ready_timeout ... elapsed_ms=60119 timeout_ms=60000
+route_authoritative_actor_busy_projection_repaired_by_ready_prompt ... prior_state=busy
+route_dispatch_only_sent ... proof=accepted
+```
+The authoritative actor was projected `Busy`, but the live pane already proved a current-generation dispatch-ready prompt (`prompt_ready=true`) — a **stale busy projection**, not a real active turn. The repair that promotes Busy→Ready and dispatches (`busy_projection_repaired_by_ready_prompt`) only ran **after** the full 60s `--wait-for-ready` timeout that JB `Run Agent Doc` passes. So every click blocked ~60s before dispatching, and one path (`route_dispatch_only_authoritative_actor_busy_focus_only_not_dispatched`) fell through to focus-only with **no dispatch at all** — the deadlock.
+
+#### Fix (submodule `fd98eb9d`)
+`classify_prompt_ready_barrier` (the wait-loop barrier) now recognizes the busy-projection repair **inline**: a `Busy` actor with a proven ready prompt + dispatch eligibility resolves to `Ready` on the first poll, dispatching immediately instead of spinning to the deadline. A `Busy` projection *without* a proven ready prompt still stays fail-closed (keeps waiting, then queues) — the no-inject-into-an-active-turn invariant is preserved, since `prompt_ready` for a `Busy` actor is only ever true when the live capture matched a harness dispatch-ready prompt.
+
+- `agent-doc-orchestration/src/flow/routed_reopen.rs` — barrier repair + `prompt_ready_barrier_repairs_busy_projection_with_proven_ready_prompt` unit test.
+- `specs/08a-session-actor-contract.md` — documents the wait-barrier repair timing contract.
+
+#### Verification
+- New unit test passes; route + routed_reopen subsystem green (158 passed, 104 live-tmux ignored). Clippy `-D warnings` clean.
+- `cargo build --release` + `cargo install --path .` — both binaries refreshed.
+- Pushed `fd98eb9d`; CI run `26744782255` in progress.
+- **Note on local `make check`:** 2 `graph::tests` (lazily-rs reactive cache invalidation) are red **locally only** — caused by uncommitted concurrent work in `src/lazily-rs/src/context.rs` (a sibling submodule with working-tree drift), not by this change and not in the route path (`a15ff6e6`: "lazily-rs is not in the pane path"). CI uses the pinned lazily-rs ref and is green; prior commits on this branch (`984e5c1e`, `6d191f1f`) passed CI with these same graph tests present. Left untouched per the concurrent-work rule.
+
+You should now be able to click `Run Agent Doc` and have it dispatch immediately even while the owner pane was momentarily projected busy. If you still see a hang, grab `ops.log` and look for a fresh `route_authoritative_actor_busy_projection_repaired_by_ready_prompt` with a low `elapsed_ms`.
+<!-- agent:boundary:721ce4d7 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 - ~do [#t3m5]. Apply all 3 optimizations.~
 - do [#j0k8]
 - do [#jkvs]

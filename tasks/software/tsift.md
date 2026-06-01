@@ -201,7 +201,38 @@ Verification:
 - `tsift --version` reports `tsift 0.1.62`.
 - GitHub Actions run `26736166082` passed both jobs: `clippy + test` and `live Convex graph acceptance`.
 - I checked for tmux CI coverage in this repo; there is no tmux workflow or `make tmux-ci` target to inspect.
-<!-- agent:boundary:b1e3b67f -->
+
+### Re: #lazily-resolve-edges — gpt-5
+
+> **Queue prompt:**
+>
+> [#lazily-resolve-edges]
+
+Implemented `#lazily-resolve-edges` in `src/tsift`.
+
+What changed:
+- Added `tsift_graph::ResolveEdgesCache`, backed by lazily-rs `Context` Slots keyed by `(file, content_hash)`.
+- Added a `FileMtime` Cell dependency for each cached edge-resolution Slot so changing file metadata invalidates the cached edges before the next read.
+- Kept the existing pure `resolve_edges()` API intact by moving the original implementation behind `resolve_edges_uncached()`.
+- Added `source_content_hash()` in `tsift-graph` and wired changed-file indexing in `tsift-index` through `ResolveEdgesCache`.
+- Added regression coverage proving cache hit/miss behavior across same-key reuse, mtime invalidation, and content-hash key changes.
+- Updated the tsift spec to document the lazily-backed call-edge resolution path.
+
+Commits:
+- `btakita/tsift`: `e6b0660` (`feat(graph): lazily cache edge resolution`) pushed to `main`.
+- root `agent-loop`: the `src/tsift` gitlink now points at `e6b0660` in local commit `5b4405a66`. I did not push root `main` because it has unrelated local commits and dirty worktree changes outside this tsift queue item.
+
+Verification:
+- `cargo test -p tsift-graph resolve_edges_cache_reuses_slots_until_mtime_or_hash_changes` passed.
+- `cargo test -p tsift-graph` passed.
+- `cargo test -p tsift-index` passed.
+- `make check` passed, including clippy, workspace tests, Node tests, and npm dry-run publish check.
+- `cargo build --workspace` passed.
+- `cargo install --path . --force` passed.
+- `tsift --version` reports `tsift 0.1.62`.
+- GitHub Actions run `26736640775` passed both jobs: `clippy + test` and `live Convex graph acceptance`.
+- This repo has no tmux workflow or `make tmux-ci` target to inspect.
+<!-- agent:boundary:ad59af7b -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -210,7 +241,7 @@ Verification:
 dispatch #spec-test-build-install-commit-push
 - ~[#lazily-tsift-status-cache]~
 - ~[#lazily-inspect-scope]~
-- [#lazily-resolve-edges]
+- ~[#lazily-resolve-edges]~
 - [#lazily-neighborhood]
 - [#lazily-summary]
 - [#lazily-tsift-plan]
@@ -219,7 +250,6 @@ dispatch #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#lazily-resolve-edges] [feature] Wrap resolve_edges in lazily-rs Slots keyed by (file, symbol, content_hash)
 - [ ] [#lazily-neighborhood] [feature] Lazy BFS neighborhood expansion via lazily-rs Slots per depth layer
 - [ ] [#lazily-summary] [feature] Lazy summary cache with Cell-backed content_hash invalidation
 - [ ] [#lazily-tsift-plan] [plan] Create integration plan for lazily-rs in tsift (see tasks/agent-doc/plans/lazily-rs-integration.md as reference)

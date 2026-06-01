@@ -68,7 +68,46 @@ Commits pushed:
 
 - `btakita/tsift@074e7b4` (`feat(graph): add surrealdb backend-eval candidate`)
 - `btakita/agent-loop@a3576dc3b` (`chore: update tsift submodule`)
-<!-- agent:boundary:98031817 -->
+
+### Re: #surreal-parity-suite — gpt-5
+
+> **Queue prompt:**
+>
+> [#surreal-parity-suite]
+
+
+Completed `#surreal-parity-suite`.
+
+Implemented explicit SurrealDB backend-eval parity coverage in `packages/tsift-cli/tests/graph_db_conformance.rs`. The conformance test now locates the SQLite and SurrealDB backend reports for every backend-eval dataset and asserts SurrealDB read-only status, empty parity diagnostics, status/count rows, operation `ok` status, SQLite-equivalent row counts, total metrics, per-operation duration metrics, per-1k row-normalized metrics, and row metrics where reported for:
+
+- `status`
+- `edge_lookup`
+- `edge_property_scan`
+- `incident_edges`
+- `neighborhood`
+- `related`
+- `path_max_hops`, `path_max_hops_128`, `path_max_hops_256`, `path_max_hops_512`
+- `evidence_target_resolution`
+- `evidence`
+- `conflict_matrix`
+- `dispatch_trace`
+
+Updated `SPEC.md` to document that the compiled conformance suite locks SurrealDB to SQLite-equivalent results and metrics across those backend-eval surfaces.
+
+Verification on the final scoped diff:
+
+- `cargo test -p tsift-cli --test graph_db_conformance graph_db_backend_eval_benchmarks_candidate_stores_against_sqlite` passed (`tart-c46863f05e`).
+- `make check` passed (`tart-bd67cf6e93`).
+- `cargo build` passed; only the existing unused local patch warnings for `agent-kit`, `tagpath`, and `tmux-router` were emitted.
+- `cargo install --path . --force` passed with the same existing unused patch warnings.
+- `gh run list --workflow CI --limit 1` showed new CI run `26782385866` in progress for `cd3a445`. The previous run `26781749753` failed before test execution while both jobs were still in the cache step; no failed test step or annotation was available.
+- Tmux CI: this repo exposes only `CI` and `Release` workflows, and `make -n tmux-ci` reports no such target.
+
+Pushed commits:
+
+- `src/tsift`: `cd3a445 test(graph): assert surrealdb backend-eval parity`
+- parent `agent-loop`: `a07112dc5 chore: update tsift submodule`
+<!-- agent:boundary:11ff1259 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -76,7 +115,7 @@ Commits pushed:
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~[#surreal-backend-eval]~
-- [#surreal-parity-suite]
+- ~[#surreal-parity-suite]~
 - [#surreal-native-adapter]
 - [#surreal-promotion-gate]
 <!-- /agent:queue -->
@@ -84,7 +123,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#surreal-parity-suite] Extend graph_db_conformance backend-eval coverage for SurrealDB candidate parity across status/counts, edge lookup, edge property scans, incident scans, neighborhood, related retrieval, path tiers, evidence, conflict-matrix, and dispatch-trace.
 - [ ] [#surreal-native-adapter] Spike a feature-gated optional SurrealDB adapter crate that writes provider-neutral projection rows to an embedded/file-backed SurrealDB store without adding SurrealDB to the default cargo build/install path.
 - [ ] [#surreal-promotion-gate] Run repeated real, full-projection, synthetic high-degree, and synthetic deep-chain backend-eval samples for the SurrealDB adapter, including install portability and multi-process/read-only lock behavior, then update the promotion gate only if it preserves SQLite parity and beats SQLite on every required workload.
 <!-- /agent:backlog -->

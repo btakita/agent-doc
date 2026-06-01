@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -77,18 +77,39 @@ Cell: content_hash(file)                    — invalidated on file change
 
 This is lighter scope than the agent-doc integration (which wires config/frontmatter/SSH resolution). Worth a separate plan if you want to proceed.
 What are #next-steps to integrate lazily-rs into tsift?
-<!-- agent:boundary:62bc70c2 -->
+
+
+### Re: #next-steps to integrate lazily-rs into tsift — glm-5.1
+
+Backlog items in priority order:
+
+1. **`#lazily-tsift-plan`** — Create a tsift-specific integration plan. The existing `tasks/agent-doc/plans/lazily-rs-integration.md` covers agent-doc only; tsift needs its own plan covering Context lifetime (single CLI invocation vs. long-lived watch/index daemon), dependency graph layout, and integration points with existing SQLite caches.
+
+2. **`#lazily-inspect-scope`** — Replace `InspectScopeGuard` (`packages/tsift-index/src/index.rs:78`) with lazily-rs reactive cache. This is the lowest-risk entry point: the guard is already a thread-local dedup cache for `IndexDb::inspect_read_only`, so swapping in a lazily-rs `Context` with a Slot per `(db_path, root, prune)` key is a drop-in change with existing test coverage at `lib.rs:31741`.
+
+3. **`#lazily-resolve-edges`** — Wrap `resolve_edges()` (`packages/tsift-graph/src/lib.rs:415`) in lazily-rs Slots. Each file's edge resolution becomes a Slot keyed by `(file, content_hash)` with a Cell tracking file mtime. This avoids re-resolving unchanged call sites across repeated `tsift graph <symbol>` invocations.
+
+4. **`#lazily-neighborhood`** — Convert `ranked_neighborhood()` / `neighborhood()` BFS from eager depth-N expansion to lazy Slots per depth layer. Each layer depends on the previous layer + the `GraphStore`. Consumer only pays I/O for layers actually traversed.
+
+5. **`#lazily-summary`** — Summary cache enrichment: Slots keyed by `(file, content_hash)` that compute LLM summaries on first access and auto-invalidate via Cell-backed content hash tracking. Replaces the scattered "check if cached, else compute" pattern.
+
+**Top of backlog: `#lazily-tsift-plan`**
+<!-- agent:boundary:263e0d16 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto -->
-- What are #next-steps to integrate lazily-rs into tsift?
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#lazily-inspect-scope] [feature] Replace InspectScopeGuard with lazily-rs reactive cache in tsift-index
+- [ ] [#lazily-resolve-edges] [feature] Wrap resolve_edges in lazily-rs Slots keyed by (file, symbol, content_hash)
+- [ ] [#lazily-neighborhood] [feature] Lazy BFS neighborhood expansion via lazily-rs Slots per depth layer
+- [ ] [#lazily-summary] [feature] Lazy summary cache with Cell-backed content_hash invalidation
+- [ ] [#lazily-tsift-plan] [plan] Create integration plan for lazily-rs in tsift (see tasks/agent-doc/plans/lazily-rs-integration.md as reference)
 <!-- /agent:backlog -->
 
 ## Review

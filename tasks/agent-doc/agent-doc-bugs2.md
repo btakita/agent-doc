@@ -16,7 +16,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -38,6 +38,7 @@ Compacted content:
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
 ❯ JB `Run Agent Doc` takes several seconds to dispatch the task. How can we improve the latency?
 ❯ #spec-test-build-install-commit-push
+
 ### Re: JB `Run Agent Doc` dispatch latency — opus-4-8
 
 I traced the full `Run Agent Doc` → dispatch path and found one dominant, fixable cost plus a few smaller ones. Fixed the big one this cycle.
@@ -103,10 +104,40 @@ Applied all three deferred `#run-agent-doc-latency` wins. One note up front on t
 
 #### On `#j0k8` (left open)
 `#j0k8` is "live-verify the cross-root claim guard" — drive a real second pane already running another document's submodule session and confirm `claim` provisions a *new* pane rather than aliasing. Its code (`cmdline_owns_other_document`) is already unit-tested; only the live-pane edge remains, which needs an interactive multi-pane tmux session + operator observation I can't perform autonomously. It stays open — there's no code left to write, just the live check. The remaining queued items (`#jkvs`, `#qasm`, `#6cmx`) are similarly operator-driven live-verify / multi-item sessions, so I'm not auto-draining them — point me at a specific one when you want to run it.
-<!-- agent:boundary:e5657090 -->
+
+### Re: do [#j0k8] — apply all 3 latency optimizations — opus-4-8
+
+Applied all three deferred `#run-agent-doc-latency` wins. One note up front on the ID: the queued instruction read `do [#j0k8]. Apply all 3 optimizations.`, but `#j0k8` is actually the *cross-root claim-guard live-verify* item — the "apply all 3 optimizations" work is `#t3m5`. I did the optimizations (closed `#t3m5`); `#j0k8` is addressed separately below.
+
+#### What landed (`#t3m5`, submodule `984e5c1e`)
+
+**(a) Submit-acceptance check is capture-then-sleep.** `send_command_unchecked` previously slept a fixed 300ms *before* its first pane capture, so even an instantly-consumed trigger paid 300ms. It now captures first and sleeps after, on a tightened `DIRECT_PANE_SUBMIT_ACCEPTANCE_POLL_INTERVAL` (150ms) — a fast pane is confirmed accepted on the first capture.
+
+**(b) Ready-prompt poll cadence.** `wait_for_agent_ready_outcome` polled every 500ms and requires a 2-poll ready streak (to debounce a transient prompt flicker), giving a ~500-1000ms ready floor. Poll interval is now `AGENT_READY_POLL_INTERVAL` (150ms), keeping the 2-observation streak → ~150-300ms floor.
+
+**(c) Plugin skips the redundant binary debounce.** `buildRunRouteCommand` now passes `route --debounce 0`. The plugin already awaits typing idle in-process via the FFI typing tracker before saving, so route's own settle is pure redundant latency on the editor path. Non-editor callers still get the default 500ms debounce, and the binary keeps treating the cross-process typing indicator as authoritative (the prior-cycle `#jb-run-agent-doc-double-debounce` fix). JB plugin bumped to **0.2.144**.
+
+#### Files
+- `agent-doc-orchestration/src/route.rs` — capture-then-sleep + two named poll-interval consts (150ms); updated module/fn doc comments.
+- `editors/jetbrains/.../TerminalUtil.kt` + `gradle.properties` (0.2.144) — `--debounce 0` on the route command.
+- `editors/jetbrains/.../TerminalUtilTest.kt` — asserts the `--debounce 0` argument.
+- `specs/11-debounce.md` — new "Run Agent Doc dispatch latency" section.
+
+#### Verification
+- `make check` green (clippy `-D warnings` + full suite, 0 FAILED; remaining warnings are pre-existing in `agent-doc-core`). `cargo test -p agent-doc-orchestration -- route::` → 136 passed, 104 ignored (live-tmux).
+- JB `TerminalUtilTest` passes; both plugin zips built (`agent-doc-jetbrains-0.2.144[-signed].zip`).
+- `cargo build --release` + `cargo install --path .` — both binaries refreshed.
+- Pushed `984e5c1e`; CI run `26743632403` in progress (prior cycle `6d191f1f` is green). Local verification stands as the gate.
+- (a)/(b) are pane-I/O timing loops covered by the existing live-tmux `send_command_checked_*` / `wait_for_agent_ready*` integration tests (`make tmux-ci`); (c) has the deterministic Kotlin assertion above.
+
+#### On `#j0k8` (left open)
+`#j0k8` is "live-verify the cross-root claim guard" — drive a real second pane already running another document's submodule session and confirm `claim` provisions a *new* pane rather than aliasing. Its code (`cmdline_owns_other_document`) is already unit-tested; only the live-pane edge remains, which needs an interactive multi-pane tmux session + operator observation I can't perform autonomously. It stays open — there's no code left to write, just the live check. The remaining queued items (`#jkvs`, `#qasm`, `#6cmx`) are similarly operator-driven live-verify / multi-item sessions, so I'm not auto-draining them — point me at a specific one when you want to run it.
+<!-- agent:boundary:49eb8314 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+- ~do [#t3m5]. Apply all 3 optimizations.~
+- do [#j0k8]
 - do [#jkvs]
 - do [#qasm]
 - do [#6cmx]

@@ -151,14 +151,14 @@ The shared `agent-doc` crate working tree is **full of uncommitted concurrent de
 2. **Consolidate to one owner** of `agent-doc-bugs2.md` so a single pane drains the queue.
 
 I'm not finalizing a competing write — the queue already advanced to a release-gated item, the working tree is mid-development by another actor, and a finalize now would race it. My fix is done and verified; it needs a clean working tree to commit into.
-<!-- agent:boundary:5e9df268 -->
+<!-- agent:boundary:3426b5d7 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#queue-sync-auto-pending-done-guard-misfire]~
 - ~do [#tagpath-queue-priority-publish-align]~
-- do [#codex-owned-pane-prompt-miss-followups]
+- ~do [#codex-owned-pane-prompt-miss-followups]~
 - do [#stuck-capture-queue-echo-false-positive]
 - do [#backlog-queue-sync-attr]
 - do [#preset-item-id-collision-enforce]

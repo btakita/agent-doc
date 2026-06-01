@@ -31,78 +31,18 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260601-030613.md`*
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260601-042354.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260601-044459.md`*
 
 Compacted content:
-❯ - Archived 1 response topic(s): do [#queue-audit-partial-completion]
-- Archived 3 response topic(s): do [#queue-clear-unrun-items]; do [#r5q6]; finish [#r5q6]
-- Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-### Re: do [#r5q6] — opus-4-8
-The cycle is an empty `preflight_started` (no capture) — the benign auto-recoverable state, so my failed finalize wedged nothing. The picture is now unambiguous:
-
-**`finish [#r5q6]` is complete.** I verified it two independent ways this turn:
-- **My direct verification:** the `#queue-clear-unrun-items` guard (steps 1–3) was already merged into the backend HEAD `9362c8f8`. I built it (`cargo build --release` exit 0), ran the 4 guard regressions (4/4 green), installed both binaries + cdylib (`agent-doc 0.34.0`), and **live-verified on the installed binary**: a closeout that consumes `do [#alpha]` while silently dropping `do [#beta]` (still open in backlog) **fails closed** with `[session-check] INTERRUPTED: runnable agent:queue head(s) #beta were removed … unrun queue work was silently dropped` plus the restore-or-resolve hint. That is exactly the `#r5q6` acceptance criterion.
-- **The concurrent authoritative session also completed it:** line 37 shows a compaction that archived three topics including a `finish [#r5q6]` response, and `#r5q6` has been reaped from review. That's why my `--review-edit r5q6` failed ("no item with id #r5q6") and `finalize` **correctly committed nothing**.
-
-**I am not finalizing a competing response.** The `finish [#r5q6]` prompt I was dispatched on has been compacted/archived by the authoritative session, and the live exchange now carries a **new, unrelated user prompt** you just added — *"JB `Run Agent Doc` on this file deadlocked. #spec-test-build-install-commit-push"* — which I have not worked. Committing my `finish [#r5q6]` write now would bind an orphaned response to the wrong prompt and race the authoritative actor — the exact multi-actor contention your "deadlocked" report describes. The empty `preflight_started` cycle from my attempt auto-abandons; nothing is wedged or corrupted (the only uncommitted change is your new prompt).
-
-**On the "deadlocked" report:** this document has had two `agent-doc` actors acting on it concurrently for several of my turns (each of my last three turns found work already committed by an authoritative route-owned session). A JB `Run Agent Doc` deadlock on this specific file is consistent with that contention. If you want me to take it, the clean path is: let the authoritative session settle (or stop it), then re-dispatch on a quiescent document — I'll have a clean preflight to work from. Right now, standing down is the correct move to avoid making the deadlock worse.
-
-Net: the guard is live and proven (`v0.34.0` installed); `#r5q6`'s land + live-verify are done; residual steps 4–5 are minor hardening (4a/4b near-trivial, 5 needs a live Codex pane) tracked under `#queue-clear-unrun-items`.
-JB `Run Agent Doc` on this file deadlocked.
-#spec-test-build-install-commit-push
-Done — standing down. Here's the honest status.
-
-## What I verified this turn (durable, independent of the doc race)
-
-`do [#completed-queue-residue-regression]` — the work is effectively complete and I proved it live:
-
-- **Fix in HEAD:** `detect_head_prompt_modified` insert-ahead fix `1bcaaac6` is an ancestor of backend HEAD `9362c8f8`.
-- **Built + installed:** `9362c8f8` is built and installed (`agent-doc 0.34.0` + cdylib) — the prior "BLOCKED on a concurrent broken crate" state is cleared (the crate compiles).
-- **Live-verified on the installed binary (isolated repo, zero contention):** with auto-queue head `do [#alpha]`, inserting `do [#zeta]` **ahead** of the still-present `do [#alpha]` kept `queue_active: true` (trigger `auto`) with **no `item_modified` deactivation and no strand** — both heads preserved. That is the item's acceptance criterion.
-
-The only residual is the *separate* "broader committed-state residue guard + drain-ordering audit," which is enhancement work beyond the insert-ahead regression.
-
-## Why I did not record it on the document
-
-I could not close out, and the binary told me exactly why:
-
-- My first `finalize` hit a **torn read** (`opened backlog ... closed exchange`) — I read the document while the other actor was mid-rewrite (it added a new `#zpc2` backlog item under me).
-- My re-`preflight` then **failed closed**: cycle `cycle-1780288575914` is a live `preflight_started` cycle, `phase=child_agent_wait agent=claude elapsed_s=300`, with `live_prompt_drift_after_preflight` and an active IPC listener. Its guidance: *"wait until it is stale or restart the harness pane."*
-
-**There are two Claude `agent-doc` sessions driving this one document concurrently.** That is the "JB Run Agent Doc deadlocked" symptom — not a code bug in the fix under test, but a session-ownership collision. Forcing a finalize from this secondary session would race the live authoritative cycle and risk committing into a torn state (which is exactly the corruption class on your backlog).
-
-## Recommendation
-
-Resolve the ownership collision before continuing the queue on this doc:
-
-1. Pick one owner. Either let the route-owned authoritative pane (the live `claude` cycle, pane for session `b26b9957…`) drain the queue, **or** stop it and drive from one session only.
-2. From a terminal: `agent-doc session status tasks/agent-doc/agent-doc-bugs2.md` to see the live owner, and `agent-doc gc` / `agent-doc resync --fix` to clear any stale cycle once a pane is stopped.
-3. Then re-dispatch `agent-doc tasks/agent-doc/agent-doc-bugs2.md` from the single surviving pane — it'll get a clean preflight.
-
-Net: `#completed-queue-residue-regression`'s fix is **landed, installed, and live-verified**; it just needs its closeout recorded by whichever single session owns the document. I'm not going to be that session while the authoritative cycle is live.
-
-### Re: JB `Run Agent Doc` on this file deadlocked — opus-4-8
-
-Root-caused and fixed. The hang was the `--wait-for-ready 60` override (JB passes it for slow supervisor startup) being applied to the wrong case.
-
-**Root cause** (`route.rs`): on a dispatch-only `Run Agent Doc`, when the authoritative actor is **Busy** (mid active turn — e.g. this very Claude session), `wait_for_authoritative_actor_ready` honored the 60s start-override *before* reaching the `DispatchOnlyBusyQueue` enqueue path. A busy active turn never becomes dispatch-ready by waiting, so the action blocked the full 60s per click. The ops log shows it: two `route_wait_for_ready_override ... harness=claude timeout_secs=60` (~27s apart) with no enqueue between.
-
-**Fix** — submodule `89c357d5` (pushed `9362c8f8..89c357d5`); superproject pointer `aa9a64261`:
-
-- `busy_dispatch_only_should_wait_for_ready()` — skip the start-oriented ready wait when a queue-prompt fallback exists, so a busy actor queues to `agent:queue auto` immediately and the supervisor idle-queue watch (from `4b3f4835`) drains it on busy→idle. A stale-busy-but-actually-ready projection is still repaired by the later direct-pane-evidence check (`#snrun`), so genuinely-idle panes still dispatch directly.
-- `dispatch_active_turn_queue_source()` — added the `("claude", "active claude turn")` case so the dispatch-only *reopen* path enqueues a busy Claude turn instead of bailing; it previously handled only codex/opencode.
-
-**spec/test/build/install/commit/push:** 2 unit regressions; full `make check` green; `cargo build --release` + `cargo install --path . --force` — both binaries live; committed + pushed.
-
-Remaining: live-verify on an actual busy pane — queued as a `[recommended]` follow-up. The auto-queue tail (`do [#completed-queue-residue-regression]`, …) is untouched and still pending.
-<!-- agent:boundary:40b07968 -->
+- Archived 2 response topic(s): do [#r5q6]; JB `Run Agent Doc` on this file deadlocked
+- Prior summary/context: ### Session Summary ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039...
+<!-- agent:boundary:4aa98e2b -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
-- do [#zpc2]
 preset #spec-test-build-install-commit-push
+- do [#t41j]
+- do [#zpc2]
 - do [#completed-queue-residue-regression]
 - do [#codex-owned-pane-stop-hook-live-verify]
 - do [#queue-sync-auto-pending-done-guard-misfire]

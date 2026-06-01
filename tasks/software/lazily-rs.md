@@ -263,7 +263,36 @@ Queue closeout: marked `#thr-spec` done. The next queue head should be `#thr-cor
 Confidence: high. The change is spec/test-only for the current item and keeps the current single-threaded implementation unchanged.
 
 Escalation: none.
-<!-- agent:boundary:3a6d1a45 -->
+
+### Re: #thr-core thread-safe context — gpt-5
+
+Implemented `ThreadSafeContext` for `lazily-rs` and completed the queued `#thr-core` work.
+
+What changed:
+- Added `src/thread_safe.rs`, a mutex-backed shared reactive graph with `Send + Sync + 'static` value/callback bounds.
+- Exported `ThreadSafeContext` and `ThreadSafeEffectCallbackResult` from `src/lib.rs` while keeping `Context` single-threaded.
+- Added cross-thread spec tests for shared reads, cross-thread invalidation, re-entrant compute callbacks, and effects rerun from another thread.
+- Updated `SPEC.md`, `README.md`, and `AGENTS.md` to document the implemented thread-safe API and new test counts.
+- During review, fixed an effect-flush race where another thread could enqueue work after the queue appeared empty but before `flushing_effects` was cleared.
+
+Verification:
+- `cargo fmt --check`
+- `cargo check`
+- `cargo test` via `tsift rewrite --run 'cargo test'`
+- `cargo test -- --list` reports 13 integration tests, 61 spec tests, and 1 doctest
+- `cargo build` via `tsift rewrite --run 'cargo build'`
+- `cargo clippy --all-targets --all-features -- -D warnings` via `tsift rewrite`
+- `cargo package --allow-dirty`
+- `cargo install --path . --force` was attempted and failed as expected because this crate has no binaries or examples
+- Root `make check` passed after the final code change
+- GitHub Actions: no workflow named `CI`; latest completed `Agent Doc` run `26769907756` passed both `check` and `tmux-ci`. Fresh push run `26770438815` had `tmux-ci` passing and `check` still in progress when recorded.
+
+Commits/push:
+- `lazily-rs`: `8e778b6` (`feat: add thread-safe context`) pushed to `origin/main`.
+- Parent `agent-loop`: the `src/lazily-rs` pointer to `8e778b6` was captured in root commit `93a2e5212` by an overlapping `agent-doc` closeout while the pointer was staged, then pushed to `origin/main` in the `bbb2b65a8..aecd06592` push range.
+
+Queue status: `#thr-core` is complete; next queued item should be `#thr-tests`.
+<!-- agent:boundary:fbcdc18f -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -271,16 +300,16 @@ Escalation: none.
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~[#thr-spec]~
-- [#thr-core]
+- ~[#thr-core]~
 - [#thr-tests]
 - [#tokio-sync]
 - [#tokio-async]
+- Would a lock-free mechanism (e.g. CAS) perform better than a lock-backed context state? If yes, create a plan with #mermaid diagrams to evaluate performance and concurrency characteristics. Ensure the parallelism/concurrency is provably safe.
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#thr-core] #parallelism Implement the thread-safe core after the spec: lock-backed context state, Send + Sync cached values and compute/effect callbacks, safe dependency tracking, and re-entrant user callback boundaries
 - [ ] [#thr-tests] #parallelism Add thread contention coverage: concurrent first get, concurrent set_cell, batch flush ordering, clear/dispose races, effect coalescing, and deadlock/regression checks modeled after lazily-zig thread_safe tests
 - [ ] [#tokio-sync] #tokio Add optional Tokio integration after thread safety is sound: async tests and examples that share the synchronous context across tokio::spawn/spawn_blocking without introducing async compute semantics
 - [ ] [#tokio-async] #tokio Design true async computations/effects only after #tokio-sync: in-flight future deduplication, cancellation, stale future completion, cleanup ordering, and Send vs LocalSet semantics
@@ -301,4 +330,5 @@ preset #spec-test-build-install-commit-push
 - 2026-06-01 [#dpzd] #api-ergonomics ctx.computed() alias and DX improvements
 - 2026-06-01 [#45rh] #release-publish Release + publish after effect system lands
 - 2026-06-01 [#thr-spec] #parallelism Specify the thread-safe contract for lazily-rs: API shape, Send/Sync bounds, lock/re-entrancy rules, single-threaded fast path compatibility, and parity/differences with lazily-zig's mutex-first design
+- 2026-06-01 [#thr-core] #parallelism Implement the thread-safe core after the spec: lock-backed context state, Send + Sync cached values and compute/effect callbacks, safe dependency tracking, and re-entrant user callback boundaries
 <!-- /agent:done -->

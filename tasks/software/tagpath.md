@@ -123,81 +123,12 @@ v0.12.0 published to crates.io — tagpath-core split release complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260530-183916.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260601-042332.md`*
 
 Compacted content:
-- Archived 5 response topic(s): do #tpcoreextract; do #tpcorefacade; do #tpcoreci; 2 more
+- Archived 2 response topic(s): publish 0.12.0; publish 0.12.1
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f...
-❯ publish 0.12.0
-
-### Re: publish 0.12.0 — gpt-5
-
-Published `tagpath` `0.12.0`.
-
-- Published `tagpath-core 0.12.0` and `tagpath 0.12.0` to crates.io: https://crates.io/crates/tagpath-core and https://crates.io/crates/tagpath
-- Tagged and pushed `v0.12.0` in `btakita/tagpath`; GitHub release is at https://github.com/btakita/tagpath/releases/tag/v0.12.0
-- Updated `VERSIONS.md` from `Unreleased` to `2026-05-30` in tagpath commit `682fcba`.
-- Committed the agent-loop superproject submodule pointer update as `eb15c8aa4`.
-
-Verification:
-
-- `cargo clippy --workspace --all-targets -- -D warnings`
-- `cargo test --workspace`
-- `cargo test -p tagpath-core --no-default-features`
-- `cargo test -p tagpath --lib --no-default-features`
-- `cargo build --target wasm32-unknown-unknown --no-default-features --features wasm`
-- `scripts/check-release.sh` before and after publishing `tagpath-core`
-- `cargo install --path . --force`
-- `cargo search tagpath --limit 3` and `cargo search tagpath-core --limit 3` both show `0.12.0`
-- GitHub `tagpath` CI run `26692232890` passed.
-- GitHub `tagpath` Release run `26692233759` passed.
-- Root `make check` passed.
-
-Root CI note: the latest agent-loop `Agent Doc` workflow run `26691990789` failed before any job steps were allocated for both `check` and `tmux-ci`, so I’m recording it as an external CI-start failure rather than a code or tmux regression. I did not run `make tmux-ci` because there was no runner-started tmux failure to reproduce.
-
-Changed paths:
-
-- `src/tagpath/VERSIONS.md` in the tagpath repo
-- `src/tagpath` submodule pointer in agent-loop
-- this session document via `agent-doc finalize`
-
-Escalation: no approval prompts were needed; the publish, tag, and push operations were authorized by the document prompt `publish 0.12.0`. Existing unrelated agent-loop worktree changes were left untouched.
-
-Confidence: high.
-❯ Is the latest version published? If not, publish.
-
-### Re: publish 0.12.1 — glm-5.1
-
-Published `tagpath` `0.12.1`.
-
-- Published `tagpath-core 0.12.1` and `tagpath 0.12.1` to crates.io
-- Tagged and pushed `v0.12.1` in `btakita/tagpath`; GitHub release at https://github.com/btakita/tagpath/releases/tag/v0.12.1
-- Updated `VERSIONS.md` with the v0.12.1 changelog entry
-- Updated test expectations in `test_core_split_plan.rs` for the new version
-- Committed agent-loop superproject submodule pointer update as `59086ccb7`
-
-Three unreleased commits were on top of `v0.12.0`: new lint rules for bare `queue`/`priority`/`auto` attributes on backlog/icebox/queue markers, plus the `agent-doc/invalid-attr-value` warning rule.
-
-Verification:
-
-- `cargo clippy --workspace --all-targets -- -D warnings` clean
-- `cargo test --workspace` — 284 tests pass
-- `cargo test -p tagpath-core --no-default-features` pass
-- `cargo test -p tagpath --lib --no-default-features` pass (77 tests)
-- `cargo build --target wasm32-unknown-unknown --no-default-features --features wasm` success
-- `scripts/check-release.sh` passed after `tagpath-core` publish
-- `cargo search tagpath --limit 3` and `cargo search tagpath-core --limit 3` both show `0.12.1`
-
-Changed paths:
-
-- `Cargo.toml`, `crates/tagpath-core/Cargo.toml`, `tests/test_core_split_plan.rs`, `VERSIONS.md`, `SPEC.md` in the tagpath repo
-- `src/tagpath` submodule pointer in agent-loop
-- this session document via `agent-doc finalize`
-
-Escalation: none. Publish and push were authorized by the document prompt.
-
-Confidence: high.
-<!-- agent:boundary:55853765 -->
+<!-- agent:boundary:a4f37616 -->
 <!-- /agent:exchange -->
 ###
 <!--

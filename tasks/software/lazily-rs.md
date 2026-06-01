@@ -119,7 +119,37 @@ Verification:
 - GitHub `Agent Doc` run `26745360067` passed: `tmux-ci` in 2m59s and `check` in 7m1s. There is no workflow named `CI`; `Agent Doc` is the project workflow.
 
 `cargo install --path .` remains not applicable because `lazily` is a library-only crate with no binary/example targets. No escalated shell permissions were required. Confidence is high; `src/lazily-rs` is clean, and unrelated dirty parent-repo files were left untouched.
-<!-- agent:boundary:ee2d1ce8 -->
+
+### Re: #fzaf memo guard — gpt-5
+
+Completed `#fzaf`: `lazily-rs` now has an opt-in memoization guard through `ctx.memo(|ctx| T)` for `T: PartialEq`, while `ctx.slot()` remains available for non-`PartialEq` values.
+
+Changed paths:
+- `src/lazily-rs/src/context.rs` adds memoized slot equality, dirty validation, effect rerun skipping for unchanged memo dependencies, and updates `ctx.is_set()` to report only cached fresh slots.
+- `src/lazily-rs/tests/spec_compliance.rs` covers equal intermediate recomputation suppressing downstream recompute/effect reruns, dirty freshness reporting, and hard-clear behavior.
+- `src/lazily-rs/README.md`, `src/lazily-rs/SPEC.md`, and `src/lazily-rs/AGENTS.md` document the memo guard and current test counts.
+- Parent `src/lazily-rs` submodule pointer now references the final lazily-rs commit.
+
+Commit/push evidence:
+- `lazily-rs` remote `main`: `4612dfa` (`feat: add memoization guard`) and follow-up `b8cc781` (`fix: report only fresh slots as set`).
+- `agent-loop` remote `main`: `91aa9739d` (`chore: update lazily-rs memo guard`) and final pointer update `5c8dbeef2` (`chore: update lazily-rs freshness guard`).
+- I removed the temporary local `src/agent-doc` graph workaround; no agent-doc code change was needed after the lazily-rs freshness fix.
+
+Verification:
+- `cargo fmt --check` passed in `src/lazily-rs`.
+- `tsift rewrite --run 'cargo test'` passed in `src/lazily-rs`.
+- `tsift rewrite --run 'cargo build'` passed in `src/lazily-rs` with only existing unused workspace patch warnings.
+- `tsift rewrite --run 'cargo clippy --all-targets --all-features -- -D warnings'` passed in `src/lazily-rs`.
+- `cargo package --allow-dirty` passed.
+- `cargo install --path . --force` is not applicable for this library-only crate; Cargo reported `no packages found with binaries or examples`.
+- `tsift rewrite --run 'cargo test -p agent-doc-orchestration graph::tests:: -- --nocapture'` passed after removing the temporary graph workaround.
+- Root `make check` passed.
+- GitHub has no workflow named `CI`; latest `Agent Doc` run `26745360067` passed both `check` and `tmux-ci`.
+
+Confidence: high. The memo guard behavior is covered in lazily-rs tests and also verified against the downstream agent-doc graph cache expectations.
+
+Escalation: none. Existing unrelated dirty files remain in the superproject worktree; I staged and committed only the lazily-rs paths/submodule pointer.
+<!-- agent:boundary:5987103e -->
 <!-- /agent:exchange -->
 
 ## Queue

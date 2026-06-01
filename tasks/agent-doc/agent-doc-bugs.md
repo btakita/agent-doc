@@ -9,7 +9,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -224,7 +224,8 @@ file: Path
 4. Thread `&Context` through the P0 hot path: `preflight → diff → write → finalize`
 5. Deduplicate the 8+ copies of `find_project_root` into the single slot
 6. Add persistent `Context` to `SupervisorShared` and `WatchEntry` (P2)
-<!-- agent:boundary:7f417e36 -->
+How can we detect any changes to the document that may invalidate the slots or cells?
+<!-- agent:boundary:8932f68c -->
 <!-- /agent:exchange -->
 
 <!--
@@ -232,7 +233,8 @@ file: Path
 
 ## Pending / Not Built
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+- How can we detect any changes to the document that may invalidate the slots or cells?
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

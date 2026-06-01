@@ -32,56 +32,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260601-081227.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260601-162307.md`*
 
 Compacted content:
-- Archived 11 response topic(s): lazily-rs for tsift caching and lazy-load graphs; #next-steps to integrate lazily-rs into tsift; status --json auto-fix stale index; 8 more
+- Archived 1 response topic(s): lazily-rs cache invalidation
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ Please review the usage of lazily-rs. Are the caches properly invalidated? #next-steps
-
-### Re: lazily-rs cache invalidation — gpt-5
-
-No blocking cache-invalidation bug found in the current lazily-rs usage.
-
-Findings:
-- `tsift-index` inspect sharing is guard-scoped and thread-local. The key is `(db_path, root, prune)`, the outermost `InspectScopeGuard` drops the whole context, errors clear the slot, and writer paths bump the epoch after index refreshes in `ensure_query_index_current` and `prepare_agent_doc_index_gate`. That means the cached read-only inspection is reused only inside the intended trusted scope and is invalidated after in-process index mutation.
-- `tsift-status` uses the same epoch pattern for one `tsift status` command. `cmd_status` invalidates the status cache after missing-scope autoindex and after status fixes before recomputing the report, so the auto-fix path does not report stale pre-fix inspection results.
-- `tsift-summarize` keys summary snapshots by normalized file path plus a content-hash cell. Hash changes cause a slot recompute; successful extraction calls `replace_file` and then `invalidate_file`; deleted summaries are also invalidated. This is correct for the command-local cache under the summary write lock.
-- `tsift-graph` call-edge caching keys by `(file, content_hash)` and also depends on the file mtime cell. A new content hash creates a new slot; mtime-only churn recomputes but should return the same edges. Since the captured symbols/call-sites come from the same file bytes, this is safe for the current indexer path.
-- The `tsift-core` lazily usage in neighborhood and ranked-neighborhood traversal is not a persistent cache. It is a per-call lazy layer chain, so there is no cross-call invalidation surface.
-- Backend-eval/full-projection cache invalidation is driven by source watermarks, not lazily slots. The watermark logic intentionally ignores generated/runtime/mtime-only churn and includes semantic index rows plus summary rows; targeted tests cover both stability and semantic invalidation.
-
-Residual risk: the safe assumptions are mostly implicit. `StatusCheckCache`, `SummaryCache`, and `ResolveEdgesCache` would be easier to audit if the cache key/lifetime/invalidation contract lived next to the spec rather than only in tests and local comments. I added that as the top backlog follow-up.
-
-Top backlog item: `#lazily-cache-contracts`.
-
-Changed paths:
-- `tasks/software/tsift.md` only (session response and backlog item)
-
-Commands:
-- `tsift status`
-- `tsift status --fix`
-- `agent-doc --version`
-- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/software/tsift.md`
-- `agent-doc read /home/brian/work/btakita/agent-loop/tasks/software/tsift.md`
-- `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/software/tsift.md`
-- `tsift --envelope search "lazily" --budget normal`
-- `tsift --envelope session-review /home/brian/work/btakita/agent-loop/tasks/software/tsift.md --next-context --budget normal`
-- `tsift rewrite --run 'cargo test -p tsift-index inspect_scope_lazily_reuses_until_epoch_invalidation'`
-- `tsift rewrite --run 'cargo test -p tsift-status status_cache_reuses_index_inspection_until_invalidated'`
-- `tsift rewrite --run 'cargo test -p tsift-summarize summary_cache'`
-- `tsift rewrite --run 'cargo test -p tsift-graph resolve_edges_cache_reuses_slots_until_mtime_or_hash_changes'`
-- `tsift rewrite --run 'cargo test -p tsift-cli full_projection_source_watermark'`
-- `tsift rewrite --run 'cargo test -p tsift-cli traversal_source_watermark'`
-
-Verification:
-- All focused cache-invalidation regression tests above passed.
-- `src/tsift` worktree remained clean after the review and test runs.
-
-Confidence: medium-high. The review covered all current `lazily` call sites and the adjacent backend-eval source-watermark caches, but I did not run the full workspace suite because no source files were changed.
-
-Escalation: none.
-<!-- agent:boundary:0a2b56d6 -->
+<!-- agent:boundary:fba41235 -->
 <!-- /agent:exchange -->
 
 ## Queue

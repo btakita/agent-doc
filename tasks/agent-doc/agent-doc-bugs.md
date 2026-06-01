@@ -9,7 +9,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -350,7 +350,8 @@ pub fn invalidate<T: 'static>(&self, handle: &SlotHandle<T>) {
 ```
 
 This is safe to expose — `clear_slot` already handles the "already cleared" early return and recursive cascade. Whether to add it depends on whether version Cells cover all invalidation needs or whether some Slots genuinely have no logical Cell input but still need explicit refresh.
-<!-- agent:boundary:c0f44e67 -->
+Can we have SlotHandle.clear(&ctx) instead?
+<!-- agent:boundary:5a34e727 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -358,7 +359,8 @@ This is safe to expose — `clear_slot` already handles the "already cleared" ea
 
 ## Pending / Not Built
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+- Can we have SlotHandle.clear(&ctx) instead?
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

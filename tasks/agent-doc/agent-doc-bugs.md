@@ -9,7 +9,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -89,7 +89,6 @@ Cell: file_path
 ## Pending / Not Built
 
 <!-- agent:queue auto -->
-- Please create a plan and #next-steps to integrate lazily-rs for caching `project_root_for_doc` and building a dependency graph across `preflight → plan → write → commit`, with two Context lifetimes (short-lived CLI run vs long-lived Actor).
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

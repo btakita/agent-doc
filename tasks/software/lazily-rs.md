@@ -179,7 +179,7 @@ Verification:
 Confidence: high. The alias delegates to existing slot behavior, has direct spec coverage, and passed both local and remote verification.
 
 Escalation: none. Existing unrelated dirty files remain in the superproject worktree; I staged and committed only lazily-rs files/submodule pointer for this item.
-<!-- agent:boundary:ee4fc171 -->
+<!-- agent:boundary:b76c84be -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -190,14 +190,13 @@ preset #spec-test-build-install-commit-push
 - ~[#exfd]~
 - ~[#rx9y]~
 - ~[#fzaf]~
-- [#dpzd]
+- ~[#dpzd]~
 - [#45rh]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [x] [#dpzd] #api-ergonomics ctx.computed() alias and DX improvements
 - [ ] [#45rh] #release-publish Release + publish after effect system lands
 <!-- /agent:backlog -->
 
@@ -218,4 +217,5 @@ preset #spec-test-build-install-commit-push
 - 2026-06-01 [#exfd] #effect-system Phase 4: Effect system — ctx.effect(|ctx| { ... }) with auto-tracking, scheduling, cleanup, and disposal
 - 2026-06-01 [#rx9y] #batch-updates ctx.batch(|ctx| { ... }) to defer invalidation until the batch completes
 - 2026-06-01 [#fzaf] #memo-guard Memoization guard — prevent unnecessary downstream cascade during invalidation when recomputed value equals prior value (slots are already lazy: invalidated only, recomputed on get())
+- 2026-06-01 [#dpzd] #api-ergonomics ctx.computed() alias and DX improvements
 <!-- /agent:done -->

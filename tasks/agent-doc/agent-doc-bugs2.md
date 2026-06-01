@@ -233,7 +233,29 @@ I'm holding, not repeating the full analysis. **One thing unblocks every remaini
 - **interrupt-clear tsift.md** (`agent-doc session interrupt-clear tasks/software/tsift.md`) so I reconcile its tree and take over as sole owner.
 
 The auto-loop has advanced past this question three times now. Until you answer, every head I'm handed is either in-flight by that live owner or un-landable from here. Reply **wait** or **interrupt** and I'll act.
-<!-- agent:boundary:482c8218 -->
+
+### Re: do [#jb-tsift-pane-sync] — cross-document owner guard landed, tested, installed — opus-4-8
+
+Implemented the cross-document variant fix (the worse symptom from your report: the `tsift.md` pane was actually running `agent-doc-bugs2.md`). Committed `bda2e1d2` on submodule branch `20260422/codex-agent-backend`, pushed, `make check` green, installed live.
+
+#### What changed
+`agent-doc-orchestration/src/sync.rs` — the normal navigation/sync/autostart owner path `find_normal_path_owner_pane_excluding_with_logging` now ends in a `reject_cross_document_owner_pane` filter. When `pane_runs_other_document_owner` proves a candidate pane is running a *different* document's agent-doc/codex session, the resolver returns `None` so the caller cold-starts a correct owner instead of binding the navigated file to the wrong pane. A pane that owns the navigated file itself, or a bare non-owner pane, is preserved (`cmdline_owns_other_document`) — happy path and legitimate reuse unchanged. This is the focus/sync sibling of the `claim` one-live-pane-per-document guard (`822688d0`); the detection primitive already existed but was wired into `claim.rs:364` only.
+
+- Regression: `cmdline_owns_other_document_blocks_navigation_to_wrong_document_pane` (the exact tsift↔bugs2 case + same-doc-reuse not-regressed assertion).
+- Spec: `specs/07-session-tmux-commands.md` cross-document owner guard invariant.
+
+#### Verification
+`make check` green in a clean HEAD worktree: 2120 + 685 + others passed, 0 failed, no clippy warnings. Installed HEAD+myfix to `~/.cargo/bin/agent-doc` and refreshed the `.bin` release binary; confirmed the guard string is in the installed binary.
+
+#### Concurrency note (why a worktree)
+The shared `src/agent-doc` tree has **806 lines of uncommitted concurrent work across 68 files** (a different session) in this exact problem domain. Per your "full worktree incl. install" choice I built/verified in a `src/agent-doc-wt` HEAD worktree and staged **only my two files** (`git apply --cached` of a HEAD-relative patch), so the commit is `HEAD + my fix` with no fmt/WIP leakage; the concurrent 68-file WIP is preserved untouched in the working tree. The install **did** replace the live binary with HEAD+myfix (drops the concurrent WIP from `~/.cargo/bin` until they rebuild — the tradeoff you approved). The superproject `src/agent-doc` submodule pointer was **not** bumped (submodule tree is mid-WIP); that's a follow-up once the concurrent work lands.
+
+#### Status: gated, not done
+`#jb-tsift-pane-sync` covers two symptoms. The **cross-document binding** (this cycle's driver) is fixed + tested + installed. The **original "pane not surfaced / manual Sync Tmux Layout deferred"** symptom (plan Phases 1–2, the focus/sync handoff for hidden/stashed owners in Phase 3) and **live-verify** of the surfaced-pane behavior remain — so I gated rather than closed. Plan: `tasks/agent-doc/plan-jb-tsift-pane-sync-regression.md` (Phase 3b done; 1, 2, 3-handoff, 4-live-verify open).
+
+#### Not auto-looping the rest of the queue
+The queue still holds `do [#ipcaa-scaf]`, `do [#submodule-response-commit-proof]`, `do [#qasm]`, each with `#spec-test-build-install-commit-push`. Each is a full build+install code cycle that would re-clobber the concurrent session's live binary. You approved that tradeoff for *this* item only, so I'm pausing the auto-loop — re-invoke `/agent-doc <FILE>` (or tell me to continue) to run the next item.
+<!-- agent:boundary:2d42c26d -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->

@@ -31,77 +31,16 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260601-055503.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260601-070447.md`*
 
 Compacted content:
-- Archived 3 response topic(s): JB `Run Agent Doc` on this file deadlocked; do [#t41j]; do [#queue-sync-auto-pending-done-guard-misfire]
-- Prior summary/context: ### Session Summary ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039...
-❯ There have been tmux layout regressions. Currently there are now 3 tmux panes with 2 editor panes.
-
-❯ Did the lazily-rs usage cause these regressions?
-
-❯ #spec-test-build-install-commit-push
-
-### Re: 3 tmux panes with 2 editor panes — opus-4-8
-
-Acknowledged — that's a pane-cardinality regression: the same editor document is showing up under two visible panes instead of one. The duplicate is produced in `agent-doc-orchestration::sync`, not in pane-creation timing. When a registered pane is already reserved by another file in the same sync run, the reconciler logs `duplicate_live_pane_claim` and intentionally treats the second claimant as *unresolved so layout can rehydrate a distinct pane* (`sync.rs` ~3471–3487). That distinct-pane rehydration is correct for two *different* files, but it is the surface that can over-create when the same editor document/session re-resolves to a churned pane id. Final cardinality dedup is `tmux-router/src/sync.rs:713–718` (HashSet over `pane_columns`) — but a doc that was dropped to "unresolved" never enters that column set, so the dedup can't catch it.
-
-### Re: Did lazily-rs cause these regressions? — opus-4-8
-
-No. Verified, not inferred:
-
-- The **only** `lazily-rs` use on the sync/pane path is `parse_frontmatter_for_sync` (`agent-doc-orchestration/src/sync.rs:558`), and it constructs a **fresh `RunContext` per call**. Per-run lazily contexts compute each slot at most once and then drop — no state survives across sync runs, so there is no stale lazily cache to drive duplicate pane creation.
-- **`tmux-router` does not depend on `lazily-rs` at all** (no `lazily` in its `Cargo.toml` or `src/`), and it is the crate that actually splits/joins panes.
-- The pane dedup/claim logic that *owns* the no-duplicate-editor-pane invariant is `claimed_sync_panes` / `SyncProofCache` (a `RefCell` per-run cache, not lazily) plus the tmux-router column dedup. Neither touches lazily-rs.
-
-The lazily-rs graph caches filesystem-derived values (`project_root`, `frontmatter`, `doc_hash`, …) for a single CLI invocation; the long-lived `ActorContext` path already invalidates on config change (`watch.rs:568`). It is not implicated here.
-
-### Re: #spec-test-build-install-commit-push — opus-4-8
-
-Shipped as a test + spec guard (plan write-scope = `specs/` + `tests/`):
-
-- **spec** — `specs/12-deterministic-simulation.md`: new `SyncRerequest*` commands, a `seed_3005` trace describing the regression class, the no-duplicate-editor-pane cardinality invariant, and an explicit note that the invariant is independent of lazily-rs.
-- **test** — `src/sim_world.rs` (`#[cfg(test)]`): `sync_sim_tmuxbudget_seed_3005_rejects_duplicate_editor_pane_for_rerequested_document`, plus a structural invariant asserted after **every** command in the generated corpus (`SyncProjection.visible` never lists the same document twice) — wired into the random scheduler so 512/2048 seeds exercise it.
-- **build/install** — `cargo build --release` + `cargo install --path .` both clean (test-only + spec change, so runtime is unchanged).
-- **commit/push** — `agent-doc@a15ff6e6` on `20260422/codex-agent-backend`, pushed. `make check` green (clippy `-D warnings`, fast + medium corpus, full bin suite 450 passed). CI run `26738606274` queued; prior run green.
-
-The deep live-tmux root cause of the actual duplicate (pane-id churn in the claim path) still needs reproduction under real tmux — queued as a recommended follow-up. The SimWorld guard covers the projection layer only.
-❯ do [#n9zf]. #spec-test-build-install-commit-push
-### Re: do [#n9zf] — root-cause + fix the live duplicate editor pane — opus-4-8
-
-Done — root-caused, fixed, and shipped. `#n9zf` is closed.
-
-#### Root cause (verified, not inferred)
-
-The auto-start pre-sync pass (`agent-doc-orchestration/src/sync.rs:3392`) built `all_files` from `col_args` with **no dedup**, then ran the reuse/auto-start decision once per occurrence:
-
-```rust
-let all_files: Vec<PathBuf> = col_args.iter()
-    .flat_map(|arg| arg.split(','))
-    .map(|s| PathBuf::from(s.trim()))
-    .collect();          // ← same document can appear twice
-```
-
-When a document is requested in more than one column, occurrence #1 cold-starts a fresh pane via `route::provision_pane`, but that new pane has **not yet recorded a registry / session-log binding**. So occurrence #2's `lookup_registry_entry_for_file_session` *and* `find_associated_panes` both miss it → it cold-starts a **second** pane for the same document. That's the "3 tmux panes with 2 editor panes." It is *not* the `duplicate_live_pane_claim` path (that's for two *different* files and is correct), which is why the earlier projection-layer guard didn't catch it.
-
-#### Fix
-
-Factored the candidate construction into `auto_start_candidate_files(col_args)`, which dedups by path in first-seen order (column/focus precedence preserved), and wired it into the pass. This closes the same-run, not-yet-discoverable window that `find_associated_panes` structurally cannot cover (it only sees panes that already advertise a binding).
-
-#### Why the guard is a deterministic test, not a live tmux test
-
-A faithful live reproduction needs a real harness spawned inside the provisioned pane — the **reuse** path (existing live owner) re-resolves to the same pane and cannot duplicate; only the **cold-start** path duplicates. Spawning a harness per test is heavy and flaky, and spec 12's deterministic-first policy says cardinality belongs in pure traces. So coverage is the pure unit test on the candidate-dedup helper + the SimWorld cardinality invariant, with the existing live `find_associated_panes` tests covering already-discoverable dedup.
-
-#### #spec-test-build-install-commit-push
-
-- **spec** — `specs/07-session-tmux-commands.md` (one-pane-decision-per-document auto-start invariant) + `specs/12-deterministic-simulation.md` (cold-start guard now named, coverage mapping).
-- **test** — `auto_start_candidate_files_dedupes_repeated_documents_preserving_order` + `_keeps_distinct_documents` (deterministic).
-- **build/install** — `cargo build --release` + `cargo install --path .` both clean (refreshes `.bin/` and `~/.cargo/bin/`).
-- **commit/push** — `agent-doc@aa747a62` on `20260422/codex-agent-backend`, pushed. `make check` green (clippy `-D warnings`, orchestration 2113 passed, fast + medium corpus, bin suite). CI `26739534513` queued; last cycle's run `26738606274` is now green.
-<!-- agent:boundary:46f14bfd -->
+- Archived 4 response topic(s): 3 tmux panes with 2 editor panes; Did lazily-rs cause these regressions?; #spec-test-build-install-commit-push; 1 more
+- Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
+<!-- agent:boundary:f561759b -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
+- do [#n9zf]
 <!-- /agent:queue -->
 ###
 <!--

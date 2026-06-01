@@ -84,7 +84,42 @@ New slots: DocContentCell, FrontmatterSlot, ComponentsSlot, DocHashSlot. New pat
 Commits: 5dc56ffb (agent-doc), d5e3f7a29 (superproject). Pushed.
 
 Remaining wiring (phases 7-10) threads these slots into session_check, snapshot, cycle_state, git, ops_log, template_io, patch, and harness detection callers.
-<!-- agent:boundary:2d341470 -->
+Would agent-doc benefit from using herdr (https://herdr.dev/compare/, https://github.com/ogulcancelik/herdr) instead of tmux?
+
+### Re: Would agent-doc benefit from using herdr — glm-5.1
+
+Short answer: not in its current form, but the idea of replacing tmux with an agent-aware multiplexer is strategically sound and already partially planned.
+
+#### What herdr offers that agent-doc does not have today
+
+1. **Semantic agent state** (blocked/working/done/idle) — agent-doc currently derives this from session logs, supervisor IPC, and process-tree heuristics. Herdr's built-in detection would collapse some of that inference.
+
+2. **Agent-shaped socket API** (read, send, wait, split, attach) — agent-doc's supervisor IPC + tmux `send-keys`/`capture-pane` surface is essentially a hand-built version of this, spread across `route.rs`, `start.rs`, `sync.rs`, `sessions.rs`, and `tmux-router`.
+
+3. **Direct agent attach** — connecting to one agent's terminal without navigating tmux windows/tabs.
+
+#### Why it does not fit as a tmux replacement today
+
+1. **Depth of integration.** agent-doc has ~2,600+ tmux references across 43+ files. The `tmux-router` crate (`src/tmux-router/`) is already a dedicated abstraction over tmux — `Tmux`, `TmuxBatch`, `IsolatedTmux`, `HybridPaneStrategy`, `PaneInputBackend`, `PaneLifecycleBackend`, `PaneOutputBackend`, `TmuxControlMode`, registry, sync. Replacing tmux underneath means rewriting `tmux-router` entirely, then auditing every caller in route/sync/start/sessions/watch.
+
+2. **Maturity gap.** Herdr is v0.6.6, AGPL-licensed, 682 commits. agent-doc depends on tmux control mode (`-CC`), `pipe-pane`, advisory file locks, `send-keys -H` hex encoding, pane PID introspection, window indexing, session isolation, and break-pane session preservation — a surface area that took months to stabilize against real tmux edge cases. Herdr's socket API is newer and has not been stress-tested against agent-doc's specific failure classes (starting-actor readiness windows, dispatch-proof timing, cross-project stash pane isolation, Kitty keyboard protocol passthrough).
+
+3. **The right abstraction already exists.** `tmux-router` already defines `PaneInputBackend`, `PaneLifecycleBackend`, and `PaneOutputBackend` traits in `hybrid.rs`. The `#multiplexertrait` backlog item planned a `Multiplexer` trait over tmux. That is the correct insertion point for any backend swap — not a hard migration.
+
+4. **Herdr runs *inside* tmux.** Its own docs say it works inside tmux. So adding herdr would layer another multiplexer on top, not replace tmux.
+
+#### What is worth borrowing
+
+- **Herdr's socket API design** is a good reference for simplifying agent-doc's supervisor IPC surface. The current `supervisor::ipc` protocol could converge toward something like `read`/`send`/`wait`/`split`/`attach` as first-class operations.
+
+- **Agent state as a first-class primitive** validates the session-actor model agent-doc already built (specs/08a-session-actor-contract.md). The sidebar/blocked/working/done model maps directly onto agent-doc's controller actor states.
+
+- **The `#multiplexertrait` abstraction boundary** is still the right long-term move. If herdr (or another agent-native multiplexer) matures, the `Multiplexer` trait is the swap point — same way `tmux-router` currently wraps tmux.
+
+#### Recommendation
+
+Keep tmux. Extract the `Multiplexer` trait from `tmux-router`'s existing `hybrid.rs` backend traits when the backlog reaches that item. Watch herdr's socket API and control surface for ideas, but do not add it as a dependency until it can demonstrate stable support for the specific tmux primitives agent-doc requires (control mode, hex sends, pane PID, session-scoped registry, break-pane preservation).
+<!-- agent:boundary:75feb267 -->
 <!-- /agent:exchange -->
 
 <!--

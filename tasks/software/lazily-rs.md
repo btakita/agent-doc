@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 
@@ -179,25 +179,34 @@ Verification:
 Confidence: high. The alias delegates to existing slot behavior, has direct spec coverage, and passed both local and remote verification.
 
 Escalation: none. Existing unrelated dirty files remain in the superproject worktree; I staged and committed only lazily-rs files/submodule pointer for this item.
-<!-- agent:boundary:b76c84be -->
+
+### Re: #45rh release — gpt-5
+
+> **Queue prompt:**
+>
+> [#45rh]
+
+
+Released `lazily` v0.3.0. crates.io now resolves `lazily = "0.3.0"`, and the crate release commit is tagged `v0.3.0`.
+
+Changed paths: `src/lazily-rs/Cargo.toml`, `src/lazily-rs/Cargo.lock`, the `src/lazily-rs` submodule pointer, `src/agent-doc/Cargo.lock`, and the `src/agent-doc` submodule pointer.
+
+Commits: `src/lazily-rs` `acb1633` (`chore: release v0.3.0`), `src/agent-doc` `f9e7e746` (`chore: update lazily lockfile to v0.3.0`), and parent `aefe72545` (`chore: update lazily-rs v0.3.0`). All three were pushed; `v0.3.0` was pushed to `btakita/lazily-rs`.
+
+Verification: `cargo fmt --check`; `tsift rewrite --run 'cargo test'`; `tsift rewrite --run 'cargo build'`; `tsift rewrite --run 'cargo clippy --all-targets --all-features -- -D warnings'`; `cargo package --allow-dirty`; `cargo publish --dry-run`; `cargo publish`; `cargo search lazily --limit 1`; root `make check`; GitHub Actions `Agent Doc` run `26746914026` passed both `check` and `tmux-ci`. The expected library-only `cargo install --path . --force` check still reports `no packages found with binaries or examples`.
+
+Confidence: high. Escalation: none; unrelated dirty edits already present in `src/agent-doc` were preserved and not included.
+<!-- agent:boundary:04a5c46a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~[#n12s]~
-- ~[#exfd]~
-- ~[#rx9y]~
-- ~[#fzaf]~
-- ~[#dpzd]~
-- [#45rh]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#45rh] #release-publish Release + publish after effect system lands
 <!-- /agent:backlog -->
 
 ## Queue
@@ -218,4 +227,5 @@ preset #spec-test-build-install-commit-push
 - 2026-06-01 [#rx9y] #batch-updates ctx.batch(|ctx| { ... }) to defer invalidation until the batch completes
 - 2026-06-01 [#fzaf] #memo-guard Memoization guard — prevent unnecessary downstream cascade during invalidation when recomputed value equals prior value (slots are already lazy: invalidated only, recomputed on get())
 - 2026-06-01 [#dpzd] #api-ergonomics ctx.computed() alias and DX improvements
+- 2026-06-01 [#45rh] #release-publish Release + publish after effect system lands
 <!-- /agent:done -->

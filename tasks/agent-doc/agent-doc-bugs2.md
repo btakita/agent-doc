@@ -36,12 +36,42 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 6 response topic(s): JB `Run Agent Doc` deadlock with monsterrodholders.md; Should #jb-run-agent-doc-busy-queue-dispatch-deadlock be run using Codex?; monsterrodholders.md is running; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:aba7da3b -->
+❯ JB `Run Agent Doc` deadlocked on this file before I restarted the agent.
+❯ #spec-test-build-install-commit-push
+
+### Re: JB `Run Agent Doc` deadlocked on this file — opus-4-8
+
+Fixed and shipped (`#spec-test-build-install-commit-push`). Root cause and the chosen fix:
+
+**Root cause.** When a busy-pane `Run Agent Doc` route hits an authoritative actor mid active-turn, `route.rs` `AuthoritativeActorDispatchAction::DispatchOnlyBusyQueue` correctly refuses to inject into the active turn — it appends the prompt to `agent:queue auto`, sets `queue_active: true`, and returns `Ok`. But the drain is **harness-delegated**: the Codex `Stop` hook drains on turn-end, and Claude relies on `/loop` or a manual re-trigger. A Claude session (like this one) not running `/loop` has **no guaranteed idle-drain trigger**, so the queued head sits forever — the "deadlock" you saw, which forced the restart. The JB plugin already surfaces a "queued behind active turn" notification, so the gap was purely the missing drain, not operator feedback.
+
+**Fix — supervisor idle-queue watch (the option you picked).** The supervisor already polls the owned pane for an idle harness prompt to fire its one-shot restart auto-trigger. I added a long-lived sibling, `spawn_idle_queue_watch_thread`, that runs for the whole child lifetime and drains a live `queue_active: true` ready head on every busy→idle transition by injecting `agent-doc <FILE>` through the existing capability-gated `auto_trigger_inject_command` path (which re-runs preflight and consumes the head).
+
+The drain logic is a pure, deterministically-tested decision, `idle_queue_drain_decision(prompt_visible, active_head, last_dispatched)`:
+
+- **Dispatch** only when idle (`prompt_visible`) with an active head that differs from the last one fired.
+- **SkipNotIdle** whenever the pane is mid-turn — same no-inject-into-active-turn invariant the route busy path enforces.
+- **SkipAlreadyDispatched** dedups a head still present after a dispatch, so a stuck/undrained head can't hot-loop the watch every tick.
+- **SkipNoActiveHead** clears the dedup so a later re-enqueue of the same prompt text fires again.
+
+The drainable head comes from the shared `queue_continuation::live_continuation_head` definition (`queue_active: true` + active `resolve_activation` + ready prompt), so inactive-residue queues (`queue_active: false`, like the leftover items in this doc) are never drained.
+
+**Note on the prior plan.** `plan-jb-run-agent-doc-busy-queue-dispatch-deadlock.md` was marked "plan only — gated on a live pane." That gate is now narrowed to the live end-to-end verification only; the deterministic implementation is landed.
+
+**Verification.**
+- `make check` green locally; 5 new unit tests pass (`idle_queue_drain_*`).
+- Also fixed a pre-existing CI-only failure that was red on the parent commit: `classify_recovery_nested_parent_pointer_stale...` committed inside a checked-out submodule worktree without setting git identity (passed locally only because the dev machine has a global identity; exit 128 in CI's clean sandbox). Set identity in the submodule worktree.
+- GitHub Actions CI green on the test-fix commit (`aaf8fcbf`).
+- Built `--release` + `cargo install --path .` (both binaries refreshed).
+
+**Shipped:** submodule `4b3f4835` (idle-queue watch) + `aaf8fcbf` (CI test-identity fix); superproject pointers `a30496287` + `ca798971c`.
+
+Marked `#jb-run-agent-doc-busy-queue-dispatch-deadlock` done and added `#jb-busy-queue-deadlock-live-verify` to review — the live busy-pane e2e is the only remaining gated step.
+<!-- agent:boundary:7a2d73e5 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
-- ~do [#closeout-recovery-state-machine]~
 - do [#jb-run-agent-doc-busy-queue-dispatch-deadlock]
 - do [#preflight-probe-side-effect-free]
 - do [#gated-followup-split-enforcement]
@@ -83,7 +113,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog priority queue=prepend -->
-- [ ] [#jb-run-agent-doc-busy-queue-dispatch-deadlock] JB Run Agent Doc on a busy Codex session (monsterrodholders.md, actor gen 245 pane %40) queues the dispatch into agent:queue auto and returns Ok, but the prompt is never delivered after the pane goes idle (deadlock). route.rs:4003 DispatchOnlyBusyQueue enqueues (queue_active:true) + returns Ok; drain is harness-delegated (Codex Stop hook / Claude auto-loop) with no guaranteed idle trigger, and JB shows no deferred-queued feedback. Plan: tasks/agent-doc/plan-jb-run-agent-doc-busy-queue-dispatch-deadlock.md. Related: #opencode-active-turn-reopen-auto-retry-on-idle (plain-reopen sibling), #jb-run-agent-doc-command-route-miss.
 - [ ] [#gated-followup-split-enforcement] [recommended] #agent-doc-bug 2026-05-31: when a directed do [#id] cycle keeps a multi-phase item open via --pending-edit (backlog) or --review-edit (review) with text that enumerates several gated/remaining phases, agent-doc neither prompts nor guards splitting those phases into discrete child backlog IDs — the deferred work stays buried in one parent's narrowed description and is not independently trackable/queueable. Repro this session: #recursive-repair-state-drift and #codex-owned-pane-prompt-miss-followups each had 2-4 gated phases folded into parent text; only a user catch prompted splitting them into #recursive-repair-recovery-states/#recursive-repair-apply/#preflight-probe-side-effect-free/#codex-owned-pane-stop-hook-live-verify. Add a session-check/finalize advisory (warn-first, sibling of #blocked-closeout-followup-capture and the SKILL 'one backlog ID per actionable phase' rule) that detects a kept-open item whose body lists multiple gated phases without discrete child IDs and recommends the split. Plan: TBD.
 - [ ] [#preflight-probe-side-effect-free] [recommended] Make probe/diagnostic agent-doc preflight side-effect-free or self-abandoning so it never leaves an open preflight_started cycle that later wedges session-check (Proposed-Fix #4 of #recursive-repair-state-drift). Distinguish a dispatch/response-bound preflight from a pure inspection probe. Plan: tasks/agent-doc/plan-recursive-repair-state-drift.md.
 - [ ] [#codex-owned-pane-stop-hook-live-verify] [recommended] Gated on a live Codex pane -- the remaining phases of #codex-owned-pane-prompt-miss-followups after phase 2a landed: (2b) a live Codex Stop-hook regression asserting the owned_pane_self_invocation diagnostic forces an in-pane response body before final chat output, and (3) live-verify a real Codex same-pane run with an unresolved exchange prompt. Plan: tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md.
@@ -99,6 +128,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Review
  
 <!-- agent:review -->
+- [/] [#jb-busy-queue-deadlock-live-verify] [recommended] Live-verify the supervisor idle-queue watch (#jb-run-agent-doc-busy-queue-dispatch-deadlock): with the installed binary, run JB Run Agent Doc on a doc whose authoritative actor is mid active-turn (Codex or a Claude session not running /loop), confirm the route appends to agent:queue auto + returns Ok, then when the pane returns to idle the supervisor idle-queue watch injects agent-doc <FILE> once and drains the head with NO duplicate injection into the active turn and no hot-loop. Check the session log for idle_queue_watch_drain. Gated on a live busy pane. Source: submodule 4b3f4835 (idle_queue_drain_decision + spawn_idle_queue_watch_thread in start.rs).
 - [/] [#recovery-drift-apply-live-verify] [recommended] Live-verify the full one-command recovery (agent-doc repair --apply-recovery) on a real owner pane now that #recovery-drift-authoritative-side landed the authoritative-side determination: reproduce a queue_metadata_drift / sidecar_visible_drift closeout and confirm apply_closeout_recovery restores-from-HEAD for the spurious queue_active:false class and commits-forward otherwise, without the manual cancel->reset->commit sequence. Gated on a live owner pane (risky in a racy multi-session repo). Parent plan: tasks/agent-doc/plan-recursive-repair-state-drift.md.
 - [/] [#opencode-active-turn-reopen-auto-retry-on-idle] [recommended] When a plain dispatch-only Run Agent Doc reopen is refused because the OpenCode (or Codex) pane shows an active turn, route currently fails closed and the operator must re-click once the turn ends. Optional refinement: watch the pane and auto-fire the bare reopen once it returns to a dispatch-ready/idle composer, so the operator does not have to retry manually. Must stay a plain reopen (no prompt to queue) and respect the existing no-inject-into-active-turn invariant. Lower priority than the live-verify items.
 - [/] [#jb-run-agent-doc-busy-feedback-live-verify] [recommended] Live-verify the busy-pane Run Agent Doc feedback fix (#jb-run-agent-doc-command-route-miss) end to end: install JB plugin 0.2.143 (build/distributions/agent-doc-jetbrains-0.2.143-signed.zip) + restart the route-owned agent-doc process to load the new binary, then run Run Agent Doc on a doc whose Codex pane is mid active-turn and confirm an immediate 'session still running' Event Log notification (no silent 60s wait, no 4x retry). Source landed submodule e1735fa2.

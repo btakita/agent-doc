@@ -72,6 +72,11 @@ This one document is being driven by **two `agent-doc` actors sharing the same q
 
 ### Re: do [#t41j] — opus-4-8
 
+> **Queue prompt:**
+>
+> do [#tagpath-queue-priority-publish-align]
+
+
 `#t41j` is the live-verify of the `#jb-run-agent-doc-busy-wait-deadlock` fix — it's **operator-gated**, not autonomously completable, so I'm gating it rather than faking a pass.
 
 The fix itself is already code-complete, CI-green, and **installed live** (submodule `89c357d5` pushed; superproject `aa9a64261`; both binaries replaced last cycle). What remains is the end-to-end check only a human can drive safely: in the IDE, click **Run Agent Doc** on a doc whose Claude actor is mid active-turn and confirm it returns immediately (no 60s `route_wait_for_ready_override` block), appends to `agent:queue auto`, and the supervisor idle-queue watch drains it on busy→idle.
@@ -122,13 +127,37 @@ This is the minimal correct change; the negative-subtract is the safe direction 
 ---
 
 **The one thing that actually unblocks this doc:** consolidate to a single owner of `agent-doc-bugs2.md`. A live authoritative Claude `agent-doc` cycle is draining this queue (9 cycles/30 min) while I'm fed the same heads in parallel — that contention is why every turn I find work done, race a live cycle, or hit torn reads. Stop one session (terminal: `agent-doc session status …` then stop the extra pane / `agent-doc gc`), and the surviving owner can apply the spec above directly. I'm not finalizing a competing write while that cycle is live.
-<!-- agent:boundary:a010708d -->
+Confirmed. My fix is implemented and verified but **cannot be cleanly landed from here**, and the reason is now concrete and important.
+
+## `#queue-sync-auto-pending-done-guard-misfire` — implemented + verified, blocked on landing
+
+I didn't just spec it — I implemented it this turn:
+- `filter_expect_done_or_gate_ids()` in `preflight.rs` excludes backlog→queue-sync source ids from `expect_done_or_gate_ids` (the synced items are agent queue-maintenance, not user directives), wired at the construction site via `collect_backlog_queue_sync`.
+- Spec bullet added to `specs/07-closeout-commands.md`.
+- 2 new green unit tests + **147 preflight tests pass**, clippy clean, `cargo build --release` exit 0.
+- The fix is **not in HEAD anywhere** — the authoritative actor's earlier response was spec-only; no implementation is committed.
+
+**Why I'm not committing it:** the submodule working tree holds **75 files / 1335 insertions of uncommitted concurrent WIP** (`write.rs`, `session_check.rs`, `route.rs`, `main.rs`, `graph.rs`, `sim_world.rs`, …) — none of it mine. `preflight.rs` alone carries ~120 lines of that WIP comingled with my ~85-line fix. Committing `preflight.rs` would capture another actor's in-progress work; I can't isolate just my change. The clean escape (a detached worktree on HEAD `89c357d5`) means re-applying my edit on a possibly-divergent HEAD + another 4-min rebuild, almost certainly duplicating the authoritative actor's imminent commit. So the correct owner-action is: **the session that owns this working tree commits the fix** (the verified implementation is sitting in `preflight.rs` right now, ready).
+
+## `do [#tagpath-queue-priority-publish-align]` — release-gated, not autonomous
+
+This item is *"publish tagpath (b55c305 + 32fd000) to crates.io and bump agent-doc's tagpath dependency past 0.12, before the next agent-doc release."* Publishing to crates.io is irreversible and is an explicit release/approval gate (the project's "manual testing gate before publish" rule). I won't autonomously publish a crate. When you're ready to cut the next agent-doc release, this is a release-checklist step: `cargo publish` tagpath, then bump `agent-doc-orchestration/Cargo.toml`'s tagpath dep past 0.12 (it currently resolves via the superproject `.cargo/config.toml` path patch, which is why the new `priority`/`queue` lint attrs work locally but would be rejected by a published tagpath 0.12).
+
+## The operational root cause — now concrete
+
+The shared `agent-doc` crate working tree is **full of uncommitted concurrent development (75 files)**. That single fact explains the whole multi-turn pattern: intermittent "concurrent broken crate" build blocks, two `agent-doc` actors on one document, torn-read corruption, and my fixes being unable to land. The fix here is operational, not code:
+
+1. **Commit or stash the 75-file WIP** in `src/agent-doc` (whichever session owns it) so the working tree is clean and my `#queue-sync` fix (plus everything else) can land verifiably.
+2. **Consolidate to one owner** of `agent-doc-bugs2.md` so a single pane drains the queue.
+
+I'm not finalizing a competing write — the queue already advanced to a release-gated item, the working tree is mid-development by another actor, and a finalize now would race it. My fix is done and verified; it needs a clean working tree to commit into.
+<!-- agent:boundary:40271f77 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#queue-sync-auto-pending-done-guard-misfire]~
-- do [#tagpath-queue-priority-publish-align]
+- ~do [#tagpath-queue-priority-publish-align]~
 - do [#codex-owned-pane-prompt-miss-followups]
 - do [#stuck-capture-queue-echo-false-positive]
 - do [#backlog-queue-sync-attr]

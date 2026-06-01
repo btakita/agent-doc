@@ -66,7 +66,14 @@ So the flow is: cell change → cascade of `value = None` through the dependency
 This matters when: Cell A → Slot B → Slot C. If A changes but B would compute to the same value, C was cleared unnecessarily. The memo guard at B would prevent C from needing recomputation.
 
 IPC corruption bug already tracked as `#zpc2` in `agent-doc-bugs2.md`. Plans: `tasks/agent-doc/plan-full-document-ipc-corruption-typing-prompt.md`, `tasks/agent-doc/plan-prompt-duplicated-while-typing.md`.
-<!-- agent:boundary:c2f39be0 -->
+
+### Re: Updated #fzaf backlog item — glm-5.1
+
+Updated `#fzaf` to reflect that slots are already lazy (invalidated only, recomputed on `get()`). The memo guard is about preventing unnecessary downstream cascade — when a slot recomputes to the same value, its dependents were already cleared but didn't need to be.
+
+New text: `#memo-guard Memoization guard — prevent unnecessary downstream cascade during invalidation when recomputed value equals prior value (slots are already lazy: invalidated only, recomputed on get())`
+
+<!-- agent:boundary:79a90e92 -->
 <!-- /agent:exchange -->
 
 ## Backlog
@@ -75,7 +82,7 @@ IPC corruption bug already tracked as `#zpc2` in `agent-doc-bugs2.md`. Plans: `t
 - [ ] [#n12s] #ipc-corruption-live-repro-lazily-rs Logged as #zpc2 in agent-doc-bugs2.md backlog. Live repro of scaffold duplication during finalize --stream. Document manually repaired.
 - [ ] [#exfd] #effect-system Phase 4: Effect system — ctx.effect(|ctx| { ... }) with auto-tracking, scheduling, cleanup, and disposal
 - [ ] [#rx9y] #batch-updates ctx.batch(|ctx| { ... }) to defer invalidation until the batch completes
-- [ ] [#fzaf] #memo-guard Memoization guard — skip recomputation when dependency values haven't changed
+- [ ] [#fzaf] #memo-guard Memoization guard — prevent unnecessary downstream cascade during invalidation when recomputed value equals prior value (slots are already lazy: invalidated only, recomputed on get())
 - [ ] [#dpzd] #api-ergonomics ctx.computed() alias and DX improvements
 - [ ] [#45rh] #release-publish Release + publish after effect system lands
 <!-- /agent:backlog -->

@@ -232,7 +232,36 @@ Verification:
 - `tsift --version` reports `tsift 0.1.62`.
 - GitHub Actions run `26736640775` passed both jobs: `clippy + test` and `live Convex graph acceptance`.
 - This repo has no tmux workflow or `make tmux-ci` target to inspect.
-<!-- agent:boundary:ad59af7b -->
+
+### Re: #lazily-neighborhood — gpt-5
+
+> **Queue prompt:**
+>
+> [#lazily-neighborhood]
+
+Implemented `#lazily-neighborhood` in `src/tsift`.
+
+What changed:
+- `GraphStore::neighborhood` now builds lazily-rs layer Slots over the BFS frontier instead of mutating one eager depth-N queue.
+- `GraphStore::ranked_neighborhood` now layers priority-queue expansions through lazily-rs Slots, keeping ranked scoring, max-node pruning, edge-kind filtering, and discovered/pruned counters intact.
+- `tsift-core` now depends on `lazily`; `Cargo.lock` and `SPEC.md` were updated for the lazy graph-neighborhood contract.
+
+Commits:
+- `btakita/tsift`: `bba1c66` (`feat(core): lazily layer graph neighborhoods`) on `main` and in sync with `origin/main`.
+- root `agent-loop`: `b9849d8e4` (`chore: update tsift submodule for lazy neighborhoods`) committed locally for the `src/tsift` gitlink.
+
+Verification:
+- `cargo test -p tsift-core ranked_neighborhood` passed.
+- `make check` passed, including clippy, workspace tests, doc tests, Node tests, and npm dry-run publish check.
+- `cargo build --workspace` passed.
+- `cargo install --path . --force` passed.
+- `tsift --version` reports `tsift 0.1.62`.
+- GitHub Actions run `26737285700` passed both jobs: `clippy + test` and `live Convex graph acceptance`.
+
+Tmux CI note: this tsift repo has no `tmux`, `tmux-ci`, or `tmux-test` references in `.github` or `Makefile`, so there is no tmux leg to inspect.
+
+Root push note: I did not push root `agent-loop` `main` because it is already ahead of `origin/main` by unrelated agent-doc commits and has unrelated dirty worktree changes; pushing would publish more than this `src/tsift` gitlink update.
+<!-- agent:boundary:d59db983 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -242,7 +271,7 @@ dispatch #spec-test-build-install-commit-push
 - ~[#lazily-tsift-status-cache]~
 - ~[#lazily-inspect-scope]~
 - ~[#lazily-resolve-edges]~
-- [#lazily-neighborhood]
+- ~[#lazily-neighborhood]~
 - [#lazily-summary]
 - [#lazily-tsift-plan]
 <!-- /agent:queue -->
@@ -250,7 +279,6 @@ dispatch #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#lazily-neighborhood] [feature] Lazy BFS neighborhood expansion via lazily-rs Slots per depth layer
 - [ ] [#lazily-summary] [feature] Lazy summary cache with Cell-backed content_hash invalidation
 - [ ] [#lazily-tsift-plan] [plan] Create integration plan for lazily-rs in tsift (see tasks/agent-doc/plans/lazily-rs-integration.md as reference)
 <!-- /agent:backlog -->

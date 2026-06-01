@@ -9,7 +9,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -303,7 +303,8 @@ impl WatchActor {
 ```
 
 The key insight: **Cells are updated by the same events agent-doc already handles.** No new detection layer is needed — just wire existing event handlers to `Cell::set()` instead of invalidating local variables or re-calling functions directly.
-<!-- agent:boundary:5f3ed925 -->
+Do Slots also have an api to be invalidated?
+<!-- agent:boundary:f7fcbe98 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -311,7 +312,8 @@ The key insight: **Cells are updated by the same events agent-doc already handle
 
 ## Pending / Not Built
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+- Do Slots also have an api to be invalidated?
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

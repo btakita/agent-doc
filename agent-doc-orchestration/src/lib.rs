@@ -77,6 +77,7 @@ pub mod focus;
 pub mod gc;
 pub mod git;
 pub mod git_sibling;
+pub mod graph;
 pub mod harness;
 pub mod harness_prompt;
 // Relocated to `agent-doc-core` (#bz6s follow-up #adoc-pure-to-core — pure,

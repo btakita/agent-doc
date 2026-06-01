@@ -362,6 +362,13 @@ object TerminalUtil {
             "route",
             "--dispatch-only",
             "--plain-trigger",
+            // #run-agent-doc-latency: the plugin already awaited typing idle via the
+            // FFI typing tracker (TypingTracker.awaitIdle) before saving and routing,
+            // so route's own mtime debounce is pure redundant latency on the editor
+            // path. Pass --debounce 0 to skip it; the binary still treats the
+            // cross-process typing indicator as authoritative for non-editor callers.
+            "--debounce",
+            "0",
             "--wait-for-ready",
             "60",
             relativePath,

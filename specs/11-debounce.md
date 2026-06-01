@@ -53,6 +53,34 @@ live typing buffer.
 indefinite hangs and fails closed instead of proceeding when the combined proof
 does not settle.
 
+## Run Agent Doc dispatch latency
+
+**Status:** Tightened. Beyond the double-debounce fix above
+(`#jb-run-agent-doc-double-debounce`), three additional `#run-agent-doc-latency`
+optimizations trim the editor-triggered dispatch floor:
+
+1. **Plugin skips the binary debounce.** The JetBrains `Run Agent Doc` action
+   awaits typing idle in-process via the FFI typing tracker before saving, so
+   `buildRunRouteCommand` now passes `route --debounce 0`. Route's mtime/indicator
+   settle is pure redundant latency on the editor path; the binary still treats
+   the cross-process typing indicator as authoritative for non-editor callers
+   (which keep the default 500ms debounce).
+2. **Submit-acceptance check is capture-then-sleep.** `send_command_unchecked`
+   captured the pane only *after* a fixed 300ms sleep, so even an instantly
+   consumed trigger paid 300ms. It now captures first and sleeps after, on a
+   tightened `DIRECT_PANE_SUBMIT_ACCEPTANCE_POLL_INTERVAL` (150ms), so a fast pane
+   is confirmed accepted on the first capture.
+3. **Ready-prompt poll cadence tightened.** `wait_for_agent_ready_outcome` polled
+   every 500ms and requires a 2-poll ready streak to debounce a transient prompt
+   flicker, giving a ~500-1000ms ready floor. The poll interval is now
+   `AGENT_READY_POLL_INTERVAL` (150ms), so the streak settles in ~150-300ms while
+   keeping the 2-observation debounce.
+
+**Test coverage:** `run route command requests plain trigger for editor dispatch`
+(JB `TerminalUtilTest`, asserts `--debounce 0`); the capture/poll cadence changes
+are exercised by the live-tmux `send_command_checked_*` and
+`wait_for_agent_ready*` integration tests (`make tmux-ci`).
+
 **Test coverage:** `route_debounce_fails_closed_while_typing_indicator_is_active`,
 `route_debounce_allows_dispatch_after_typing_indicator_expires`,
 `route_dispatches_immediately_when_idle_typing_indicator_present_despite_fresh_mtime`,

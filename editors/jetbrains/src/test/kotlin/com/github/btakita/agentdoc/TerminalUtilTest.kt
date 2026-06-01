@@ -18,6 +18,8 @@ class TerminalUtilTest {
                 "route",
                 "--dispatch-only",
                 "--plain-trigger",
+                "--debounce",
+                "0",
                 "--wait-for-ready",
                 "60",
                 "tasks/root.md",

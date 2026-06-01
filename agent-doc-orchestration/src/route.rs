@@ -65,10 +65,14 @@
 //!   Hook-visible Codex dispatch-only reroutes still require routed submit proof after the
 //!   pane accepts the reopen; acceptance without hook-backed dispatch-start proof is terminal
 //!   for ready actors as well as startup-window reroutes.
-//! - **`await_idle(file, debounce)`**: Polls file mtime and the shared editor typing
-//!   indicator every 100ms until both have been idle for `debounce`, or fails closed
-//!   after the `10 × debounce` safety cap expires.
-//! - **`wait_for_agent_ready(tmux, pane_id, timeout, harness)`**: Polls pane content every 500ms
+//! - **`await_idle(file, debounce)`**: Polls every 100ms. When an editor typing
+//!   indicator is present it is authoritative — an idle indicator dispatches
+//!   immediately (the editor already debounced; its pre-route save bumps mtime),
+//!   an active one keeps waiting. With no indicator (CLI/direct-disk caller) it
+//!   falls back to the file mtime settle. Fails closed after the `10 × debounce`
+//!   safety cap expires.
+//! - **`wait_for_agent_ready(tmux, pane_id, timeout, harness)`**: Polls pane content every
+//!   `AGENT_READY_POLL_INTERVAL`
 //!   looking for the agent's idle prompt (per `harness.prompt_patterns`). Returns true when
 //!   prompt found, false on timeout. Logs progress every 10 polls. Existing-pane reroutes only
 //!   fail closed on timeout when the document still has prompt-bearing drift; otherwise route
@@ -351,6 +355,19 @@ fn route_latency_status(elapsed: Duration, budget: Duration) -> &'static str {
         "ok"
     }
 }
+
+/// Poll cadence for the direct-pane submit-acceptance check in
+/// `send_command_unchecked`. `#run-agent-doc-latency`: tightened from 300ms so a
+/// pane that consumes the routed trigger quickly is confirmed accepted within one
+/// short poll instead of a 300ms floor. The loop captures before sleeping, so a
+/// near-instant consume returns on the first capture.
+const DIRECT_PANE_SUBMIT_ACCEPTANCE_POLL_INTERVAL: Duration = Duration::from_millis(150);
+
+/// Poll cadence for `wait_for_agent_ready_outcome`. `#run-agent-doc-latency`:
+/// tightened from 500ms so the 2-poll ready streak settles in ~150-300ms instead
+/// of the old ~500-1000ms floor, while still requiring two consecutive idle
+/// observations to debounce a transient prompt flicker.
+const AGENT_READY_POLL_INTERVAL: Duration = Duration::from_millis(150);
 
 fn direct_pane_submit_acceptance_timeout() -> Duration {
     crate::flow::routed_reopen::direct_pane_submit_acceptance_timeout()
@@ -5707,9 +5724,12 @@ fn send_command_unchecked(
     let trigger = send_command_once_unchecked(tmux, pane, file_path, harness)?;
     let start = std::time::Instant::now();
     let timeout = direct_pane_submit_acceptance_timeout();
-    let poll_interval = std::time::Duration::from_millis(300);
+    // `#run-agent-doc-latency`: capture-then-sleep, not sleep-then-capture. A pane
+    // that consumes the trigger quickly is detected on the first capture (~capture
+    // overhead) instead of paying a full poll interval before the first check, and
+    // a tighter poll shortens the acceptance floor for slower panes.
+    let poll_interval = DIRECT_PANE_SUBMIT_ACCEPTANCE_POLL_INTERVAL;
     while start.elapsed() < timeout {
-        std::thread::sleep(poll_interval);
         if let Ok(content) = sessions::capture_pane(tmux, pane) {
             let cmd_still_in_input = recent_lines_contain_trigger(&content, &trigger);
 
@@ -5720,6 +5740,7 @@ fn send_command_unchecked(
                 });
             }
         }
+        std::thread::sleep(poll_interval);
     }
     Ok(CommandDispatchResult {
         status: CommandDispatchStatus::TimedOut,
@@ -8148,7 +8169,8 @@ fn agent_doc_start_bin() -> String {
 /// Poll a tmux pane until the agent is ready to accept input.
 ///
 /// Uses the harness's prompt patterns for detection.
-/// Strips ANSI escape codes before matching. Polls every 500ms up to the given timeout.
+/// Strips ANSI escape codes before matching. Polls every
+/// `AGENT_READY_POLL_INTERVAL` up to the given timeout.
 fn wait_for_agent_ready(
     tmux: &Tmux,
     pane_id: &str,
@@ -8165,7 +8187,7 @@ fn wait_for_agent_ready_outcome(
     harness: &HarnessConfig,
 ) -> AgentReadyWaitOutcome {
     let start = std::time::Instant::now();
-    let poll_interval = std::time::Duration::from_millis(500);
+    let poll_interval = AGENT_READY_POLL_INTERVAL;
     let mut poll_count = 0u32;
     let mut ready_streak = 0u32;
     let mut last_ready_line: Option<String> = None;

@@ -16,7 +16,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -255,16 +255,10 @@ The shared `src/agent-doc` tree has **806 lines of uncommitted concurrent work a
 
 #### Not auto-looping the rest of the queue
 The queue still holds `do [#ipcaa-scaf]`, `do [#submodule-response-commit-proof]`, `do [#qasm]`, each with `#spec-test-build-install-commit-push`. Each is a full build+install code cycle that would re-clobber the concurrent session's live binary. You approved that tradeoff for *this* item only, so I'm pausing the auto-loop — re-invoke `/agent-doc <FILE>` (or tell me to continue) to run the next item.
-<!-- agent:boundary:2d42c26d -->
+<!-- agent:boundary:abcd0eae -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~do [#jb-tsift-pane-sync]~
-- ~The dirty files were from the tsift.md session...which I canceled. Please reconcile the dirty changes.~
-- ~do [#ipcaa-scaf]~
-- ~do [#submodule-response-commit-proof]~
-- ~do [#qasm]~
+<!-- agent:queue -->
 <!-- /agent:queue -->
 ###
 <!--
@@ -352,7 +346,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 
 <!-- agent:icebox -->
 - [ ] [#misfire-recovery-snapshot] Pre-auto-run recovery snapshot/tag (mirroring `compact`'s pre-mutation tag) so a destructive auto-run misfire is recoverable without git/sidecar archaeology. Proposed fix #4 of `#backlog-auto-marker-misfire` (now IMPLEMENTED for fixes #1–#3). Parked: only worth doing if a new auto-run path can mutate the backlog in place — currently the misfire is inert (queue-scoped) and surfaced (misplaced_component_attr warning). Plan: tasks/agent-doc/plan-backlog-auto-marker-misfire.md.
-<!-- /agent:icebox -->
+- [ ] [#1k5y] <!-- /agent:icebox -->
 
 ## Completed / Reaped
 

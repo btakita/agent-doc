@@ -36,14 +36,38 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 2 response topic(s): do [#gated-followup-split-enforcement]; fix the queue-drift regressions first
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:7718cc06 -->
+
+### Re: do [#queue-audit-partial-completion] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#queue-audit-partial-completion]
+
+
+Done. Also unblocked the branch CI and confirmed the prior queue fix is now live.
+
+**The feature.** A queue-completion audit ("which queue items are complete?") should classify each row as complete / partially complete / not-started — naming the completed substeps and the exact remaining condition — instead of collapsing partial progress into a blanket "none complete." Per this repo's binary-vs-skill rule, per-row classification of free-text rows is natural-language judgment (skill/spec response contract), so the binary's job is to flag the unambiguous collapse:
+
+`check_queue_audit_partial_completion_guard` (WARN-only, suppressible via `<!-- no-queue-audit-guard -->`) fires only when the committed response is about the queue, makes a blanket none-complete claim (`\b(none|no)\b … complet(e|ed)`), cites ≥2 distinct substep completions, and never frames anything as "partial." A pure "nothing done yet" answer (none-complete with no extra completion evidence) does not fire; an answer that already breaks out partials does not fire.
+
+5 regressions: fires-on-collapse / quiet-when-partial-given / quiet-when-not-about-queue / quiet-without-extra-evidence / suppressed-by-marker. Spec response-contract guidance added to the closeout spec. (Scope note: the richer per-row state table + split recommendation are guidance by design — the split half overlaps the `#gated-followup-split-enforcement` guard I shipped earlier.)
+
+**Two adjacent wins this turn:**
+- **Prior queue fix is now live.** The concurrent `lazily-rs`/`graph.rs` work that blocked the build last turn is committed, so I built + installed. Verified the `#completed-queue-residue-regression` insert-ahead fix end-to-end against the installed binary: inserting a head no longer deactivates/strands the queue — it advances and stays active. That's why this turn's preflight kept `queue_active: true` instead of halting.
+- **Fixed branch CI.** The `lazily` dependency (`path = "../../lazily-rs"`) had no CI checkout step, so `make check` couldn't load the orchestration manifest on a standalone clone — CI was red for the whole branch (commit `cdd5474d`). Added a `git clone … lazily-rs ../lazily-rs` step alongside `agent-kit`/`tmux-router`. **CI green again on `e6731fa5`.**
+
+**Verification:** `make check` green; both binaries built + installed; CI green on `e6731fa5`.
+
+**Shipped:** submodule `cdd5474d` (queue-audit guard) + `e6731fa5` (CI fix); superproject pointer bumped. Marked `#queue-audit-partial-completion` done.
+<!-- agent:boundary:daa3bd14 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#jb-run-agent-doc-busy-queue-dispatch-deadlock]~
 - ~do [#preflight-probe-side-effect-free]~
-- do [#queue-audit-partial-completion]
+- ~do [#queue-audit-partial-completion]~
+- do [#queue-clear-unrun-items]
 - do [#gated-followup-split-enforcement]
 - do [#completed-queue-residue-regression]
 - do [#codex-owned-pane-stop-hook-live-verify]
@@ -84,7 +108,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 
 <!-- agent:backlog priority queue=prepend -->
 - [ ] [#queue-clear-unrun-items] [recommended] #agent-doc-bug 2026-05-31: active `agent:queue auto` heads can be deleted/cleared without execution proof during same-pane/recovery closeout. Live repro `src/boost-client/tasks/monsterrodholders.md`: queue heads `#convqa-rerun`, `#hydroapproval`, `#nbapproval`, `#shopcachewatch`, `#shoplabelgate`, and `#accessorymargin` were removed while the matching backlog items stayed open and no per-head closeout ran. Add queue-removal invariants so every removed head must have explicit consumed/done/gated/struck/stale-user-edit proof, and make reset/commit/session-check fail closed on unproved deletion. Plan: `tasks/agent-doc/plan-queue-clear-unrun-items.md`.
-- [ ] [#queue-audit-partial-completion] [recommended] #agent-doc-bug 2026-06-01: queue completion audits can collapse partial progress into "none complete" when every row still has a remaining action. Live repro `src/boost-client/tasks/monsterrodholders.md`: same-day QA, URL/validate-only checks, feed-label/Merchant audits, budget checks, and Rods negatives were complete, but the response said none of the six queue items was complete because each still had at least one blocker. Add per-row queue audit states (complete / partially complete / not started-blocked), require completed-substep plus remaining-condition reporting, and recommend split/narrowing when one row contains multiple gateable phases. Plan: `tasks/agent-doc/plan-queue-audit-partial-completion.md`.
 - [ ] [#codex-owned-pane-stop-hook-live-verify] [recommended] Gated on a live Codex pane -- the remaining phases of #codex-owned-pane-prompt-miss-followups after phase 2a landed: (2b) a live Codex Stop-hook regression asserting the owned_pane_self_invocation diagnostic forces an in-pane response body before final chat output, and (3) live-verify a real Codex same-pane run with an unresolved exchange prompt. Plan: tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md.
 - [ ] [#queue-sync-auto-pending-done-guard-misfire] [recommended] When a queue=sync/append attribute populates an active auto-queue in the same cycle, the freshly-synced do-[#id] entries appear as new do-directives in the cycle diff, so preflight records them all as expect_done_or_gate_ids and pending_done_guard then demands every synced item be --done in the populating cycle (live repro 2026-05-31 agent-doc-bugs2.md: do [#backlog-queue-sync-attr] cycle flagged 9 other freshly-synced queue items). Fix: agent-generated/synced queue items must not be treated as user do-directives; only a genuine user exchange do [#id] or the single consumed queue head should populate expect_done_or_gate_ids. Plan: tasks/agent-doc/plan-queue-sync-auto-pending-done-guard-misfire.md.
 - [ ] [#tagpath-queue-priority-publish-align] [recommended] Before the next agent-doc release, publish tagpath (commits b55c305 + 32fd000: backlog/icebox/queue priority + queue sync lint attrs) and bump agent-doc's tagpath dependency past 0.12. Locally agent-doc resolves tagpath via the superproject .cargo/config.toml path patch so the lint-gate accepts the new attributes; a published agent-doc on tagpath 0.12 would reject bare priority/queue as malformed-attr.

@@ -1564,6 +1564,16 @@ pub fn backfill(body: &str, doc_id: &str, existing_ids: &HashSet<String>) -> (St
 
     let mut changed = false;
     let rewritten = layout.replace_items(|item| {
+        // Drop content-less items: a bullet with no description text and no
+        // continuation carries no information (typically a stray empty `- [ ]`
+        // from an editor/IPC insertion). Backfilling it would manufacture a
+        // phantom `[#hash]` id for an empty line — the "description disappeared"
+        // bug (#icebox-empty-item-phantom-id) — so remove it instead. This also
+        // self-heals an already-cemented id-only empty item (`- [ ] [#hash]`).
+        if item.text.trim().is_empty() && item.continuation.trim().is_empty() {
+            changed = true;
+            return None;
+        }
         let mut next = item.clone();
         if next.id.is_empty() {
             let id = assign_unique_hash(&next.text, doc_id, &taken);
@@ -2348,6 +2358,50 @@ mod tests {
         let (new_body, changed) = backfill(body, DOC_ID, &ids());
         assert!(changed);
         assert!(new_body.contains("[#"));
+    }
+
+    #[test]
+    fn backfill_drops_content_less_empty_bullet() {
+        // #icebox-empty-item-phantom-id: a stray empty `- [ ]` must NOT be
+        // assigned a phantom hash id; it carries no description and is dropped.
+        let body = "- [ ]\n";
+        let (new_body, changed) = backfill(body, DOC_ID, &ids());
+        assert!(changed);
+        assert!(
+            !new_body.contains("[#"),
+            "empty bullet must not get a phantom id: {new_body:?}"
+        );
+        let (_, items, _) = parse_items(&new_body);
+        assert!(items.is_empty(), "empty bullet should be dropped: {items:?}");
+    }
+
+    #[test]
+    fn backfill_drops_id_only_empty_item_self_heal() {
+        // Already-cemented phantom (`- [ ] [#1k5y]` with no description) is
+        // removed on the next backfill so the bug self-heals.
+        let body = "- [ ] [#existing] real item\n- [ ] [#1k5y]\n";
+        let (new_body, changed) = backfill(body, DOC_ID, &ids());
+        assert!(changed);
+        assert!(new_body.contains("[#existing] real item"));
+        assert!(
+            !new_body.contains("[#1k5y]"),
+            "phantom id-only item must be dropped: {new_body:?}"
+        );
+        let (_, items, _) = parse_items(&new_body);
+        assert_eq!(items.len(), 1);
+    }
+
+    #[test]
+    fn backfill_keeps_empty_text_with_continuation() {
+        // Guard against over-dropping: an item with empty header text but a real
+        // indented continuation still carries content and must be preserved.
+        let body = "- [ ] [#p1]\n  - detail line\n";
+        let (new_body, _changed) = backfill(body, DOC_ID, &ids());
+        assert!(
+            new_body.contains("[#p1]"),
+            "item with continuation must survive: {new_body:?}"
+        );
+        assert!(new_body.contains("detail line"));
     }
 
     #[test]

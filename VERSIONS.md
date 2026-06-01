@@ -6,6 +6,19 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Empty pending/icebox bullets no longer get a phantom id
+  (`#icebox-empty-item-phantom-id`).** A stray content-less bullet (`- [ ]`
+  with no description and no continuation — e.g. an editor/IPC insertion before
+  a component close marker) was being assigned a backfilled `[#hash]` id,
+  producing a phantom tracked item whose "description disappeared" (observed:
+  `- [ ] [#1k5y]` in an icebox). `pending::backfill` now **drops** content-less
+  items instead of manufacturing an id for them, which both prevents the phantom
+  and self-heals an already-cemented id-only empty item on the next maintenance
+  pass. Items with empty header text but a real indented continuation are
+  preserved. Regressions: `backfill_drops_content_less_empty_bullet`,
+  `backfill_drops_id_only_empty_item_self_heal`,
+  `backfill_keeps_empty_text_with_continuation`.
+
 - **Managed capability-proof failure is recoverable (`#codex-capability-proof-unrecoverable`).**
   Two fixes so a transient network blip no longer permanently wedges a managed
   Codex/OpenCode session:

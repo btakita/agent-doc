@@ -5735,10 +5735,13 @@ fn token_is_non_owner_agent_doc_subcommand(token: &str) -> bool {
 }
 
 fn agent_doc_cmdline_is_owner(cmdline: &str, file_path: &str) -> bool {
-    if !cmdline_has_file_match(cmdline, file_path) {
-        return false;
-    }
+    cmdline_has_file_match(cmdline, file_path) && cmdline_is_agent_doc_owner_session(cmdline)
+}
 
+/// File-agnostic half of [`agent_doc_cmdline_is_owner`]: true when `cmdline` is a
+/// long-lived agent-doc/codex owner invocation (a supervisor `start`, an owner
+/// subcommand, or a harness binary) for *some* document, regardless of which.
+fn cmdline_is_agent_doc_owner_session(cmdline: &str) -> bool {
     let tokens = cmdline.split_whitespace().collect::<Vec<_>>();
     if let Some(idx) = tokens
         .iter()
@@ -5754,6 +5757,67 @@ fn agent_doc_cmdline_is_owner(cmdline: &str, file_path: &str) -> bool {
     }
 
     tokens.iter().any(|token| token_is_harness_binary(token))
+}
+
+/// True when `cmdline` references at least one `.md` document path token.
+fn cmdline_references_md_document(cmdline: &str) -> bool {
+    cmdline
+        .split_whitespace()
+        .any(|token| token.trim_matches(|c| c == '"' || c == '\'').ends_with(".md"))
+}
+
+/// True when `cmdline` is a live agent-doc/codex owner session for a document
+/// OTHER than `claimed_file`. Cross-root safe: it is keyed on the live process
+/// command line, so it recognizes a pane owned by a document rooted in another
+/// project/submodule whose session registry the calling root cannot see. Used to
+/// keep `claim`/`route` from commandeering such a pane.
+pub(crate) fn cmdline_owns_other_document(cmdline: &str, claimed_file: &str) -> bool {
+    cmdline_is_agent_doc_owner_session(cmdline)
+        && cmdline_references_md_document(cmdline)
+        && !agent_doc_cmdline_is_owner(cmdline, claimed_file)
+}
+
+/// Walk the pane's process tree (pane pid + direct children) and return true if
+/// any live process is an agent-doc/codex owner session for a document other than
+/// `claimed_file`. Keyed on the live cmdline rather than any single root's
+/// `sessions.json`, so it enforces the one-live-pane-per-document binding
+/// invariant across project/submodule roots.
+pub(crate) fn pane_runs_other_document_owner(
+    tmux: &Tmux,
+    pane_id: &str,
+    claimed_file: &Path,
+) -> bool {
+    let Some(pane_pid) = pane_pid_from_tmux(tmux, pane_id) else {
+        return false;
+    };
+    let claimed = claimed_file.to_string_lossy();
+    let mut pids = vec![pane_pid.to_string()];
+    if let Ok(children) = std::process::Command::new("pgrep")
+        .args(["-P", &pane_pid.to_string()])
+        .output()
+    {
+        for child in String::from_utf8_lossy(&children.stdout).lines() {
+            let child = child.trim();
+            if !child.is_empty() {
+                pids.push(child.to_string());
+            }
+        }
+    }
+    for pid in pids {
+        let cmdline = match std::process::Command::new("ps")
+            .args(["-p", &pid, "-o", "command="])
+            .output()
+        {
+            Ok(output) if output.status.success() => {
+                String::from_utf8_lossy(&output.stdout).to_string()
+            }
+            _ => continue,
+        };
+        if cmdline_owns_other_document(&cmdline, &claimed) {
+            return true;
+        }
+    }
+    false
 }
 
 fn pid_has_agent_doc_for_file(pid: &str, file_path: &str) -> bool {
@@ -6474,6 +6538,59 @@ mod tests {
             "/home/brian/.cargo/bin/agent-doc claim tasks/live-tmux-repro-codex.md --pane %522",
             file
         ));
+    }
+
+    #[test]
+    fn cmdline_owns_other_document_blocks_cross_root_commandeer() {
+        // The exact awear/monsterrodholders cross-root repro: a brand-new
+        // superproject document is claimed onto a pane already running a live
+        // submodule Codex session for a different document.
+        let claimed = "tasks/recruit/awear.md";
+        assert!(
+            cmdline_owns_other_document(
+                "/home/brian/.cargo/bin/agent-doc start --route-owned tasks/monsterrodholders.md",
+                claimed,
+            ),
+            "a pane owning a different document must block commandeering"
+        );
+        assert!(
+            cmdline_owns_other_document(
+                "/usr/bin/codex /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md",
+                claimed,
+            ),
+            "a harness session for another document must block commandeering"
+        );
+    }
+
+    #[test]
+    fn cmdline_owns_other_document_allows_same_doc_and_non_owner_panes() {
+        let claimed = "tasks/recruit/awear.md";
+        // The pane's own document — reuse, do not provision a new pane.
+        assert!(
+            !cmdline_owns_other_document(
+                "/home/brian/.cargo/bin/agent-doc start --route-owned tasks/recruit/awear.md",
+                claimed,
+            ),
+            "a pane owning the claimed document is reusable"
+        );
+        // A plain shell with no owned .md document — claimable.
+        assert!(
+            !cmdline_owns_other_document("-zsh", claimed),
+            "a bare shell does not own another document"
+        );
+        // An owner invocation with no .md document token — not provably another doc.
+        assert!(
+            !cmdline_owns_other_document("/home/brian/.cargo/bin/agent-doc start", claimed),
+            "an owner session with no document token is not a different-document conflict"
+        );
+        // A transient non-owner subcommand against another doc — not an owner session.
+        assert!(
+            !cmdline_owns_other_document(
+                "/home/brian/.cargo/bin/agent-doc route tasks/other.md",
+                claimed,
+            ),
+            "a non-owner subcommand is not a live owner session"
+        );
     }
 
     #[test]

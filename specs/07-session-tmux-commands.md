@@ -79,6 +79,7 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 
 - Claims a document for a tmux pane that is already running the harness.
 - The command must enforce the one-live-pane-per-document binding invariant. If the requested pane already belongs to another alive document session, `claim` provisions a new pane instead of commandeering the old one.
+- The binding invariant is enforced **across project/submodule roots**, not just against the calling root's `sessions.json`. The calling root's registry only records documents rooted under it, so a pane owned by a document rooted in another project/submodule (for example a submodule `agent-doc start --route-owned <other>.md` Codex session) would not appear as a registry conflict. `claim` must therefore also inspect the requested pane's live process tree: if it runs an agent-doc/codex owner session for a different document, `claim` provisions a new pane instead of commandeering it. Without this, a new document claimed from inside another document's live pane aliases onto that pane (registries can even disagree on the new document's session id) and no real pane for the new document ever appears.
 - Cross-session claim is invalid unless the configured project session is stale or the user forced the claim explicitly.
 - For new template documents, `claim` scaffolds the default `status` and `exchange` components and saves a baseline snapshot with empty exchange content.
 

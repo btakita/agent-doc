@@ -338,6 +338,26 @@ pub fn run(
         }
     }
 
+    // Cross-root binding guard (SPEC §8.5): the calling root's `sessions.json`
+    // only records documents rooted under it, so the registry loop above cannot
+    // see a pane owned by a document rooted in another project/submodule. Inspect
+    // the pane's live process tree directly: if it runs an agent-doc/codex owner
+    // session for a different document, never commandeer it — provision a new
+    // pane. Without this, a new document claimed from inside another document's
+    // live pane (e.g. a submodule Codex session) aliases onto that pane and no
+    // real pane for the new document ever appears.
+    if !force
+        && sessions::Multiplexer::pane_alive(&tmux, &pane_id)
+        && crate::sync::pane_runs_other_document_owner(&tmux, &pane_id, file)
+    {
+        eprintln!(
+            "[claim] pane {} runs a live agent-doc/codex session for another document; provisioning a new pane instead of commandeering it",
+            pane_id
+        );
+        route::provision_pane(&tmux, file, &session_id, &file_str, None, &[]).map(|_| ())?;
+        return Ok(());
+    }
+
     // Pane validated — now safe to modify files
     if updated_content != content {
         std::fs::write(file, &updated_content)

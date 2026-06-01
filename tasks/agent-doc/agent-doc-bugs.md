@@ -9,7 +9,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -80,7 +80,7 @@ Cell: file_path
 - Add `CellHandle::set(&ctx, value)` to lazily-rs first? (Current API is `Context::set_cell()`)
 - Per-file context or per-process with file-keyed cells?
 - Config hot-reload: file watcher on config.toml or clear on next cycle?
-<!-- agent:boundary:1d3caf6e -->
+<!-- agent:boundary:55e4fa08 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -89,6 +89,7 @@ Cell: file_path
 ## Pending / Not Built
 
 <!-- agent:queue auto -->
+- Please create a plan and #next-steps to integrate lazily-rs for caching `project_root_for_doc` and building a dependency graph across `preflight → plan → write → commit`, with two Context lifetimes (short-lived CLI run vs long-lived Actor).
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

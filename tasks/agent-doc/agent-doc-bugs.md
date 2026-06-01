@@ -9,7 +9,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -89,7 +89,68 @@ This gives you the graph incrementally without a big-bang refactor. Each slot is
 
 **Caveat:** agent-doc runs are sequential and short-lived (single CLI invocation). The dependency graph's value isn't reactive updates mid-run — it's **deduplication** (avoiding redundant `stat`/`read`/`parse` for the same file across `preflight → plan → write → commit`) and **structural clarity** (making the data flow explicit rather than scattered function calls). If the graph later spans multiple documents or a long-lived watch/stream daemon, lazily-rs's invalidation tracking becomes more compelling.
 There are long lived Actor processes that share the logic. So the CLI runs are short lived and can have a single run Context while the long lived processes can have a shared Context that persists across the lifetime of the Actor.
-<!-- agent:boundary:ebf80ce7 -->
+
+### Re: Two Context lifetimes (CLI vs Actor) — gpt-5
+
+That's the right split. lazily-rs's `Context` is designed for exactly this — you create a context per lifetime scope, and slots automatically share cached state within that scope.
+
+**Two contexts, same slot definitions:**
+
+| Context | Lifetime | Owner | Invalidation |
+|---------|----------|-------|-------------|
+| **Run Context** | Single CLI invocation (`preflight → write → commit`) | Created in `main.rs`, dropped at exit | Implicit — process exit clears everything |
+| **Actor Context** | Long-lived process (watch daemon, stream session, controller, session actor) | Created at actor startup, held in actor state | Explicit — `slot.clear()` or `ctx.clear()` when the file/config changes |
+
+The slot *functions* (`project_root_for_doc`, `load_project_for_doc`, etc.) are defined once and work against `&Context`. They don't care which lifetime they're in:
+
+```rust
+// slot definitions — lifetime-agnostic
+slot!(project_root_for_doc, |ctx: &Context, file: &Path| -> Option<PathBuf> {
+    // walk up from file to .agent-doc/
+});
+
+slot!(load_project_for_doc, |ctx: &Context, file: &Path| -> ProjectConfig {
+    let root = project_root_for_doc(&ctx, file); // cached
+    // ...
+});
+
+slot!(resolve_ssh_context, |ctx: &Context, file: &Path| -> SshContext {
+    let config = load_project_for_doc(&ctx, file); // cached
+    // ...
+});
+```
+
+**CLI path** — one-shot context, maximum deduplication within the run:
+```rust
+fn main() {
+    let ctx = Context::new();
+    // preflight, plan, write, commit all share ctx
+    run(&ctx, file);
+    // ctx drops — no cleanup needed
+}
+```
+
+**Actor path** — persistent context with selective invalidation:
+```rust
+struct WatchActor {
+    ctx: Context,
+    watched_files: HashSet<PathBuf>,
+}
+
+impl WatchActor {
+    fn on_file_changed(&self, file: &Path) {
+        // Invalidate only the slots that depend on this file
+        self.ctx.clear(); // or selective: project_root_for_doc(&self.ctx, file).clear()
+        // Re-run with fresh cache
+        self.process(file);
+    }
+}
+```
+
+The watch daemon's reactive file-watching (zero debounce for CRDT docs) becomes a natural invalidation trigger — `inotify`/`poll` event → `slot.clear()` → next access recomputes. No redundant `stat` walks between events for the same path.
+
+**Migration path:** Define the slot functions in `agent-doc-core` (no `std::fs` — slot bodies call the existing I/O wrappers). CLI `main.rs` creates a throwaway context. Actor structs hold a persistent one. The existing function signatures stay available as non-context entry points for backward compat during migration.
+<!-- agent:boundary:60995c9b -->
 <!-- /agent:exchange -->
 
 <!--
@@ -97,8 +158,7 @@ There are long lived Actor processes that share the logic. So the CLI runs are s
 
 ## Pending / Not Built
 
-<!-- agent:queue auto -->
-- There are long lived Actor processes that share the logic. So the CLI runs are short lived and can have a single run Context while the long lived processes can have a shared Context that persists across the lifetime of the Actor.
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

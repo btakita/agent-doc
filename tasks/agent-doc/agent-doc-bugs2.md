@@ -53,7 +53,34 @@ Compacted content:
 - **`#v819` (Path A)** and **`#wy0y` (Path B)** — operator-only **live-IDE** verification/capture sessions. I can't drive live tmux panes / IntelliJ or enable JB debug logging from here; these need you at the keyboard.
 
 I've paused the auto-drain here rather than blindly loop into work I can't finish (or kick off an 18-fix run without confirming). Picking the scope below.
-<!-- agent:boundary:1481bc58 -->
+
+### Re: do Path C queue-provenance cluster — opus-4-8
+
+Audited the cluster before writing any code — and the honest finding is: **all three items are already implemented and green-tested.** There is no fresh implementation to do here; they're gated `[/]` on *live verification*, not on missing code. This corrects my earlier `#next-steps` roadmap, which wrongly classified Path C as "not-yet-implemented agent work."
+
+| Item | Implementation (committed) | Regression tests (passing) |
+|---|---|---|
+| `#prompt-preempts-auto-queue` | `session_check::unresolved_exchange_prompt` + snapshot-independent detection, wired into `run.rs` precedence (prefers unresolved exchange prompt over queue synthetic head) | `unresolved_exchange_prompt_*` ×5 |
+| `#queue-user-edit-overwrite` | `check_dropped_queue_prompt_guard` + `check_queue_head_removal_guard` + `cycle_state::record_dropped_queue_prompts` provenance + `write.rs` `dropped_queue_prompt_lines_after_content_ours` | `session_check_*_dropped_queue_*` + `queue_head_removal_guard_*` ×7 |
+| `#jb-run-agent-doc-response-queue-contamination` | `queue::Freeform` (contamination inert at dispatch) + `check_queue_response_contamination_guard` (rejects `### Re:` prose in queue) | `queue_contamination_guard_*` ×3 |
+
+I ran the 15 regression tests just now — all pass. No `todo!()`/stubs; detection **and** prevention paths are present.
+
+#### What this means for the roadmap
+Most of Path C (`#qasm`) is in the same state — **code-complete, gated on live verification**, not awaiting agent implementation. Spot-check: `#exchange-prompt-dropped-on-merge` (guard implemented), `#do-id-partial-closeout-state` ("WARN guard landed"), `#t41j` ("fix landed"), `#adoc-queue-ipc-buffer-divergence` ("IMPLEMENTED"), the feature pair `#backlog-queue-sync-attribute`/`#backlog-priority-attribute` (`queue::sync_backlog_into_queue` modes + `sort_prompts_by_priority` exist; this very backlog uses `priority queue=prepend`). So Path C is **not** ~18 fresh fixes — it's mostly verification work that belongs with Path A/B.
+
+The genuinely *unimplemented* agent-executable remainder is small:
+- `#preset-item-id-collision-enforce` — the deferred "riskier half" (escalate preflight warning → hard mutation-time rejection).
+- `#free-text-queue-skip-diagnostic` — a one-line closeout-message polish.
+
+#### Reassess (as agreed)
+The queue-provenance cluster needs **live verification**, which I can't drive from here — so it folds into the Path A/B operator sessions rather than a separate agent run. I left `#xt3v` in the queue and did **not** mark it done (its premise — fresh implementation — doesn't hold). Two real choices:
+
+1. **I implement the small genuinely-unimplemented items now** (`#free-text-queue-skip-diagnostic`, then `#preset-item-id-collision-enforce`) at full quality — that's actual agent work that exists.
+2. **Re-scope `#xt3v`**: I rewrite it to "live-verify the already-implemented Path C guards" (operator) + a short backlog of only the truly-unimplemented items, so the queue reflects reality.
+
+Tell me **1**, **2**, or both. I paused the auto-queue rather than loop into `#v819`/`#wy0y` (operator-only) or re-doing finished work.
+<!-- agent:boundary:86f24c41 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -62,6 +89,7 @@ preset #spec-test-build-install-commit-push
 - [#xt3v]
 - [#v819]
 - [#wy0y]
+- [#ynra]
 <!-- /agent:queue -->
 ###
 <!--
@@ -91,6 +119,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 - [ ] [#xt3v] Path C (#qasm — agent-executable now, no live pane): implement the no-live-pane review items in priority order — queue-provenance cluster (#prompt-preempts-auto-queue, #queue-user-edit-overwrite, #jb-run-agent-doc-response-queue-contamination) -> Option-A fixes (#cancel-orphans-preflight-cycle, #exchange-prompt-dropped-on-merge, #duplicate-response-after-commit) -> closeout-guard hardening (#do-id-partial-closeout-state, #preset-item-id-collision-enforce, #queue-clear-unrun-items, #free-text-queue-skip-diagnostic) -> feature pair (#backlog-priority-attribute, #backlog-queue-sync-attribute) -> hygiene/UX (#stash-session-ttl-prune, #plugin-cleanup-menu-command, #clear-stops-running-process, #jb-stale-busy-idle-footer, #snrun, #4a6p, #nbsearch, #gscaccess).
 - [ ] [#v819] Path A (#jkvs — after Step 0): one consolidated live busy-pane verification session to batch-close ~11 live-verify items: #t41j, #jb-busy-queue-deadlock-live-verify, #jb-run-agent-doc-busy-feedback-live-verify, #route-drain-all-surface-live-verify, #codex-owned-pane-stop-hook-live-verify, #codex-owned-pane-prompt-miss-followups (2b/3), #codex-final-response-live-verify, #recovery-drift-apply-live-verify, #jb-load-tmux-window-verify, #j0k8, #stash-pane-promote-on-focus.
 - [ ] [#wy0y] Path B (#6cmx — after Step 0): one IPC/typing-corruption capture session with #com.github.btakita.agentdoc debug logging enabled to capture the setText payload, then repro #ipcfullprompt-recur2, #finalize-retry-ipc-response-duplication, #ipc-dup-tracking-double-merge, #adoc-queue-ipc-buffer-divergence, #duplicate-response-after-commit, #prompt-duplicated-while-typing, and the scaffold-dup set #zpc2 / #ipcaa-scaf / #submodule-response-commit-proof. Several convert from verify to one CURE commit once the payload is captured.
+- [ ] [#ynra] [recommended][agent-doc-bug] Queue re-mints resolved `do [#…]` items (#na3x/#yqkg/#t5vx) that already live in agent:done; preflight auto-strikes them each cycle (source=done) and drains the queue, but they keep reappearing. File/fix against agent-doc so completed queue refs are not re-injected into agent:queue.
 <!-- /agent:backlog -->
 
 ## Review

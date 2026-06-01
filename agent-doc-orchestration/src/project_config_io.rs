@@ -32,19 +32,9 @@ pub fn load_project_for_doc(file: &Path) -> ProjectConfig {
 }
 
 /// Resolve the nearest project root for a document by walking up to `.agent-doc/`.
+/// Delegates to [`crate::fs_util::find_project_root`].
 pub fn project_root_for_doc(file: &Path) -> Option<PathBuf> {
-    let start = file.parent().unwrap_or(file);
-    let mut current = start;
-    loop {
-        if current.join(".agent-doc").is_dir() {
-            return Some(current.to_path_buf());
-        }
-        match current.parent() {
-            Some(p) if p != current => current = p,
-            _ => break,
-        }
-    }
-    None
+    crate::fs_util::find_project_root(file)
 }
 
 /// Load project config from an explicit path. On absence, I/O error, or

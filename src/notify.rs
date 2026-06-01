@@ -87,15 +87,9 @@ fn format_notification(message: &str, source: Option<&str>, affects: Option<&str
 }
 
 /// Find the project root by walking up from a file path looking for `.agent-doc/`.
+/// Delegates to [`agent_doc_orchestration::fs_util::find_project_root_canonical`].
 fn find_project_root(file: &Path) -> Option<std::path::PathBuf> {
-    let canonical = file.canonicalize().ok()?;
-    let mut dir = canonical.parent()?;
-    loop {
-        if dir.join(".agent-doc").is_dir() {
-            return Some(dir.to_path_buf());
-        }
-        dir = dir.parent()?;
-    }
+    agent_doc_orchestration::fs_util::find_project_root_canonical(file)
 }
 
 /// Ensure the document has an `agent:pending` component; create one if absent.

@@ -144,17 +144,9 @@ fn canonicalize_dir(candidate: &Path, base: Option<&Path>, context_label: &str) 
 /// Returns the containing directory on hit. Returns `None` if the walk
 /// reaches the filesystem root without finding `.agent-doc/`.
 ///
-/// This mirrors `snapshot::find_project_root` but is duplicated here so the
-/// supervisor module stays self-contained — it will be called from a
-/// supervisor process that may not have a snapshot path available yet.
+/// Delegates to [`crate::fs_util::find_project_root`].
 fn find_project_root(start: &Path) -> Option<PathBuf> {
-    let mut current: &Path = start;
-    loop {
-        if current.join(".agent-doc").is_dir() {
-            return Some(current.to_path_buf());
-        }
-        current = current.parent()?;
-    }
+    crate::fs_util::find_project_root(start)
 }
 
 #[cfg(test)]

@@ -13,6 +13,13 @@ pub fn find_project_root(path: &Path) -> Option<PathBuf> {
     }
 }
 
+/// Canonicalize `path` first, then delegate to [`find_project_root`].
+/// Returns `None` if canonicalization fails or no `.agent-doc` ancestor exists.
+pub fn find_project_root_canonical(path: &Path) -> Option<PathBuf> {
+    let canonical = path.canonicalize().ok()?;
+    find_project_root(&canonical)
+}
+
 pub fn read_optional_text(path: &Path) -> Result<Option<String>> {
     read_optional(path, |path| std::fs::read_to_string(path))
 }

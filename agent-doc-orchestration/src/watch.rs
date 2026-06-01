@@ -270,7 +270,7 @@ pub fn ensure_running() -> Result<bool> {
 pub fn start(config: &Config, watch_config: WatchConfig) -> Result<()> {
     // Resolve project root and cd there (critical for finding .agent-doc/)
     let cwd = std::env::current_dir().unwrap_or_default();
-    if let Some(root) = find_project_root(&cwd)
+    if let Some(root) = crate::fs_util::find_project_root(&cwd)
         && root != cwd
     {
         std::env::set_current_dir(&root)
@@ -747,17 +747,6 @@ pub fn status() -> Result<()> {
         }
     }
     Ok(())
-}
-
-/// Find the project root by walking up from `path` looking for `.agent-doc/`.
-fn find_project_root(path: &Path) -> Option<PathBuf> {
-    let mut current = if path.is_file() { path.parent()? } else { path };
-    loop {
-        if current.join(".agent-doc").is_dir() {
-            return Some(current.to_path_buf());
-        }
-        current = current.parent()?;
-    }
 }
 
 #[cfg(test)]

@@ -989,19 +989,18 @@ fn create_pre_compact_tag(file: &Path, tag_override: Option<&str>) -> Result<()>
 }
 
 /// Find project root by walking up to find `.agent-doc/`.
+/// Delegates to [`crate::fs_util::find_project_root_canonical`] with a
+/// fallback to the file's parent directory when no `.agent-doc/` is found.
 fn find_project_root(file: &Path) -> Result<std::path::PathBuf> {
-    let canonical = file
-        .canonicalize()
-        .with_context(|| format!("failed to canonicalize {}", file.display()))?;
-    let mut dir = canonical.parent();
-    while let Some(d) = dir {
-        if d.join(".agent-doc").is_dir() {
-            return Ok(d.to_path_buf());
+    match crate::fs_util::find_project_root_canonical(file) {
+        Some(root) => Ok(root),
+        None => {
+            let canonical = file
+                .canonicalize()
+                .with_context(|| format!("failed to canonicalize {}", file.display()))?;
+            Ok(canonical.parent().unwrap_or(Path::new(".")).to_path_buf())
         }
-        dir = d.parent();
     }
-    // Fallback to file's parent
-    Ok(canonical.parent().unwrap_or(Path::new(".")).to_path_buf())
 }
 
 /// Generate a compact timestamp for archive filenames.

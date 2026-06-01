@@ -937,15 +937,9 @@ pub extern "C" fn agent_doc_version() -> *mut c_char {
 }
 
 /// Walk up from `path` to find the nearest ancestor containing `.agent-doc/`.
-/// Mirrors `snapshot::find_project_root` (binary crate) for the library crate.
+/// Delegates to [`agent_doc_orchestration::fs_util::find_project_root`].
 fn find_project_root_ffi(path: &std::path::Path) -> Option<std::path::PathBuf> {
-    let mut current = if path.is_file() { path.parent()? } else { path };
-    loop {
-        if current.join(".agent-doc").is_dir() {
-            return Some(current.to_path_buf());
-        }
-        current = current.parent()?;
-    }
+    agent_doc_orchestration::fs_util::find_project_root(path)
 }
 
 /// Resolve a file's agent-doc project root and the path relative to that root.

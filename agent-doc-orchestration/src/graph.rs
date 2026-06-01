@@ -258,6 +258,7 @@ impl ActorContext {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
     use tempfile::TempDir;
 
     fn setup_project(dir: &Path) -> PathBuf {

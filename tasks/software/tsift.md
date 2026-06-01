@@ -48,8 +48,32 @@ But that is still backend-eval/prototype parity. It is not promoted to SQLite-eq
 So I would treat it as: `SurrealDB is parity-checked and currently passes the measured read/query parity suite; SQLite remains the stable baseline and default until SurrealDB passes the production adapter and performance gates.`
 
 Evidence checked: `SPEC.md`, `packages/tsift-cli/src/lib.rs`, and `packages/tsift-cli/tests/graph_db_conformance.rs`. No repo files changed.
-<!-- agent:boundary:03031379 -->
+❯ What is the performance of SurrealDB compared to SQLite?
+
+### Re: SurrealDB performance — gpt-5
+
+I ran the local backend-eval comparison with `--candidate surrealdb`, including the opt-in `--full-projection` gate. The result is: SurrealDB still passes parity, but it does not beat SQLite overall in the promotion-relevant workloads.
+
+Latest `--full-projection` totals:
+
+| dataset | SQLite | SurrealDB | result |
+| --- | ---: | ---: | --- |
+| real | 17.6 ms | 375.2 ms | SurrealDB ~21x slower |
+| synthetic_high_degree | 17.6 ms | 9.2 ms | SurrealDB ~1.9x faster |
+| synthetic_deep_chain | 15.7 ms | 6.4 ms | SurrealDB ~2.5x faster |
+| full_projection | 38.4 s | 50.7 s | SurrealDB ~1.3x slower |
+
+The important detail is the operation mix. SurrealDB wins some synthetic totals because its prototype load/refresh path is cheaper there, and it is faster on some deep-chain path/evidence-style operations. But it loses badly on the operations that matter for replacing SQLite on the real/full graph: full-projection `edge_lookup` was 4.30 s vs SQLite 13.2 ms, `edge_property_scan` was 2.00 s vs 27.7 ms, `incident_edges` was 3.62 s vs 0.39 ms, `related` was 24.5 s vs 19.3 ms, and path probes were seconds vs tens of microseconds.
+
+So the current conclusion is: `SurrealDB is parity-correct but not performance-competitive enough to promote.` The backend-eval promotion decision remains `hold`, with the explicit gate still requiring a real optional adapter, provider-neutral projection writes/load, SQLite parity on real and full-projection datasets, matching-or-better lock behavior, install portability, and faster-than-SQLite results across the required workloads.
+
+Commands run: `tsift status`, `agent-doc preflight`, `agent-doc plan`, `tsift graph-db --path /home/brian/work/btakita/agent-loop/tasks/software/tsift.md --json backend-eval --candidate surrealdb --target gval`, and the same backend-eval command with `--full-projection`. No repo code files were changed.
+<!-- agent:boundary:51a5db8b -->
 <!-- /agent:exchange -->
+###
+<!--
+What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
+-->
 
 ## Queue
 

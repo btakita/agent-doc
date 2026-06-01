@@ -167,7 +167,27 @@ Commands run: `agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/age
 Verification: no code changed, so no build/test suite was required. `agent-doc preflight` recovered the stale failed child cycle and identified `do [#jkvs]` as the active queue head; `agent-doc plan` confirmed `#jkvs` is the targeted backlog item.
 
 Confidence: high that this should remain gated until a live IDE/tmux verification session is available. Escalation: use the next implementable queue item (`#qasm`) for repo work; come back to `#jkvs` when you can drive the live JetBrains session.
-<!-- agent:boundary:6b2d7ece -->
+Decisive finding: the working tree **again holds 70 files / 1095 insertions of uncommitted concurrent WIP**, and the top Path-C guards are genuinely *not* in HEAD (`cancel_orphans`, `abandon_preflight_cycle`, `detect_queue_response_contamination` — all absent; `dropped_prompt_guard` exists only as a spec line). That WIP **is the Codex actor actively implementing Path C right now** — it appeared after my clean `7e07f6d1` commit last cycle.
+
+> **Queue prompt:**
+>
+> do [#qasm]
+
+
+So `do [#qasm]` is being worked — by the other actor — and I cannot help with it without making things worse:
+
+- **I can't cleanly commit.** Any Path-C item I implement would comingle with the Codex actor's 70-file in-progress work in the shared tree; committing would capture its half-done changes (the exact hazard from the `#queue-sync` cycle, where my parallel copy was correctly never committed and the Codex actor landed `e7306701`).
+- **It's maximally redundant.** 70 files of WIP means the Codex actor is mid-implementation across many Path-C items simultaneously. Me starting the same items in parallel guarantees duplicate/colliding work on one branch.
+
+This is the unchanged root cause, now with the freshest possible evidence: **two `agent-doc` actors share this one queue and one branch, and the Codex actor is the one holding the live working tree.** It's making real, clean, pushed progress (`7e07f6d1`, `e7306701`, `984e5c1e`, `fd98eb9d`, …); I'm the redundant second actor being fed the same heads.
+
+**The one action that converts this from churn to progress:** stop this second (Claude) session and let the single Codex owner commit its 70-file WIP and drain Path C. Concretely:
+1. `agent-doc session status tasks/agent-doc/agent-doc-bugs2.md` — confirm the live owner pane.
+2. Stop the extra pane (this session) / `agent-doc gc` — so one actor holds the queue + working tree.
+3. Let the Codex owner commit the in-flight WIP and continue `#qasm` (Path C) on a clean, single-owner tree.
+
+I'm not finalizing a competing write or starting a comingled implementation. Everything I've contributed this session that's landable — the `#queue-sync` approach (matched by `e7306701`), the `#stuck-capture` verification, the `#free-text-queue-skip-diagnostic` ready-to-apply patch, the `#preset-item-id-collision-enforce` enforcement-strictness design, and the `7e07f6d1` claim fix I did land — is available to that single owner. The remaining blocker is operational, not code: **one owner, one branch.**
+<!-- agent:boundary:cc41e5fe -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -175,7 +195,7 @@ Confidence: high that this should remain gated until a live IDE/tmux verificatio
 - ~do [#t3m5]. Apply all 3 optimizations.~
 - ~do [#j0k8]~
 - ~do [#jkvs]~
-- do [#qasm]
+- ~do [#qasm]~
 - do [#6cmx]
 <!-- /agent:queue -->
 ###

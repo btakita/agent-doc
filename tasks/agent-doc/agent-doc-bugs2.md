@@ -36,7 +36,46 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 3 response topic(s): What are #next-steps to complete review items?; Add the #next-steps to complete review items into the backlog; I added awear.md but don't see the claiming tmux pane
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:ac1d013d -->
+❯ JB `Run Agent Doc` takes several seconds to dispatch the task. How can we improve the latency?
+❯ #spec-test-build-install-commit-push
+### Re: JB `Run Agent Doc` dispatch latency — opus-4-8
+
+I traced the full `Run Agent Doc` → dispatch path and found one dominant, fixable cost plus a few smaller ones. Fixed the big one this cycle.
+
+#### The dispatch path
+
+`SubmitAction.actionPerformed` (JB) → `TypingTracker.awaitIdle` (FFI, 500ms debounce) → `saveAllDocuments()` → `TerminalUtil.sendToTerminal` → spawns `agent-doc route --dispatch-only --plain-trigger --wait-for-ready 60 <doc>` → binary `await_idle` → pane dispatch.
+
+#### Root cause: a redundant double debounce (fixed)
+
+The plugin already waits for typing to settle **in-process** via the FFI typing tracker, then calls `saveAllDocuments()` — which **bumps the file mtime** — immediately before spawning `route`. The binary's `await_idle` (default `--debounce 500`) required **both** mtime idle **and** the cross-process typing indicator idle. So the editor's own pre-route save re-triggered a fresh ~500ms mtime settle inside `route`, on top of the plugin's own 500ms wait. That's the "several seconds" — roughly a full extra debounce (plus process spawn) spent waiting on the editor's *own* write.
+
+Key insight: the typing indicator is written **only on real keystrokes**, never on save. So an *idle* indicator already proves the user stopped typing; the fresh mtime is just the editor's save.
+
+**Fix** (`#jb-run-agent-doc-double-debounce`):
+- New tri-state `debounce::typing_indicator_status` → `Absent` / `Active` / `Idle` (the old `is_typing_via_file` collapsed `Idle` and `Absent` into one `false`).
+- `route::await_idle_with_max_wait` now: **Idle** indicator → dispatch immediately (skip the mtime settle); **Active** → keep waiting; **Absent** (CLI / direct-disk caller, no plugin) → fall back to the mtime debounce as the fail-closed guard.
+
+This removes ~500ms–1s from every editor-triggered dispatch while preserving the "never dispatch mid-typing" invariant and CLI fail-closed behavior.
+
+#### Files
+- `agent-doc-orchestration/src/debounce.rs` — `TypingIndicatorStatus` + `typing_indicator_status`; `is_typing_via_file` now delegates.
+- `agent-doc-orchestration/src/route.rs` — `await_idle_with_max_wait` trusts an idle editor indicator.
+- `agent-doc-orchestration/src/route/tests.rs` — `route_dispatches_immediately_when_idle_typing_indicator_present_despite_fresh_mtime` (asserts return < 50ms despite a freshly-bumped mtime). Existing `route_debounce_*` tests still pass.
+- `specs/11-debounce.md` — Route Quiescence rewritten around the tri-state model.
+
+#### Verification
+- `make check` green (clippy + full suite, ~4350 lines, 0 FAILED). New + existing route debounce tests pass.
+- `cargo build --release` + `cargo install --path .` — both `.bin/agent-doc` (release symlink) and `~/.cargo/bin/agent-doc` (tmux-spawned) refreshed.
+- Committed + pushed to `20260422/codex-agent-backend` (`6d191f1f`). CI run `26742691083` queued at push time — local verification stands as the gate; flag if CI surfaces anything.
+
+#### Smaller wins left (queued as a recommended backlog item)
+1. `send_command_unchecked` sleeps **300ms before** the first acceptance capture (sleep-then-check) — check first to let a fast pane return immediately.
+2. `wait_for_agent_ready` polls every 500ms and needs a 2-streak → a ~500ms–1s "ready" floor; a ~150ms poll keeping the streak cuts that.
+3. The plugin could pass `route --debounce 0` (it already awaited idle via FFI) for belt-and-suspenders, though the binary fix above already neutralizes the redundant wait.
+
+These are lower-impact and touch hotter pane-timing code, so I left them for a focused follow-up rather than bundling them into this change.
+<!-- agent:boundary:29765c8f -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
@@ -70,6 +109,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog priority queue=prepend -->
+- [ ] [#t3m5] [recommended] Trim remaining Run Agent Doc dispatch latency: (a) send_command_unchecked sleeps 300ms BEFORE the first capture-pane acceptance check (sleep-then-check) — capture first so a fast pane returns immediately; (b) wait_for_agent_ready polls every 500ms and needs a 2-streak, a ~500-1000ms ready floor — drop the poll interval to ~150ms keeping the streak; (c) JB plugin could pass route --debounce 0 since it already awaited idle via FFI before saving. See src/agent-doc/agent-doc-orchestration/src/route.rs.
 - [ ] [#j0k8] [recommended] Live-verify the cross-root claim guard (submodule 822688d0): from the superproject root, claim/open a new document from inside a pane already running a different document's submodule agent-doc/codex session, and confirm claim provisions a NEW pane (logs '[claim] pane ... runs a live agent-doc/codex session for another document') instead of aliasing onto it. Also confirm the awear.md recovery restores a real pane. cmdline_owns_other_document is unit-tested; this is the live-pane edge.
 - [ ] [#jkvs] [recommended] Path A — run one consolidated live busy-pane verification session to batch-close the live-verify-gated review items: install the current signed JB plugin + restart the route-owned agent-doc process, then drive one mid-active-turn pane through #t41j, #jb-busy-queue-deadlock-live-verify, #jb-run-agent-doc-busy-feedback-live-verify, #route-drain-all-surface-live-verify, #codex-owned-pane-stop-hook-live-verify, #codex-owned-pane-prompt-miss-followups (2b/3), #codex-final-response-live-verify, #recovery-drift-apply-live-verify, #jb-load-tmux-window-verify.
 - [ ] [#qasm] [recommended] Path C — work the no-live-pane implementable review items in priority order: #free-text-queue-skip-diagnostic, #queue-auto-no-continue, then the queue-provenance cluster (#prompt-preempts-auto-queue, #queue-user-edit-overwrite, #jb-run-agent-doc-response-queue-contamination), the Option-A fixes (#cancel-orphans-preflight-cycle, #exchange-prompt-dropped-on-merge, #duplicate-response-after-commit), closeout-guard hardening (#do-id-partial-closeout-state, #preset-item-id-collision-enforce, #queue-clear-unrun-items), the feature pair (#backlog-priority-attribute, #backlog-queue-sync-attribute), then hygiene/UX (#stash-session-ttl-prune, #plugin-cleanup-menu-command, #stash-pane-promote-on-focus, #clear-stops-running-process, #jb-stale-busy-idle-footer, #snrun).

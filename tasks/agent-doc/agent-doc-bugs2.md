@@ -36,17 +36,34 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 10 response topic(s): do [#6cmx]; ignored previous prompt and incomplete closeout; agent-doc ignored my previous prompt; 7 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:6c5a8154 -->
+❯ JB error
+```
+agent-doc command failed (exit 1): Error: managed Codex capability proof failed; prompt dispatch is disabled: codex child network probe timed out after 45s; stderr=Reading prompt from stdin... 2026-06-01T05:23:03.072189Z ERROR codex_core::tools::router: error=apply_patch verification failed: Failed to find expected lines in /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md: - ~do [#preset-item-id-collision-enforce]~ - ~do [#free-text-queue-skip-diagnostic]~ - do [#do-id-partial-closeout-state] 2026-06-01T05:29:43.727680Z ERROR codex_core::tools::router: error=apply_patch verification failed: Failed to find expected lines in /home/brian/work/btakita/agent-loop/src/agent-doc/agent-doc-orchestration/src/write.rs: } fn should_consume_queue_prompt_for_diff_content( 2026-06-01T05:30:40.447726Z ERROR codex_core::tools::router: error=apply_patch verification failed: Failed to find expected lines in /home/brian/work/btakita/agent-loop/src/agent-doc/tests/finalize_integration.rs: ); } #[test] fn write_commit_empty_stdin_repair_preserves_active_auto_queue_and_owned_scratch_comment() {
+```
+❯ #spec-test-build-install-commit-push
+
+### Re: JB error — managed Codex capability proof / dispatch disabled — opus-4-8
+
+Diagnosed. This is a real, important bug — but it lives in the live-supervisor + network-probe + IPC-gate + recovery path, where a blind one-shot fix can wedge sessions *worse*. So I've written a precise plan and a backlog item rather than rush code through build/install/commit/push I can't fully verify. I'm being explicit about deviating from `#spec-test-build-install-commit-push` here because shipping a half-understood change to this gate is the wrong trade.
+
+#### What the error actually is (two defects + one non-defect)
+1. **No retry → permanent wedge.** The capability proof runs a 45s network probe in a supervisor thread (`start.rs` ~1556). On failure it sets the dispatch gate to **`Failed` permanently** (`~1579`) — no bounded retry, no re-prove on network recovery. Every dispatch path (`auto_trigger_inject_command` ~1082, `IpcMethod::Inject` ~2120) is then refused until a manual `start`. A transient blip disables the whole session.
+2. **Recovery is itself blocked.** I hit this live earlier: with the gate `Failed`, **both** `session clear` and `session interrupt-clear` fail with the *same* `prompt dispatch is disabled … 45s` error (the `Reading prompt from stdin…` codex stderr confirms a managed proof ran during the recovery command). The documented recovery (`agent-doc start`) and the stop commands all route through the gate — so there's no managed way out, and I had to `kill`/`tmux kill-pane` the tsift tree by hand.
+3. **Not an agent-doc bug:** the `apply_patch verification failed: Failed to find expected lines …` lines are **Codex-internal** (the gpt-5 agent's own patch tool failing on stale context) — a downstream symptom of the wedged turn, not a patch bug to fix here.
+
+#### What I need from you: pick the scope
+Plan: `tasks/agent-doc/plan-codex-capability-proof-unrecoverable.md`. Two independently-shippable pieces:
+- **(A) bounded re-prove** instead of permanent `Failed` (+ configurable timeout) — heals transient blips, but changes startup-readiness latency and the probe shells out to the network so deterministic test coverage is limited to the back-off decision helper.
+- **(B) operator stop/clear/interrupt/recovery bypasses the dispatch gate** — the higher-value fix (makes a wedged session recoverable without `kill -9`); needs a careful audit of the clear/interrupt IPC paths + a gate-exempt control channel.
+
+Tell me **A**, **B**, or **both** and I'll implement + test + install + commit that scope. I didn't want to guess which behavior change you want in this area. Backlog item `#codex-capability-proof-unrecoverable` queued with the plan.
+<!-- agent:boundary:c937e420 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
 <!-- /agent:queue -->
 ###
 <!--
-```
-agent-doc command failed (exit 1): Error: managed Codex capability proof failed; prompt dispatch is disabled: codex child network probe timed out after 45s; stderr=Reading prompt from stdin... 2026-06-01T05:23:03.072189Z ERROR codex_core::tools::router: error=apply_patch verification failed: Failed to find expected lines in /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md: - ~do [#preset-item-id-collision-enforce]~ - ~do [#free-text-queue-skip-diagnostic]~ - do [#do-id-partial-closeout-state] 2026-06-01T05:29:43.727680Z ERROR codex_core::tools::router: error=apply_patch verification failed: Failed to find expected lines in /home/brian/work/btakita/agent-loop/src/agent-doc/agent-doc-orchestration/src/write.rs: } fn should_consume_queue_prompt_for_diff_content( 2026-06-01T05:30:40.447726Z ERROR codex_core::tools::router: error=apply_patch verification failed: Failed to find expected lines in /home/brian/work/btakita/agent-loop/src/agent-doc/tests/finalize_integration.rs: ); } #[test] fn write_commit_empty_stdin_repair_preserves_active_auto_queue_and_owned_scratch_comment() {
-```
----
 Verify [#ipcfullprompt-recur2]
 ---
 The last run had a code fence stripped away by agent-doc.
@@ -71,6 +88,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog priority queue=prepend -->
+- [ ] [#codex-capability-proof-unrecoverable] [recommended] #agent-doc-bug 2026-06-01: a failed managed Codex capability proof (codex child network probe timeout, 45s) sets the dispatch gate to Failed permanently with no retry/re-prove (start.rs ~1579), and session clear / interrupt-clear / the start recovery path all fail with the same 'prompt dispatch is disabled' error, so a network-wedged session is un-recoverable without kill -9. Fix: (A) bounded re-prove instead of permanent Failed + configurable timeout; (B) operator stop/clear/interrupt/recovery must bypass the dispatch gate. Plan: tasks/agent-doc/plan-codex-capability-proof-unrecoverable.md.
 <!-- /agent:backlog -->
 
 ## Review

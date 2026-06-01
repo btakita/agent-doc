@@ -9,7 +9,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -151,7 +151,80 @@ The watch daemon's reactive file-watching (zero debounce for CRDT docs) becomes 
 
 **Migration path:** Define the slot functions in `agent-doc-core` (no `std::fs` — slot bodies call the existing I/O wrappers). CLI `main.rs` creates a throwaway context. Actor structs hold a persistent one. The existing function signatures stay available as non-context entry points for backward compat during migration.
 Add #next-steps to begin integration of lazily-rs. Find areas where lazily-rs can help with performance.
-<!-- agent:boundary:aa8b4caa -->
+
+### Re: lazily-rs next steps — gpt-5
+
+Codebase audit found significant redundancy. Key metrics:
+
+| Operation | Estimated redundant calls per cycle | Type |
+|-----------|-------------------------------------|------|
+| `find_project_root()` (directory walk) | 129+ | stat walk per call |
+| `canonicalize()` | 303+ | syscall per call |
+| `doc_hash()` (SHA-256 + canonicalize) | 73+ | syscall + CPU |
+| `frontmatter::parse()` / `parse_for_file()` | 124+ | YAML parse + I/O |
+| `load_project_for_doc()` (TOML read + parse) | 18+ | file read + parse |
+| `config::load()` (global config) | 5-10+ | file read + TOML parse |
+
+The dependency chain is:
+
+```
+file: Path
+  → canonicalize() → PathBuf
+    → find_project_root() → Option<PathBuf>
+      → load_project_config() → ProjectConfig
+      → load_global_config() → Config
+    → doc_hash() → String
+      → snapshot_path, lock_path, crdt_path, baseline_path, pending_path (all derived)
+  → read_to_string() → content
+    → frontmatter::parse() → (Frontmatter, body)
+      → resolve_mode(), ssh_targets, harness config
+```
+
+#### Recommended lazily-rs Context Shape
+
+| Slot | Input | Value | Invalidation trigger |
+|------|-------|-------|---------------------|
+| `canonical_path` | `&Path` | `PathBuf` | Never (within run) |
+| `project_root` | `&PathBuf` (canonical) | `Option<PathBuf>` | Never (CLI run); on file-tree change (Actor) |
+| `doc_hash` | `&PathBuf` (canonical) | `String` | Never (path is immutable within run) |
+| `global_config` | `()` | `Config` | Never (CLI); on SIGHUP (Actor) |
+| `project_config` | `&PathBuf` (root) | `ProjectConfig` | Never (CLI); on config file change (Actor) |
+| `frontmatter` | `&str` (content) | `(Frontmatter, &str)` | On file content change |
+| `snapshot_path` | `(&str hash, &PathBuf root)` | `PathBuf` | Never |
+| `ssh_context` | `(&Path, &ProjectConfig)` | `Vec<String>` | When config changes |
+
+#### Priority Order
+
+**P0 — Highest impact, leaf nodes (no upstream deps beyond file path):**
+
+1. `canonical_path` — eliminate 303 redundant syscalls
+2. `find_project_root` — eliminate 129 directory walks
+3. `doc_hash` — eliminate 73 SHA-256 + canonicalize recomputations
+4. `frontmatter::parse` — eliminate 124 YAML re-parses
+
+**P1 — Mid-level derived slots:**
+
+5. `load_project_for_doc` — depends on project_root
+6. `config::load` — global, no deps
+7. `resolve_ssh_context_inputs` — depends on canonical + project_root + project_config
+8. `snapshot::path_for` — depends on doc_hash + project_root
+
+**P2 — Actor/long-lived process integration:**
+
+9. Watch daemon `discover_entries()` — persistent Context, invalidate on file-tree change
+10. `SupervisorShared` — cache Config + ProjectConfig + Frontmatter across child restarts
+11. `session_actor` operations — persistent Context for canonicalize + project_root
+12. Route `run_with_tmux()` — Context scoped to tab-switch burst
+
+#### Implementation Sequence
+
+1. Add `lazily-rs` to `agent-doc-orchestration/Cargo.toml`
+2. Define slot functions in a new `context.rs` module in `agent-doc-orchestration/src/`
+3. Create a `Context` in `main.rs` / each CLI entry point (throwaway lifetime)
+4. Thread `&Context` through the P0 hot path: `preflight → diff → write → finalize`
+5. Deduplicate the 8+ copies of `find_project_root` into the single slot
+6. Add persistent `Context` to `SupervisorShared` and `WatchEntry` (P2)
+<!-- agent:boundary:7f417e36 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -159,8 +232,7 @@ Add #next-steps to begin integration of lazily-rs. Find areas where lazily-rs ca
 
 ## Pending / Not Built
 
-<!-- agent:queue auto -->
-- Add #next-steps to begin integration of lazily-rs. Find areas where lazily-rs can help with performance.
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

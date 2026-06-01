@@ -152,6 +152,20 @@ pub fn run(
     no_git: bool,
     config: &Config,
 ) -> Result<()> {
+    run_with_context(file, branch, agent_name, model, dry_run, no_git, config, None)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn run_with_context(
+    file: &Path,
+    branch: bool,
+    agent_name: Option<&str>,
+    model: Option<&str>,
+    dry_run: bool,
+    no_git: bool,
+    config: &Config,
+    run_context: Option<&crate::graph::RunContext>,
+) -> Result<()> {
     let mut create_branch = branch;
     let mut completed_queue_items = 0usize;
 
@@ -164,6 +178,7 @@ pub fn run(
             dry_run,
             no_git,
             config,
+            run_context,
         )?;
         create_branch = false;
 
@@ -179,6 +194,7 @@ pub fn run(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_once(
     file: &Path,
     branch: bool,
@@ -187,6 +203,7 @@ fn run_once(
     dry_run: bool,
     no_git: bool,
     config: &Config,
+    run_context: Option<&crate::graph::RunContext>,
 ) -> Result<RunCycleOutcome> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
@@ -216,7 +233,15 @@ fn run_once(
         std::fs::write(file, &content_original)?;
     }
     content_original = normalize_direct_run_prompt_prefixes(file, &content_original, &the_diff)?;
-    let (fm, _body) = frontmatter::parse_for_file(&content_original, file)?;
+    let owned_rc;
+    let rc: &crate::graph::RunContext = if let Some(provided) = run_context {
+        provided.set_file_path(file.to_path_buf());
+        provided
+    } else {
+        owned_rc = crate::graph::RunContext::new(file.to_path_buf());
+        &owned_rc
+    };
+    let (fm, _body) = frontmatter::parse_for_file_with_context(&content_original, file, rc)?;
     let run_mode = RunMode::from_frontmatter(&fm);
 
     // Resolve agent
@@ -471,7 +496,8 @@ enum ActiveQueuePromptState {
 fn active_queue_prompt_state(file: &Path) -> Result<ActiveQueuePromptState> {
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
-    let (fm, _) = frontmatter::parse_for_file(&content, file)?;
+    let rc = crate::graph::RunContext::new(file.to_path_buf());
+    let (fm, _) = frontmatter::parse_for_file_with_context(&content, file, &rc)?;
     if fm.queue_active != Some(true) {
         return Ok(ActiveQueuePromptState::Inactive);
     }

@@ -5,10 +5,9 @@
 //! lookups (`project_root`, `project_config`, etc.) behind a reactive
 //! dependency graph. Within a CLI run, each slot computes at most once.
 //!
-//! For long-lived contexts (watch daemon, supervisor), use [`ActorContext`]
-//! (Phase 5 — not yet implemented), which adds explicit invalidation via
-//! `SlotHandle::clear()` / `CellHandle::clear_dependents()` on file/config
-//! change events.
+//! For long-lived contexts (watch daemon, supervisor), use [`ActorContext`],
+//! which adds explicit invalidation via `SlotHandle::clear()` /
+//! `CellHandle::clear_dependents()` on file/config change events.
 //!
 //! Slot graph:
 //!
@@ -26,13 +25,18 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use agent_doc_core::component::{self, Component};
+use agent_doc_core::frontmatter::{self, Frontmatter};
 use agent_doc_core::project_config::ProjectConfig;
+use hex;
 use lazily::{CellHandle, Context, SlotHandle};
+use sha2::{Digest, Sha256};
 
 use crate::fs_util;
 use crate::project_config_io;
 
 pub type FilePathCell = CellHandle<PathBuf>;
+pub type DocContentCell = CellHandle<String>;
 pub type CanonicalPathSlot = SlotHandle<PathBuf>;
 pub type ProjectRootSlot = SlotHandle<Option<PathBuf>>;
 pub type ConfigPathSlot = SlotHandle<Option<PathBuf>>;
@@ -40,6 +44,9 @@ pub type ProjectConfigSlot = SlotHandle<Arc<ProjectConfig>>;
 pub type SnapshotPathSlot = SlotHandle<Option<PathBuf>>;
 pub type DocRelativeSlot = SlotHandle<Option<String>>;
 pub type SshContextSlot = SlotHandle<Arc<SshContextValue>>;
+pub type FrontmatterSlot = SlotHandle<Arc<Frontmatter>>;
+pub type ComponentsSlot = SlotHandle<Arc<Vec<Component>>>;
+pub type DocHashSlot = SlotHandle<String>;
 
 pub struct SshContextValue {
     pub config: Arc<ProjectConfig>,
@@ -49,6 +56,7 @@ pub struct SshContextValue {
 pub struct RunContext {
     ctx: Context,
     file_path: FilePathCell,
+    doc_content: DocContentCell,
     canonical_path: CanonicalPathSlot,
     project_root: ProjectRootSlot,
     config_path: ConfigPathSlot,
@@ -56,6 +64,9 @@ pub struct RunContext {
     snapshot_path: SnapshotPathSlot,
     doc_relative: DocRelativeSlot,
     ssh_context: SshContextSlot,
+    frontmatter: FrontmatterSlot,
+    components: ComponentsSlot,
+    doc_hash: DocHashSlot,
 }
 
 impl RunContext {
@@ -136,9 +147,46 @@ impl RunContext {
             }
         });
 
+        let doc_content = ctx.cell(String::new());
+
+        let frontmatter = ctx.slot({
+            let dc = doc_content;
+            let sc = ssh_context;
+            move |ctx: &Context| -> Arc<Frontmatter> {
+                let content: String = ctx.get_cell(&dc);
+                let ssh: Arc<SshContextValue> = ctx.get(&sc);
+                let resolver = agent_doc_core::frontmatter::SshResolverContext {
+                    project: &ssh.config,
+                    doc_relative: &ssh.doc_relative,
+                    file_display: &ssh.doc_relative,
+                };
+                let fm = frontmatter::parse_with_ssh_resolver(&content, &resolver)
+                    .map(|(fm, _)| fm)
+                    .unwrap_or_default();
+                Arc::new(fm)
+            }
+        });
+
+        let components = ctx.slot({
+            let dc = doc_content;
+            move |ctx: &Context| -> Arc<Vec<Component>> {
+                let content: String = ctx.get_cell(&dc);
+                Arc::new(component::parse(&content).unwrap_or_default())
+            }
+        });
+
+        let doc_hash = ctx.slot({
+            let cp = canonical_path;
+            move |ctx: &Context| -> String {
+                let canonical: PathBuf = ctx.get(&cp);
+                hash_path_str(&canonical.to_string_lossy())
+            }
+        });
+
         Self {
             ctx,
             file_path: file_path_cell,
+            doc_content,
             canonical_path,
             project_root,
             config_path,
@@ -146,6 +194,9 @@ impl RunContext {
             snapshot_path,
             doc_relative,
             ssh_context,
+            frontmatter,
+            components,
+            doc_hash,
         }
     }
 
@@ -185,6 +236,26 @@ impl RunContext {
         self.ctx.get(&self.ssh_context)
     }
 
+    pub fn doc_content(&self) -> String {
+        self.ctx.get_cell(&self.doc_content)
+    }
+
+    pub fn set_doc_content(&self, content: String) {
+        self.ctx.set_cell(&self.doc_content, content);
+    }
+
+    pub fn frontmatter(&self) -> Arc<Frontmatter> {
+        self.ctx.get(&self.frontmatter)
+    }
+
+    pub fn components(&self) -> Arc<Vec<Component>> {
+        self.ctx.get(&self.components)
+    }
+
+    pub fn doc_hash(&self) -> String {
+        self.ctx.get(&self.doc_hash)
+    }
+
     pub fn invalidate_project_root(&self) {
         self.project_root.clear(&self.ctx);
     }
@@ -212,6 +283,46 @@ impl RunContext {
     pub fn is_ssh_context_cached(&self) -> bool {
         self.ctx.is_set(&self.ssh_context)
     }
+
+    pub fn is_frontmatter_cached(&self) -> bool {
+        self.ctx.is_set(&self.frontmatter)
+    }
+
+    pub fn is_components_cached(&self) -> bool {
+        self.ctx.is_set(&self.components)
+    }
+
+    pub fn is_doc_hash_cached(&self) -> bool {
+        self.ctx.is_set(&self.doc_hash)
+    }
+
+    pub fn invalidate_doc_content(&self) {
+        self.doc_content.clear_dependents(&self.ctx);
+    }
+
+    pub fn snapshot_path_for(&self) -> Option<PathBuf> {
+        let root = self.project_root()?;
+        let hash = self.doc_hash();
+        Some(root.join(".agent-doc").join("snapshots").join(format!("{}.md", hash)))
+    }
+
+    pub fn lock_path_for(&self) -> Option<PathBuf> {
+        let root = self.project_root()?;
+        let hash = self.doc_hash();
+        Some(root.join(".agent-doc").join("locks").join(format!("{}.lock", hash)))
+    }
+
+    pub fn baseline_path_for(&self) -> Option<PathBuf> {
+        let root = self.project_root()?;
+        let hash = self.doc_hash();
+        Some(root.join(".agent-doc").join("baselines").join(format!("{}.md", hash)))
+    }
+
+    pub fn pending_path_for(&self) -> Option<PathBuf> {
+        let root = self.project_root()?;
+        let hash = self.doc_hash();
+        Some(root.join(".agent-doc").join("pending").join(format!("{}.json", hash)))
+    }
 }
 
 impl SshContextValue {
@@ -225,6 +336,12 @@ impl SshContextValue {
             file_display,
         }
     }
+}
+
+fn hash_path_str(path: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(path.as_bytes());
+    hex::encode(hasher.finalize())
 }
 
 pub struct ActorContext {
@@ -258,6 +375,7 @@ impl ActorContext {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::snapshot;
     use std::path::Path;
     use tempfile::TempDir;
 
@@ -507,5 +625,196 @@ mod tests {
         if root.is_some() {
             assert!(rel.is_some());
         }
+    }
+
+    #[test]
+    fn set_doc_content_enables_frontmatter_and_components() {
+        let dir = TempDir::new().unwrap();
+        setup_project(dir.path());
+        let doc = dir.path().join("file.md");
+        std::fs::write(
+            &doc,
+            "---\nagent: claude\n---\n\n<!-- agent:exchange -->\nhello\n<!-- /agent:exchange -->\n",
+        )
+        .unwrap();
+
+        let rc = RunContext::new(doc.clone());
+        rc.set_doc_content(std::fs::read_to_string(&doc).unwrap());
+
+        let fm = rc.frontmatter();
+        assert_eq!(fm.agent.as_deref(), Some("claude"));
+
+        let comps = rc.components();
+        assert_eq!(comps.len(), 1);
+        assert_eq!(comps[0].name, "exchange");
+    }
+
+    #[test]
+    fn frontmatter_returns_default_when_no_frontmatter() {
+        let dir = TempDir::new().unwrap();
+        setup_project(dir.path());
+        let doc = dir.path().join("file.md");
+        std::fs::write(&doc, "no frontmatter here\n").unwrap();
+
+        let rc = RunContext::new(doc);
+        rc.set_doc_content("no frontmatter here\n".to_string());
+
+        let fm = rc.frontmatter();
+        assert!(fm.agent.is_none());
+        assert!(fm.session.is_none());
+    }
+
+    #[test]
+    fn components_returns_empty_for_no_markers() {
+        let dir = TempDir::new().unwrap();
+        setup_project(dir.path());
+        let doc = dir.path().join("file.md");
+        std::fs::write(&doc, "plain text\n").unwrap();
+
+        let rc = RunContext::new(doc);
+        rc.set_doc_content("plain text\n".to_string());
+
+        let comps = rc.components();
+        assert!(comps.is_empty());
+    }
+
+    #[test]
+    fn doc_hash_is_deterministic() {
+        let dir = TempDir::new().unwrap();
+        setup_project(dir.path());
+        let doc = dir.path().join("file.md");
+        std::fs::write(&doc, "").unwrap();
+
+        let rc = RunContext::new(doc);
+
+        let hash1 = rc.doc_hash();
+        let hash2 = rc.doc_hash();
+        assert_eq!(hash1, hash2);
+        assert_eq!(hash1.len(), 64);
+    }
+
+    #[test]
+    fn doc_hash_matches_snapshot_doc_hash() {
+        let dir = TempDir::new().unwrap();
+        setup_project(dir.path());
+        let doc = dir.path().join("file.md");
+        std::fs::write(&doc, "").unwrap();
+
+        let rc = RunContext::new(doc.clone());
+
+        let graph_hash = rc.doc_hash();
+        let canonical = doc.canonicalize().unwrap();
+        let snap_hash = snapshot::doc_hash(&canonical).unwrap();
+        assert_eq!(graph_hash, snap_hash);
+    }
+
+    #[test]
+    fn snapshot_path_for_matches_expected_layout() {
+        let dir = TempDir::new().unwrap();
+        setup_project(dir.path());
+        let doc = dir.path().join("file.md");
+        std::fs::write(&doc, "").unwrap();
+
+        let rc = RunContext::new(doc);
+
+        let snap_path = rc.snapshot_path_for().unwrap();
+        let hash = rc.doc_hash();
+        assert_eq!(
+            snap_path,
+            dir.path().join(".agent-doc").join("snapshots").join(format!("{}.md", hash))
+        );
+    }
+
+    #[test]
+    fn lock_path_for_matches_expected_layout() {
+        let dir = TempDir::new().unwrap();
+        setup_project(dir.path());
+        let doc = dir.path().join("file.md");
+        std::fs::write(&doc, "").unwrap();
+
+        let rc = RunContext::new(doc);
+
+        let lock_path = rc.lock_path_for().unwrap();
+        let hash = rc.doc_hash();
+        assert_eq!(
+            lock_path,
+            dir.path().join(".agent-doc").join("locks").join(format!("{}.lock", hash))
+        );
+    }
+
+    #[test]
+    fn baseline_path_for_matches_expected_layout() {
+        let dir = TempDir::new().unwrap();
+        setup_project(dir.path());
+        let doc = dir.path().join("file.md");
+        std::fs::write(&doc, "").unwrap();
+
+        let rc = RunContext::new(doc);
+
+        let baseline = rc.baseline_path_for().unwrap();
+        let hash = rc.doc_hash();
+        assert_eq!(
+            baseline,
+            dir.path().join(".agent-doc").join("baselines").join(format!("{}.md", hash))
+        );
+    }
+
+    #[test]
+    fn pending_path_for_matches_expected_layout() {
+        let dir = TempDir::new().unwrap();
+        setup_project(dir.path());
+        let doc = dir.path().join("file.md");
+        std::fs::write(&doc, "").unwrap();
+
+        let rc = RunContext::new(doc);
+
+        let pending = rc.pending_path_for().unwrap();
+        let hash = rc.doc_hash();
+        assert_eq!(
+            pending,
+            dir.path().join(".agent-doc").join("pending").join(format!("{}.json", hash))
+        );
+    }
+
+    #[test]
+    fn invalidate_doc_content_clears_frontmatter_and_components() {
+        let dir = TempDir::new().unwrap();
+        setup_project(dir.path());
+        let doc = dir.path().join("file.md");
+        std::fs::write(
+            &doc,
+            "---\nagent: claude\n---\n\n<!-- agent:exchange -->\nhi\n<!-- /agent:exchange -->\n",
+        )
+        .unwrap();
+
+        let rc = RunContext::new(doc.clone());
+        rc.set_doc_content(std::fs::read_to_string(&doc).unwrap());
+
+        let _fm = rc.frontmatter();
+        let _comps = rc.components();
+        assert!(rc.is_frontmatter_cached());
+        assert!(rc.is_components_cached());
+
+        rc.invalidate_doc_content();
+
+        assert!(!rc.is_frontmatter_cached());
+        assert!(!rc.is_components_cached());
+    }
+
+    #[test]
+    fn caching_status_flags_new_slots() {
+        let dir = TempDir::new().unwrap();
+        setup_project(dir.path());
+        let doc = dir.path().join("file.md");
+        std::fs::write(&doc, "").unwrap();
+
+        let rc = RunContext::new(doc);
+
+        assert!(!rc.is_doc_hash_cached());
+        let _hash = rc.doc_hash();
+        assert!(rc.is_doc_hash_cached());
+
+        assert!(!rc.is_frontmatter_cached());
+        assert!(!rc.is_components_cached());
     }
 }

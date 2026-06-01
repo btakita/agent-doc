@@ -68,7 +68,7 @@ use std::time::{Duration, Instant};
 
 use notify::{EventKind, RecursiveMode, Watcher};
 
-use crate::{config::Config, frontmatter, run, sessions, stream};
+use crate::{config::Config, frontmatter, graph::ActorContext, run, sessions, stream};
 
 const PID_FILE: &str = ".agent-doc/watch.pid";
 
@@ -354,7 +354,6 @@ fn run_event_loop(
                 }
             }
             DocMode::StreamCapture => {
-                // Stream-mode: tmux capture polling
                 stream_states.insert(
                     entry.path.clone(),
                     StreamState {
@@ -364,7 +363,6 @@ fn run_event_loop(
                         max_lines: entry.max_lines,
                     },
                 );
-                // Reactive: also file-watch with zero debounce (CRDT handles concurrency)
                 if entry.reactive {
                     if let Err(e) = watcher.watch(&entry.path, RecursiveMode::NonRecursive) {
                         eprintln!("Warning: could not watch {}: {}", entry.path.display(), e);
@@ -390,11 +388,26 @@ fn run_event_loop(
     }
 
     let mut states: HashMap<PathBuf, FileState> = HashMap::new();
+    let mut actor_contexts: HashMap<PathBuf, ActorContext> = HashMap::new();
     let mut pending: HashMap<PathBuf, Instant> = HashMap::new();
     let mut last_rescan = Instant::now();
     let mut idle_since: Option<Instant> = None;
 
     let tmux = sessions::Tmux::default_server();
+
+    let config_toml_path = std::env::current_dir()
+        .ok()
+        .and_then(|d| crate::fs_util::find_project_root(&d))
+        .map(|r| r.join(".agent-doc").join("config.toml"));
+
+    if let Some(ref cp) = config_toml_path
+        && cp.exists()
+        && let Err(e) = watcher.watch(cp, RecursiveMode::NonRecursive)
+    {
+        eprintln!("Warning: could not watch config {}: {}", cp.display(), e);
+    }
+
+    let mut config_changed = false;
 
     while running.load(std::sync::atomic::Ordering::Relaxed) {
         // Check PID file still exists (external stop)
@@ -482,6 +495,7 @@ fn run_event_loop(
             for path in dead_streams {
                 eprintln!("Stream pane dead for {} — removing", path.display());
                 stream_states.remove(&path);
+                actor_contexts.remove(&path);
             }
 
             last_rescan = Instant::now();
@@ -525,6 +539,13 @@ fn run_event_loop(
                 if matches!(event.kind, EventKind::Modify(_) | EventKind::Create(_)) {
                     for path in event.paths {
                         let canonical = path.canonicalize().unwrap_or(path);
+                        if let Some(ref cp) = config_toml_path
+                            && canonical == *cp
+                        {
+                            config_changed = true;
+                            eprintln!("[watch] config change detected");
+                            continue;
+                        }
                         if watched_files
                             .iter()
                             .any(|w| w.canonicalize().unwrap_or_else(|_| w.clone()) == canonical)
@@ -536,6 +557,17 @@ fn run_event_loop(
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+
+        if config_changed {
+            config_changed = false;
+            for ac in actor_contexts.values() {
+                ac.on_config_change();
+            }
+            eprintln!(
+                "[watch] invalidated {} actor context(s) after config change",
+                actor_contexts.len()
+            );
         }
 
         // Process debounced file-change events (reactive paths skip debounce)
@@ -607,7 +639,20 @@ fn run_event_loop(
 
             // Submit
             eprintln!("Change detected: {}", path.display());
-            match run::run(&path, false, None, None, false, false, config) {
+            let ac = actor_contexts
+                .entry(path.clone())
+                .or_insert_with(|| ActorContext::new(path.clone()));
+            ac.on_file_change(path.clone());
+            match run::run_with_context(
+                &path,
+                false,
+                None,
+                None,
+                false,
+                false,
+                config,
+                Some(ac.context()),
+            ) {
                 Ok(()) => {
                     state.last_run = Some(Instant::now());
                     eprintln!("Submit complete: {}", path.display());

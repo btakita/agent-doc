@@ -35,11 +35,39 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 
 Compacted content:
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:95aae886 -->
+❯ What are #next-steps to complete review items?
+
+### Re: #next-steps to complete review items — opus-4-8
+
+All 47 review items are gated `[/]` and already sort into the three paths the doc defines (`#jkvs`/A, `#6cmx`/B, `#qasm`/C). No new backlog items here — these are next-steps over already-tracked work. The split that matters: **Path C is the only one an agent can finish autonomously** — A and B are operator-at-the-IDE sessions, because what remains is *live verification*, not more code. So the next steps are sequencing + the one unblock that retires the most items.
+
+#### Step 0 — single highest-leverage unblock (do first)
+Install the **latest signed JB plugin** (≥0.2.138) and **restart IntelliJ + the route-owned `agent-doc` process** so the new plugin *and* the new binary are live. Almost every `*-live-verify` item is blocked only because the running plugin/binary predates its fix. This is the prerequisite for both Path A and Path B.
+
+#### Path A — one consolidated live busy-pane session (`#jkvs`)
+After Step 0, drive **one** mid-active-turn pane through the whole batch in a single sitting and tick each off:
+`#t41j`, `#jb-busy-queue-deadlock-live-verify`, `#jb-run-agent-doc-busy-feedback-live-verify`, `#route-drain-all-surface-live-verify`, `#codex-owned-pane-stop-hook-live-verify`, `#codex-owned-pane-prompt-miss-followups` (phases 2b/3), `#codex-final-response-live-verify`, `#recovery-drift-apply-live-verify`, `#jb-load-tmux-window-verify`, plus `#j0k8` (cross-root claim guard) and `#stash-pane-promote-on-focus`. These are code-complete; the session just needs to observe the fixed behavior once each. **~11 items retired.**
+
+#### Path B — one IPC/typing-corruption capture session (`#6cmx`)
+Before reproducing, **enable `#com.github.btakita.agentdoc` debug logging** — the whole IPC-dup cluster is blocked on capturing the exact `setText` payload, which prior repros missed because logging was off. Then repro once each:
+`#ipcfullprompt-recur2`, `#finalize-retry-ipc-response-duplication`, `#ipc-dup-tracking-double-merge`, `#adoc-queue-ipc-buffer-divergence`, `#duplicate-response-after-commit`, `#prompt-duplicated-while-typing`, `#zpc2`/`#ipcaa-scaf`/`#submodule-response-commit-proof` (lazily-rs/monsterrodholders scaffold-dup repros). Several may need a CURE commit after the payload is captured (`#ipcfullprompt-recur2` is explicitly cure-pending). **~8 items, some converting from verify to one more fix.**
+
+#### Path C — autonomous, no-live-pane items (`#qasm`, agent-executable now)
+What I can implement directly in priority order, no IDE required:
+1. **Queue-provenance cluster:** `#prompt-preempts-auto-queue`, `#queue-user-edit-overwrite`, `#jb-run-agent-doc-response-queue-contamination`.
+2. **Option-A fixes:** `#cancel-orphans-preflight-cycle`, `#exchange-prompt-dropped-on-merge`, `#duplicate-response-after-commit` (design half).
+3. **Closeout-guard hardening:** `#do-id-partial-closeout-state`, `#preset-item-id-collision-enforce`, `#queue-clear-unrun-items`, `#free-text-queue-skip-diagnostic`.
+4. **Feature pair:** `#backlog-priority-attribute`, `#backlog-queue-sync-attribute`.
+5. **Hygiene/UX:** `#stash-session-ttl-prune`, `#plugin-cleanup-menu-command`, `#clear-stops-running-process`, `#jb-stale-busy-idle-footer`, `#snrun`, `#4a6p` (opt-in plain-doc), `#nbsearch`, `#gscaccess`.
+
+#### Recommended order
+**Step 0 → Path C (I can start now) → batch Path A + Path B in your next IDE session.** Path C doesn't need you at the keyboard, so it's the best use of agent time; A and B convert ~19 items the moment you run the two live sessions after the plugin/binary refresh.
+
+Want me to start Path C? Say `do path C` (or name a cluster, e.g. `do queue-provenance cluster`) and I'll implement + test + ship them one ID per phase.
+<!-- agent:boundary:efb671ac -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
-- ~do [#codex-capability-proof-unrecoverable]~
 <!-- /agent:queue -->
 ###
 <!--

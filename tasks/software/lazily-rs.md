@@ -32,33 +32,23 @@ queue_active: false
 <!-- agent:exchange -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260601-223728.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260601-224718.md`*
 
 Compacted content:
-- Archived 14 response topic(s): #rx9y; #fzaf; #fzaf memo guard; 11 more
+- Archived 1 response topic(s): lazily-rs performance next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-❯ What are #next-steps to improve performance of lazily-rs?
-### Re: lazily-rs performance next steps — gpt-5
-
-Top backlog item: `#perf-bench`.
-
-I added five performance follow-ups to the backlog in priority order. The right first move is measurement, not an optimization rewrite: add benchmarks for the current single-threaded and thread-safe paths, then add instrumentation so later changes can prove whether they reduce real work or only move overhead around.
-
-Priority order:
-
-1. `#perf-bench` — baseline benchmark suite for cached reads, cold first get, dependency fan-out, memo suppression, effect flushing, batch storms, and threaded contention.
-2. `#perf-profile` — lightweight counters for recomputes, duplicate speculative computes, dependency edge churn, effect queue depth, allocations, and lock wait/hold time.
-3. `#perf-layout` — single-threaded storage/edge-maintenance optimizations driven by benchmark results.
-4. `#perf-thread-dedup` — thread-safe in-flight recompute deduplication if duplicate concurrent first-get work is material.
-5. `#perf-lock-eval` — RwLock, sharded-lock, or targeted-CAS evaluation only after contention is proven and modeled with Loom/Shuttle.
-
-No code changed in this cycle; this was a backlog/recommendation update. Verification is `agent-doc finalize` plus follow-up `session-check`.
-<!-- agent:boundary:c6e503e7 -->
+<!-- agent:boundary:80900c6d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+preset #spec-test-build-install-commit-push
+- [#perf-bench]
+- [#perf-profile]
+- [#perf-layout]
+- [#perf-thread-dedup]
+- [#perf-lock-eval]
 <!-- /agent:queue -->
 
 ## Backlog

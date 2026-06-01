@@ -75,7 +75,35 @@ This removes ~500ms–1s from every editor-triggered dispatch while preserving t
 3. The plugin could pass `route --debounce 0` (it already awaited idle via FFI) for belt-and-suspenders, though the binary fix above already neutralizes the redundant wait.
 
 These are lower-impact and touch hotter pane-timing code, so I left them for a focused follow-up rather than bundling them into this change.
-<!-- agent:boundary:29765c8f -->
+
+### Re: do [#j0k8] — apply all 3 latency optimizations — opus-4-8
+
+Applied all three deferred `#run-agent-doc-latency` wins. One note up front on the ID: the queued instruction read `do [#j0k8]. Apply all 3 optimizations.`, but `#j0k8` is actually the *cross-root claim-guard live-verify* item — the "apply all 3 optimizations" work is `#t3m5`. I did the optimizations (closed `#t3m5`); `#j0k8` is addressed separately below.
+
+#### What landed (`#t3m5`, submodule `984e5c1e`)
+
+**(a) Submit-acceptance check is capture-then-sleep.** `send_command_unchecked` previously slept a fixed 300ms *before* its first pane capture, so even an instantly-consumed trigger paid 300ms. It now captures first and sleeps after, on a tightened `DIRECT_PANE_SUBMIT_ACCEPTANCE_POLL_INTERVAL` (150ms) — a fast pane is confirmed accepted on the first capture.
+
+**(b) Ready-prompt poll cadence.** `wait_for_agent_ready_outcome` polled every 500ms and requires a 2-poll ready streak (to debounce a transient prompt flicker), giving a ~500-1000ms ready floor. Poll interval is now `AGENT_READY_POLL_INTERVAL` (150ms), keeping the 2-observation streak → ~150-300ms floor.
+
+**(c) Plugin skips the redundant binary debounce.** `buildRunRouteCommand` now passes `route --debounce 0`. The plugin already awaits typing idle in-process via the FFI typing tracker before saving, so route's own settle is pure redundant latency on the editor path. Non-editor callers still get the default 500ms debounce, and the binary keeps treating the cross-process typing indicator as authoritative (the prior-cycle `#jb-run-agent-doc-double-debounce` fix). JB plugin bumped to **0.2.144**.
+
+#### Files
+- `agent-doc-orchestration/src/route.rs` — capture-then-sleep + two named poll-interval consts (150ms); updated module/fn doc comments.
+- `editors/jetbrains/.../TerminalUtil.kt` + `gradle.properties` (0.2.144) — `--debounce 0` on the route command.
+- `editors/jetbrains/.../TerminalUtilTest.kt` — asserts the `--debounce 0` argument.
+- `specs/11-debounce.md` — new "Run Agent Doc dispatch latency" section.
+
+#### Verification
+- `make check` green (clippy `-D warnings` + full suite, 0 FAILED; remaining warnings are pre-existing in `agent-doc-core`). `cargo test -p agent-doc-orchestration -- route::` → 136 passed, 104 ignored (live-tmux).
+- JB `TerminalUtilTest` passes; both plugin zips built (`agent-doc-jetbrains-0.2.144[-signed].zip`).
+- `cargo build --release` + `cargo install --path .` — both binaries refreshed.
+- Pushed `984e5c1e`; CI run `26743632403` in progress (prior cycle `6d191f1f` is green). Local verification stands as the gate.
+- (a)/(b) are pane-I/O timing loops covered by the existing live-tmux `send_command_checked_*` / `wait_for_agent_ready*` integration tests (`make tmux-ci`); (c) has the deterministic Kotlin assertion above.
+
+#### On `#j0k8` (left open)
+`#j0k8` is "live-verify the cross-root claim guard" — drive a real second pane already running another document's submodule session and confirm `claim` provisions a *new* pane rather than aliasing. Its code (`cmdline_owns_other_document`) is already unit-tested; only the live-pane edge remains, which needs an interactive multi-pane tmux session + operator observation I can't perform autonomously. It stays open — there's no code left to write, just the live check. The remaining queued items (`#jkvs`, `#qasm`, `#6cmx`) are similarly operator-driven live-verify / multi-item sessions, so I'm not auto-draining them — point me at a specific one when you want to run it.
+<!-- agent:boundary:e5657090 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
@@ -109,7 +137,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog priority queue=prepend -->
-- [ ] [#t3m5] [recommended] Trim remaining Run Agent Doc dispatch latency: (a) send_command_unchecked sleeps 300ms BEFORE the first capture-pane acceptance check (sleep-then-check) — capture first so a fast pane returns immediately; (b) wait_for_agent_ready polls every 500ms and needs a 2-streak, a ~500-1000ms ready floor — drop the poll interval to ~150ms keeping the streak; (c) JB plugin could pass route --debounce 0 since it already awaited idle via FFI before saving. See src/agent-doc/agent-doc-orchestration/src/route.rs.
 - [ ] [#j0k8] [recommended] Live-verify the cross-root claim guard (submodule 822688d0): from the superproject root, claim/open a new document from inside a pane already running a different document's submodule agent-doc/codex session, and confirm claim provisions a NEW pane (logs '[claim] pane ... runs a live agent-doc/codex session for another document') instead of aliasing onto it. Also confirm the awear.md recovery restores a real pane. cmdline_owns_other_document is unit-tested; this is the live-pane edge.
 - [ ] [#jkvs] [recommended] Path A — run one consolidated live busy-pane verification session to batch-close the live-verify-gated review items: install the current signed JB plugin + restart the route-owned agent-doc process, then drive one mid-active-turn pane through #t41j, #jb-busy-queue-deadlock-live-verify, #jb-run-agent-doc-busy-feedback-live-verify, #route-drain-all-surface-live-verify, #codex-owned-pane-stop-hook-live-verify, #codex-owned-pane-prompt-miss-followups (2b/3), #codex-final-response-live-verify, #recovery-drift-apply-live-verify, #jb-load-tmux-window-verify.
 - [ ] [#qasm] [recommended] Path C — work the no-live-pane implementable review items in priority order: #free-text-queue-skip-diagnostic, #queue-auto-no-continue, then the queue-provenance cluster (#prompt-preempts-auto-queue, #queue-user-edit-overwrite, #jb-run-agent-doc-response-queue-contamination), the Option-A fixes (#cancel-orphans-preflight-cycle, #exchange-prompt-dropped-on-merge, #duplicate-response-after-commit), closeout-guard hardening (#do-id-partial-closeout-state, #preset-item-id-collision-enforce, #queue-clear-unrun-items), the feature pair (#backlog-priority-attribute, #backlog-queue-sync-attribute), then hygiene/UX (#stash-session-ttl-prune, #plugin-cleanup-menu-command, #stash-pane-promote-on-focus, #clear-stops-running-process, #jb-stale-busy-idle-footer, #snrun).

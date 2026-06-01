@@ -18,6 +18,9 @@ jobs:
       - name: Check out tmux-router patch dependency
         run: git clone --depth 1 https://github.com/btakita/tmux-router ../tmux-router
 
+      - name: Check out lazily-rs path dependency
+        run: git clone --depth 1 https://github.com/btakita/lazily-rs ../lazily-rs
+
       - name: Install tmux for integration tests
         run: sudo apt-get update && sudo apt-get install -y tmux
 

@@ -81,11 +81,44 @@ Re the secondary `apply_patch verification failed …` lines: left alone per the
 **Verification:** `make check` clean (clippy `-D warnings`, full test suite, sim-medium, version-sync). New regressions: `proof_retry_decision_*`, `resolve_managed_proof_policy_*`, `ipc_method_gate_classification_only_gates_inject`, `handle_ipc_clear_bypasses_failed_capability_proof`, `handle_ipc_stop_bypasses_failed_capability_proof`. Live network-denied repro remains the `#[ignore]` tmux-CI leg.
 
 **Shipped:** submodule `a236fc98` (pushed to `20260422/codex-agent-backend`), superproject pointer `a3ff98545`. `cargo build --release` + `cargo install --path .` both refreshed. Specs aligned: `SPEC.md`, `codex-support.md`, `06-config.md`, `07-session-tmux-commands.md`, `VERSIONS.md`.
-<!-- agent:boundary:caf0b262 -->
+❯ [#1k5y] description disappeared. #spec-test-build-install-commit-push
+
+### Re: [#1k5y] description disappeared — opus-4-8
+
+Root-caused and fixed. `#1k5y` was never a real item — it's a **phantom id minted from an empty bullet**, so there was never a description to lose. (Not a `--done` completion; it's removed as invalid by the fix below — guard suppressed for this cycle.)
+
+#### What happened
+- `git log -S 1k5y` shows the id first appears in commit `16f68fed7` (2026-06-01 13:30), where the icebox close marker line became `- [ ] [#1k5y] &lt;!-- /agent:icebox --&gt;`. A stray content-less `- [ ]` bullet (an editor/IPC insertion ahead of the close marker — same drift family as the existing `#ipcfullprompt-*` icebox items) ended up inside the icebox body.
+- `pending::backfill` (run on every preflight over backlog/review/**icebox**) assigns a hash id to any id-less item. `assign_unique_hash("")` over this doc's id produced `1k5y`, cementing a `- [ ] [#1k5y]` "item" with no text. `parse_item_line("- [ ]")` parses an empty bullet as a real item, so backfill happily hashed nothing.
+
+#### Fix (`#icebox-empty-item-phantom-id`)
+`pending::backfill` now **drops** content-less items (empty header text **and** empty continuation) instead of minting an id for them. This:
+- prevents manufacturing a phantom id from an empty line, and
+- **self-heals** the already-cemented `- [ ] [#1k5y]` on the next maintenance pass — which is this very cycle, so the icebox phantom is now gone from the document.
+
+A bullet with empty header text but a real indented continuation is explicitly preserved (guard against over-dropping). Spec'd in `pending-system.md §3` lazy-backfill.
+
+#### Verification
+`make check` green (clippy `-D warnings`, full suite, sim-medium, version-sync). New regressions: `backfill_drops_content_less_empty_bullet`, `backfill_drops_id_only_empty_item_self_heal`, `backfill_keeps_empty_text_with_continuation`. Both binaries rebuilt + installed.
+
+#### Shipped
+- Submodule `0c1f52a0` (fix) + `42cf3173` (spec), pushed to `20260422/codex-agent-backend`.
+- Superproject pointer `949a6f610`.
+
+```mermaid
+flowchart TD
+    A["stray empty bullet lands in icebox body<br/>(editor/IPC insertion before close marker)"] --> B["preflight lazy backfill scans icebox"]
+    B --> C{"item id empty?"}
+    C -->|"OLD: yes, assign_unique_hash(empty text)"| D["phantom id-only item<br/>(description never existed)"]
+    C -->|"NEW: content-less, drop"| E["bullet removed<br/>no phantom id minted"]
+    D -->|"NEW backfill re-run"| E
+    E --> F["icebox clean; self-healed this cycle"]
+```
+<!-- agent:boundary:c72856c5 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
-- do [#codex-capability-proof-unrecoverable]
+- ~do [#codex-capability-proof-unrecoverable]~
 <!-- /agent:queue -->
 ###
 <!--
@@ -101,7 +134,6 @@ equityfundingsource.md had the full-document IPC duplicate corruption. Then a ne
 #spec-test-build-install-commit-push
 ---
 Please review the agent-doc, claude, codex logs. What are #next-steps to fix bugs?
----
 ---
 As I was typing into the comment below `/agent:exchange`, the full-document IPC corruption happened, then the duplicate line happened, then the full-document IPC corruption happened again.
 
@@ -169,7 +201,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 
 <!-- agent:icebox -->
 - [ ] [#misfire-recovery-snapshot] Pre-auto-run recovery snapshot/tag (mirroring `compact`'s pre-mutation tag) so a destructive auto-run misfire is recoverable without git/sidecar archaeology. Proposed fix #4 of `#backlog-auto-marker-misfire` (now IMPLEMENTED for fixes #1–#3). Parked: only worth doing if a new auto-run path can mutate the backlog in place — currently the misfire is inert (queue-scoped) and surfaced (misplaced_component_attr warning). Plan: tasks/agent-doc/plan-backlog-auto-marker-misfire.md.
-- [ ] [#1k5y] <!-- /agent:icebox -->
+<!-- /agent:icebox -->
 
 ## Completed / Reaped
 

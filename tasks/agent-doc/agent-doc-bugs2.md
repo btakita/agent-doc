@@ -79,7 +79,26 @@ The fix itself is already code-complete, CI-green, and **installed live** (submo
 I'm deliberately **not** self-routing `route --dispatch-only --wait-for-ready 60` into this session's own busy pane to synthesize the check — that injects into the document I'm actively editing and risks compounding the live `#zpc2` IPC churn already destabilizing this doc.
 
 **Gating** `#t41j` → review (un-gate after the operator live-verify). The auto-queue tail (`#completed-queue-residue-regression`, …) is untouched.
-<!-- agent:boundary:cadf7cdb -->
+Same definitive signal as before — preflight shows a **live authoritative cycle owns the document right now**: `cycle-1780289455025`, `phase=child_agent_wait agent=claude elapsed_s=30`, with `live_prompt_drift_after_preflight` and an active IPC listener. I'm racing a route-owned Claude cycle that's mid-flight. Standing down again — not finalizing.
+
+> **Queue prompt:**
+>
+> do [#codex-owned-pane-stop-hook-live-verify]
+
+
+Short answer to the dispatched item:
+
+**`do [#codex-owned-pane-stop-hook-live-verify]` → gated, by its own definition.** The item is explicitly *"Gated on a live Codex pane."* The code already landed (phase 1 structured `owned_pane_self_invocation` + phase 2a in-pane Codex guidance + the deterministic session-check backstop, submodule `407b0825`). What remains is purely operator-driven and cannot be done from this session:
+- **(2b)** a live Codex **Stop-hook** regression asserting the `owned_pane_self_invocation` diagnostic forces an in-pane response body before final chat output;
+- **(3)** live-verify a real Codex **same-pane** run with an unresolved exchange prompt.
+
+Both need a live Codex pane. Self-driving one would inject into this contended document and risk the very `#zpc2` IPC churn destabilizing it. So the honest outcome is **gate it** (un-gate after the operator runs the live Codex checks) — not a fabricated pass.
+
+**Why I'm not recording that on the doc:** an authoritative Claude `agent-doc` cycle is live on `agent-doc-bugs2.md` this instant (the binary's own `child_agent_wait` heartbeat above). It will gate this item on its own cycle, exactly as it did `#t41j`. A competing finalize from this secondary session would race it and risk a torn-write corruption.
+
+This is now consistent across many turns: **two `agent-doc` actors share this one queue.** Until that's consolidated to a single owner of `agent-doc-bugs2.md`, every queue head I'm handed is either already handled or actively in-flight by the route-owned cycle. The genuinely useful action is to stop one of the two sessions — not to keep me draining heads in parallel. I'll keep standing down on this doc while that live cycle is active.
+Add #next-steps
+<!-- agent:boundary:85dc10f3 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -87,7 +106,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#t41j]~
 - ~do [#zpc2]~
 - ~do [#completed-queue-residue-regression]~
-- do [#codex-owned-pane-stop-hook-live-verify]
+- ~do [#codex-owned-pane-stop-hook-live-verify]~
 - do [#queue-sync-auto-pending-done-guard-misfire]
 - do [#tagpath-queue-priority-publish-align]
 - do [#codex-owned-pane-prompt-miss-followups]

@@ -244,7 +244,7 @@ Each of those can **break a live session** if the collision already exists in a 
 ## Net
 
 The queue is nearly drained and the Codex owner is committing cleanly now — the contention is winding down on its own. For `#preset-item-id-collision-enforce`, the right path is: let the single Codex owner finish the queue, then if you want hard enforcement, decide the strictness boundary (new-mutation-reject vs. dispatch-block vs. opt-in) and have **one** owner implement it on a quiesced document. I'm not finalizing a competing write while the Codex cycle owns the doc.
-<!-- agent:boundary:65c50c94 -->
+<!-- agent:boundary:d0073d2d -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -253,7 +253,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#tagpath-queue-priority-publish-align]~
 - ~do [#codex-owned-pane-prompt-miss-followups]~
 - ~do [#stuck-capture-queue-echo-false-positive]~
-- do [#preset-item-id-collision-enforce]
+- ~do [#preset-item-id-collision-enforce]~
 - do [#free-text-queue-skip-diagnostic]
 - do [#do-id-partial-closeout-state]
 <!-- /agent:queue -->

@@ -31,37 +31,12 @@ prompt_presets:
 <!-- agent:exchange -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260601-040101.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260601-042343.md`*
 
 Compacted content:
-- Archived 2 response topic(s): Update README, audit docs, release; Docs updated, pushed
-❯ What are #next-steps? Are derived signals a priority? Should we focus on effect system first?
-
-### Re: Next steps, derived signals vs effect system — glm-5.1
-
-**Derived signals are already mostly done.** `ctx.slot()` is a derived/computed signal — it auto-tracks dependencies, recomputes lazily, and propagates invalidation. The core reactive graph is in place.
-
-**Phase 3 (Derived signals) should focus on ergonomic enhancements:**
-- `ctx.computed()` alias with cleaner ergonomics
-- Memoization guard — skip recomputation when dependency values haven't actually changed (currently a slot recomputes every time its cache is invalidated, even if the input resolves to the same value)
-- Batch updates — `ctx.batch(|ctx| { ... })` to defer invalidation until the batch completes
-
-**Phase 4 (Effect system) is the higher-value next step.** Effects run side-effect code when dependencies change — this is what makes the library useful for reactive UIs, DOM updates, logging, etc. It builds directly on the existing dependency graph. Key design decisions:
-- `ctx.effect(|ctx| { ... })` — registers an effect, auto-tracks deps on first run
-- Effect scheduling — when to run effects (synchronously after invalidation? deferred to next tick?)
-- Cleanup — effects may return a cleanup function that runs before re-execution
-- Disposal — ability to stop an effect
-
-**Recommended priority order:**
-
-1. **Effect system** (Phase 4) — highest impact, enables real reactive usage
-2. **Batch updates** — needed to prevent cascading invalidation bugs in effect-heavy code
-3. **Memoization guard** — performance optimization for expensive computations
-4. **API ergonomics** (`computed()`, better DX)
-5. **Release + publish** — after effect system lands
-
-Top of backlog: `#effect-system`
-<!-- agent:boundary:a3f8e27f -->
+- Archived 1 response topic(s): Next steps, derived signals vs effect system
+- Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
+<!-- agent:boundary:bce7852f -->
 <!-- /agent:exchange -->
 
 ## Backlog

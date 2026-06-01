@@ -236,7 +236,9 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         ("agent-doc-orchestration/src/git.rs", "guard_") => 19,
         ("agent-doc-orchestration/src/git.rs", "reason=") => 4,
         ("src/orchestrate.rs", "guard_") => 2,
-        ("agent-doc-orchestration/src/preflight.rs", "reason=") => 2,
+        // +1 (`reason=probe_inspection_only`): `preflight --probe` logs why it
+        // skipped opening a `preflight_started` cycle (#preflight-probe-side-effect-free).
+        ("agent-doc-orchestration/src/preflight.rs", "reason=") => 3,
         ("agent-doc-orchestration/src/repair.rs", "guard_") => 10,
         ("agent-doc-orchestration/src/repair.rs", "reason=") => 5,
         ("agent-doc-orchestration/src/route.rs", "accepted_only") => 4,

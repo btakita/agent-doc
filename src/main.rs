@@ -671,6 +671,12 @@ enum Commands {
     Preflight {
         /// Path to the session document
         file: PathBuf,
+        /// Pure inspection probe: emit the same JSON but do NOT open a
+        /// `preflight_started` cycle, so a diagnostic preflight never leaves an
+        /// open cycle that later wedges `session-check`
+        /// (`#preflight-probe-side-effect-free`).
+        #[arg(long)]
+        probe: bool,
     },
     /// Check end-of-cycle write invariant — nonzero exit if the cycle is open or a likely direct response patchback bypassed agent-doc
     SessionCheck {
@@ -2024,7 +2030,12 @@ fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
-        Commands::Preflight { file } => agent_doc_orchestration::preflight::run(&file),
+        Commands::Preflight { file, probe } => {
+            agent_doc_orchestration::preflight::run_with_options(
+                &file,
+                agent_doc_orchestration::preflight::PreflightOptions { probe },
+            )
+        }
         Commands::Plan { file } => plan::run(&file),
         Commands::Jobs { action } => match action {
             JobsAction::Create {

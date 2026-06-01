@@ -1638,7 +1638,22 @@ fn wait_for_typing_idle_before_mutation(file: &Path, debounce_ms: u64) -> Result
     }
 }
 
+/// Options controlling a `preflight` invocation.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PreflightOptions {
+    /// Pure inspection probe (`#preflight-probe-side-effect-free`): compute and
+    /// emit the same JSON, but do NOT open a `preflight_started` cycle. A
+    /// diagnostic preflight is not dispatch/response-bound, so opening a cycle
+    /// only leaves open state that later wedges `session-check`.
+    pub probe: bool,
+}
+
+/// Run preflight with default (dispatch/response-bound) options.
 pub fn run(file: &Path) -> Result<()> {
+    run_with_options(file, PreflightOptions::default())
+}
+
+pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
@@ -2134,20 +2149,38 @@ pub fn run(file: &Path) -> Result<()> {
 
     let no_changes = diff_result.is_none();
     if !no_changes {
-        let snap = crate::snapshot::load(file).unwrap_or(None);
-        let file_content = std::fs::read_to_string(file).unwrap_or_default();
-        let snap_len = snap.as_ref().map(|s| s.len()).unwrap_or(0);
-        let file_len = file_content.len();
-        crate::cycle_state::start_preflight(file, snap.as_deref(), Some(&file_content))?;
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "preflight_diff_start file={} snap_len={} file_len={}",
-                file.display(),
-                snap_len,
-                file_len
-            ),
-        );
+        if options.probe {
+            // `#preflight-probe-side-effect-free`: a pure inspection probe must
+            // not open a `preflight_started` cycle. The probe reports the same
+            // diff/queue state below, but leaving an open cycle behind is the
+            // side effect that later wedges `session-check` (the empty-cycle
+            // churn from the recursive owner-pane diagnostic path).
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "preflight_probe_no_cycle file={} reason=probe_inspection_only",
+                    file.display()
+                ),
+            );
+            eprintln!(
+                "[preflight] probe: skipping preflight_started cycle (inspection only)"
+            );
+        } else {
+            let snap = crate::snapshot::load(file).unwrap_or(None);
+            let file_content = std::fs::read_to_string(file).unwrap_or_default();
+            let snap_len = snap.as_ref().map(|s| s.len()).unwrap_or(0);
+            let file_len = file_content.len();
+            crate::cycle_state::start_preflight(file, snap.as_deref(), Some(&file_content))?;
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "preflight_diff_start file={} snap_len={} file_len={}",
+                    file.display(),
+                    snap_len,
+                    file_len
+                ),
+            );
+        }
     }
 
     // Step 4c: Annotate the diff with content-source markers.
@@ -5022,6 +5055,57 @@ mod tests {
             crate::cycle_state::CyclePhase::PreflightStarted,
             "active queue prompt should open a cycle even when the file matches the snapshot"
         );
+    }
+
+    #[test]
+    fn preflight_probe_does_not_open_cycle_even_with_dispatchable_diff() {
+        // #preflight-probe-side-effect-free: the SAME active-queue input that
+        // opens a `preflight_started` cycle in the dispatch path (see
+        // `preflight_opens_cycle_from_active_queue_when_document_has_no_diff`)
+        // must leave NO open cycle when run as a pure inspection probe, so a
+        // diagnostic preflight never wedges a later `session-check`.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#oobpmt]\n",
+            "<!-- /agent:queue -->\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#oobpmt] Fix OOB prompt absorption.\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        run_with_options(&doc, PreflightOptions { probe: true }).unwrap();
+
+        // The probe must not leave an OPEN cycle (`preflight_started` /
+        // `response_captured` / `write_applied`) — that is the state that wedges
+        // a later `session-check`. A terminal `committed`/`abandoned` cycle from
+        // the (idempotent) commit step is acceptable.
+        if let Some(state) = crate::cycle_state::load(&doc).unwrap() {
+            assert!(
+                matches!(
+                    state.phase,
+                    crate::cycle_state::CyclePhase::Committed
+                        | crate::cycle_state::CyclePhase::Abandoned
+                ),
+                "a probe preflight must not leave an open cycle, got {:?}",
+                state.phase
+            );
+        }
     }
 
     #[test]

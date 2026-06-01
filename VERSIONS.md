@@ -6,6 +6,19 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **`preflight --probe` is a side-effect-free inspection mode
+  (`#preflight-probe-side-effect-free`).** A diagnostic `agent-doc preflight`
+  used to open a `preflight_started` cycle even when it was only inspecting
+  state, leaving an open cycle that later wedged `session-check` (the empty-cycle
+  churn from the recursive owner-pane diagnostic path, Proposed-Fix #4 of
+  `#recursive-repair-state-drift`). `agent-doc preflight --probe <FILE>` now emits
+  the same JSON but never opens a `preflight_started` cycle. The default
+  response-bound preflight (and internal callers like `orchestrate`) keep opening
+  the cycle that binds the upcoming response. Regressions:
+  `preflight_probe_does_not_open_cycle_even_with_dispatchable_diff` (probe leaves
+  no open cycle) and the existing
+  `preflight_opens_cycle_from_active_queue_when_document_has_no_diff` (contrast:
+  default path still opens it).
 - **Supervisor idle-queue watch drains route-enqueued busy-queue heads
   (`#jb-run-agent-doc-busy-queue-dispatch-deadlock`).** When a busy-pane
   `Run Agent Doc` route appends a prompt to `agent:queue auto` and returns `Ok`,

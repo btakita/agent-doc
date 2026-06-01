@@ -107,6 +107,8 @@ Two modes:
 
 Before preflight performs document-mutating recovery, commit, pending maintenance, or duplicate-residue cleanup, it waits for the shared editor typing indicator to become idle. The emitted `baseline_file` is captured from the same stable visible content used for diff computation, not from an earlier pre-debounce cleanup projection.
 
+`agent-doc preflight --probe <FILE>` runs the same inspection (recovery, commit, queue analysis, diff, JSON output) but is a **pure inspection probe**: it never opens a `preflight_started` cycle (`#preflight-probe-side-effect-free`). The default (dispatch/response-bound) preflight opens that cycle so the upcoming response is bound to it; a diagnostic probe is not response-bound, and an open `preflight_started` cycle left by a probe is exactly the state that later wedges `session-check`. Use `--probe` for diagnostic/recursive-guard inspection so the probe leaves no open cycle behind (a terminal `committed`/`abandoned` cycle from the idempotent commit step is still acceptable). Internal response-bound callers such as `orchestrate` keep the default cycle-opening behavior.
+
 ## audit-docs
 
 `agent-doc audit-docs [--root DIR]`

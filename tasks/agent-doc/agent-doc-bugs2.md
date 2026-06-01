@@ -36,7 +36,29 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 1 response topic(s): do [#preflight-probe-side-effect-free]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:7e855f89 -->
+
+### Re: do [#gated-followup-split-enforcement] — opus-4-8
+
+Done and shipped. Added a warn-first session-check advisory that detects buried multi-phase work.
+
+**What it does.** `check_gated_phase_split_guard` fires when a directed `do [#id]` cycle keeps a tracked item open (`--pending-edit` / `--review-edit` / `--pending-gate`, recorded in `pending_kept_open_ids`) whose body enumerates multiple gated/remaining phases but never breaks them into discrete child backlog IDs. Detection:
+
+- the word **"phase"** appears, **and**
+- ≥2 short parenthesized phase markers — `(1)`, `(2a)`, `(2b)`, `(3)` (a regex that excludes dates/hashes like `(2026-05-31)` / `(submodule 407b0825)`), **and**
+- a gating signal (`gated`, `remaining`, `live-verify`, `awaiting`, `still needs`), **and**
+- fewer than 2 discrete child `#id` references other than its own id (and the `#agent-doc-bug` preset tag) — i.e. not already split.
+
+It's **WARN-only** — never blocks closeout — and suppressed by `<!-- no-gated-phase-split-guard -->` when the phases are intentionally one unit. Sibling of `#blocked-closeout-followup-capture` and the SKILL "one backlog ID per actionable phase" rule.
+
+**Verification.**
+- 5 new regressions: warns on a multi-phase kept-open item; quiet when already split into ≥2 child ids; quiet for a single-phase item; suppressed by marker; advisory-not-blocking (full `inspect` stays `Ok`).
+- FlowCore `session_check.rs` `guard_` budget bumped 51→57 (audited: 1 ops event + 5 test-fn names).
+- `make check` green; `--release` + `cargo install` (both binaries); CI green on submodule `dc29f28f`.
+
+**Drift observed + recovered (not committed).** When I re-ran `preflight` to capture the baseline for this closeout, queue-maintenance deactivated the active queue to inactive residue (`queue_active: false`), and on the first pass mangled the opening tag to `&lt;!-- agent:queue au--&gt;` (a corrupted `auto` strip). HEAD was clean and correct, so I restored it (`git checkout HEAD` + `reset --from-current`) rather than committing the corruption. Two concerns worth tracking separately: (1) this active queue (head `#gated-followup-split-enforcement`, with completed heads struck `~...~`) keeps being deactivated to residue instead of advancing — the `#completed-queue-residue-regression` / queue-auto-no-continue family; (2) the `au-->` tag corruption from `strip_auto_from_tag` under this state. Neither is in scope for this item, but both reproduced live this turn.
+
+**Shipped:** submodule `dc29f28f`; superproject pointer bumped. Marked `#gated-followup-split-enforcement` done.
+<!-- agent:boundary:c69fa6f6 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -83,7 +105,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 
 <!-- agent:backlog priority queue=prepend -->
 - [ ] [#queue-audit-partial-completion] [recommended] #agent-doc-bug 2026-06-01: queue completion audits can collapse partial progress into "none complete" when every row still has a remaining action. Live repro `src/boost-client/tasks/monsterrodholders.md`: same-day QA, URL/validate-only checks, feed-label/Merchant audits, budget checks, and Rods negatives were complete, but the response said none of the six queue items was complete because each still had at least one blocker. Add per-row queue audit states (complete / partially complete / not started-blocked), require completed-substep plus remaining-condition reporting, and recommend split/narrowing when one row contains multiple gateable phases. Plan: `tasks/agent-doc/plan-queue-audit-partial-completion.md`.
-- [ ] [#gated-followup-split-enforcement] [recommended] #agent-doc-bug 2026-05-31: when a directed do [#id] cycle keeps a multi-phase item open via --pending-edit (backlog) or --review-edit (review) with text that enumerates several gated/remaining phases, agent-doc neither prompts nor guards splitting those phases into discrete child backlog IDs — the deferred work stays buried in one parent's narrowed description and is not independently trackable/queueable. Repro this session: #recursive-repair-state-drift and #codex-owned-pane-prompt-miss-followups each had 2-4 gated phases folded into parent text; only a user catch prompted splitting them into #recursive-repair-recovery-states/#recursive-repair-apply/#preflight-probe-side-effect-free/#codex-owned-pane-stop-hook-live-verify. Add a session-check/finalize advisory (warn-first, sibling of #blocked-closeout-followup-capture and the SKILL 'one backlog ID per actionable phase' rule) that detects a kept-open item whose body lists multiple gated phases without discrete child IDs and recommends the split. Plan: TBD.
 - [ ] [#codex-owned-pane-stop-hook-live-verify] [recommended] Gated on a live Codex pane -- the remaining phases of #codex-owned-pane-prompt-miss-followups after phase 2a landed: (2b) a live Codex Stop-hook regression asserting the owned_pane_self_invocation diagnostic forces an in-pane response body before final chat output, and (3) live-verify a real Codex same-pane run with an unresolved exchange prompt. Plan: tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md.
 - [ ] [#queue-sync-auto-pending-done-guard-misfire] [recommended] When a queue=sync/append attribute populates an active auto-queue in the same cycle, the freshly-synced do-[#id] entries appear as new do-directives in the cycle diff, so preflight records them all as expect_done_or_gate_ids and pending_done_guard then demands every synced item be --done in the populating cycle (live repro 2026-05-31 agent-doc-bugs2.md: do [#backlog-queue-sync-attr] cycle flagged 9 other freshly-synced queue items). Fix: agent-generated/synced queue items must not be treated as user do-directives; only a genuine user exchange do [#id] or the single consumed queue head should populate expect_done_or_gate_ids. Plan: tasks/agent-doc/plan-queue-sync-auto-pending-done-guard-misfire.md.
 - [ ] [#tagpath-queue-priority-publish-align] [recommended] Before the next agent-doc release, publish tagpath (commits b55c305 + 32fd000: backlog/icebox/queue priority + queue sync lint attrs) and bump agent-doc's tagpath dependency past 0.12. Locally agent-doc resolves tagpath via the superproject .cargo/config.toml path patch so the lint-gate accepts the new attributes; a published agent-doc on tagpath 0.12 would reject bare priority/queue as malformed-attr.

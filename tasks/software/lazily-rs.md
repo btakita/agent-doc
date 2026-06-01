@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 
@@ -189,24 +189,45 @@ Commits pushed:
 
 - `src/lazily-rs`: `fcf5a05` (`perf: deduplicate thread-safe first get`) to `btakita/lazily-rs main`
 - `agent-loop`: `9e9aaf602` (`chore: update lazily-rs dedup pointer`) to `btakita/agent-loop main`
-<!-- agent:boundary:a8205cbc -->
+
+### Re: #perf-lock-eval — gpt-5
+
+> **Queue prompt:**
+>
+> [#perf-lock-eval]
+
+
+Completed `#perf-lock-eval`.
+
+Evaluated the thread-safe lock strategy using the current contention/profile data and did not adopt `RwLock`, sharded locks, `Condvar`, or CAS in this cycle. The current evidence is mixed: the short contention sample after in-flight dedup improved 1-2 worker runs, stayed neutral around 4 workers, and regressed at 8-16 workers. That supports keeping the mutex-first design until lock wait/hold instrumentation shows the graph lock dominates a real workload.
+
+Added the lock-strategy gate to `SPEC.md` and `README.md`: future RwLock/sharding/Condvar/CAS work must include a Loom or Shuttle safety model covering concurrent first get, stale in-flight completion, invalidation during compute, effect scheduling/disposal, and re-entrant callbacks before replacing the mutex-first design.
+
+Verification:
+
+- `cargo bench --bench context thread_safe_contention -- --warm-up-time 0.1 --measurement-time 0.2`
+- `cargo fmt -- --check`
+- `cargo test --all-features`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo build`
+- CI check: `gh run list --workflow CI --limit 1` still reports no `CI` workflow, and `gh workflow list` returns no workflows for `lazily-rs`
+- `make check` was not run because `src/lazily-rs` has no `Makefile`
+
+Commits pushed:
+
+- `src/lazily-rs`: `8e917cf` (`docs: gate thread-safe lock strategy changes`) to `btakita/lazily-rs main`
+- `agent-loop`: `77ceabc35` (`chore: update lazily-rs lock-eval pointer`) to `btakita/agent-loop main`
+<!-- agent:boundary:3a18f4d5 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~[#perf-bench]~
-- ~[#perf-profile]~
-- ~[#perf-layout]~
-- ~[#perf-thread-dedup]~
-- [#perf-lock-eval]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#perf-lock-eval] #performance Evaluate RwLock, sharded locks, or targeted CAS only after baseline data identifies lock contention, and require Loom/Shuttle safety models before adopting concurrency changes
 <!-- /agent:backlog -->
 
 ## Review

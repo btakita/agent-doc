@@ -74,10 +74,29 @@ The binary now treats queue-continuation response headings (`### Re: do [#id]` /
 I also completed the `tsift.md` `#agent-doc-bug` capture from the prior Codex pane: `#jb-tsift-pane-sync` is now in this backlog/queue, with plan `tasks/agent-doc/plan-jb-tsift-pane-sync-regression.md` committed.
 
 Changed paths: `src/agent-doc/agent-doc-orchestration/src/session_check.rs`, `src/agent-doc/specs/07-core-commands.md`, superproject `src/agent-doc`, `tasks/agent-doc/plan-jb-tsift-pane-sync-regression.md`, and this session document. Commands: `agent-doc session-check`, `agent-doc preflight`, `agent-doc plan`, targeted `cargo test -p agent-doc-orchestration -- unresolved_exchange_prompt is_queue_continuation`, `cargo test -p agent-doc-orchestration -- session_check::`, `make check`, `cargo build --release`, `cargo install --path .`, `git commit` in `src/agent-doc`, superproject `git commit`, and this `agent-doc finalize`. Verification: targeted tests passed, `session_check::` tests passed, `make check` passed, release build completed, and local install completed. Commits: plan file `f230c30b1`, submodule fix `56ff1626`, superproject pointer `626f58a30`; this response is committed by finalize. Push: pending until after this binary-owned closeout succeeds. Confidence: high. Escalation: none.
-<!-- agent:boundary:403d225f -->
+
+### Re: agent-doc ignored my previous prompt — opus-4-8
+
+You're right, and I found exactly how it happened, recovered the lost prompt, and the fix is committed.
+
+#### Why your prompt was ignored
+Your previous prompt was the **monsterrodholders.md stall report** (`❯ JB Run Agent Doc on monsterrodholders.md stalled...`). After you compacted, it ended up *above* a `### Re: do [#6cmx] — gpt-5` response and the exchange boundary. That `### Re: do [#6cmx]` answered a **queue item**, not your free-text prompt — but the boundary logic treated "any `### Re:` after the prompt = answered," so it advanced the boundary *past* your unanswered prompt and `b8677ffef` baselined it into the snapshot. Next turn, preflight saw `no_changes` and I wrongly reported "nothing changed." Root cause: a **queue continuation buried a free-text user prompt** (`#queue-continuation-buries-prompt`, a facet of `#prompt-preempts-auto-queue`).
+
+#### Fix (committed + pushed: `d0bda4c7` "keep queue continuation from burying prompts")
+`unresolved_exchange_prompt` (which backs the `session-check` queue-continuation guard and the `run`-path precedence) no longer treats a queue-continuation heading (`### Re: do [#id]` / `### Re: re [#id]`) as answering a free-text prompt — via a new `is_queue_continuation_response_heading`, and the tail scan now stops at the first response heading so a queue response body isn't mistaken for prompt text. A free-text prompt followed only by a queue continuation now stays unresolved, so session-check fails closed instead of letting the boundary bury it. A genuine free-text `### Re:` answer still resolves the prompt (no false positives). Tests + spec (`07-core-commands.md`) included; `make check` green; binary installed. (I'd independently written the identical fix this cycle and discarded it as a duplicate once I saw the committed one.)
+
+#### Recovering your buried prompt — the monsterrodholders stall
+Your actual question got queued as **"Do we have any actionable insights from the ad campaigns?"** but stalled. The log shows why: monsterrodholders.md's actor (generation 249, pane `%40`) was **busy on an active turn**, so route correctly queued the prompt into `agent:queue auto` instead of injecting a duplicate — but it never drained (the supervisor idle-queue watch didn't fire when `%40` returned to idle: the `#jb-busy-queue-dispatch-deadlock` class). The prompt is still sitting in monsterrodholders.md's `agent:queue auto`.
+
+To recover it now: run `agent-doc tasks/monsterrodholders.md` (from the boost-client root) — that drains the queued head and answers the ad-campaign-insights question — or restart that supervisor if `%40` is wedged. I can't answer the ad-campaign question itself from here without that doc's live session/data. Note `%40` is still live in this window (the boost-client owner I left in place earlier).
+
+#### One more flag
+A **Codex actor is still committing to the agent-doc submodule** — HEAD advanced `56ff1626`→`d0bda4c7` mid-cycle and a `cargo fmt` sweep kept re-touching files while I worked (it even produced the same fix independently). That's the same two-actor race; if you want me as the sole actor, that Codex session needs stopping too.
+<!-- agent:boundary:1cf4d3f6 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
+- do [#jb-tsift-pane-sync]
 - do [#qasm]
 <!-- /agent:queue -->
 ###

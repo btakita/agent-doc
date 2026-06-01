@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -76,12 +76,14 @@ Cell: content_hash(file)                    — invalidated on file change
 ```
 
 This is lighter scope than the agent-doc integration (which wires config/frontmatter/SSH resolution). Worth a separate plan if you want to proceed.
-<!-- agent:boundary:98989583 -->
+What are #next-steps to integrate lazily-rs into tsift?
+<!-- agent:boundary:62bc70c2 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+- What are #next-steps to integrate lazily-rs into tsift?
 <!-- /agent:queue -->
 
 ## Backlog

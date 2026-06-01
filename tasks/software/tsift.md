@@ -169,7 +169,39 @@ Tmux CI note: this tsift repo's CI workflow does not define a `tmux-test`, `tmux
 ### Re: closeout repair — gpt-5
 
 Closeout repair only: the implementation response for `#lazily-tsift-status-cache` is already committed above. This write reopens the binary-owned path after boundary metadata drift and does not add task work.
-<!-- agent:boundary:e1295671 -->
+
+### Re: #lazily-inspect-scope — gpt-5
+
+> **Queue prompt:**
+>
+> [#lazily-inspect-scope]
+
+Implemented `#lazily-inspect-scope` in `src/tsift`.
+
+What changed:
+- Replaced the thread-local `HashMap` inspection cache behind `InspectScopeGuard` with a lazily-rs `Context` containing per-key Slots and an epoch Cell.
+- `IndexDb::inspect_read_only` now routes guarded reads through the lazily-backed scope cache, while unguarded callers keep fresh per-call behavior.
+- `inspect_scope_invalidate_all()` now bumps the scope epoch so in-scope refreshes clear dependent Slots before the next read.
+- Failed inspections are not retained in the Slot cache, preserving the old retry behavior for transient read failures.
+- Added regression coverage for Slot reuse until epoch invalidation, including WAL snapshot fallback after invalidation.
+- Updated the tsift spec and the CLI freshness comment to describe the lazily-backed guard.
+
+Commits:
+- `btakita/tsift`: `22e6768` (`feat(index): lazily cache inspect scopes`) pushed to `main`.
+- root `agent-loop`: `404a3e71a` (`chore: update tsift submodule`) committed locally for the `src/tsift` gitlink. I did not push root `main` because it already has unrelated unpushed `agent-doc-bugs2` commits ahead of `origin/main`.
+
+Verification:
+- `cargo test -p tsift-index inspect_scope_lazily_reuses_until_epoch_invalidation` passed.
+- `cargo test -p tsift-index` passed.
+- `cargo test -p tsift-cli build_context_pack_reuses_inspect_within_scope` passed.
+- `cargo test -p tsift-cli inspect_read_only_outside_scope_does_not_cache` passed.
+- `make check` passed, including clippy, workspace tests, Node tests, and npm dry-run publish check.
+- `cargo build --workspace` passed.
+- `cargo install --path . --force` passed.
+- `tsift --version` reports `tsift 0.1.62`.
+- GitHub Actions run `26736166082` passed both jobs: `clippy + test` and `live Convex graph acceptance`.
+- I checked for tmux CI coverage in this repo; there is no tmux workflow or `make tmux-ci` target to inspect.
+<!-- agent:boundary:b1e3b67f -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -177,7 +209,7 @@ Closeout repair only: the implementation response for `#lazily-tsift-status-cach
 <!-- agent:queue auto -->
 dispatch #spec-test-build-install-commit-push
 - ~[#lazily-tsift-status-cache]~
-- [#lazily-inspect-scope]
+- ~[#lazily-inspect-scope]~
 - [#lazily-resolve-edges]
 - [#lazily-neighborhood]
 - [#lazily-summary]
@@ -187,7 +219,6 @@ dispatch #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#lazily-inspect-scope] [feature] Replace InspectScopeGuard with lazily-rs reactive cache in tsift-index
 - [ ] [#lazily-resolve-edges] [feature] Wrap resolve_edges in lazily-rs Slots keyed by (file, symbol, content_hash)
 - [ ] [#lazily-neighborhood] [feature] Lazy BFS neighborhood expansion via lazily-rs Slots per depth layer
 - [ ] [#lazily-summary] [feature] Lazy summary cache with Cell-backed content_hash invalidation

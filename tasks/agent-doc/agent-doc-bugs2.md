@@ -31,12 +31,28 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260601-030613.md`*
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260601-042354.md`*
 
 Compacted content:
+❯ - Archived 1 response topic(s): do [#queue-audit-partial-completion]
 - Archived 3 response topic(s): do [#queue-clear-unrun-items]; do [#r5q6]; finish [#r5q6]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:4af81b20 -->
+### Re: do [#r5q6] — opus-4-8
+The cycle is an empty `preflight_started` (no capture) — the benign auto-recoverable state, so my failed finalize wedged nothing. The picture is now unambiguous:
+
+**`finish [#r5q6]` is complete.** I verified it two independent ways this turn:
+- **My direct verification:** the `#queue-clear-unrun-items` guard (steps 1–3) was already merged into the backend HEAD `9362c8f8`. I built it (`cargo build --release` exit 0), ran the 4 guard regressions (4/4 green), installed both binaries + cdylib (`agent-doc 0.34.0`), and **live-verified on the installed binary**: a closeout that consumes `do [#alpha]` while silently dropping `do [#beta]` (still open in backlog) **fails closed** with `[session-check] INTERRUPTED: runnable agent:queue head(s) #beta were removed … unrun queue work was silently dropped` plus the restore-or-resolve hint. That is exactly the `#r5q6` acceptance criterion.
+- **The concurrent authoritative session also completed it:** line 37 shows a compaction that archived three topics including a `finish [#r5q6]` response, and `#r5q6` has been reaped from review. That's why my `--review-edit r5q6` failed ("no item with id #r5q6") and `finalize` **correctly committed nothing**.
+
+**I am not finalizing a competing response.** The `finish [#r5q6]` prompt I was dispatched on has been compacted/archived by the authoritative session, and the live exchange now carries a **new, unrelated user prompt** you just added — *"JB `Run Agent Doc` on this file deadlocked. #spec-test-build-install-commit-push"* — which I have not worked. Committing my `finish [#r5q6]` write now would bind an orphaned response to the wrong prompt and race the authoritative actor — the exact multi-actor contention your "deadlocked" report describes. The empty `preflight_started` cycle from my attempt auto-abandons; nothing is wedged or corrupted (the only uncommitted change is your new prompt).
+
+**On the "deadlocked" report:** this document has had two `agent-doc` actors acting on it concurrently for several of my turns (each of my last three turns found work already committed by an authoritative route-owned session). A JB `Run Agent Doc` deadlock on this specific file is consistent with that contention. If you want me to take it, the clean path is: let the authoritative session settle (or stop it), then re-dispatch on a quiescent document — I'll have a clean preflight to work from. Right now, standing down is the correct move to avoid making the deadlock worse.
+
+Net: the guard is live and proven (`v0.34.0` installed); `#r5q6`'s land + live-verify are done; residual steps 4–5 are minor hardening (4a/4b near-trivial, 5 needs a live Codex pane) tracked under `#queue-clear-unrun-items`.
+JB `Run Agent Doc` on this file deadlocked.
+#spec-test-build-install-commit-push
+<!-- agent:boundary:bd074aa7 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -67,7 +83,6 @@ equityfundingsource.md had the full-document IPC duplicate corruption. Then a ne
 ---
 Please review the agent-doc, claude, codex logs. What are #next-steps to fix bugs?
 ---
-When I ran the last turn, #spec-test-build-install-commit-push was removed by agent-doc.
 ---
 As I was typing into the comment below `/agent:exchange`, the full-document IPC corruption happened, then the duplicate line happened, then the full-document IPC corruption happened again.
 

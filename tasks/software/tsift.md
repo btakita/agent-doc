@@ -1,6 +1,6 @@
 ---
 agent_doc_session: tsift-v0.1
-agent: opencode
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -109,7 +109,6 @@ Implemented and pushed (`f454216`).
 **lazily-rs integration deferred** to a follow-up item (`#lazily-tsift-status-cache`). Adding lazily-rs as a dependency requires workspace-level Cargo.toml changes and a dedicated integration plan beyond the scope of this status auto-fix.
 recovery sync
 `tsift status` should auto-fix stale indexes by default. Deprecate `--fix`. Add `--no-fix` to skip auto-fixing.
-<!-- agent:boundary:782ef24b -->
 ### Re: auto-fix by default, deprecate --fix, add --no-fix — glm-5.1
 
 Implemented.
@@ -128,17 +127,60 @@ Implemented.
 - `status_json_auto_fixes_stale_index_without_fix_flag` — still passes (behavior unchanged)
 - `status_fix_refreshes_stale_index_before_reporting_json` — still passes (deprecated `--fix` still works)
 - `status_fix_refreshes_stale_instructions_after_version_bump_in_json` — still passes
+
+### Re: #lazily-tsift-status-cache — gpt-5
+
+> **Queue prompt:**
+>
+> [#lazily-tsift-status-cache]
+
+
+Implemented and pushed.
+
+What changed:
+- Added `lazily` to `tsift-status` and introduced a per-status-cycle `StatusCheckCache` backed by lazily `Context` / Slots.
+- `cmd_status` now reuses one cache across the initial report, missing-scope autoindex pass, and auto-fix pass, invalidating it after any status-triggered index mutation.
+- `ReadOnlyInspectResult` now carries tracked file paths, so summary coverage can reuse the cached inspection instead of reopening the same SQLite index just to read `file_state` paths.
+- Added regression coverage proving cached status checks reuse the first index inspection until explicit invalidation, even when a WAL writer appears afterward.
+- Updated `SPEC.md` with the status-cache contract.
+- Fixed current-toolchain clippy blockers in `tsift-algorithms`, `tsift-search`, and the status command argument shape so the required full suite is green.
+
+Commits:
+- `8a87c26` in `btakita/tsift`: `feat(status): cache status index inspections`
+- `22488b8d1` in `agent-loop`: `chore: update tsift submodule`
+
+Verification:
+- `cargo test -p tsift-status status_cache_reuses_index_inspection_until_invalidated`
+- `cargo test -p tsift-status`
+- `cargo test -p tsift-cli status_cmd`
+- `cargo clippy -p tsift-algorithms --all-targets -- -D warnings`
+- `cargo clippy -p tsift-search --all-targets -- -D warnings`
+- `cargo clippy -p tsift-cli --all-targets -- -D warnings`
+- `make check`
+- `cargo build --workspace`
+- `cargo install --path . --force`
+- `tsift --version` -> `tsift 0.1.62`
+- GitHub CI run `26735499287` passed: `clippy + test` and `live Convex graph acceptance` both green.
+
+Tmux CI note: this tsift repo's CI workflow does not define a `tmux-test`, `tmux-ci`, or other tmux job; I checked the workflow and repo references while reviewing CI.
+<!-- agent:boundary:21be2f9e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+dispatch #spec-test-build-install-commit-push
+- ~[#lazily-tsift-status-cache]~
+- [#lazily-inspect-scope]
+- [#lazily-resolve-edges]
+- [#lazily-neighborhood]
+- [#lazily-summary]
+- [#lazily-tsift-plan]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#lazily-tsift-status-cache] [feature] Integrate lazily-rs into tsift status check to cache index inspections and avoid redundant SQLite opens across repeated status calls
 - [ ] [#lazily-inspect-scope] [feature] Replace InspectScopeGuard with lazily-rs reactive cache in tsift-index
 - [ ] [#lazily-resolve-edges] [feature] Wrap resolve_edges in lazily-rs Slots keyed by (file, symbol, content_hash)
 - [ ] [#lazily-neighborhood] [feature] Lazy BFS neighborhood expansion via lazily-rs Slots per depth layer

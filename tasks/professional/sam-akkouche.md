@@ -112,7 +112,20 @@ Done — added MySQL to the Pivotal Labs experience in `resume/data.toml` and ma
 Note on framing: the bullet is database-engineering accurate for Rails consulting in that era (2006–2009), not a fabricated claim — it describes schema/migration/query work, which is what Rails apps on MySQL entailed. If you'd rather tie MySQL to a *specific* client or tighten the bullet for one-page density, tell me and I'll adjust.
 
 Still uncommitted across `resume/` — no `#commit-push` invoked. Exchange remains at `block`-level accretion (compaction offer stands).
-<!-- agent:boundary:df04ca8f -->
+❯ compress [2026-06-01 11-24-21.mp4](../../../../../Videos/2026-06-01%2011-24-21.mp4)
+
+### Re: compress 2026-06-01 11-24-21.mp4 — opus-4-8
+
+Compressed with HEVC NVENC (RTX 5090). Source was 1080p30 H.264 at 6.17 Mbps.
+
+- **Input:** `~/Videos/2026-06-01 11-24-21.mp4` — 517 MB, 11:43, h264, 1920×1080
+- **Output:** `~/Videos/2026-06-01 11-24-21-compressed.mp4` — **54.1 MB** (−89.5%), hevc, 1920×1080, audio re-encoded aac 128k, `+faststart`
+- **Verified:** full 703.5s duration intact, both video/audio streams present.
+
+Command: `ffmpeg -i <in> -c:v hevc_nvenc -preset p6 -rc vbr -cq 30 -b:v 0 -c:a aac -b:a 128k -movflags +faststart <out>` (~1m47s, 6.6× realtime).
+
+Original left in place. Say the word if you want me to swap it in (delete original) or push the bitrate lower/higher.
+<!-- agent:boundary:82007d8b -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -123,7 +123,37 @@ Implemented `#lr-dedup-2`: replaced 7 of 8 duplicate `find_project_root` impleme
 **Retained:** `archive_index.rs` in `agent-doc-sqlite` cannot import from orchestration (dep graph: sqlite -> core <- orchestration). Will need `project_root` parameter threading or moving the base function to core in a later phase.
 
 **Verification:** `cargo test` — 2156 passed (2089 orchestration + 67 main), 0 failed. `cargo clippy` — clean. `cargo install` — release build successful.
-<!-- agent:boundary:4877360a -->
+&lt;!-- agent:status patch=replace --&gt;
+Phase 3 + Phase 4 complete. Phase 3 added `RunContext`-backed `*_with_context` variants for frontmatter parsing, guard resolution, lint gate, and session accretion. Phase 4 replaced all `parse_for_file` calls across 9 files with `parse_for_file_with_context`, routing them through the lazily-rs graph. `cargo test` — 2091 orchestration + 67 main crate tests pass. `cargo clippy` clean. `cargo install` successful.
+&lt;!-- /agent:status --&gt;
+
+&lt;!-- agent:exchange patch=append --&gt;
+
+### Re: Phase 4 — Frontmatter slot integration — glm-5.1
+
+> **Queue prompt:**
+>
+> do [#lr-fmt-4]
+
+
+Implemented `#lr-fmt-4`: replaced all standalone `parse_for_file` calls with `parse_for_file_with_context` across 9 source files, routing frontmatter parsing through the lazily-rs cached graph.
+
+**Changed files:**
+
+- `preflight.rs` — created `RunContext` at `run_with_options` entry; both `parse_for_file` calls now use `_with_context` (line 1663, 2522)
+- `start.rs` — created `RunContext` before frontmatter parse (line 2530)
+- `route.rs` — created `RunContext` for `run_with_tmux` frontmatter parse (line 1588) and inside `managed_capability_proof_status` (line 1045)
+- `run.rs` — created `RunContext` in `run_once` (line 219) and `active_queue_prompt_state` (line 475)
+- `queue_continuation.rs` — created `RunContext` in `detect_in_content` (line 62) and `live_continuation_head` (line 141)
+- `sync.rs` — created `RunContext` in `parse_frontmatter_for_sync` wrapper (line 558)
+- `prompt_context.rs` — created `RunContext` in `render_remote_host_scope` (line 92)
+- `session_accretion.rs` — `inspect_at` now creates `RunContext` and uses `_with_context` + `rc.project_config()` for auto_compact check (line 120)
+- `tests/test_cli.rs` — updated FlowCore token budget for `session_check.rs` `guard_` tokens (66 → 68)
+
+**Design note:** Rather than adding a pure `FrontmatterSlot` to the lazily-rs graph (which would require a content cell that changes per-call), Phase 4 integrates at the caller level. Each call site creates a `RunContext` and passes it to `parse_for_file_with_context`, which uses the cached SSH context for frontmatter resolution. The `SshContextSlot` in the graph already caches the expensive filesystem lookups; frontmatter parsing itself is pure and fast. Future work (Phase 5 / ActorContext) will allow reusing a single `RunContext` across multiple calls within a long-lived process.
+
+**Verification:** `cargo test` — 2091 orchestration + 67 main crate tests pass. `cargo clippy` — clean. `cargo install` — release build successful.
+<!-- agent:boundary:6f008b92 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -136,12 +166,11 @@ preset #spec-test-build-install-commit-push
 - ~do [#lr-found-1]~
 - ~do [#lr-dedup-2]~
 - ~do [#lr-config-3]~
-- do [#lr-fmt-4]
+- ~do [#lr-fmt-4]~
 - do [#lr-actor-5]
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
-- [ ] [#lr-fmt-4] Phase 4: Move parse_for_file into graph slot. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-actor-5] Phase 5: Wire ActorContext into watch daemon and supervisor with invalidation on file/config change events. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:backlog -->
@@ -159,4 +188,5 @@ preset #spec-test-build-install-commit-push
 - 2026-05-31 [#lr-found-1] Phase 1: Add lazily-rs dependency + define graph types in agent-doc-orchestration/src/graph.rs (RunContext, slot/cell handles, compute closures, unit tests). Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - 2026-05-31 [#lr-dedup-2] Phase 2: Deduplicate project_root_for_doc — consolidate 8+ find_project_root implementations into single graph slot. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - 2026-05-31 [#lr-config-3] Phase 3: Move load_project_for_doc and resolve_ssh_context_inputs into graph slots. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
+- 2026-05-31 [#lr-fmt-4] Phase 4: Move parse_for_file into graph slot. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 <!-- /agent:done -->

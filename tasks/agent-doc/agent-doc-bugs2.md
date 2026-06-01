@@ -36,7 +36,52 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 4 response topic(s): 3 tmux panes with 2 editor panes; Did lazily-rs cause these regressions?; #spec-test-build-install-commit-push; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:e9923525 -->
+❯ What are #next-steps to complete review items?
+
+### Re: What are #next-steps to complete review items? — opus-4-8
+
+All 39 review items are `[/]`-gated `[recommended]` — the code has landed for almost all; what remains is **verification or a small follow-up phase**, not greenfield work. They split into three completion paths, and most close in **batches** because they share the same gate.
+
+#### Path A — One consolidated live busy-pane verification session (closes the biggest batch)
+
+These are all "code landed, gated on a live pane / installed signed plugin + restart." Doing them in one session — install the current signed JB plugin, restart the route-owned `agent-doc` process, then drive one mid-active-turn pane — verifies most of them together:
+
+- `#t41j`, `#jb-busy-queue-deadlock-live-verify`, `#jb-run-agent-doc-busy-feedback-live-verify` — busy-pane Run Agent Doc (immediate feedback, queue-append, idle-drain).
+- `#route-drain-all-surface-live-verify` — completed-item-in-review no longer blocks dispatch.
+- `#codex-owned-pane-stop-hook-live-verify`, `#codex-owned-pane-prompt-miss-followups` (2b/3), `#codex-final-response-live-verify` — Codex same-pane / Stop-hook.
+- `#recovery-drift-apply-live-verify`, `#jb-load-tmux-window-verify`.
+
+**Single most unblocking action:** confirm which signed plugin build is installed + restart the route-owned process, then run the busy-pane checklist once.
+
+#### Path B — One IPC/typing-corruption live-capture session (gated on debug logging)
+
+The duplication family is blocked on capturing the exact editor `setText` payload — enable `#com.github.btakita.agentdoc` debug logging **first**, then type a prompt into a doc during an in-flight `finalize --stream`:
+
+- `#ipcfullprompt-recur2`, `#ipc-dup-tracking-double-merge`, `#adoc-queue-ipc-buffer-divergence`, `#prompt-duplicated-while-typing`, `#finalize-retry-ipc-response-duplication`, `#zpc2`.
+
+These can't be confidently closed without that transport packet, so they stay gated until the capture exists.
+
+#### Path C — Implementable now, no live pane (prioritized, smallest-first)
+
+These need code + tests, then move to done. Recommended order:
+
+1. `#free-text-queue-skip-diagnostic` — smallest; shape-aware message at `write.rs ~1460/1469`.
+2. `#queue-auto-no-continue` — pending-shadow warning blocking auto-continue (high friction, hit this session-class repeatedly).
+3. `#prompt-preempts-auto-queue` + `#queue-user-edit-overwrite` + `#jb-run-agent-doc-response-queue-contamination` — the queue-provenance cluster (related fixes, share queue/snapshot logic).
+4. `#cancel-orphans-preflight-cycle`, `#exchange-prompt-dropped-on-merge`, `#duplicate-response-after-commit` — each has a recommended Option A in its plan.
+5. `#do-id-partial-closeout-state` remainder, `#preset-item-id-collision-enforce`, `#queue-clear-unrun-items` — closeout-guard hardening.
+6. New-feature pair `#backlog-priority-attribute` + `#backlog-queue-sync-attribute` (composable; the priority one would automate this very #next-steps reprioritization).
+7. `#stash-session-ttl-prune`, `#plugin-cleanup-menu-command`, `#stash-pane-promote-on-focus`, `#clear-stops-running-process`, `#jb-stale-busy-idle-footer`, `#snrun` — hygiene + UX polish.
+
+#### Recommended sequence
+
+1. **Path A** first — one live session retires ~9 items at low cost.
+2. **Path C #1–#2** next — quick wins that reduce the friction you keep hitting in these very sessions.
+3. **Path B** when you can spare a debug-logging capture session.
+4. Work the rest of **Path C** in plan-backed cycles.
+
+No new backlog items added — every next step above is already tracked in the 39 review items; this is purely the ordering/batching over them.
+<!-- agent:boundary:1c81f807 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->

@@ -151,7 +151,45 @@ Commits pushed:
 
 - `src/lazily-rs`: `9f4d7ed` (`perf: index context nodes by slot id`) to `btakita/lazily-rs main`
 - `agent-loop`: `bc5940e64` (`chore: update lazily-rs layout pointer`) to `btakita/agent-loop main`
-<!-- agent:boundary:1fbdb72a -->
+
+### Re: #perf-thread-dedup — gpt-5
+
+> **Queue prompt:**
+>
+> [#perf-thread-dedup]
+
+
+Completed `#perf-thread-dedup`.
+
+Prototyped in-flight recompute deduplication for `ThreadSafeContext` first-get contention. Each thread-safe slot now has an in-flight `computing` flag: the first caller owns the compute for the current slot revision, while contending callers yield/wait and then either read the published cache or retry if an invalidation made the in-flight result stale. This keeps user callbacks outside the graph lock and avoids introducing a broader lock strategy before `#perf-lock-eval`.
+
+Updated the threading spec from “duplicate speculative computation may happen” to the new shared in-flight compute contract. The contention and instrumentation tests now assert one recompute for contending first-get callers and zero duplicate speculative publication races. The feature-gated profile bench was adjusted so it exercises the dedup path without waiting for two compute callbacks.
+
+Short profile-bench sample with instrumentation enabled:
+
+- `profile_instrumentation/context_snapshot`: about `416 ns`
+- `profile_instrumentation/thread_safe_snapshot`: about `294 us`
+
+Verification:
+
+- `cargo fmt -- --check`
+- `cargo test --all-features benchmark_instrumentation -- --nocapture`
+- `cargo test --all-features thread_safe_concurrent_first_get_contention -- --nocapture`
+- `cargo test`
+- `cargo test --all-features`
+- `cargo bench --no-run`
+- `cargo bench --features instrumentation --no-run`
+- `cargo bench --features instrumentation --bench profile -- --warm-up-time 0.1 --measurement-time 0.2`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo build`
+- CI check: `gh run list --workflow CI --limit 1` still reports no `CI` workflow, and `gh workflow list` returns no workflows for `lazily-rs`
+- `make check` was not run because `src/lazily-rs` has no `Makefile`
+
+Commits pushed:
+
+- `src/lazily-rs`: `fcf5a05` (`perf: deduplicate thread-safe first get`) to `btakita/lazily-rs main`
+- `agent-loop`: `9e9aaf602` (`chore: update lazily-rs dedup pointer`) to `btakita/agent-loop main`
+<!-- agent:boundary:a8205cbc -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -161,14 +199,13 @@ preset #spec-test-build-install-commit-push
 - ~[#perf-bench]~
 - ~[#perf-profile]~
 - ~[#perf-layout]~
-- [#perf-thread-dedup]
+- ~[#perf-thread-dedup]~
 - [#perf-lock-eval]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#perf-thread-dedup] #performance Prototype ThreadSafeContext in-flight recompute deduplication so concurrent first get callers share one computation when benchmarks show duplicate work is material
 - [ ] [#perf-lock-eval] #performance Evaluate RwLock, sharded locks, or targeted CAS only after baseline data identifies lock contention, and require Loom/Shuttle safety models before adopting concurrency changes
 <!-- /agent:backlog -->
 

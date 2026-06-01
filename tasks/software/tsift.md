@@ -132,7 +132,11 @@ Verification:
 - Default `cargo install --path . --force` passed (`tart-e2f44e7862`) and its log has no `tsift-surrealdb`/SurrealDB compile lines.
 - GitHub CI: new tsift CI run `26784235057` for `2a6d8cb` is in progress; previous CI run `26782385866` was green.
 - Tmux CI: workflows are `CI` and `Release`; this repo has no `make tmux-ci` target.
-<!-- agent:boundary:4b4f6f1d -->
+
+### Re: #surreal-native-adapter queue repair — gpt-5
+
+Repaired the document closeout state for `#surreal-native-adapter`: the implementation response was already written and committed, and the queue component is now reaped so `#surreal-promotion-gate` is the next live queue item.
+<!-- agent:boundary:76f00d41 -->
 <!-- /agent:exchange -->
 
 ## Queue

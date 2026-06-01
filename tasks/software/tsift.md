@@ -107,7 +107,32 @@ Pushed commits:
 
 - `src/tsift`: `cd3a445 test(graph): assert surrealdb backend-eval parity`
 - parent `agent-loop`: `a07112dc5 chore: update tsift submodule`
-<!-- agent:boundary:11ff1259 -->
+
+### Re: #surreal-native-adapter — gpt-5
+
+Completed `#surreal-native-adapter`.
+
+Implemented a feature-gated optional `tsift-surrealdb` crate, excluded from the default workspace, using the stable SurrealDB Rust SDK 2.x embedded SurrealKV engine. The adapter writes provider-neutral `ConvexProjectionRows` into file-backed SurrealDB records, implements `GraphStore`, and keeps synchronized read indexes so backend-eval parity runs are practical while still proving the SurrealKV projection write/load path.
+
+Wired `backend-surrealdb` through the root and `tsift-cli` feature graph. With the feature enabled, backend-eval replaces the read-only SurrealDB prototype with the SurrealKV adapter under `.tsift/backend-eval-cache/surrealdb/<scope>/<dataset>/surrealkv`; without the feature, the default dependency-free prototype remains in use. Updated docs and conformance coverage accordingly, including order-independent schema tests for serde_json feature-unified column ordering.
+
+Commits pushed:
+
+- `src/tsift`: `2a6d8cb` (`feat(graph): add optional surrealdb adapter spike`)
+- parent repo: `0ba7deca0` (`chore: update tsift submodule`)
+
+Verification:
+
+- `cargo check -p tsift-cli --features backend-surrealdb` passed (`tart-bedd8557bb`).
+- `cargo test --manifest-path packages/tsift-surrealdb/Cargo.toml` passed (`tart-a0597ee731`).
+- `cargo test -p tsift-cli --features backend-surrealdb --test graph_db_conformance graph_db_backend_eval_benchmarks_candidate_stores_against_sqlite` passed (`tart-8f4ef429a1`).
+- Default backend-eval conformance passed without the feature (`tart-4b40753551`).
+- `make check` passed on the final diff (`tart-9b9dc67030`).
+- Default `cargo build` passed (`tart-c6cdc0ac34`) and its log has no `tsift-surrealdb`/SurrealDB compile lines.
+- Default `cargo install --path . --force` passed (`tart-e2f44e7862`) and its log has no `tsift-surrealdb`/SurrealDB compile lines.
+- GitHub CI: new tsift CI run `26784235057` for `2a6d8cb` is in progress; previous CI run `26782385866` was green.
+- Tmux CI: workflows are `CI` and `Release`; this repo has no `make tmux-ci` target.
+<!-- agent:boundary:fd0cc1ea -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -123,7 +148,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#surreal-native-adapter] Spike a feature-gated optional SurrealDB adapter crate that writes provider-neutral projection rows to an embedded/file-backed SurrealDB store without adding SurrealDB to the default cargo build/install path.
 - [ ] [#surreal-promotion-gate] Run repeated real, full-projection, synthetic high-degree, and synthetic deep-chain backend-eval samples for the SurrealDB adapter, including install portability and multi-process/read-only lock behavior, then update the promotion gate only if it preserves SQLite parity and beats SQLite on every required workload.
 <!-- /agent:backlog -->
 

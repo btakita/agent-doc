@@ -151,6 +151,31 @@ The shared `agent-doc` crate working tree is **full of uncommitted concurrent de
 2. **Consolidate to one owner** of `agent-doc-bugs2.md` so a single pane drains the queue.
 
 I'm not finalizing a competing write — the queue already advanced to a release-gated item, the working tree is mid-development by another actor, and a finalize now would race it. My fix is done and verified; it needs a clean working tree to commit into.
+Same condition as every recent turn: a **live authoritative cycle owns the document right now** — `cycle-1780291016495`, `phase=child_agent_wait agent=claude elapsed_s=60`, IPC listener active. I won't race it. But the verification this item asked for is complete:
+
+> **Queue prompt:**
+>
+> do [#stuck-capture-queue-echo-false-positive]
+
+
+## `#stuck-capture-queue-echo-false-positive` — verification PASSES, ready to mark done
+
+- **Fix is in HEAD:** `6220379c` is an ancestor of the backend HEAD (the `normalized_response_lines` echo-blockquote strip).
+- **Live evidence across queue-consumed cycles:** this session ran **14 queue-consumed cycles in the last 30 min** (thousands of queue/preflight ops events). The ops log shows **zero new `stuck_captured_cycle` warnings**. The only two `stuck_captured_cycle_detected` entries in the entire log are from **~May 24, before `6220379c` landed** (one on this doc, one on `tsift.md`) — exactly the pre-fix false-positives the item describes.
+
+That satisfies the item's "verify across a couple more queue-consumed cycles that no preflight emits the false warning, then mark done." It's ready for `--done`.
+
+## Why I'm not recording the `--done`
+
+This closeout needs only a clean document mutation (no code commit), but the document is owned by the live authoritative `child_agent_wait` cycle above. A competing `finalize` from this session would race it and risk a torn write — the `#zpc2` corruption class. So the owning session should reap it: `agent-doc finalize … --done stuck-capture-queue-echo-false-positive` (or `agent-doc write --commit … --done …`).
+
+## The situation is unchanged and the fix is operational, not code
+
+For 13+ turns every dispatched head has been **already-landed-needs-verify**, **operator-gated**, or **release-gated**, and I can't close any of them because:
+1. A **live authoritative `agent=claude` cycle** owns `agent-doc-bugs2.md` (it's draining the queue itself — that's why each item is already handled), and
+2. The shared crate working tree holds **75 files of uncommitted concurrent WIP**.
+
+Both point to one action: **stop the second session and commit/stash the WIP.** Run `agent-doc session status tasks/agent-doc/agent-doc-bugs2.md`, stop the extra pane (`agent-doc gc` / kill it), and let the single surviving owner drain the remaining 2–3 queue items and commit the crate. Everything I've verified this session (the `#queue-sync` fix implementation, this `#stuck-capture` verification, the `#t41j`/`#codex-pane` gatings) is correct and ready — it just needs one clean owner to record. I'll keep standing down while two actors share this doc.
 
 ### Re: do [#queue-sync-auto-pending-done-guard-misfire] — gpt-5
 
@@ -173,7 +198,7 @@ Verification:
 Commits:
 - `src/agent-doc`: `e7306701` (`Fix synced queue pending-done accounting`) pushed to `origin/20260422/codex-agent-backend`.
 - Superproject gitlink commit `751bec20` is created; per agent-doc closeout ordering, I will push `main` after this document commit lands.
-<!-- agent:boundary:b921e7ce -->
+<!-- agent:boundary:8838b427 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -181,7 +206,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#queue-sync-auto-pending-done-guard-misfire]~
 - ~do [#tagpath-queue-priority-publish-align]~
 - ~do [#codex-owned-pane-prompt-miss-followups]~
-- do [#stuck-capture-queue-echo-false-positive]
+- ~do [#stuck-capture-queue-echo-false-positive]~
 - do [#preset-item-id-collision-enforce]
 - do [#free-text-queue-skip-diagnostic]
 - do [#do-id-partial-closeout-state]

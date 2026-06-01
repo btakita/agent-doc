@@ -37,7 +37,24 @@ queue_active: false
 Compacted content:
 - Archived 5 response topic(s): #perf-bench; #perf-profile; #perf-layout; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:d7e8b475 -->
+❯ What are #next-steps to improve the lazily-rs performance?
+
+### Re: next steps — gpt-5
+
+Top backlog item: `#perf-profile-baseline`.
+
+I added the performance backlog in priority order. The next move should be a full profiling pass using the new Criterion and instrumentation surfaces, because the last contention sample was mixed: 1-2 worker runs improved after in-flight dedup, 4 workers was roughly neutral, and 8-16 workers regressed. That profile should decide whether the next implementation patch targets lock waiting, dependency-edge churn, or effect scheduling.
+
+Priority order:
+
+1. `#perf-profile-baseline` — collect the full benchmark and instrumentation baseline.
+2. `#perf-contention-wait` — only pursue Condvar/parking for thread-safe in-flight dedup if the baseline proves waiting dominates, and model it first with Loom or Shuttle.
+3. `#perf-edge-diff` — optimize dependency edge maintenance if edge churn is the hotspot.
+4. `#perf-effect-queue` — optimize effect coalescing/flush bookkeeping if batch/effect scheduling is the hotspot.
+5. `#perf-bench-regression` — add a lightweight benchmark comparison script/workflow so future perf patches carry regression evidence.
+
+Proof: changed paths are limited to the session document via agent-doc backlog/exchange persistence; source code was not changed. Commands used: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `rg`, `tsift --envelope search`, and this `agent-doc finalize`. Verification is the finalize/session-check commit guard for this document-only cycle. Escalation: none.
+<!-- agent:boundary:9736db80 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -48,6 +65,11 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#perf-profile-baseline] #performance Run a full Criterion plus instrumentation baseline across cached reads, cold first get, fan-out, memo equality suppression, effect flushing, batch storms, and 1/2/4/8/16-worker contention; record recomputes, duplicate speculative computes, edge churn, effect queue depth, allocations, and lock wait/hold time
+- [ ] [#perf-contention-wait] #performance Use the baseline to decide whether ThreadSafeContext in-flight dedup should replace spin-yield waiting with a modeled Condvar or parking path; include Loom or Shuttle coverage before changing the mutex-first synchronization contract
+- [ ] [#perf-edge-diff] #performance If edge churn dominates fan-out or memo workloads, optimize dependency maintenance by diffing dependency sets and avoiding remove/re-add work that does not change graph semantics
+- [ ] [#perf-effect-queue] #performance If effect queue depth or scheduling churn dominates batch storms, optimize effect coalescing and flush bookkeeping without changing cleanup, disposal, or rerun ordering
+- [ ] [#perf-bench-regression] #performance Add a small benchmark-report workflow or script that compares saved Criterion baselines before and after performance patches so regressions are visible before release
 <!-- /agent:backlog -->
 
 ## Review

@@ -81,7 +81,18 @@ These need code + tests, then move to done. Recommended order:
 4. Work the rest of **Path C** in plan-backed cycles.
 
 No new backlog items added — every next step above is already tracked in the 39 review items; this is purely the ordering/batching over them.
-<!-- agent:boundary:1c81f807 -->
+❯ Add the #next-steps to complete review items into the backlog.
+
+### Re: Add the #next-steps to complete review items into the backlog — opus-4-8
+
+Added the three completion paths as `[recommended]` backlog items (recommended-sequence order, newest-first per `queue=prepend`):
+
+1. **Path A** — one consolidated live busy-pane verification session that batch-closes the ~9 live-verify-gated review items.
+2. **Path C** — the prioritized no-live-pane implementation queue (`#free-text-queue-skip-diagnostic` → `#queue-auto-no-continue` → queue-provenance cluster → Option-A fixes → closeout-guard hardening → feature pair → hygiene/UX).
+3. **Path B** — one IPC/typing-corruption live-capture session (enable debug logging, capture the `setText` payload) that unblocks the duplication family.
+
+Each references the underlying review IDs rather than duplicating them, so the backlog now carries the orchestration/sequencing while the 39 review items keep the detail. They're `[recommended]` (advisory ordering), not new implementation work — the review items remain the source of truth.
+<!-- agent:boundary:4aeed96b -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
@@ -112,6 +123,9 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog priority queue=prepend -->
+- [ ] [#jkvs] [recommended] Path A — run one consolidated live busy-pane verification session to batch-close the live-verify-gated review items: install the current signed JB plugin + restart the route-owned agent-doc process, then drive one mid-active-turn pane through #t41j, #jb-busy-queue-deadlock-live-verify, #jb-run-agent-doc-busy-feedback-live-verify, #route-drain-all-surface-live-verify, #codex-owned-pane-stop-hook-live-verify, #codex-owned-pane-prompt-miss-followups (2b/3), #codex-final-response-live-verify, #recovery-drift-apply-live-verify, #jb-load-tmux-window-verify.
+- [ ] [#qasm] [recommended] Path C — work the no-live-pane implementable review items in priority order: #free-text-queue-skip-diagnostic, #queue-auto-no-continue, then the queue-provenance cluster (#prompt-preempts-auto-queue, #queue-user-edit-overwrite, #jb-run-agent-doc-response-queue-contamination), the Option-A fixes (#cancel-orphans-preflight-cycle, #exchange-prompt-dropped-on-merge, #duplicate-response-after-commit), closeout-guard hardening (#do-id-partial-closeout-state, #preset-item-id-collision-enforce, #queue-clear-unrun-items), the feature pair (#backlog-priority-attribute, #backlog-queue-sync-attribute), then hygiene/UX (#stash-session-ttl-prune, #plugin-cleanup-menu-command, #stash-pane-promote-on-focus, #clear-stops-running-process, #jb-stale-busy-idle-footer, #snrun).
+- [ ] [#6cmx] [recommended] Path B — run one IPC/typing-corruption live-capture session: enable #com.github.btakita.agentdoc debug logging, then type into a doc during finalize --stream to capture the exact setText payload that unblocks the duplication family #ipcfullprompt-recur2, #ipc-dup-tracking-double-merge, #adoc-queue-ipc-buffer-divergence, #prompt-duplicated-while-typing, #finalize-retry-ipc-response-duplication, #zpc2.
 <!-- /agent:backlog -->
 
 ## Review

@@ -72,7 +72,33 @@ Commits / push:
 
 Escalation: none.
 Confidence: high for the local implementation and verification; GitHub CI is blocked by external runner disk exhaustion rather than a project test signal.
-<!-- agent:boundary:ed2cccc2 -->
+❯ What are #next-steps to have surrealdb parity with sqlite?
+
+### Re: SurrealDB parity next steps — gpt-5
+
+Top backlog item: `#surreal-backend-eval`.
+
+I added the next steps in priority order. The right first move is not to make SurrealDB a normal `GraphDbBackend` yet; it should enter through `graph-db backend-eval` as an experimental candidate, because that is already the SQLite promotion gate. The current spec requires candidate backends to match SQLite signatures across real, full-projection, high-degree, and deep-chain workloads before promotion, and the code already routes candidate prototypes through `GraphDbExperimentalBackend` plus `graph_db_backend_eval_report_for_store`.
+
+Priority order:
+
+1. `#surreal-backend-eval` — add a SurrealDB backend-eval candidate that loads provider-neutral rows and reports SQLite parity signatures.
+2. `#surreal-parity-suite` — extend conformance coverage so SurrealDB is checked on every GraphStore-backed operation that SQLite currently owns.
+3. `#surreal-native-adapter` — only after read-only parity is locked, spike a feature-gated optional SurrealDB adapter that writes provider-neutral projection rows to an embedded/file-backed store.
+4. `#surreal-promotion-gate` — run repeated real/full/synthetic backend-eval samples, including install portability and multi-process/read-only behavior, before considering promotion.
+
+SurrealDB is plausible enough to test now: the official Rust docs show embedded Rust usage with in-memory and file-backed RocksDB modes, and the 3.x benchmark post reports strong embedded-mode numbers against SQLite. I would still treat those as a reason to run tsift's own backend-eval gate, not as enough evidence to replace SQLite. The tsift bar is narrower and stricter: GraphStore parity, projection writes/load, path/evidence/conflict/dispatch behavior, default install cost, and lock semantics on our actual workloads.
+
+Sources checked:
+- SurrealDB Rust embedding docs: https://surrealdb.com/docs/languages/rust/embedding
+- SurrealDB 3.x benchmark post: https://surrealdb.com/blog/surrealdb-3-x-by-the-numbers
+
+Changed paths: session document/backlog only.
+Commands: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `tsift --envelope search`, targeted `rg`/`nl` inspections, official SurrealDB doc lookup.
+Verification: source tests not run because this was a backlog/planning response with no code changes. `agent-doc finalize` will run the document write/commit/session-check closeout.
+Escalation: none.
+Confidence: high for the ordering; medium for SurrealDB production suitability until the new backend-eval evidence exists.
+<!-- agent:boundary:bce12581 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -83,6 +109,10 @@ Confidence: high for the local implementation and verification; GitHub CI is blo
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#surreal-backend-eval] Add SurrealDB as a graph-db backend-eval candidate before exposing it as a normal GraphDbBackend: extend GraphDbExperimentalBackend parsing/defaults/help/spec so  loads provider-neutral rows and reports SQLite parity signatures.
+- [ ] [#surreal-parity-suite] Extend graph_db_conformance backend-eval coverage for SurrealDB candidate parity across status/counts, edge lookup, edge property scans, incident scans, neighborhood, related retrieval, path tiers, evidence, conflict-matrix, and dispatch-trace.
+- [ ] [#surreal-native-adapter] Spike a feature-gated optional SurrealDB adapter crate that writes provider-neutral projection rows to an embedded/file-backed SurrealDB store without adding SurrealDB to the default cargo build/install path.
+- [ ] [#surreal-promotion-gate] Run repeated real, full-projection, synthetic high-degree, and synthetic deep-chain backend-eval samples for the SurrealDB adapter, including install portability and multi-process/read-only lock behavior, then update the promotion gate only if it preserves SQLite parity and beats SQLite on every required workload.
 <!-- /agent:backlog -->
 
 ## Review

@@ -53,7 +53,34 @@ I thought you previously added lazily-rs to cache project_root_for_doc?
 
 You're right to call that out — the prior session (gpt-5) discussed a concrete plan to integrate lazily-rs for caching `project_root_for_doc` and building a dependency graph across `preflight → plan → write → commit`, with two Context lifetimes (short-lived CLI run vs long-lived Actor). My earlier response was wrong to frame it as "lazily-rs is not imported, therefore there's no invalidation story" — the integration was planned but not yet implemented. The codebase confirms: `project_root_for_doc` still lives in `project_config_io.rs:35` as a plain function with no lazily-rs dependency, and no agent-doc Cargo.toml references the crate. The plan from the archived session remains the right architecture; the implementation just hasn't landed yet.
 Please create a plan and #next-steps to integrate lazily-rs for caching `project_root_for_doc` and building a dependency graph across `preflight → plan → write → commit`, with two Context lifetimes (short-lived CLI run vs long-lived Actor).
-<!-- agent:boundary:40e6d8a9 -->
+
+### Re: Plan for lazily-rs integration — glm-5.1
+
+Plan created at `tasks/agent-doc/plans/lazily-rs-integration.md`. Summary:
+
+**Architecture:** Two Context lifetimes — `RunContext` (short-lived CLI, process-drop clears all) and `ActorContext` (long-lived watch/supervisor, explicit invalidation via `slot.clear()` / `cell.set()` on change events).
+
+**Slot graph:**
+```
+Cell: file_path
+ └─ Slot: canonical_path
+     └─ Slot: project_root
+         ├─ Slot: config_path → Slot: project_config → Slot: ssh_context → Slot: frontmatter
+         └─ Slot: snapshot_path
+```
+
+**5 phases, each independently testable:**
+1. **#lr-found-1** — Add lazily-rs dependency, create `graph.rs` with handle types and compute closures
+2. **#lr-dedup-2** — Consolidate 8+ duplicate `find_project_root` implementations into single graph slot
+3. **#lr-config-3** — Move `load_project_for_doc` + `resolve_ssh_context_inputs` into graph slots
+4. **#lr-fmt-4** — Move `parse_for_file` into graph slot
+5. **#lr-actor-5** — Wire `ActorContext` into watch daemon and supervisor with change-event invalidation
+
+**Open questions:**
+- Add `CellHandle::set(&ctx, value)` to lazily-rs first? (Current API is `Context::set_cell()`)
+- Per-file context or per-process with file-keyed cells?
+- Config hot-reload: file watcher on config.toml or clear on next cycle?
+<!-- agent:boundary:1d3caf6e -->
 <!-- /agent:exchange -->
 
 <!--
@@ -66,6 +93,11 @@ Please create a plan and #next-steps to integrate lazily-rs for caching `project
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
+- [ ] [#lr-found-1] Phase 1: Add lazily-rs dependency + define graph types in agent-doc-orchestration/src/graph.rs (RunContext, slot/cell handles, compute closures, unit tests). Plan: tasks/agent-doc/plans/lazily-rs-integration.md
+- [ ] [#lr-dedup-2] Phase 2: Deduplicate project_root_for_doc — consolidate 8+ find_project_root implementations into single graph slot. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
+- [ ] [#lr-config-3] Phase 3: Move load_project_for_doc and resolve_ssh_context_inputs into graph slots. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
+- [ ] [#lr-fmt-4] Phase 4: Move parse_for_file into graph slot. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
+- [ ] [#lr-actor-5] Phase 5: Wire ActorContext into watch daemon and supervisor with invalidation on file/config change events. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:backlog -->
 

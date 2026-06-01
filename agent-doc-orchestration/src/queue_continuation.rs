@@ -59,7 +59,8 @@ pub fn detect(file: &Path) -> Result<Option<QueueContinuation>> {
 }
 
 fn detect_in_content(file: &Path, content: &str) -> Result<Option<QueueContinuation>> {
-    let (fm, _) = crate::frontmatter::parse_for_file(content, file)?;
+    let rc = crate::graph::RunContext::new(file.to_path_buf());
+    let (fm, _) = crate::frontmatter::parse_for_file_with_context(content, file, &rc)?;
     if fm.queue_active != Some(true) {
         return Ok(None);
     }
@@ -137,7 +138,8 @@ fn detect_in_content(file: &Path, content: &str) -> Result<Option<QueueContinuat
 /// authoritative, because legitimate consumption of a queue head always shows up
 /// as response/content drift, never as metadata-only drift.
 pub fn live_continuation_head(file: &Path, content: &str) -> Option<String> {
-    let (fm, _) = crate::frontmatter::parse_for_file(content, file).ok()?;
+    let rc = crate::graph::RunContext::new(file.to_path_buf());
+    let (fm, _) = crate::frontmatter::parse_for_file_with_context(content, file, &rc).ok()?;
     if fm.queue_active != Some(true) {
         return None;
     }

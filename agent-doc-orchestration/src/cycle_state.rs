@@ -135,6 +135,38 @@ pub struct CycleState {
     /// the current response.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dropped_queue_prompts: Vec<String>,
+    /// `#queue-clear-unrun-items`: `do [#id]` queue head prompt texts present in
+    /// the visible `agent:queue` at preflight time. An active queue head is
+    /// executable user intent, so a closeout / reset / commit may delete one only
+    /// with proof that it was consumed (this cycle's directive target), resolved
+    /// (its `#id` left `agent:backlog` via done/gate/reap), or removed by an
+    /// explicit user edit. `session-check` fails closed when a recorded head
+    /// disappears from the committed queue while its `#id` is still open in
+    /// `agent:backlog` and the cycle never targeted it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub active_queue_heads: Vec<String>,
+}
+
+/// Extract the queue prompt head texts (e.g. `do [#convqa-rerun]`) from a
+/// document's `agent:queue` component. Recorded at preflight so `session-check`
+/// can detect unproved deletion of runnable heads (`#queue-clear-unrun-items`).
+/// Freeform / non-prompt entries are skipped; id semantics are applied later by
+/// the guard via `do_directive_target_ids`.
+pub fn active_queue_directive_heads(doc: &str) -> Vec<String> {
+    let Ok(components) = crate::component::parse(doc) else {
+        return Vec::new();
+    };
+    let Some(queue) = components.iter().find(|c| c.name == "queue") else {
+        return Vec::new();
+    };
+    let Ok(entries) = crate::queue::parse(queue.content(doc)) else {
+        return Vec::new();
+    };
+    crate::queue::prompts(&entries)
+        .into_iter()
+        .map(|prompt| prompt.text.trim().to_string())
+        .filter(|text| !text.is_empty())
+        .collect()
 }
 
 impl CycleState {
@@ -188,10 +220,34 @@ pub fn start_preflight(
         ipc_snapshot_adoption_blocked: false,
         dropped_exchange_prompts: Vec::new(),
         dropped_queue_prompts: Vec::new(),
+        active_queue_heads: file_content
+            .map(active_queue_directive_heads)
+            .unwrap_or_default(),
     };
     save(file, &state)?;
     append_phase_event_to_session_log(file, &state);
     Ok(state)
+}
+
+/// Record (or overwrite) the runnable `agent:queue` heads that were active at
+/// the start of the cycle (`#queue-clear-unrun-items`). Normally populated by
+/// `start_preflight` from the visible document; exposed so a caller that only
+/// has the pre-cycle queue text later can backfill the proof anchor.
+pub fn record_active_queue_heads(file: &Path, heads: &[String]) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+    let normalized: Vec<String> = heads
+        .iter()
+        .map(|head| head.trim().to_string())
+        .filter(|head| !head.is_empty())
+        .collect();
+    if state.active_queue_heads != normalized {
+        state.active_queue_heads = normalized;
+        state.updated_at = now_secs();
+        save(file, &state)?;
+    }
+    Ok(Some(state))
 }
 
 pub fn mark_write_applied(
@@ -761,6 +817,7 @@ fn synthetic_state_with_id(
         ipc_snapshot_adoption_blocked: false,
         dropped_exchange_prompts: Vec::new(),
         dropped_queue_prompts: Vec::new(),
+        active_queue_heads: Vec::new(),
     }
 }
 

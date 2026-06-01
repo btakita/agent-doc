@@ -1042,7 +1042,8 @@ fn managed_capability_proof_status(
 ) -> Result<ManagedCapabilityProofStatus> {
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
-    let fm = frontmatter::parse_for_file(&content, file).map(|(fm, _)| fm)?;
+    let rc = crate::graph::RunContext::new(file.to_path_buf());
+    let fm = frontmatter::parse_for_file_with_context(&content, file, &rc).map(|(fm, _)| fm)?;
     #[cfg(test)]
     let global_config = crate::config::Config::default();
     #[cfg(not(test))]
@@ -1584,7 +1585,8 @@ pub fn run_with_tmux(
         updated_content = cleanup.content;
     }
 
-    let fm = frontmatter::parse_for_file(&updated_content, file).map(|(f, _)| f)?;
+    let rc = crate::graph::RunContext::new(file.to_path_buf());
+    let fm = frontmatter::parse_for_file_with_context(&updated_content, file, &rc).map(|(f, _)| f)?;
     let global_config = crate::config::load().unwrap_or_default();
     let mut harness = HarnessConfig::from_context(&fm, &global_config);
     if plain_trigger {

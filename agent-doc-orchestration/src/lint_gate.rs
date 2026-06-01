@@ -123,6 +123,29 @@ pub fn resolve_mode(
     (LintDialectMode::default(), LintModeSource::Default)
 }
 
+/// Resolve the effective lint mode using a cached [`RunContext`] for the
+/// workspace config lookup. Avoids redundant filesystem reads when the
+/// caller already has a context from a prior phase.
+pub fn resolve_mode_with_context(
+    rc: &crate::graph::RunContext,
+    content: &str,
+    cli: Option<LintCliMode>,
+) -> (LintDialectMode, LintModeSource) {
+    if let Some(cli) = cli {
+        return (cli.to_dialect(), LintModeSource::Cli);
+    }
+    if let Ok((fm, _)) = frontmatter::parse(content)
+        && let Some(mode) = fm.agent_doc_lint_dialect
+    {
+        return (mode, LintModeSource::Frontmatter);
+    }
+    let config = rc.project_config();
+    if let Some(mode) = config.lint.dialect {
+        return (mode, LintModeSource::ProjectConfig);
+    }
+    (LintDialectMode::default(), LintModeSource::Default)
+}
+
 /// Run the finalize lint gate for `file`, with an optional CLI override.
 ///
 /// Returns `Ok(())` on:

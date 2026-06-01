@@ -555,7 +555,8 @@ fn parse_frontmatter_for_sync<'a>(
     file: &Path,
     phase: &str,
 ) -> Result<(frontmatter::Frontmatter, &'a str)> {
-    frontmatter::parse_for_file(content, file)
+    let rc = crate::graph::RunContext::new(file.to_path_buf());
+    frontmatter::parse_for_file_with_context(content, file, &rc)
         .map_err(|err| anyhow::anyhow!("sync {} frontmatter: {}", phase, err))
 }
 

@@ -267,6 +267,7 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
             check_blocked_closeout_followup_guard(file)?,
             check_gated_phase_split_guard(file)?,
             check_queue_audit_partial_completion_guard(file)?,
+            check_queue_head_removal_guard(file)?,
         ] {
             match guard {
                 GuardResult::None => {}
@@ -1628,6 +1629,21 @@ pub fn resolve_pending_capture_guard_mode(
         .unwrap_or_default())
 }
 
+pub fn resolve_pending_capture_guard_mode_with_context(
+    file: &Path,
+    rc: &crate::graph::RunContext,
+) -> Result<crate::frontmatter::PendingCaptureGuardMode> {
+    let content = std::fs::read_to_string(file)?;
+    let (fm, _) = crate::frontmatter::parse(&content)?;
+    if let Some(mode) = fm.pending_capture_guard {
+        return Ok(mode);
+    }
+    Ok(rc.project_config()
+        .guards
+        .pending_capture
+        .unwrap_or_default())
+}
+
 pub fn resolve_pending_done_guard_mode(
     file: &Path,
 ) -> Result<crate::frontmatter::PendingCaptureGuardMode> {
@@ -1640,6 +1656,28 @@ pub fn resolve_pending_done_guard_mode(
         .guards
         .pending_done
     {
+        return Ok(mode);
+    }
+    if fm
+        .session
+        .as_deref()
+        .is_some_and(|session| !session.trim().is_empty())
+    {
+        return Ok(crate::frontmatter::PendingCaptureGuardMode::Strict);
+    }
+    Ok(crate::frontmatter::PendingCaptureGuardMode::Warn)
+}
+
+pub fn resolve_pending_done_guard_mode_with_context(
+    file: &Path,
+    rc: &crate::graph::RunContext,
+) -> Result<crate::frontmatter::PendingCaptureGuardMode> {
+    let content = std::fs::read_to_string(file)?;
+    let (fm, _) = crate::frontmatter::parse(&content)?;
+    if let Some(mode) = fm.pending_done_guard {
+        return Ok(mode);
+    }
+    if let Some(mode) = rc.project_config().guards.pending_done {
         return Ok(mode);
     }
     if fm
@@ -1669,6 +1707,21 @@ pub fn resolve_review_done_guard_mode(
     Ok(crate::frontmatter::PendingCaptureGuardMode::Off)
 }
 
+pub fn resolve_review_done_guard_mode_with_context(
+    file: &Path,
+    rc: &crate::graph::RunContext,
+) -> Result<crate::frontmatter::PendingCaptureGuardMode> {
+    let content = std::fs::read_to_string(file)?;
+    let (fm, _) = crate::frontmatter::parse(&content)?;
+    if let Some(mode) = fm.review_done_guard {
+        return Ok(mode);
+    }
+    if let Some(mode) = rc.project_config().guards.review_done {
+        return Ok(mode);
+    }
+    Ok(crate::frontmatter::PendingCaptureGuardMode::Off)
+}
+
 pub fn resolve_auto_done(file: &Path) -> Result<bool> {
     let content = std::fs::read_to_string(file)?;
     let (fm, _) = crate::frontmatter::parse(&content)?;
@@ -1679,6 +1732,18 @@ pub fn resolve_auto_done(file: &Path) -> Result<bool> {
         .guards
         .auto_done
         .unwrap_or(false))
+}
+
+pub fn resolve_auto_done_with_context(
+    file: &Path,
+    rc: &crate::graph::RunContext,
+) -> Result<bool> {
+    let content = std::fs::read_to_string(file)?;
+    let (fm, _) = crate::frontmatter::parse(&content)?;
+    if let Some(enabled) = fm.auto_done {
+        return Ok(enabled);
+    }
+    Ok(rc.project_config().guards.auto_done.unwrap_or(false))
 }
 
 fn check_pending_done_guard(file: &Path) -> Result<GuardResult> {
@@ -2254,6 +2319,141 @@ fn check_expect_done_or_gate_guard(file: &Path) -> Result<GuardResult> {
             "{}\n[session-check] hint: repair with `{}`, run `--pending-gate <id>` if review/external validation remains, or set pending_done_guard = \"warn\" to downgrade",
             warn_line.replacen("[session-check] warn:", "[session-check] INTERRUPTED:", 1),
             repair
+        )),
+        crate::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
+    })
+}
+
+/// `do [#id]` target ids present in a committed document's `agent:queue`
+/// component. Used by `#queue-clear-unrun-items` to decide which recorded
+/// preflight heads are still queued (preserved) vs removed this cycle.
+fn committed_queue_head_ids(content: &str) -> Vec<String> {
+    let Ok(components) = crate::component::parse(content) else {
+        return Vec::new();
+    };
+    let Some(queue) = components.iter().find(|c| c.name == "queue") else {
+        return Vec::new();
+    };
+    do_directive_target_ids(&[queue.content(content).to_string()])
+}
+
+/// `#queue-clear-unrun-items`: an active `agent:queue` head is executable user
+/// intent. A closeout / reset / commit may delete a runnable `do [#id]` head
+/// only with durable proof that it was consumed (this cycle's directive target,
+/// owned by `#do-id-closeout-open-backlog`), resolved (its `#id` left
+/// `agent:backlog` via done/gate/reap), or removed by an explicit user edit.
+/// When a head present in the visible queue at preflight disappears from the
+/// committed queue while its `#id` is STILL OPEN in `agent:backlog` and the
+/// cycle never targeted it, fail closed and name each lost id so the queue can
+/// be restored. Suppress an intentional user removal with
+/// `<!-- no-queue-removal-guard -->`.
+fn check_queue_head_removal_guard(file: &Path) -> Result<GuardResult> {
+    let mode = resolve_pending_done_guard_mode(file)?;
+    if mode == crate::frontmatter::PendingCaptureGuardMode::Off {
+        return Ok(GuardResult::None);
+    }
+    let Some(state) = crate::cycle_state::load(file)? else {
+        return Ok(GuardResult::None);
+    };
+    if state.active_queue_heads.is_empty() {
+        return Ok(GuardResult::None);
+    }
+    // Only enforce on a committed closeout; an open cycle is still mid-flight and
+    // may not have written the final queue yet.
+    if state.is_open() {
+        return Ok(GuardResult::None);
+    }
+    let recorded_ids = do_directive_target_ids(&state.active_queue_heads);
+    if recorded_ids.is_empty() {
+        return Ok(GuardResult::None);
+    }
+    let content = std::fs::read_to_string(file)?;
+    // Explicit user removal already reconciled — do not second-guess it.
+    if content.contains("<!-- no-queue-removal-guard -->") {
+        return Ok(GuardResult::None);
+    }
+
+    let still_queued: std::collections::HashSet<String> = committed_queue_head_ids(&content)
+        .into_iter()
+        .map(|id| crate::pending::normalize_pending_id(&id))
+        .collect();
+    let open_backlog: std::collections::HashSet<String> =
+        open_backlog_ids(file)?.into_iter().collect();
+    // Lifecycle proof: ids the cycle explicitly resolved (done/reaped/gated) or
+    // chose to keep open via an explicit edit. A done/gate/reap also removes the
+    // id from `open_backlog`, so this set is a defensive superset.
+    let mut resolved: std::collections::HashSet<String> =
+        crate::cycle_state::resolved_pending_ids(file)?;
+    resolved.extend(
+        state
+            .pending_gated_ids
+            .iter()
+            .chain(state.pending_kept_open_ids.iter())
+            .map(|id| crate::pending::normalize_pending_id(id)),
+    );
+    // This cycle's `do [#id]` directive targets are owned by the
+    // `expect_done_or_gate` guard, which reports the open-target class with a
+    // more specific repair. Skip them here to avoid double-firing.
+    let directive_targets: std::collections::HashSet<String> = state
+        .expect_done_or_gate_ids
+        .iter()
+        .map(|id| crate::pending::normalize_pending_id(id))
+        .collect();
+
+    let mut lost: Vec<String> = Vec::new();
+    for id in recorded_ids {
+        let norm = crate::pending::normalize_pending_id(&id);
+        if norm.is_empty() {
+            continue;
+        }
+        if still_queued.contains(&norm) {
+            continue; // head preserved in the committed queue
+        }
+        if !open_backlog.contains(&norm) {
+            continue; // backlog item resolved / removed → deletion proven
+        }
+        if resolved.contains(&norm) || directive_targets.contains(&norm) {
+            continue; // explicit lifecycle proof or sibling-owned target
+        }
+        if !lost.iter().any(|existing| existing == &norm) {
+            lost.push(norm);
+        }
+    }
+
+    if lost.is_empty() {
+        return Ok(GuardResult::None);
+    }
+
+    let ids = lost
+        .iter()
+        .map(|id| format!("#{}", id))
+        .collect::<Vec<_>>()
+        .join(", ");
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "queue_head_removal_guard_fired file={} lost={}",
+            file.display(),
+            lost.join(",")
+        ),
+    );
+    let warn_line = format!(
+        "[session-check] warn: runnable agent:queue head(s) {} were removed from the committed queue but their backlog item(s) are still open in agent:backlog, and the cycle never consumed, completed, gated, or reaped them — unrun queue work was silently dropped",
+        ids
+    );
+    let repair = format!(
+        "restore the dropped head(s) to `agent:queue` (or resolve each id with `--done`/`--pending-gate`), then re-run `agent-doc write --commit {}`; add `<!-- no-queue-removal-guard -->` to the response if the removal was an explicit user edit",
+        file.display()
+    );
+
+    Ok(match mode {
+        crate::frontmatter::PendingCaptureGuardMode::Warn => GuardResult::Warn(vec![
+            warn_line,
+            format!("[session-check] hint: {repair} (see #queue-clear-unrun-items)"),
+        ]),
+        crate::frontmatter::PendingCaptureGuardMode::Strict => GuardResult::Error(format!(
+            "{}\n[session-check] hint: {repair} (see #queue-clear-unrun-items)",
+            warn_line.replacen("[session-check] warn:", "[session-check] INTERRUPTED:", 1),
         )),
         crate::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
     })
@@ -7922,6 +8122,136 @@ Body\n\
         assert!(
             matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
             "guard should clear when the dropped queue head was consumed this cycle"
+        );
+    }
+
+    // `#queue-clear-unrun-items` — committed doc with the six monsterrodholders
+    // heads removed from the queue while their backlog items stay open, the
+    // convqa head consumed/done. Recorded preflight heads = all six.
+    fn queue_clear_fixture(queue_body: &str) -> String {
+        format!(
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+                "## Exchange\n\n",
+                "<!-- agent:exchange -->\n",
+                "### Re: do #convqa-rerun — gpt-5\n\nRefreshed the conversion QA gate.\n",
+                "<!-- /agent:exchange -->\n\n",
+                "## Backlog\n\n",
+                "<!-- agent:backlog -->\n",
+                "- [ ] [#hydroapproval] approve hydro listing\n",
+                "- [ ] [#nbapproval] approve nb listing\n",
+                "- [ ] [#shopcachewatch] watch shop cache\n",
+                "- [ ] [#shoplabelgate] gate shop labels\n",
+                "- [ ] [#accessorymargin] recompute accessory margin\n",
+                "<!-- /agent:backlog -->\n\n",
+                "<!-- agent:queue auto -->\n{}<!-- /agent:queue -->\n",
+            ),
+            queue_body
+        )
+    }
+
+    const QUEUE_CLEAR_HEADS: &[&str] = &[
+        "do [#convqa-rerun]",
+        "do [#hydroapproval]",
+        "do [#nbapproval]",
+        "do [#shopcachewatch]",
+        "do [#shoplabelgate]",
+        "do [#accessorymargin]",
+    ];
+
+    fn record_queue_clear_heads(doc: &Path) {
+        let heads: Vec<String> = QUEUE_CLEAR_HEADS.iter().map(|s| s.to_string()).collect();
+        crate::cycle_state::record_active_queue_heads(doc, &heads).unwrap();
+    }
+
+    #[test]
+    fn queue_head_removal_guard_fails_closed_on_silently_dropped_open_heads() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // Queue collapsed to empty; convqa was consumed (done), the other five
+        // open backlog heads were dropped without any closeout.
+        let committed = queue_clear_fixture("");
+        let doc = init_committed_doc_for_queue_guard(tmp.path(), &committed);
+        record_queue_clear_heads(&doc);
+        crate::cycle_state::record_pending_done_ids(&doc, &["convqa-rerun".to_string()]).unwrap();
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Interrupted(message) => {
+                for id in [
+                    "hydroapproval",
+                    "nbapproval",
+                    "shopcachewatch",
+                    "shoplabelgate",
+                    "accessorymargin",
+                ] {
+                    assert!(
+                        message.contains(id),
+                        "should name dropped open head #{id}: {message}"
+                    );
+                }
+                assert!(
+                    !message.contains("convqa-rerun"),
+                    "consumed/done head must not be flagged: {message}"
+                );
+            }
+            other => panic!("expected queue-head-removal interruption, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn queue_head_removal_guard_allows_consumed_head_when_rest_preserved() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // Only the consumed convqa head is removed; the five open heads stay
+        // queued — legitimate single-head consumption.
+        let committed = queue_clear_fixture(concat!(
+            "- do [#hydroapproval]\n",
+            "- do [#nbapproval]\n",
+            "- do [#shopcachewatch]\n",
+            "- do [#shoplabelgate]\n",
+            "- do [#accessorymargin]\n",
+        ));
+        let doc = init_committed_doc_for_queue_guard(tmp.path(), &committed);
+        record_queue_clear_heads(&doc);
+        crate::cycle_state::record_pending_done_ids(&doc, &["convqa-rerun".to_string()]).unwrap();
+
+        assert!(
+            matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
+            "guard must not fire when the only removed head was consumed and the rest stay queued"
+        );
+    }
+
+    #[test]
+    fn queue_head_removal_guard_suppressed_by_marker() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // Heads dropped, but an explicit user-removal marker suppresses the guard.
+        let mut committed = queue_clear_fixture("");
+        committed.push_str("\n<!-- no-queue-removal-guard -->\n");
+        let doc = init_committed_doc_for_queue_guard(tmp.path(), &committed);
+        record_queue_clear_heads(&doc);
+
+        assert!(
+            matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
+            "explicit user-removal marker should suppress the queue-head-removal guard"
+        );
+    }
+
+    #[test]
+    fn queue_head_removal_guard_quiet_when_backlog_items_resolved() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // Queue empty AND backlog empty: every head's id left agent:backlog, so
+        // each deletion is proven (done/gate/reap) — no fire.
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n### Re: closeout — gpt-5\n\nAll resolved.\n<!-- /agent:exchange -->\n\n",
+            "## Backlog\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n\n",
+            "<!-- agent:queue auto -->\n<!-- /agent:queue -->\n",
+        );
+        let doc = init_committed_doc_for_queue_guard(tmp.path(), committed);
+        record_queue_clear_heads(&doc);
+
+        assert!(
+            matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
+            "guard must not fire when the removed heads' backlog items are no longer open"
         );
     }
 

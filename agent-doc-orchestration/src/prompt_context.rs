@@ -89,7 +89,8 @@ fn full_document_section(doc: &str, remote_host_scope: &str) -> String {
 }
 
 fn render_remote_host_scope(file: &Path, doc: &str) -> String {
-    let declared_targets = frontmatter::parse_for_file(doc, file)
+    let rc = crate::graph::RunContext::new(file.to_path_buf());
+    let declared_targets = frontmatter::parse_for_file_with_context(doc, file, &rc)
         .or_else(|_| frontmatter::parse(doc))
         .ok()
         .map(|(fm, _)| fm.required_ssh_targets)

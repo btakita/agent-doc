@@ -2527,7 +2527,8 @@ pub fn run_with_reap_policy(
         eprintln!("Generated session UUID: {}", session_id);
     }
 
-    let (fm, _body) = frontmatter::parse_for_file(&updated_content, file)?;
+    let rc = crate::graph::RunContext::new(file.to_path_buf());
+    let (fm, _body) = frontmatter::parse_for_file_with_context(&updated_content, file, &rc)?;
     let global_config = config::load().unwrap_or_default();
     let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
     let project_root = snapshot::find_project_root(&canonical).unwrap_or_else(|| {
@@ -2972,6 +2973,7 @@ pub fn run_with_reap_policy(
     let mut failed_resume_tracker = FailedResumeTracker::default();
     let mut suppress_stale_ctrl_d_until_prompt = false;
     let mut child_launch_count: u32 = 0;
+    let _actor_context = crate::graph::ActorContext::new(canonical.clone());
     let supervisor_exit_reason = loop {
         if child_launch_count > 0 {
             let restart_reason = if first_run {
@@ -4423,6 +4425,7 @@ mod tests {
             ipc_snapshot_adoption_blocked: false,
             dropped_exchange_prompts: Vec::new(),
             dropped_queue_prompts: Vec::new(),
+            active_queue_heads: Vec::new(),
         }
     }
 

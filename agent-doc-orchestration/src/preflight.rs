@@ -1660,7 +1660,8 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
 
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
-    let (initial_frontmatter, _) = frontmatter::parse_for_file(&content, file)?;
+    let rc = crate::graph::RunContext::new(file.to_path_buf());
+    let (initial_frontmatter, _) = frontmatter::parse_for_file_with_context(&content, file, &rc)?;
     let active_harness = agent_doc_core::model_tier::detect_harness();
     let mut warnings = Vec::new();
     if let Some(warning) =
@@ -2519,7 +2520,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             })
             .map(|change| change.text.clone());
         let current = std::fs::read_to_string(file).unwrap_or_default();
-        match frontmatter::parse_for_file(&current, file) {
+        match frontmatter::parse_for_file_with_context(&current, file, &rc) {
             Ok((owner_fm, _)) => match owner_fm.session.as_deref() {
                 Some(session_id) => {
                     let agent_name = owner_fm.agent.as_deref().unwrap_or("claude");

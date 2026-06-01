@@ -284,7 +284,15 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // +6 (#queue-audit-partial-completion): one `queue_audit_partial_completion_guard_fired`
         // ops event for the warn-first queue-audit collapse advisory, plus its
         // five `queue_audit_guard_*` regression test-fn names.
-        ("agent-doc-orchestration/src/session_check.rs", "guard_") => 63,
+        // +5 (#lr-config-3): three `_with_context` guard resolution variants
+        // (pending_capture, pending_done, review_done) mirroring the originals
+        // for RunContext-backed project config access, plus 2 additional
+        // guard-mode resolution call sites in queue-head removal logic.
+        // +4 (#queue-clear-unrun-items): the four `queue_head_removal_guard_*`
+        // regression test-fn names for `check_queue_head_removal_guard` (its
+        // `resolve_pending_done_guard_mode` reuse + `queue_head_removal_guard_fired`
+        // ops diagnostic are already counted in the #lr-config-3 line above).
+        ("agent-doc-orchestration/src/session_check.rs", "guard_") => 72,
         ("agent-doc-orchestration/src/write.rs", "guard_") => 70,
         // +1 for the audited `bare_write_escalated_to_commit ... reason=response_body_placed`
         // ops_log diagnostic on the #bare-write-captured-uncommitted escalation path.

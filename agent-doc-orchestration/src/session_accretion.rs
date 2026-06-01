@@ -88,6 +88,14 @@ pub fn inspect(file: &Path) -> Result<SessionAccretionReport> {
     inspect_at(file, &content, current_epoch_secs())
 }
 
+pub fn inspect_with_context(
+    file: &Path,
+    rc: &crate::graph::RunContext,
+) -> Result<SessionAccretionReport> {
+    let content = std::fs::read_to_string(file)?;
+    inspect_at_with_context(file, &content, current_epoch_secs(), rc)
+}
+
 pub fn record_recent_exchange_compaction(file: &Path) -> Result<()> {
     let Some(path) = recent_exchange_compaction_path(file)? else {
         return Ok(());
@@ -109,7 +117,9 @@ fn inspect_at(file: &Path, content: &str, now: u64) -> Result<SessionAccretionRe
     let (exchange_lines, response_sections) = exchange_metrics(content);
     let (recent_committed_cycles, recent_noop_closeouts) = recent_cycle_metrics(file, now)?;
     let startup_miss_active = crate::startup_miss::load(file)?.is_some();
-    let parsed_frontmatter = crate::frontmatter::parse_for_file(content, file).ok();
+    let rc = crate::graph::RunContext::new(file.to_path_buf());
+    let parsed_frontmatter =
+        crate::frontmatter::parse_for_file_with_context(content, file, &rc).ok();
     let session_id = parsed_frontmatter
         .as_ref()
         .and_then(|(fm, _)| fm.session.as_ref().map(|s| s.trim().to_string()))
@@ -118,9 +128,145 @@ fn inspect_at(file: &Path, content: &str, now: u64) -> Result<SessionAccretionRe
         .as_ref()
         .map(|(fm, _)| fm.auto_compact.is_some())
         .unwrap_or(false)
-        || crate::project_config::load_project_for_doc(file)
-            .agent_doc_auto_compact
-            .is_some();
+        || rc.project_config().agent_doc_auto_compact.is_some();
+    let recent_restart_count = session_id
+        .as_deref()
+        .map(|session_id| recent_restart_metrics(file, session_id, now))
+        .transpose()?
+        .unwrap_or(0);
+    let recent_session_loss_count = session_id
+        .as_deref()
+        .and_then(|session_id| {
+            crate::startup_miss::recent_session_loss_window(file, session_id)
+                .ok()
+                .flatten()
+                .map(|window| window.count)
+        })
+        .unwrap_or(0);
+
+    let mut reasons = Vec::new();
+    if exchange_lines >= WARN_EXCHANGE_LINES || response_sections >= WARN_RESPONSE_SECTIONS {
+        reasons.push(format!(
+            "exchange has grown to {} lines across {} response sections",
+            exchange_lines, response_sections
+        ));
+    }
+    if recent_committed_cycles >= WARN_RECENT_COMMITTED_CYCLES {
+        reasons.push(format!(
+            "document closed {} cycles in the last {} minutes ({} no-op closeouts)",
+            recent_committed_cycles,
+            RECENT_WINDOW_SECS / 60,
+            recent_noop_closeouts
+        ));
+    } else if recent_noop_closeouts >= WARN_RECENT_NOOP_CLOSEOUTS {
+        reasons.push(format!(
+            "document hit {} no-op closeouts in the last {} minutes",
+            recent_noop_closeouts,
+            RECENT_WINDOW_SECS / 60
+        ));
+    }
+    if recent_restart_count >= WARN_RESTART_EVENTS {
+        reasons.push(format!(
+            "session log recorded {} restart-heavy events in the last {} minutes",
+            recent_restart_count,
+            RECENT_WINDOW_SECS / 60
+        ));
+    }
+    if startup_miss_active {
+        reasons.push("an unresolved startup-miss marker is still active".to_string());
+    }
+    if recent_session_loss_count >= RECENT_SESSION_LOSS_WARN {
+        reasons.push(format!(
+            "session lost {} pane(s) recently enough to trip the restart-loss window",
+            recent_session_loss_count
+        ));
+    }
+
+    let block_for_exchange =
+        exchange_lines >= BLOCK_EXCHANGE_LINES || response_sections >= BLOCK_RESPONSE_SECTIONS;
+    let block_for_closeout_churn = recent_committed_cycles >= BLOCK_RECENT_COMMITTED_CYCLES
+        && recent_noop_closeouts >= BLOCK_RECENT_NOOP_CLOSEOUTS;
+    let block_for_restart_churn = recent_restart_count >= BLOCK_RESTART_EVENTS
+        && (startup_miss_active || recent_session_loss_count >= RECENT_SESSION_LOSS_WARN);
+    let warn = !reasons.is_empty();
+    let level = if block_for_exchange || block_for_closeout_churn || block_for_restart_churn {
+        SessionAccretionLevel::Block
+    } else if warn {
+        SessionAccretionLevel::Warn
+    } else {
+        SessionAccretionLevel::Healthy
+    };
+
+    let mut guidance = Vec::new();
+    if !matches!(level, SessionAccretionLevel::Healthy) {
+        if exchange_lines >= WARN_EXCHANGE_LINES
+            || response_sections >= WARN_RESPONSE_SECTIONS
+            || recent_committed_cycles >= WARN_RECENT_COMMITTED_CYCLES
+            || recent_noop_closeouts >= WARN_RECENT_NOOP_CLOSEOUTS
+        {
+            if auto_compact_opt_in {
+                guidance.push(format!(
+                    "Run `agent-doc compact {} --commit` before another large turn.",
+                    file.display()
+                ));
+            } else {
+                guidance.push(format!(
+                    "Exchange is large; ask the user before compacting. Auto-compact requires an explicit `agent_doc_auto_compact` opt-in in frontmatter or `.agent-doc/config.toml` (currently off). If the user approves, run `agent-doc compact {} --commit`.",
+                    file.display()
+                ));
+            }
+        }
+        if recent_restart_count >= WARN_RESTART_EVENTS
+            || startup_miss_active
+            || recent_session_loss_count >= RECENT_SESSION_LOSS_WARN
+        {
+            guidance.push(
+                "Restart cleanly from the current committed boundary before continuing."
+                    .to_string(),
+            );
+        }
+        if guidance.is_empty() {
+            guidance.push(
+                "Inspect the per-document churn signals before launching another large turn."
+                    .to_string(),
+            );
+        }
+    }
+
+    Ok(SessionAccretionReport {
+        level,
+        exchange_lines,
+        response_sections,
+        recent_committed_cycles,
+        recent_noop_closeouts,
+        recent_restart_count,
+        recent_session_loss_count,
+        startup_miss_active,
+        reasons,
+        guidance,
+    })
+}
+
+fn inspect_at_with_context(
+    file: &Path,
+    content: &str,
+    now: u64,
+    rc: &crate::graph::RunContext,
+) -> Result<SessionAccretionReport> {
+    let (exchange_lines, response_sections) = exchange_metrics(content);
+    let (recent_committed_cycles, recent_noop_closeouts) = recent_cycle_metrics(file, now)?;
+    let startup_miss_active = crate::startup_miss::load(file)?.is_some();
+    let parsed_frontmatter =
+        crate::frontmatter::parse_for_file_with_context(content, file, rc).ok();
+    let session_id = parsed_frontmatter
+        .as_ref()
+        .and_then(|(fm, _)| fm.session.as_ref().map(|s| s.trim().to_string()))
+        .filter(|s| !s.is_empty());
+    let auto_compact_opt_in = parsed_frontmatter
+        .as_ref()
+        .map(|(fm, _)| fm.auto_compact.is_some())
+        .unwrap_or(false)
+        || rc.project_config().agent_doc_auto_compact.is_some();
     let recent_restart_count = session_id
         .as_deref()
         .map(|session_id| recent_restart_metrics(file, session_id, now))

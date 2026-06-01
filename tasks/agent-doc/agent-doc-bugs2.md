@@ -31,90 +31,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260601-210550.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260601-223454.md`*
 
 Compacted content:
-- Archived 10 response topic(s): do [#6cmx]; ignored previous prompt and incomplete closeout; agent-doc ignored my previous prompt; 7 more
+- Archived 3 response topic(s): JB error; do both (A + B); [#1k5y] description disappeared
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ JB error
-```
-agent-doc command failed (exit 1): Error: managed Codex capability proof failed; prompt dispatch is disabled: codex child network probe timed out after 45s; stderr=Reading prompt from stdin... 2026-06-01T05:23:03.072189Z ERROR codex_core::tools::router: error=apply_patch verification failed: Failed to find expected lines in /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md: - ~do [#preset-item-id-collision-enforce]~ - ~do [#free-text-queue-skip-diagnostic]~ - do [#do-id-partial-closeout-state] 2026-06-01T05:29:43.727680Z ERROR codex_core::tools::router: error=apply_patch verification failed: Failed to find expected lines in /home/brian/work/btakita/agent-loop/src/agent-doc/agent-doc-orchestration/src/write.rs: } fn should_consume_queue_prompt_for_diff_content( 2026-06-01T05:30:40.447726Z ERROR codex_core::tools::router: error=apply_patch verification failed: Failed to find expected lines in /home/brian/work/btakita/agent-loop/src/agent-doc/tests/finalize_integration.rs: ); } #[test] fn write_commit_empty_stdin_repair_preserves_active_auto_queue_and_owned_scratch_comment() {
-```
-❯ #spec-test-build-install-commit-push
-
-### Re: JB error — managed Codex capability proof / dispatch disabled — opus-4-8
-
-Diagnosed. This is a real, important bug — but it lives in the live-supervisor + network-probe + IPC-gate + recovery path, where a blind one-shot fix can wedge sessions *worse*. So I've written a precise plan and a backlog item rather than rush code through build/install/commit/push I can't fully verify. I'm being explicit about deviating from `#spec-test-build-install-commit-push` here because shipping a half-understood change to this gate is the wrong trade.
-
-#### What the error actually is (two defects + one non-defect)
-1. **No retry → permanent wedge.** The capability proof runs a 45s network probe in a supervisor thread (`start.rs` ~1556). On failure it sets the dispatch gate to **`Failed` permanently** (`~1579`) — no bounded retry, no re-prove on network recovery. Every dispatch path (`auto_trigger_inject_command` ~1082, `IpcMethod::Inject` ~2120) is then refused until a manual `start`. A transient blip disables the whole session.
-2. **Recovery is itself blocked.** I hit this live earlier: with the gate `Failed`, **both** `session clear` and `session interrupt-clear` fail with the *same* `prompt dispatch is disabled … 45s` error (the `Reading prompt from stdin…` codex stderr confirms a managed proof ran during the recovery command). The documented recovery (`agent-doc start`) and the stop commands all route through the gate — so there's no managed way out, and I had to `kill`/`tmux kill-pane` the tsift tree by hand.
-3. **Not an agent-doc bug:** the `apply_patch verification failed: Failed to find expected lines …` lines are **Codex-internal** (the gpt-5 agent's own patch tool failing on stale context) — a downstream symptom of the wedged turn, not a patch bug to fix here.
-
-#### What I need from you: pick the scope
-Plan: `tasks/agent-doc/plan-codex-capability-proof-unrecoverable.md`. Two independently-shippable pieces:
-- **(A) bounded re-prove** instead of permanent `Failed` (+ configurable timeout) — heals transient blips, but changes startup-readiness latency and the probe shells out to the network so deterministic test coverage is limited to the back-off decision helper.
-- **(B) operator stop/clear/interrupt/recovery bypasses the dispatch gate** — the higher-value fix (makes a wedged session recoverable without `kill -9`); needs a careful audit of the clear/interrupt IPC paths + a gate-exempt control channel.
-
-Tell me **A**, **B**, or **both** and I'll implement + test + install + commit that scope. I didn't want to guess which behavior change you want in this area. Backlog item `#codex-capability-proof-unrecoverable` queued with the plan.
-❯ do both. #spec-test-build-install-commit-push
-
-### Re: do both (A + B) — opus-4-8
-
-Implemented and shipped both pieces of `#codex-capability-proof-unrecoverable`. `make check` is green, both binaries reinstalled, submodule + pointer committed and pushed.
-
-#### (A) Bounded re-prove — transient failure no longer wedges the session
-`spawn_managed_capability_proof_thread` (`start.rs`) now retries the probe with exponential back-off instead of setting `Failed` on the first error:
-- Between attempts the gate stays **`Pending`** (gated but recoverable) and the session log records `..._capability_proof status=retry attempt=<n>/<max> backoff_ms=…`. Only after the budget is exhausted does it commit to `Failed` / `Blocked` / kill child.
-- A stop request during back-off abandons the loop instead of wedging the gate.
-- Configurable via frontmatter **and** `.agent-doc/config.toml`: `managed_proof_max_attempts` (3), `managed_proof_retry_backoff_secs` (2), `managed_proof_probe_timeout_secs` (45). Frontmatter wins; resolution in `agent::resolve_managed_proof_policy`.
-- Pure decision helper `agent::proof_retry_decision` (exponential back-off, capped at 30s) is deterministically unit-tested — no network needed.
-- The 45s probe timeout is now threaded through `prove_managed_session_capabilities` → the three child probes rather than a hardcoded const.
-
-#### (B) Operator recovery bypasses the dispatch gate
-The supervisor IPC gate is now centralized and scoped: `ipc_method_requires_capability_gate` gates **only** `Inject` (real prompt dispatch). New gate-exempt **`Clear`** control method plus existing `Stop`/`Restart` and read-only `State`/`Pid` bypass the gate. `Inject` and `Clear` share one `deliver_ipc_inject` delivery path; only the caller decides gating.
-- `session_actor_cmd::send_clear_via_supervisor` now sends `IpcMethod::Clear` instead of `Inject`, so `session clear` / `session interrupt-clear` succeed against a proof-`Failed` session without `kill -9` instead of failing with `prompt dispatch is disabled`.
-- Auto-trigger / auto-queue dispatch (`auto_trigger_inject_command`, route Inject) stay gated — those are real dispatches, not recovery.
-
-Re the secondary `apply_patch verification failed …` lines: left alone per the plan — Codex-internal, not an agent-doc patch bug.
-
-**Verification:** `make check` clean (clippy `-D warnings`, full test suite, sim-medium, version-sync). New regressions: `proof_retry_decision_*`, `resolve_managed_proof_policy_*`, `ipc_method_gate_classification_only_gates_inject`, `handle_ipc_clear_bypasses_failed_capability_proof`, `handle_ipc_stop_bypasses_failed_capability_proof`. Live network-denied repro remains the `#[ignore]` tmux-CI leg.
-
-**Shipped:** submodule `a236fc98` (pushed to `20260422/codex-agent-backend`), superproject pointer `a3ff98545`. `cargo build --release` + `cargo install --path .` both refreshed. Specs aligned: `SPEC.md`, `codex-support.md`, `06-config.md`, `07-session-tmux-commands.md`, `VERSIONS.md`.
-❯ [#1k5y] description disappeared. #spec-test-build-install-commit-push
-
-### Re: [#1k5y] description disappeared — opus-4-8
-
-Root-caused and fixed. `#1k5y` was never a real item — it's a **phantom id minted from an empty bullet**, so there was never a description to lose. (Not a `--done` completion; it's removed as invalid by the fix below — guard suppressed for this cycle.)
-
-#### What happened
-- `git log -S 1k5y` shows the id first appears in commit `16f68fed7` (2026-06-01 13:30), where the icebox close marker line became `- [ ] [#1k5y] &lt;!-- /agent:icebox --&gt;`. A stray content-less `- [ ]` bullet (an editor/IPC insertion ahead of the close marker — same drift family as the existing `#ipcfullprompt-*` icebox items) ended up inside the icebox body.
-- `pending::backfill` (run on every preflight over backlog/review/**icebox**) assigns a hash id to any id-less item. `assign_unique_hash("")` over this doc's id produced `1k5y`, cementing a `- [ ] [#1k5y]` "item" with no text. `parse_item_line("- [ ]")` parses an empty bullet as a real item, so backfill happily hashed nothing.
-
-#### Fix (`#icebox-empty-item-phantom-id`)
-`pending::backfill` now **drops** content-less items (empty header text **and** empty continuation) instead of minting an id for them. This:
-- prevents manufacturing a phantom id from an empty line, and
-- **self-heals** the already-cemented `- [ ] [#1k5y]` on the next maintenance pass — which is this very cycle, so the icebox phantom is now gone from the document.
-
-A bullet with empty header text but a real indented continuation is explicitly preserved (guard against over-dropping). Spec'd in `pending-system.md §3` lazy-backfill.
-
-#### Verification
-`make check` green (clippy `-D warnings`, full suite, sim-medium, version-sync). New regressions: `backfill_drops_content_less_empty_bullet`, `backfill_drops_id_only_empty_item_self_heal`, `backfill_keeps_empty_text_with_continuation`. Both binaries rebuilt + installed.
-
-#### Shipped
-- Submodule `0c1f52a0` (fix) + `42cf3173` (spec), pushed to `20260422/codex-agent-backend`.
-- Superproject pointer `949a6f610`.
-
-```mermaid
-flowchart TD
-    A["stray empty bullet lands in icebox body<br/>(editor/IPC insertion before close marker)"] --> B["preflight lazy backfill scans icebox"]
-    B --> C{"item id empty?"}
-    C -->|"OLD: yes, assign_unique_hash(empty text)"| D["phantom id-only item<br/>(description never existed)"]
-    C -->|"NEW: content-less, drop"| E["bullet removed<br/>no phantom id minted"]
-    D -->|"NEW backfill re-run"| E
-    E --> F["icebox clean; self-healed this cycle"]
-```
-<!-- agent:boundary:c72856c5 -->
+<!-- agent:boundary:c491db69 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->

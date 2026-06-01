@@ -31,35 +31,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260601-022544.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260601-030613.md`*
 
 Compacted content:
-- Archived 2 response topic(s): do [#gated-followup-split-enforcement]; fix the queue-drift regressions first
+- Archived 1 response topic(s): do [#queue-audit-partial-completion]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: do [#queue-audit-partial-completion] — opus-4-8
-
-> **Queue prompt:**
->
-> do [#queue-audit-partial-completion]
-
-
-Done. Also unblocked the branch CI and confirmed the prior queue fix is now live.
-
-**The feature.** A queue-completion audit ("which queue items are complete?") should classify each row as complete / partially complete / not-started — naming the completed substeps and the exact remaining condition — instead of collapsing partial progress into a blanket "none complete." Per this repo's binary-vs-skill rule, per-row classification of free-text rows is natural-language judgment (skill/spec response contract), so the binary's job is to flag the unambiguous collapse:
-
-`check_queue_audit_partial_completion_guard` (WARN-only, suppressible via `<!-- no-queue-audit-guard -->`) fires only when the committed response is about the queue, makes a blanket none-complete claim (`\b(none|no)\b … complet(e|ed)`), cites ≥2 distinct substep completions, and never frames anything as "partial." A pure "nothing done yet" answer (none-complete with no extra completion evidence) does not fire; an answer that already breaks out partials does not fire.
-
-5 regressions: fires-on-collapse / quiet-when-partial-given / quiet-when-not-about-queue / quiet-without-extra-evidence / suppressed-by-marker. Spec response-contract guidance added to the closeout spec. (Scope note: the richer per-row state table + split recommendation are guidance by design — the split half overlaps the `#gated-followup-split-enforcement` guard I shipped earlier.)
-
-**Two adjacent wins this turn:**
-- **Prior queue fix is now live.** The concurrent `lazily-rs`/`graph.rs` work that blocked the build last turn is committed, so I built + installed. Verified the `#completed-queue-residue-regression` insert-ahead fix end-to-end against the installed binary: inserting a head no longer deactivates/strands the queue — it advances and stays active. That's why this turn's preflight kept `queue_active: true` instead of halting.
-- **Fixed branch CI.** The `lazily` dependency (`path = "../../lazily-rs"`) had no CI checkout step, so `make check` couldn't load the orchestration manifest on a standalone clone — CI was red for the whole branch (commit `cdd5474d`). Added a `git clone … lazily-rs ../lazily-rs` step alongside `agent-kit`/`tmux-router`. **CI green again on `e6731fa5`.**
-
-**Verification:** `make check` green; both binaries built + installed; CI green on `e6731fa5`.
-
-**Shipped:** submodule `cdd5474d` (queue-audit guard) + `e6731fa5` (CI fix); superproject pointer bumped. Marked `#queue-audit-partial-completion` done.
-<!-- agent:boundary:daa3bd14 -->
+<!-- agent:boundary:8f1d5227 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->

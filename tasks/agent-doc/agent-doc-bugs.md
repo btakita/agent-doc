@@ -28,7 +28,21 @@ Prior frontmatter bug fix remains complete. New work this cycle is planning only
 Compacted content:
 - Archived 9 response topic(s): lazily-rs for caching project_root_for_doc; lazily-rs dependency graph vision; Two Context lifetimes (CLI vs Actor); 6 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/9b6e92d2...
-<!-- agent:boundary:6c1b3e6d -->
+❯ Do we have a way to invalidate Slots and Cells in agent-doc if the user changes the document mid-run?
+### Re: Slot/Cell invalidation mid-run — glm-5.1
+
+Slots and Cells belong to the `lazily-rs` crate, which is **not imported by agent-doc** — there are zero `use lazily` or `Cargo.toml` dependencies connecting them. So the short answer is: agent-doc doesn't use Slots or Cells, and therefore has no invalidation path for them.
+
+Agent-doc's actual mid-run change detection is a layered system that doesn't use a reactive dependency graph:
+
+1. **Snapshot/file SHA-256 hashing** at each `CyclePhase` transition (`cycle_state.rs:72-73`) — tamper evidence and drift detection
+2. **Debounce system** (`debounce.rs`) — cross-process typing indicators, live buffer divergence checks, editor buffer state from FFI plugins
+3. **Actor generation CAS** (`session_actor.rs:216-233`) — rejects stale concurrent transitions
+4. **Cycle phase state machine** — monotonic progression prevents regression (`cycle_state.rs:44-50`)
+5. **Watch daemon** (`watch.rs`) — file-system watcher with convergence detection and agent-triggered-loop prevention
+
+If the intent is to wire `lazily-rs` into agent-doc so that a document change mid-run reactively clears cached computation, `lazily-rs` already provides the transitive clearing infrastructure (`SlotHandle::clear()` and `CellHandle::clear_dependents()`). The integration gap would be connecting agent-doc's debounce/snapshot-hash signals to `Context::set_cell()` or `SlotHandle::clear()` calls at the appropriate cycle boundaries.
+<!-- agent:boundary:55e21eb3 -->
 <!-- /agent:exchange -->
 
 <!--

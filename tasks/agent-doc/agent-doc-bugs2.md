@@ -299,7 +299,28 @@ Three independent checks all agree — each pane owns exactly one document:
 The earlier contamination — tsift's owner *committing to bugs2* — is **not** an ownership-aliasing bug (pane `%60` owns tsift correctly), so `resync`'s wrong-process check wouldn't catch it. It looks more like a **dispatch/route** path feeding bugs2's cycle into the tsift owner pane, which the ownership guards above don't cover. I can't reproduce it from the current clean state, so I won't guess the exact vector. If you want belt-and-suspenders, the concrete follow-up is to gate the `route`/dispatch path on `pane_runs_other_document_owner` too (the same primitive, applied at dispatch time) — say the word and I'll implement + test it.
 
 **To stop any recurrence now:** the live tsift.md session (`%60`) is what kept getting re-routed onto bugs2. It's correctly scoped right now; if it drifts again, `agent-doc session interrupt-clear tasks/software/tsift.md` stops it cleanly.
-<!-- agent:boundary:08496021 -->
+❯ Add logging so next time it occurs, we can diagnose the exact vector. Use this heuristic. Search the logs and if the cause cannot be found in the logs, add logging so next time it occurs, we can diagnose the exact vector.
+
+### Re: log the contamination vector — searched logs (absent), added logging — opus-4-8
+
+Followed your heuristic: searched the logs first; the cause **isn't capturable there**, so I added logging — committed `19d4f966`, pushed, `make check` green, **installed live** (both `~/.cargo/bin` and `.bin`).
+
+#### Log search result: vector is invisible
+- Every `route_dispatch_*` event for pane `%60` records `file=tasks/software/tsift.md` — bugs2 was **never** dispatched to `%60`. So the contamination wasn't a route/dispatch mis-target.
+- The only recursion event is the **same-document** guard (`run_recursive_direct_invocation_abandoned` for tsift→tsift). A **cross-document** child invocation (a tsift-owned pane running `agent-doc bugs2.md`) doesn't trip it, and nothing else ties a bugs2 cycle to `%60`'s process tree.
+
+So the smoking gun — a bugs2 cycle executing inside the tsift pane — leaves **no trace** in the current logs. Cause not found → add logging.
+
+#### Logging added (`sync::log_cross_document_execution_context`)
+Best-effort, non-blocking. When an agent-doc cycle for `file` runs inside a tmux pane whose live process tree owns a **different** document (via the existing `cmdline_owns_other_document` walk), it emits:
+```
+cross_document_execution_context file=<F> origin=<run|write|stream> current_pane=%N pane_owns=<other-doc> note=…
+```
+Wired into the three entry points where the contamination surfaces: `run_with_context` (`run.rs`) and both write/commit entries `run_command` + `run_stream` (`write.rs`). Preflight is intentionally skipped (frequent side-effect-free probe). Unit tests: `owner_document_from_cmdline_extracts_bound_document`, `cross_document_execution_identifies_foreign_owner_document`.
+
+#### Next time it happens
+`grep cross_document_execution_context .agent-doc/logs/ops.log` will pin the exact **foreign document, pane, and entry point** (run vs write vs stream) — turning the invisible vector into a one-line diagnosis. (As a bonus, this install also makes the live binary current with HEAD — the reconciled WIP `7135ffa5` + the cross-document owner guard `bda2e1d2` are now the running binary.)
+<!-- agent:boundary:bbc95d82 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->

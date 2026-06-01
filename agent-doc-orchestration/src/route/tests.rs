@@ -2274,6 +2274,13 @@ fn dispatch_active_turn_blockers_are_queueable_for_prompt_bearing_reroutes() {
         dispatch_active_turn_queue_source(&HarnessConfig::opencode(), "opencode active turn"),
         Some("dispatch_only_opencode_active_turn")
     );
+    // #jb-run-agent-doc-busy-wait-deadlock: a busy Claude active turn is
+    // queueable just like Codex/OpenCode, so the reopen path enqueues instead of
+    // bailing.
+    assert_eq!(
+        dispatch_active_turn_queue_source(&HarnessConfig::claude(), "active claude turn"),
+        Some("dispatch_only_claude_active_turn")
+    );
     assert_eq!(
         dispatch_active_turn_queue_source(&HarnessConfig::codex(), "codex hook review prompt"),
         None,
@@ -2284,6 +2291,28 @@ fn dispatch_active_turn_blockers_are_queueable_for_prompt_bearing_reroutes() {
         None,
         "drafted prompt input must not be overwritten by route queueing"
     );
+}
+
+// #jb-run-agent-doc-busy-wait-deadlock: a dispatch-only route on a busy active
+// turn must NOT honor the slow-start `--wait-for-ready` override when a queue
+// fallback exists — it should skip the wait and queue immediately, so JB `Run
+// Agent Doc` on a mid-turn Claude actor does not block for the full 60s.
+#[test]
+fn busy_dispatch_only_skips_ready_wait_when_queue_fallback_exists() {
+    use crate::session_actor::ActorState;
+    // Busy + dispatch-only + a queue prompt available → do NOT wait (queue now).
+    assert!(
+        !busy_dispatch_only_should_wait_for_ready(true, ActorState::Busy, true),
+        "a busy active turn with a queue fallback must skip the start-oriented ready wait"
+    );
+    // Busy + dispatch-only + no queue fallback → still wait (would otherwise bail).
+    assert!(
+        busy_dispatch_only_should_wait_for_ready(true, ActorState::Busy, false),
+        "without a queue fallback the bounded ready wait is still the only recourse before bailing"
+    );
+    // Not dispatch-only, or not busy → the busy-wait guard does not apply.
+    assert!(!busy_dispatch_only_should_wait_for_ready(false, ActorState::Busy, false));
+    assert!(!busy_dispatch_only_should_wait_for_ready(true, ActorState::Ready, false));
 }
 
 #[test]

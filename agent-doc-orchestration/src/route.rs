@@ -2956,6 +2956,12 @@ fn dispatch_active_turn_queue_source(
     match (harness.binary.as_str(), reason) {
         ("codex", "active codex turn") => Some("dispatch_only_codex_active_turn"),
         ("opencode", "opencode active turn") => Some("dispatch_only_opencode_active_turn"),
+        // `#jb-run-agent-doc-busy-wait-deadlock`: a busy Claude pane (a session
+        // not running `/loop`) is an active turn just like Codex/OpenCode. The
+        // dispatch-only reopen path must queue the prompt to `agent:queue auto`
+        // for the idle-queue watch to drain, not bail/refuse, so JB `Run Agent
+        // Doc` on a mid-turn Claude actor enqueues instead of erroring.
+        ("claude", "active claude turn") => Some("dispatch_only_claude_active_turn"),
         _ => None,
     }
 }
@@ -3479,6 +3485,27 @@ fn mark_starting_actor_timeout_blocked(
     }
 }
 
+/// `#jb-run-agent-doc-busy-wait-deadlock`: the `wait_for_ready` override exists
+/// for a slow-`starting` supervisor (JB `Run Agent Doc` passes `--wait-for-ready
+/// 60`), not for a busy *active turn*. A dispatch-only route that finds the
+/// authoritative actor `Busy` (mid active turn) must not honor that start
+/// override here: an active turn will not become dispatch-ready by waiting, so a
+/// 60s block before the `DispatchOnlyBusyQueue` enqueue is an operator-perceived
+/// deadlock. When a queue-prompt fallback exists, skip the wait entirely and let
+/// the busy actor queue the prompt immediately for the supervisor idle-queue
+/// watch to drain; a stale-busy-but-actually-ready projection is still repaired
+/// by the later direct-pane-evidence check (`#snrun`). Only wait when there is
+/// no queue fallback (where route would otherwise have to bail).
+fn busy_dispatch_only_should_wait_for_ready(
+    dispatch_only: bool,
+    actor_state: crate::session_actor::ActorState,
+    has_queue_fallback: bool,
+) -> bool {
+    dispatch_only
+        && actor_state == crate::session_actor::ActorState::Busy
+        && !has_queue_fallback
+}
+
 fn wait_for_authoritative_actor_ready(
     tmux: &Tmux,
     file: &Path,
@@ -3749,10 +3776,12 @@ fn route_via_authoritative_actor(
         dispatch_pane = actor.record.pane_id.clone();
         actor_state = actor.actor_state();
     }
-    if dispatch_only
-        && actor_state == crate::session_actor::ActorState::Busy
-        && let Some(refreshed) =
-            wait_for_authoritative_actor_ready(tmux, file, session_id, file_path, harness, &actor)?
+    if busy_dispatch_only_should_wait_for_ready(
+        dispatch_only,
+        actor_state,
+        prompt_context.is_some(),
+    ) && let Some(refreshed) =
+        wait_for_authoritative_actor_ready(tmux, file, session_id, file_path, harness, &actor)?
     {
         crate::ops_log::log_op(
             file,

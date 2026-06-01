@@ -35,9 +35,48 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 6 response topic(s): #terse-health-early-exit; #libsql-edges-between-pushdown; #compact-community-serialization; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-Would tsift benefit from lazily-rs for caching and create lazy-load graphs?
+❯ Would tsift benefit from lazily-rs for caching and create lazy-load graphs?
 test content
-<!-- agent:boundary:70b4cf65 -->
+
+
+### Re: lazily-rs for tsift caching and lazy-load graphs — glm-5.1
+
+Yes, tsift would benefit from lazily-rs in specific areas, though the fit is narrower than the agent-doc integration (which already has a plan at `tasks/agent-doc/plans/lazily-rs-integration.md`).
+
+#### Where lazily-rs helps tsift
+
+**1. Graph neighborhood expansion** — `ranked_neighborhood()` and `neighborhood()` currently BFS-eagerly to depth N, loading all nodes/edges up front. A lazily-rs Slot per depth layer would defer each hop until the consumer requests it, cutting I/O for shallow queries on large graphs.
+
+**2. Call-graph edge resolution** — `resolve_edges()` resolves all call sites eagerly per file. Wrapping per-symbol resolution in Slots keyed by `(file, symbol, content_hash)` with Cell-backed file-mtime invalidation would avoid re-resolving unchanged symbols across `tsift graph <symbol> --callees` calls.
+
+**3. Thread-local inspection cache replacement** — `InspectScopeGuard` is a hand-rolled dedup cache for `IndexDb::inspect_read_only`. lazily-rs's built-in dependency tracking + auto-invalidation could replace it with less boilerplate.
+
+**4. Summary cache enrichment** — Summary rows could be lazily loaded as Slots keyed by `(file, content_hash)`, computing on first access and auto-invalidating when the file changes (Cell tracks content hash). This replaces the "check if cached, else compute" pattern scattered across summary lookups.
+
+#### Where lazily-rs is NOT a good fit
+
+- **SQLite graph store** (`SqliteGraphStore`) — tsift already has mature SQLite-backed CRUD with WAL concurrency. lazily-rs is single-threaded (`RefCell`-based), so it cannot replace the storage layer.
+- **Community detection** (Louvain) — requires full edge-set access; lazy evaluation doesn't help the algorithm itself (though Slot-wrapping the *result* for incremental invalidation on edge changes would).
+- **Search token index** — inverted index construction is batch-oriented, not demand-driven.
+
+#### Concrete integration path
+
+```
+Cell: content_hash(file)                    — invalidated on file change
+ |--
+ |-- Slot: symbol_edges(file, content_hash)  — resolve_edges, cached per-file
+ |   |--
+ |   +-- Slot: symbol_callees(symbol, symbol_edges) -- per-symbol callees
+ |
+ |-- Slot: neighborhood(depth, center, graph_store) -- lazy BFS layer
+ |   |--
+ |   +-- Slot: ranked_neighborhood(center, scoring) -- ranked expansion
+ |
+ +-- Slot: summary(file, content_hash)       -- LLM summary, computed once
+```
+
+This is lighter scope than the agent-doc integration (which wires config/frontmatter/SSH resolution). Worth a separate plan if you want to proceed.
+<!-- agent:boundary:98989583 -->
 <!-- /agent:exchange -->
 
 ## Queue

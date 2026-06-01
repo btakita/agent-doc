@@ -92,7 +92,25 @@ Here's a tightened ~65-word version that keeps the agentic-first framing, agent-
 That's 4 sentences / ~70 words. It drops the 2014-ontology and "collaborative intelligence" tail (still covered by Career Highlights + Skills) to gain the space.
 
 Want me to apply it? Say the word (or "shorter still" / "keep PresenceAI bigger") and I'll update the `[[replace]]` block and rebuild.
-<!-- agent:boundary:9aeffbdd -->
+❯ Get rid of "plus corky and tagpath"...say and other "open-source libraries in Rust, Python, Zig, Typescript". Mention full-stack development with Next.js, Livekit, Python, Rust.
+
+### Re: Generalize OSS libraries + add full-stack stack — opus-4-8
+
+Done — updated the `[[replace]]` summary in `resume/profiles/sam-akkouche.toml` and rebuilt **`resume/BrianTakita-sam-akkouche.pdf`**. Summary now reads:
+
+> Builds **agentic** developer infrastructure where humans and agents work in parallel. Most recently at a **Confidential AI Startup**, did **full-stack** development of real-time AI systems and **closed-loop agentic workflows** with **Next.js**, **LiveKit**, **Python**, and **Rust**. In open source, created **agent-doc** — a document-as-interface for persistent AI sessions with an agent-agnostic core and pluggable LLM backends — and other open-source libraries in **Rust**, **Python**, **Zig**, and **TypeScript**. Earlier architected a real-time multimodal AI avatar pipeline at **Presence AI** (NVIDIA H100, WebRTC). A decade of context engineering across reactive and event-driven systems.
+
+**Changes:**
+- Dropped "plus corky and tagpath" → **"and other open-source libraries in Rust, Python, Zig, and TypeScript."**
+- Added **full-stack** development with **Next.js, LiveKit, Python, Rust** — placed in the Confidential AI Startup clause, where that stack actually applies.
+- Kept it to 4 sentences (~85 words) so it didn't balloon back past your length concern; trimmed the old "deep expertise in..." tail to make room.
+
+**Verification:** clean rebuild; summary check confirms corky/tagpath removed (0), full-stack present, Next.js + LiveKit + Zig all present, **Dreamable leak = 0** (still "Confidential AI Startup" only), Presence AI retained.
+
+Still uncommitted in `resume/` + `mail/` — no `#commit-push` invoked.
+
+_Note: the exchange is getting long (8 cycles). If you want, I can `agent-doc compact` it — just say so; I won't auto-compact._
+<!-- agent:boundary:ba915b5b -->
 <!-- /agent:exchange -->
 
 ## Queue

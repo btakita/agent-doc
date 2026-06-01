@@ -194,7 +194,13 @@ I won't run `interrupt-clear` autonomously — it throws away live work and that
 **Also worth fixing the root cause:** the reason "cancel" didn't take is that `tsift.md` is a Codex-harness doc, so any `Run Agent Doc` / `route` / navigation **auto-restarts** its owner pane. To keep it gone you must stop routing it (or `interrupt-clear` it **and** not re-navigate). This is precisely the focus/sync/autostart contract `#jb-tsift-pane-sync` is meant to fix.
 
 Tell me **wait** or **interrupt-clear tsift.md**, and I'll proceed with the reconciliation from a safe, stopped tree.
-<!-- agent:boundary:92ec74ac -->
+
+### Re: The dirty files were from the tsift.md session...which I canceled. Please reconcile the dirty changes. — gpt-5
+
+Answered above. I did not reconcile those dirty files because they belong to a live `tasks/software/tsift.md` Codex turn that `agent-doc session clear` reported as alive-busy. Reconciling them while that actor is still editing would risk corrupting its in-progress work.
+
+The safe next step is still a user choice: wait for that turn to finish, or explicitly authorize `agent-doc session interrupt-clear tasks/software/tsift.md` and then reconcile the resulting tree.
+<!-- agent:boundary:6df7c2ca -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->

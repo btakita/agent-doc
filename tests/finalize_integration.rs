@@ -673,7 +673,7 @@ fn write_commit_empty_stdin_repair_preserves_active_auto_queue_without_done() {
         .assert()
         .success()
         .stderr(predicates::str::contains(
-            "[queue] skipped consumption because the active prompt did not target the queue head",
+            "[queue] kept head `do #fix1` because the response did not record a completion outcome for #fix1",
         ));
 
     let content = fs::read_to_string(&doc).unwrap();
@@ -2057,7 +2057,7 @@ fn finalize_skips_queue_consumption_when_unrelated_prompt_is_already_in_baseline
         .assert()
         .success()
         .stderr(predicates::str::contains(
-            "[queue] skipped consumption because the active prompt did not target the queue head",
+            "`--pending-gate fix1`",
         ));
 
     let content = fs::read_to_string(&doc).unwrap();
@@ -2217,7 +2217,7 @@ fn finalize_skips_queue_consumption_when_user_prompt_diff_targets_other_work() {
         .assert()
         .success()
         .stderr(predicates::str::contains(
-            "[queue] skipped consumption because the active prompt did not target the queue head",
+            "`--pending-edit \"fix1=...\"`",
         ));
 
     let content = fs::read_to_string(&doc).unwrap();

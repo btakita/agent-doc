@@ -437,9 +437,7 @@ fn run_once(
         {
             queue_consumption = write::consume_queue_prompt_with_outcome(file)?;
         } else {
-            eprintln!(
-                "[queue] skipped consumption because the active prompt did not target the queue head"
-            );
+            eprintln!("{}", write::queue_skip_diagnostic_for_file(file)?);
         }
         write::complete_required_closeout(file)?;
     }

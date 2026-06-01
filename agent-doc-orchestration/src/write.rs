@@ -1514,18 +1514,14 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
                         eprintln!("[queue] warning: consumption failed: {}", e);
                     }
                 } else {
-                    eprintln!(
-                        "[queue] skipped consumption because the active prompt did not target the queue head"
-                    );
+                    eprintln!("{}", queue_skip_diagnostic_for_file(file)?);
                 }
             }
             CommitMode::Required => {
                 if queue_consumption_allowed {
                     consume_queue_prompts_for_done_ids_with_outcome(file, &options.pending_done)?;
                 } else {
-                    eprintln!(
-                        "[queue] skipped consumption because the active prompt did not target the queue head"
-                    );
+                    eprintln!("{}", queue_skip_diagnostic_for_file(file)?);
                 }
             }
         }
@@ -2651,6 +2647,33 @@ fn should_consume_queue_prompt_for_write(
     should_consume_queue_prompt_for_diff_content(file, current_content, diff_text.as_deref())
 }
 
+pub(crate) fn queue_skip_diagnostic_for_file(file: &Path) -> Result<String> {
+    let content =
+        std::fs::read_to_string(file).context("queue skip diagnostic: failed to read document")?;
+    queue_skip_diagnostic_for_content(&content)
+}
+
+fn queue_skip_diagnostic_for_content(content: &str) -> Result<String> {
+    const GENERIC: &str =
+        "[queue] skipped consumption because the active prompt did not target the queue head";
+
+    let Some(queue_head) = active_queue_head_text(content)? else {
+        return Ok(GENERIC.to_string());
+    };
+    let queue_head_display = display_queue_prompt_text(&queue_head);
+    if queue_head_is_free_text_prompt(content)? {
+        return Ok(format!(
+            "[queue] kept free-text head `{queue_head_display}` because free-text heads are consumed by an answering `### Re:` response, not a tracked id outcome. Confirm the response targets this head (heading/topic match) so the answered-response path can strike it; otherwise it stays queued."
+        ));
+    }
+    if let Some(id) = queue_prompt_done_id(&queue_head) {
+        return Ok(format!(
+            "[queue] kept head `{queue_head_display}` because the response did not record a completion outcome for #{id}. Reap it with `--done {id}`, gate it with `--pending-gate {id}`, or keep/narrow it with `--pending-edit \"{id}=...\"`. (missing proof: no done/gate/reap recorded for #{id} this cycle)"
+        ));
+    }
+    Ok(GENERIC.to_string())
+}
+
 fn should_consume_queue_prompt_for_diff_content(
     file: &Path,
     content: &str,
@@ -2978,6 +3001,10 @@ fn queue_consume_count_for_done_ids(
 }
 
 fn normalize_queue_prompt_text(text: &str) -> String {
+    display_queue_prompt_text(text).to_ascii_lowercase()
+}
+
+fn display_queue_prompt_text(text: &str) -> String {
     text.lines()
         .map(|line| {
             line.trim()
@@ -2989,7 +3016,6 @@ fn normalize_queue_prompt_text(text: &str) -> String {
         .filter(|line| !line.is_empty())
         .collect::<Vec<_>>()
         .join("\n")
-        .to_ascii_lowercase()
 }
 
 /// First non-empty, trimmed line of `text`, or `None` when blank.
@@ -12521,6 +12547,34 @@ mod tests {
             queue_head_is_free_text_prompt(verb_prefixed).unwrap(),
             "a prose head mentioning a single #id is still free text"
         );
+    }
+
+    #[test]
+    fn queue_skip_diagnostic_names_head_shape_and_repair_path() {
+        let id_backed = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#foo]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let id_message = queue_skip_diagnostic_for_content(id_backed).unwrap();
+        assert!(id_message.contains("[queue] kept head `do #foo`"));
+        assert!(id_message.contains("`--done foo`"));
+        assert!(id_message.contains("`--pending-gate foo`"));
+        assert!(id_message.contains("`--pending-edit \"foo=...\"`"));
+        assert!(id_message.contains("missing proof"));
+
+        let free_text = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- Review the queue diagnostics\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let free_text_message = queue_skip_diagnostic_for_content(free_text).unwrap();
+        assert!(free_text_message.contains(
+            "[queue] kept free-text head `Review the queue diagnostics`"
+        ));
+        assert!(free_text_message.contains("answered-response path"));
     }
 
     #[test]

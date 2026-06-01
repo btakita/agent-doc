@@ -79,7 +79,20 @@ Rewrote the summary and rebuilt **`resume/BrianTakita-sam-akkouche.pdf`**. New s
 **Verification:** clean rebuild; summary shows 3 "agentic" mentions, agent-doc + Confidential AI Startup + Presence AI all present.
 
 Still uncommitted in the `resume/` and `mail/` submodule working trees — no `#commit-push` invoked yet.
-<!-- agent:boundary:fc4d9aca -->
+❯ Is the summary too long?
+
+### Re: Is the summary too long? — opus-4-8
+
+A bit, yes. It's **106 words across 5 sentences** and renders as ~9 wrapped lines — a resume summary reads best at **3–4 sentences / ~50–75 words**, so it's roughly 30% over and it pushes Experience further down page one.
+
+Here's a tightened ~65-word version that keeps the agentic-first framing, agent-doc, the Confidential AI Startup, and a brief Presence AI nod:
+
+> Builds **agentic** developer infrastructure where humans and agents work in parallel. Recently engineered real-time AI systems and **closed-loop agentic workflows** at a **Confidential AI Startup**, and created **agent-doc** — a document-as-interface for persistent AI sessions — plus corky and tagpath, all in **Rust**. Earlier architected a real-time multimodal AI avatar pipeline at **Presence AI** (NVIDIA H100, WebRTC). A decade of context engineering across reactive and **event-driven** systems.
+
+That's 4 sentences / ~70 words. It drops the 2014-ontology and "collaborative intelligence" tail (still covered by Career Highlights + Skills) to gain the space.
+
+Want me to apply it? Say the word (or "shorter still" / "keep PresenceAI bigger") and I'll update the `[[replace]]` block and rebuild.
+<!-- agent:boundary:9aeffbdd -->
 <!-- /agent:exchange -->
 
 ## Queue

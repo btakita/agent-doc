@@ -3592,15 +3592,31 @@ fn unresolved_exchange_prompt_in_content(content: &str) -> Option<String> {
         .unwrap_or(0);
     let tail = &lines[tail_start..];
 
-    // A response heading in the tail means the trailing prompt was answered.
-    if tail
+    // `#prompt-preempts-auto-queue` / `#queue-continuation-buries-prompt`: a
+    // response heading means the prompt *above it* was answered — but a
+    // queue-continuation response (`### Re: do [#id]` / `### Re: re [#id]`)
+    // answers a queue/backlog item, NOT a free-text user prompt. When the only
+    // response after a free-text prompt is a queue continuation, the prompt is
+    // still unresolved; the queue continuation must not let the boundary bury it.
+    // Scan only the prompt region up to the FIRST response heading so a queue
+    // continuation's own response body is never mistaken for prompt text.
+    let first_response_idx = tail
         .iter()
-        .any(|line| is_exchange_response_heading(line.trim()))
-    {
-        return None;
+        .position(|line| is_exchange_response_heading(line.trim()));
+    if let Some(idx) = first_response_idx {
+        let heading = tail[idx].trim();
+        if !is_queue_continuation_response_heading(heading) {
+            // A genuine free-text answer resolves the prompt.
+            return None;
+        }
+        // Queue-continuation response — does not answer a free-text prompt.
     }
+    let prompt_region = match first_response_idx {
+        Some(idx) => &tail[..idx],
+        None => tail,
+    };
 
-    let prompt_lines: Vec<String> = tail
+    let prompt_lines: Vec<String> = prompt_region
         .iter()
         .map(|line| line.trim())
         .filter(|line| {
@@ -3616,6 +3632,27 @@ fn unresolved_exchange_prompt_in_content(content: &str) -> Option<String> {
         return None;
     }
     Some(prompt_lines.join("\n"))
+}
+
+/// `#queue-continuation-buries-prompt`: a queue-continuation response heading
+/// (`### Re: do [#id]` / `### Re: re [#id]`, any h-level) answers a queue or
+/// backlog item, not a free-text user prompt. Such a heading must not mark a
+/// preceding free-text exchange prompt as answered, or a queue continuation can
+/// advance the boundary past an unanswered user prompt and bury it in the
+/// snapshot (the JB "ignored my previous prompt" class).
+pub fn is_queue_continuation_response_heading(trimmed: &str) -> bool {
+    let Some(rest) = trimmed
+        .strip_prefix("### Re:")
+        .or_else(|| trimmed.strip_prefix("#### Re:"))
+        .or_else(|| trimmed.strip_prefix("##### Re:"))
+        .or_else(|| trimmed.strip_prefix("###### Re:"))
+    else {
+        return false;
+    };
+    let topic = rest.trim_start();
+    // Queue-continuation topics start with the `do`/`re` directive verb plus a
+    // bracketed id, e.g. "do [#6cmx]" or "re [#374n] ...".
+    (topic.starts_with("do [#") || topic.starts_with("re [#")) && topic.contains(']')
 }
 
 pub fn detect_unstarted_prompt_bearing_diff(file: &Path) -> Result<Option<String>> {
@@ -8369,6 +8406,42 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         assert_eq!(unresolved_exchange_prompt_in_content(content), None);
+    }
+
+    #[test]
+    fn unresolved_exchange_prompt_unmasked_by_queue_continuation_response() {
+        // `#queue-continuation-buries-prompt`: a free-text user prompt followed
+        // only by a queue-continuation response (`### Re: do [#id]`) is still
+        // unresolved — that response answered the queue item, not the prompt.
+        // This is the JB "agent-doc ignored my previous prompt" failure: a
+        // concurrent queue continuation must not let the boundary bury it.
+        let content = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "<!-- agent:boundary:committed -->\n",
+            "❯ JB Run Agent Doc on monsterrodholders.md stalled.\n",
+            "### Re: do [#6cmx] — gpt-5\n\nI gated #6cmx.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        assert_eq!(
+            unresolved_exchange_prompt_in_content(content).as_deref(),
+            Some("JB Run Agent Doc on monsterrodholders.md stalled."),
+            "a free-text prompt followed only by a queue-continuation response must stay unresolved"
+        );
+    }
+
+    #[test]
+    fn is_queue_continuation_response_heading_distinguishes_directive_topics() {
+        assert!(is_queue_continuation_response_heading("### Re: do [#6cmx]"));
+        assert!(is_queue_continuation_response_heading(
+            "#### Re: re [#374n] follow-up"
+        ));
+        // Free-text answer topics are NOT queue continuations.
+        assert!(!is_queue_continuation_response_heading(
+            "### Re: JB Run Agent Doc deadlock — opus-4-8"
+        ));
+        assert!(!is_queue_continuation_response_heading("### Re: do this thing"));
+        assert!(!is_queue_continuation_response_heading("not a heading"));
     }
 
     #[test]

@@ -112,10 +112,49 @@ Full plan: `tasks/agent-doc/plan-opt-in-agent-doc-documents.md`; queued as a `[r
 2. Should `agent-doc init` also offer to add a `[documents]` glob, or stay purely per-file?
 
 Say the word (with `#spec-test-build-install-commit-push` if you want it shipped this cycle) and I'll implement against the plan.
-<!-- agent:boundary:b867510a -->
+❯ A new session was created. But there was a JB error
+```
+Claim failed (exit 1): [claim] auto-scaffolding empty file: /home/brian/work/btakita/agent-loop/tasks/recruit/test.md [commit] repositioned boundary in snapshot [commit] skipping working-tree boundary reposition — IPC listener active [perf] commit.staging (hash_object+update-index): 10ms [perf] commit.git_commit: 10ms [main 0899cd3b7] agent-doc(test): 2026-06-01 05:05:05 [commit] IPC reposition boundary signal sent [commit] VCS refresh signal written [perf] commit total: 22ms Error: pane %18 is in tmux session '1' but project session is '0'; switch to the configured session or pass --force
+```
+
+### Re: JB claim error — auto-scaffold + cross-session reject — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#4a6p]
+
+
+Fixed the immediate bug. Your error had two parts; the damaging one is an ordering bug.
+
+#### What the error showed
+```
+[claim] auto-scaffolding empty file: tasks/recruit/test.md
+[main 0899cd3b7] agent-doc(test): ...            ← already committed!
+Error: pane %18 is in tmux session '1' but project session is '0'; switch to the configured session or pass --force
+```
+`claim` **scaffolded and committed** the empty `test.md` *before* validating the pane. Then the cross-session guard rejected (your JB pane `%18` was in tmux session `1`, but the project session is `0`). So a file you never opted into got converted to a session and committed, and the claim still failed.
+
+#### Fix (`#claim-validate-before-scaffold`, submodule `7e07f6d1`)
+Moved pane resolution + the cross-session guard **ahead of** the empty-file auto-scaffold in `claim.rs` (pane validation needs only the pane id + configured session). A rejected cross-session claim now **fails closed and leaves the file byte-identical** — no scaffold, no `agent-doc(<doc>)` commit. This honors the existing `// Pane validated — now safe to modify files` invariant, which the auto-scaffold had been jumping ahead of. Documented in `specs/07-session-tmux-commands.md`.
+
+- Verified: `make check` fully green (the earlier local `graph::tests` red from concurrent lazily-rs drift has cleared); claim tests pass (16). `cargo build --release` + `cargo install` refreshed both binaries. Pushed `7e07f6d1`.
+
+#### About the cross-session reject itself
+That guard is intentional — `claim` refuses to bind a pane that lives in a *different* tmux session than the project's configured one (here pane in `1`, project `0`), unless you pass `--force` or switch the pane to session `0`. The fix above just ensures a refused claim no longer mutates the file first. If you frequently work across tmux sessions and want claim to adopt the pane's session automatically, that's a separate policy change — tell me and I'll scope it.
+
+#### This is one slice of `#4a6p` (opt-in) — gated pending your input
+The auto-scaffold-on-reject was a symptom of the broader "every `.md` is auto-converted" issue you raised. The full opt-in feature (`#4a6p`, plan `tasks/agent-doc/plan-opt-in-agent-doc-documents.md`) is still **blocked on your two answers** from last cycle, so I gated it rather than auto-draining a design-blocked item:
+1. Opt-in surface — per-file frontmatter, project-config glob, or **both** (my recommendation)?
+2. Should `agent-doc init` also offer to add a `[documents]` glob, or stay per-file?
+
+Answer those (add `#spec-test-build-install-commit-push` to ship) and I'll ungate `#4a6p` and implement the full gate.
+
+(FYI: the exchange is getting large — 6 cycles in 30 min. Say the word if you want me to `agent-doc compact` it.)
+<!-- agent:boundary:a28992c1 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+- ~do [#4a6p]~
 - ~do [#t3m5]. Apply all 3 optimizations.~
 - ~do [#j0k8]~
 - do [#jkvs]
@@ -152,7 +191,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog priority queue=prepend -->
-- [ ] [#4a6p] [recommended] Make agent-doc documents opt-in so a plain .md is not auto-converted into a session. Add is_agent_doc_document(path, content, config) gate (frontmatter field OR .agent-doc config [documents] glob OR auto_session_for_all_md escape hatch); ensure_session_for_file/route/run/write fail closed with an opt-in message instead of injecting session: frontmatter; FFI agent_doc_is_session_document for JB/VSCode SubmitAction.update gating. Plan: tasks/agent-doc/plan-opt-in-agent-doc-documents.md.
 - [ ] [#jkvs] [recommended] Path A — run one consolidated live busy-pane verification session to batch-close the live-verify-gated review items: install the current signed JB plugin + restart the route-owned agent-doc process, then drive one mid-active-turn pane through #t41j, #jb-busy-queue-deadlock-live-verify, #jb-run-agent-doc-busy-feedback-live-verify, #route-drain-all-surface-live-verify, #codex-owned-pane-stop-hook-live-verify, #codex-owned-pane-prompt-miss-followups (2b/3), #codex-final-response-live-verify, #recovery-drift-apply-live-verify, #jb-load-tmux-window-verify.
 - [ ] [#qasm] [recommended] Path C — work the no-live-pane implementable review items in priority order: #free-text-queue-skip-diagnostic, #queue-auto-no-continue, then the queue-provenance cluster (#prompt-preempts-auto-queue, #queue-user-edit-overwrite, #jb-run-agent-doc-response-queue-contamination), the Option-A fixes (#cancel-orphans-preflight-cycle, #exchange-prompt-dropped-on-merge, #duplicate-response-after-commit), closeout-guard hardening (#do-id-partial-closeout-state, #preset-item-id-collision-enforce, #queue-clear-unrun-items), the feature pair (#backlog-priority-attribute, #backlog-queue-sync-attribute), then hygiene/UX (#stash-session-ttl-prune, #plugin-cleanup-menu-command, #stash-pane-promote-on-focus, #clear-stops-running-process, #jb-stale-busy-idle-footer, #snrun).
 - [ ] [#6cmx] [recommended] Path B — run one IPC/typing-corruption live-capture session: enable #com.github.btakita.agentdoc debug logging, then type into a doc during finalize --stream to capture the exact setText payload that unblocks the duplication family #ipcfullprompt-recur2, #ipc-dup-tracking-double-merge, #adoc-queue-ipc-buffer-divergence, #prompt-duplicated-while-typing, #finalize-retry-ipc-response-duplication, #zpc2.
@@ -161,6 +199,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Review
  
 <!-- agent:review -->
+- [/] [#4a6p] [recommended] Make agent-doc documents opt-in so a plain .md is not auto-converted into a session. Add is_agent_doc_document(path, content, config) gate (frontmatter field OR .agent-doc config [documents] glob OR auto_session_for_all_md escape hatch); ensure_session_for_file/route/run/write fail closed with an opt-in message instead of injecting session: frontmatter; FFI agent_doc_is_session_document for JB/VSCode SubmitAction.update gating. Plan: tasks/agent-doc/plan-opt-in-agent-doc-documents.md.
 - [/] [#j0k8] [recommended] Live-verify the cross-root claim guard (submodule 822688d0): from the superproject root, claim/open a new document from inside a pane already running a different document's submodule agent-doc/codex session, and confirm claim provisions a NEW pane (logs '[claim] pane ... runs a live agent-doc/codex session for another document') instead of aliasing onto it. Also confirm the awear.md recovery restores a real pane. cmdline_owns_other_document is unit-tested; this is the live-pane edge.
 - [/] [#do-id-partial-closeout-state] [recommended] Partial-closeout WARN guard landed (check_partial_closeout_state_guard: a do[#id] turn whose response shows shipped + remaining-live-work signals with the directed id still open advises --pending-edit/--pending-gate narrowing; suppressible by a no-partial-closeout-guard response marker; FlowCore guard_ budget 35->40). Remaining: per-id edit-vs-gate tracking in cycle_state, opt-in strict mode, next-phase queue convergence, and the runbook note that #spec-test-commit-push completes a repo phase without a live/deploy item. Plan: tasks/agent-doc/plan-do-id-partial-closeout-state.md.
 - [/] [#free-text-queue-skip-diagnostic] [recommended] Polish from #free-text-queue-owner-consume plan point 4: when queue consumption is skipped, the closeout still prints the generic '[queue] skipped consumption because the active prompt did not target the queue head'. For an id-backed head with no completion flag, name the missing proof source and the supported repair (--done/--pending-gate/--pending-edit <id>); for a free-text head edge case, point to the answered-response path. Replace the single generic line at write.rs ~1460/1469 with a shape-aware diagnostic. Plan: tasks/agent-doc/plan-free-text-queue-owner-consume.md (point 4).

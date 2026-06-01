@@ -68,7 +68,30 @@ The important detail is the operation mix. SurrealDB wins some synthetic totals 
 So the current conclusion is: `SurrealDB is parity-correct but not performance-competitive enough to promote.` The backend-eval promotion decision remains `hold`, with the explicit gate still requiring a real optional adapter, provider-neutral projection writes/load, SQLite parity on real and full-projection datasets, matching-or-better lock behavior, install portability, and faster-than-SQLite results across the required workloads.
 
 Commands run: `tsift status`, `agent-doc preflight`, `agent-doc plan`, `tsift graph-db --path /home/brian/work/btakita/agent-loop/tasks/software/tsift.md --json backend-eval --candidate surrealdb --target gval`, and the same backend-eval command with `--full-projection`. No repo code files were changed.
-<!-- agent:boundary:51a5db8b -->
+❯ Can SurrealDB be optimized for performance? We put in substantial effort to optimize Sqlite.
+
+### Re: SurrealDB optimization potential — gpt-5
+
+Yes, SurrealDB can probably be optimized a lot from where it is now. The current numbers are not a fair apples-to-apples comparison with the SQLite path, because SQLite has received substantial workload-specific optimization and the SurrealDB adapter is still a feature-gated spike.
+
+The main issue I found is structural: `SurrealdbGraphStore` persists rows into SurrealDB, but its hot reads mostly go through two Rust `BTreeMap`s keyed by node id and edge id. It overrides `outgoing_edges`, but it does not override several high-impact `GraphStore` methods where SQLite has dedicated indexed implementations. The default trait methods for `edge`, `incident_edges`, `paged_incident_edges`, and `edges_between_nodes` fall back to `all_edges()` / repeated `outgoing_edges()` scans. On the full projection, that means some SurrealDB benchmark operations are effectively paying O(E) or repeated scan costs over ~657k edges.
+
+SQLite is not just “using SQLite.” It has very specific pushdown work: `edge()` probes `idx_graph_edges_edge_key`, incident scans use separate `from_id` and `to_id` index probes, property scans use materialized `graph_edge_properties`, `edges_between_nodes()` uses a temp-table + `EXISTS` pattern, and path reads use a bounded frontier over `idx_graph_edges_from_kind`. Those are exactly the operations where SurrealDB is losing by orders of magnitude.
+
+The optimization path for SurrealDB is clear:
+
+1. Add secondary indexes inside `SurrealdbGraphStore`: edge by stable id, outgoing by `(from_id, kind)`, incoming by `(to_id, kind)`, edge-property by `(key, value)`, and maybe node-kind/property indexes.
+2. Override the same `GraphStore` hot methods SQLite overrides: `edge`, `sample_edge`, `sample_edge_with_property`, `incident_edges`, `paged_edges`, `paged_incident_edges`, `edges_between_nodes`, and probably `shortest_path_with_max_hops`.
+3. Avoid cloning/sorting the full edge set for every probe; return already ordered ranges from the secondary indexes or maintain order-specific maps.
+4. Batch projection writes. `replace_projection_rows()` currently clears and then calls `upsert_node` / `upsert_edge` per row, each crossing the Tokio/SurrealDB boundary. A production adapter should bulk load or transact rows and rebuild secondary indexes in one pass.
+5. Decide whether SurrealDB itself should own these indexes with query pushdown, or whether the adapter should keep Rust-side derived indexes and treat SurrealKV as durable row storage. The latter is easier and likely enough to test whether SurrealDB can catch SQLite on the current benchmark.
+
+Even after that, I would not assume SurrealDB wins. SQLite has a very favorable profile here: embedded, bundled, low overhead, mature B-tree indexes, stable query plans, WAL semantics, and no async/runtime boundary in the hot read path. SurrealDB may catch up on some graph-shaped workloads if we remove the full scans, but it still has to beat a highly tuned embedded SQLite implementation on every required dataset, including full projection.
+
+So the pragmatic answer is: `yes, SurrealDB is optimizable, and the current adapter has obvious low-hanging fruit; no, we should not treat current parity as performance parity until it gets the same indexed/pushdown treatment SQLite already has and then passes repeated backend-eval samples.`
+
+Commands/evidence used: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `tsift --envelope search`, `rg`, and source inspection of `packages/tsift-surrealdb/src/lib.rs`, `packages/tsift-core/src/lib.rs`, `packages/tsift-sqlite/src/lib.rs`, `packages/tsift-cli/src/lib.rs`, and `SPEC.md`. No repo code files were changed.
+<!-- agent:boundary:bf49ebcd -->
 <!-- /agent:exchange -->
 ###
 <!--

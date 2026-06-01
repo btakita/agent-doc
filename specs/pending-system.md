@@ -116,6 +116,13 @@ On every preflight run:
 1. Scan tracked-work components (`agent:backlog` / legacy `agent:pending`,
    `agent:review`, and `agent:icebox`) for list items.
 2. For each bullet:
+   - Content-less bullet (no description text **and** no continuation, e.g. a
+     stray `- [ ]` or an id-only `- [ ] [#hash]`) → **drop it**. Backfill must
+     never mint a hash id for an empty line, because that manufactures a phantom
+     tracked item whose description "disappeared" (`#icebox-empty-item-phantom-id`).
+     Dropping also self-heals an already-cemented id-only empty item. A bullet
+     with empty header text but a real indented continuation is **not**
+     content-less and is preserved.
    - No hash prefix → generate and insert a hash.
    - No checkbox → insert `- [ ] ` before the hash.
 3. Reap `- [x]` bullets **only**:

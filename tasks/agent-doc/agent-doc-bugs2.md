@@ -31,16 +31,15 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260601-070447.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260601-070503.md`*
 
 Compacted content:
 - Archived 4 response topic(s): 3 tmux panes with 2 editor panes; Did lazily-rs cause these regressions?; #spec-test-build-install-commit-push; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:f561759b -->
+<!-- agent:boundary:e9923525 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
-- do [#n9zf]
 <!-- /agent:queue -->
 ###
 <!--

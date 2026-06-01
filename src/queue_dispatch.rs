@@ -427,7 +427,8 @@ mod tests {
             dir.path(),
             "queue-session",
             move |method| match method {
-                agent_doc_orchestration::supervisor::ipc::IpcMethod::Inject { bytes } => {
+                agent_doc_orchestration::supervisor::ipc::IpcMethod::Inject { bytes }
+                | agent_doc_orchestration::supervisor::ipc::IpcMethod::Clear { bytes } => {
                     captured_for_ipc.lock().unwrap().push(bytes);
                     agent_doc_orchestration::supervisor::ipc::IpcResponse::ok_empty()
                 }

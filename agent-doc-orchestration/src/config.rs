@@ -89,6 +89,18 @@ pub struct Config {
     /// `CODEX_SANDBOX_NETWORK_DISABLED`, and `disabled` forces it on.
     #[serde(default)]
     pub codex_network_access: Option<CodexNetworkAccess>,
+    /// Maximum number of managed-capability-proof attempts before the dispatch
+    /// gate is set to `Failed`. Frontmatter overrides this. Default `3`.
+    #[serde(default)]
+    pub managed_proof_max_attempts: Option<u32>,
+    /// Base back-off (seconds) between managed-capability-proof retries.
+    /// Frontmatter overrides this. Default `2`.
+    #[serde(default)]
+    pub managed_proof_retry_backoff_secs: Option<u64>,
+    /// Override for the managed-capability child probe timeout (seconds).
+    /// Frontmatter overrides this. Default `45`.
+    #[serde(default)]
+    pub managed_proof_probe_timeout_secs: Option<u64>,
     /// Execution mode: hybrid (default), parallel, sequential.
     /// Controls how the skill handles concurrent /agent-doc invocations.
     #[serde(default)]

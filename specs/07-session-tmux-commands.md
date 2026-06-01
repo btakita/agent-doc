@@ -390,7 +390,11 @@ single-owner actor controls:
   single-line submit command used by routed reopen and queued slash-command
   dispatch. When the authoritative pane is alive on the default tmux server,
   the command must submit directly through that pane's tmux input path;
-  otherwise it may fall back to supervisor IPC inject. For Codex, it still
+  otherwise it may fall back to supervisor IPC delivery. That supervisor
+  fallback uses the gate-exempt `Clear` IPC control method rather than the gated
+  `Inject` method, so clearing a session whose managed capability proof failed
+  succeeds without `kill -9` instead of failing with `prompt dispatch is
+  disabled` (`#codex-capability-proof-unrecoverable`). For Codex, it still
   records the clear prompt state so the next reroute can reapply the original
   launch contract. Before contacting tmux or the supervisor, it must record a
   controller operator-command acceptance or fail with the rejected stage. Clear

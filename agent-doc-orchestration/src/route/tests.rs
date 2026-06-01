@@ -3020,7 +3020,7 @@ fn resolve_or_create_pane_waits_longer_for_live_child_cycle_ack() {
     let injects = Arc::new(Mutex::new(Vec::<String>::new()));
     let injects_for_ipc = injects.clone();
     let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
-        IpcMethod::Inject { bytes } => {
+        IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
             injects_for_ipc.lock().unwrap().push(bytes.clone());
             IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
         }
@@ -3230,7 +3230,7 @@ fn resolve_or_create_pane_keeps_live_child_reroute_optimistic_when_cycle_ack_is_
             dir.path(),
             "route-live-child-skip",
             move |method| match method {
-                IpcMethod::Inject { bytes } => {
+                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
                     injects_for_ipc.lock().unwrap().push(bytes.clone());
                     IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                 }
@@ -3328,7 +3328,7 @@ fn resolve_or_create_pane_retries_fresh_restart_after_live_codex_ack_timeout() {
                     IpcResponse::ok_empty()
                 }
                 IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-                IpcMethod::Inject { bytes } => {
+                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
                     if let Some(target) = injected_pane_for_ipc.lock().unwrap().clone() {
                         let _ = ipc_tmux.send_keys(&target, bytes.trim_end_matches('\n'));
                     }
@@ -3486,7 +3486,7 @@ fn resolve_or_create_pane_records_optimistic_fresh_restart_retry_in_original_pan
                     IpcResponse::ok_empty()
                 }
                 IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-                IpcMethod::Inject { bytes } => {
+                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
                     IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                 }
                 IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
@@ -3668,7 +3668,7 @@ fn resolve_or_create_pane_restarts_fresh_before_dispatch_after_tracked_codex_cle
                     IpcResponse::ok_empty()
                 }
                 IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-                IpcMethod::Inject { bytes } => {
+                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
                     injects_for_ipc.lock().unwrap().push(bytes.clone());
                     IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                 }
@@ -4000,7 +4000,7 @@ fn dispatch_only_send_reopen_direct_pane_submit_avoids_extra_enter_retries() {
         dir.path(),
         "route-test-dispatch-only-no-enter-retries",
         move |method| match method {
-            IpcMethod::Inject { bytes } => {
+            IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
                 injects_for_ipc.lock().unwrap().push(bytes.clone());
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
@@ -4241,7 +4241,7 @@ fn run_with_tmux_dispatch_only_ignores_startup_miss_on_alive_registered_pane() {
     let ipc_tmux = iso.clone();
     let pane_for_ipc = pane.clone();
     let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
-        IpcMethod::Inject { bytes } => {
+        IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
             let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
             IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
         }
@@ -4338,7 +4338,7 @@ fn resolve_or_create_pane_retries_busy_registered_pane_once_after_interrupt_reco
     let ipc_tmux = iso.clone();
     let pane_for_ipc = pane.clone();
     let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
-        IpcMethod::Inject { bytes } => {
+        IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
             let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
             IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
         }
@@ -4429,7 +4429,7 @@ fn resolve_or_create_pane_retries_busy_registered_pane_once_after_ctrl_g_probe()
     let ipc_tmux = iso.clone();
     let pane_for_ipc = pane.clone();
     let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
-        IpcMethod::Inject { bytes } => {
+        IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
             let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
             IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
         }
@@ -4522,7 +4522,7 @@ fn resolve_or_create_pane_retries_busy_opencode_pane_after_escape_interrupt() {
     let ipc_tmux = iso.clone();
     let pane_for_ipc = pane.clone();
     let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
-        IpcMethod::Inject { bytes } => {
+        IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
             let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
             IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
         }
@@ -4638,7 +4638,7 @@ fn resolve_or_create_pane_keeps_interrupt_timeout_busy_reroute_optimistic_for_al
                     IpcResponse::ok_empty()
                 }
                 IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-                IpcMethod::Inject { bytes } => {
+                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
                     if let Some(target) = injected_pane_for_ipc.lock().unwrap().clone() {
                         let _ = ipc_tmux.send_keys(&target, &bytes);
                     }
@@ -4740,7 +4740,7 @@ fn resolve_or_create_pane_restarts_fresh_for_busy_registered_pane_after_noop_fix
                     IpcResponse::ok_empty()
                 }
                 IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-                IpcMethod::Inject { bytes } => {
+                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
                     if let Some(target) = injected_pane_for_ipc.lock().unwrap().clone() {
                         let _ = ipc_tmux.send_keys(&target, &bytes);
                     }
@@ -4893,7 +4893,7 @@ fn fresh_restart_retry_preserves_absolute_reopen_path_for_relative_docs() {
                     IpcResponse::ok_empty()
                 }
                 IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-                IpcMethod::Inject { bytes } => {
+                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
                     IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                 }
                 IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
@@ -5026,7 +5026,7 @@ fn resolve_or_create_pane_retries_busy_registered_pane_once_after_scoped_fix() {
     let ipc_tmux = iso.clone();
     let pane_for_ipc = pane.clone();
     let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
-        IpcMethod::Inject { bytes } => {
+        IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
             let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
             IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
         }
@@ -5134,7 +5134,7 @@ fn resolve_or_create_pane_waits_for_busy_restart_handoff_before_retrying_route()
                     IpcResponse::ok_empty()
                 }
                 IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-                IpcMethod::Inject { bytes } => {
+                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
                     injects_for_ipc.lock().unwrap().push(bytes.clone());
                     IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                 }
@@ -5338,7 +5338,7 @@ fn resolve_or_create_pane_rejects_same_committed_cycle_mutation_for_prompt_drift
     let ipc_tmux = iso.clone();
     let pane_for_ipc = pane.clone();
     let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
-        IpcMethod::Inject { bytes } => {
+        IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
             let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
             IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
         }
@@ -5421,7 +5421,7 @@ fn resolve_or_create_pane_accepts_registered_pane_trigger_once_new_cycle_starts(
     let ipc_tmux = iso.clone();
     let pane_for_ipc = pane.clone();
     let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
-        IpcMethod::Inject { bytes } => {
+        IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
             let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
             IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
         }
@@ -5510,7 +5510,7 @@ fn resolve_or_create_pane_accepts_content_edit_cycle_ack_without_extra_payload_l
     let ipc_tmux = iso.clone();
     let pane_for_ipc = pane.clone();
     let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
-        IpcMethod::Inject { bytes } => {
+        IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
             let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
             IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
         }
@@ -5823,7 +5823,7 @@ fn resolve_or_create_pane_prefers_authoritative_actor_dispatch_target() {
             "actor_state": "ready",
             "restart_count": 0
         })),
-        IpcMethod::Inject { bytes } => {
+        IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
             injects_for_ipc.lock().unwrap().push(bytes.clone());
             IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
         }
@@ -5956,7 +5956,7 @@ fn resolve_or_create_pane_dispatch_only_prefers_authoritative_actor_dispatch_tar
             "actor_state": "ready",
             "restart_count": 0
         })),
-        IpcMethod::Inject { bytes } => {
+        IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
             injects_for_ipc.lock().unwrap().push(bytes.clone());
             IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
         }
@@ -6168,7 +6168,7 @@ fn resolve_or_create_pane_dispatch_only_does_not_restart_after_tracked_codex_cle
             "actor_state": "ready",
             "restart_count": 0
         })),
-        IpcMethod::Inject { bytes } => {
+        IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
             injects_for_ipc.lock().unwrap().push(bytes.clone());
             IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
         }
@@ -6296,7 +6296,7 @@ fn resolve_or_create_pane_dispatch_only_fails_closed_when_live_submit_has_no_cod
             "actor_state": "ready",
             "restart_count": 0
         })),
-        IpcMethod::Inject { bytes } => {
+        IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
             injects_for_ipc.lock().unwrap().push(bytes.clone());
             IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
         }
@@ -6406,7 +6406,7 @@ fn resolve_or_create_pane_dispatch_only_recovers_waiting_input_actor_with_fresh_
             restart_called_for_ipc.store(true, Ordering::Relaxed);
             IpcResponse::ok_empty()
         }
-        IpcMethod::Inject { .. } => IpcResponse::ok_empty(),
+        IpcMethod::Inject { .. } | IpcMethod::Clear { .. } => IpcResponse::ok_empty(),
         IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
         IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
     })
@@ -6501,7 +6501,7 @@ fn resolve_or_create_pane_fails_closed_for_blocked_or_closed_authoritative_actor
                 "actor_state": actor_state,
                 "restart_count": 0
             })),
-            IpcMethod::Inject { bytes } => {
+            IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
                 injects_for_ipc.lock().unwrap().push(bytes.clone());
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
@@ -6592,7 +6592,7 @@ fn load_authoritative_actor_dispatch_target_accepts_normalized_claude_harness_id
             "actor_state": "ready",
             "restart_count": 0
         })),
-        IpcMethod::Inject { .. } => IpcResponse::ok_empty(),
+        IpcMethod::Inject { .. } | IpcMethod::Clear { .. } => IpcResponse::ok_empty(),
         IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
         IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
         IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
@@ -6664,7 +6664,7 @@ fn resolve_or_create_pane_dispatches_busy_authoritative_actor_when_prompt_target
             "actor_state": "busy",
             "restart_count": 0
         })),
-        IpcMethod::Inject { bytes } => {
+        IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
             injects_for_ipc.lock().unwrap().push(bytes.clone());
             IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
         }
@@ -6795,7 +6795,7 @@ fn route_waits_for_starting_authoritative_actor_ready_before_dispatch() {
             "actor_state": "starting",
             "restart_count": 0
         })),
-        IpcMethod::Inject { bytes } => {
+        IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
             injects_for_ipc.lock().unwrap().push(bytes.clone());
             IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
         }
@@ -6918,7 +6918,7 @@ fn route_refreshes_closed_starting_authoritative_actor_without_start_timeout() {
             "actor_state": "starting",
             "restart_count": 0
         })),
-        IpcMethod::Inject { bytes } => {
+        IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
             injects_for_ipc.lock().unwrap().push(bytes.clone());
             IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
         }
@@ -7020,7 +7020,7 @@ fn route_dispatch_only_fails_closed_for_starting_authoritative_actor_without_rea
             "actor_state": "starting",
             "restart_count": 0
         })),
-        IpcMethod::Inject { bytes } => {
+        IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
             injects_for_ipc.lock().unwrap().push(bytes.clone());
             IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
         }
@@ -7144,7 +7144,7 @@ fn route_dispatch_only_refuses_starting_authoritative_actor_after_tracked_clear_
             "actor_state": "starting",
             "restart_count": 0
         })),
-        IpcMethod::Inject { bytes } => {
+        IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
             injects_for_ipc.lock().unwrap().push(bytes.clone());
             IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
         }
@@ -7284,7 +7284,7 @@ fn resolve_or_create_pane_dispatch_only_submits_to_healthy_starting_actor_withou
             "actor_state": "starting",
             "restart_count": 0
         })),
-        IpcMethod::Inject { .. } => {
+        IpcMethod::Inject { .. } | IpcMethod::Clear { .. } => {
             panic!("ready-prompt dispatch-only reroute must use direct pane submit")
         }
         IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
@@ -7944,7 +7944,7 @@ fn alive_registered_pane_uses_supervisor_pid_fallback_when_argv_loses_file_path(
     let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
         IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": mock_agent_pid })),
         IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
-        IpcMethod::Inject { bytes } => {
+        IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
             injects_for_ipc.lock().unwrap().push(bytes.clone());
             IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
         }
@@ -9999,7 +9999,7 @@ fn resolve_or_create_pane_fails_closed_for_halted_supervisor_when_no_live_owner(
                     IpcResponse::ok_empty()
                 }
                 IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": null })),
-                IpcMethod::Inject { bytes } => {
+                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
                     IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                 }
                 IpcMethod::Stop { .. } => IpcResponse::ok_empty(),

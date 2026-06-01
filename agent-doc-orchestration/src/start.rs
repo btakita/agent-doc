@@ -1551,56 +1551,104 @@ fn spawn_managed_capability_proof_thread(
     mut session_log: Option<std::fs::File>,
 ) -> std::thread::JoinHandle<()> {
     let thread_name = format!("{harness_binary}-capability-proof");
+    let policy = crate::agent::resolve_managed_proof_policy(&fm, &global_config);
     std::thread::Builder::new()
         .name(thread_name)
         .spawn(move || {
-            match crate::agent::codex::prove_managed_session_capabilities(
-                &harness_binary,
-                &args,
-                &env,
-                &fm,
-                &global_config,
-                &harness_binary,
-            ) {
-                Ok(Some(event)) => {
-                    surface_managed_capability_proof_status(&shared, &harness_binary, &event);
-                    shared.set_capability_proof_gate(CapabilityProofGate::Proven, None);
-                    log_event(&mut session_log, &event);
-                }
-                Ok(None) => {
-                    shared.set_capability_proof_gate(CapabilityProofGate::NotRequired, None);
-                    log_event(
-                        &mut session_log,
-                        &format!("{}_capability_proof status=not_required", harness_binary),
-                    );
-                }
-                Err(err) => {
-                    let detail = err.to_string();
-                    shared.set_capability_proof_gate(
-                        CapabilityProofGate::Failed,
-                        Some(detail.clone()),
-                    );
-                    shared.transition_actor_state(
-                        crate::session_actor::ActorState::Blocked,
-                        "supervisor",
-                        &format!("{}_capability_proof_failed", harness_binary),
-                    );
-                    log_event(
-                        &mut session_log,
-                        &format!(
-                            "{}_capability_proof status=failed error={detail:?}",
-                            harness_binary
-                        ),
-                    );
-                    surface_managed_capability_proof_status(
-                        &shared,
-                        &harness_binary,
-                        &format!(
-                            "{}_capability_proof status=failed error={detail:?}",
-                            harness_binary
-                        ),
-                    );
-                    shared.kill_child();
+            // Bounded re-prove: a transient network blip no longer permanently
+            // wedges the session. Retry the probe (with exponential back-off) up
+            // to `policy.max_attempts` before committing the gate to `Failed`.
+            // The gate stays `Pending` between attempts so dispatch remains gated
+            // but recoverable rather than dead.
+            let mut attempt: u32 = 0;
+            loop {
+                attempt += 1;
+                match crate::agent::codex::prove_managed_session_capabilities(
+                    &harness_binary,
+                    &args,
+                    &env,
+                    &fm,
+                    &global_config,
+                    &harness_binary,
+                    policy.probe_timeout,
+                ) {
+                    Ok(Some(event)) => {
+                        surface_managed_capability_proof_status(&shared, &harness_binary, &event);
+                        shared.set_capability_proof_gate(CapabilityProofGate::Proven, None);
+                        log_event(&mut session_log, &event);
+                        return;
+                    }
+                    Ok(None) => {
+                        shared.set_capability_proof_gate(CapabilityProofGate::NotRequired, None);
+                        log_event(
+                            &mut session_log,
+                            &format!("{}_capability_proof status=not_required", harness_binary),
+                        );
+                        return;
+                    }
+                    Err(err) => {
+                        let detail = err.to_string();
+                        match crate::agent::proof_retry_decision(
+                            attempt,
+                            policy.max_attempts,
+                            policy.base_backoff,
+                        ) {
+                            crate::agent::ProofRetryDecision::Retry { backoff } => {
+                                // Keep the gate `Pending` (gated but not failed)
+                                // while we back off and re-prove.
+                                shared.set_capability_proof_gate(
+                                    CapabilityProofGate::Pending,
+                                    Some(detail.clone()),
+                                );
+                                let retry_event = format!(
+                                    "{}_capability_proof status=retry attempt={attempt}/{} backoff_ms={} error={detail:?}",
+                                    harness_binary,
+                                    policy.max_attempts,
+                                    backoff.as_millis()
+                                );
+                                log_event(&mut session_log, &retry_event);
+                                surface_managed_capability_proof_status(
+                                    &shared,
+                                    &harness_binary,
+                                    &retry_event,
+                                );
+                                if !sleep_with_stop(&shared.stop_requested, backoff) {
+                                    // Supervisor is stopping; abandon the retry
+                                    // loop without wedging the gate to `Failed`.
+                                    return;
+                                }
+                                continue;
+                            }
+                            crate::agent::ProofRetryDecision::GiveUp => {
+                                shared.set_capability_proof_gate(
+                                    CapabilityProofGate::Failed,
+                                    Some(detail.clone()),
+                                );
+                                shared.transition_actor_state(
+                                    crate::session_actor::ActorState::Blocked,
+                                    "supervisor",
+                                    &format!("{}_capability_proof_failed", harness_binary),
+                                );
+                                log_event(
+                                    &mut session_log,
+                                    &format!(
+                                        "{}_capability_proof status=failed attempts={attempt} error={detail:?}",
+                                        harness_binary
+                                    ),
+                                );
+                                surface_managed_capability_proof_status(
+                                    &shared,
+                                    &harness_binary,
+                                    &format!(
+                                        "{}_capability_proof status=failed attempts={attempt} error={detail:?}",
+                                        harness_binary
+                                    ),
+                                );
+                                shared.kill_child();
+                                return;
+                            }
+                        }
+                    }
                 }
             }
         })
@@ -2071,7 +2119,71 @@ impl SupervisorShared {
     }
 }
 
+/// Whether an IPC method is a prompt dispatch that must pass the managed
+/// capability proof gate before delivery. Only [`IpcMethod::Inject`] is a real
+/// dispatch; operator control methods ([`IpcMethod::Clear`], `Stop`, `Restart`)
+/// and read-only methods (`State`, `Pid`) are gate-exempt so a session whose
+/// proof failed can still be inspected, cleared, and stopped without `kill -9`.
+/// Pure and deterministic for unit testing the gate-exemption classification.
+fn ipc_method_requires_capability_gate(method: &IpcMethod) -> bool {
+    matches!(method, IpcMethod::Inject { .. })
+}
+
+/// Shared delivery for injected text (pane submit or PTY write). Used by both
+/// the gated [`IpcMethod::Inject`] path and the gate-exempt
+/// [`IpcMethod::Clear`] path; the gate decision is made by the caller.
+fn deliver_ipc_inject(shared: &SupervisorShared, bytes: &str, diag_op: &str) -> Result<(), String> {
+    if let Some(pane_id) = shared.inject_pane.as_deref() {
+        crate::input_diag::log_text_submit(
+            None,
+            &format!("supervisor.{diag_op}"),
+            &format!("pane:{pane_id}"),
+            bytes,
+            Some(&shared.harness_binary),
+            if shared.harness_binary == "opencode" {
+                "ipc_inject_kitty_return"
+            } else {
+                "ipc_inject_enter"
+            },
+            if shared.harness_binary == "opencode" {
+                "KittyReturn"
+            } else {
+                "Enter"
+            },
+        );
+        dispatch_submit_text_to_pane(pane_id, bytes, &shared.harness_binary)
+            .map_err(|e| e.to_string())
+    } else {
+        let guard = shared.inject_writer.lock().unwrap();
+        match guard.as_ref() {
+            Some(writer_arc) => {
+                let mut w = writer_arc.lock().unwrap();
+                let normalized = normalize_supervisor_inject_bytes(bytes);
+                crate::input_diag::log_transform_event(
+                    None,
+                    &format!("supervisor.{diag_op}"),
+                    "child_pty",
+                    "normalize_lf_to_cr",
+                    bytes.as_bytes(),
+                    &normalized,
+                    Some(&shared.harness_binary),
+                );
+                w.write_all_blocking(&normalized)
+                    .map_err(|e| format!("write error: {e}"))
+            }
+            None => Err("no active session".to_string()),
+        }
+    }
+}
+
 fn handle_ipc(method: IpcMethod, shared: &SupervisorShared) -> IpcResponse {
+    // Central dispatch gate: only real prompt dispatch is gated behind the
+    // managed-capability proof. Operator/read-only methods are gate-exempt.
+    if ipc_method_requires_capability_gate(&method)
+        && let Some(reason) = shared.capability_dispatch_blocker()
+    {
+        return IpcResponse::err(reason);
+    }
     match method {
         IpcMethod::State => {
             let state = shared.supervisor_state.lock().unwrap();
@@ -2117,56 +2229,30 @@ fn handle_ipc(method: IpcMethod, shared: &SupervisorShared) -> IpcResponse {
             }
         }
         IpcMethod::Inject { bytes } => {
-            if let Some(reason) = shared.capability_dispatch_blocker() {
-                return IpcResponse::err(reason);
-            }
-            let injected = if let Some(pane_id) = shared.inject_pane.as_deref() {
-                crate::input_diag::log_text_submit(
-                    None,
-                    "supervisor.ipc_inject",
-                    &format!("pane:{pane_id}"),
-                    &bytes,
-                    Some(&shared.harness_binary),
-                    if shared.harness_binary == "opencode" {
-                        "ipc_inject_kitty_return"
-                    } else {
-                        "ipc_inject_enter"
-                    },
-                    if shared.harness_binary == "opencode" {
-                        "KittyReturn"
-                    } else {
-                        "Enter"
-                    },
-                );
-                dispatch_submit_text_to_pane(pane_id, &bytes, &shared.harness_binary)
-                    .map_err(|e| e.to_string())
-            } else {
-                let guard = shared.inject_writer.lock().unwrap();
-                match guard.as_ref() {
-                    Some(writer_arc) => {
-                        let mut w = writer_arc.lock().unwrap();
-                        let normalized = normalize_supervisor_inject_bytes(&bytes);
-                        crate::input_diag::log_transform_event(
-                            None,
-                            "supervisor.ipc_inject",
-                            "child_pty",
-                            "normalize_lf_to_cr",
-                            bytes.as_bytes(),
-                            &normalized,
-                            Some(&shared.harness_binary),
-                        );
-                        w.write_all_blocking(&normalized)
-                            .map_err(|e| format!("write error: {e}"))
-                    }
-                    None => Err("no active session".to_string()),
-                }
-            };
-            match injected {
+            // `Inject` is a real prompt dispatch; the central gate above already
+            // refused it when the managed-capability proof failed.
+            match deliver_ipc_inject(shared, &bytes, "ipc_inject") {
                 Ok(()) => {
                     shared.transition_actor_state(
                         crate::session_actor::ActorState::Busy,
                         "dispatch",
                         "ipc_inject",
+                    );
+                    IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+                }
+                Err(err) => IpcResponse::err(err),
+            }
+        }
+        IpcMethod::Clear { bytes } => {
+            // Gate-exempt operator control channel: clearing a session is a
+            // recovery action, not a dispatch, so it must succeed even when the
+            // capability proof has failed (#codex-capability-proof-unrecoverable).
+            match deliver_ipc_inject(shared, &bytes, "ipc_clear") {
+                Ok(()) => {
+                    shared.transition_actor_state(
+                        crate::session_actor::ActorState::Busy,
+                        "operator",
+                        "ipc_clear",
                     );
                     IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                 }
@@ -5087,6 +5173,83 @@ Done.
                 .contains("capability proof is still pending"),
             "{response:?}"
         );
+    }
+
+    #[test]
+    fn ipc_method_gate_classification_only_gates_inject() {
+        // Only a real prompt dispatch is gated; operator/read-only methods are
+        // gate-exempt so a proof-failed session stays recoverable.
+        assert!(ipc_method_requires_capability_gate(&IpcMethod::Inject {
+            bytes: "x".to_string(),
+        }));
+        assert!(!ipc_method_requires_capability_gate(&IpcMethod::Clear {
+            bytes: "/clear".to_string(),
+        }));
+        assert!(!ipc_method_requires_capability_gate(&IpcMethod::Stop {
+            graceful: false,
+        }));
+        assert!(!ipc_method_requires_capability_gate(&IpcMethod::Restart {
+            mode: "continue".to_string(),
+        }));
+        assert!(!ipc_method_requires_capability_gate(&IpcMethod::State));
+        assert!(!ipc_method_requires_capability_gate(&IpcMethod::Pid));
+    }
+
+    #[test]
+    fn handle_ipc_clear_bypasses_failed_capability_proof() {
+        // #codex-capability-proof-unrecoverable: with the gate `Failed`, an
+        // `Inject` is refused by the dispatch gate but `Clear` is delivered
+        // (here to a recording PTY writer) without the gate error.
+        let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
+        shared.set_capability_proof_gate(
+            CapabilityProofGate::Failed,
+            Some("network denied".to_string()),
+        );
+
+        let inject = handle_ipc(
+            IpcMethod::Inject {
+                bytes: "/clear".to_string(),
+            },
+            &shared,
+        );
+        assert!(!inject.ok);
+        assert!(
+            inject
+                .error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("capability proof failed"),
+            "{inject:?}"
+        );
+
+        let written = Arc::new(Mutex::new(Vec::new()));
+        *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(
+            Box::new(RecordingWriter(written.clone())),
+        ))));
+        let clear = handle_ipc(
+            IpcMethod::Clear {
+                bytes: "/clear".to_string(),
+            },
+            &shared,
+        );
+        assert!(clear.ok, "clear must bypass the dispatch gate: {clear:?}");
+        // Delivery matches the Inject path: trailing-newline normalization only,
+        // no spurious CR added when the control text has none.
+        assert_eq!(written.lock().unwrap().as_slice(), b"/clear");
+    }
+
+    #[test]
+    fn handle_ipc_stop_bypasses_failed_capability_proof() {
+        // Stopping a session is recovery, not dispatch: it must succeed even
+        // when the capability proof failed.
+        let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
+        shared.set_capability_proof_gate(
+            CapabilityProofGate::Failed,
+            Some("network denied".to_string()),
+        );
+        let response = handle_ipc(IpcMethod::Stop { graceful: false }, &shared);
+        assert!(response.ok, "{response:?}");
+        assert!(shared.stop_requested.load(Ordering::Relaxed));
     }
 
     #[test]

@@ -568,9 +568,13 @@ fn supervisor_clear_inject_available(ctx: &SessionContext) -> bool {
 
 fn send_clear_via_supervisor(ctx: &SessionContext) -> Result<()> {
     ensure_supervisor_socket(ctx)?;
+    // Use the gate-exempt `Clear` control method so an operator can clear a
+    // session whose managed-capability proof failed without `kill -9`
+    // (#codex-capability-proof-unrecoverable). `Inject` would be refused by the
+    // dispatch gate.
     let response = agent_doc_orchestration::supervisor::ipc::send_command(
         &ctx.supervisor_socket,
-        &IpcMethod::Inject {
+        &IpcMethod::Clear {
             bytes: agent_doc_orchestration::supervisor::ipc::normalize_submit_text("/clear"),
         },
     )
@@ -3277,7 +3281,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             "session-clear",
             {
                 move |method| match method {
-                    IpcMethod::Inject { bytes } => {
+                    IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
                         captured_for_ipc.lock().unwrap().push(bytes);
                         agent_doc_orchestration::supervisor::ipc::IpcResponse::ok_empty()
                     }

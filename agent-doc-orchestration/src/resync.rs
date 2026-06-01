@@ -3691,7 +3691,8 @@ mod tests {
                             serde_json::json!({ "running": true }),
                         )
                     }
-                    crate::supervisor::ipc::IpcMethod::Inject { bytes } => {
+                    crate::supervisor::ipc::IpcMethod::Inject { bytes }
+                    | crate::supervisor::ipc::IpcMethod::Clear { bytes } => {
                         crate::supervisor::ipc::IpcResponse::ok(
                             serde_json::json!({ "n": bytes.len() }),
                         )
@@ -3746,7 +3747,8 @@ mod tests {
                 crate::supervisor::ipc::IpcMethod::State => {
                     crate::supervisor::ipc::IpcResponse::ok(serde_json::json!({ "running": true }))
                 }
-                crate::supervisor::ipc::IpcMethod::Inject { bytes } => {
+                crate::supervisor::ipc::IpcMethod::Inject { bytes }
+                    | crate::supervisor::ipc::IpcMethod::Clear { bytes } => {
                     crate::supervisor::ipc::IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                 }
                 crate::supervisor::ipc::IpcMethod::Restart { .. }
@@ -3808,7 +3810,8 @@ mod tests {
                 crate::supervisor::ipc::IpcMethod::State => {
                     crate::supervisor::ipc::IpcResponse::ok(serde_json::json!({ "running": true }))
                 }
-                crate::supervisor::ipc::IpcMethod::Inject { bytes } => {
+                crate::supervisor::ipc::IpcMethod::Inject { bytes }
+                    | crate::supervisor::ipc::IpcMethod::Clear { bytes } => {
                     crate::supervisor::ipc::IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                 }
                 crate::supervisor::ipc::IpcMethod::Restart { .. }
@@ -3867,7 +3870,8 @@ mod tests {
                             serde_json::json!({ "running": true }),
                         )
                     }
-                    crate::supervisor::ipc::IpcMethod::Inject { bytes } => {
+                    crate::supervisor::ipc::IpcMethod::Inject { bytes }
+                    | crate::supervisor::ipc::IpcMethod::Clear { bytes } => {
                         crate::supervisor::ipc::IpcResponse::ok(
                             serde_json::json!({ "n": bytes.len() }),
                         )

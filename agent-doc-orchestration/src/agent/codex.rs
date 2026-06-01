@@ -103,7 +103,6 @@ struct StreamProcess {
     stderr_buf: Arc<Mutex<String>>,
 }
 
-const CODEX_CHILD_NETWORK_PROBE_TIMEOUT: Duration = Duration::from_secs(45);
 const CODEX_CHILD_NETWORK_PROBE_MARKER: &str = "AGENT_DOC_NETWORK_PROBE_OK";
 const CODEX_CHILD_WRITABLE_ROOT_PROBE_MARKER: &str = "AGENT_DOC_WRITABLE_ROOT_PROBE_OK";
 
@@ -817,6 +816,7 @@ fn prove_codex_child_network_access(
     launch_args: &[String],
     env: &std::collections::HashMap<String, String>,
     harness: &str,
+    probe_timeout: Duration,
 ) -> Result<()> {
     let probe_args = codex_exec_args_for_probe(launch_args);
     let codex =
@@ -832,7 +832,7 @@ fn prove_codex_child_network_access(
     }
     child.stdin.take();
 
-    let output = wait_with_timeout(child, CODEX_CHILD_NETWORK_PROBE_TIMEOUT, "network", harness)?;
+    let output = wait_with_timeout(child, probe_timeout, "network", harness)?;
     if !output.status.success() {
         let detail = String::from_utf8_lossy(&output.stderr);
         let classification = classify_child_network_probe_failure(&detail, harness);
@@ -854,6 +854,7 @@ fn prove_opencode_child_network_access(
     launch_args: &[String],
     env: &std::collections::HashMap<String, String>,
     harness: &str,
+    probe_timeout: Duration,
 ) -> Result<()> {
     let probe_args =
         opencode_run_args_for_probe(launch_args, opencode_child_network_probe_prompt());
@@ -867,7 +868,7 @@ fn prove_opencode_child_network_access(
     let output = wait_with_timeout(
         spawn_agent_command(&mut cmd)
             .map_err(|e| anyhow::anyhow!("failed to start {harness} child network probe: {e}"))?,
-        CODEX_CHILD_NETWORK_PROBE_TIMEOUT,
+        probe_timeout,
         "network",
         harness,
     )?;
@@ -1094,6 +1095,7 @@ fn prove_codex_child_writable_roots(
     env: &std::collections::HashMap<String, String>,
     roots: &[PathBuf],
     harness: &str,
+    probe_timeout: Duration,
 ) -> Result<()> {
     if roots.is_empty() {
         return Ok(());
@@ -1112,12 +1114,7 @@ fn prove_codex_child_writable_roots(
     }
     child.stdin.take();
 
-    let output = wait_with_timeout(
-        child,
-        CODEX_CHILD_NETWORK_PROBE_TIMEOUT,
-        "writable-root",
-        harness,
-    )?;
+    let output = wait_with_timeout(child, probe_timeout, "writable-root", harness)?;
     if !output.status.success() {
         let detail = String::from_utf8_lossy(&output.stderr);
         let classification = classify_child_writable_root_probe_failure(&detail, harness);
@@ -1250,6 +1247,7 @@ pub fn prove_managed_session_capabilities(
     fm: &Frontmatter,
     global_config: &crate::config::Config,
     harness: &str,
+    probe_timeout: Duration,
 ) -> Result<Option<String>> {
     if !managed_capability_contract_required(args, fm, global_config, harness) {
         return Ok(None);
@@ -1271,9 +1269,9 @@ pub fn prove_managed_session_capabilities(
             network_probe = "child_dns_https_cached";
         } else {
             if harness == "opencode" {
-                prove_opencode_child_network_access(command, args, env, harness)?;
+                prove_opencode_child_network_access(command, args, env, harness, probe_timeout)?;
             } else {
-                prove_codex_child_network_access(command, args, env, harness)?;
+                prove_codex_child_network_access(command, args, env, harness, probe_timeout)?;
             }
             remember_managed_network_child_proof(cache_key);
             network_probe = "child_dns_https";
@@ -1314,7 +1312,7 @@ pub fn prove_managed_session_capabilities(
         timings.writable_launcher = Some(phase_start.elapsed());
     }
     let phase_start = Instant::now();
-    prove_codex_child_writable_roots(command, args, env, &writable_roots, harness)?;
+    prove_codex_child_writable_roots(command, args, env, &writable_roots, harness, probe_timeout)?;
     if !writable_roots.is_empty() {
         timings.writable_child = Some(phase_start.elapsed());
     }
@@ -2961,6 +2959,7 @@ printf '%s\n' '{{"type":"message","text":"{}\n"}}'
             &fm,
             &crate::config::Config::default(),
             "opencode",
+            crate::agent::DEFAULT_MANAGED_PROOF_PROBE_TIMEOUT,
         )
         .unwrap()
         .unwrap();
@@ -2998,6 +2997,7 @@ printf '%s\n' '{{"type":"turn.completed","usage":{{}}}}'
             &fm,
             &crate::config::Config::default(),
             "codex",
+            crate::agent::DEFAULT_MANAGED_PROOF_PROBE_TIMEOUT,
         )
         .unwrap()
         .unwrap();
@@ -3039,6 +3039,7 @@ printf '%s\n' '{{"type":"turn.completed","usage":{{}}}}'
             &fm,
             &crate::config::Config::default(),
             "codex",
+            crate::agent::DEFAULT_MANAGED_PROOF_PROBE_TIMEOUT,
         )
         .unwrap()
         .unwrap();
@@ -3249,6 +3250,7 @@ printf '%s\n' '{{"type":"turn.completed","usage":{{}}}}'
             &["-s".to_string(), "danger-full-access".to_string()],
             &env,
             "codex",
+            crate::agent::DEFAULT_MANAGED_PROOF_PROBE_TIMEOUT,
         )
         .unwrap();
     }

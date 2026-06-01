@@ -365,6 +365,21 @@ pub struct Frontmatter {
     /// SSH mappings when the document omits direct `required_ssh_targets`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub required_ssh_profile: Option<String>,
+    /// Maximum number of managed-capability-proof attempts before the dispatch
+    /// gate is set to `Failed`. A transient network blip is retried (with
+    /// backoff) up to this many times so it no longer permanently wedges the
+    /// session. `1` disables retry (legacy behavior). Default `3`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub managed_proof_max_attempts: Option<u32>,
+    /// Base back-off (seconds) between managed-capability-proof retries. The
+    /// delay grows exponentially from this value, capped internally. Default `2`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub managed_proof_retry_backoff_secs: Option<u64>,
+    /// Override for the managed-capability child network/writable-root probe
+    /// timeout (seconds). Slow-network environments can raise it above the
+    /// default `45`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub managed_proof_probe_timeout_secs: Option<u64>,
     /// When true, passes `--no-mcp` to the `claude` process.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub no_mcp: Option<bool>,
@@ -1218,6 +1233,9 @@ mod tests {
             codex_network_access: None,
             required_ssh_targets: Vec::new(),
             required_ssh_profile: None,
+            managed_proof_max_attempts: None,
+            managed_proof_retry_backoff_secs: None,
+            managed_proof_probe_timeout_secs: None,
             no_mcp: None,
             enable_tool_search: None,
             debounce_ms: None,

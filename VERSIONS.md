@@ -6,6 +6,31 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Managed capability-proof failure is recoverable (`#codex-capability-proof-unrecoverable`).**
+  Two fixes so a transient network blip no longer permanently wedges a managed
+  Codex/OpenCode session:
+  - **Bounded re-prove.** The capability-proof thread now retries the
+    network/SSH/writable-root probe with exponential back-off before committing
+    the dispatch gate to `Failed`. Between attempts the gate stays `Pending`
+    (gated but recoverable) and the session log records
+    `..._capability_proof status=retry attempt=<n>/<max>`. Retry budget, base
+    back-off, and probe timeout are configurable in frontmatter and
+    `.agent-doc/config.toml` (`managed_proof_max_attempts`,
+    `managed_proof_retry_backoff_secs`, `managed_proof_probe_timeout_secs`;
+    defaults 3 / 2s / 45s, frontmatter wins). Pure helper `proof_retry_decision`
+    has deterministic unit coverage.
+  - **Gate-exempt operator recovery.** The supervisor IPC layer now gates only
+    real prompt dispatch (`Inject`); the new `Clear` control method plus `Stop`
+    and `Restart` bypass the capability gate. `agent-doc session clear` /
+    `session interrupt-clear` deliver `/clear` through the gate-exempt `Clear`
+    method, so they stop or clear a proof-`Failed` session without `kill -9`
+    instead of failing with `prompt dispatch is disabled`. Auto-trigger /
+    auto-queue dispatch stays gated.
+  - Regressions: `proof_retry_decision_*`, `resolve_managed_proof_policy_*`,
+    `ipc_method_gate_classification_only_gates_inject`,
+    `handle_ipc_clear_bypasses_failed_capability_proof`,
+    `handle_ipc_stop_bypasses_failed_capability_proof`.
+
 - **Queue-audit partial-completion advisory (`#queue-audit-partial-completion`,
   WARN-only).** A queue-completion audit that reports the queue as "none
   complete" while citing several completed substeps — collapsing partial progress

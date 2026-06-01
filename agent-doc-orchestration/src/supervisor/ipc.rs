@@ -138,6 +138,13 @@ pub enum IpcMethod {
     Inject {
         bytes: String,
     },
+    /// Gate-exempt operator control injection (e.g. `/clear`). Unlike
+    /// [`IpcMethod::Inject`], this bypasses the managed-capability dispatch gate
+    /// so an operator can stop/clear a session whose capability proof failed
+    /// without `kill -9`. Delivery is otherwise identical to `Inject`.
+    Clear {
+        bytes: String,
+    },
     State,
     Pid,
     Stop {
@@ -429,6 +436,7 @@ mod tests {
                 IpcResponse::ok(serde_json::json!({ "pid": 99999, "mode": mode }))
             }
             IpcMethod::Inject { bytes } => IpcResponse::ok(serde_json::json!({ "n": bytes.len() })),
+            IpcMethod::Clear { bytes } => IpcResponse::ok(serde_json::json!({ "n": bytes.len() })),
         })
         .expect("start test handler")
     }

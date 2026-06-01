@@ -53,6 +53,24 @@ OpenCode resolution chain: `frontmatter agent_args > frontmatter opencode_args >
 
 Codex network resolution chain: `frontmatter codex_network_access > config codex_network_access > inherit`.
 
+## managed_proof_max_attempts / managed_proof_retry_backoff_secs / managed_proof_probe_timeout_secs
+
+Tune the managed-capability proof (network/SSH/writable-root) retry policy so a
+transient probe failure (e.g. a brief network blip) self-heals instead of
+permanently disabling dispatch.
+
+- `managed_proof_max_attempts` — total proof attempts before the dispatch gate
+  commits to `Failed`. `1` disables retry (legacy behavior). Default `3`.
+- `managed_proof_retry_backoff_secs` — base back-off between retries; the delay
+  grows exponentially from this value and is capped internally. Default `2`.
+- `managed_proof_probe_timeout_secs` — child network/writable-root probe timeout.
+  Raise it for slow-network environments. `0` falls back to the default. Default `45`.
+
+Frontmatter and global config share these field names. Managed-proof resolution
+chain (each field independently): `frontmatter > config > built-in default`.
+Between retries the gate stays `Pending` (gated but recoverable); operator
+`session clear` / `session interrupt-clear` / stop remain gate-exempt regardless.
+
 `claude_args` and `AGENT_DOC_CLAUDE_ARGS` are ignored when the active harness is not Claude. `codex_args` is ignored when the active harness is not Codex. `opencode_args` is ignored when the active harness is not OpenCode.
 
 ## Project Config

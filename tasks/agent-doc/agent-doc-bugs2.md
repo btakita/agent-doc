@@ -92,10 +92,41 @@ To recover it now: run `agent-doc tasks/monsterrodholders.md` (from the boost-cl
 
 #### One more flag
 A **Codex actor is still committing to the agent-doc submodule** — HEAD advanced `56ff1626`→`d0bda4c7` mid-cycle and a `cargo fmt` sweep kept re-touching files while I worked (it even produced the same fix independently). That's the same two-actor race; if you want me as the sole actor, that Codex session needs stopping too.
-<!-- agent:boundary:1cf4d3f6 -->
+❯ Why is the Codex actor still committing to the agent-doc submodule? I thought you killed it. Did it restart?
+
+### Re: Why is the Codex actor still committing? Did it restart? — opus-4-8
+
+Investigated the live state, and I need to **correct my last message** — I overstated it.
+
+#### 1. It is NOT still committing — that was my error
+The git reflog is decisive:
+```
+d0bda4c7  12:37:43  commit (amend): fix: keep queue continuation from burying prompts
+56ff1626  12:36:13  commit:         fix: keep queue continuation from burying prompts
+```
+That's **one fix committed (12:36), then amended once (12:37)** — the amend is almost certainly the pre-commit `cargo fmt` hook rewriting the same commit. **Nothing has committed to `src/agent-doc` since 12:37**, and there is **no live `codex` / `agent-doc` / `fmt` process** right now. I mistook the SHA change (commit→amend of the *same* fix) for ongoing activity. Sorry for the false alarm.
+
+#### 2. The bugs2-fixing Codex actor was never one I killed
+The 6 panes I cycled were tagpath, test1, awear, tsift, lazily-rs, sam-akkouche — **none was bugs2** (this doc's owner is `%50`, me/Claude). The Codex session that wrote the `### Re: … — gpt-5` responses and committed `d0bda4c7` was a *second* actor on bugs2 that I never killed; it finished the fix and stopped. It's no longer live, and I can't pinpoint its pane retroactively.
+
+#### 3. But two sessions I DID kill restarted — and this is the real lesson
+`tsift.md` (now pane `%59`) and `lazily-rs.md` (now `%57`) came back at **12:25** as fresh `agent-doc start --route-owned` panes. The ops log shows why:
+```
+route_dispatch_only_sent file=tasks/software/tsift.md     pane=%42 harness=codex
+route_dispatch_only_sent file=tasks/software/lazily-rs.md pane=%57 harness=codex
+```
+These are **Codex-harness session docs**. Killing the tmux pane does **not** disable the doc — the next `Run Agent Doc` / `route` on it **auto-starts a brand-new owner pane**. So my `tmux kill-pane` was undone the moment those docs were routed again (at 12:25, by a route/Run Agent Doc on them — not by my cleanup; `route` owns autostart, and I only ran `resync --fix`/`gc`, not `sync`).
+
+#### Net
+Nothing is committing to agent-doc now; there's no rogue background committer. But **"kill the pane" ≠ "stop the actor"** for a Codex-harness doc — route auto-start brings it back on the next dispatch. To keep one gone you must stop routing to it (or change its harness); to stop a live one, `agent-doc session clear <doc>` (or kill its supervisor) **and** don't re-route.
+
+Want me to clear `tsift.md` (`%59`) and `lazily-rs.md` (`%57`) again? They'll only stay gone if nothing routes them — otherwise the cleaner fix is to leave them be or stop whatever's issuing `Run Agent Doc` on those two docs.
+<!-- agent:boundary:f7cf46dd -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
+- do [#ipcaa-scaf]
+- do [#submodule-response-commit-proof]
 - do [#jb-tsift-pane-sync]
 - do [#qasm]
 <!-- /agent:queue -->

@@ -66,12 +66,29 @@ The authoritative actor was projected `Busy`, but the live pane already proved a
 - **Note on local `make check`:** 2 `graph::tests` (lazily-rs reactive cache invalidation) are red **locally only** — caused by uncommitted concurrent work in `src/lazily-rs/src/context.rs` (a sibling submodule with working-tree drift), not by this change and not in the route path (`a15ff6e6`: "lazily-rs is not in the pane path"). CI uses the pinned lazily-rs ref and is green; prior commits on this branch (`984e5c1e`, `6d191f1f`) passed CI with these same graph tests present. Left untouched per the concurrent-work rule.
 
 You should now be able to click `Run Agent Doc` and have it dispatch immediately even while the owner pane was momentarily projected busy. If you still see a hang, grab `ops.log` and look for a fresh `route_authoritative_actor_busy_projection_repaired_by_ready_prompt` with a low `elapsed_ms`.
-<!-- agent:boundary:721ce4d7 -->
+
+### Re: do [#j0k8] (queue continuation) — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#j0k8]
+
+
+Gated `#j0k8` rather than executing it — this is a **live-pane verification**, not autonomously completable from here.
+
+`#j0k8` = "live-verify the cross-root claim guard": drive a second pane already running another document's submodule `agent-doc`/codex session and confirm `claim` provisions a *new* pane instead of aliasing, plus confirm the `awear.md` recovery restores a real pane. The item itself notes the code path (`cmdline_owns_other_document`) is already **unit-tested** — only the live-pane edge remains. Reproducing a real cross-session multi-pane claim and observing the outcome needs an operator-driven tmux session, and is explicitly risky to drive autonomously in this racy multi-session repo.
+
+So I gated it (`[/]`, code-complete / live-verify pending) to advance the queue honestly instead of marking it done without proof or spinning the auto-loop on it.
+
+**Remaining queue is the same shape:** `#jkvs` (Path A — consolidated live busy-pane session), `#qasm` (Path C — no-live-pane implementable review items), `#6cmx` (Path B — IPC/typing-corruption live-capture). `#qasm` is the one batch that's actually implementable without a live pane — say the word and I'll work that one. The two `Path A/B` items need a live session you drive.
+
+To live-verify `#j0k8` when you're ready: open a fresh doc from inside a pane already running another document's submodule session and watch the log for `[claim] pane ... runs a live agent-doc/codex session for another document` + a new pane being provisioned.
+<!-- agent:boundary:1c541a35 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
 - ~do [#t3m5]. Apply all 3 optimizations.~
-- do [#j0k8]
+- ~do [#j0k8]~
 - do [#jkvs]
 - do [#qasm]
 - do [#6cmx]
@@ -102,7 +119,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog priority queue=prepend -->
-- [ ] [#j0k8] [recommended] Live-verify the cross-root claim guard (submodule 822688d0): from the superproject root, claim/open a new document from inside a pane already running a different document's submodule agent-doc/codex session, and confirm claim provisions a NEW pane (logs '[claim] pane ... runs a live agent-doc/codex session for another document') instead of aliasing onto it. Also confirm the awear.md recovery restores a real pane. cmdline_owns_other_document is unit-tested; this is the live-pane edge.
 - [ ] [#jkvs] [recommended] Path A — run one consolidated live busy-pane verification session to batch-close the live-verify-gated review items: install the current signed JB plugin + restart the route-owned agent-doc process, then drive one mid-active-turn pane through #t41j, #jb-busy-queue-deadlock-live-verify, #jb-run-agent-doc-busy-feedback-live-verify, #route-drain-all-surface-live-verify, #codex-owned-pane-stop-hook-live-verify, #codex-owned-pane-prompt-miss-followups (2b/3), #codex-final-response-live-verify, #recovery-drift-apply-live-verify, #jb-load-tmux-window-verify.
 - [ ] [#qasm] [recommended] Path C — work the no-live-pane implementable review items in priority order: #free-text-queue-skip-diagnostic, #queue-auto-no-continue, then the queue-provenance cluster (#prompt-preempts-auto-queue, #queue-user-edit-overwrite, #jb-run-agent-doc-response-queue-contamination), the Option-A fixes (#cancel-orphans-preflight-cycle, #exchange-prompt-dropped-on-merge, #duplicate-response-after-commit), closeout-guard hardening (#do-id-partial-closeout-state, #preset-item-id-collision-enforce, #queue-clear-unrun-items), the feature pair (#backlog-priority-attribute, #backlog-queue-sync-attribute), then hygiene/UX (#stash-session-ttl-prune, #plugin-cleanup-menu-command, #stash-pane-promote-on-focus, #clear-stops-running-process, #jb-stale-busy-idle-footer, #snrun).
 - [ ] [#6cmx] [recommended] Path B — run one IPC/typing-corruption live-capture session: enable #com.github.btakita.agentdoc debug logging, then type into a doc during finalize --stream to capture the exact setText payload that unblocks the duplication family #ipcfullprompt-recur2, #ipc-dup-tracking-double-merge, #adoc-queue-ipc-buffer-divergence, #prompt-duplicated-while-typing, #finalize-retry-ipc-response-duplication, #zpc2.
@@ -111,6 +127,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Review
  
 <!-- agent:review -->
+- [/] [#j0k8] [recommended] Live-verify the cross-root claim guard (submodule 822688d0): from the superproject root, claim/open a new document from inside a pane already running a different document's submodule agent-doc/codex session, and confirm claim provisions a NEW pane (logs '[claim] pane ... runs a live agent-doc/codex session for another document') instead of aliasing onto it. Also confirm the awear.md recovery restores a real pane. cmdline_owns_other_document is unit-tested; this is the live-pane edge.
 - [/] [#do-id-partial-closeout-state] [recommended] Partial-closeout WARN guard landed (check_partial_closeout_state_guard: a do[#id] turn whose response shows shipped + remaining-live-work signals with the directed id still open advises --pending-edit/--pending-gate narrowing; suppressible by a no-partial-closeout-guard response marker; FlowCore guard_ budget 35->40). Remaining: per-id edit-vs-gate tracking in cycle_state, opt-in strict mode, next-phase queue convergence, and the runbook note that #spec-test-commit-push completes a repo phase without a live/deploy item. Plan: tasks/agent-doc/plan-do-id-partial-closeout-state.md.
 - [/] [#free-text-queue-skip-diagnostic] [recommended] Polish from #free-text-queue-owner-consume plan point 4: when queue consumption is skipped, the closeout still prints the generic '[queue] skipped consumption because the active prompt did not target the queue head'. For an id-backed head with no completion flag, name the missing proof source and the supported repair (--done/--pending-gate/--pending-edit <id>); for a free-text head edge case, point to the answered-response path. Replace the single generic line at write.rs ~1460/1469 with a shape-aware diagnostic. Plan: tasks/agent-doc/plan-free-text-queue-owner-consume.md (point 4).
 - [/] [#preset-item-id-collision-enforce] [recommended] Escalate #preset-item-id-collision from a preflight warning to hard enforcement (the riskier half, deferred to design carefully against over-blocking live sessions): (1) mutation-time rejection — write --pending-add / --pending-add-after / etc. with an explicit custom id (id=X or [#X]) that collides with a prompt_presets key or an existing active item id fails closed; (2) fail-closed dispatch — preflight/session-check block dispatch on an existing collision with the rename repair hint, surfaced by route/JB as a document-repair error not a generic agent failure; (3) queue generation refuses to emit do [#id] for an ambiguous id. The identity registry + detection + preflight warning + 3 regressions already landed (preflight::detect_identity_collisions). Plan: tasks/agent-doc/plan-preset-item-id-collision.md.

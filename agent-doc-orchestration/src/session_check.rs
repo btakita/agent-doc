@@ -265,6 +265,7 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
             check_expect_done_or_gate_guard(file)?,
             check_partial_closeout_state_guard(file)?,
             check_blocked_closeout_followup_guard(file)?,
+            check_gated_phase_split_guard(file)?,
         ] {
             match guard {
                 GuardResult::None => {}
@@ -2634,6 +2635,178 @@ fn check_blocked_closeout_followup_guard(file: &Path) -> Result<GuardResult> {
         )),
         crate::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
     })
+}
+
+/// `#gated-followup-split-enforcement`: when a directed `do [#id]` cycle keeps a
+/// multi-phase item open (via `--pending-edit` / `--review-edit` /
+/// `--pending-gate`) whose body enumerates several gated/remaining phases but
+/// never breaks them out into discrete child backlog IDs, the deferred phases
+/// stay buried in one parent's narrowed description and are not independently
+/// trackable or queueable. Advise splitting each phase into its own child ID
+/// (sibling of `#blocked-closeout-followup-capture` and the SKILL "one backlog
+/// ID per actionable phase" rule).
+///
+/// Warn-first advisory only — it never blocks closeout. Suppressible via a
+/// `<!-- no-gated-phase-split-guard -->` response marker.
+fn check_gated_phase_split_guard(file: &Path) -> Result<GuardResult> {
+    let Some(state) = crate::cycle_state::load(file)? else {
+        return Ok(GuardResult::None);
+    };
+    if state.expect_done_or_gate_ids.is_empty() || state.is_open() {
+        return Ok(GuardResult::None);
+    }
+    let Some(capture_id) = state.capture_id.as_deref() else {
+        return Ok(GuardResult::None);
+    };
+    let Some(capture) = crate::capture::load_by_id(file, capture_id)? else {
+        return Ok(GuardResult::None);
+    };
+    if capture.state != crate::capture::CaptureState::Committed {
+        return Ok(GuardResult::None);
+    }
+    if capture
+        .response_body
+        .contains("<!-- no-gated-phase-split-guard -->")
+    {
+        return Ok(GuardResult::None);
+    }
+
+    // Items kept open this cycle (`--pending-edit` / `--review-edit` /
+    // `--pending-gate` all feed `pending_kept_open_ids`) that were also the
+    // directed targets — the parent items at risk of burying gated phases.
+    let kept_open: std::collections::HashSet<String> = state
+        .pending_kept_open_ids
+        .iter()
+        .map(|id| crate::pending::normalize_pending_id(id))
+        .filter(|id| !id.is_empty())
+        .collect();
+    if kept_open.is_empty() {
+        return Ok(GuardResult::None);
+    }
+    let directed: std::collections::HashSet<String> = state
+        .expect_done_or_gate_ids
+        .iter()
+        .map(|id| crate::pending::normalize_pending_id(id))
+        .filter(|id| !id.is_empty())
+        .collect();
+
+    let content = std::fs::read_to_string(file)?;
+    let Ok(components) = crate::component::parse(&content) else {
+        return Ok(GuardResult::None);
+    };
+    let mut flagged: Vec<String> = Vec::new();
+    for component in &components {
+        let trackable = crate::component::is_backlog_component(&component.name)
+            || crate::component::is_review_component(&component.name);
+        if !trackable {
+            continue;
+        }
+        let (_, items, _) = crate::pending::parse_items(component.content(&content));
+        for item in items {
+            if item.is_done() {
+                continue;
+            }
+            let id = crate::pending::normalize_pending_id(&item.id);
+            if id.is_empty() || !kept_open.contains(&id) || !directed.contains(&id) {
+                continue;
+            }
+            let body = format!("{} {}", item.text, item.continuation);
+            if body_enumerates_multiple_gated_phases(&body)
+                && !body_already_split_into_child_ids(&body, &id)
+                && !flagged.iter().any(|existing| existing == &id)
+            {
+                flagged.push(id);
+            }
+        }
+    }
+    if flagged.is_empty() {
+        return Ok(GuardResult::None);
+    }
+
+    let ids = flagged
+        .iter()
+        .map(|id| format!("#{id}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let add_after_hint = flagged
+        .first()
+        .map(|id| format!("--pending-add-after {id} \"<child-id>=<one phase scope>\""))
+        .unwrap_or_default();
+
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "gated_phase_split_guard_fired file={} flagged={}",
+            file.display(),
+            flagged.join(",")
+        ),
+    );
+
+    Ok(GuardResult::Warn(vec![
+        format!(
+            "[session-check] warn: kept-open tracked item {ids} enumerates multiple gated/remaining phases in its body but does not break them out into discrete child backlog IDs — the deferred phases are not independently trackable or queueable"
+        ),
+        format!(
+            "[session-check] hint: split each gated phase into its own child id (e.g. `agent-doc write {} {} --pending-only --commit`), keeping the parent as context, or add `<!-- no-gated-phase-split-guard -->` if the phases are intentionally one unit",
+            file.display(),
+            add_after_hint
+        ),
+    ]))
+}
+
+/// True when a kept-open item body enumerates multiple gated/remaining phases:
+/// the word "phase" appears, at least two short parenthesized phase markers
+/// (`(1)`, `(2a)`, `(2b)`, `(3)`, ...) are present, and a gating/remaining
+/// signal frames them as deferred work.
+fn body_enumerates_multiple_gated_phases(body: &str) -> bool {
+    let lower = body.to_ascii_lowercase();
+    if !lower.contains("phase") {
+        return false;
+    }
+    let gating = [
+        "gated",
+        "remaining",
+        "live-verify",
+        "live verify",
+        "awaiting",
+        "still needs",
+        "not yet",
+    ];
+    if !gating.iter().any(|signal| lower.contains(signal)) {
+        return false;
+    }
+    count_phase_markers(body) >= 2
+}
+
+/// Count distinct short parenthesized phase markers like `(1)`, `(2a)`, `(2b)`,
+/// `(3)`. Requires 1-2 digits optionally followed by 1-2 ASCII lowercase letters
+/// so dates and commit hashes (`(2026-05-31)`, `(submodule 407b0825)`) are not
+/// mistaken for phase markers.
+fn count_phase_markers(body: &str) -> usize {
+    static MARKER: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"\((\d{1,2}[a-z]{0,2})\)").unwrap());
+    let mut seen = std::collections::HashSet::new();
+    for cap in MARKER.captures_iter(body) {
+        seen.insert(cap[1].to_string());
+    }
+    seen.len()
+}
+
+/// True when the body already references at least two discrete child ids other
+/// than its own (and other than the ubiquitous `#agent-doc-bug` preset tag) —
+/// i.e. the phases were already broken out into independently trackable ids, so
+/// the split advisory should stay quiet.
+fn body_already_split_into_child_ids(body: &str, own_id: &str) -> bool {
+    static ID_REF: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"#([a-z0-9][a-z0-9-]*)").unwrap());
+    let mut others = std::collections::HashSet::new();
+    for cap in ID_REF.captures_iter(body) {
+        let id = crate::pending::normalize_pending_id(&cap[1]);
+        if !id.is_empty() && id != own_id && id != "agent-doc-bug" {
+            others.insert(id);
+        }
+    }
+    others.len() >= 2
 }
 
 fn single_open_review_item_id(file: &Path) -> Result<Option<String>> {
@@ -6323,6 +6496,119 @@ Body\n\
         match inspect_with_warnings(&doc).unwrap().status {
             SessionCheckStatus::Interrupted(message) => assert!(message.contains("#374n"), "{message}"),
             other => panic!("expected interrupted status, got {other:?}"),
+        }
+    }
+
+    // `#gated-followup-split-enforcement`: kept-open parent item whose body
+    // enumerates multiple gated phases without discrete child ids.
+    const MULTI_PHASE_REVIEW: &str = "- [/] [#parentfix] [recommended] Follow-ups from the parent fix. Phase 1 landed. Remaining (gated — needs a live pane): (2b) a live Stop-hook regression asserting in-pane output; (3) live-verify a real same-pane run. Plan: tasks/x.md\n";
+    const SPLIT_RESPONSE: &str =
+        "### Re: do #parentfix — gpt-5\n\nLanded phase 1 and kept the remaining phases noted on the item.\n";
+
+    #[test]
+    fn gated_phase_split_guard_warns_on_multi_phase_kept_open_item() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_blocked_closeout_cycle(
+            tmp.path(),
+            SPLIT_RESPONSE,
+            Some(MULTI_PHASE_REVIEW),
+            None,
+            &["parentfix"],
+            &["parentfix"],
+            &["parentfix"],
+            false,
+        );
+        match check_gated_phase_split_guard(&doc).unwrap() {
+            GuardResult::Warn(lines) => {
+                assert!(lines.iter().any(|l| l.contains("#parentfix")), "{lines:?}");
+                assert!(
+                    lines.iter().any(|l| l.contains("discrete child backlog IDs")),
+                    "{lines:?}"
+                );
+            }
+            other => panic!("expected split-advisory warning, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn gated_phase_split_guard_quiet_when_phases_already_split_into_child_ids() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // Same multi-phase shape, but the phases are already broken out into two
+        // discrete child ids — the split work is done, so stay quiet.
+        let already_split = "- [/] [#parentfix] [recommended] Remaining gated phases tracked as children: phase (2b) -> #childb, phase (3) -> #childc. Plan: tasks/x.md\n";
+        let doc = setup_blocked_closeout_cycle(
+            tmp.path(),
+            SPLIT_RESPONSE,
+            Some(already_split),
+            None,
+            &["parentfix"],
+            &["parentfix"],
+            &["parentfix"],
+            false,
+        );
+        assert!(matches!(
+            check_gated_phase_split_guard(&doc).unwrap(),
+            GuardResult::None
+        ));
+    }
+
+    #[test]
+    fn gated_phase_split_guard_quiet_for_single_phase_item() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let single = "- [/] [#parentfix] [recommended] One remaining gated phase: live-verify the fix on a real pane. Plan: tasks/x.md\n";
+        let doc = setup_blocked_closeout_cycle(
+            tmp.path(),
+            SPLIT_RESPONSE,
+            Some(single),
+            None,
+            &["parentfix"],
+            &["parentfix"],
+            &["parentfix"],
+            false,
+        );
+        assert!(matches!(
+            check_gated_phase_split_guard(&doc).unwrap(),
+            GuardResult::None
+        ));
+    }
+
+    #[test]
+    fn gated_phase_split_guard_suppressed_by_marker() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_blocked_closeout_cycle(
+            tmp.path(),
+            "### Re: do #parentfix — gpt-5\n\nKept phases as one unit. <!-- no-gated-phase-split-guard -->\n",
+            Some(MULTI_PHASE_REVIEW),
+            None,
+            &["parentfix"],
+            &["parentfix"],
+            &["parentfix"],
+            false,
+        );
+        assert!(matches!(
+            check_gated_phase_split_guard(&doc).unwrap(),
+            GuardResult::None
+        ));
+    }
+
+    #[test]
+    fn gated_phase_split_guard_is_advisory_not_blocking() {
+        // The guard only warns — a multi-phase kept-open item must not interrupt
+        // closeout (warn-first), so `inspect` still reports Ok with the warning.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_blocked_closeout_cycle(
+            tmp.path(),
+            SPLIT_RESPONSE,
+            Some(MULTI_PHASE_REVIEW),
+            None,
+            &["parentfix"],
+            &[],
+            &["parentfix"],
+            false,
+        );
+        match inspect_with_warnings(&doc).unwrap().status {
+            SessionCheckStatus::Ok(_) => {}
+            other => panic!("split advisory must not block closeout, got {other:?}"),
         }
     }
 

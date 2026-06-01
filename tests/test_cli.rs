@@ -278,7 +278,10 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // regression test name. A no-op commit (`commit_already_current`)
         // committed no binary-owned work, so the guard skips it instead of
         // looping the cycle forever.
-        ("agent-doc-orchestration/src/session_check.rs", "guard_") => 51,
+        // +6 (#gated-followup-split-enforcement): one `gated_phase_split_guard_fired`
+        // ops event for the warn-first multi-phase split advisory, plus its five
+        // `check_gated_phase_split_guard` regression test-fn names.
+        ("agent-doc-orchestration/src/session_check.rs", "guard_") => 57,
         ("agent-doc-orchestration/src/write.rs", "guard_") => 70,
         // +1 for the audited `bare_write_escalated_to_commit ... reason=response_body_placed`
         // ops_log diagnostic on the #bare-write-captured-uncommitted escalation path.

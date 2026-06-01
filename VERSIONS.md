@@ -6,6 +6,21 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Gated-phase split advisory (`#gated-followup-split-enforcement`, WARN-only).**
+  When a directed `do [#id]` cycle keeps a tracked item open (`--pending-edit` /
+  `--review-edit` / `--pending-gate`) whose body enumerates multiple
+  gated/remaining phases (the word "phase" + ≥2 parenthesized phase markers like
+  `(2b)`/`(3)` framed by a gating signal) without breaking them into discrete
+  child backlog IDs, `session-check`'s new `check_gated_phase_split_guard` warns
+  to split each phase into its own child ID so deferred work stays independently
+  trackable/queueable (sibling of `#blocked-closeout-followup-capture` and the
+  SKILL "one backlog ID per actionable phase" rule). WARN-only — never blocks
+  closeout — and suppressed by a `<!-- no-gated-phase-split-guard -->` marker.
+  Regressions: `gated_phase_split_guard_warns_on_multi_phase_kept_open_item`,
+  `gated_phase_split_guard_quiet_when_phases_already_split_into_child_ids`,
+  `gated_phase_split_guard_quiet_for_single_phase_item`,
+  `gated_phase_split_guard_suppressed_by_marker`,
+  `gated_phase_split_guard_is_advisory_not_blocking`.
 - **`preflight --probe` is a side-effect-free inspection mode
   (`#preflight-probe-side-effect-free`).** A diagnostic `agent-doc preflight`
   used to open a `preflight_started` cycle even when it was only inspecting

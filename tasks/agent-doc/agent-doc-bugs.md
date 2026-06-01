@@ -29,6 +29,7 @@ Compacted content:
 - Archived 7 response topic(s): Slot/Cell invalidation mid-run; CellHandle::set vs Context::set_cell; lazily-rs integration status; 4 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/9b6e92d2...
 ❯ Evaluate the agent-doc codebase. Where else can lazily-rs be used to improve performance and reliability?
+
 ### Re: Where else can lazily-rs be used — glm-5.1
 
 Identified 14 opportunities beyond the 5 completed phases.
@@ -68,7 +69,22 @@ Low-impact / wiring fixes:
 14. agent resolve_for_file - which subprocess 1-3x per cycle. Cache in slot.
 
 Suggested phase ordering: 6 (DocContent+Frontmatter+Components slots) then 7 (SnapshotPaths+CycleState+SnapshotContent) then 8 (HeadContent+SnapshotCommitStatus) then 9 (wire RunContext into ops_log/template_io/patch) then 10 (GlobalConfig+SessionRegistry for ActorContext).
-<!-- agent:boundary:6f051f67 -->
+#spec-test-build-install-commit-push
+
+### Re: Where else can lazily-rs be used — glm-5.1
+
+#### What was done
+
+Updated graph.rs with 4 new slot types and path convenience methods for phases 6-10. Added 12 new unit tests. Updated the plan at tasks/agent-doc/plans/lazily-rs-integration.md with phase 6-10 specifications. Fixed clippy warnings in run.rs and watch.rs.
+
+New slots: DocContentCell, FrontmatterSlot, ComponentsSlot, DocHashSlot. New path methods: snapshot_path_for, lock_path_for, baseline_path_for, pending_path_for. Invalidation: invalidate_doc_content cascades to frontmatter and components.
+
+12 new tests all pass. make check: 2102 tests, 0 failures, clippy clean. cargo install succeeds.
+
+Commits: 5dc56ffb (agent-doc), d5e3f7a29 (superproject). Pushed.
+
+Remaining wiring (phases 7-10) threads these slots into session_check, snapshot, cycle_state, git, ops_log, template_io, patch, and harness detection callers.
+<!-- agent:boundary:2d341470 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -80,6 +96,11 @@ Suggested phase ordering: 6 (DocContent+Frontmatter+Components slots) then 7 (Sn
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
+- [ ] [#lr-content-6] Phase 6: Wire DocContentCell + FrontmatterSlot + ComponentsSlot into session_check guard functions. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
+- [ ] [#lr-cycle-7] Phase 7: Add CycleStateSlot + SnapshotContentSlot; consolidate snapshot path lookups. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
+- [ ] [#lr-head-8] Phase 8: Add HeadContentSlot + SnapshotCommitStatusSlot for git show HEAD dedup. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
+- [ ] [#lr-wire-9] Phase 9: Wire RunContext into ops_log, template_io, patch, harness detection. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
+- [ ] [#lr-actor-10] Phase 10: Add GlobalConfigSlot + SessionRegistrySlot for ActorContext. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:backlog -->
 
@@ -89,7 +110,7 @@ Suggested phase ordering: 6 (DocContent+Frontmatter+Components slots) then 7 (Sn
 
 ## Completed / Reaped
 
-<!-- agent:done -->
+<!-- agent:done archive=tasks/agent-doc/agent-doc-bugs.done.md -->
 - 2026-05-31 [#pbc1] Commit-boundary reliability for Codex/IPC sessions: fail closed when fresh-start route trigger never fires, and auto-resume commit when write/snapshot succeeded but commit boundary was interrupted. Plan: `tasks/agent-doc/plans/commit-boundary-reliability-codex-ipc.md`
 - 2026-05-31 [#dtmc] scan_text_source parallelized via std::thread::scope in diagnose_cycle
 - 2026-05-31 [#editor-buffer-state-ffi-debounce] [recommended] Replace `wait_for_stable_content`'s last-added-line/truncation heuristic with editor-authoritative buffer stability when an IDE plugin is attached. JetBrains and VS Code plugins should report normalized editor state through the FFI bridge to the Session Actor: canonical doc path/session, monotonic editor document version, dirty flag, last edit timestamp, optional save timestamp, optional buffer hash, and ideally current buffer content. Run requests should include the editor version/hash observed at click time so the Session Actor can detect edits after invocation, debounce until the version/hash is stable, and compute the diff against the exact stable editor buffer when available. If no editor state exists, fall back to whole-file content + mtime stability polling. This removes reliance on `extract_last_added_line`, which misses edits above the last inserted line, and reduces disk/snapshot/editor-buffer race classes seen in live IPC/JB/VSCode flows.

@@ -110,7 +110,22 @@ Done — updated the `[[replace]]` summary in `resume/profiles/sam-akkouche.toml
 Still uncommitted in `resume/` + `mail/` — no `#commit-push` invoked.
 
 _Note: the exchange is getting long (8 cycles). If you want, I can `agent-doc compact` it — just say so; I won't auto-compact._
-<!-- agent:boundary:ba915b5b -->
+- Add monsterrodholders to career highlights. Mentioning the wordpress rescue and increasing MRR by 50% in one month using SEO and Google Ads.
+
+### Re: Add MonsterRodHolders to Career Highlights — opus-4-8
+
+Added it and rebuilt **`resume/BrianTakita-sam-akkouche.pdf`**. New highlight (positioned after Open Source, before Pivotal Labs so engineering still leads):
+
+> **MonsterRodHolders** — Rescued a failing WordPress/WooCommerce storefront and grew MRR 50% in one month via SEO and Google Ads
+
+**Where it lives:** added as a `[[career_highlights]]` entry in `resume/data.toml` (tags: WordPress, WooCommerce, SEO, growth, e-commerce). Career Highlights have no per-profile filter, so this also enriches the master resume and every other profile — which is appropriate for a real engagement.
+
+**Verification:** clean rebuild confirms the MonsterRodHolders bullet renders in Career Highlights; **Dreamable leak = 0**.
+
+**Build gotcha (heads-up):** the `Makefile` lists only the profile TOML / `build.py` as prerequisites, not `data.toml` — so editing `data.toml` alone reports "up to date" and silently skips the rebuild. I forced it with `rm -f BrianTakita-sam-akkouche.pdf && make`. Worth adding `data.toml` to the Makefile prereqs at some point; flag me if you want that fixed.
+
+Still uncommitted across `resume/` + `mail/` — no `#commit-push` invoked.
+<!-- agent:boundary:d3cbb423 -->
 <!-- /agent:exchange -->
 
 ## Queue

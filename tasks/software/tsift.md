@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -297,25 +297,41 @@ Verification:
 Tmux CI note: this tsift repo has no `tmux`, `tmux-ci`, or `tmux-test` references in `.github` or `Makefile`, so there is no tmux leg to inspect.
 
 Root push note: I did not push root `agent-loop` `main` because it is already ahead of `origin/main` by unrelated commits and has unrelated dirty worktree changes; pushing would publish more than this `src/tsift` gitlink update.
-<!-- agent:boundary:66af970a -->
+
+### Re: #lazily-tsift-plan — gpt-5
+
+> **Queue prompt:**
+>
+> [#lazily-tsift-plan]
+
+Created the tsift-specific lazily-rs integration plan: `tasks/software/plan-lazily-rs-tsift-integration.md`.
+
+What the plan covers:
+- The current lazily-rs integration surfaces in tsift: status inspection caching, guarded inspect scopes, call-edge resolution, graph-neighborhood layers, and summary extraction caching.
+- Context lifetime boundaries for one-shot CLI runs versus future long-lived actor/watch contexts.
+- Slot/Cell dependency graphs for status/inspection, call-edge resolution, graph neighborhoods, and summary extraction.
+- Completed implementation phases mapped to their tsift commits.
+- Non-goals that keep SQLite, WAL/snapshot recovery, and explicit writer locks as the durable correctness layer.
+- Verification expectations and future gates for any daemon or persistent-worker follow-up.
+
+Commit:
+- root `agent-loop`: `c0a8be689` (`docs: plan tsift lazily integration`) committed the plan file.
+
+Verification:
+- `git diff --check -- tasks/software/plan-lazily-rs-tsift-integration.md` passed.
+
+No code, test, build, or instruction surfaces changed in this cycle, so I did not rerun the full tsift suite. I also did not push root `agent-loop` `main` because it is already ahead of `origin/main` by unrelated commits and has unrelated dirty worktree changes.
+<!-- agent:boundary:8ce1f919 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto -->
-dispatch #spec-test-build-install-commit-push
-- ~[#lazily-tsift-status-cache]~
-- ~[#lazily-inspect-scope]~
-- ~[#lazily-resolve-edges]~
-- ~[#lazily-neighborhood]~
-- ~[#lazily-summary]~
-- [#lazily-tsift-plan]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#lazily-tsift-plan] [plan] Create integration plan for lazily-rs in tsift (see tasks/agent-doc/plans/lazily-rs-integration.md as reference)
 <!-- /agent:backlog -->
 
 ## Review

@@ -121,7 +121,35 @@ These are **Codex-harness session docs**. Killing the tmux pane does **not** dis
 Nothing is committing to agent-doc now; there's no rogue background committer. But **"kill the pane" ≠ "stop the actor"** for a Codex-harness doc — route auto-start brings it back on the next dispatch. To keep one gone you must stop routing to it (or change its harness); to stop a live one, `agent-doc session clear <doc>` (or kill its supervisor) **and** don't re-route.
 
 Want me to clear `tsift.md` (`%59`) and `lazily-rs.md` (`%57`) again? They'll only stay gone if nothing routes them — otherwise the cleaner fix is to leave them be or stop whatever's issuing `Run Agent Doc` on those two docs.
-<!-- agent:boundary:f7cf46dd -->
+❯ I noticed that the tsift.md session was running this document. There were issues with starting the tsift.md session. We need a way of cleanly autostarting sessions when navigating to a document and when syncing. This session was in the tmux pane when I switched to tsift.md. Perhaps when I ran JB `Sync Tmux Layout`, agent-doc had a state issue?
+❯ See [#jb-tsift-pane-sync].
+
+### Re: tsift.md pane was running *this* document — cross-document pane/owner mismatch — opus-4-8
+
+That observation upgrades `#jb-tsift-pane-sync` from "pane didn't appear" to a worse class: a pane *did* surface for the navigated file, but it was bound to the **wrong document** (`agent-doc-bugs2.md` running in the slot you expected `tsift.md`). I've folded it into the existing bug + plan rather than spawning a new item — it's the same focus/sync/autostart handoff, just failing by aliasing instead of by hiding.
+
+#### What likely happened during `Sync Tmux Layout`
+The bugs2 owner pane was the live pane present in the layout when you switched to `tsift.md`. The most probable culprits (all in `focus.rs` / `sync.rs` / `route.rs`):
+
+- **reuse-by-visibility**: focus/sync picked the currently-visible pane (bugs2's owner) for `tsift.md` instead of resolving `tsift.md`'s own registered owner;
+- **autostart aliasing**: a navigation/sync autostart attached a new `tsift.md` session onto a pane already owning bugs2 — the same hazard the claim guard catches via `cmdline_owns_other_document` (`#j0k8`), but on the focus/sync path which doesn't run that check;
+- **position-based reconcile**: `Sync Tmux Layout` matched slots by tmux position/visibility without re-validating each surfaced pane's *owned-file* against the editor's intended file, so the stale bugs2 owner got promoted into the "tsift" slot.
+
+So "kill the pane ≠ stop the actor" (from the prior turn) has a sibling here: **"surface a pane ≠ surface the right document's pane."** Sync reconciled geometry without re-checking ownership identity.
+
+#### The contract you asked for
+> a way of cleanly autostarting sessions when navigating to a document and when syncing
+
+I added it to the plan as an explicit invariant: navigating to file `F`, or running manual `Sync Tmux Layout`, must **surface/promote `F`'s own owner, autostart a *new* owner for `F`, or fail closed naming the contaminating document** — never reuse/alias a pane that owns a different live document.
+
+#### Plan + backlog updated (no code change this cycle)
+`tasks/agent-doc/plan-jb-tsift-pane-sync-regression.md` now carries:
+- a **New symptom (2026-06-01)** section describing the wrong-document binding;
+- **Phase 3b — cross-document owner guard on focus/sync/autostart**: validate `pane.owned_file == F` before surfacing/reusing, share the `cmdline_owns_other_document` ownership check across focus/sync/claim, define the autostart-on-navigation contract (new owner when none exists; promote the stashed/hidden owner when one exists), and emit `focused file=F surfaced pane=%N owns=G (mismatch)` diagnostics;
+- regression + acceptance criteria for the cross-document guard.
+
+I'm keeping this at plan/backlog level rather than editing code now: it's in the live-JB-verify cluster (no automated tmux repro of the contaminated `Sync Tmux Layout` state yet), and a blind change to the focus/sync reuse path risks regressing the stash-promote and exact-visible dedup work. The next executable step is Phase 1's trace recipe to capture the actual `owns=G` mismatch from a live repro, then land Phase 3b's guard with Rust sync/focus regressions. `#jb-tsift-pane-sync` stays queued (`do [#jb-tsift-pane-sync]`).
+<!-- agent:boundary:9bc0acc6 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
@@ -162,7 +190,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 <!-- agent:backlog priority queue=prepend -->
 - [ ] [#ipcaa-scaf] [recommended] #agent-doc-bug 2026-06-01: socket IPC already_applied accepted a prompt-drifted, scaffold-duplicated live buffer for tasks/software/lazily-rs.md (prompt_drift=true, snap_source=file_read), then committed a structurally invalid document with duplicated Queue/Backlog/Review/Done scaffold and partial typed prompt fragments. Fix already_applied snapshot adoption to fail closed or use content_ours when prompt drift or duplicated scaffold is detected. Plan: tasks/agent-doc/plan-ipc-already-applied-scaffold-drift.md.
 - [ ] [#submodule-response-commit-proof] [recommended] #agent-doc-bug 2026-06-01: a response to `src/boost-client/tasks/monsterrodholders.md` was committed inside the `boost-client` submodule (`6cbff1d`), but the parent `agent-loop` repo still showed `M src/boost-client`, and the closeout wording did not distinguish target-doc commit proof, parent submodule-pointer dirtiness, and the fact that the response bypassed binary-owned `agent-doc write` / `finalize` after recursive same-pane dispatch failed. Fix by making nested-repo commit ownership explicit in session-check/final diagnostics and fail closed on unverified manual fallback. Plan: tasks/agent-doc/plan-submodule-response-commit-proof.md.
-- [ ] [#jb-tsift-pane-sync] [recommended] JetBrains navigation to `tasks/software/tsift.md` and manual `Sync Tmux Layout` did not immediately surface this pane. Plan and fix the regression where automatic selection plus explicit manual sync can leave a live/hidden/stashed target pane invisible or silently deferred; manual sync must either make the focused pane visible or report the exact blocker. Plan: tasks/agent-doc/plan-jb-tsift-pane-sync-regression.md.
+- [ ] [#jb-tsift-pane-sync] [recommended] JetBrains navigation to `tasks/software/tsift.md` and manual `Sync Tmux Layout` did not immediately surface this pane, AND a 2026-06-01 report shows a worse cross-document variant: the pane surfaced for `tsift.md` was actually running `agent-doc-bugs2.md` (wrong-document pane↔owner binding). Plan and fix the regression where automatic selection plus explicit manual sync can leave a live/hidden/stashed target pane invisible or silently deferred OR surface a pane that owns a different document; navigation + manual sync must cleanly autostart/surface the owner for the exact navigated file (never alias/reuse another document's owner) or fail closed naming the blocker. Plan: tasks/agent-doc/plan-jb-tsift-pane-sync-regression.md.
 - [ ] [#qasm] [recommended] Path C - continue the no-live-pane implementable review items in priority order, starting with the queue-provenance cluster (#prompt-preempts-auto-queue, #queue-user-edit-overwrite, #jb-run-agent-doc-response-queue-contamination), then the Option-A fixes (#cancel-orphans-preflight-cycle, #exchange-prompt-dropped-on-merge, #duplicate-response-after-commit), closeout-guard hardening (#do-id-partial-closeout-state, #preset-item-id-collision-enforce, #queue-clear-unrun-items), the feature pair (#backlog-priority-attribute, #backlog-queue-sync-attribute), then hygiene/UX (#stash-session-ttl-prune, #plugin-cleanup-menu-command, #stash-pane-promote-on-focus, #clear-stops-running-process, #jb-stale-busy-idle-footer, #snrun).
 <!-- /agent:backlog -->
 

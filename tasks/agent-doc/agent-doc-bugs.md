@@ -9,7 +9,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -393,7 +393,9 @@ impl<T> SlotHandle<T> {
 Option A is simpler and the handle already has privileged access to the `SlotId`. Option B adds an indirection layer that doesn't add much since `SlotHandle` is already a context-owned concept. I'd go with **Option A**.
 
 Worth adding the same for `CellHandle`? A `CellHandle.clear_dependents(&ctx)` that clears all downstream slots without changing the cell value could be useful for "I know the cached derivations are stale but the input hasn't changed" cases. Same implementation pattern.
-<!-- agent:boundary:2e16f5b2 -->
+Let's do Option A along with the public `Slot.clear(&ctx)`. Ensure a public `Cell.clear(&ctx)` is also implemented.
+#spec-test-build-install-commit-push
+<!-- agent:boundary:28d2a741 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -401,7 +403,11 @@ Worth adding the same for `CellHandle`? A `CellHandle.clear_dependents(&ctx)` th
 
 ## Pending / Not Built
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+---
+Let's do Option A along with the public `Slot.clear(&ctx)`. Ensure a public `Cell.clear(&ctx)` is also implemented.
+#spec-test-build-install-commit-push
+---
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

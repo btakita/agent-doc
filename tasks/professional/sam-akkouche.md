@@ -125,7 +125,31 @@ Added it and rebuilt **`resume/BrianTakita-sam-akkouche.pdf`**. New highlight (p
 **Build gotcha (heads-up):** the `Makefile` lists only the profile TOML / `build.py` as prerequisites, not `data.toml` — so editing `data.toml` alone reports "up to date" and silently skips the rebuild. I forced it with `rm -f BrianTakita-sam-akkouche.pdf && make`. Worth adding `data.toml` to the Makefile prereqs at some point; flag me if you want that fixed.
 
 Still uncommitted across `resume/` + `mail/` — no `#commit-push` invoked.
-<!-- agent:boundary:d3cbb423 -->
+❯ Should I mention the MonsterRodHolders is ongoing? Should I mention it was this May or no?
+
+### Re: Mention MonsterRodHolders as ongoing? Mention "this May"? — opus-4-8
+
+My recommendation: **leave the Career Highlight bullet dateless and metric-forward, and put any "ongoing"/recency signal in the Experience section instead** (and say it out loud on the call).
+
+**Should you mention it's ongoing?**
+- **Not in the highlight bullet.** "Grew MRR 50% in one month" is a clean, finished result — tacking on "ongoing" reads as in-progress/unproven and dilutes the punch.
+- **Yes implicitly + verbally.** The `Independent Consulting` block is already "2026 – Present," so an active engagement is covered. On the call, absolutely say you're still running their growth — sustained, active results are a strong signal for a recruiter.
+
+**Should you mention "this May"?**
+- **Not a specific month in the bullet.** Career Highlights conventionally carry no dates (dates belong in Experience), and a hard month dates the resume fast.
+- **Recency is a plus, so anchor it in Experience.** The MonsterRodHolders entry under Independent Consulting could take a `(2026)` tag like the Confidential AI Startup line uses `(Apr–May 2026)`. That conveys "recent" without freezing the bullet to one month.
+
+**One consistency gap worth knowing:** the existing Experience accomplishment for MonsterRodHolders describes the *technical rescue* (security remediation, Cloudflare CDN, WordPress↔Shopify eval, analytics) — it does **not** mention SEO / Google Ads / the 50% MRR growth. So right now the growth story lives only in the highlight. If a recruiter asks, the Experience bullet won't back it up.
+
+**Options — say the word and I'll apply any combo:**
+1. Add the growth result (SEO, Google Ads, 50% MRR) to the MonsterRodHolders Experience accomplishment so highlight + experience agree.
+2. Add a `(2026)` recency tag to that Experience entry (matching the Confidential AI Startup style).
+3. Leave the highlight exactly as-is (my default recommendation).
+
+Net: keep the bullet as the crisp metric, reflect recency/ongoing in Experience + conversation. I'd do #1 (the consistency fix) and skip dates on the bullet.
+
+Still uncommitted across `resume/` + `mail/` — no `#commit-push` invoked.
+<!-- agent:boundary:c93e990d -->
 <!-- /agent:exchange -->
 
 ## Queue

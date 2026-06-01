@@ -28,7 +28,47 @@ Prior frontmatter bug fix remains complete. New work this cycle is planning only
 Compacted content:
 - Archived 7 response topic(s): Slot/Cell invalidation mid-run; CellHandle::set vs Context::set_cell; lazily-rs integration status; 4 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/9b6e92d2...
-<!-- agent:boundary:c8c2475e -->
+❯ Evaluate the agent-doc codebase. Where else can lazily-rs be used to improve performance and reliability?
+### Re: Where else can lazily-rs be used — glm-5.1
+
+Identified 14 opportunities beyond the 5 completed phases.
+
+High-impact (5-30 redundant ops/cycle):
+
+1. Doc content + frontmatter dedup in session_check guards - Guard functions each independently read_to_string + frontmatter parse. Single session-check reads/parses same doc 4-6x. Add DocContentCell + FrontmatterSlot.
+
+2. canonicalize + find_project_root + doc_hash triple in snapshot.rs - Path functions each call all three independently, 8-15x per preflight for same file. Add SnapshotPathsSlot depending on existing project_root + canonical_path slots.
+
+3. cycle_state load dedup - Recomputes canonicalize + find_project_root + doc_hash + JSON parse each call, at 5-15 sites per cycle. Add CycleStateSlot.
+
+4. git show_head subprocess dedup - Spawns git subprocess 3-8x per cycle. HEAD unchanged within CLI invocation. Add HeadContentSlot.
+
+5. snapshot load flock dedup - Acquires advisory flock + reads disk 5-12x per cycle. Add SnapshotContentSlot.
+
+6. component parse dedup - Full-document regex scan 10-30x per cycle on identical content. Add ComponentsSlot depending on DocContentCell.
+
+Medium-impact (3-8 redundant ops/cycle):
+
+7. ops_log root walk - ~445 call sites each walk find_project_root. Thread RunContext into log_op.
+
+8. config load global TOML dedup - Global config parsed 2-3x per invocation. Add GlobalConfigSlot.
+
+9. sessions load registry dedup - Sessions JSON parsed 3-8x per route/sync. Add SessionRegistrySlot.
+
+10. verify_snapshot_committed composite dedup - Loads snapshot + HEAD 2-3x per preflight. Add SnapshotCommitStatusSlot.
+
+Low-impact / wiring fixes:
+
+11. template_io.rs - load_component_configs + load_max_lines_configs each walk independently. Wire through Phase 3 slot.
+
+12. patch.rs load_configs - Manual walk duplicating project_root_for_doc. Wire RunContext.
+
+13. harness_detection caching - detect_harness checks 11 env vars 3-5x. Compute once at RunContext creation.
+
+14. agent resolve_for_file - which subprocess 1-3x per cycle. Cache in slot.
+
+Suggested phase ordering: 6 (DocContent+Frontmatter+Components slots) then 7 (SnapshotPaths+CycleState+SnapshotContent) then 8 (HeadContent+SnapshotCommitStatus) then 9 (wire RunContext into ops_log/template_io/patch) then 10 (GlobalConfig+SessionRegistry for ActorContext).
+<!-- agent:boundary:6f051f67 -->
 <!-- /agent:exchange -->
 
 <!--

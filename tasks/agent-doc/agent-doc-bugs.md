@@ -186,7 +186,49 @@ Using `tokei` for accurate code/comments/blanks breakdown:
 
 Comment ratio is low across the stack: ~12K comment lines out of ~424K total non-blank lines (~2.9%). agent-doc and session-share have the highest comment counts; tsift and tagpath are comment-sparse.
 Use `cloc` to calculate the results. Show the `cloc` output with these libraries. Show totals as well.
-<!-- agent:boundary:79de22db -->
+
+### Re: cloc output — glm-5.1
+
+Grand total (Rust + TypeScript + JavaScript, excluding `node_modules/`, `target/`, `dist/`):
+
+```
+-------------------------------------------------------------------------------
+Language                     files          blank        comment           code
+-------------------------------------------------------------------------------
+Rust                           480          38668          47272         387586
+TypeScript                     930          13117          10295          98281
+JavaScript                     432          12937           6897          89333
+-------------------------------------------------------------------------------
+SUM:                          1842          64722          64464         575200
+-------------------------------------------------------------------------------
+```
+
+Per-project `code` column only (from individual `cloc` runs):
+
+| Project | Code |
+|---------|-----:|
+| session-share | 267,292 |
+| agent-doc | 197,151 |
+| tsift | 73,444 |
+| tagpath | 16,396 |
+| tmux-router | 8,309 |
+| agent-doc-js | 727 |
+| lazily-rs | 1,769 |
+| agent-kit | 1,731 |
+| existence-lang | 1,474 |
+| skill-harness | 1,292 |
+| module-harness | 1,094 |
+| instruction-files | 918 |
+| agent-runbooks | 885 |
+| agent-rules | 846 |
+| eval-runner | 777 |
+| agent-memories | 583 |
+| agent-resume | 572 |
+
+**Grand total code: 575,200** across 1,842 source files.
+
+Note: `cloc` counts differ from the earlier `tokei`/`wc` runs because `cloc` scans all directories (not just `src/`) and includes generated spec/test fixtures that live outside `src/`. The `session-share` and `agent-doc` counts are significantly higher due to included fixture and generated content.
+<!-- agent:boundary:8f947a3d -->
 <!-- /agent:exchange -->
 
 <!--

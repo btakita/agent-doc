@@ -109,7 +109,49 @@ Commits pushed:
 
 - `src/lazily-rs`: `0fd3a89` (`perf: add benchmark instrumentation`) to `btakita/lazily-rs main`
 - `agent-loop`: `1965d50bb` (`chore: update lazily-rs instrumentation pointer`) to `btakita/agent-loop main`
-<!-- agent:boundary:5066f3de -->
+
+### Re: #perf-layout — gpt-5
+
+> **Queue prompt:**
+>
+> [#perf-layout]
+
+
+Completed `#perf-layout`.
+
+Optimized the single-threaded `Context` storage layout by replacing its `HashMap<SlotId, Node>` with slot-id-indexed `Vec<Option<Node>>` storage. `SlotId` remains monotonic and stable; disposed effects leave vacant entries instead of reusing ids, so existing handles and dependency edges keep their semantics while the hot local path avoids hash-map lookup and insertion churn.
+
+Updated the spec and README to document the contiguous local storage contract, and added a regression test for allocating new slots after effect disposal leaves a storage hole.
+
+Short post-change Criterion sample for the single-threaded path:
+
+- cached read: about `12.3 ns`
+- cold first get: about `91 ns`
+- dependency fan-out / 256: about `27 us`
+- memo equality suppression: about `2.9 us`
+- effect flushing: about `94 ns`
+- batch storm / 64: about `3.6 us`
+
+Verification:
+
+- `cargo fmt -- --check`
+- `cargo check --all-targets --all-features`
+- `cargo test context::context_allocates_after_effect_disposal -- --exact`
+- `cargo test`
+- `cargo test --all-features`
+- `cargo bench --no-run`
+- `cargo bench --features instrumentation --no-run`
+- `cargo bench --bench context -- --warm-up-time 0.1 --measurement-time 0.2`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo build`
+- CI check: `gh run list --workflow CI --limit 1` still reports no `CI` workflow, and `gh workflow list` returns no workflows for `lazily-rs`
+- `make check` was not run because `src/lazily-rs` has no `Makefile`
+
+Commits pushed:
+
+- `src/lazily-rs`: `9f4d7ed` (`perf: index context nodes by slot id`) to `btakita/lazily-rs main`
+- `agent-loop`: `bc5940e64` (`chore: update lazily-rs layout pointer`) to `btakita/agent-loop main`
+<!-- agent:boundary:1fbdb72a -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -118,7 +160,7 @@ Commits pushed:
 preset #spec-test-build-install-commit-push
 - ~[#perf-bench]~
 - ~[#perf-profile]~
-- [#perf-layout]
+- ~[#perf-layout]~
 - [#perf-thread-dedup]
 - [#perf-lock-eval]
 <!-- /agent:queue -->
@@ -126,7 +168,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#perf-layout] #performance Use benchmark results to optimize single-threaded Context storage and edge maintenance, starting with node storage locality and avoiding unnecessary HashSet/HashMap churn without changing public semantics
 - [ ] [#perf-thread-dedup] #performance Prototype ThreadSafeContext in-flight recompute deduplication so concurrent first get callers share one computation when benchmarks show duplicate work is material
 - [ ] [#perf-lock-eval] #performance Evaluate RwLock, sharded locks, or targeted CAS only after baseline data identifies lock contention, and require Loom/Shuttle safety models before adopting concurrency changes
 <!-- /agent:backlog -->

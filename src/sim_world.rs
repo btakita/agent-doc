@@ -93,6 +93,8 @@ enum SimCommand {
     SyncDetachableReplaceManual,
     SyncDetachableReplacePassive,
     SyncVisibleFocusPreserve,
+    SyncRerequestVisibleEditorManual,
+    SyncRerequestVisibleEditorPassive,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -198,6 +200,21 @@ impl SyncProjection {
             protected_open_cycle: BTreeSet::from(["protected".to_string()]),
             stashed: BTreeSet::from(["requested".to_string()]),
             active: Some("protected".to_string()),
+        }
+    }
+
+    /// The editor document is already visible under one pane. This models the
+    /// state in which a duplicate-claim / pane-id churn makes sync re-request the
+    /// same document that is already on screen (see
+    /// `duplicate_live_pane_claim` in `agent-doc-orchestration::sync`). The
+    /// reconciler must recognize the document as already present and must NOT
+    /// attach a second editor pane for it (no-duplicate-editor-pane invariant).
+    fn rerequested_visible_editor_case() -> Self {
+        Self {
+            visible: vec!["editor".to_string()],
+            protected_open_cycle: BTreeSet::new(),
+            stashed: BTreeSet::new(),
+            active: Some("editor".to_string()),
         }
     }
 
@@ -465,7 +482,7 @@ impl SimWorld {
         let mut rng = DeterministicRng::new(seed);
         let mut world = Self::new(seed);
         for _ in 0..steps {
-            let command = match rng.next_usize(46) {
+            let command = match rng.next_usize(48) {
                 0 => SimCommand::EditPrompt,
                 1 => SimCommand::EditLaterPrompt,
                 2 => SimCommand::AddMalformedBacklogItem,
@@ -506,6 +523,8 @@ impl SimWorld {
                 42 => SimCommand::SyncDetachableReplaceManual,
                 43 => SimCommand::SyncDetachableReplacePassive,
                 44 => SimCommand::RepairBusyProjectionWithReadyPrompt,
+                45 => SimCommand::SyncRerequestVisibleEditorManual,
+                46 => SimCommand::SyncRerequestVisibleEditorPassive,
                 _ => SimCommand::SyncVisibleFocusPreserve,
             };
             world.apply(command)?;
@@ -737,6 +756,12 @@ impl SimWorld {
             SimCommand::SyncVisibleFocusPreserve => {
                 self.apply_sync_visible_focus_preserve(SyncMode::SafePassive);
             }
+            SimCommand::SyncRerequestVisibleEditorManual => {
+                self.apply_sync_rerequest_visible_editor(SyncMode::Full);
+            }
+            SimCommand::SyncRerequestVisibleEditorPassive => {
+                self.apply_sync_rerequest_visible_editor(SyncMode::SafePassive);
+            }
         }
         Ok(())
     }
@@ -794,6 +819,17 @@ impl SimWorld {
         self.sync = SyncProjection::protected_growth_case();
         self.sync.active = Some("sibling".to_string());
         self.record_sync_outcome(SyncOutcome::PreservedLayoutAndFocused);
+    }
+
+    fn apply_sync_rerequest_visible_editor(&mut self, mode: SyncMode) {
+        self.sync = SyncProjection::rerequested_visible_editor_case();
+        // Re-requesting a document that is already visible must be a no-op for
+        // pane cardinality: the editor stays a single pane. Attaching a second
+        // pane here is the duplicate-editor-pane regression.
+        let outcome = self
+            .sync
+            .apply_requested_projection(&["editor"], "editor", mode);
+        self.record_sync_outcome(outcome);
     }
 
     fn bind_route_owner(&mut self) {
@@ -1485,6 +1521,22 @@ impl SimWorld {
                 self.seed,
                 self.trace
             );
+        }
+        // No-duplicate-editor-pane cardinality invariant: a sync projection must
+        // never present the same document under two visible panes. This is the
+        // in-memory guard for the "3 tmux panes with 2 editor panes" regression
+        // class. Ownership of this invariant lives in the sync claim-tracking +
+        // tmux-router column dedup, NOT in any lazily-rs cache.
+        let mut seen_visible = BTreeSet::new();
+        for pane in &self.sync.visible {
+            if !seen_visible.insert(pane.clone()) {
+                bail!(
+                    "sync projection presents a duplicate visible pane `{pane}` for the same document (duplicate editor pane regression): visible={:?}; seed={} trace={:?}",
+                    self.sync.visible,
+                    self.seed,
+                    self.trace
+                );
+            }
         }
         Ok(())
     }
@@ -2573,6 +2625,36 @@ fn sync_sim_tmuxbudget_seed_3003_preserve_layout_still_reselects_visible_focus()
     assert_eq!(world.sync.active.as_deref(), Some("sibling"));
     assert_eq!(world.coverage.sync_preserve_layout_blocks, 1);
     assert_eq!(world.coverage.sync_focus_handoffs, 1);
+}
+
+#[test]
+fn sync_sim_tmuxbudget_seed_3005_rejects_duplicate_editor_pane_for_rerequested_document() {
+    // Regression guard for "3 tmux panes with 2 editor panes": when the editor
+    // document is already visible and sync re-requests the same document (the
+    // duplicate-claim / pane-id churn surface), the projection must keep a single
+    // editor pane instead of attaching a second one.
+    let mut world = SimWorld::new(3_005);
+    world
+        .apply(SimCommand::SyncRerequestVisibleEditorManual)
+        .unwrap();
+    assert_eq!(
+        world.sync.visible,
+        vec!["editor".to_string()],
+        "manual sync must not attach a second editor pane when the document is already visible"
+    );
+    assert_eq!(world.sync.active.as_deref(), Some("editor"));
+    // The structural cardinality invariant must hold: no duplicate visible pane.
+    world.assert_structural_invariants().unwrap();
+
+    world
+        .apply(SimCommand::SyncRerequestVisibleEditorPassive)
+        .unwrap();
+    assert_eq!(
+        world.sync.visible,
+        vec!["editor".to_string()],
+        "safe-passive sync must share the same single-editor-pane decision"
+    );
+    world.assert_structural_invariants().unwrap();
 }
 
 #[test]

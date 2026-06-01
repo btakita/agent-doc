@@ -55,6 +55,8 @@ SyncProtectedGrowthFocusVisible
 SyncDetachableReplaceManual
 SyncDetachableReplacePassive
 SyncVisibleFocusPreserve
+SyncRerequestVisibleEditorManual
+SyncRerequestVisibleEditorPassive
 ```
 
 Every generated failure must include a stable seed and command trace. The
@@ -125,6 +127,8 @@ Closeout invariants currently exercised by the simulator:
   crosses the commit boundary.
 - Duplicate visible response patchbacks are rejected before commit.
 - Boundary cleanup leaves at most one live exchange boundary marker.
+- A sync projection never presents the same document under two visible panes
+  (no-duplicate-editor-pane cardinality invariant).
 - IPC snapshot duplicate-prompt repair removes an extra live-typed prompt copy
   before the repaired response crosses the commit boundary.
 - A focused post-exchange scratch-comment ownership fixture preserves visible
@@ -182,6 +186,23 @@ live tmux server:
 - `sync_sim_tmuxbudget_seed_3004...` covers the remaining pure attach/focus
   variant: a hidden requested pane is attached while an open-cycle owner can be
   stashed and sync still focuses an already-visible requested sibling.
+- `sync_sim_tmuxbudget_seed_3005...` covers the no-duplicate-editor-pane
+  regression class ("3 tmux panes with 2 editor panes"): when the editor
+  document is already visible and sync re-requests the same document — the
+  duplicate-claim / pane-id churn surface logged as `duplicate_live_pane_claim`
+  in `agent-doc-orchestration::sync` — the projection must keep a single editor
+  pane rather than attaching a second one. The cardinality side of this is also
+  enforced as a structural invariant on every command in the generated corpus
+  (`SyncProjection.visible` must never list the same document twice).
+
+This no-duplicate-editor-pane invariant is owned by the sync claim-tracking
+(`claimed_sync_panes` / `SyncProofCache`) and the `tmux-router` per-column pane
+dedup. It is independent of the `lazily-rs` dependency graph: the only
+`lazily-rs` use on the sync path is `parse_frontmatter_for_sync`, which
+constructs a fresh per-invocation `RunContext` (each slot computes at most once,
+then drops), so no lazily-cached state survives across sync runs to drive
+duplicate pane creation, and `tmux-router` does not depend on `lazily-rs` at
+all.
 
 Real tmux tests are still required in `make tmux-ci` for pane/window movement,
 `tmux-router` reconcile behavior, shell/process ownership proof, and end-to-end

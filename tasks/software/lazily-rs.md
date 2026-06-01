@@ -149,7 +149,37 @@ Verification:
 Confidence: high. The memo guard behavior is covered in lazily-rs tests and also verified against the downstream agent-doc graph cache expectations.
 
 Escalation: none. Existing unrelated dirty files remain in the superproject worktree; I staged and committed only the lazily-rs paths/submodule pointer.
-<!-- agent:boundary:5987103e -->
+
+### Re: #dpzd computed alias — gpt-5
+
+Completed `#dpzd`: `lazily-rs` now exposes `ctx.computed(|ctx| T)` as the ergonomic alias for ordinary derived slots, while keeping `ctx.slot()` as the underlying low-level synonym and `ctx.memo()` for `PartialEq` guarded derived values.
+
+Changed paths:
+- `src/lazily-rs/src/context.rs` adds `Context::computed()` delegating to `Context::slot()`.
+- `src/lazily-rs/tests/spec_compliance.rs` adds coverage that `ctx.computed()` tracks cell dependencies and invalidates/recomputes like a slot.
+- `src/lazily-rs/README.md` and `src/lazily-rs/SPEC.md` document `computed`, clarify the slot/memo choice, and make the quickstart use `ctx.computed()` for derived values.
+- `src/lazily-rs/AGENTS.md` updates the test counts to 13 integration tests plus 55 spec tests, 68 total.
+- Parent `src/lazily-rs` submodule pointer now references the final lazily-rs commit.
+
+Commit/push evidence:
+- `lazily-rs` remote `main`: `780093b` (`feat: add computed alias`).
+- `agent-loop` remote `main`: `ffdeb5a96` (`chore: update lazily-rs computed alias`).
+
+Verification:
+- `cargo fmt --check` passed in `src/lazily-rs`.
+- `tsift rewrite --run 'cargo test'` passed in `src/lazily-rs`.
+- `cargo test -- --list` reports 13 integration tests and 55 spec compliance tests.
+- `tsift rewrite --run 'cargo build'` passed in `src/lazily-rs` with only existing unused workspace patch warnings.
+- `tsift rewrite --run 'cargo clippy --all-targets --all-features -- -D warnings'` passed in `src/lazily-rs`.
+- `cargo package --allow-dirty` passed.
+- `cargo install --path . --force` is still not applicable for this library-only crate; Cargo reported `no packages found with binaries or examples`.
+- Root `make check` passed.
+- GitHub has no workflow named `CI`; latest `Agent Doc` run `26746156851` passed both `check` and `tmux-ci`.
+
+Confidence: high. The alias delegates to existing slot behavior, has direct spec coverage, and passed both local and remote verification.
+
+Escalation: none. Existing unrelated dirty files remain in the superproject worktree; I staged and committed only lazily-rs files/submodule pointer for this item.
+<!-- agent:boundary:ee4fc171 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -167,7 +197,7 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#dpzd] #api-ergonomics ctx.computed() alias and DX improvements
+- [x] [#dpzd] #api-ergonomics ctx.computed() alias and DX improvements
 - [ ] [#45rh] #release-publish Release + publish after effect system lands
 <!-- /agent:backlog -->
 

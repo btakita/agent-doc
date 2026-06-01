@@ -200,13 +200,13 @@ Tell me **wait** or **interrupt-clear tsift.md**, and I'll proceed with the reco
 Answered above. I did not reconcile those dirty files because they belong to a live `tasks/software/tsift.md` Codex turn that `agent-doc session clear` reported as alive-busy. Reconciling them while that actor is still editing would risk corrupting its in-progress work.
 
 The safe next step is still a user choice: wait for that turn to finish, or explicitly authorize `agent-doc session interrupt-clear tasks/software/tsift.md` and then reconcile the resulting tree.
-<!-- agent:boundary:6df7c2ca -->
+<!-- agent:boundary:de57c1c6 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#jb-tsift-pane-sync]~
-- The dirty files were from the tsift.md session...which I canceled. Please reconcile the dirty changes.
+- ~The dirty files were from the tsift.md session...which I canceled. Please reconcile the dirty changes.~
 - do [#ipcaa-scaf]
 - do [#submodule-response-commit-proof]
 - do [#qasm]

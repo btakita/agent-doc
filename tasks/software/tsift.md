@@ -13,12 +13,14 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
+
+
 <!-- /agent:status -->
 
 ## Spec
@@ -167,7 +169,7 @@ Tmux CI note: this tsift repo's CI workflow does not define a `tmux-test`, `tmux
 ### Re: closeout repair — gpt-5
 
 Closeout repair only: the implementation response for `#lazily-tsift-status-cache` is already committed above. This write reopens the binary-owned path after boundary metadata drift and does not add task work.
-<!-- agent:boundary:79fb9f0a -->
+<!-- agent:boundary:e1295671 -->
 <!-- /agent:exchange -->
 
 ## Queue

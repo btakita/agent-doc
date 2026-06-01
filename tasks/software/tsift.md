@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -94,12 +94,18 @@ Backlog items in priority order:
 5. **`#lazily-summary`** — Summary cache enrichment: Slots keyed by `(file, content_hash)` that compute LLM summaries on first access and auto-invalidate via Cell-backed content hash tracking. Replaces the scattered "check if cached, else compute" pattern.
 
 **Top of backlog: `#lazily-tsift-plan`**
-<!-- agent:boundary:263e0d16 -->
+`tsift status --json` should automatically fix the index if stale. Use lazily-rs to avoid redundant I/O.
+#spec-test-build-install-commit-push
+<!-- agent:boundary:2b98c1b2 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+---
+`tsift status --json` should automatically fix the index if stale. Use lazily-rs to avoid redundant I/O.
+#spec-test-build-install-commit-push
+---
 <!-- /agent:queue -->
 
 ## Backlog

@@ -16,7 +16,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -36,10 +36,32 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 2 response topic(s): #next-steps to complete review items; Add completion tasks (#next-steps) into the backlog
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:15fa892a -->
+
+### Re: do [#sfmt] — 0.2.144 is installed — opus-4-8
+
+> **Queue prompt:**
+>
+> [#sfmt]: 0.2.144 is installed
+
+
+**`#sfmt` (Step 0 unblock) — done.** JB plugin **0.2.144** is installed (≥0.2.138 ✓), and the `agent-doc` binaries were rebuilt + reinstalled with the recent fixes in the prior turns (`cargo install --path .` → `~/.cargo/bin`, `cargo build --release` → `.bin`), so newly-started / restarted sessions run the current binary. Step 0 is satisfied; the `*-live-verify` review items are now unblocked.
+
+> Note: any tmux supervisor that was already running before the reinstall keeps its old binary until that pane restarts. If a live-verify item shows stale behavior, restart that specific pane (or `agent-doc session restart <FILE>`) so it picks up `~/.cargo/bin/agent-doc`.
+
+**Before I drain the rest of the queue — a scope check.** The remaining items split by who can execute them:
+- **`#xt3v` (Path C)** — agent-executable, but it expands to ~18 review fixes, each under the `#spec-test-build-install-commit-push` preset. That's a large multi-cycle autonomous run (many commits/pushes).
+- **`#v819` (Path A)** and **`#wy0y` (Path B)** — operator-only **live-IDE** verification/capture sessions. I can't drive live tmux panes / IntelliJ or enable JB debug logging from here; these need you at the keyboard.
+
+I've paused the auto-drain here rather than blindly loop into work I can't finish (or kick off an 18-fix run without confirming). Picking the scope below.
+<!-- agent:boundary:1481bc58 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+preset #spec-test-build-install-commit-push
+- ~[#sfmt]: 0.2.144 is installed~
+- [#xt3v]
+- [#v819]
+- [#wy0y]
 <!-- /agent:queue -->
 ###
 <!--
@@ -66,7 +88,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog priority queue=prepend -->
-- [ ] [#sfmt] Step 0 (unblock — top priority): install the latest signed JB plugin (>=0.2.138) and restart IntelliJ + the route-owned agent-doc process so the new plugin AND binary are live. Prerequisite for the Path A/B live-verify batches; nearly every *-live-verify review item is blocked only on this.
 - [ ] [#xt3v] Path C (#qasm — agent-executable now, no live pane): implement the no-live-pane review items in priority order — queue-provenance cluster (#prompt-preempts-auto-queue, #queue-user-edit-overwrite, #jb-run-agent-doc-response-queue-contamination) -> Option-A fixes (#cancel-orphans-preflight-cycle, #exchange-prompt-dropped-on-merge, #duplicate-response-after-commit) -> closeout-guard hardening (#do-id-partial-closeout-state, #preset-item-id-collision-enforce, #queue-clear-unrun-items, #free-text-queue-skip-diagnostic) -> feature pair (#backlog-priority-attribute, #backlog-queue-sync-attribute) -> hygiene/UX (#stash-session-ttl-prune, #plugin-cleanup-menu-command, #clear-stops-running-process, #jb-stale-busy-idle-footer, #snrun, #4a6p, #nbsearch, #gscaccess).
 - [ ] [#v819] Path A (#jkvs — after Step 0): one consolidated live busy-pane verification session to batch-close ~11 live-verify items: #t41j, #jb-busy-queue-deadlock-live-verify, #jb-run-agent-doc-busy-feedback-live-verify, #route-drain-all-surface-live-verify, #codex-owned-pane-stop-hook-live-verify, #codex-owned-pane-prompt-miss-followups (2b/3), #codex-final-response-live-verify, #recovery-drift-apply-live-verify, #jb-load-tmux-window-verify, #j0k8, #stash-pane-promote-on-focus.
 - [ ] [#wy0y] Path B (#6cmx — after Step 0): one IPC/typing-corruption capture session with #com.github.btakita.agentdoc debug logging enabled to capture the setText payload, then repro #ipcfullprompt-recur2, #finalize-retry-ipc-response-duplication, #ipc-dup-tracking-double-merge, #adoc-queue-ipc-buffer-divergence, #duplicate-response-after-commit, #prompt-duplicated-while-typing, and the scaffold-dup set #zpc2 / #ipcaa-scaf / #submodule-response-commit-proof. Several convert from verify to one CURE commit once the payload is captured.

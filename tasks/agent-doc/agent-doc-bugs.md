@@ -9,7 +9,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -43,7 +43,11 @@ Agent-doc's actual mid-run change detection is a layered system that doesn't use
 
 If the intent is to wire `lazily-rs` into agent-doc so that a document change mid-run reactively clears cached computation, `lazily-rs` already provides the transitive clearing infrastructure (`SlotHandle::clear()` and `CellHandle::clear_dependents()`). The integration gap would be connecting agent-doc's debounce/snapshot-hash signals to `Context::set_cell()` or `SlotHandle::clear()` calls at the appropriate cycle boundaries.
 Use `CellHandle::set(&ctx)` instead of `Context::set_cell()`.
-<!-- agent:boundary:c96d7eae -->
+
+### Re: CellHandle::set vs Context::set_cell — glm-5.1
+
+Acknowledged. Currently `set` lives on `Context::set_cell()` (`context.rs`) and `CellHandle` has no `set` method — only `clear_dependents()`. The correction points to a better ergonomic direction: the mutation should be a method on the handle (`CellHandle::set(&ctx, value)`) rather than on the container, mirroring how `SlotHandle::clear(&ctx)` already works. Updated phrasing: the integration gap would be connecting agent-doc's debounce/snapshot-hash signals to `CellHandle::set(&ctx, value)` calls at the appropriate cycle boundaries.
+<!-- agent:boundary:a3b24b03 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -51,8 +55,7 @@ Use `CellHandle::set(&ctx)` instead of `Context::set_cell()`.
 
 ## Pending / Not Built
 
-<!-- agent:queue auto -->
-- Use `CellHandle::set(&ctx)` instead of `Context::set_cell()`.
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

@@ -52,7 +52,37 @@ The cycle is an empty `preflight_started` (no capture) — the benign auto-recov
 Net: the guard is live and proven (`v0.34.0` installed); `#r5q6`'s land + live-verify are done; residual steps 4–5 are minor hardening (4a/4b near-trivial, 5 needs a live Codex pane) tracked under `#queue-clear-unrun-items`.
 JB `Run Agent Doc` on this file deadlocked.
 #spec-test-build-install-commit-push
-<!-- agent:boundary:bd074aa7 -->
+Done — standing down. Here's the honest status.
+
+## What I verified this turn (durable, independent of the doc race)
+
+`do [#completed-queue-residue-regression]` — the work is effectively complete and I proved it live:
+
+- **Fix in HEAD:** `detect_head_prompt_modified` insert-ahead fix `1bcaaac6` is an ancestor of backend HEAD `9362c8f8`.
+- **Built + installed:** `9362c8f8` is built and installed (`agent-doc 0.34.0` + cdylib) — the prior "BLOCKED on a concurrent broken crate" state is cleared (the crate compiles).
+- **Live-verified on the installed binary (isolated repo, zero contention):** with auto-queue head `do [#alpha]`, inserting `do [#zeta]` **ahead** of the still-present `do [#alpha]` kept `queue_active: true` (trigger `auto`) with **no `item_modified` deactivation and no strand** — both heads preserved. That is the item's acceptance criterion.
+
+The only residual is the *separate* "broader committed-state residue guard + drain-ordering audit," which is enhancement work beyond the insert-ahead regression.
+
+## Why I did not record it on the document
+
+I could not close out, and the binary told me exactly why:
+
+- My first `finalize` hit a **torn read** (`opened backlog ... closed exchange`) — I read the document while the other actor was mid-rewrite (it added a new `#zpc2` backlog item under me).
+- My re-`preflight` then **failed closed**: cycle `cycle-1780288575914` is a live `preflight_started` cycle, `phase=child_agent_wait agent=claude elapsed_s=300`, with `live_prompt_drift_after_preflight` and an active IPC listener. Its guidance: *"wait until it is stale or restart the harness pane."*
+
+**There are two Claude `agent-doc` sessions driving this one document concurrently.** That is the "JB Run Agent Doc deadlocked" symptom — not a code bug in the fix under test, but a session-ownership collision. Forcing a finalize from this secondary session would race the live authoritative cycle and risk committing into a torn state (which is exactly the corruption class on your backlog).
+
+## Recommendation
+
+Resolve the ownership collision before continuing the queue on this doc:
+
+1. Pick one owner. Either let the route-owned authoritative pane (the live `claude` cycle, pane for session `b26b9957…`) drain the queue, **or** stop it and drive from one session only.
+2. From a terminal: `agent-doc session status tasks/agent-doc/agent-doc-bugs2.md` to see the live owner, and `agent-doc gc` / `agent-doc resync --fix` to clear any stale cycle once a pane is stopped.
+3. Then re-dispatch `agent-doc tasks/agent-doc/agent-doc-bugs2.md` from the single surviving pane — it'll get a clean preflight.
+
+Net: `#completed-queue-residue-regression`'s fix is **landed, installed, and live-verified**; it just needs its closeout recorded by whichever single session owns the document. I'm not going to be that session while the authoritative cycle is live.
+<!-- agent:boundary:632add25 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->

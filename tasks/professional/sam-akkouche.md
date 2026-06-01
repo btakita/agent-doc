@@ -149,7 +149,28 @@ My recommendation: **leave the Career Highlight bullet dateless and metric-forwa
 Net: keep the bullet as the crisp metric, reflect recency/ongoing in Experience + conversation. I'd do #1 (the consistency fix) and skip dates on the bullet.
 
 Still uncommitted across `resume/` + `mail/` — no `#commit-push` invoked.
-<!-- agent:boundary:67692064 -->
+
+### Re: Add to the job description — opus-4-8
+
+Done — added the growth story to the MonsterRodHolders **Experience job description** (`resume/data.toml`) so it now backs up the Career Highlight, and rebuilt the PDF. The entry now leads with the result:
+
+> **MonsterRodHolders.com** — Rescued a failing WooCommerce storefront (57-SKU catalog) and **grew MRR 50% in one month through SEO and Google Ads**. Identified and documented an admin-account security compromise with a remediation path, evaluated WordPress-vs-Shopify migration, configured Cloudflare CDN for performance and DDoS protection, and restored analytics tracking. WordPress, WooCommerce, SEO, Google Ads, Cloudflare CDN, Google Analytics.
+
+- Reordered so the **business impact leads** (growth) and the technical rescue follows.
+- Added SEO / Google Ads to the trailing tech list and tags (SEO, Google Ads, growth).
+- Highlight bullet and Experience entry are now **consistent** — a recruiter asking about the 50% claim will find it substantiated in Experience.
+- Closed backlog `#j52j` (the consistency-fix item).
+
+**Verification:** clean rebuild; entry renders correctly; **Dreamable leak = 0**.
+
+I left dates off per the earlier recommendation — recency is already carried by "Independent Consulting — 2026–Present." Say so if you'd rather pin a `(2026)` tag on it.
+
+Still uncommitted across `resume/` + `mail/` — no `#commit-push` invoked.
+
+---
+
+**Heads-up — exchange is now large (`block` level: 127 lines, 12 cycles).** I won't auto-compact (no opt-in set). If you want, I can run `agent-doc compact tasks/professional/sam-akkouche.md --commit` to collapse the resolved exchange before we continue. Want me to compact, or keep going as-is?
+<!-- agent:boundary:34ac2b82 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -160,10 +181,15 @@ Still uncommitted across `resume/` + `mail/` — no `#commit-push` invoked.
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#j52j] [recommended] Sync MonsterRodHolders growth story into resume/data.toml Experience accomplishment (add SEO + Google Ads + 50% MRR result; optional (2026) recency tag) so it backs up the Career Highlight bullet
 <!-- /agent:backlog -->
 
 ## Icebox
 
 <!-- agent:icebox -->
 <!-- /agent:icebox -->
+
+## Completed / Reaped
+
+<!-- agent:done -->
+- 2026-05-31 [#j52j] [recommended] Sync MonsterRodHolders growth story into resume/data.toml Experience accomplishment (add SEO + Google Ads + 50% MRR result; optional (2026) recency tag) so it backs up the Career Highlight bullet
+<!-- /agent:done -->

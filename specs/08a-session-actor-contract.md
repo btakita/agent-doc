@@ -122,6 +122,19 @@ Later phases may refine caller values without changing the field names.
   prompt-driven `busy -> ready` recovery must fire after every later routed or
   auto-trigger dispatch that returns the same child to an idle prompt; it is not
   a spawn-only one-shot transition.
+- The dispatch-ready wait barrier must repair a stale busy projection without
+  waiting out the full `--wait-for-ready` timeout
+  (`#run-agent-doc-busy-ready-deadlock`, `#snrun`). When the authoritative actor
+  is projected `Busy` but the live pane proves a current-generation dispatch-ready
+  prompt, the wait loop resolves to `Ready` on the first poll that proves the
+  prompt and dispatches immediately, rather than spinning to the deadline and only
+  then applying the post-wait `busy_projection_repaired_by_ready_prompt` promotion.
+  Editor `Run Agent Doc` passes `--wait-for-ready 60`, so the prior
+  spin-then-repair behavior blocked dispatch for ~60s (and sometimes fell through
+  to focus-only with no dispatch) on a pane whose busy projection was already
+  stale — an operator-visible deadlock. A `Busy` projection without a proven ready
+  prompt still stays fail-closed (keeps waiting, then queues), per the
+  direct-evidence rule.
 - The phase-4 route path now consumes the authoritative actor binding through
   project controller IPC. Before submitting a managed or dispatch-only reopen
   into an actor-owned pane, route records a controller `dispatch` attempt for

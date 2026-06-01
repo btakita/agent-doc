@@ -565,6 +565,22 @@ pub fn classify_prompt_ready_barrier(
     {
         return PromptReadyBarrierDecision::Ready;
     }
+    // `#run-agent-doc-busy-ready-deadlock` (#snrun): a `Busy` projection whose
+    // live pane proves a current-generation dispatch-ready prompt is a stale busy
+    // projection, not a real active turn. The post-wait repair
+    // (`busy_projection_repaired_by_ready_prompt`) already promotes this exact
+    // state to `Ready` and dispatches — but only AFTER the full `--wait-for-ready`
+    // timeout (e.g. JB `Run Agent Doc`'s 60s), which the operator perceives as a
+    // deadlock. Recognize the repair in the wait barrier so the loop returns
+    // `Ready` on the first poll that proves the prompt instead of spinning to the
+    // deadline. `prompt_ready` for a `Busy` actor is only ever true when the live
+    // capture matched a harness dispatch-ready prompt, so this never returns
+    // `Ready` for a genuinely mid-turn pane.
+    if busy_projection_repaired_by_ready_prompt(facts.actor_state, facts.prompt_ready)
+        && facts.dispatch_eligible
+    {
+        return PromptReadyBarrierDecision::Ready;
+    }
     if actor_start_wait_terminal_state(facts.actor_state) {
         return PromptReadyBarrierDecision::Terminal;
     }
@@ -1115,6 +1131,40 @@ mod tests {
                 dispatch_eligible: true,
             }),
             PromptReadyBarrierDecision::Ready
+        );
+    }
+
+    #[test]
+    fn prompt_ready_barrier_repairs_busy_projection_with_proven_ready_prompt() {
+        // `#run-agent-doc-busy-ready-deadlock`: a Busy projection with a proven
+        // current-generation ready prompt must resolve the wait barrier to Ready
+        // immediately (the busy-projection repair) instead of spinning to the
+        // --wait-for-ready deadline.
+        assert_eq!(
+            classify_prompt_ready_barrier(PromptReadyBarrierFacts {
+                actor_state: ActorDispatchState::Busy,
+                prompt_ready: true,
+                dispatch_eligible: true,
+            }),
+            PromptReadyBarrierDecision::Ready
+        );
+        // Busy without a proven ready prompt stays fail-closed (keep waiting).
+        assert_eq!(
+            classify_prompt_ready_barrier(PromptReadyBarrierFacts {
+                actor_state: ActorDispatchState::Busy,
+                prompt_ready: false,
+                dispatch_eligible: true,
+            }),
+            PromptReadyBarrierDecision::Continue
+        );
+        // A proven ready prompt without dispatch eligibility must not dispatch.
+        assert_eq!(
+            classify_prompt_ready_barrier(PromptReadyBarrierFacts {
+                actor_state: ActorDispatchState::Busy,
+                prompt_ready: true,
+                dispatch_eligible: false,
+            }),
+            PromptReadyBarrierDecision::Continue
         );
     }
 

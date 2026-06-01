@@ -84,7 +84,39 @@ New text: `#memo-guard Memoization guard — prevent unnecessary downstream casc
 I expanded the active queue and handled `#n12s` as the current head. This item is bookkeeping for the lazily-rs document: the live IPC scaffold-duplication repro has already been logged in `tasks/agent-doc/agent-doc-bugs2.md` as `#zpc2`, and this document was manually repaired in the prior cycle.
 
 I did not change lazily-rs source, specs, or tests for `#n12s` because the remaining prevention work is owned by the agent-doc bug thread (`#zpc2` / `#ipcfullprompt-recur2`) and is still gated on capturing the live JetBrains `PatchWatcher.setText` payload. I verified `src/lazily-rs` is clean and marked `#n12s` done here so the auto queue can advance to the next real lazily-rs implementation item.
-<!-- agent:boundary:3ed7e9b7 -->
+
+### Re: Queue head #exfd — gpt-5
+
+> **Queue prompt:**
+>
+> [#exfd]
+
+
+Implemented Phase 4 effects for `lazily-rs` and marked `#exfd` complete.
+
+What changed:
+- Added `Context::effect(...)` and `EffectHandle` with immediate execution, dependency auto-tracking, scheduled reruns, coalescing, disposal, and cleanup closures.
+- Wired effect invalidation through cells and slots, including dynamic dependency replacement and nested initial-run invalidation without losing cleanup state.
+- Updated `SPEC.md`, `README.md`, and `AGENTS.md` for effect semantics and the current 59-test baseline.
+- Added spec coverage for cell/slot tracking, diamond coalescing, cleanup ordering, disposal, dynamic dependencies, and nested scheduling.
+
+Commits pushed:
+- `src/lazily-rs`: `7a25f8c` (`feat: add reactive effects`)
+- superproject: `da2173de7` (`feat: add lazily reactive effects`)
+- Current `origin/main` is also pushed through `190da40b7`, which includes concurrent agent-doc-bugs2 follow-up commits and the final CI checkout fix.
+
+Verification:
+- `cargo check` passed in `src/lazily-rs`.
+- `cargo fmt` completed.
+- `cargo test` passed: 13 integration tests, 46 spec tests, 0 doctests.
+- `cargo clippy --all-targets -- -D warnings` passed.
+- `cargo build` passed.
+- `cargo package --allow-dirty` passed.
+- `cargo install --path . --force` is not applicable because `lazily` is a library crate with no binaries or examples.
+- Root `make check` passed.
+- Local `make tmux-ci` passed in `src/agent-doc`.
+- GitHub `Agent Doc` run `26736541070` passed both `check` and `tmux-ci`.
+<!-- agent:boundary:ca43f79d -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -92,7 +124,7 @@ I did not change lazily-rs source, specs, or tests for `#n12s` because the remai
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~[#n12s]~
-- [#exfd]
+- ~[#exfd]~
 - [#rx9y]
 - [#fzaf]
 - [#dpzd]
@@ -102,7 +134,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#exfd] #effect-system Phase 4: Effect system — ctx.effect(|ctx| { ... }) with auto-tracking, scheduling, cleanup, and disposal
 - [ ] [#rx9y] #batch-updates ctx.batch(|ctx| { ... }) to defer invalidation until the batch completes
 - [ ] [#fzaf] #memo-guard Memoization guard — prevent unnecessary downstream cascade during invalidation when recomputed value equals prior value (slots are already lazy: invalidated only, recomputed on get())
 - [ ] [#dpzd] #api-ergonomics ctx.computed() alias and DX improvements
@@ -123,4 +154,5 @@ preset #spec-test-build-install-commit-push
 
 <!-- agent:done -->
 - 2026-06-01 [#n12s] #ipc-corruption-live-repro-lazily-rs Logged as #zpc2 in agent-doc-bugs2.md backlog. Live repro of scaffold duplication during finalize --stream. Document manually repaired.
+- 2026-06-01 [#exfd] #effect-system Phase 4: Effect system — ctx.effect(|ctx| { ... }) with auto-tracking, scheduling, cleanup, and disposal
 <!-- /agent:done -->

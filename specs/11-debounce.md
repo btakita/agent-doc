@@ -6,18 +6,36 @@ The debounce subsystem manages multi-layer typing detection across editor plugin
 
 ## Route Quiescence
 
-**Status:** Fixed for editor-triggered route. The route path now treats filesystem
-mtime as only one side of the quiescence proof. When debounce is enabled, route
-waits until both of these are true for the debounce window before it inserts a
-session id, scrubs duplicate prompt residue, or submits a reopen:
+**Status:** Fixed for editor-triggered route. The route path treats the
+cross-process typing indicator as the authoritative quiescence signal and uses
+filesystem mtime only as a fallback when no editor indicator exists. When
+debounce is enabled, route waits before it inserts a session id, scrubs duplicate
+prompt residue, or submits a reopen, classifying the typing indicator as one of:
 
-- the file mtime is idle
-- the cross-process typing indicator is idle
+- **Idle** (indicator file present but older than the debounce window): an editor
+  owns the typing lifecycle and already debounced in-process. Route dispatches
+  **immediately** — it does *not* re-impose the mtime settle.
+- **Active** (indicator updated within the debounce window): the user is still
+  typing. Route keeps waiting regardless of mtime.
+- **Absent** (no indicator file): no editor is tracking the document (CLI /
+  direct-disk caller). Route falls back to the filesystem mtime settle as the
+  only available quiescence proof.
 
-If either signal remains active through the bounded wait, route fails closed and
-asks the caller to retry after typing stops. The CLI `route` default debounce is
-500ms, so JetBrains `Run Agent Doc` gets this binary-owned guard even though the
-plugin also waits in-process before saving.
+If the indicator stays Active (or, for the Absent case, mtime never settles)
+through the bounded wait, route fails closed and asks the caller to retry after
+typing stops. The CLI `route` default debounce is 500ms.
+
+**Latency fix (`#jb-run-agent-doc-double-debounce`):** JetBrains `Run Agent Doc`
+awaits typing idle in-process, then calls `saveAllDocuments()` (which bumps the
+file mtime) immediately before spawning `agent-doc route`. The earlier design
+required *both* mtime idle and indicator idle, so the editor's own pre-route save
+re-triggered a full ~500ms mtime settle inside route — a redundant double
+debounce the operator perceived as "Run Agent Doc takes several seconds to
+dispatch". Because the typing indicator is only written on real keystrokes (not
+on save), an Idle indicator already proves the user stopped typing; the fresh
+mtime is the editor's save, not user input. Route now trusts the Idle indicator
+and skips the redundant mtime wait, while the Absent path keeps the mtime guard
+for non-plugin callers.
 
 Filesystem mtime resolution still varies:
 - **Coarse-grained systems** (e.g., HFS+ on macOS): 1-second resolution
@@ -37,6 +55,7 @@ does not settle.
 
 **Test coverage:** `route_debounce_fails_closed_while_typing_indicator_is_active`,
 `route_debounce_allows_dispatch_after_typing_indicator_expires`,
+`route_dispatches_immediately_when_idle_typing_indicator_present_despite_fresh_mtime`,
 `test_mtime_granularity_100ms_rapid_edits`, `test_mtime_granularity_1s_coarse_system`.
 See `src/route/tests.rs` and `tests/debounce_gaps_test_plan.rs`.
 

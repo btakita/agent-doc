@@ -382,27 +382,59 @@ fn live_buffer_snapshot_path(file: &str) -> PathBuf {
     }
 }
 
+/// Tri-state status of a document's cross-process editor typing indicator.
+///
+/// Distinguishes "no editor is tracking this document" (`Absent`) from "an
+/// editor tracked typing and it has settled" (`Idle`), which `is_typing_via_file`
+/// collapses into the same `false`. Route uses this distinction to skip the
+/// redundant mtime settle when an editor already owns the typing lifecycle
+/// (`#jb-run-agent-doc-double-debounce`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypingIndicatorStatus {
+    /// No typing indicator file exists (or it is malformed) — no editor is
+    /// tracking this document, so the indicator proves nothing.
+    Absent,
+    /// Indicator exists and was updated within `debounce_ms` — user is typing.
+    Active,
+    /// Indicator exists but is older than `debounce_ms` — the editor tracked
+    /// typing and it has since settled.
+    Idle,
+}
+
+/// Classify the cross-process typing indicator for a document.
+///
+/// Reads `.agent-doc/typing/<hash>` and compares its timestamp against the
+/// debounce window. Used by callers that need to tell an idle-but-present
+/// editor indicator apart from a missing one.
+pub fn typing_indicator_status(file: &str, debounce_ms: u64) -> TypingIndicatorStatus {
+    let path = typing_indicator_path(file);
+    match std::fs::read_to_string(&path) {
+        Ok(content) => match content.trim().parse::<u128>() {
+            Ok(ts_ms) => {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis();
+                if now.saturating_sub(ts_ms) < debounce_ms as u128 {
+                    TypingIndicatorStatus::Active
+                } else {
+                    TypingIndicatorStatus::Idle
+                }
+            }
+            // Malformed indicator proves nothing — treat as absent.
+            Err(_) => TypingIndicatorStatus::Absent,
+        },
+        Err(_) => TypingIndicatorStatus::Absent, // No indicator file — not tracked
+    }
+}
+
 /// Check if the document has a recent typing indicator (cross-process).
 ///
 /// Returns `true` if the typing indicator exists and was updated within
 /// `debounce_ms` milliseconds. Used by CLI preflight to detect active typing
 /// from a plugin running in a different process.
 pub fn is_typing_via_file(file: &str, debounce_ms: u64) -> bool {
-    let path = typing_indicator_path(file);
-    match std::fs::read_to_string(&path) {
-        Ok(content) => {
-            if let Ok(ts_ms) = content.trim().parse::<u128>() {
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis();
-                now.saturating_sub(ts_ms) < debounce_ms as u128
-            } else {
-                false
-            }
-        }
-        Err(_) => false, // No indicator file — not typing
-    }
+    typing_indicator_status(file, debounce_ms) == TypingIndicatorStatus::Active
 }
 
 /// Block until the typing indicator shows idle, or timeout.

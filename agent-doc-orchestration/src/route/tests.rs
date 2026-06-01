@@ -515,6 +515,42 @@ fn route_debounce_allows_dispatch_after_typing_indicator_expires() {
 }
 
 #[test]
+fn route_dispatches_immediately_when_idle_typing_indicator_present_despite_fresh_mtime() {
+    // `#jb-run-agent-doc-double-debounce`: the editor already awaited typing
+    // idle in-process, then `saveAllDocuments()` bumped the file mtime right
+    // before spawning route. Route must not re-impose the full mtime debounce on
+    // the editor's own pre-route save when the cross-process typing indicator is
+    // idle — that redundant wait is the "several seconds to dispatch" latency.
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("session.md");
+    std::fs::write(&doc, "settled prompt\n").unwrap();
+    let doc_str = doc.to_string_lossy().to_string();
+
+    // Editor tracked typing, then went idle (indicator present but stale).
+    crate::debounce::document_changed(&doc_str);
+    std::thread::sleep(Duration::from_millis(80)); // exceed the 50ms debounce window
+
+    assert_eq!(
+        crate::debounce::typing_indicator_status(&doc_str, 50),
+        crate::debounce::TypingIndicatorStatus::Idle,
+        "indicator should report idle after the debounce window elapses"
+    );
+
+    // Editor's pre-route save bumps mtime to "now" (simulates saveAllDocuments()).
+    std::fs::write(&doc, "settled prompt\n").unwrap();
+
+    let start = std::time::Instant::now();
+    await_idle_with_max_wait(&doc, Duration::from_millis(50), Duration::from_millis(2000))
+        .expect("an idle editor typing indicator must authorize immediate dispatch");
+    assert!(
+        start.elapsed() < Duration::from_millis(50),
+        "route must not re-impose the mtime debounce when the editor indicator is idle (elapsed {:?})",
+        start.elapsed()
+    );
+}
+
+#[test]
 fn route_enqueue_dispatch_prompt_creates_visible_auto_queue_and_snapshot() {
     let dir = tempfile::TempDir::new().unwrap();
     std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();

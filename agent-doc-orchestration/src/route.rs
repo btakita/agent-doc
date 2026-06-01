@@ -8332,6 +8332,7 @@ fn await_idle(file: &Path, debounce: Duration) -> Result<()> {
 
 fn await_idle_with_max_wait(file: &Path, debounce: Duration, max_wait: Duration) -> Result<()> {
     use std::time::Instant;
+    use crate::debounce::TypingIndicatorStatus;
 
     let poll_interval = Duration::from_millis(100);
     let start = Instant::now();
@@ -8339,27 +8340,57 @@ fn await_idle_with_max_wait(file: &Path, debounce: Duration, max_wait: Duration)
     let file_str = file.to_string_lossy();
 
     loop {
-        let mtime = std::fs::metadata(file)
-            .and_then(|m| m.modified())
-            .with_context(|| format!("failed to stat {}", file.display()))?;
-        let elapsed_since_edit = mtime.elapsed().unwrap_or(Duration::ZERO);
-        let typing_active = crate::debounce::is_typing_via_file(&file_str, debounce_ms);
+        let indicator = crate::debounce::typing_indicator_status(&file_str, debounce_ms);
 
-        if elapsed_since_edit >= debounce && !typing_active {
-            eprintln!(
-                "[route] debounce OK — file idle for {:.1}s and typing indicator idle",
-                elapsed_since_edit.as_secs_f64(),
-            );
-            return Ok(());
+        // `#jb-run-agent-doc-double-debounce`: when an editor owns the typing
+        // lifecycle and its indicator reports idle, the editor already debounced
+        // in-process before saving and routing. The editor's pre-route save
+        // (`saveAllDocuments()`) freshly bumps the file mtime, so re-imposing the
+        // mtime settle here double-counts the editor's own write as if it were
+        // user typing — a redundant ~debounce-long wait the operator perceives as
+        // "Run Agent Doc takes several seconds". The idle indicator is the
+        // authoritative cross-process typing signal, so trust it and dispatch
+        // immediately. CLI / direct-disk edits leave no indicator (`Absent`) and
+        // keep the mtime debounce below as the fail-closed typing guard.
+        match indicator {
+            TypingIndicatorStatus::Idle => {
+                eprintln!(
+                    "[route] debounce OK — editor typing indicator idle (skipping redundant mtime settle for editor pre-route save)"
+                );
+                return Ok(());
+            }
+            TypingIndicatorStatus::Active => {
+                // Editor reports active typing — keep waiting regardless of mtime.
+            }
+            TypingIndicatorStatus::Absent => {
+                // No editor indicator (CLI / direct-disk caller): fall back to the
+                // filesystem mtime settle as the only available quiescence proof.
+                let mtime = std::fs::metadata(file)
+                    .and_then(|m| m.modified())
+                    .with_context(|| format!("failed to stat {}", file.display()))?;
+                let elapsed_since_edit = mtime.elapsed().unwrap_or(Duration::ZERO);
+                if elapsed_since_edit >= debounce {
+                    eprintln!(
+                        "[route] debounce OK — file idle for {:.1}s and no editor typing indicator",
+                        elapsed_since_edit.as_secs_f64(),
+                    );
+                    return Ok(());
+                }
+            }
         }
 
         if start.elapsed() >= max_wait {
+            let elapsed_since_edit = std::fs::metadata(file)
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|m| m.elapsed().ok())
+                .unwrap_or(Duration::ZERO);
             anyhow::bail!(
                 "route deferred for {}: document did not settle within {}ms (mtime_idle_ms={}, typing_active={}); retry after typing stops",
                 file.display(),
                 max_wait.as_millis(),
                 elapsed_since_edit.as_millis(),
-                typing_active
+                indicator == TypingIndicatorStatus::Active
             );
         }
 

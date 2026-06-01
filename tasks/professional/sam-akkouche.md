@@ -41,7 +41,27 @@ Created the contact at `mail/contacts/sam-akkouche/` (`corky contact add` + cano
 The contact file is structured the same way as the other professional contacts (role / company / LinkedIn / location header, then Relationship / Formality / Tone / Topics / Research / Notes), so it's ready for email drafting once an address comes in.
 
 Sources: [Sam Akkouche — Signify Technology (LinkedIn)](https://www.linkedin.com/in/sam-akkouche/), [Signify Technology](https://www.signifytechnology.com/)
-<!-- agent:boundary:2f874885 -->
+❯ Create a resume for my call with sam-akkouche tomorrow morning at 11am.
+
+### Re: Create a resume for the sam-akkouche call (tomorrow 11am) — opus-4-8
+
+Built a tailored resume: **`resume/BrianTakita-sam-akkouche.pdf`**.
+
+**Tailoring rationale** — Sam recruits for **Signify Technology**, a functional-programming staffing agency (Rust / Scala / Go + Software Engineering / Data / Cloud / Leadership). So the profile (`resume/profiles/sam-akkouche.toml`) leads with your **Rust + functional/reactive + systems** signal:
+
+- **Skills** surface Rust, Go, Functional/Reactive Programming, TypeScript, Python, ZeroMQ, Docker, AWS.
+- **Experience order:** Independent Consulting (recent Rust tooling — corky, agent-doc, tagpath) → Presence AI (real-time multimodal pipeline) → Open Source → Milyoni → TrueCar → Censible → Pivotal Labs.
+- Auto-bolds Rust, functional programming, reactive contexts, CRDT/3-way-merge/streaming-merge, event-driven, cloud, plus leadership/career signals (20+ years, 20+ startups, RailsConf 2008) for Signify's Leadership vertical.
+
+**Verification:**
+- `make PROFILE=sam-akkouche` built cleanly.
+- `pdftotext` confirms **10 Rust mentions** and all targeted companies present.
+- **Confidentiality:** Dreamable leak check = **0** — it renders as "Confidential AI Startup" (skills-only), per the confidentiality rule.
+
+**Left uncommitted** (no `#commit-push` invoked): the new `resume/profiles/sam-akkouche.toml` and `resume/BrianTakita-sam-akkouche.pdf` are in the `resume/` submodule working tree, plus the earlier `mail/` contact. Say the word and I'll commit + push.
+
+One gap: the profile leans on public web data for Sam's role since LinkedIn was auth-walled — if you learn specifics before the call (exact role/team, what they're hiring for), I can re-tailor in minutes.
+<!-- agent:boundary:f778b2ed -->
 <!-- /agent:exchange -->
 
 ## Queue

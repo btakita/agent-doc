@@ -2163,9 +2163,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
                     file.display()
                 ),
             );
-            eprintln!(
-                "[preflight] probe: skipping preflight_started cycle (inspection only)"
-            );
+            eprintln!("[preflight] probe: skipping preflight_started cycle (inspection only)");
         } else {
             let snap = crate::snapshot::load(file).unwrap_or(None);
             let file_content = std::fs::read_to_string(file).unwrap_or_default();
@@ -2421,16 +2419,21 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         if directive_ids.is_empty() {
             Vec::new()
         } else {
-            let open_backlog: std::collections::HashSet<String> = std::fs::read_to_string(file)
-                .ok()
-                .and_then(|content| crate::component::parse(&content).ok().map(|c| (content, c)))
+            // Read the live document once for the open-backlog set.
+            let parsed = std::fs::read_to_string(file).ok().and_then(|content| {
+                crate::component::parse(&content)
+                    .ok()
+                    .map(|components| (content, components))
+            });
+            let open_backlog: std::collections::HashSet<String> = parsed
+                .as_ref()
                 .map(|(content, components)| {
                     components
-                        .into_iter()
+                        .iter()
                         .filter(|component| crate::component::is_backlog_component(&component.name))
                         .flat_map(|component| {
                             let (_, items, _) =
-                                crate::pending::parse_items(component.content(&content));
+                                crate::pending::parse_items(component.content(content));
                             items
                         })
                         .filter(|item| !item.is_done())
@@ -2439,11 +2442,12 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
                         .collect::<std::collections::HashSet<String>>()
                 })
                 .unwrap_or_default();
-            directive_ids
-                .into_iter()
-                .map(|id| crate::pending::normalize_pending_id(&id))
-                .filter(|id| open_backlog.contains(id))
-                .collect::<Vec<_>>()
+            let synced_queue_ids = queue_state
+                .synced_queue_ids
+                .iter()
+                .cloned()
+                .collect::<std::collections::HashSet<String>>();
+            filter_expect_done_or_gate_ids(&directive_ids, &open_backlog, &synced_queue_ids)
         }
     };
     if !no_changes {
@@ -2516,7 +2520,10 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         let unresolved_prompt = prompt_bearing_changes
             .iter()
             .find(|change| {
-                matches!(change.kind, crate::diff::PromptBearingChangeKind::PromptTarget)
+                matches!(
+                    change.kind,
+                    crate::diff::PromptBearingChangeKind::PromptTarget
+                )
             })
             .map(|change| change.text.clone());
         let current = std::fs::read_to_string(file).unwrap_or_default();
@@ -3008,6 +3015,7 @@ struct QueueState {
     queue_start_at: Option<String>,
     queue_trigger: Option<crate::queue::QueueTrigger>,
     queue_halted: Option<String>,
+    synced_queue_ids: Vec<String>,
     warnings: Vec<PreflightWarning>,
 }
 
@@ -3026,6 +3034,36 @@ struct QueueState {
 /// queue-tagged component's mode wins) and the active item ids from every
 /// queue-tagged source component, in document order. Returns `None` when no
 /// source component carries a recognized `queue` attribute.
+/// Narrow the raw `do [#id]` directive target ids to the set that must reach a
+/// `--done`/`--pending-gate` lifecycle outcome this cycle: ids still open in the
+/// live backlog, minus any id that the backlog→queue sync auto-populated this
+/// cycle (`#queue-sync-auto-pending-done-guard-misfire`). Synced ids are agent
+/// queue maintenance, not user directives, so demanding they be resolved in the
+/// populating cycle is a false-closed misfire.
+fn filter_expect_done_or_gate_ids(
+    directive_ids: &[String],
+    open_backlog_ids: &std::collections::HashSet<String>,
+    synced_queue_ids: &std::collections::HashSet<String>,
+) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    directive_ids
+        .iter()
+        .map(|id| crate::pending::normalize_pending_id(id))
+        .filter(|id| open_backlog_ids.contains(id))
+        .filter(|id| !synced_queue_ids.contains(id))
+        .filter(|id| seen.insert(id.clone()))
+        .collect()
+}
+
+fn queue_entry_do_id(entry: &crate::queue::QueueEntry) -> Option<String> {
+    match entry {
+        crate::queue::QueueEntry::Prompt(prompt) | crate::queue::QueueEntry::Completed(prompt) => {
+            queue_prompt_done_id(&prompt.text)
+        }
+        _ => None,
+    }
+}
+
 fn collect_backlog_queue_sync(
     components: &[crate::component::Component],
     content: &str,
@@ -3098,6 +3136,7 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
     let mut mutated = false;
     let mut current_content = content.clone();
     let mut queue_warnings = Vec::new();
+    let mut synced_queue_ids = Vec::new();
 
     // Backlog→queue sync (#backlog-queue-sync-attr): when an `agent:backlog` /
     // `agent:icebox` component carries a `queue` attribute, regenerate the queue
@@ -3106,6 +3145,17 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
     if let Some((mode, backlog_ids)) = collect_backlog_queue_sync(&components, &content)
         && let Some(synced) = crate::queue::sync_backlog_into_queue(&entries, &backlog_ids, mode)
     {
+        let pre_sync_ids = entries
+            .iter()
+            .filter_map(queue_entry_do_id)
+            .collect::<std::collections::HashSet<String>>();
+        let mut seen_synced_ids = std::collections::HashSet::new();
+        synced_queue_ids = synced
+            .iter()
+            .filter_map(queue_entry_do_id)
+            .filter(|id| !pre_sync_ids.contains(id))
+            .filter(|id| seen_synced_ids.insert(id.clone()))
+            .collect();
         let new_body = crate::queue::render(&synced);
         current_content = {
             let comps = crate::component::parse(&current_content)?;
@@ -3325,6 +3375,7 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
                 queue_start_at: None,
                 queue_trigger: activation.trigger,
                 queue_halted: Some("stop_fence".into()),
+                synced_queue_ids,
                 warnings: Vec::new(),
             });
         }
@@ -3339,6 +3390,7 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
                 queue_start_at: Some(dt.to_string()),
                 queue_trigger: activation.trigger,
                 queue_halted: None,
+                synced_queue_ids,
                 warnings: Vec::new(),
             });
         }
@@ -3435,6 +3487,7 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
                     queue_start_at: None,
                     queue_trigger: activation.trigger,
                     queue_halted: Some("item_modified".into()),
+                    synced_queue_ids,
                     warnings: Vec::new(),
                 });
             }
@@ -3636,6 +3689,7 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
         queue_start_at: activation.start_at,
         queue_trigger: activation.trigger,
         queue_halted: None,
+        synced_queue_ids,
         warnings: queue_warnings,
     })
 }
@@ -5135,10 +5189,17 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         snapshot::save(&doc, content).unwrap();
 
-        run_queue_maintenance(&doc, None).unwrap();
+        let state = run_queue_maintenance(&doc, None).unwrap();
 
         let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("- do [#alpha]"), "synced queue:\n{updated}");
+        assert_eq!(
+            state.synced_queue_ids,
+            vec!["alpha".to_string(), "beta".to_string()]
+        );
+        assert!(
+            updated.contains("- do [#alpha]"),
+            "synced queue:\n{updated}"
+        );
         assert!(updated.contains("- do [#beta]"));
         assert!(
             !updated.contains("- do [#gated]"),
@@ -5166,14 +5227,70 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         snapshot::save(&doc, content).unwrap();
 
-        run_queue_maintenance(&doc, None).unwrap();
+        let state = run_queue_maintenance(&doc, None).unwrap();
 
         let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            state.synced_queue_ids.is_empty(),
+            "idempotent sync should not report freshly-added ids"
+        );
         assert_eq!(
             updated.matches("- do [#alpha]").count(),
             1,
             "append must not duplicate an already-queued id:\n{updated}"
         );
+    }
+
+    #[test]
+    fn run_queue_maintenance_records_only_newly_synced_ids() {
+        // The existing queue head must stay outside the synced-id exclusion set
+        // so pending_done_guard still requires the consumed `do [#worked]` item
+        // to be done/gated.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#worked]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog queue=prepend -->\n",
+            "- [ ] [#worked] the real queue head\n",
+            "- [ ] [#alpha] freshly synced\n",
+            "- [ ] [#beta] freshly synced\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+
+        assert_eq!(
+            state.synced_queue_ids,
+            vec!["alpha".to_string(), "beta".to_string()]
+        );
+        let open_backlog: std::collections::HashSet<String> = ["worked", "alpha", "beta"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let synced_queue_ids = state
+            .synced_queue_ids
+            .iter()
+            .cloned()
+            .collect::<std::collections::HashSet<String>>();
+        let result = filter_expect_done_or_gate_ids(
+            &[
+                "worked".to_string(),
+                "alpha".to_string(),
+                "beta".to_string(),
+            ],
+            &open_backlog,
+            &synced_queue_ids,
+        );
+        assert_eq!(result, vec!["worked".to_string()]);
     }
 
     #[test]
@@ -5442,7 +5559,10 @@ mod tests {
             );
             let conv = convergences[0];
             assert_eq!(conv["queue_auto"], serde_json::json!(false));
-            assert_eq!(conv["frontmatter"], serde_json::json!("queue_active: false"));
+            assert_eq!(
+                conv["frontmatter"],
+                serde_json::json!("queue_active: false")
+            );
         }
 
         // Idempotency: a follow-up maintenance pass on the converged document
@@ -5452,7 +5572,10 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(100));
         {
             let msgs = received.lock().unwrap();
-            let convergences = msgs.iter().filter(|m| m.get("queue_auto").is_some()).count();
+            let convergences = msgs
+                .iter()
+                .filter(|m| m.get("queue_auto").is_some())
+                .count();
             assert_eq!(
                 convergences, 1,
                 "follow-up maintenance must not re-diverge / re-send convergence"
@@ -5547,7 +5670,10 @@ mod tests {
         let before = std::fs::read_to_string(&doc).unwrap();
         let _ = run_queue_maintenance(&doc, None).unwrap();
         let after = std::fs::read_to_string(&doc).unwrap();
-        assert_eq!(before, after, "queue maintenance must be idempotent after dedup");
+        assert_eq!(
+            before, after,
+            "queue maintenance must be idempotent after dedup"
+        );
     }
 
     #[test]
@@ -6284,8 +6410,13 @@ mod tests {
             .output()
             .unwrap();
         crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(committed), Some(committed))
-            .unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
 
         // Late-IPC replay re-inserts an EARLIER committed response (A) at the
         // tail, separated from its original by response B. This is NOT a
@@ -7847,7 +7978,11 @@ mod tests {
         let warning = misplaced_component_attr_warning(Path::new("session.md"), content)
             .expect("typo'd attribute on a component should warn");
         assert_eq!(warning.code, "misplaced_component_attr");
-        assert!(warning.message.contains("not a recognized component attribute"));
+        assert!(
+            warning
+                .message
+                .contains("not a recognized component attribute")
+        );
         assert!(warning.message.contains("auot"));
     }
 
@@ -7917,7 +8052,10 @@ mod tests {
         let updated = std::fs::read_to_string(&doc).unwrap();
         let high = updated.find("[#high]").unwrap();
         let low = updated.find("[#low]").unwrap();
-        assert!(high < low, "priority=1 item must sort before priority=5:\n{updated}");
+        assert!(
+            high < low,
+            "priority=1 item must sort before priority=5:\n{updated}"
+        );
     }
 
     #[test]
@@ -7952,7 +8090,10 @@ mod tests {
         let queue_region = &updated[q..qend];
         let high = queue_region.find("do [#high]").unwrap();
         let low = queue_region.find("do [#low]").unwrap();
-        assert!(high < low, "priority=1 must sort before priority=5 in queue:\n{queue_region}");
+        assert!(
+            high < low,
+            "priority=1 must sort before priority=5 in queue:\n{queue_region}"
+        );
     }
 
     #[test]
@@ -7985,6 +8126,40 @@ mod tests {
             .expect("backlog with queue attr should produce a sync request");
         assert_eq!(mode, crate::queue::BacklogQueueSyncMode::Sync);
         assert_eq!(ids, vec!["a".to_string(), "b".to_string()]);
+    }
+
+    #[test]
+    fn filter_expect_done_or_gate_excludes_synced_queue_ids() {
+        // #queue-sync-auto-pending-done-guard-misfire: a cycle that works one
+        // directive (#worked) while the backlog→queue sync auto-populated
+        // do[#a]/do[#b]/#worked into the active queue must demand only the
+        // genuine worked directive, never the freshly-synced siblings.
+        let directive_ids = vec!["worked".to_string(), "a".to_string(), "b".to_string()];
+        let open_backlog: std::collections::HashSet<String> =
+            ["worked", "a", "b"].iter().map(|s| s.to_string()).collect();
+        let synced_queue_ids: std::collections::HashSet<String> =
+            ["a", "b"].iter().map(|s| s.to_string()).collect();
+        let result =
+            filter_expect_done_or_gate_ids(&directive_ids, &open_backlog, &synced_queue_ids);
+        assert_eq!(result, vec!["worked".to_string()]);
+    }
+
+    #[test]
+    fn filter_expect_done_or_gate_keeps_open_directives_without_sync() {
+        // No sync attribute → no exclusion; an open user directive stays demanded,
+        // a directive whose backlog item is already resolved drops out, and
+        // duplicates collapse.
+        let directive_ids = vec![
+            "open".to_string(),
+            "open".to_string(),
+            "resolved".to_string(),
+        ];
+        let open_backlog: std::collections::HashSet<String> =
+            ["open"].iter().map(|s| s.to_string()).collect();
+        let synced_queue_ids = std::collections::HashSet::new();
+        let result =
+            filter_expect_done_or_gate_ids(&directive_ids, &open_backlog, &synced_queue_ids);
+        assert_eq!(result, vec!["open".to_string()]);
     }
 
     #[test]
@@ -8346,7 +8521,9 @@ mod tests {
 
         let file_after = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            !file_after.contains(&format!("head -->\n❯ {prompt}\n❯ #spec-test-build-install-commit-push")),
+            !file_after.contains(&format!(
+                "head -->\n❯ {prompt}\n❯ #spec-test-build-install-commit-push"
+            )),
             "preflight should scrub duplicate answered-form prompt tails before diffing:\n{file_after}"
         );
         assert!(
@@ -8355,7 +8532,9 @@ mod tests {
         );
         let snapshot_after = crate::snapshot::load(&doc).unwrap().unwrap();
         assert!(
-            !snapshot_after.contains(&format!("head -->\n❯ {prompt}\n❯ #spec-test-build-install-commit-push")),
+            !snapshot_after.contains(&format!(
+                "head -->\n❯ {prompt}\n❯ #spec-test-build-install-commit-push"
+            )),
             "snapshot must not absorb the duplicate tail cleanup prompt"
         );
     }

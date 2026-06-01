@@ -9,7 +9,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -185,7 +185,8 @@ Using `tokei` for accurate code/comments/blanks breakdown:
 **Total code (no comments, no blanks): ~380,022 LoC**
 
 Comment ratio is low across the stack: ~12K comment lines out of ~424K total non-blank lines (~2.9%). agent-doc and session-share have the highest comment counts; tsift and tagpath are comment-sparse.
-<!-- agent:boundary:b653e6e3 -->
+Use `cloc` to calculate the results. Show the `cloc` output with these libraries. Show totals as well.
+<!-- agent:boundary:79de22db -->
 <!-- /agent:exchange -->
 
 <!--
@@ -193,7 +194,8 @@ Comment ratio is low across the stack: ~12K comment lines out of ~424K total non
 
 ## Pending / Not Built
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+- Use `cloc` to calculate the results. Show the `cloc` output with these libraries. Show totals as well.
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

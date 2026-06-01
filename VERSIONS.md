@@ -6,6 +6,20 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Queue-audit partial-completion advisory (`#queue-audit-partial-completion`,
+  WARN-only).** A queue-completion audit that reports the queue as "none
+  complete" while citing several completed substeps — collapsing partial progress
+  into all-or-none — now trips `check_queue_audit_partial_completion_guard`, which
+  recommends classifying each row as complete / partially complete / not-started
+  with the completed substeps and exact remaining condition. Conservative,
+  WARN-only (never blocks closeout), suppressed by `<!-- no-queue-audit-guard -->`.
+  Per the binary-vs-skill rule, per-row classification is response-contract
+  guidance (skill/spec); the binary only flags the unambiguous collapse.
+  Regressions: `queue_audit_guard_warns_when_none_complete_collapses_partial_progress`,
+  `queue_audit_guard_quiet_when_partial_states_already_given`,
+  `queue_audit_guard_quiet_when_not_about_queue`,
+  `queue_audit_guard_quiet_without_extra_completion_evidence`,
+  `queue_audit_guard_suppressed_by_marker`.
 - **Auto-queue no longer strands live items when a new head is inserted
   (`#completed-queue-residue-regression` / `#queue-auto-no-continue`).**
   `detect_head_prompt_modified` compared only the first queue prompt's text, so

@@ -281,7 +281,10 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // +6 (#gated-followup-split-enforcement): one `gated_phase_split_guard_fired`
         // ops event for the warn-first multi-phase split advisory, plus its five
         // `check_gated_phase_split_guard` regression test-fn names.
-        ("agent-doc-orchestration/src/session_check.rs", "guard_") => 57,
+        // +6 (#queue-audit-partial-completion): one `queue_audit_partial_completion_guard_fired`
+        // ops event for the warn-first queue-audit collapse advisory, plus its
+        // five `queue_audit_guard_*` regression test-fn names.
+        ("agent-doc-orchestration/src/session_check.rs", "guard_") => 63,
         ("agent-doc-orchestration/src/write.rs", "guard_") => 70,
         // +1 for the audited `bare_write_escalated_to_commit ... reason=response_body_placed`
         // ops_log diagnostic on the #bare-write-captured-uncommitted escalation path.

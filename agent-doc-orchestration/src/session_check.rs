@@ -266,6 +266,7 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
             check_partial_closeout_state_guard(file)?,
             check_blocked_closeout_followup_guard(file)?,
             check_gated_phase_split_guard(file)?,
+            check_queue_audit_partial_completion_guard(file)?,
         ] {
             match guard {
                 GuardResult::None => {}
@@ -2807,6 +2808,111 @@ fn body_already_split_into_child_ids(body: &str, own_id: &str) -> bool {
         }
     }
     others.len() >= 2
+}
+
+/// Substep-completion phrases that evidence partial progress in a queue audit.
+const QUEUE_AUDIT_SUBSTEP_COMPLETE_PHRASES: &[&str] = &[
+    "is complete",
+    "was complete",
+    "are complete",
+    "were complete",
+    "is done",
+    "was done",
+    "was clean",
+    "is clean",
+    "is current",
+    "are current",
+    "passed",
+    "verified clean",
+    "already complete",
+];
+
+/// `#queue-audit-partial-completion`: detect a queue-completion audit response
+/// that collapses meaningful partial progress into a blanket "none complete."
+///
+/// A queue audit ("which queue items are complete?") should classify each row as
+/// complete / partially complete / not-started, naming completed substeps and the
+/// exact remaining condition — not answer "none are complete" just because every
+/// row still has one remaining action. This warn-first guard fires only on the
+/// clearest collapse signal: the response is about the queue, makes a blanket
+/// none-complete claim, shows at least two distinct substep-completion signals,
+/// and never frames anything as "partial." It is WARN-only (never blocks
+/// closeout) and suppressed by a `<!-- no-queue-audit-guard -->` marker.
+///
+/// The richer per-row state table is response guidance (a natural-language
+/// judgment that lives in the skill/spec contract, per the binary-vs-skill rule),
+/// so the binary only flags the unambiguous collapse rather than trying to
+/// classify free-text rows itself.
+fn check_queue_audit_partial_completion_guard(file: &Path) -> Result<GuardResult> {
+    let Some(state) = crate::cycle_state::load(file)? else {
+        return Ok(GuardResult::None);
+    };
+    if state.is_open() {
+        return Ok(GuardResult::None);
+    }
+    let Some(capture_id) = state.capture_id.as_deref() else {
+        return Ok(GuardResult::None);
+    };
+    let Some(capture) = crate::capture::load_by_id(file, capture_id)? else {
+        return Ok(GuardResult::None);
+    };
+    if capture.state != crate::capture::CaptureState::Committed {
+        return Ok(GuardResult::None);
+    }
+    if capture
+        .response_body
+        .contains("<!-- no-queue-audit-guard -->")
+    {
+        return Ok(GuardResult::None);
+    }
+
+    let text = response_text_for_guards(&capture.response_body);
+    let lower = text.to_ascii_lowercase();
+    if !queue_audit_collapses_partial_completion(&lower) {
+        return Ok(GuardResult::None);
+    }
+
+    crate::ops_log::log_op(
+        file,
+        &format!("queue_audit_partial_completion_guard_fired file={}", file.display()),
+    );
+
+    Ok(GuardResult::Warn(vec![
+        "[session-check] warn: this queue-completion audit reports the queue as not complete while also citing several completed substeps, but never classifies any row as partially complete — meaningful partial progress is collapsed into \"none complete\"".to_string(),
+        "[session-check] hint: classify each queue row as complete / partially complete / not-started, naming the completed substeps and the exact remaining condition for partial rows; recommend splitting a row with multiple gateable phases. Add `<!-- no-queue-audit-guard -->` if the all-or-none framing is intentional.".to_string(),
+    ]))
+}
+
+/// True when a queue-audit response collapses partial completion: it is about the
+/// queue, makes a blanket none-complete claim, shows >=2 distinct substep
+/// completions, and never frames anything as "partial."
+fn queue_audit_collapses_partial_completion(lower: &str) -> bool {
+    if !lower.contains("queue") {
+        return false;
+    }
+    // Already broke it down — not a collapse.
+    if lower.contains("partial") {
+        return false;
+    }
+    if !queue_audit_has_none_complete_claim(lower) {
+        return false;
+    }
+    let substep_completions = QUEUE_AUDIT_SUBSTEP_COMPLETE_PHRASES
+        .iter()
+        .filter(|phrase| lower.contains(*phrase))
+        .count();
+    substep_completions >= 2
+}
+
+/// A blanket "none / not ... complete" claim about the queue items.
+fn queue_audit_has_none_complete_claim(lower: &str) -> bool {
+    static NONE_COMPLETE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        // "none of the queue items is/are (fully) complete", "no items are
+        // complete", "none are fully complete", etc. — a none/no quantifier
+        // within a short span before a complete/completed token.
+        regex::Regex::new(r"\b(none|no)\b[^.\n]{0,60}?\bcomplet(e|ed)\b").unwrap()
+    });
+    NONE_COMPLETE.is_match(lower)
 }
 
 fn single_open_review_item_id(file: &Path) -> Result<Option<String>> {
@@ -6610,6 +6716,76 @@ Body\n\
             SessionCheckStatus::Ok(_) => {}
             other => panic!("split advisory must not block closeout, got {other:?}"),
         }
+    }
+
+    // `#queue-audit-partial-completion`: a queue-completion audit that collapses
+    // partial progress into "none complete."
+    #[test]
+    fn queue_audit_guard_warns_when_none_complete_collapses_partial_progress() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let response = "### Re: which queue items are complete? — gpt-5\n\nNone of the six queue items are complete. Same-day QA is complete and the URL validate-only check was clean, but each row still has at least one remaining action.\n";
+        let doc = setup_blocked_closeout_cycle(
+            tmp.path(),
+            response,
+            None,
+            None,
+            &[],
+            &[],
+            &[],
+            false,
+        );
+        match check_queue_audit_partial_completion_guard(&doc).unwrap() {
+            GuardResult::Warn(lines) => {
+                assert!(lines.iter().any(|l| l.contains("partially complete")), "{lines:?}");
+            }
+            other => panic!("expected queue-audit collapse warning, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn queue_audit_guard_quiet_when_partial_states_already_given() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let response = "### Re: which queue items are complete? — gpt-5\n\nNone of the queue items are fully complete, but several are partially complete: same-day QA is complete and the validate-only check was clean, each with one remaining action.\n";
+        let doc = setup_blocked_closeout_cycle(tmp.path(), response, None, None, &[], &[], &[], false);
+        assert!(matches!(
+            check_queue_audit_partial_completion_guard(&doc).unwrap(),
+            GuardResult::None
+        ));
+    }
+
+    #[test]
+    fn queue_audit_guard_quiet_when_not_about_queue() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let response = "### Re: status — gpt-5\n\nNone of the migration steps are complete. The schema dump is complete and the backup was clean.\n";
+        let doc = setup_blocked_closeout_cycle(tmp.path(), response, None, None, &[], &[], &[], false);
+        assert!(matches!(
+            check_queue_audit_partial_completion_guard(&doc).unwrap(),
+            GuardResult::None
+        ));
+    }
+
+    #[test]
+    fn queue_audit_guard_quiet_without_extra_completion_evidence() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // Blanket none-complete with no additional substep-completion evidence is
+        // a legitimate "nothing done yet" answer, not a collapse.
+        let response = "### Re: which queue items are complete? — gpt-5\n\nNone of the queue items are complete yet; every row is still blocked on input.\n";
+        let doc = setup_blocked_closeout_cycle(tmp.path(), response, None, None, &[], &[], &[], false);
+        assert!(matches!(
+            check_queue_audit_partial_completion_guard(&doc).unwrap(),
+            GuardResult::None
+        ));
+    }
+
+    #[test]
+    fn queue_audit_guard_suppressed_by_marker() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let response = "### Re: which queue items are complete? — gpt-5\n\nNone of the six queue items are complete. Same-day QA is complete and the check was clean. <!-- no-queue-audit-guard -->\n";
+        let doc = setup_blocked_closeout_cycle(tmp.path(), response, None, None, &[], &[], &[], false);
+        assert!(matches!(
+            check_queue_audit_partial_completion_guard(&doc).unwrap(),
+            GuardResult::None
+        ));
     }
 
     #[test]

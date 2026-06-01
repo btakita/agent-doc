@@ -41,8 +41,7 @@ Done — rewrote the MonsterRodHolders Experience entry in `resume/data.toml` an
 
 > **MonsterRodHolders.com** — Rescued a failing WooCommerce storefront (57-SKU catalog) and grew MRR 50% in one month through SEO and Google Ads. Diagnosed a **card-testing bot attack** (170+ fraudulent PayPal orders in two weeks, threatening merchant-account standing) from order-database analysis and mitigated it — deployed **Cloudflare Turnstile** on checkout to block headless bots, removed the low-cost product the bots used to validate stolen cards, and drove **PayPal fraud controls** (3D Secure, AVS/velocity filters). Hardened **WordPress security** after an admin-account compromise, configured Cloudflare CDN for performance and DDoS protection, and restored analytics tracking. WordPress, WooCommerce, Cloudflare Turnstile, PayPal, SEO, Google Ads, Cloudflare CDN, Google Analytics.
 
-**Changes:**
-- **Removed** "evaluated WordPress-vs-Shopify migration."
+**Changes:**- **Removed** "evaluated WordPress-vs-Shopify migration."
 - **Added** the bot/fraud mitigation with **Cloudflare Turnstile**, **WordPress security** hardening, and **PayPal** fraud controls.
 - Sourced from your commit/correspondence history — the high-end signal here is *diagnosing* a card-testing attack from order-DB analysis (170+ fraudulent orders, real-customer silent-decline risk) and *collapsing the attack economics* (removing the $1 stolen-card validation product), not just installing a CAPTCHA.
 
@@ -51,7 +50,27 @@ Done — rewrote the MonsterRodHolders Experience entry in `resume/data.toml` an
 Note: this entry is now detailed (4 sentences) — appropriate for an Experience bullet, but if you want it tighter for one-page density, say so and I'll compress the fraud/security clause.
 
 Still uncommitted across `resume/` + `mail/` — no `#commit-push` invoked. (Exchange remains at `block`-level accretion — compaction offer still stands.)
-<!-- agent:boundary:e1ac467e -->
+Should I mention real-time Voice Agent with On Demand asset generation? Will this break my agreement with Dreamable?
+
+### Re: Mention real-time Voice Agent + on-demand asset generation? Does it break the Dreamable agreement? — opus-4-8
+
+Short answer: **describe it as a generic capability, not as their product — and don't put it on the resume as something you "built for the client" without checking your actual NDA.** I can't read your agreement, so treat this as risk-reduction guidance, not a legal ruling.
+
+**Why the specific phrasing is risky:**
+"Real-time Voice Agent with on-demand asset generation" is a **product-architecture description** — it tells a reader *what Dreamable's product does*, even with the name redacted. The standing confidentiality rule for that engagement is **skills-only: never the name and never the product architecture**. A distinctive product concept can identify the company (or its IP) as surely as the name, so this crosses the line the rule is drawing.
+
+**The safe vs. risky distinction:**
+- ✅ **Safe (capability/skill framing):** "real-time voice AI," "streaming inference and generative media pipelines," "real-time multimodal agents" — listed as *your expertise*, tied to the tech (LiveKit, WebRTC, streaming inference, CopilotKit). This is what your resume already does ("real-time AI inference and streaming pipelines").
+- ⚠️ **Risky (product framing):** "At [Confidential AI Startup], built a real-time Voice Agent that generates assets on demand" — that's narrating their specific product, which is exactly what the agreement protects.
+
+**My recommendation:**
+1. **Keep the resume capability-level.** If you want more voice/generative signal, I can add a generic skill like "real-time voice agents" or "on-demand/generative media pipelines" to the Confidential AI Startup line — framed as transferable expertise, not their product.
+2. **Verify against the actual NDA** before going more specific. If your agreement only restricts the *name*, you have more latitude; if it restricts product/IP details (most do), keep it generic. When in doubt, generic wins — and you can always describe the specifics verbally to Sam under his agency's own confidentiality.
+
+Want me to add a generic "real-time voice / generative media" capability phrase to the Confidential AI Startup clause? I'll keep it skills-only and re-verify the Dreamable leak check stays 0.
+
+(Noted your edit merging the "Changes:" line in the prior response — left as-is.) Still uncommitted across `resume/` + `mail/`; exchange still at `block`-level accretion.
+<!-- agent:boundary:b63b907c -->
 <!-- /agent:exchange -->
 
 ## Queue

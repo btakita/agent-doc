@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 9386d273-2288-498c-b9fc-207f224f9fdb
-agent: opencode
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -13,6 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue_active: true
 ---
 
 
@@ -73,13 +74,34 @@ Updated `#fzaf` to reflect that slots are already lazy (invalidated only, recomp
 
 New text: `#memo-guard Memoization guard — prevent unnecessary downstream cascade during invalidation when recomputed value equals prior value (slots are already lazy: invalidated only, recomputed on get())`
 
-<!-- agent:boundary:79a90e92 -->
+### Re: Queue head #n12s — gpt-5
+
+> **Queue prompt:**
+>
+> [#n12s]
+
+
+I expanded the active queue and handled `#n12s` as the current head. This item is bookkeeping for the lazily-rs document: the live IPC scaffold-duplication repro has already been logged in `tasks/agent-doc/agent-doc-bugs2.md` as `#zpc2`, and this document was manually repaired in the prior cycle.
+
+I did not change lazily-rs source, specs, or tests for `#n12s` because the remaining prevention work is owned by the agent-doc bug thread (`#zpc2` / `#ipcfullprompt-recur2`) and is still gated on capturing the live JetBrains `PatchWatcher.setText` payload. I verified `src/lazily-rs` is clean and marked `#n12s` done here so the auto queue can advance to the next real lazily-rs implementation item.
+<!-- agent:boundary:3ed7e9b7 -->
 <!-- /agent:exchange -->
+
+## Queue
+
+<!-- agent:queue auto -->
+preset #spec-test-build-install-commit-push
+- ~[#n12s]~
+- [#exfd]
+- [#rx9y]
+- [#fzaf]
+- [#dpzd]
+- [#45rh]
+<!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#n12s] #ipc-corruption-live-repro-lazily-rs Logged as #zpc2 in agent-doc-bugs2.md backlog. Live repro of scaffold duplication during finalize --stream. Document manually repaired.
 - [ ] [#exfd] #effect-system Phase 4: Effect system — ctx.effect(|ctx| { ... }) with auto-tracking, scheduling, cleanup, and disposal
 - [ ] [#rx9y] #batch-updates ctx.batch(|ctx| { ... }) to defer invalidation until the batch completes
 - [ ] [#fzaf] #memo-guard Memoization guard — prevent unnecessary downstream cascade during invalidation when recomputed value equals prior value (slots are already lazy: invalidated only, recomputed on get())
@@ -96,3 +118,9 @@ New text: `#memo-guard Memoization guard — prevent unnecessary downstream casc
 
 <!-- agent:review archive=tasks/software/lazily-rs.done.md -->
 <!-- /agent:review -->
+
+## Completed / Reaped
+
+<!-- agent:done -->
+- 2026-06-01 [#n12s] #ipc-corruption-live-repro-lazily-rs Logged as #zpc2 in agent-doc-bugs2.md backlog. Live repro of scaffold duplication during finalize --stream. Document manually repaired.
+<!-- /agent:done -->

@@ -36,7 +36,27 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 1 response topic(s): do [#queue-audit-partial-completion]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:8f1d5227 -->
+
+### Re: do [#queue-clear-unrun-items] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#queue-clear-unrun-items]
+
+
+Implemented the queue-head deletion invariant and verified it CI-green, but build+install into the live binary is **blocked** by the same concurrent-session breakage noted on `#completed-queue-residue-regression`: a parallel session has the shared `agent-doc-orchestration` crate mid-edit (`route.rs`/`preflight.rs` don't compile right now). So the fix landed on an isolated branch + worktree, not the active backend branch.
+
+**What landed** — branch `queue-clear-unrun-items`, agent-doc submodule commit `32c34bb1`, full `make check` green (clippy + suite, including the FlowCore budget gate):
+
+- `cycle_state`: new `active_queue_heads` field records the runnable `do [#id]` queue heads present at preflight (`start_preflight` parses the visible `agent:queue`; `record_active_queue_heads` backfills), so deletion can be proven against the cycle's starting intent.
+- `session_check`: `check_queue_head_removal_guard` fails closed when a recorded head disappears from the committed queue while its `#id` is **still open** in `agent:backlog` and the cycle never consumed / completed / gated / reaped it or named it as its directive target. Each lost id is listed with a restore-or-resolve repair hint; `<!-- no-queue-removal-guard -->` suppresses an explicit user removal.
+- Proof model: a done/gate/reap removes the id from `open_backlog`, so "still open in backlog after the head vanished" is the precise silent-loss signal. This cycle's own `do [#id]` targets stay owned by `#do-id-closeout-open-backlog` to avoid double-firing.
+- 4 regressions modeling the monsterrodholders repro: six dropped open heads fail closed (the consumed `#convqa-rerun` head excluded); single-consumed-head-with-the-rest-preserved passes; suppression marker; all-backlog-resolved passes. FlowCore `session_check.rs` `guard_` budget 63→69 with an audit note.
+
+Plan step 3 (session-check guard) and steps 1–2 (queue-head accounting in cycle state) are done. Steps 4–5 (reset/repair/commit hardening + same-pane recursive-guard diagnostics) remain.
+
+**Gating** `#queue-clear-unrun-items`: code-complete + CI-green but not yet live. The merge/build/live-verify + steps 4–5 are queued as the follow-up backlog item.
+<!-- agent:boundary:f9a7b255 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -44,8 +64,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#jb-run-agent-doc-busy-queue-dispatch-deadlock]~
 - ~do [#preflight-probe-side-effect-free]~
 - ~do [#queue-audit-partial-completion]~
-- do [#queue-clear-unrun-items]
-- do [#gated-followup-split-enforcement]
+- ~do [#queue-clear-unrun-items]~
 - do [#completed-queue-residue-regression]
 - do [#codex-owned-pane-stop-hook-live-verify]
 - do [#queue-sync-auto-pending-done-guard-misfire]
@@ -84,7 +103,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog priority queue=prepend -->
-- [ ] [#queue-clear-unrun-items] [recommended] #agent-doc-bug 2026-05-31: active `agent:queue auto` heads can be deleted/cleared without execution proof during same-pane/recovery closeout. Live repro `src/boost-client/tasks/monsterrodholders.md`: queue heads `#convqa-rerun`, `#hydroapproval`, `#nbapproval`, `#shopcachewatch`, `#shoplabelgate`, and `#accessorymargin` were removed while the matching backlog items stayed open and no per-head closeout ran. Add queue-removal invariants so every removed head must have explicit consumed/done/gated/struck/stale-user-edit proof, and make reset/commit/session-check fail closed on unproved deletion. Plan: `tasks/agent-doc/plan-queue-clear-unrun-items.md`.
+- [ ] [#r5q6] [recommended] #queue-clear-unrun-items merge+land: the session-check queue-head deletion guard + cycle_state active_queue_heads accounting (plan steps 1-3) are committed CI-green on branch `queue-clear-unrun-items` (agent-doc submodule commit 32c34bb1) but NOT live — merging into the active backend branch is BLOCKED on a concurrent session's broken shared agent-doc-orchestration crate (route.rs/preflight.rs don't compile). Once that lands: merge the branch, cargo build --release + cargo install --path ., live-verify a queue closeout that drops an open head fails closed, then implement plan steps 4-5 (reset/repair/commit hardening + same-pane recursive-guard diagnostics). Plan: tasks/agent-doc/plan-queue-clear-unrun-items.md.
 - [ ] [#codex-owned-pane-stop-hook-live-verify] [recommended] Gated on a live Codex pane -- the remaining phases of #codex-owned-pane-prompt-miss-followups after phase 2a landed: (2b) a live Codex Stop-hook regression asserting the owned_pane_self_invocation diagnostic forces an in-pane response body before final chat output, and (3) live-verify a real Codex same-pane run with an unresolved exchange prompt. Plan: tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md.
 - [ ] [#queue-sync-auto-pending-done-guard-misfire] [recommended] When a queue=sync/append attribute populates an active auto-queue in the same cycle, the freshly-synced do-[#id] entries appear as new do-directives in the cycle diff, so preflight records them all as expect_done_or_gate_ids and pending_done_guard then demands every synced item be --done in the populating cycle (live repro 2026-05-31 agent-doc-bugs2.md: do [#backlog-queue-sync-attr] cycle flagged 9 other freshly-synced queue items). Fix: agent-generated/synced queue items must not be treated as user do-directives; only a genuine user exchange do [#id] or the single consumed queue head should populate expect_done_or_gate_ids. Plan: tasks/agent-doc/plan-queue-sync-auto-pending-done-guard-misfire.md.
 - [ ] [#tagpath-queue-priority-publish-align] [recommended] Before the next agent-doc release, publish tagpath (commits b55c305 + 32fd000: backlog/icebox/queue priority + queue sync lint attrs) and bump agent-doc's tagpath dependency past 0.12. Locally agent-doc resolves tagpath via the superproject .cargo/config.toml path patch so the lint-gate accepts the new attributes; a published agent-doc on tagpath 0.12 would reject bare priority/queue as malformed-attr.
@@ -98,6 +117,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Review
  
 <!-- agent:review -->
+- [/] [#queue-clear-unrun-items] [recommended] #agent-doc-bug 2026-05-31: active `agent:queue auto` heads can be deleted/cleared without execution proof during same-pane/recovery closeout. Live repro `src/boost-client/tasks/monsterrodholders.md`: queue heads `#convqa-rerun`, `#hydroapproval`, `#nbapproval`, `#shopcachewatch`, `#shoplabelgate`, and `#accessorymargin` were removed while the matching backlog items stayed open and no per-head closeout ran. Add queue-removal invariants so every removed head must have explicit consumed/done/gated/struck/stale-user-edit proof, and make reset/commit/session-check fail closed on unproved deletion. Plan: `tasks/agent-doc/plan-queue-clear-unrun-items.md`.
 - [/] [#jb-busy-queue-deadlock-live-verify] [recommended] Live-verify the supervisor idle-queue watch (#jb-run-agent-doc-busy-queue-dispatch-deadlock): with the installed binary, run JB Run Agent Doc on a doc whose authoritative actor is mid active-turn (Codex or a Claude session not running /loop), confirm the route appends to agent:queue auto + returns Ok, then when the pane returns to idle the supervisor idle-queue watch injects agent-doc <FILE> once and drains the head with NO duplicate injection into the active turn and no hot-loop. Check the session log for idle_queue_watch_drain. Gated on a live busy pane. Source: submodule 4b3f4835 (idle_queue_drain_decision + spawn_idle_queue_watch_thread in start.rs).
 - [/] [#recovery-drift-apply-live-verify] [recommended] Live-verify the full one-command recovery (agent-doc repair --apply-recovery) on a real owner pane now that #recovery-drift-authoritative-side landed the authoritative-side determination: reproduce a queue_metadata_drift / sidecar_visible_drift closeout and confirm apply_closeout_recovery restores-from-HEAD for the spurious queue_active:false class and commits-forward otherwise, without the manual cancel->reset->commit sequence. Gated on a live owner pane (risky in a racy multi-session repo). Parent plan: tasks/agent-doc/plan-recursive-repair-state-drift.md.
 - [/] [#opencode-active-turn-reopen-auto-retry-on-idle] [recommended] When a plain dispatch-only Run Agent Doc reopen is refused because the OpenCode (or Codex) pane shows an active turn, route currently fails closed and the operator must re-click once the turn ends. Optional refinement: watch the pane and auto-fire the bare reopen once it returns to a dispatch-ready/idle composer, so the operator does not have to retry manually. Must stay a plain reopen (no prompt to queue) and respect the existing no-inject-into-active-turn invariant. Lower priority than the live-verify items.

@@ -1235,6 +1235,35 @@ fn reserve_sync_pane(
         .insert(pane_id.to_string(), file_path.to_path_buf());
 }
 
+/// Build the unique candidate document paths for the auto-start pre-sync pass
+/// from the requested column arguments.
+///
+/// Each `col_args` entry is a comma-joined column of documents, and the same
+/// document may legitimately appear in more than one requested column (column
+/// memory, focus + column overlap, repeated layout requests). The auto-start
+/// pass must make at most ONE pane decision per document: if the same path is
+/// processed twice, the first occurrence can auto-start a fresh pane that the
+/// second occurrence's registry / session-log lookup cannot see yet (the new
+/// pane has not recorded its binding), so the second occurrence cold-starts a
+/// second pane — the duplicate-editor-pane regression ("3 tmux panes with 2
+/// editor panes"). Dedup by path, preserving first-seen order so column/focus
+/// precedence is unchanged. The reconciler already dedups panes per column, so
+/// collapsing duplicate auto-start candidates here keeps the two passes aligned.
+fn auto_start_candidate_files(col_args: &[String]) -> Vec<PathBuf> {
+    let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+    let mut out: Vec<PathBuf> = Vec::new();
+    for path in col_args
+        .iter()
+        .flat_map(|arg| arg.split(','))
+        .map(|s| PathBuf::from(s.trim()))
+    {
+        if seen.insert(path.clone()) {
+            out.push(path);
+        }
+    }
+    out
+}
+
 #[derive(Default)]
 struct SyncProofCache {
     actor_records: RefCell<HashMap<(PathBuf, String), Option<crate::session_actor::ActorRecord>>>,
@@ -3388,12 +3417,11 @@ fn run_with_options_internal(
         let claimed_sync_panes: RefCell<std::collections::HashMap<String, PathBuf>> =
             RefCell::new(std::collections::HashMap::new());
 
-        // Parse file paths from col_args (each arg is "file1.md,file2.md")
-        let all_files: Vec<PathBuf> = col_args
-            .iter()
-            .flat_map(|arg| arg.split(','))
-            .map(|s| PathBuf::from(s.trim()))
-            .collect();
+        // Parse file paths from col_args (each arg is "file1.md,file2.md").
+        // Dedup so the auto-start pass makes one pane decision per document and
+        // cannot start a second editor pane for a document requested in more
+        // than one column (see `auto_start_candidate_files`).
+        let all_files: Vec<PathBuf> = auto_start_candidate_files(col_args);
 
         // Determine the target session for auto-start:
         // 1. From frontmatter tmux_session (if alive)
@@ -10137,6 +10165,43 @@ mod tests {
             ordered,
             vec![root_pane, child_pane],
             "focusing the child document must not invert cross-root pane ownership"
+        );
+    }
+
+    #[test]
+    fn auto_start_candidate_files_dedupes_repeated_documents_preserving_order() {
+        // A document requested in more than one column must yield a single
+        // auto-start candidate so the pre-sync pass cannot start two editor
+        // panes for it ("3 tmux panes with 2 editor panes" regression).
+        let col_args = vec![
+            "editor.md,notes.md".to_string(),
+            "editor.md".to_string(), // same document requested again in a second column
+            "other.md, notes.md".to_string(), // whitespace + repeat
+        ];
+        let files = auto_start_candidate_files(&col_args);
+        assert_eq!(
+            files,
+            vec![
+                PathBuf::from("editor.md"),
+                PathBuf::from("notes.md"),
+                PathBuf::from("other.md"),
+            ],
+            "duplicate document requests must collapse to one first-seen auto-start candidate"
+        );
+    }
+
+    #[test]
+    fn auto_start_candidate_files_keeps_distinct_documents() {
+        let col_args = vec!["a.md".to_string(), "b.md".to_string(), "c.md".to_string()];
+        let files = auto_start_candidate_files(&col_args);
+        assert_eq!(
+            files,
+            vec![
+                PathBuf::from("a.md"),
+                PathBuf::from("b.md"),
+                PathBuf::from("c.md"),
+            ],
+            "distinct documents must each remain an auto-start candidate"
         );
     }
 

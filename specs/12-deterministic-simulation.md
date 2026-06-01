@@ -195,9 +195,21 @@ live tmux server:
   enforced as a structural invariant on every command in the generated corpus
   (`SyncProjection.visible` must never list the same document twice).
 
+The live cold-start side of this regression is guarded deterministically by
+`auto_start_candidate_files` in `agent-doc-orchestration::sync`, which dedups the
+auto-start candidate set by path so a document requested in more than one column
+cannot cold-start a second pane before its first freshly-provisioned pane is
+discoverable (covered by `auto_start_candidate_files_dedupes_repeated_documents_preserving_order`).
+A faithful live-tmux reproduction would require spawning a real harness in the
+provisioned pane (the reuse path cannot duplicate), so per the deterministic-first
+policy above the candidate-dedup unit test plus this SimWorld cardinality trace
+are the promoted coverage, with the existing live `find_associated_panes` tests
+covering already-discoverable live-pane dedup.
+
 This no-duplicate-editor-pane invariant is owned by the sync claim-tracking
-(`claimed_sync_panes` / `SyncProofCache`) and the `tmux-router` per-column pane
-dedup. It is independent of the `lazily-rs` dependency graph: the only
+(`claimed_sync_panes` / `SyncProofCache`), the auto-start candidate dedup, and the
+`tmux-router` per-column pane dedup. It is independent of the `lazily-rs`
+dependency graph: the only
 `lazily-rs` use on the sync path is `parse_frontmatter_for_sync`, which
 constructs a fresh per-invocation `RunContext` (each slot computes at most once,
 then drops), so no lazily-cached state survives across sync runs to drive

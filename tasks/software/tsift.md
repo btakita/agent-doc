@@ -107,7 +107,8 @@ Implemented and pushed (`f454216`).
 - New test: `status_json_auto_fixes_stale_index_without_fix_flag` — confirms `--json` alone refreshes a stale index.
 
 **lazily-rs integration deferred** to a follow-up item (`#lazily-tsift-status-cache`). Adding lazily-rs as a dependency requires workspace-level Cargo.toml changes and a dedicated integration plan beyond the scope of this status auto-fix.
-<!-- agent:boundary:6ee767cf -->
+recovery sync
+<!-- agent:boundary:2d84e748 -->
 <!-- /agent:exchange -->
 
 ## Queue

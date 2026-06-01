@@ -16,7 +16,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -36,13 +36,41 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 1 response topic(s): JB `Run Agent Doc` deadlocked on this file
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:227a490a -->
+
+### Re: do [#preflight-probe-side-effect-free] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#preflight-probe-side-effect-free]
+
+
+Done (Proposed-Fix #4 of `#recursive-repair-state-drift`). The auto-queue head is consumed and shipped.
+
+**Problem.** A diagnostic `agent-doc preflight` opened a `preflight_started` cycle even when it was only inspecting state. That open cycle is exactly what later wedges `session-check` — the empty-cycle churn the recursive owner-pane diagnostic path produced (preflight probe after a recursive block left a second open cycle, then `session-check` failed and recovery needed the manual cancel → reset → commit sequence).
+
+**Fix — `preflight --probe`.** `agent-doc preflight --probe <FILE>` runs the same inspection (recovery, commit, queue analysis, diff, full JSON) but **never opens a `preflight_started` cycle**. The distinction the plan asked for is now explicit:
+
+- **Default (dispatch/response-bound):** opens the cycle so the upcoming response binds to it — unchanged. Internal response-bound callers like `orchestrate` keep this path.
+- **`--probe` (pure inspection):** skips the cycle open and logs `preflight_probe_no_cycle ... reason=probe_inspection_only`. A terminal `committed`/`abandoned` cycle from the idempotent commit step is still acceptable — only an *open* cycle wedges `session-check`.
+
+Threaded via `PreflightOptions { probe }` / `preflight::run_with_options`; `run()` is now a thin default wrapper.
+
+**Verification.**
+- New regression `preflight_probe_does_not_open_cycle_even_with_dispatchable_diff` (same active-queue input that opens a cycle in the dispatch path leaves no open cycle under `--probe`), paired against the existing `preflight_opens_cycle_from_active_queue_when_document_has_no_diff` contrast.
+- FlowCore hot-path `reason=` budget for preflight.rs bumped 2→3 for the audited `reason=probe_inspection_only` token (the only gate that catches it — `make check`).
+- `make check` green; `--release` + `cargo install` (both binaries); `--probe` verified live in `preflight --help`.
+- GitHub Actions CI green on commit `1c912334`.
+
+**Scope note.** This closes the probe side-effect for `#preflight-probe-side-effect-free` specifically. The broader `#recursive-repair-state-drift` proposed fixes (#2 one-command `repair --apply-recovery`, live-verify) stay tracked under their existing review items (`#recovery-drift-apply-live-verify`).
+
+**Shipped:** submodule `1c912334`; superproject pointer bumped.
+<!-- agent:boundary:e92f7d97 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#jb-run-agent-doc-busy-queue-dispatch-deadlock]
-- do [#preflight-probe-side-effect-free]
+- ~do [#jb-run-agent-doc-busy-queue-dispatch-deadlock]~
+- ~do [#preflight-probe-side-effect-free]~
 - do [#gated-followup-split-enforcement]
 - do [#completed-queue-residue-regression]
 - do [#codex-owned-pane-stop-hook-live-verify]
@@ -83,7 +111,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 
 <!-- agent:backlog priority queue=prepend -->
 - [ ] [#gated-followup-split-enforcement] [recommended] #agent-doc-bug 2026-05-31: when a directed do [#id] cycle keeps a multi-phase item open via --pending-edit (backlog) or --review-edit (review) with text that enumerates several gated/remaining phases, agent-doc neither prompts nor guards splitting those phases into discrete child backlog IDs — the deferred work stays buried in one parent's narrowed description and is not independently trackable/queueable. Repro this session: #recursive-repair-state-drift and #codex-owned-pane-prompt-miss-followups each had 2-4 gated phases folded into parent text; only a user catch prompted splitting them into #recursive-repair-recovery-states/#recursive-repair-apply/#preflight-probe-side-effect-free/#codex-owned-pane-stop-hook-live-verify. Add a session-check/finalize advisory (warn-first, sibling of #blocked-closeout-followup-capture and the SKILL 'one backlog ID per actionable phase' rule) that detects a kept-open item whose body lists multiple gated phases without discrete child IDs and recommends the split. Plan: TBD.
-- [ ] [#preflight-probe-side-effect-free] [recommended] Make probe/diagnostic agent-doc preflight side-effect-free or self-abandoning so it never leaves an open preflight_started cycle that later wedges session-check (Proposed-Fix #4 of #recursive-repair-state-drift). Distinguish a dispatch/response-bound preflight from a pure inspection probe. Plan: tasks/agent-doc/plan-recursive-repair-state-drift.md.
 - [ ] [#codex-owned-pane-stop-hook-live-verify] [recommended] Gated on a live Codex pane -- the remaining phases of #codex-owned-pane-prompt-miss-followups after phase 2a landed: (2b) a live Codex Stop-hook regression asserting the owned_pane_self_invocation diagnostic forces an in-pane response body before final chat output, and (3) live-verify a real Codex same-pane run with an unresolved exchange prompt. Plan: tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md.
 - [ ] [#queue-sync-auto-pending-done-guard-misfire] [recommended] When a queue=sync/append attribute populates an active auto-queue in the same cycle, the freshly-synced do-[#id] entries appear as new do-directives in the cycle diff, so preflight records them all as expect_done_or_gate_ids and pending_done_guard then demands every synced item be --done in the populating cycle (live repro 2026-05-31 agent-doc-bugs2.md: do [#backlog-queue-sync-attr] cycle flagged 9 other freshly-synced queue items). Fix: agent-generated/synced queue items must not be treated as user do-directives; only a genuine user exchange do [#id] or the single consumed queue head should populate expect_done_or_gate_ids. Plan: tasks/agent-doc/plan-queue-sync-auto-pending-done-guard-misfire.md.
 - [ ] [#tagpath-queue-priority-publish-align] [recommended] Before the next agent-doc release, publish tagpath (commits b55c305 + 32fd000: backlog/icebox/queue priority + queue sync lint attrs) and bump agent-doc's tagpath dependency past 0.12. Locally agent-doc resolves tagpath via the superproject .cargo/config.toml path patch so the lint-gate accepts the new attributes; a published agent-doc on tagpath 0.12 would reject bare priority/queue as malformed-attr.

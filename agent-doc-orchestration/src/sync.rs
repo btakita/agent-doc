@@ -5169,7 +5169,7 @@ fn find_normal_path_owner_pane_excluding_with_logging(
     excluded_pane: Option<&str>,
     log_hits: bool,
 ) -> Option<String> {
-    authoritative_actor_pane_for_document(tmux, file, session_id)
+    let candidate = authoritative_actor_pane_for_document(tmux, file, session_id)
         .filter(|pane| excluded_pane != Some(pane.as_str()))
         .or_else(|| {
             find_registered_pane_via_path_provenance(
@@ -5179,7 +5179,47 @@ fn find_normal_path_owner_pane_excluding_with_logging(
                 excluded_pane,
                 log_hits,
             )
-        })
+        });
+    // Cross-document guard (#jb-tsift-pane-sync): navigation / sync / autostart
+    // owner resolution must never surface or reuse a pane that is actually
+    // running a *different* document's agent-doc/codex session. Stale registry
+    // provenance or geometry-only reconciliation can otherwise return the
+    // currently-visible pane (e.g. one owning `agent-doc-bugs2.md`) as the owner
+    // for the navigated file (e.g. `tsift.md`). Reject the wrong-document pane so
+    // the caller cold-starts a correct owner instead of aliasing two documents
+    // onto one pane.
+    reject_cross_document_owner_pane(tmux, candidate, file, log_hits)
+}
+
+/// Reject an owner-pane candidate that is running a *different* document's
+/// agent-doc/codex session so the normal navigation/sync/autostart owner path
+/// never binds the navigated file to a wrong-document pane
+/// (#jb-tsift-pane-sync cross-document variant). Returns `None` (forcing a
+/// correct cold-start / proper-owner path) when the candidate owns another
+/// document; otherwise returns the candidate unchanged. A candidate that owns
+/// `file` itself, or a bare non-owner pane, is preserved (see
+/// `cmdline_owns_other_document`).
+fn reject_cross_document_owner_pane(
+    tmux: &Tmux,
+    candidate: Option<String>,
+    file: &Path,
+    log_hits: bool,
+) -> Option<String> {
+    let pane = candidate?;
+    if pane_runs_other_document_owner(tmux, &pane, file) {
+        if log_hits {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "[sync] owner candidate pane {} runs another document; not surfacing for {} (cross-document guard #jb-tsift-pane-sync)",
+                    pane,
+                    file.display()
+                ),
+            );
+        }
+        return None;
+    }
+    Some(pane)
 }
 
 pub fn find_live_owner_pane_excluding(
@@ -6590,6 +6630,34 @@ mod tests {
                 claimed,
             ),
             "a non-owner subcommand is not a live owner session"
+        );
+    }
+
+    #[test]
+    fn cmdline_owns_other_document_blocks_navigation_to_wrong_document_pane() {
+        // #jb-tsift-pane-sync cross-document variant: navigating the editor to
+        // `tasks/software/tsift.md` must not surface or reuse the pane that is
+        // already running `tasks/agent-doc/agent-doc-bugs2.md`. The normal
+        // owner-resolution path (`find_normal_path_owner_pane_excluding_with_logging`
+        // -> `reject_cross_document_owner_pane` -> `pane_runs_other_document_owner`)
+        // relies on this decision to reject the wrong-document pane and cold-start
+        // a correct owner instead of aliasing two documents onto one pane.
+        let navigated = "tasks/software/tsift.md";
+        assert!(
+            cmdline_owns_other_document(
+                "/home/brian/.cargo/bin/agent-doc start --route-owned tasks/agent-doc/agent-doc-bugs2.md",
+                navigated,
+            ),
+            "a pane running a different document must not be surfaced as the navigated file's owner"
+        );
+        // The legitimate tsift owner is still reusable — the guard must not force
+        // a spurious cold-start when the surfaced pane already owns the file.
+        assert!(
+            !cmdline_owns_other_document(
+                "/home/brian/.cargo/bin/agent-doc start --route-owned tasks/software/tsift.md",
+                navigated,
+            ),
+            "the navigated document's own owner pane stays reusable under the cross-document guard"
         );
     }
 

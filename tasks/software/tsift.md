@@ -261,7 +261,43 @@ Verification:
 Tmux CI note: this tsift repo has no `tmux`, `tmux-ci`, or `tmux-test` references in `.github` or `Makefile`, so there is no tmux leg to inspect.
 
 Root push note: I did not push root `agent-loop` `main` because it is already ahead of `origin/main` by unrelated agent-doc commits and has unrelated dirty worktree changes; pushing would publish more than this `src/tsift` gitlink update.
-<!-- agent:boundary:d59db983 -->
+
+### Re: #lazily-summary — gpt-5
+
+> **Queue prompt:**
+>
+> [#lazily-summary]
+
+Implemented `#lazily-summary` in `src/tsift`.
+
+What changed:
+- Added `lazily` to `tsift-summarize` and introduced `SummaryCache`, backed by lazily-rs `Context` Slots and content-hash Cells.
+- Each normalized file key now has a cached summary snapshot Slot; repeated same-file/same-hash checks reuse the Slot, while changing the requested `content_hash` invalidates the Slot before re-reading `summaries.db`.
+- Added `SummaryCache::get_or_extract_file`, which owns the "current rows or compute then replace" path used by `tsift summarize --extract`, so current files skip extraction and stale/missing files compute summaries on first access.
+- Wired `cmd_summarize --extract` through `SummaryCache` while keeping read-only query modes read-only.
+- Updated `SPEC.md` with the lazy summary-cache contract.
+- Added regression coverage for Slot reuse, content-hash invalidation, and compute-once extraction behavior.
+
+Commits:
+- `btakita/tsift`: `20fedad` (`feat(summarize): lazily cache summary extraction`) pushed to `main`.
+- root `agent-loop`: `ae0866208` (`chore: update tsift submodule for summary cache`) committed locally for the `src/tsift` gitlink. Root `main` later advanced with an unrelated `agent-doc(awear)` commit, so this gitlink commit is in local history but is not the current HEAD.
+
+Verification:
+- `cargo test -p tsift-summarize summary_cache` passed.
+- `cargo test -p tsift-summarize` passed.
+- `cargo test -p tsift-cli summarize` passed.
+- `cargo clippy -p tsift-summarize --all-targets -- -D warnings` passed.
+- `cargo clippy -p tsift-cli --all-targets -- -D warnings` passed.
+- `make check` passed, including workspace clippy, workspace tests, doc tests, OpenCode npm tests, and npm dry-run publish check.
+- `cargo build --workspace` passed.
+- `cargo install --path . --force` passed.
+- `tsift --version` reports `tsift 0.1.62`.
+- GitHub Actions run `26742125319` passed both jobs: `clippy + test` and `live Convex graph acceptance`.
+
+Tmux CI note: this tsift repo has no `tmux`, `tmux-ci`, or `tmux-test` references in `.github` or `Makefile`, so there is no tmux leg to inspect.
+
+Root push note: I did not push root `agent-loop` `main` because it is already ahead of `origin/main` by unrelated commits and has unrelated dirty worktree changes; pushing would publish more than this `src/tsift` gitlink update.
+<!-- agent:boundary:66af970a -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -272,14 +308,13 @@ dispatch #spec-test-build-install-commit-push
 - ~[#lazily-inspect-scope]~
 - ~[#lazily-resolve-edges]~
 - ~[#lazily-neighborhood]~
-- [#lazily-summary]
+- ~[#lazily-summary]~
 - [#lazily-tsift-plan]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#lazily-summary] [feature] Lazy summary cache with Cell-backed content_hash invalidation
 - [ ] [#lazily-tsift-plan] [plan] Create integration plan for lazily-rs in tsift (see tasks/agent-doc/plans/lazily-rs-integration.md as reference)
 <!-- /agent:backlog -->
 

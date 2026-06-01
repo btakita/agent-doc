@@ -70,7 +70,46 @@ Commits pushed:
 
 - `src/lazily-rs`: `baae170` (`perf: add benchmark suite`) to `btakita/lazily-rs main`
 - `agent-loop`: `e7eaa33bf` (`chore: update lazily-rs benchmark pointer`) to `btakita/agent-loop main`
-<!-- agent:boundary:2f9d16af -->
+
+### Re: #perf-profile — gpt-5
+
+> **Queue prompt:**
+>
+> [#perf-profile]
+
+
+Completed `#perf-profile`.
+
+Added a feature-gated benchmark instrumentation surface to `lazily-rs`:
+
+- `instrumentation` Cargo feature
+- `InstrumentationSnapshot` export
+- `instrumentation_snapshot()` and `reset_instrumentation()` on `Context` and `ThreadSafeContext`
+- counters for reactive node allocation events, slot recompute starts, duplicate speculative `ThreadSafeContext` computes, dependency edge add/remove churn, effect queue pushes/max depth, and `ThreadSafeContext` graph-lock acquisition/wait/hold timing
+- `benches/profile.rs`, gated by `required-features = ["instrumentation"]`, to exercise and consume the profiling counters in Criterion
+
+The default crate path remains feature-free for this instrumentation; default tests/builds compile without the instrumentation fields or lock wrapper. I updated `SPEC.md` and `README.md` with the profiling contract and added spec coverage for the local graph counters plus a deterministic two-thread speculative compute race.
+
+Verification:
+
+- `cargo fmt -- --check`
+- `cargo check --all-targets --all-features`
+- `cargo test`
+- `cargo test --features instrumentation benchmark_instrumentation -- --nocapture`
+- `cargo test --all-features`
+- `cargo bench --no-run`
+- `cargo bench --features instrumentation --no-run`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo build`
+- CI check: `gh run list --workflow CI --limit 1` still reports no `CI` workflow, and `gh workflow list` returns no workflows for `lazily-rs`
+- `make check` was not run because `src/lazily-rs` has no `Makefile`
+- `cargo install --path .` is still not applicable; `cargo metadata` shows no package binary target
+
+Commits pushed:
+
+- `src/lazily-rs`: `0fd3a89` (`perf: add benchmark instrumentation`) to `btakita/lazily-rs main`
+- `agent-loop`: `1965d50bb` (`chore: update lazily-rs instrumentation pointer`) to `btakita/agent-loop main`
+<!-- agent:boundary:5066f3de -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -78,7 +117,7 @@ Commits pushed:
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~[#perf-bench]~
-- [#perf-profile]
+- ~[#perf-profile]~
 - [#perf-layout]
 - [#perf-thread-dedup]
 - [#perf-lock-eval]
@@ -87,7 +126,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#perf-profile] #performance Add lightweight benchmark instrumentation for recompute counts, duplicate speculative computes, dependency edge churn, effect queue depth, allocations, and ThreadSafeContext lock wait/hold time
 - [ ] [#perf-layout] #performance Use benchmark results to optimize single-threaded Context storage and edge maintenance, starting with node storage locality and avoiding unnecessary HashSet/HashMap churn without changing public semantics
 - [ ] [#perf-thread-dedup] #performance Prototype ThreadSafeContext in-flight recompute deduplication so concurrent first get callers share one computation when benchmarks show duplicate work is material
 - [ ] [#perf-lock-eval] #performance Evaluate RwLock, sharded locks, or targeted CAS only after baseline data identifies lock contention, and require Loom/Shuttle safety models before adopting concurrency changes

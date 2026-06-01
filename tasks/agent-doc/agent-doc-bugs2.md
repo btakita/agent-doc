@@ -31,54 +31,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260601-013544.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260601-022544.md`*
 
 Compacted content:
-- Archived 1 response topic(s): do [#preflight-probe-side-effect-free]
+- Archived 2 response topic(s): do [#gated-followup-split-enforcement]; fix the queue-drift regressions first
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: do [#gated-followup-split-enforcement] — opus-4-8
-
-Done and shipped. Added a warn-first session-check advisory that detects buried multi-phase work.
-
-**What it does.** `check_gated_phase_split_guard` fires when a directed `do [#id]` cycle keeps a tracked item open (`--pending-edit` / `--review-edit` / `--pending-gate`, recorded in `pending_kept_open_ids`) whose body enumerates multiple gated/remaining phases but never breaks them into discrete child backlog IDs. Detection:
-
-- the word **"phase"** appears, **and**
-- ≥2 short parenthesized phase markers — `(1)`, `(2a)`, `(2b)`, `(3)` (a regex that excludes dates/hashes like `(2026-05-31)` / `(submodule 407b0825)`), **and**
-- a gating signal (`gated`, `remaining`, `live-verify`, `awaiting`, `still needs`), **and**
-- fewer than 2 discrete child `#id` references other than its own id (and the `#agent-doc-bug` preset tag) — i.e. not already split.
-
-It's **WARN-only** — never blocks closeout — and suppressed by `<!-- no-gated-phase-split-guard -->` when the phases are intentionally one unit. Sibling of `#blocked-closeout-followup-capture` and the SKILL "one backlog ID per actionable phase" rule.
-
-**Verification.**
-- 5 new regressions: warns on a multi-phase kept-open item; quiet when already split into ≥2 child ids; quiet for a single-phase item; suppressed by marker; advisory-not-blocking (full `inspect` stays `Ok`).
-- FlowCore `session_check.rs` `guard_` budget bumped 51→57 (audited: 1 ops event + 5 test-fn names).
-- `make check` green; `--release` + `cargo install` (both binaries); CI green on submodule `dc29f28f`.
-
-**Drift observed + recovered (not committed).** When I re-ran `preflight` to capture the baseline for this closeout, queue-maintenance deactivated the active queue to inactive residue (`queue_active: false`), and on the first pass mangled the opening tag to `&lt;!-- agent:queue au--&gt;` (a corrupted `auto` strip). HEAD was clean and correct, so I restored it (`git checkout HEAD` + `reset --from-current`) rather than committing the corruption. Two concerns worth tracking separately: (1) this active queue (head `#gated-followup-split-enforcement`, with completed heads struck `~...~`) keeps being deactivated to residue instead of advancing — the `#completed-queue-residue-regression` / queue-auto-no-continue family; (2) the `au-->` tag corruption from `strip_auto_from_tag` under this state. Neither is in scope for this item, but both reproduced live this turn.
-
-**Shipped:** submodule `dc29f28f`; superproject pointer bumped. Marked `#gated-followup-split-enforcement` done.
-
-### Re: fix the queue-drift regressions first — opus-4-8
-
-Found and fixed the root cause of the queue stranding. Per your pick, I prioritized the regression over the `#queue-audit-partial-completion` feature.
-
-**Root cause (reproduced + fixed).** `detect_head_prompt_modified` (`queue.rs`) compared only the *first* queue prompt's text. So when a new item was inserted — or an existing one reordered — **ahead of** the still-present in-flight head, it read as an in-place `item_modified` edit. Preflight then halted the queue, stripped `auto`, set `queue_active: false`, and stranded **every** remaining live `do [#id]` as inactive residue — the auto-queue stopped instead of advancing. That's exactly what kept happening to this document each turn (`#completed-queue-residue-regression` / `#queue-auto-no-continue`).
-
-Minimal repro confirmed against the old binary:
-- snapshot head `do [#bbb]`; insert `do [#ccc]` ahead → `queue_active: false`, `halted: item_modified`, all prompts stranded.
-
-**Fix.** A head change now counts as `item_modified` **only when the snapshot head prompt is genuinely gone** from the current queue (edited in place / removed). A prepend or reorder of a still-present head is a re-prioritization → the queue advances to the new head and stays active. After the fix the same repro yields `queue_active: true`, `halted: None`, `prompts: [#ccc, #bbb, #ddd]`.
-
-**On the `au-->` corruption.** `strip_auto_from_tag` is `tag.replace(" auto", "")`, which is correct for a clean `&lt;!-- agent:queue auto --&gt;` (→ `&lt;!-- agent:queue --&gt;`). It did not reproduce this turn. The one-off `au-->` last turn was almost certainly a live IPC/CRDT buffer-merge artifact (the `#adoc-queue-ipc-buffer-divergence` family), not this code path — I did not chase it down, so I'm leaving it as an unconfirmed separate observation rather than claiming a fix.
-
-**Verification + an important caveat.**
-- Verified in a clean `git worktree` (HEAD + the queue.rs change): 169 queue tests pass + 4 new `head_prompt_modified_*` regressions + the end-to-end repro.
-- **CI green** on submodule `1bcaaac6`.
-- ⚠️ **Not built/installed live.** The shared `agent-doc-orchestration` crate currently will not compile on the main tree because a **concurrent session left an untracked `graph.rs`** (+ uncommitted `lib.rs`/`Cargo.toml`) with `ProjectConfig`/`SshContextValue: Clone` errors. I did **not** touch that other session's work, so I could not `cargo build --release` / `cargo install`. The fix is committed + CI-green but **won't take effect in this live session's binary until that graph.rs work compiles and someone rebuilds/installs** — which is also why this very closeout's queue maintenance (old binary) still deactivated the queue.
-
-**Shipped:** submodule `1bcaaac6` (+ pointer). Narrowed `#completed-queue-residue-regression` to the remaining build/install (blocked) → live-verify → committed-state-guard phases.
-<!-- agent:boundary:dde90864 -->
+<!-- agent:boundary:b19eff10 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->

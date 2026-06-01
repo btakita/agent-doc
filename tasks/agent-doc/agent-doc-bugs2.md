@@ -31,40 +31,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260601-002307.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260601-013544.md`*
 
 Compacted content:
-- Archived 1 response topic(s): JB `Run Agent Doc` deadlocked on this file
+- Archived 1 response topic(s): do [#preflight-probe-side-effect-free]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: do [#preflight-probe-side-effect-free] — opus-4-8
-
-> **Queue prompt:**
->
-> do [#preflight-probe-side-effect-free]
-
-
-Done (Proposed-Fix #4 of `#recursive-repair-state-drift`). The auto-queue head is consumed and shipped.
-
-**Problem.** A diagnostic `agent-doc preflight` opened a `preflight_started` cycle even when it was only inspecting state. That open cycle is exactly what later wedges `session-check` — the empty-cycle churn the recursive owner-pane diagnostic path produced (preflight probe after a recursive block left a second open cycle, then `session-check` failed and recovery needed the manual cancel → reset → commit sequence).
-
-**Fix — `preflight --probe`.** `agent-doc preflight --probe <FILE>` runs the same inspection (recovery, commit, queue analysis, diff, full JSON) but **never opens a `preflight_started` cycle**. The distinction the plan asked for is now explicit:
-
-- **Default (dispatch/response-bound):** opens the cycle so the upcoming response binds to it — unchanged. Internal response-bound callers like `orchestrate` keep this path.
-- **`--probe` (pure inspection):** skips the cycle open and logs `preflight_probe_no_cycle ... reason=probe_inspection_only`. A terminal `committed`/`abandoned` cycle from the idempotent commit step is still acceptable — only an *open* cycle wedges `session-check`.
-
-Threaded via `PreflightOptions { probe }` / `preflight::run_with_options`; `run()` is now a thin default wrapper.
-
-**Verification.**
-- New regression `preflight_probe_does_not_open_cycle_even_with_dispatchable_diff` (same active-queue input that opens a cycle in the dispatch path leaves no open cycle under `--probe`), paired against the existing `preflight_opens_cycle_from_active_queue_when_document_has_no_diff` contrast.
-- FlowCore hot-path `reason=` budget for preflight.rs bumped 2→3 for the audited `reason=probe_inspection_only` token (the only gate that catches it — `make check`).
-- `make check` green; `--release` + `cargo install` (both binaries); `--probe` verified live in `preflight --help`.
-- GitHub Actions CI green on commit `1c912334`.
-
-**Scope note.** This closes the probe side-effect for `#preflight-probe-side-effect-free` specifically. The broader `#recursive-repair-state-drift` proposed fixes (#2 one-command `repair --apply-recovery`, live-verify) stay tracked under their existing review items (`#recovery-drift-apply-live-verify`).
-
-**Shipped:** submodule `1c912334`; superproject pointer bumped.
-<!-- agent:boundary:e92f7d97 -->
+<!-- agent:boundary:7e855f89 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->

@@ -149,12 +149,33 @@ I added it to the plan as an explicit invariant: navigating to file `F`, or runn
 - regression + acceptance criteria for the cross-document guard.
 
 I'm keeping this at plan/backlog level rather than editing code now: it's in the live-JB-verify cluster (no automated tmux repro of the contaminated `Sync Tmux Layout` state yet), and a blind change to the focus/sync reuse path risks regressing the stash-promote and exact-visible dedup work. The next executable step is Phase 1's trace recipe to capture the actual `owns=G` mismatch from a live repro, then land Phase 3b's guard with Rust sync/focus regressions. `#jb-tsift-pane-sync` stays queued (`do [#jb-tsift-pane-sync]`).
-<!-- agent:boundary:08fcf9a3 -->
+The working tree **still carries 69 files / 957 insertions of uncommitted WIP** (not mine), so clean commits remain blocked — and `cmdline_owns_other_document` already exists in `sync.rs`, confirming the guard helper Phase 3b would share is in place.
+
+> **Queue prompt:**
+>
+> do [#jb-tsift-pane-sync]
+
+
+I've already done the autonomous part of `#jb-tsift-pane-sync` across the last cycles: the plan (`plan-jb-tsift-pane-sync-regression.md`) now carries the upgraded **wrong-document-binding** symptom, **Phase 3b — cross-document owner guard on focus/sync/autostart** (validate `pane.owned_file == F` before surfacing/reusing; share `cmdline_owns_other_document` across focus/sync/claim; autostart-on-navigation contract; `owns=G (mismatch)` diagnostics), and regression/acceptance criteria. That landed last cycle.
+
+What remains is genuinely blocked on two things, neither of which I can resolve from here:
+
+1. **JB-gated live repro (Phase 1).** The fix targets a contaminated `Sync Tmux Layout` state — a pane that surfaced for `tsift.md` while owning `agent-doc-bugs2.md`. There's no automated tmux repro of that wrong-owner binding yet; capturing the actual `owns=G` mismatch needs a live JetBrains session. Per my own prior analysis, **Phase 3b should not be landed blind** — a change to the focus/sync reuse path risks regressing the stash-promote and exact-visible-dedup work, so it needs the live trace to confirm the failing path first.
+2. **Dirty crate tree.** Even the deterministic half of Phase 3b can't be isolated-committed while 69 files of concurrent WIP sit in `src/agent-doc`.
+
+So `#jb-tsift-pane-sync` correctly stays queued/gated: **planned and ready, blocked on a live JB repro + a clean working tree.** This is the same recurring operational wall — I'll restate the one action that clears it rather than re-derive it:
+
+- **Commit or stash the 69-file WIP** in `src/agent-doc` so a single owner has a clean tree.
+- **Consolidate to one owner** of `agent-doc-bugs2.md` (and stop routing the duplicate Codex-harness docs — recall "kill the pane ≠ stop the actor"; `route` auto-restarts them).
+- Then drive the **Phase 1 trace** in a live JB session to capture the `owns=G` mismatch, and land Phase 3b's guard with sync/focus regressions on the clean tree.
+
+I'm not landing a blind focus/sync change or a comingled commit. The plan and the shareable guard helper are in place for whoever holds the clean, single-owner tree to implement against the captured repro.
+<!-- agent:boundary:0827eea5 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#jb-tsift-pane-sync]
+- ~do [#jb-tsift-pane-sync]~
 - do [#ipcaa-scaf]
 - do [#submodule-response-commit-proof]
 - do [#qasm]

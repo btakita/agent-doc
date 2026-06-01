@@ -9,7 +9,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -28,7 +28,7 @@ Prior frontmatter bug fix remains complete. New work this cycle is planning only
 Compacted content:
 - Archived 7 response topic(s): Slot/Cell invalidation mid-run; CellHandle::set vs Context::set_cell; lazily-rs integration status; 4 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/9b6e92d2...
-<!-- agent:boundary:653668f1 -->
+<!-- agent:boundary:c8c2475e -->
 <!-- /agent:exchange -->
 
 <!--
@@ -36,13 +36,7 @@ Compacted content:
 
 ## Pending / Not Built
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~do [#lr-found-1]~
-- ~do [#lr-dedup-2]~
-- ~do [#lr-config-3]~
-- ~do [#lr-fmt-4]~
-- do [#lr-actor-5]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

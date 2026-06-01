@@ -31,108 +31,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260601-074403.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260601-083030.md`*
 
 Compacted content:
-- Archived 3 response topic(s): What are #next-steps to complete review items?; Add the #next-steps to complete review items into the backlog; I added awear.md but don't see the claiming tmux pane
+- Archived 3 response topic(s): JB `Run Agent Doc` dispatch latency; do [#j0k8]; do [#j0k8]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ JB `Run Agent Doc` takes several seconds to dispatch the task. How can we improve the latency?
-❯ #spec-test-build-install-commit-push
-
-### Re: JB `Run Agent Doc` dispatch latency — opus-4-8
-
-I traced the full `Run Agent Doc` → dispatch path and found one dominant, fixable cost plus a few smaller ones. Fixed the big one this cycle.
-
-#### The dispatch path
-
-`SubmitAction.actionPerformed` (JB) → `TypingTracker.awaitIdle` (FFI, 500ms debounce) → `saveAllDocuments()` → `TerminalUtil.sendToTerminal` → spawns `agent-doc route --dispatch-only --plain-trigger --wait-for-ready 60 <doc>` → binary `await_idle` → pane dispatch.
-
-#### Root cause: a redundant double debounce (fixed)
-
-The plugin already waits for typing to settle **in-process** via the FFI typing tracker, then calls `saveAllDocuments()` — which **bumps the file mtime** — immediately before spawning `route`. The binary's `await_idle` (default `--debounce 500`) required **both** mtime idle **and** the cross-process typing indicator idle. So the editor's own pre-route save re-triggered a fresh ~500ms mtime settle inside `route`, on top of the plugin's own 500ms wait. That's the "several seconds" — roughly a full extra debounce (plus process spawn) spent waiting on the editor's *own* write.
-
-Key insight: the typing indicator is written **only on real keystrokes**, never on save. So an *idle* indicator already proves the user stopped typing; the fresh mtime is just the editor's save.
-
-**Fix** (`#jb-run-agent-doc-double-debounce`):
-- New tri-state `debounce::typing_indicator_status` → `Absent` / `Active` / `Idle` (the old `is_typing_via_file` collapsed `Idle` and `Absent` into one `false`).
-- `route::await_idle_with_max_wait` now: **Idle** indicator → dispatch immediately (skip the mtime settle); **Active** → keep waiting; **Absent** (CLI / direct-disk caller, no plugin) → fall back to the mtime debounce as the fail-closed guard.
-
-This removes ~500ms–1s from every editor-triggered dispatch while preserving the "never dispatch mid-typing" invariant and CLI fail-closed behavior.
-
-#### Files
-- `agent-doc-orchestration/src/debounce.rs` — `TypingIndicatorStatus` + `typing_indicator_status`; `is_typing_via_file` now delegates.
-- `agent-doc-orchestration/src/route.rs` — `await_idle_with_max_wait` trusts an idle editor indicator.
-- `agent-doc-orchestration/src/route/tests.rs` — `route_dispatches_immediately_when_idle_typing_indicator_present_despite_fresh_mtime` (asserts return < 50ms despite a freshly-bumped mtime). Existing `route_debounce_*` tests still pass.
-- `specs/11-debounce.md` — Route Quiescence rewritten around the tri-state model.
-
-#### Verification
-- `make check` green (clippy + full suite, ~4350 lines, 0 FAILED). New + existing route debounce tests pass.
-- `cargo build --release` + `cargo install --path .` — both `.bin/agent-doc` (release symlink) and `~/.cargo/bin/agent-doc` (tmux-spawned) refreshed.
-- Committed + pushed to `20260422/codex-agent-backend` (`6d191f1f`). CI run `26742691083` queued at push time — local verification stands as the gate; flag if CI surfaces anything.
-
-#### Smaller wins left (queued as a recommended backlog item)
-1. `send_command_unchecked` sleeps **300ms before** the first acceptance capture (sleep-then-check) — check first to let a fast pane return immediately.
-2. `wait_for_agent_ready` polls every 500ms and needs a 2-streak → a ~500ms–1s "ready" floor; a ~150ms poll keeping the streak cuts that.
-3. The plugin could pass `route --debounce 0` (it already awaited idle via FFI) for belt-and-suspenders, though the binary fix above already neutralizes the redundant wait.
-
-These are lower-impact and touch hotter pane-timing code, so I left them for a focused follow-up rather than bundling them into this change.
-
-### Re: do [#j0k8] — apply all 3 latency optimizations — opus-4-8
-
-Applied all three deferred `#run-agent-doc-latency` wins. One note up front on the ID: the queued instruction read `do [#j0k8]. Apply all 3 optimizations.`, but `#j0k8` is actually the *cross-root claim-guard live-verify* item — the "apply all 3 optimizations" work is `#t3m5`. I did the optimizations (closed `#t3m5`); `#j0k8` is addressed separately below.
-
-#### What landed (`#t3m5`, submodule `984e5c1e`)
-
-**(a) Submit-acceptance check is capture-then-sleep.** `send_command_unchecked` previously slept a fixed 300ms *before* its first pane capture, so even an instantly-consumed trigger paid 300ms. It now captures first and sleeps after, on a tightened `DIRECT_PANE_SUBMIT_ACCEPTANCE_POLL_INTERVAL` (150ms) — a fast pane is confirmed accepted on the first capture.
-
-**(b) Ready-prompt poll cadence.** `wait_for_agent_ready_outcome` polled every 500ms and requires a 2-poll ready streak (to debounce a transient prompt flicker), giving a ~500-1000ms ready floor. Poll interval is now `AGENT_READY_POLL_INTERVAL` (150ms), keeping the 2-observation streak → ~150-300ms floor.
-
-**(c) Plugin skips the redundant binary debounce.** `buildRunRouteCommand` now passes `route --debounce 0`. The plugin already awaits typing idle in-process via the FFI typing tracker before saving, so route's own settle is pure redundant latency on the editor path. Non-editor callers still get the default 500ms debounce, and the binary keeps treating the cross-process typing indicator as authoritative (the prior-cycle `#jb-run-agent-doc-double-debounce` fix). JB plugin bumped to **0.2.144**.
-
-#### Files
-- `agent-doc-orchestration/src/route.rs` — capture-then-sleep + two named poll-interval consts (150ms); updated module/fn doc comments.
-- `editors/jetbrains/.../TerminalUtil.kt` + `gradle.properties` (0.2.144) — `--debounce 0` on the route command.
-- `editors/jetbrains/.../TerminalUtilTest.kt` — asserts the `--debounce 0` argument.
-- `specs/11-debounce.md` — new "Run Agent Doc dispatch latency" section.
-
-#### Verification
-- `make check` green (clippy `-D warnings` + full suite, 0 FAILED; remaining warnings are pre-existing in `agent-doc-core`). `cargo test -p agent-doc-orchestration -- route::` → 136 passed, 104 ignored (live-tmux).
-- JB `TerminalUtilTest` passes; both plugin zips built (`agent-doc-jetbrains-0.2.144[-signed].zip`).
-- `cargo build --release` + `cargo install --path .` — both binaries refreshed.
-- Pushed `984e5c1e`; CI run `26743632403` in progress (prior cycle `6d191f1f` is green). Local verification stands as the gate.
-- (a)/(b) are pane-I/O timing loops covered by the existing live-tmux `send_command_checked_*` / `wait_for_agent_ready*` integration tests (`make tmux-ci`); (c) has the deterministic Kotlin assertion above.
-
-#### On `#j0k8` (left open)
-`#j0k8` is "live-verify the cross-root claim guard" — drive a real second pane already running another document's submodule session and confirm `claim` provisions a *new* pane rather than aliasing. Its code (`cmdline_owns_other_document`) is already unit-tested; only the live-pane edge remains, which needs an interactive multi-pane tmux session + operator observation I can't perform autonomously. It stays open — there's no code left to write, just the live check. The remaining queued items (`#jkvs`, `#qasm`, `#6cmx`) are similarly operator-driven live-verify / multi-item sessions, so I'm not auto-draining them — point me at a specific one when you want to run it.
-
-### Re: do [#j0k8] — apply all 3 latency optimizations — opus-4-8
-
-Applied all three deferred `#run-agent-doc-latency` wins. One note up front on the ID: the queued instruction read `do [#j0k8]. Apply all 3 optimizations.`, but `#j0k8` is actually the *cross-root claim-guard live-verify* item — the "apply all 3 optimizations" work is `#t3m5`. I did the optimizations (closed `#t3m5`); `#j0k8` is addressed separately below.
-
-#### What landed (`#t3m5`, submodule `984e5c1e`)
-
-**(a) Submit-acceptance check is capture-then-sleep.** `send_command_unchecked` previously slept a fixed 300ms *before* its first pane capture, so even an instantly-consumed trigger paid 300ms. It now captures first and sleeps after, on a tightened `DIRECT_PANE_SUBMIT_ACCEPTANCE_POLL_INTERVAL` (150ms) — a fast pane is confirmed accepted on the first capture.
-
-**(b) Ready-prompt poll cadence.** `wait_for_agent_ready_outcome` polled every 500ms and requires a 2-poll ready streak (to debounce a transient prompt flicker), giving a ~500-1000ms ready floor. Poll interval is now `AGENT_READY_POLL_INTERVAL` (150ms), keeping the 2-observation streak → ~150-300ms floor.
-
-**(c) Plugin skips the redundant binary debounce.** `buildRunRouteCommand` now passes `route --debounce 0`. The plugin already awaits typing idle in-process via the FFI typing tracker before saving, so route's own settle is pure redundant latency on the editor path. Non-editor callers still get the default 500ms debounce, and the binary keeps treating the cross-process typing indicator as authoritative (the prior-cycle `#jb-run-agent-doc-double-debounce` fix). JB plugin bumped to **0.2.144**.
-
-#### Files
-- `agent-doc-orchestration/src/route.rs` — capture-then-sleep + two named poll-interval consts (150ms); updated module/fn doc comments.
-- `editors/jetbrains/.../TerminalUtil.kt` + `gradle.properties` (0.2.144) — `--debounce 0` on the route command.
-- `editors/jetbrains/.../TerminalUtilTest.kt` — asserts the `--debounce 0` argument.
-- `specs/11-debounce.md` — new "Run Agent Doc dispatch latency" section.
-
-#### Verification
-- `make check` green (clippy `-D warnings` + full suite, 0 FAILED; remaining warnings are pre-existing in `agent-doc-core`). `cargo test -p agent-doc-orchestration -- route::` → 136 passed, 104 ignored (live-tmux).
-- JB `TerminalUtilTest` passes; both plugin zips built (`agent-doc-jetbrains-0.2.144[-signed].zip`).
-- `cargo build --release` + `cargo install --path .` — both binaries refreshed.
-- Pushed `984e5c1e`; CI run `26743632403` in progress (prior cycle `6d191f1f` is green). Local verification stands as the gate.
-- (a)/(b) are pane-I/O timing loops covered by the existing live-tmux `send_command_checked_*` / `wait_for_agent_ready*` integration tests (`make tmux-ci`); (c) has the deterministic Kotlin assertion above.
-
-#### On `#j0k8` (left open)
-`#j0k8` is "live-verify the cross-root claim guard" — drive a real second pane already running another document's submodule session and confirm `claim` provisions a *new* pane rather than aliasing. Its code (`cmdline_owns_other_document`) is already unit-tested; only the live-pane edge remains, which needs an interactive multi-pane tmux session + operator observation I can't perform autonomously. It stays open — there's no code left to write, just the live check. The remaining queued items (`#jkvs`, `#qasm`, `#6cmx`) are similarly operator-driven live-verify / multi-item sessions, so I'm not auto-draining them — point me at a specific one when you want to run it.
-<!-- agent:boundary:49eb8314 -->
+<!-- agent:boundary:9875e947 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->

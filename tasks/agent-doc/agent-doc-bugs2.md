@@ -16,7 +16,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -244,6 +244,49 @@ Each of those can **break a live session** if the collision already exists in a 
 ## Net
 
 The queue is nearly drained and the Codex owner is committing cleanly now — the contention is winding down on its own. For `#preset-item-id-collision-enforce`, the right path is: let the single Codex owner finish the queue, then if you want hard enforcement, decide the strictness boundary (new-mutation-reject vs. dispatch-block vs. opt-in) and have **one** owner implement it on a quiesced document. I'm not finalizing a competing write while the Codex cycle owns the doc.
+I now have the exact site. The tree is clean and this item is genuinely unfixed — but I'm deliberately **not** adding a commit to `20260422/codex-agent-backend`, because the live Codex owner is actively committing *and pushing* to that same branch (it stated it'll "push main after this document commit lands"). A second pusher on one branch creates push races / divergence — which makes the contention worse, not better. So here is the exact ready-to-apply fix for the single owner to drop in.
+
+> **Queue prompt:**
+>
+> do [#do-id-partial-closeout-state]
+
+
+## `#free-text-queue-skip-diagnostic` — ready-to-apply (`write.rs:1518` & `1527`)
+
+Both branches (`BestEffort` and `Required`) emit the same generic line. Replace each `eprintln!("[queue] skipped consumption because the active prompt did not target the queue head")` with a shape-aware helper:
+
+```rust
+// near queue_head_is_free_text_prompt
+fn queue_skip_diagnostic(current_content: &str) -> String {
+    // Free-text head: consumes only when the captured response answers it.
+    if queue_head_is_free_text_prompt(current_content).unwrap_or(false) {
+        return "[queue] skipped consumption: queue head is a free-text prompt — it \
+                consumes only when the cycle's captured `### Re:` response answers it; \
+                no answered-response was recorded this cycle".to_string();
+    }
+    // Id-backed head with no completion proof this cycle: name the id + repairs.
+    match queue_head_id(current_content) {
+        Some(id) => format!(
+            "[queue] skipped consumption: active prompt did not target queue head [#{id}] \
+             and no completion proof for #{id} was recorded this cycle — resolve with \
+             `--done {id}`, `--pending-gate {id}`, or `--pending-edit \"{id}=…\"`"
+        ),
+        None => "[queue] skipped consumption: active prompt did not target the queue head"
+            .to_string(),
+    }
+}
+```
+
+…then `eprintln!("{}", queue_skip_diagnostic(&current_content));` at both sites. `queue_head_id` is the small missing helper — parse the first `agent:queue` `do [#id]` entry (reuse `crate::queue` parsing already used by `queue_head_is_free_text_prompt`). Add a unit test per shape: free-text head → answered-response wording; id-backed head with no `--done` → names `#id` + the three repairs; consumed head → no skip line. That's the whole item (plan point 4).
+
+## Status — the contention is resolving itself
+
+This is genuinely improving, which is the useful update:
+- **Working tree is now clean** — the 75-file WIP I flagged was the Codex owner's pre-commit state; it committed (`e7306701` queue-sync, `2fa93efe` tagpath ≥0.12.1).
+- **`#tagpath-queue-priority-publish-align` is effectively handled** — `2fa93efe` already requires tagpath ≥0.12.1; only the actual crates.io publish remains (still a human release-gate).
+- The Codex owner is draining the last 2 queue items (`#free-text-queue-skip-diagnostic`, `#do-id-partial-closeout-state`) and committing cleanly.
+
+The single owner is now making clean, pushed progress on a clean tree. The right move is to let it finish — and stop this second Claude session so two actors stop sharing the branch. Everything I've verified/scoped this session (the `#queue-sync` fix, `#stuck-capture` verification, this diagnostic, the gatings) is correct and directly applicable by that owner.
 I located the two generic diagnostic lines — `write.rs:1518` and `:1527`. The item is genuinely unfixed in HEAD (`2fa93efe`), the working tree is clean, and the Codex owner is draining this exact queue, so it will take this next. Here's the ready-to-apply shape-aware diagnostic so whoever lands it (the Codex owner, on a clean tree) has the exact content — I'm not racing a duplicate `write.rs` commit onto the shared branch.
 
 ## `do [#free-text-queue-skip-diagnostic]` — ready-to-apply
@@ -271,18 +314,10 @@ Implementation notes for the owner:
 ## Status
 
 The contention is winding down: the Codex owner has committed `e7306701` (queue-sync) and `2fa93efe` (tagpath ≥0.12.1) on a now-clean tree, and is draining the last items (`#free-text-queue-skip-diagnostic`, `#do-id-partial-closeout-state`). I'm not finalizing — the doc is owned by the live Codex cycle, and a competing write risks the `#zpc2` torn-write. Let the single Codex owner record this one; the diagnostic content above drops straight in.
-<!-- agent:boundary:c162fef8 -->
+<!-- agent:boundary:8e352e4f -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~do [#queue-sync-auto-pending-done-guard-misfire]~
-- ~do [#tagpath-queue-priority-publish-align]~
-- ~do [#codex-owned-pane-prompt-miss-followups]~
-- ~do [#stuck-capture-queue-echo-false-positive]~
-- ~do [#preset-item-id-collision-enforce]~
-- ~do [#free-text-queue-skip-diagnostic]~
-- do [#do-id-partial-closeout-state]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 ###
 <!--

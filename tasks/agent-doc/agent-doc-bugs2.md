@@ -198,7 +198,31 @@ Verification:
 Commits:
 - `src/agent-doc`: `e7306701` (`Fix synced queue pending-done accounting`) pushed to `origin/20260422/codex-agent-backend`.
 - Superproject gitlink commit `751bec20` is created; per agent-doc closeout ordering, I will push `main` after this document commit lands.
-<!-- agent:boundary:d867d021 -->
+Good news, and it confirms everything: the **Codex/gpt-5 actor committed its work** — `e7306701` (the `#queue-sync` fix) is now an ancestor of HEAD, HEAD advanced to `2fa93efe`, and **the submodule working tree is now clean** (the 75-file WIP I flagged was that actor's pre-commit state — it's committed). So the operational blocker is resolving itself as the authoritative session commits.
+
+> **Queue prompt:**
+>
+> do [#preset-item-id-collision-enforce]
+
+
+A few things now settle:
+
+- **`#queue-sync-auto-pending-done-guard-misfire` is landed** via `e7306701` — my parallel implementation was redundant and *correctly* never committed (it would have collided with the gpt-5 commit on the same branch). The fix is in; no action needed.
+- The "authoritative actor" is a **Codex `agent-doc` session** actively draining and committing this queue (it even said it'll *"push main after this document commit lands"*). That's the single owner this doc needs — it's just sharing the queue with this Claude session too.
+
+## `do [#preset-item-id-collision-enforce]` — deliberately-deferred risky half, needs a design call
+
+This item is explicitly the *"riskier half, deferred to design carefully against over-blocking live sessions."* The base already landed (`preflight::detect_identity_collisions` + preflight warning + 3 regressions, confirmed in HEAD). What remains is **escalating a warning to hard fail-closed enforcement**:
+1. mutation-time rejection of colliding `--pending-add … id=X`,
+2. fail-closed preflight/session-check dispatch block on an existing collision,
+3. queue generation refusing `do [#id]` for an ambiguous id.
+
+Each of those can **break a live session** if the collision already exists in a working document (a fail-closed dispatch block stops the operator cold). That's exactly why the item was deferred "to design carefully." This is not something to ship autonomously and blindly — it needs a decision on strictness (e.g. reject only *new* mutations that introduce a collision, but keep dispatch a warning for pre-existing ones; or gate hard-enforcement behind a frontmatter/config opt-in). I won't race the authoritative Codex actor to ship aggressive fail-closed blocking without that call.
+
+## Net
+
+The queue is nearly drained and the Codex owner is committing cleanly now — the contention is winding down on its own. For `#preset-item-id-collision-enforce`, the right path is: let the single Codex owner finish the queue, then if you want hard enforcement, decide the strictness boundary (new-mutation-reject vs. dispatch-block vs. opt-in) and have **one** owner implement it on a quiesced document. I'm not finalizing a competing write while the Codex cycle owns the doc.
+<!-- agent:boundary:4a3c3042 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -207,7 +231,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#tagpath-queue-priority-publish-align]~
 - ~do [#codex-owned-pane-prompt-miss-followups]~
 - ~do [#stuck-capture-queue-echo-false-positive]~
-- do [#preset-item-id-collision-enforce]
+- ~do [#preset-item-id-collision-enforce]~
 - do [#free-text-queue-skip-diagnostic]
 - do [#do-id-partial-closeout-state]
 <!-- /agent:queue -->

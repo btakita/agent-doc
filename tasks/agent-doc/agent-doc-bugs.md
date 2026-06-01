@@ -9,7 +9,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -88,7 +88,8 @@ Each arrow is a potential lazily-rs **Slot**: compute once, cache, and automatic
 This gives you the graph incrementally without a big-bang refactor. Each slot is testable in isolation.
 
 **Caveat:** agent-doc runs are sequential and short-lived (single CLI invocation). The dependency graph's value isn't reactive updates mid-run — it's **deduplication** (avoiding redundant `stat`/`read`/`parse` for the same file across `preflight → plan → write → commit`) and **structural clarity** (making the data flow explicit rather than scattered function calls). If the graph later spans multiple documents or a long-lived watch/stream daemon, lazily-rs's invalidation tracking becomes more compelling.
-<!-- agent:boundary:11f04cd3 -->
+There are long lived Actor processes that share the logic. So the CLI runs are short lived and can have a single run Context while the long lived processes can have a shared Context that persists across the lifetime of the Actor.
+<!-- agent:boundary:ebf80ce7 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -96,7 +97,8 @@ This gives you the graph incrementally without a big-bang refactor. Each slot is
 
 ## Pending / Not Built
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+- There are long lived Actor processes that share the logic. So the CLI runs are short lived and can have a single run Context while the long lived processes can have a shared Context that persists across the lifetime of the Actor.
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

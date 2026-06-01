@@ -150,14 +150,31 @@ The auto-scaffold-on-reject was a symptom of the broader "every `.md` is auto-co
 Answer those (add `#spec-test-build-install-commit-push` to ship) and I'll ungate `#4a6p` and implement the full gate.
 
 (FYI: the exchange is getting large — 6 cycles in 30 min. Say the word if you want me to `agent-doc compact` it.)
-<!-- agent:boundary:a28992c1 -->
+
+### Re: do [#jkvs] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#jkvs]
+
+
+I gated `#jkvs` instead of marking it done.
+
+`#jkvs` is a consolidated **live JetBrains/tmux verification** batch: install the current signed JB plugin, restart the route-owned agent-doc process, then drive one mid-active-turn pane through the live-verify items (`#t41j`, busy queue feedback, route-drain all-surface, Codex stop-hook/live prompt-miss/final-response checks, recovery drift, and Load Tmux Window). That requires a live IDE/plugin session and operator-driven pane state; I cannot complete that verification from this Codex turn without fabricating proof.
+
+Commands run: `agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` attempted the binary-owned route but failed after submitting to Claude; I recovered through Codex preflight/plan, inspected the `#jkvs` backlog item and `tasks/agent-doc/plan-active-prompt-pane-reap.md`, and am closing this item as gated with `--pending-gate jkvs`.
+
+Verification: no code changed, so no build/test suite was required. `agent-doc preflight` recovered the stale failed child cycle and identified `do [#jkvs]` as the active queue head; `agent-doc plan` confirmed `#jkvs` is the targeted backlog item.
+
+Confidence: high that this should remain gated until a live IDE/tmux verification session is available. Escalation: use the next implementable queue item (`#qasm`) for repo work; come back to `#jkvs` when you can drive the live JetBrains session.
+<!-- agent:boundary:6b2d7ece -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 - ~do [#4a6p]~
 - ~do [#t3m5]. Apply all 3 optimizations.~
 - ~do [#j0k8]~
-- do [#jkvs]
+- ~do [#jkvs]~
 - do [#qasm]
 - do [#6cmx]
 <!-- /agent:queue -->
@@ -191,7 +208,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog priority queue=prepend -->
-- [ ] [#jkvs] [recommended] Path A — run one consolidated live busy-pane verification session to batch-close the live-verify-gated review items: install the current signed JB plugin + restart the route-owned agent-doc process, then drive one mid-active-turn pane through #t41j, #jb-busy-queue-deadlock-live-verify, #jb-run-agent-doc-busy-feedback-live-verify, #route-drain-all-surface-live-verify, #codex-owned-pane-stop-hook-live-verify, #codex-owned-pane-prompt-miss-followups (2b/3), #codex-final-response-live-verify, #recovery-drift-apply-live-verify, #jb-load-tmux-window-verify.
 - [ ] [#qasm] [recommended] Path C — work the no-live-pane implementable review items in priority order: #free-text-queue-skip-diagnostic, #queue-auto-no-continue, then the queue-provenance cluster (#prompt-preempts-auto-queue, #queue-user-edit-overwrite, #jb-run-agent-doc-response-queue-contamination), the Option-A fixes (#cancel-orphans-preflight-cycle, #exchange-prompt-dropped-on-merge, #duplicate-response-after-commit), closeout-guard hardening (#do-id-partial-closeout-state, #preset-item-id-collision-enforce, #queue-clear-unrun-items), the feature pair (#backlog-priority-attribute, #backlog-queue-sync-attribute), then hygiene/UX (#stash-session-ttl-prune, #plugin-cleanup-menu-command, #stash-pane-promote-on-focus, #clear-stops-running-process, #jb-stale-busy-idle-footer, #snrun).
 - [ ] [#6cmx] [recommended] Path B — run one IPC/typing-corruption live-capture session: enable #com.github.btakita.agentdoc debug logging, then type into a doc during finalize --stream to capture the exact setText payload that unblocks the duplication family #ipcfullprompt-recur2, #ipc-dup-tracking-double-merge, #adoc-queue-ipc-buffer-divergence, #prompt-duplicated-while-typing, #finalize-retry-ipc-response-duplication, #zpc2.
 <!-- /agent:backlog -->
@@ -199,6 +215,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Review
  
 <!-- agent:review -->
+- [/] [#jkvs] [recommended] Path A — run one consolidated live busy-pane verification session to batch-close the live-verify-gated review items: install the current signed JB plugin + restart the route-owned agent-doc process, then drive one mid-active-turn pane through #t41j, #jb-busy-queue-deadlock-live-verify, #jb-run-agent-doc-busy-feedback-live-verify, #route-drain-all-surface-live-verify, #codex-owned-pane-stop-hook-live-verify, #codex-owned-pane-prompt-miss-followups (2b/3), #codex-final-response-live-verify, #recovery-drift-apply-live-verify, #jb-load-tmux-window-verify.
 - [/] [#4a6p] [recommended] Make agent-doc documents opt-in so a plain .md is not auto-converted into a session. Add is_agent_doc_document(path, content, config) gate (frontmatter field OR .agent-doc config [documents] glob OR auto_session_for_all_md escape hatch); ensure_session_for_file/route/run/write fail closed with an opt-in message instead of injecting session: frontmatter; FFI agent_doc_is_session_document for JB/VSCode SubmitAction.update gating. Plan: tasks/agent-doc/plan-opt-in-agent-doc-documents.md.
 - [/] [#j0k8] [recommended] Live-verify the cross-root claim guard (submodule 822688d0): from the superproject root, claim/open a new document from inside a pane already running a different document's submodule agent-doc/codex session, and confirm claim provisions a NEW pane (logs '[claim] pane ... runs a live agent-doc/codex session for another document') instead of aliasing onto it. Also confirm the awear.md recovery restores a real pane. cmdline_owns_other_document is unit-tested; this is the live-pane edge.
 - [/] [#do-id-partial-closeout-state] [recommended] Partial-closeout WARN guard landed (check_partial_closeout_state_guard: a do[#id] turn whose response shows shipped + remaining-live-work signals with the directed id still open advises --pending-edit/--pending-gate narrowing; suppressible by a no-partial-closeout-guard response marker; FlowCore guard_ budget 35->40). Remaining: per-id edit-vs-gate tracking in cycle_state, opt-in strict mode, next-phase queue convergence, and the runbook note that #spec-test-commit-push completes a repo phase without a live/deploy item. Plan: tasks/agent-doc/plan-do-id-partial-closeout-state.md.

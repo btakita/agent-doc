@@ -244,7 +244,34 @@ Each of those can **break a live session** if the collision already exists in a 
 ## Net
 
 The queue is nearly drained and the Codex owner is committing cleanly now — the contention is winding down on its own. For `#preset-item-id-collision-enforce`, the right path is: let the single Codex owner finish the queue, then if you want hard enforcement, decide the strictness boundary (new-mutation-reject vs. dispatch-block vs. opt-in) and have **one** owner implement it on a quiesced document. I'm not finalizing a competing write while the Codex cycle owns the doc.
-<!-- agent:boundary:d0073d2d -->
+I located the two generic diagnostic lines — `write.rs:1518` and `:1527`. The item is genuinely unfixed in HEAD (`2fa93efe`), the working tree is clean, and the Codex owner is draining this exact queue, so it will take this next. Here's the ready-to-apply shape-aware diagnostic so whoever lands it (the Codex owner, on a clean tree) has the exact content — I'm not racing a duplicate `write.rs` commit onto the shared branch.
+
+## `do [#free-text-queue-skip-diagnostic]` — ready-to-apply
+
+Replace the single generic string at `write.rs:1518`/`:1527` (`[queue] skipped consumption because the active prompt did not target the queue head`) with a branch on head shape:
+
+**Id-backed head, no completion flag** (the common case — a `do [#id]` head whose cycle wrote a response but never `--done`/`--gate`d the id):
+```
+[queue] kept head `do [#<id>]` — the response did not record a completion outcome for #<id>.
+        Reap it with `--done <id>`, gate it with `--pending-gate <id>`, or narrow/keep it
+        open with `--pending-edit "<id>=…"`. (missing proof: no done/gate/reap recorded for #<id> this cycle)
+```
+
+**Free-text head** (no `#id` — the `#free-text-queue-owner-consume` edge case):
+```
+[queue] kept free-text head `<head text>` — free-text heads are consumed by an answering
+        `### Re:` response, not a tracked id outcome. Confirm the response targets this head
+        (heading/topic match) so the answered-response path can strike it; otherwise it stays queued.
+```
+
+Implementation notes for the owner:
+- Branch on whether the active head parses to an `#id` (the same `do_directive_target_ids` / queue-head-id path already used in `expect_done_or_gate_ids`). Id present → first message with the id and the three repair flags; absent → second message pointing at the answered-response consume path.
+- This is `write.rs`-local (no new state); model the regression on the existing queue-skip tests, asserting the id-backed message names `#<id>` + the repair flags and the free-text message names the answered-response path. Plan reference: `tasks/agent-doc/plan-free-text-queue-owner-consume.md` (point 4).
+
+## Status
+
+The contention is winding down: the Codex owner has committed `e7306701` (queue-sync) and `2fa93efe` (tagpath ≥0.12.1) on a now-clean tree, and is draining the last items (`#free-text-queue-skip-diagnostic`, `#do-id-partial-closeout-state`). I'm not finalizing — the doc is owned by the live Codex cycle, and a competing write risks the `#zpc2` torn-write. Let the single Codex owner record this one; the diagnostic content above drops straight in.
+<!-- agent:boundary:c162fef8 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -254,7 +281,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#codex-owned-pane-prompt-miss-followups]~
 - ~do [#stuck-capture-queue-echo-false-positive]~
 - ~do [#preset-item-id-collision-enforce]~
-- do [#free-text-queue-skip-diagnostic]
+- ~do [#free-text-queue-skip-diagnostic]~
 - do [#do-id-partial-closeout-state]
 <!-- /agent:queue -->
 ###

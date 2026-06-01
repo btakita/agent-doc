@@ -19,8 +19,6 @@ queue_active: false
 ## Status
 
 <!-- agent:status patch=replace -->
-
-
 <!-- /agent:status -->
 
 ## Spec
@@ -37,7 +35,20 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 5 response topic(s): #surreal-backend-eval; #surreal-parity-suite; #surreal-native-adapter; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:7ba90748 -->
+❯ Is surrealdb at parity with sqlite?
+
+### Re: SurrealDB parity — gpt-5
+
+Short answer: yes for the current backend-eval parity surface, no for production replacement parity with SQLite.
+
+The conformance path asserts SurrealDB's backend-eval report has `parity.matches_sqlite == true` and no diagnostics for each dataset, then compares SurrealDB row counts against SQLite for the parity operations. The spec says the SurrealDB prototype is compared against SQLite across status/count rows, edge lookup, edge-property scan, incident scan, neighborhood, related retrieval, path tiers, evidence, conflict-matrix, and dispatch-trace.
+
+But that is still backend-eval/prototype parity. It is not promoted to SQLite-equivalent substrate status. The promotion gate keeps SurrealDB behind backend-eval until a real optional adapter proves provider-neutral projection writes/load, full `GraphStore` parity, writer/read-only lock behavior, default build/install portability, full-projection wins, and faster-than-SQLite results across the real, full-projection, high-degree, and deep-chain workloads. The code also labels the default SurrealDB path as a read snapshot unless the `backend-surrealdb` feature is enabled.
+
+So I would treat it as: `SurrealDB is parity-checked and currently passes the measured read/query parity suite; SQLite remains the stable baseline and default until SurrealDB passes the production adapter and performance gates.`
+
+Evidence checked: `SPEC.md`, `packages/tsift-cli/src/lib.rs`, and `packages/tsift-cli/tests/graph_db_conformance.rs`. No repo files changed.
+<!-- agent:boundary:03031379 -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -9,7 +9,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -420,7 +420,20 @@ Implemented Option A and pushed to `lazily-rs` (`f4f6b2c`).
 
 **Verification:** 54 tests pass (13 integration + 41 spec compliance). `cargo build --release` clean.
 publish and release lazily-rs
-<!-- agent:boundary:1a4b7705 -->
+
+### Re: publish and release lazily-rs — gpt-5
+
+Released `lazily v0.2.0` to crates.io.
+
+**Release steps completed:**
+
+1. Pre-release checklist: 54 tests pass, working tree clean
+2. Updated `SPEC.md` and `README.md` with `SlotHandle::clear` and `CellHandle::clear_dependents` in API tables
+3. Bumped `Cargo.toml` version `0.1.1` → `0.2.0`
+4. Committed (`fd81655`), tagged `v0.2.0`, pushed
+5. Published: `cargo publish` → `lazily v0.2.0` live on crates.io
+6. Verified: `cargo search lazily` → `lazily = "0.2.0"`
+<!-- agent:boundary:a5d33b53 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -428,8 +441,7 @@ publish and release lazily-rs
 
 ## Pending / Not Built
 
-<!-- agent:queue auto -->
-- publish and release lazily-rs
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

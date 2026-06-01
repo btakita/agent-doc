@@ -58,10 +58,10 @@ It's **WARN-only** — never blocks closeout — and suppressed by `<!-- no-gate
 **Drift observed + recovered (not committed).** When I re-ran `preflight` to capture the baseline for this closeout, queue-maintenance deactivated the active queue to inactive residue (`queue_active: false`), and on the first pass mangled the opening tag to `&lt;!-- agent:queue au--&gt;` (a corrupted `auto` strip). HEAD was clean and correct, so I restored it (`git checkout HEAD` + `reset --from-current`) rather than committing the corruption. Two concerns worth tracking separately: (1) this active queue (head `#gated-followup-split-enforcement`, with completed heads struck `~...~`) keeps being deactivated to residue instead of advancing — the `#completed-queue-residue-regression` / queue-auto-no-continue family; (2) the `au-->` tag corruption from `strip_auto_from_tag` under this state. Neither is in scope for this item, but both reproduced live this turn.
 
 **Shipped:** submodule `dc29f28f`; superproject pointer bumped. Marked `#gated-followup-split-enforcement` done.
-<!-- agent:boundary:c69fa6f6 -->
+<!-- agent:boundary:c9cb3964 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#jb-run-agent-doc-busy-queue-dispatch-deadlock]~
 - ~do [#preflight-probe-side-effect-free]~

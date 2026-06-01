@@ -132,7 +132,7 @@ Verification:
 - Default `cargo install --path . --force` passed (`tart-e2f44e7862`) and its log has no `tsift-surrealdb`/SurrealDB compile lines.
 - GitHub CI: new tsift CI run `26784235057` for `2a6d8cb` is in progress; previous CI run `26782385866` was green.
 - Tmux CI: workflows are `CI` and `Release`; this repo has no `make tmux-ci` target.
-<!-- agent:boundary:fd0cc1ea -->
+<!-- agent:boundary:4b4f6f1d -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -141,7 +141,7 @@ Verification:
 preset #spec-test-build-install-commit-push
 - ~[#surreal-backend-eval]~
 - ~[#surreal-parity-suite]~
-- [#surreal-native-adapter]
+- ~[#surreal-native-adapter]~
 - [#surreal-promotion-gate]
 <!-- /agent:queue -->
 

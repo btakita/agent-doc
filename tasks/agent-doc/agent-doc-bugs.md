@@ -9,7 +9,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -42,7 +42,8 @@ Agent-doc's actual mid-run change detection is a layered system that doesn't use
 5. **Watch daemon** (`watch.rs`) — file-system watcher with convergence detection and agent-triggered-loop prevention
 
 If the intent is to wire `lazily-rs` into agent-doc so that a document change mid-run reactively clears cached computation, `lazily-rs` already provides the transitive clearing infrastructure (`SlotHandle::clear()` and `CellHandle::clear_dependents()`). The integration gap would be connecting agent-doc's debounce/snapshot-hash signals to `Context::set_cell()` or `SlotHandle::clear()` calls at the appropriate cycle boundaries.
-<!-- agent:boundary:55e21eb3 -->
+Use `CellHandle::set(&ctx)` instead of `Context::set_cell()`.
+<!-- agent:boundary:c96d7eae -->
 <!-- /agent:exchange -->
 
 <!--
@@ -50,7 +51,8 @@ If the intent is to wire `lazily-rs` into agent-doc so that a document change mi
 
 ## Pending / Not Built
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+- Use `CellHandle::set(&ctx)` instead of `Context::set_cell()`.
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

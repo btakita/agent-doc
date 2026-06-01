@@ -96,7 +96,20 @@ Backlog items in priority order:
 **Top of backlog: `#lazily-tsift-plan`**
 `tsift status --json` should automatically fix the index if stale. Use lazily-rs to avoid redundant I/O.
 #spec-test-build-install-commit-push
-<!-- agent:boundary:2b98c1b2 -->
+
+
+### Re: status --json auto-fix stale index — glm-5.1
+
+Implemented and pushed (`f454216`).
+
+**What changed:**
+- `packages/tsift-cli/src/commands/infra.rs` — `cmd_status` now auto-applies index fixes when `--json` detects a stale or missing index (no WAL lock recovery). This means agents calling `tsift status --json` always get a fresh report without needing `--fix`.
+- WAL lock recovery is respected: if the index is stale because a concurrent writer holds a WAL lock (`recovery: Some(...)`), auto-fix is skipped to preserve snapshot fallback reporting.
+- `SPEC.md` / `CLAUDE.md` — documented `--json` auto-fix behavior.
+- New test: `status_json_auto_fixes_stale_index_without_fix_flag` — confirms `--json` alone refreshes a stale index.
+
+**lazily-rs integration deferred** to a follow-up item (`#lazily-tsift-status-cache`). Adding lazily-rs as a dependency requires workspace-level Cargo.toml changes and a dedicated integration plan beyond the scope of this status auto-fix.
+<!-- agent:boundary:6ee767cf -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -111,6 +124,7 @@ Backlog items in priority order:
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#lazily-tsift-status-cache] [feature] Integrate lazily-rs into tsift status check to cache index inspections and avoid redundant SQLite opens across repeated status calls
 - [ ] [#lazily-inspect-scope] [feature] Replace InspectScopeGuard with lazily-rs reactive cache in tsift-index
 - [ ] [#lazily-resolve-edges] [feature] Wrap resolve_edges in lazily-rs Slots keyed by (file, symbol, content_hash)
 - [ ] [#lazily-neighborhood] [feature] Lazy BFS neighborhood expansion via lazily-rs Slots per depth layer

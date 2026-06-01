@@ -63,7 +63,18 @@ I gated `#6cmx`; it still needs a live operator capture, not a source-code chang
 This item requires a live JetBrains/plugin session with `#com.github.btakita.agentdoc` debug logging enabled, followed by typing into a document during `finalize --stream` so the exact `setText` payload can be captured. I cannot produce that capture from this Codex pane, and I am not going to mark it done without the live proof.
 
 Changed paths: session document only. Commands run: `agent-doc preflight`, `agent-doc plan`, and `agent-doc write --commit --pending-gate 6cmx`. Verification: no source changes, so no build/test suite was required. Confidence: high that this belongs in gated live-capture state. Escalation: run the capture from the live JetBrains session when ready.
-<!-- agent:boundary:3bf0da91 -->
+❯ agent-doc ignored my previous prompt in the last turn. #spec-test-build-install-commit-push
+
+### Re: ignored previous prompt and incomplete closeout — gpt-5
+
+I completed the turn and fixed the ignored-prompt class that caused it. The failure was a queue-continuation response (`### Re: do [#6cmx]`) masking a preceding free-text user prompt as if it had been answered. That let the boundary/snapshot advance past the user's prompt, so the next preflight could report `no_changes` even though real user work was still pending.
+
+The binary now treats queue-continuation response headings (`### Re: do [#id]` / `### Re: re [#id]`, any h-level) as answers to queue/backlog items, not as answers to preceding free-text prompts. The unresolved-prompt detector scans only the prompt region before the first response heading, so a queue continuation can no longer bury an unanswered prompt in the snapshot. I added regression coverage for the masked free-text prompt shape and for directive-heading classification, and updated `specs/07-core-commands.md` with the invariant.
+
+I also completed the `tsift.md` `#agent-doc-bug` capture from the prior Codex pane: `#jb-tsift-pane-sync` is now in this backlog/queue, with plan `tasks/agent-doc/plan-jb-tsift-pane-sync-regression.md` committed.
+
+Changed paths: `src/agent-doc/agent-doc-orchestration/src/session_check.rs`, `src/agent-doc/specs/07-core-commands.md`, superproject `src/agent-doc`, `tasks/agent-doc/plan-jb-tsift-pane-sync-regression.md`, and this session document. Commands: `agent-doc session-check`, `agent-doc preflight`, `agent-doc plan`, targeted `cargo test -p agent-doc-orchestration -- unresolved_exchange_prompt is_queue_continuation`, `cargo test -p agent-doc-orchestration -- session_check::`, `make check`, `cargo build --release`, `cargo install --path .`, `git commit` in `src/agent-doc`, superproject `git commit`, and this `agent-doc finalize`. Verification: targeted tests passed, `session_check::` tests passed, `make check` passed, release build completed, and local install completed. Commits: plan file `f230c30b1`, submodule fix `56ff1626`, superproject pointer `626f58a30`; this response is committed by finalize. Push: pending until after this binary-owned closeout succeeds. Confidence: high. Escalation: none.
+<!-- agent:boundary:403d225f -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->

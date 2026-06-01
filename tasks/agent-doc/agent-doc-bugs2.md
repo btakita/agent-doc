@@ -170,12 +170,37 @@ So `#jb-tsift-pane-sync` correctly stays queued/gated: **planned and ready, bloc
 - Then drive the **Phase 1 trace** in a live JB session to capture the `owns=G` mismatch, and land Phase 3b's guard with sync/focus regressions on the clean tree.
 
 I'm not landing a blind focus/sync change or a comingled commit. The plan and the shareable guard helper are in place for whoever holds the clean, single-owner tree to implement against the captured repro.
-<!-- agent:boundary:0827eea5 -->
+**Stop — I must not reconcile these changes, and the binary agrees.** The dirty tree is **not orphaned WIP. It's a live, active Codex turn's in-progress work.**
+
+`agent-doc session clear tasks/software/tsift.md` **refused**, fail-closed, with the decisive reason:
+
+```
+session_clear refused ... pane %60 is alive-busy
+(reason=active codex turn, source=authoritative_actor,
+ current_command=agent-doc, tail="gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 66% used")
+```
+
+So the `tsift.md` session is **running a `gpt-5.5` Codex turn right now**, on pane `%60`, working in the agent-loop root — and the 69-file dirty tree is **that turn's uncommitted output**. Your JB cancel did **not** stop it (the "kill the pane ≠ stop the actor" issue — `route` restarted it on `%60`).
+
+**I did not stash, commit, or discard anything.** Reconciling a live session's working tree mid-turn would corrupt its active work — `git stash`/commit would yank the files out from under a process that's still editing them, diverging its in-memory state from disk. The binary refused `session clear` for exactly this reason, and I'm honoring that.
+
+To make these changes reconcilable, the tsift.md turn has to stop first. Two paths — **your call**, because one is destructive:
+
+1. **Wait (non-destructive).** Let the tsift.md Codex turn finish. It will almost certainly **commit its own work** (it's the same actor that committed `d0bda4c7`, `56ff1626`, etc.) — in which case the tree cleans itself and there's nothing to reconcile. Once it's idle, `agent-doc session clear tasks/software/tsift.md` succeeds and I can reconcile anything left.
+2. **Interrupt now (destructive — loses its active turn).** `agent-doc session interrupt-clear tasks/software/tsift.md` intentionally interrupts pane `%60` and clears its context, discarding the in-progress turn's reasoning. *Then* I'd reconcile the resulting tree: build + `make check` → **commit** if coherent, **stash** if broken.
+
+I won't run `interrupt-clear` autonomously — it throws away live work and that's your decision.
+
+**Also worth fixing the root cause:** the reason "cancel" didn't take is that `tsift.md` is a Codex-harness doc, so any `Run Agent Doc` / `route` / navigation **auto-restarts** its owner pane. To keep it gone you must stop routing it (or `interrupt-clear` it **and** not re-navigate). This is precisely the focus/sync/autostart contract `#jb-tsift-pane-sync` is meant to fix.
+
+Tell me **wait** or **interrupt-clear tsift.md**, and I'll proceed with the reconciliation from a safe, stopped tree.
+<!-- agent:boundary:92ec74ac -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#jb-tsift-pane-sync]~
+- The dirty files were from the tsift.md session...which I canceled. Please reconcile the dirty changes.
 - do [#ipcaa-scaf]
 - do [#submodule-response-commit-proof]
 - do [#qasm]
@@ -212,13 +237,13 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 <!-- agent:backlog priority queue=prepend -->
 - [ ] [#ipcaa-scaf] [recommended] #agent-doc-bug 2026-06-01: socket IPC already_applied accepted a prompt-drifted, scaffold-duplicated live buffer for tasks/software/lazily-rs.md (prompt_drift=true, snap_source=file_read), then committed a structurally invalid document with duplicated Queue/Backlog/Review/Done scaffold and partial typed prompt fragments. Fix already_applied snapshot adoption to fail closed or use content_ours when prompt drift or duplicated scaffold is detected. Plan: tasks/agent-doc/plan-ipc-already-applied-scaffold-drift.md.
 - [ ] [#submodule-response-commit-proof] [recommended] #agent-doc-bug 2026-06-01: a response to `src/boost-client/tasks/monsterrodholders.md` was committed inside the `boost-client` submodule (`6cbff1d`), but the parent `agent-loop` repo still showed `M src/boost-client`, and the closeout wording did not distinguish target-doc commit proof, parent submodule-pointer dirtiness, and the fact that the response bypassed binary-owned `agent-doc write` / `finalize` after recursive same-pane dispatch failed. Fix by making nested-repo commit ownership explicit in session-check/final diagnostics and fail closed on unverified manual fallback. Plan: tasks/agent-doc/plan-submodule-response-commit-proof.md.
-- [ ] [#jb-tsift-pane-sync] [recommended] JetBrains navigation to `tasks/software/tsift.md` and manual `Sync Tmux Layout` did not immediately surface this pane, AND a 2026-06-01 report shows a worse cross-document variant: the pane surfaced for `tsift.md` was actually running `agent-doc-bugs2.md` (wrong-document pane↔owner binding). Plan and fix the regression where automatic selection plus explicit manual sync can leave a live/hidden/stashed target pane invisible or silently deferred OR surface a pane that owns a different document; navigation + manual sync must cleanly autostart/surface the owner for the exact navigated file (never alias/reuse another document's owner) or fail closed naming the blocker. Plan: tasks/agent-doc/plan-jb-tsift-pane-sync-regression.md.
 - [ ] [#qasm] [recommended] Path C - continue the no-live-pane implementable review items in priority order, starting with the queue-provenance cluster (#prompt-preempts-auto-queue, #queue-user-edit-overwrite, #jb-run-agent-doc-response-queue-contamination), then the Option-A fixes (#cancel-orphans-preflight-cycle, #exchange-prompt-dropped-on-merge, #duplicate-response-after-commit), closeout-guard hardening (#do-id-partial-closeout-state, #preset-item-id-collision-enforce, #queue-clear-unrun-items), the feature pair (#backlog-priority-attribute, #backlog-queue-sync-attribute), then hygiene/UX (#stash-session-ttl-prune, #plugin-cleanup-menu-command, #stash-pane-promote-on-focus, #clear-stops-running-process, #jb-stale-busy-idle-footer, #snrun).
 <!-- /agent:backlog -->
 
 ## Review
  
 <!-- agent:review -->
+- [/] [#jb-tsift-pane-sync] [recommended] JetBrains navigation to `tasks/software/tsift.md` and manual `Sync Tmux Layout` did not immediately surface this pane, AND a 2026-06-01 report shows a worse cross-document variant: the pane surfaced for `tsift.md` was actually running `agent-doc-bugs2.md` (wrong-document pane↔owner binding). Plan and fix the regression where automatic selection plus explicit manual sync can leave a live/hidden/stashed target pane invisible or silently deferred OR surface a pane that owns a different document; navigation + manual sync must cleanly autostart/surface the owner for the exact navigated file (never alias/reuse another document's owner) or fail closed naming the blocker. Plan: tasks/agent-doc/plan-jb-tsift-pane-sync-regression.md.
 - [/] [#6cmx] [recommended] Path B — run one IPC/typing-corruption live-capture session: enable #com.github.btakita.agentdoc debug logging, then type into a doc during finalize --stream to capture the exact setText payload that unblocks the duplication family #ipcfullprompt-recur2, #ipc-dup-tracking-double-merge, #adoc-queue-ipc-buffer-divergence, #prompt-duplicated-while-typing, #finalize-retry-ipc-response-duplication, #zpc2.
 - [/] [#jkvs] [recommended] Path A — run one consolidated live busy-pane verification session to batch-close the live-verify-gated review items: install the current signed JB plugin + restart the route-owned agent-doc process, then drive one mid-active-turn pane through #t41j, #jb-busy-queue-deadlock-live-verify, #jb-run-agent-doc-busy-feedback-live-verify, #route-drain-all-surface-live-verify, #codex-owned-pane-stop-hook-live-verify, #codex-owned-pane-prompt-miss-followups (2b/3), #codex-final-response-live-verify, #recovery-drift-apply-live-verify, #jb-load-tmux-window-verify.
 - [/] [#4a6p] [recommended] Make agent-doc documents opt-in so a plain .md is not auto-converted into a session. Add is_agent_doc_document(path, content, config) gate (frontmatter field OR .agent-doc config [documents] glob OR auto_session_for_all_md escape hatch); ensure_session_for_file/route/run/write fail closed with an opt-in message instead of injecting session: frontmatter; FFI agent_doc_is_session_document for JB/VSCode SubmitAction.update gating. Plan: tasks/agent-doc/plan-opt-in-agent-doc-documents.md.

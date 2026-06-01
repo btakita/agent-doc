@@ -53,6 +53,8 @@ These are all "code landed, gated on a live pane / installed signed plugin + res
 
 **Single most unblocking action:** confirm which signed plugin build is installed + restart the route-owned process, then run the busy-pane checklist once.
 
+I'm running v0.2.143.
+
 #### Path B — One IPC/typing-corruption live-capture session (gated on debug logging)
 
 The duplication family is blocked on capturing the exact editor `setText` payload — enable `#com.github.btakita.agentdoc` debug logging **first**, then type a prompt into a doc during an in-flight `finalize --stream`:
@@ -92,10 +94,44 @@ Added the three completion paths as `[recommended]` backlog items (recommended-s
 3. **Path B** — one IPC/typing-corruption live-capture session (enable debug logging, capture the `setText` payload) that unblocks the duplication family.
 
 Each references the underlying review IDs rather than duplicating them, so the backlog now carries the orchestration/sequencing while the 39 review items keep the detail. They're `[recommended]` (advisory ordering), not new implementation work — the review items remain the source of truth.
-<!-- agent:boundary:4aeed96b -->
+I added /home/brian/work/btakita/agent-loop/tasks/recruit/awear.md. However, I don't see the claiming tmux pane.
+#spec-test-build-install-commit-push
+
+### Re: I added awear.md but don't see the claiming tmux pane — opus-4-8
+
+Diagnosed, fixed, shipped. (And noted you're on JB plugin **v0.2.143** — that's the Path A build, fine for the live-verify items.)
+
+#### What actually happened (verified against live state)
+
+There is no real pane running `awear.md` — it was **aliased onto another document's live pane**:
+
+- `awear.md` → registries say pane `%40`, but `%40` is a live **Codex `gpt-5.5` session for `monsterrodholders.md`** (`src/boost-client`), process tree `agent-doc start --route-owned tasks/monsterrodholders.md`.
+- Worse, the two superproject registries disagree on awear's own session: `sessions.json` says `ee25d7aa…`, `session-actors.json` says `e8ad5e9f…` — both pointing at `%40`.
+
+So when awear was added/claimed, the claim bound it onto `%40` (monsterrodholders' pane) and never provisioned a real pane for it. That's why you see no awear pane.
+
+#### Root cause
+
+`claim`'s one-live-pane-per-document guard only consulted the **calling root's** `sessions.json`. `monsterrodholders.md` is rooted in the **boost-client submodule** (its own `.agent-doc`), so its `%40` ownership is invisible to the superproject registry — claim saw `%40` as unowned and commandeered it. The binding invariant wasn't enforced across roots.
+
+#### Fix (`#spec-test-build-install-commit-push`)
+
+- **fix** — `claim.rs` now also inspects the requested pane's **live process tree**: if it runs an agent-doc/codex owner session for a *different* `.md` document, claim provisions a new pane instead of commandeering it. The decision (`cmdline_owns_other_document` in `sync.rs`) is keyed on the live cmdline, so it's cross-root/submodule safe.
+- **test** — `cmdline_owns_other_document_blocks_cross_root_commandeer` (exact awear/monsterrodholders repro) + `_allows_same_doc_and_non_owner_panes` (same-doc reuse, shell, no-doc, non-owner negatives).
+- **spec** — `specs/07-session-tmux-commands.md` claim invariant now states the cross-root enforcement explicitly.
+- **build/install** — `cargo build --release` + `cargo install --path .` clean (both binaries refreshed).
+- **commit/push** — `agent-doc@822688d0`. `make check` green (clippy `-D warnings`, orchestration 2115 passed). CI `26741479773` queued; prior run green.
+
+#### Recovering your current awear state
+
+The fix prevents recurrence; your existing bad binding still needs clearing. From the **superproject root**, `agent-doc resync --fix` detects the wrong-process pane (awear→`%40` where `%40` runs monsterrodholders) and drops the stale binding without touching the live `%40` session; then re-open awear and the fixed binary provisions a fresh pane. I did **not** run it for you — it mutates live multi-session state in a racy repo, so it's your call. Queued a `[recommended]` live-verify item.
+<!-- agent:boundary:e7cf7af5 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
+- do [#jkvs]
+- do [#qasm]
+- do [#6cmx]
 <!-- /agent:queue -->
 ###
 <!--
@@ -123,6 +159,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog priority queue=prepend -->
+- [ ] [#j0k8] [recommended] Live-verify the cross-root claim guard (submodule 822688d0): from the superproject root, claim/open a new document from inside a pane already running a different document's submodule agent-doc/codex session, and confirm claim provisions a NEW pane (logs '[claim] pane ... runs a live agent-doc/codex session for another document') instead of aliasing onto it. Also confirm the awear.md recovery restores a real pane. cmdline_owns_other_document is unit-tested; this is the live-pane edge.
 - [ ] [#jkvs] [recommended] Path A — run one consolidated live busy-pane verification session to batch-close the live-verify-gated review items: install the current signed JB plugin + restart the route-owned agent-doc process, then drive one mid-active-turn pane through #t41j, #jb-busy-queue-deadlock-live-verify, #jb-run-agent-doc-busy-feedback-live-verify, #route-drain-all-surface-live-verify, #codex-owned-pane-stop-hook-live-verify, #codex-owned-pane-prompt-miss-followups (2b/3), #codex-final-response-live-verify, #recovery-drift-apply-live-verify, #jb-load-tmux-window-verify.
 - [ ] [#qasm] [recommended] Path C — work the no-live-pane implementable review items in priority order: #free-text-queue-skip-diagnostic, #queue-auto-no-continue, then the queue-provenance cluster (#prompt-preempts-auto-queue, #queue-user-edit-overwrite, #jb-run-agent-doc-response-queue-contamination), the Option-A fixes (#cancel-orphans-preflight-cycle, #exchange-prompt-dropped-on-merge, #duplicate-response-after-commit), closeout-guard hardening (#do-id-partial-closeout-state, #preset-item-id-collision-enforce, #queue-clear-unrun-items), the feature pair (#backlog-priority-attribute, #backlog-queue-sync-attribute), then hygiene/UX (#stash-session-ttl-prune, #plugin-cleanup-menu-command, #stash-pane-promote-on-focus, #clear-stops-running-process, #jb-stale-busy-idle-footer, #snrun).
 - [ ] [#6cmx] [recommended] Path B — run one IPC/typing-corruption live-capture session: enable #com.github.btakita.agentdoc debug logging, then type into a doc during finalize --stream to capture the exact setText payload that unblocks the duplication family #ipcfullprompt-recur2, #ipc-dup-tracking-double-merge, #adoc-queue-ipc-buffer-divergence, #prompt-duplicated-while-typing, #finalize-retry-ipc-response-duplication, #zpc2.

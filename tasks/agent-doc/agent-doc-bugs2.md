@@ -16,7 +16,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -149,13 +149,14 @@ I added it to the plan as an explicit invariant: navigating to file `F`, or runn
 - regression + acceptance criteria for the cross-document guard.
 
 I'm keeping this at plan/backlog level rather than editing code now: it's in the live-JB-verify cluster (no automated tmux repro of the contaminated `Sync Tmux Layout` state yet), and a blind change to the focus/sync reuse path risks regressing the stash-promote and exact-visible dedup work. The next executable step is Phase 1's trace recipe to capture the actual `owns=G` mismatch from a live repro, then land Phase 3b's guard with Rust sync/focus regressions. `#jb-tsift-pane-sync` stays queued (`do [#jb-tsift-pane-sync]`).
-<!-- agent:boundary:9bc0acc6 -->
+<!-- agent:boundary:08fcf9a3 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+preset #spec-test-build-install-commit-push
+- do [#jb-tsift-pane-sync]
 - do [#ipcaa-scaf]
 - do [#submodule-response-commit-proof]
-- do [#jb-tsift-pane-sync]
 - do [#qasm]
 <!-- /agent:queue -->
 ###

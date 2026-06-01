@@ -168,6 +168,12 @@ pub fn run_with_context(
     config: &Config,
     run_context: Option<&crate::graph::RunContext>,
 ) -> Result<()> {
+    // #jb-tsift-pane-sync diagnostic: log if this run is executing inside a tmux
+    // pane that owns a *different* document (cross-document contamination vector
+    // — e.g. a tsift.md-owned pane running agent-doc-bugs2.md's cycle). The
+    // same-document recursion guard below only catches same-document re-entry.
+    crate::sync::log_cross_document_execution_context(file, "run");
+
     let mut create_branch = branch;
     let mut completed_queue_items = 0usize;
 

@@ -1162,6 +1162,11 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
             &format!("write_origin file={} origin={}", file.display(), origin),
         );
     }
+    // #jb-tsift-pane-sync diagnostic: capture a write/commit to `file` that is
+    // executing inside a tmux pane owning a different document (the
+    // cross-document contamination vector — e.g. a tsift.md-owned pane
+    // committing agent-doc-bugs2.md's response).
+    crate::sync::log_cross_document_execution_context(file, "write");
 
     let has_pending_ops = !options.pending_add.is_empty()
         || !options.pending_add_to.is_empty()
@@ -7058,6 +7063,9 @@ pub fn run_stream(
         anyhow::bail!("file not found: {}", file.display());
     }
     verify_pane_ownership(file)?;
+    // #jb-tsift-pane-sync diagnostic: capture a streamed write/commit to `file`
+    // executing inside a tmux pane that owns a different document.
+    crate::sync::log_cross_document_execution_context(file, "stream");
 
     // Read response from stdin
     let mut response = String::new();

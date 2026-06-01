@@ -5815,6 +5815,85 @@ pub(crate) fn cmdline_owns_other_document(cmdline: &str, claimed_file: &str) -> 
         && !agent_doc_cmdline_is_owner(cmdline, claimed_file)
 }
 
+/// First `.md` document path token in `cmdline` (the document an
+/// agent-doc/codex owner session is bound to), for cross-document diagnostics.
+fn owner_document_from_cmdline(cmdline: &str) -> Option<String> {
+    cmdline
+        .split_whitespace()
+        .map(|token| token.trim_matches(|c| c == '"' || c == '\''))
+        .find(|token| token.ends_with(".md"))
+        .map(|token| token.to_string())
+}
+
+/// Diagnostic sibling of [`pane_runs_other_document_owner`]: returns the foreign
+/// document path the pane's live process tree owns (a document other than
+/// `claimed_file`), or `None`. Used only for cross-document execution logging.
+fn pane_owned_document_other_than(
+    tmux: &Tmux,
+    pane_id: &str,
+    claimed_file: &Path,
+) -> Option<String> {
+    let pane_pid = pane_pid_from_tmux(tmux, pane_id)?;
+    let claimed = claimed_file.to_string_lossy();
+    let mut pids = vec![pane_pid.to_string()];
+    if let Ok(children) = std::process::Command::new("pgrep")
+        .args(["-P", &pane_pid.to_string()])
+        .output()
+    {
+        for child in String::from_utf8_lossy(&children.stdout).lines() {
+            let child = child.trim();
+            if !child.is_empty() {
+                pids.push(child.to_string());
+            }
+        }
+    }
+    for pid in pids {
+        let cmdline = match std::process::Command::new("ps")
+            .args(["-p", &pid, "-o", "command="])
+            .output()
+        {
+            Ok(output) if output.status.success() => {
+                String::from_utf8_lossy(&output.stdout).to_string()
+            }
+            _ => continue,
+        };
+        if cmdline_owns_other_document(&cmdline, &claimed) {
+            return owner_document_from_cmdline(&cmdline);
+        }
+    }
+    None
+}
+
+/// `#jb-tsift-pane-sync` cross-document execution diagnostic. Logs (best-effort,
+/// never blocks) when an agent-doc cycle for `file` is executing inside a tmux
+/// pane whose live process tree owns a *different* document — the contamination
+/// vector where, e.g., a `tsift.md`-owned pane runs `agent-doc-bugs2.md`'s cycle
+/// (a cross-document child `agent-doc <FILE>` invocation). The same-document
+/// recursion guard (`owned_pane_self_invocation_detail`) does not catch this
+/// because the invoked document differs from the pane's own, and route/dispatch
+/// logs only record the pane's own document — so without this line the exact
+/// vector is invisible in the logs. `origin` names the entry point (e.g. `run`,
+/// `preflight`) so a future repro pins where the cross-document cycle started.
+pub fn log_cross_document_execution_context(file: &Path, origin: &str) {
+    let current_pane = match crate::sessions::current_pane() {
+        Ok(pane) if !pane.is_empty() => pane,
+        _ => return,
+    };
+    let tmux = Tmux::default_server();
+    if let Some(other) = pane_owned_document_other_than(&tmux, &current_pane, file) {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "cross_document_execution_context file={} origin={} current_pane={} pane_owns={} note=agent-doc cycle running inside a pane that owns a different document (#jb-tsift-pane-sync contamination vector)",
+                file.display(),
+                origin,
+                current_pane,
+                other
+            ),
+        );
+    }
+}
+
 /// Walk the pane's process tree (pane pid + direct children) and return true if
 /// any live process is an agent-doc/codex owner session for a document other than
 /// `claimed_file`. Keyed on the live cmdline rather than any single root's
@@ -6657,6 +6736,45 @@ mod tests {
             ),
             "the navigated document's own owner pane stays reusable under the cross-document guard"
         );
+    }
+
+    #[test]
+    fn owner_document_from_cmdline_extracts_bound_document() {
+        assert_eq!(
+            owner_document_from_cmdline(
+                "/home/brian/.cargo/bin/agent-doc start --route-owned tasks/software/tsift.md"
+            ),
+            Some("tasks/software/tsift.md".to_string())
+        );
+        // Quoted token is unwrapped.
+        assert_eq!(
+            owner_document_from_cmdline("/usr/bin/codex \"tasks/agent-doc/agent-doc-bugs2.md\""),
+            Some("tasks/agent-doc/agent-doc-bugs2.md".to_string())
+        );
+        // A bare shell owns no document.
+        assert_eq!(owner_document_from_cmdline("-zsh"), None);
+    }
+
+    #[test]
+    fn cross_document_execution_identifies_foreign_owner_document() {
+        // #jb-tsift-pane-sync logging vector: an agent-doc cycle for bugs2 running
+        // inside a pane whose process owns tsift.md must be both detected
+        // (cmdline_owns_other_document) and name the foreign document
+        // (owner_document_from_cmdline) so log_cross_document_execution_context can
+        // emit `pane_owns=tasks/software/tsift.md`.
+        let pane_cmdline =
+            "/home/brian/.cargo/bin/agent-doc start --route-owned tasks/software/tsift.md";
+        let cycle_doc = "tasks/agent-doc/agent-doc-bugs2.md";
+        assert!(cmdline_owns_other_document(pane_cmdline, cycle_doc));
+        assert_eq!(
+            owner_document_from_cmdline(pane_cmdline),
+            Some("tasks/software/tsift.md".to_string())
+        );
+        // No spurious cross-document signal when the pane owns the cycle's own doc.
+        assert!(!cmdline_owns_other_document(
+            "/home/brian/.cargo/bin/agent-doc start --route-owned tasks/agent-doc/agent-doc-bugs2.md",
+            cycle_doc,
+        ));
     }
 
     #[test]

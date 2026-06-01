@@ -47,7 +47,26 @@ Compacted content:
 Trade-off: requires storing dependency value copies for comparison. Worth doing after the effect system, since effects are where cascading recomputation hurts most.
 
 **IPC corruption logged** as `#zpc2` in `tasks/agent-doc/agent-doc-bugs2.md`. This is a new live repro of `#ipcfullprompt-recur2` / `#prompt-duplicated-while-typing`. The corrupted lazily-rs.md had full scaffold duplication (2x Backlog/Queue/Review + 2x `&lt;!-- /agent:exchange --&gt;` + partial typing "re [#fzaf]: W" / "re [#fzaf]: Would" embedded in wrong positions). Manually repaired — removed duplicate tail sections.
-<!-- agent:boundary:18a11b55 -->
+
+### Re: Slot invalidation vs recomputation — glm-5.1
+
+**You're correct — slots are only invalidated, not recomputed.** My previous wording was imprecise. Here's the exact flow from the code:
+
+1. `set_cell()` (`context.rs:249-283`) — changes cell value, then calls `clear_slot()` on each dependent
+2. `clear_slot()` (`context.rs:288-305`) — sets `slot.value = None` (pure invalidation), then recursively clears *its* dependents. No recomputation happens here.
+3. `get_slot()` (`context.rs:116-208`) — checks `slot.value.is_some()`. If cached, returns immediately. If `None` (invalidated), recomputes. **This is the only place recomputation happens, and only on access.**
+
+So the flow is: cell change → cascade of `value = None` through the dependency graph → nothing else until someone calls `get()`. Fully lazy.
+
+**What the memo guard would actually do:** It's not about skipping recomputation (that's already lazy). It's about preventing *unnecessary downstream cascade* during step 2. Currently `clear_slot` recursively clears all dependents regardless of whether the recomputed value would actually change. A memo guard would:
+
+- After recomputation in `get_slot()`, compare the new value with the prior value
+- If unchanged, skip re-clearing dependents (they were already cleared, but the memo guard would restore their cached values or mark them as still-valid)
+
+This matters when: Cell A → Slot B → Slot C. If A changes but B would compute to the same value, C was cleared unnecessarily. The memo guard at B would prevent C from needing recomputation.
+
+IPC corruption bug already tracked as `#zpc2` in `agent-doc-bugs2.md`. Plans: `tasks/agent-doc/plan-full-document-ipc-corruption-typing-prompt.md`, `tasks/agent-doc/plan-prompt-duplicated-while-typing.md`.
+<!-- agent:boundary:c2f39be0 -->
 <!-- /agent:exchange -->
 
 ## Backlog

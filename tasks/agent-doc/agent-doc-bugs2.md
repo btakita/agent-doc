@@ -16,7 +16,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -190,13 +190,7 @@ I'm not finalizing a competing write or starting a comingled implementation. Eve
 <!-- agent:boundary:cc41e5fe -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue auto -->
-- ~do [#4a6p]~
-- ~do [#t3m5]. Apply all 3 optimizations.~
-- ~do [#j0k8]~
-- ~do [#jkvs]~
-- ~do [#qasm]~
-- do [#6cmx]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 ###
 <!--

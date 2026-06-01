@@ -57,10 +57,35 @@ Plan: `tasks/agent-doc/plan-codex-capability-proof-unrecoverable.md`. Two indepe
 - **(B) operator stop/clear/interrupt/recovery bypasses the dispatch gate** — the higher-value fix (makes a wedged session recoverable without `kill -9`); needs a careful audit of the clear/interrupt IPC paths + a gate-exempt control channel.
 
 Tell me **A**, **B**, or **both** and I'll implement + test + install + commit that scope. I didn't want to guess which behavior change you want in this area. Backlog item `#codex-capability-proof-unrecoverable` queued with the plan.
-<!-- agent:boundary:c937e420 -->
+❯ do both. #spec-test-build-install-commit-push
+
+### Re: do both (A + B) — opus-4-8
+
+Implemented and shipped both pieces of `#codex-capability-proof-unrecoverable`. `make check` is green, both binaries reinstalled, submodule + pointer committed and pushed.
+
+#### (A) Bounded re-prove — transient failure no longer wedges the session
+`spawn_managed_capability_proof_thread` (`start.rs`) now retries the probe with exponential back-off instead of setting `Failed` on the first error:
+- Between attempts the gate stays **`Pending`** (gated but recoverable) and the session log records `..._capability_proof status=retry attempt=<n>/<max> backoff_ms=…`. Only after the budget is exhausted does it commit to `Failed` / `Blocked` / kill child.
+- A stop request during back-off abandons the loop instead of wedging the gate.
+- Configurable via frontmatter **and** `.agent-doc/config.toml`: `managed_proof_max_attempts` (3), `managed_proof_retry_backoff_secs` (2), `managed_proof_probe_timeout_secs` (45). Frontmatter wins; resolution in `agent::resolve_managed_proof_policy`.
+- Pure decision helper `agent::proof_retry_decision` (exponential back-off, capped at 30s) is deterministically unit-tested — no network needed.
+- The 45s probe timeout is now threaded through `prove_managed_session_capabilities` → the three child probes rather than a hardcoded const.
+
+#### (B) Operator recovery bypasses the dispatch gate
+The supervisor IPC gate is now centralized and scoped: `ipc_method_requires_capability_gate` gates **only** `Inject` (real prompt dispatch). New gate-exempt **`Clear`** control method plus existing `Stop`/`Restart` and read-only `State`/`Pid` bypass the gate. `Inject` and `Clear` share one `deliver_ipc_inject` delivery path; only the caller decides gating.
+- `session_actor_cmd::send_clear_via_supervisor` now sends `IpcMethod::Clear` instead of `Inject`, so `session clear` / `session interrupt-clear` succeed against a proof-`Failed` session without `kill -9` instead of failing with `prompt dispatch is disabled`.
+- Auto-trigger / auto-queue dispatch (`auto_trigger_inject_command`, route Inject) stay gated — those are real dispatches, not recovery.
+
+Re the secondary `apply_patch verification failed …` lines: left alone per the plan — Codex-internal, not an agent-doc patch bug.
+
+**Verification:** `make check` clean (clippy `-D warnings`, full test suite, sim-medium, version-sync). New regressions: `proof_retry_decision_*`, `resolve_managed_proof_policy_*`, `ipc_method_gate_classification_only_gates_inject`, `handle_ipc_clear_bypasses_failed_capability_proof`, `handle_ipc_stop_bypasses_failed_capability_proof`. Live network-denied repro remains the `#[ignore]` tmux-CI leg.
+
+**Shipped:** submodule `a236fc98` (pushed to `20260422/codex-agent-backend`), superproject pointer `a3ff98545`. `cargo build --release` + `cargo install --path .` both refreshed. Specs aligned: `SPEC.md`, `codex-support.md`, `06-config.md`, `07-session-tmux-commands.md`, `VERSIONS.md`.
+<!-- agent:boundary:caf0b262 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
+- do [#codex-capability-proof-unrecoverable]
 <!-- /agent:queue -->
 ###
 <!--
@@ -88,7 +113,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog priority queue=prepend -->
-- [ ] [#codex-capability-proof-unrecoverable] [recommended] #agent-doc-bug 2026-06-01: a failed managed Codex capability proof (codex child network probe timeout, 45s) sets the dispatch gate to Failed permanently with no retry/re-prove (start.rs ~1579), and session clear / interrupt-clear / the start recovery path all fail with the same 'prompt dispatch is disabled' error, so a network-wedged session is un-recoverable without kill -9. Fix: (A) bounded re-prove instead of permanent Failed + configurable timeout; (B) operator stop/clear/interrupt/recovery must bypass the dispatch gate. Plan: tasks/agent-doc/plan-codex-capability-proof-unrecoverable.md.
 <!-- /agent:backlog -->
 
 ## Review

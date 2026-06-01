@@ -72,7 +72,7 @@ Commits / push:
 
 Escalation: none.
 Confidence: high for the local implementation and verification; GitHub CI is blocked by external runner disk exhaustion rather than a project test signal.
-<!-- agent:boundary:31982811 -->
+<!-- agent:boundary:ed2cccc2 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -83,7 +83,6 @@ Confidence: high for the local implementation and verification; GitHub CI is blo
 ## Backlog
 
 <!-- agent:backlog -->
-- [x] [#lazily-cache-contracts] [recommended] Document each lazily-rs cache key, lifetime, invalidation trigger, and matching regression test in src/tsift/SPEC.md so future cache additions have an explicit audit checklist.
 <!-- /agent:backlog -->
 
 ## Review

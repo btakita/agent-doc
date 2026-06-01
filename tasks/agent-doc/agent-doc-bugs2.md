@@ -56,10 +56,30 @@ Implemented the queue-head deletion invariant and verified it CI-green, but buil
 Plan step 3 (session-check guard) and steps 1–2 (queue-head accounting in cycle state) are done. Steps 4–5 (reset/repair/commit hardening + same-pane recursive-guard diagnostics) remain.
 
 **Gating** `#queue-clear-unrun-items`: code-complete + CI-green but not yet live. The merge/build/live-verify + steps 4–5 are queued as the follow-up backlog item.
-<!-- agent:boundary:f9a7b255 -->
+
+### Re: do [#r5q6] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#r5q6]
+
+
+`#r5q6` is the merge/land follow-up I queued last cycle for `#queue-clear-unrun-items` — it's **blocked**, not actionable now, so I'm gating it and pausing the auto-queue rather than blind-draining.
+
+The directive wants the branch `queue-clear-unrun-items` (`32c34bb1`) merged into the active backend branch, then build+install + live-verify. None of that is possible right now:
+
+- The active branch `20260422/codex-agent-backend` carries a concurrent session's uncommitted work that **does not compile** (`route.rs`/`preflight.rs`), so merging my branch into it is impossible.
+- `cargo install` from my isolated branch would install a binary missing the concurrent session's in-progress features — a divergent fork, not a "land". Not appropriate over live concurrent work.
+- Live-verify needs that installed binary, so it's blocked transitively.
+
+This is the same wall flagged on `#completed-queue-residue-regression`: the remaining queue tail is largely gated on the concurrent session's shared-crate work compiling — nearly every remaining head ends in "build+install (BLOCKED) + live-verify".
+
+**Action:** gating `#r5q6` (tracked in review; un-gate to resume) and **stopping the auto-queue** — this needs operator attention. Recommended sequence once the concurrent session commits and the crate compiles: merge `queue-clear-unrun-items`, `cargo build --release && cargo install --path .`, live-verify a closeout that drops an open queue head fails closed, then resume the queue for the build-gated tail.
+<!-- agent:boundary:6415a645 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
+- ~do [#r5q6]~
 preset #spec-test-build-install-commit-push
 - ~do [#jb-run-agent-doc-busy-queue-dispatch-deadlock]~
 - ~do [#preflight-probe-side-effect-free]~
@@ -103,7 +123,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog priority queue=prepend -->
-- [ ] [#r5q6] [recommended] #queue-clear-unrun-items merge+land: the session-check queue-head deletion guard + cycle_state active_queue_heads accounting (plan steps 1-3) are committed CI-green on branch `queue-clear-unrun-items` (agent-doc submodule commit 32c34bb1) but NOT live — merging into the active backend branch is BLOCKED on a concurrent session's broken shared agent-doc-orchestration crate (route.rs/preflight.rs don't compile). Once that lands: merge the branch, cargo build --release + cargo install --path ., live-verify a queue closeout that drops an open head fails closed, then implement plan steps 4-5 (reset/repair/commit hardening + same-pane recursive-guard diagnostics). Plan: tasks/agent-doc/plan-queue-clear-unrun-items.md.
 - [ ] [#codex-owned-pane-stop-hook-live-verify] [recommended] Gated on a live Codex pane -- the remaining phases of #codex-owned-pane-prompt-miss-followups after phase 2a landed: (2b) a live Codex Stop-hook regression asserting the owned_pane_self_invocation diagnostic forces an in-pane response body before final chat output, and (3) live-verify a real Codex same-pane run with an unresolved exchange prompt. Plan: tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md.
 - [ ] [#queue-sync-auto-pending-done-guard-misfire] [recommended] When a queue=sync/append attribute populates an active auto-queue in the same cycle, the freshly-synced do-[#id] entries appear as new do-directives in the cycle diff, so preflight records them all as expect_done_or_gate_ids and pending_done_guard then demands every synced item be --done in the populating cycle (live repro 2026-05-31 agent-doc-bugs2.md: do [#backlog-queue-sync-attr] cycle flagged 9 other freshly-synced queue items). Fix: agent-generated/synced queue items must not be treated as user do-directives; only a genuine user exchange do [#id] or the single consumed queue head should populate expect_done_or_gate_ids. Plan: tasks/agent-doc/plan-queue-sync-auto-pending-done-guard-misfire.md.
 - [ ] [#tagpath-queue-priority-publish-align] [recommended] Before the next agent-doc release, publish tagpath (commits b55c305 + 32fd000: backlog/icebox/queue priority + queue sync lint attrs) and bump agent-doc's tagpath dependency past 0.12. Locally agent-doc resolves tagpath via the superproject .cargo/config.toml path patch so the lint-gate accepts the new attributes; a published agent-doc on tagpath 0.12 would reject bare priority/queue as malformed-attr.
@@ -117,6 +136,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Review
  
 <!-- agent:review -->
+- [/] [#r5q6] [recommended] #queue-clear-unrun-items merge+land: the session-check queue-head deletion guard + cycle_state active_queue_heads accounting (plan steps 1-3) are committed CI-green on branch `queue-clear-unrun-items` (agent-doc submodule commit 32c34bb1) but NOT live — merging into the active backend branch is BLOCKED on a concurrent session's broken shared agent-doc-orchestration crate (route.rs/preflight.rs don't compile). Once that lands: merge the branch, cargo build --release + cargo install --path ., live-verify a queue closeout that drops an open head fails closed, then implement plan steps 4-5 (reset/repair/commit hardening + same-pane recursive-guard diagnostics). Plan: tasks/agent-doc/plan-queue-clear-unrun-items.md.
 - [/] [#queue-clear-unrun-items] [recommended] #agent-doc-bug 2026-05-31: active `agent:queue auto` heads can be deleted/cleared without execution proof during same-pane/recovery closeout. Live repro `src/boost-client/tasks/monsterrodholders.md`: queue heads `#convqa-rerun`, `#hydroapproval`, `#nbapproval`, `#shopcachewatch`, `#shoplabelgate`, and `#accessorymargin` were removed while the matching backlog items stayed open and no per-head closeout ran. Add queue-removal invariants so every removed head must have explicit consumed/done/gated/struck/stale-user-edit proof, and make reset/commit/session-check fail closed on unproved deletion. Plan: `tasks/agent-doc/plan-queue-clear-unrun-items.md`.
 - [/] [#jb-busy-queue-deadlock-live-verify] [recommended] Live-verify the supervisor idle-queue watch (#jb-run-agent-doc-busy-queue-dispatch-deadlock): with the installed binary, run JB Run Agent Doc on a doc whose authoritative actor is mid active-turn (Codex or a Claude session not running /loop), confirm the route appends to agent:queue auto + returns Ok, then when the pane returns to idle the supervisor idle-queue watch injects agent-doc <FILE> once and drains the head with NO duplicate injection into the active turn and no hot-loop. Check the session log for idle_queue_watch_drain. Gated on a live busy pane. Source: submodule 4b3f4835 (idle_queue_drain_decision + spawn_idle_queue_watch_thread in start.rs).
 - [/] [#recovery-drift-apply-live-verify] [recommended] Live-verify the full one-command recovery (agent-doc repair --apply-recovery) on a real owner pane now that #recovery-drift-authoritative-side landed the authoritative-side determination: reproduce a queue_metadata_drift / sidecar_visible_drift closeout and confirm apply_closeout_recovery restores-from-HEAD for the spurious queue_active:false class and commits-forward otherwise, without the manual cancel->reset->commit sequence. Gated on a live owner pane (risky in a racy multi-session repo). Parent plan: tasks/agent-doc/plan-recursive-repair-state-drift.md.

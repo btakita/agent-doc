@@ -156,7 +156,36 @@ Rust `.rs` lines (excluding `target/`), unless noted:
 **Total: ~669,199 LoC** across all tracked projects.
 
 agent-doc alone is 34% of the stack. The top three (agent-doc, agent-doc-js, session-share) account for 79%.
-<!-- agent:boundary:5405b06c -->
+❯ Please run LoC excluding comments.
+
+### Re: LoC excluding comments — glm-5.1
+
+Using `tokei` for accurate code/comments/blanks breakdown:
+
+| Project | Code | Comments | Blanks | Total |
+|---------|-----:|---------:|-------:|------:|
+| agent-doc | 194,653 | 5,581 | 17,748 | 217,982 |
+| session-share | 57,594 | 4,755 | 4,749 | 67,098 |
+| tsift | 92,848 | 350 | 6,045 | 99,243 |
+| agent-doc-js | 1,034 | 48 | 131 | 1,213 |
+| tagpath | 15,897 | 518 | 1,239 | 17,654 |
+| tmux-router | 6,781 | 427 | 764 | 7,972 |
+| lazily-rs | 1,769 | 144 | 348 | 2,261 |
+| agent-kit | 1,730 | 49 | 278 | 2,057 |
+| existence-lang | 1,522 | 58 | 221 | 1,801 |
+| skill-harness | 1,309 | 0 | 148 | 1,457 |
+| module-harness | 1,114 | 38 | 108 | 1,260 |
+| instruction-files | 957 | 22 | 119 | 1,098 |
+| agent-runbooks | 1,016 | 3 | 45 | 1,064 |
+| agent-rules | 860 | 13 | 101 | 974 |
+| eval-runner | 777 | 29 | 123 | 929 |
+| agent-memories | 589 | 6 | 62 | 657 |
+| agent-resume | 572 | 16 | 60 | 648 |
+
+**Total code (no comments, no blanks): ~380,022 LoC**
+
+Comment ratio is low across the stack: ~12K comment lines out of ~424K total non-blank lines (~2.9%). agent-doc and session-share have the highest comment counts; tsift and tagpath are comment-sparse.
+<!-- agent:boundary:b653e6e3 -->
 <!-- /agent:exchange -->
 
 <!--

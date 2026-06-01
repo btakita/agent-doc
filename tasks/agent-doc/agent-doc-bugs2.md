@@ -13,7 +13,7 @@ prompt_presets:
   '#commit-push': commit + push all uncommitted files
   '#follow-up-backlog': Any follow-up items to place in the backlog?
   '#mermaid': Include explanatory mermaid diagram(s).
-  '#next-steps': Any follow-up items to place in the acklog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
+  '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
 queue_active: false
@@ -64,7 +64,19 @@ What I can implement directly in priority order, no IDE required:
 **Step 0 → Path C (I can start now) → batch Path A + Path B in your next IDE session.** Path C doesn't need you at the keyboard, so it's the best use of agent time; A and B convert ~19 items the moment you run the two live sessions after the plugin/binary refresh.
 
 Want me to start Path C? Say `do path C` (or name a cluster, e.g. `do queue-provenance cluster`) and I'll implement + test + ship them one ID per phase.
-<!-- agent:boundary:efb671ac -->
+Add completion tasks (#next-steps) into the backlog.
+
+### Re: Add completion tasks (#next-steps) into the backlog — opus-4-8
+
+Added four completion tasks to `agent:backlog` in priority order (the backlog was empty; `priority queue=prepend`, `queue_active:false` so no auto-loop spawned):
+
+1. **Step 0 — unblock** (top): install signed JB plugin ≥0.2.138 + restart IntelliJ and the route-owned `agent-doc` process. Prerequisite for Paths A/B.
+2. **Path C (`#qasm`)** — agent-executable now: implement the no-live-pane review items in priority order (queue-provenance → Option-A → closeout-guard → feature pair → hygiene/UX).
+3. **Path A (`#jkvs`)** — after Step 0: one consolidated live busy-pane verification session (~11 live-verify items).
+4. **Path B (`#6cmx`)** — after Step 0: one IPC/typing-corruption capture session with debug logging on.
+
+Each task carries the exact review-item ids it drives, so closing a task maps directly back to the gated `[/]` review entries. The top-of-backlog id is reported in the console below.
+<!-- agent:boundary:0566209f -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
@@ -94,6 +106,10 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog priority queue=prepend -->
+- [ ] [#sfmt] Step 0 (unblock — top priority): install the latest signed JB plugin (>=0.2.138) and restart IntelliJ + the route-owned agent-doc process so the new plugin AND binary are live. Prerequisite for the Path A/B live-verify batches; nearly every *-live-verify review item is blocked only on this.
+- [ ] [#xt3v] Path C (#qasm — agent-executable now, no live pane): implement the no-live-pane review items in priority order — queue-provenance cluster (#prompt-preempts-auto-queue, #queue-user-edit-overwrite, #jb-run-agent-doc-response-queue-contamination) -> Option-A fixes (#cancel-orphans-preflight-cycle, #exchange-prompt-dropped-on-merge, #duplicate-response-after-commit) -> closeout-guard hardening (#do-id-partial-closeout-state, #preset-item-id-collision-enforce, #queue-clear-unrun-items, #free-text-queue-skip-diagnostic) -> feature pair (#backlog-priority-attribute, #backlog-queue-sync-attribute) -> hygiene/UX (#stash-session-ttl-prune, #plugin-cleanup-menu-command, #clear-stops-running-process, #jb-stale-busy-idle-footer, #snrun, #4a6p, #nbsearch, #gscaccess).
+- [ ] [#v819] Path A (#jkvs — after Step 0): one consolidated live busy-pane verification session to batch-close ~11 live-verify items: #t41j, #jb-busy-queue-deadlock-live-verify, #jb-run-agent-doc-busy-feedback-live-verify, #route-drain-all-surface-live-verify, #codex-owned-pane-stop-hook-live-verify, #codex-owned-pane-prompt-miss-followups (2b/3), #codex-final-response-live-verify, #recovery-drift-apply-live-verify, #jb-load-tmux-window-verify, #j0k8, #stash-pane-promote-on-focus.
+- [ ] [#wy0y] Path B (#6cmx — after Step 0): one IPC/typing-corruption capture session with #com.github.btakita.agentdoc debug logging enabled to capture the setText payload, then repro #ipcfullprompt-recur2, #finalize-retry-ipc-response-duplication, #ipc-dup-tracking-double-merge, #adoc-queue-ipc-buffer-divergence, #duplicate-response-after-commit, #prompt-duplicated-while-typing, and the scaffold-dup set #zpc2 / #ipcaa-scaf / #submodule-response-commit-proof. Several convert from verify to one CURE commit once the payload is captured.
 <!-- /agent:backlog -->
 
 ## Review

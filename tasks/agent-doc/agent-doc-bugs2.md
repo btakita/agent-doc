@@ -36,7 +36,7 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 2 response topic(s): do [#gated-followup-split-enforcement]; fix the queue-drift regressions first
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:3b2e4e6e -->
+<!-- agent:boundary:83d68a94 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -44,7 +44,6 @@ preset #spec-test-build-install-commit-push
 - ~do [#jb-run-agent-doc-busy-queue-dispatch-deadlock]~
 - ~do [#preflight-probe-side-effect-free]~
 - do [#queue-audit-partial-completion]
-- do [#queue-clear-unrun-items]
 - do [#gated-followup-split-enforcement]
 - do [#completed-queue-residue-regression]
 - do [#codex-owned-pane-stop-hook-live-verify]
@@ -84,7 +83,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog priority queue=prepend -->
-- [ ] [#queue-clear-unrun-items] [recommended] #agent-doc-bug 2026-05-31: active `agent:queue auto` heads can be deleted/cleared without execution proof during same-pane/recovery closeout. Live repro `src/boost-client/tasks/monsterrodholders.md`: queue heads `#convqa-rerun`, `#hydroapproval`, `#nbapproval`, `#shopcachewatch`, `#shoplabelgate`, and `#accessorymargin` were removed while the matching backlog items stayed open and no per-head closeout ran. Add queue-removal invariants so every removed head must have explicit consumed/done/gated/struck/stale-user-edit proof, and make reset/commit/session-check fail closed on unproved deletion. Plan: `tasks/agent-doc/plan-queue-clear-unrun-items.md`.
 - [ ] [#queue-audit-partial-completion] [recommended] #agent-doc-bug 2026-06-01: queue completion audits can collapse partial progress into "none complete" when every row still has a remaining action. Live repro `src/boost-client/tasks/monsterrodholders.md`: same-day QA, URL/validate-only checks, feed-label/Merchant audits, budget checks, and Rods negatives were complete, but the response said none of the six queue items was complete because each still had at least one blocker. Add per-row queue audit states (complete / partially complete / not started-blocked), require completed-substep plus remaining-condition reporting, and recommend split/narrowing when one row contains multiple gateable phases. Plan: `tasks/agent-doc/plan-queue-audit-partial-completion.md`.
 - [ ] [#codex-owned-pane-stop-hook-live-verify] [recommended] Gated on a live Codex pane -- the remaining phases of #codex-owned-pane-prompt-miss-followups after phase 2a landed: (2b) a live Codex Stop-hook regression asserting the owned_pane_self_invocation diagnostic forces an in-pane response body before final chat output, and (3) live-verify a real Codex same-pane run with an unresolved exchange prompt. Plan: tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md.
 - [ ] [#queue-sync-auto-pending-done-guard-misfire] [recommended] When a queue=sync/append attribute populates an active auto-queue in the same cycle, the freshly-synced do-[#id] entries appear as new do-directives in the cycle diff, so preflight records them all as expect_done_or_gate_ids and pending_done_guard then demands every synced item be --done in the populating cycle (live repro 2026-05-31 agent-doc-bugs2.md: do [#backlog-queue-sync-attr] cycle flagged 9 other freshly-synced queue items). Fix: agent-generated/synced queue items must not be treated as user do-directives; only a genuine user exchange do [#id] or the single consumed queue head should populate expect_done_or_gate_ids. Plan: tasks/agent-doc/plan-queue-sync-auto-pending-done-guard-misfire.md.

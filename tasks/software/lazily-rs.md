@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 
@@ -81,8 +81,22 @@ CI / closeout notes:
 - `cargo install --path .` is not applicable because `lazily` is a library crate with examples/benches and no binary target; local build validation used `cargo build`, benchmark compilation/runs, and the instrumentation example instead.
 
 Confidence: high for the targeted invalidation optimization and measured lock-attribution improvement; overall wall-clock contention remains noisy, so the benchmark result should be treated as directional rather than statistically conclusive.
-<!-- agent:boundary:4bc631f4 -->
+
+### Re: Run performance benchmarks — gpt-5
+
+I ran the performance benchmarks relevant to the completed `#lazybatch1` change.
+
+Commands and results:
+- `cargo bench --features instrumentation --bench context -- thread_safe_contention/batched_write_bursts/16`: mean `7.8662 ms`; Criterion reported no statistically significant change, but it is slightly below the prior README baseline `7.920 ms`.
+- `cargo bench --features instrumentation --bench context -- set_cell_invalidation/batched_write_bursts/16`: mean `6.9561 ms`, estimated `-8.0256%`; Criterion still reported no statistically significant change.
+- `cargo run --example instrumentation_profile --features instrumentation --quiet`: `thread_safe_contention_batched_write_bursts_16` set-cell invalidation attribution is now `11.962 ms wait / 577.558 us hold`, down from the prior README baseline `13.802 ms wait / 781.677 us hold`.
+
+Verification context from the same run remains green: `cargo test`, `cargo test --features instrumentation`, `cargo test --features tokio`, `cargo test --features loom --test thread_safe_loom`, `cargo check`, `cargo build`, and `cargo clippy` all passed. No new repo changes were needed for this benchmark-only prompt.
+<!-- agent:boundary:78decb4c -->
 <!-- /agent:exchange -->
+###
+<!--
+-->
 
 ## Queue
 
@@ -91,6 +105,7 @@ preset #spec-test-build-install-commit-push
 - ~[#lazybatch1]~
 - [#lazybatch2]
 - [#lazybatch3]
+- Run performance benchmarks
 <!-- /agent:queue -->
 
 ## Backlog

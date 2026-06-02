@@ -88,9 +88,6 @@ Escalation: none. Confidence: high.
 ## Queue
 
 <!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- [#lazyperf10]
-- [#lazyperf11]
 <!-- /agent:queue -->
 
 ## Backlog

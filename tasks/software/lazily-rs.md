@@ -34,17 +34,20 @@ queue_active: false
 <!-- agent:exchange -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260602-044941.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260602-045011.md`*
 
 Compacted content:
-- Archived 2 response topic(s): batched write burst next steps; What are #next-steps to improve `thread_safe_contention_batched_write_bursts_16` and `thread_safe_contention_batched_...
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:badb8d6c -->
+<!-- agent:boundary:604b1917 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+preset #spec-test-build-install-commit-push
+- [#lazybatch1]
+- [#lazybatch2]
+- [#lazybatch3]
 <!-- /agent:queue -->
 
 ## Backlog

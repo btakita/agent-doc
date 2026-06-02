@@ -71,7 +71,25 @@ No — it's non-destructive by construction. Nothing across the four fixes rewri
 **One housekeeping caveat (not destructive):** the `pre-auto-run-N` tags accumulate, one per queue auto-run (same as compact's `pre-compact-N`). They're cheap refs but grow over time; prune with `git tag -d agent-doc/<doc>/pre-auto-run-*` if they ever clutter the tag namespace. I queued a `[recommended]` item to add automatic tag GC.
 
 So: fix #1 only warns, the destructive original path is gated off (not replaced), and fix #4 only adds a recovery tag. No part of it performs a destructive mutation.
-<!-- agent:boundary:694f7b55 -->
+❯ Will the agent guide the decision/recovery process?
+
+### Re: Will the agent guide the decision/recovery process? — opus-4-8
+
+Honestly: **not automatically — today the tag is a passive checkpoint, not a guided flow.** Two layers to separate:
+
+#### What the binary does today
+
+- **At tag creation:** it logs `[agent-doc] Tagged pre-auto-run state as agent-doc/<doc>/pre-auto-run-N` to stderr, so the recovery point is visible in the run output. That's the *only* proactive surfacing.
+- **At misfire/recovery time:** nothing. There's no misfire detector that says "your backlog was rewritten — recover at this tag," and no command that lists the recovery tags or offers to reset. Recovery is currently manual: list the tags (`git tag -l 'agent-doc/<doc>/pre-auto-run-*'`), pick the latest, then `git reset`/`git checkout` it. `agent-doc undo` exists but only restores the pre-*response* snapshot, not these pre-auto-run tags.
+
+#### What the agent (me) does
+
+If you tell me a misfire happened in an agent-doc session, I'll guide it interactively — find the right `pre-auto-run-N`/`pre-compact-N` tag, show the diff, and walk through the reset. But that's me-in-the-loop, not a binary-owned, discoverable recovery path.
+
+#### Gap → queued
+
+So the answer to your question as it stands is "no, not by the tool itself." That's a real gap: a checkpoint with no guided exit isn't much better than git archaeology for someone who doesn't know the tag convention. I queued a `[recommended]` item to add a guided recovery command (list recovery tags newest-first, offer reset/inspect, optional misfire detection pointing at the latest tag) — it pairs with the tag-GC item. Worth doing together if you want the recovery story to actually be self-service.
+<!-- agent:boundary:d9829665 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
@@ -83,6 +101,7 @@ preset #spec-test-build-install-commit-push
 - [#lr-head-8]
 - [#lr-wire-9]
 - [#lr-actor-10]
+- do [#x8aw]
 <!-- /agent:queue -->
 ###
 <!--
@@ -95,6 +114,7 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Backlog
 
 <!-- agent:backlog priority queue=append -->
+- [ ] [#kc5e] [recommended] Add guided recovery for pre-auto-run / pre-compact recovery tags: a command (agent-doc recover <FILE>, or extend agent-doc undo) that lists a doc's recovery tags newest-first and offers to reset/inspect HEAD at the chosen tag, optionally with misfire detection that points the operator at the latest tag. Today the tag is a passive checkpoint with no binary-owned guidance. Pairs with the tag-GC item. Surfaced 2026-06-02.
 - [ ] [#x8aw] [recommended] GC/prune accumulated recovery tags (agent-doc/<doc>/pre-auto-run-N and pre-compact-N) — one is created per queue auto-run / compact, so they grow unbounded over a doc's life. Add a retention cap (keep last N) to gc.rs or a  path, mirroring the stash/diagnostic GC. Low priority; surfaced by #misfire-recovery-snapshot 2026-06-02.
 - [ ] [#lr-content-6] Phase 6: Wire DocContentCell + FrontmatterSlot + ComponentsSlot into session_check guard functions. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-cycle-7] Phase 7: Add CycleStateSlot + SnapshotContentSlot; consolidate snapshot path lookups. Plan: tasks/agent-doc/plans/lazily-rs-integration.md

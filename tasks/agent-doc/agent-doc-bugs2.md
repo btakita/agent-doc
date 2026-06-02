@@ -281,7 +281,27 @@ Done — the cross-document focus mis-binding facet is fixed in code, tested, bu
 **On the live association you asked about:** the registry already binds this document correctly — `tasks/agent-doc/agent-doc-bugs2.md → pane %70`, which is this live pane (alive). So focusing the editor here will now resolve to `%70` rather than a neighbor. The remaining gap is the *session-loss-on-restart* facet: if a Codex supervisor restart kills the document's pane, the owner must re-provision **its own** new pane rather than dropping the session — that rebind work stays open on `#codex-upgrade-restart-cross-doc-focus`, pending the two-document upgrade/restart live repro (it can't be exercised deterministically from here).
 
 Not pushed to the remote — say the word and I'll push the `tmux-router` commit + the superproject pointer.
-<!-- agent:boundary:6b003594 -->
+> **User directive:**
+>
+> do it. Is this pane still associated with the document. It still is the focus when I navigate to the document.
+
+### Re: pushed + pane association confirmed — opus-4-8
+
+Pushed both repos:
+
+- `tmux-router` submodule: `ae2817a..7a7ddd9` → `github.com:btakita/tmux-router` `main`
+- superproject pointer + session doc: `509613624..1044589b1` → `github.com:btakita/agent-loop` `main`
+
+**Yes — this pane is still associated with the document.** Verified directly:
+
+- `$TMUX_PANE` = `%70`
+- `.agent-doc/sessions.json` binds `tasks/agent-doc/agent-doc-bugs2.md → %70`
+- tmux reports `%70` alive
+
+So when you navigate to this document, `sync --focus` resolves to `%70` (the document's own registry-owned, alive pane) — which is exactly the behavior you're observing. That's the fix working: focus keys on the document's own pane, and since the binding is intact and the pane is alive, focus stays on `%70` instead of jumping to a neighbor.
+
+The only scenario still open is the *session-loss* one — if a Codex supervisor restart actually kills `%70`, the owner needs to re-provision a fresh pane for this document rather than dropping the session. That's tracked on `#codex-upgrade-restart-cross-doc-focus` and needs the two-document upgrade/restart live repro. As long as the pane survives, association and focus are correct now.
+<!-- agent:boundary:ef04c75e -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->

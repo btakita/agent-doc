@@ -157,7 +157,44 @@ Verification:
 
 Confidence: high.
 Escalation: none.
-<!-- agent:boundary:f9d62819 -->
+
+### Re: mdembeddedcode — gpt-5
+
+Done `#mdembeddedcode`.
+
+Changed paths:
+
+- `src/tsift/SPEC.md`
+- `src/tsift/packages/tsift-cli/src/lib.rs`
+- `src/tsift` submodule pointer in the parent repo
+
+What changed:
+
+- Markdown fenced code blocks now act as embedded language islands for supported fence languages: Rust, Python, TypeScript/JavaScript including JSX/TSX, Kotlin, Zig, and shell aliases.
+- Markdown AST span/node metadata now carries `embedded_symbols[]`, with each extracted symbol projected back onto absolute Markdown file bytes and lines.
+- Search AST facets can match from Markdown prose/block context into embedded code symbols, including child facet matching such as a Markdown `code_block` found by `--child sample`.
+- Traversal graph output now materializes embedded code symbols as AST span nodes and links them both directions with the containing fence and enclosing section via `contains_embedded_symbol`, `embedded_in_fence`, `contains_embedded_code`, and `enclosing_section` edges.
+- The spec documents embedded fence parsing, metadata shape, search behavior, and traversal edges.
+
+Commits:
+
+- tsift submodule: `acf89a0 feat: link markdown embedded code symbols` pushed to `btakita/tsift main`.
+- parent repo: `8905f1a60 chore: update tsift submodule` committed locally for the submodule pointer.
+
+Verification:
+
+- `cargo test -p tsift-cli markdown` passed.
+- `cargo test -p tsift-cli traversal_graph_projects` passed.
+- `make check` passed for the full local suite.
+- `cargo install --path . --force` passed; installed CLI reports `tsift 0.1.62`.
+- Installed CLI smoke passed for Markdown containing a Rust fence with `fn sample() {}` and `tsift --envelope search rust --kind code_block --child sample`, returning the Markdown `code_block` with embedded symbol metadata for `sample`.
+- Tmux CI review: no tmux references were found under `.github`, `Makefile`, `packages`, `src`, or `tests`; `make -n tmux-ci` reports no `tmux-ci` target, so there is no repo-local tmux CI leg to inspect or run.
+- GitHub Actions CI run `26848778901` passed both jobs: `clippy + test` and `live Convex graph acceptance`. The run still carries existing annotations for Node.js 20 action deprecation and for configuring `TSIFT_LIVE_CONVEX_GRAPH_URL` on a dedicated deployment.
+
+Confidence: high.
+
+Escalation: none.
+<!-- agent:boundary:a4e48621 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -179,7 +216,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#mdembeddedcode] Treat Markdown fenced code blocks as embedded language islands: parse supported fence languages, link fence AST nodes to extracted symbols, and let search navigate from prose section to embedded code and back.
 - [ ] [#astrankingmerge] Merge symbol, span, lexical, summary, and graph-neighborhood evidence into one AST-aware ranking path so file-level lexical matches do not drown out precise span hits.
 - [ ] [#astnavfixtures] Add multilingual AST navigation fixtures and perf gates covering Rust/Python/TS/JS/Kotlin/Zig/Bash plus Markdown headings, lists, fenced code, stable handles, ranking recall, and expand-command validity.
 <!-- /agent:backlog -->

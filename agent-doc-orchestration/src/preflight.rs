@@ -3931,10 +3931,15 @@ fn collect_agent_review_gated_ids(content: &str) -> std::collections::HashSet<St
     ids
 }
 
-/// Walk the queue's leading prompt entries and convert any `Prompt` whose
-/// `#id` is already in `done_ids` to a `Completed` (`~text~`) entry. Stops at
-/// the first head prompt whose id is NOT in `done_ids` so a live head stays
-/// intact for the regular consumption path.
+/// Convert **every** queue `Prompt` whose `#id` is already resolved (in
+/// `done_ids`) to a `Completed` (`~text~`) entry, regardless of position.
+///
+/// Originally head-only, this now strikes resolved prompts anywhere in the
+/// queue: a `do [#id]` for a completed (`agent:done`) or pending-gated id is a
+/// stale ref that must never dispatch and, left behind a still-live head, would
+/// otherwise sit forever as an orphaned ref and trip the shadow-backlog guard
+/// (`#ynra`). Live (non-resolved) prompts are preserved in place, so no live
+/// work is skipped — the first surviving prompt is still the consumption head.
 ///
 /// Returns `None` when nothing changed. On match, returns the rewritten
 /// entries plus the prompts that were struck (for telemetry).
@@ -3947,30 +3952,14 @@ fn strike_done_queue_head_prompts(
 )> {
     let mut rewritten: Vec<crate::queue::QueueEntry> = Vec::with_capacity(entries.len());
     let mut struck: Vec<crate::queue::QueuePrompt> = Vec::new();
-    let mut head_settled = false;
     for entry in entries {
-        if !head_settled {
-            match entry {
-                crate::queue::QueueEntry::Prompt(prompt) => {
-                    if let Some(id) = queue_prompt_done_id(&prompt.text)
-                        && done_ids.contains(&id)
-                    {
-                        struck.push(prompt.clone());
-                        rewritten.push(crate::queue::QueueEntry::Completed(prompt.clone()));
-                        continue;
-                    }
-                    head_settled = true;
-                }
-                // Already-struck completed prompts and non-prompt entries
-                // (presets, fences, preserved free-text) sit in front of the
-                // live head and must not block the scan.
-                crate::queue::QueueEntry::Completed(_)
-                | crate::queue::QueueEntry::Preset(_)
-                | crate::queue::QueueEntry::Dispatch(_)
-                | crate::queue::QueueEntry::StartFence(_)
-                | crate::queue::QueueEntry::StopFence
-                | crate::queue::QueueEntry::Freeform(_) => {}
-            }
+        if let crate::queue::QueueEntry::Prompt(prompt) = entry
+            && let Some(id) = queue_prompt_done_id(&prompt.text)
+            && done_ids.contains(&id)
+        {
+            struck.push(prompt.clone());
+            rewritten.push(crate::queue::QueueEntry::Completed(prompt.clone()));
+            continue;
         }
         rewritten.push(entry.clone());
     }
@@ -4694,6 +4683,39 @@ mod tests {
             ["somethingelse".to_string()].into_iter().collect();
 
         assert!(super::strike_done_queue_head_prompts(&entries, &done_ids).is_none());
+    }
+
+    #[test]
+    fn strike_done_queue_prompts_strikes_non_head_resolved_ref() {
+        // #ynra: a resolved (done) ref behind a live head must be struck, not
+        // left as an orphaned ref (which trips the shadow-backlog guard). The
+        // live head is preserved in place.
+        let entries = vec![
+            crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
+                text: "do [#liveone]".to_string(),
+                multiline: false,
+            }),
+            crate::queue::QueueEntry::Prompt(crate::queue::QueuePrompt {
+                text: "do [#donetail]".to_string(),
+                multiline: false,
+            }),
+        ];
+        let done_ids: std::collections::HashSet<String> =
+            ["donetail".to_string()].into_iter().collect();
+
+        let (rewritten, struck) =
+            super::strike_done_queue_head_prompts(&entries, &done_ids).expect("expected a strike");
+        assert_eq!(struck.len(), 1);
+        assert_eq!(struck[0].text, "do [#donetail]");
+        // Live head preserved as a Prompt; the trailing resolved ref struck.
+        assert!(matches!(
+            &rewritten[0],
+            crate::queue::QueueEntry::Prompt(p) if p.text == "do [#liveone]"
+        ));
+        assert!(matches!(
+            &rewritten[1],
+            crate::queue::QueueEntry::Completed(p) if p.text == "do [#donetail]"
+        ));
     }
 
     #[test]

@@ -12,8 +12,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   whose id was also in `agent:done` was minted into the queue, struck by the
   done-strike pass that same cycle, then re-minted the next cycle — churning
   forever on a completed ref. `agent:done` ids are computed once up front and
-  reused by both the sync filter and the strike pass. Regression:
-  `run_queue_maintenance_excludes_done_ids_from_backlog_sync`.
+  reused by both the sync filter and the strike pass. The done-strike pass also
+  now reaps a resolved `do [#id]` **anywhere** in the queue (not only the head),
+  so an already-orphaned completed ref behind a still-live head no longer lingers
+  and trips the shadow-backlog guard. Regressions:
+  `run_queue_maintenance_excludes_done_ids_from_backlog_sync`,
+  `strike_done_queue_prompts_strikes_non_head_resolved_ref`.
 
 - **Mutation-time identity-collision rejection (`#preset-item-id-collision-enforce`,
   part 1).** `agent-doc write --pending-add` / `--pending-add-after` /

@@ -171,7 +171,7 @@ Verification completed:
 - GitHub Actions CI `26798728907` passed. The only annotations were the existing Node 20 actions deprecation and the optional live Convex deployment configuration note.
 
 No tmux CI workflow/target was present for this repo; the SimWorld coverage ran through `make check`.
-<!-- agent:boundary:80b158ec -->
+<!-- agent:boundary:329ef1e6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -185,7 +185,7 @@ preset #spec-test-build-install-commit-push
 - ~[#astspans]~
 - ~[#writerefs]~
 - ~[#writecompound]~
-- [#langexecutors]
+- ~[#langexecutors]~
 - [#astverify]
 - create contract to support additional programming languages
 - Can markdown support ast operations?

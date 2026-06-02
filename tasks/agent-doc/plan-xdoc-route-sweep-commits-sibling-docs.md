@@ -50,6 +50,23 @@ and the same `src/agent-doc` files. Two sessions can pick up the same work and
 race the same submodule, so the sweep (facet A) is not just bookkeeping churn —
 it bundles a sibling's shared-submodule edits into another doc's closeout.
 
+**C. Prompt-preset cross-document write coupling.** `lazily-rs.md` frontmatter
+defines `prompt_presets['#agent-doc-bug']: "Please create a plan for agent-doc to
+fix this issue. Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md"`.
+So `lazily-rs` is *configured* to write `bugs2.md`'s backlog when it hits an
+agent-doc bug. That cross-document write is intentional (central bug tracker),
+but combined with facet A it means a `lazily-rs` turn both edits and *commits*
+`bugs2.md`. The fix must let a sibling session **append a backlog item** to a
+foreign document (via the explicit `--pending-add-to` path, which is owner-safe)
+without authoring that document's whole closeout cycle.
+
+**Respawn note (operational).** Killing the contaminating actor's process does
+**not** stop it: `lazily-rs.md` runs `queue_active: true` (auto-queue loop), and
+the route/supervisor re-provisions a fresh pane and restarts the actor on death
+(observed: pane `%73` gen 15 → pane `%74` gen 17). To stop the contamination you
+must halt the queue (`queue_active: false`) or land this fix — a `kill` alone is
+whack-a-mole against a supervised loop.
+
 ## Desired behavior
 
 1. The sibling-document commit sweep must only commit / advance a document whose

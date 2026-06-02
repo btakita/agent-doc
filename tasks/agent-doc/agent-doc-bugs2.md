@@ -59,12 +59,35 @@ So normal no-change behavior is preserved; only genuinely abnormal prior states 
 **Why gated, not done.** I scoped this turn to the run-path diagnostic because the plan's broader surfaces — stale-open preflight detection, repair-only/reap-only closeout with an unconsumed queue head, and the session-check fixtures — live in `preflight.rs`/`session_check.rs`, which currently hold **another session's uncommitted edits** I must not disturb (can't cleanly separate by file). I `--pending-gate`d `#nochange-after-stall` (core implemented, awaiting live-verify of the monsterrodholders recursive repro) and captured the deferred breadth as `#nochange-after-stall-breadth`. The remaining queue heads (`#lr-queue-*`, `#lr-head/wire/actor`) are next.
 
 Pushing now (see closeout).
-<!-- agent:boundary:a5155782 -->
+> **Queue prompt:**
+>
+> do [#lr-queue-response-miss]
+
+### Re: do #lr-queue-response-miss — blocked on concurrent work, pausing the queue — opus-4-8
+
+I can't safely implement this one right now, and the same is true for most of the queue. Stopping per your "pause + gate" call.
+
+**Why blocked.** `#lr-queue-response-miss`'s core deliverable is "add session-check coverage" — that lives in `session_check.rs`, which currently holds **another session's uncommitted work**: ~584 insertions / 176 deletions across `session_check.rs` (278 lines), `graph.rs` (249), `preflight.rs` (74), `write.rs`, `closeout.rs`, `session_actor_cmd.rs`. Editing any of those would clobber that work or force a conflict-heavy fork. The remaining queue heads collide the same way:
+
+| Queue head | Core file | State |
+|---|---|---|
+| `#lr-queue-response-miss` | `session_check.rs` | blocked (dirty) |
+| `#lr-queue-repair-adopt` | `write.rs` | blocked (dirty) |
+| `#lr-queue-patchback-miss` | `session_check.rs` | blocked (dirty) |
+| `#lr-head-8` / `#lr-wire-9` / `#lr-actor-10` | `graph.rs` | blocked (dirty — likely the same lazily-rs integration that session is doing) |
+| `#nochange-after-stall-breadth` | `session_check.rs` / `preflight.rs` | blocked (dirty) |
+| `#lr-queue-plan-deferral` | `plan.rs` | **clean — resumable** |
+
+**Action taken.** Gated the 7 blocked items (`--pending-gate`) so the auto-queue stops churning on them and they're tracked as blocked-on-concurrent-work. None of the dirty files were touched. `#lr-queue-plan-deferral` (plan.rs, clean) is left active as the next runnable head if you want to keep going.
+
+**Resume condition.** Once the other session commits `session_check.rs` / `graph.rs` / `write.rs` / `preflight.rs`, un-gate these and I'll implement them cleanly. If you'd rather not wait, the alternative is isolated worktrees with manual merge later — say the word and I'll take that route instead.
+<!-- agent:boundary:709b6411 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 - ~do [#nochange-after-stall]~
-- do [#lr-queue-response-miss]
+- ~do [#lr-queue-response-miss]~
+- do [#nochange-after-stall-breadth]
 - do [#lr-queue-plan-deferral]
 - do [#lr-queue-repair-adopt]
 - do [#lr-queue-patchback-miss]
@@ -83,19 +106,19 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Backlog
 
 <!-- agent:backlog priority queue=append -->
-- [ ] [#nochange-after-stall-breadth] [recommended] #agent-doc-bug follow-up to #nochange-after-stall: extend the no-change abnormal-cycle diagnostic beyond terminally-abandoned cycles — stale-open preflight detection, repair-only/reap-only closeout with an unconsumed active queue head, and session-check fixtures asserting each shape, plus a spec note in 07-commands.md. Deferred this turn because preflight.rs/session_check.rs had concurrent uncommitted edits that must not be disturbed. Plan: tasks/agent-doc/plan-no-change-after-stalled-cycle.md.
-- [ ] [#lr-queue-response-miss] [recommended] #agent-doc-bug 2026-06-02: lazily-rs queued free-text prompt with preset had no committed response patchback in tasks/software/lazily-rs.md. Add session-check coverage so a seen queue head requires committed response, consume proof, or explicit deferral. Plan: tasks/agent-doc/plan-lazily-rs-queued-prompt-patchback-miss.md.
 - [ ] [#lr-queue-plan-deferral] [recommended] #agent-doc-bug 2026-06-02: mixed #agent-doc-bug capture plus #spec-test-build-install-commit-push queue head made agent-doc plan choose plan_backlog_only, deferring runnable lazily-rs work without making the deferral contract explicit. Plan: tasks/agent-doc/plan-lazily-rs-queue-plan-deferral.md.
-- [ ] [#lr-queue-repair-adopt] [recommended] #agent-doc-bug 2026-06-02: if the lazily-rs queued prompt was already completed console-only, recovery must adopt a supplied response through agent-doc write --commit and consume or preserve the matching free-text queue head without rerunning repo work. Plan: tasks/agent-doc/plan-lazily-rs-queue-repair-adopt.md.
-- [ ] [#lr-queue-patchback-miss] [recommended] #agent-doc-bug 2026-06-02: lazily-rs queued free-text prompt with preset was not visibly answered or patched back; mixed #agent-doc-bug capture made this cycle plan_backlog_only and deferred the actionable queue head. Add plan/session-check coverage so the head is either answered, consumed, or explicitly deferred through a committed response. Plan: tasks/agent-doc/plan-lazily-rs-queued-prompt-patchback-miss.md.
-- [ ] [#lr-head-8] Phase 8: Add HeadContentSlot + SnapshotCommitStatusSlot for git show HEAD dedup. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
-- [ ] [#lr-wire-9] Phase 9: Wire RunContext into ops_log, template_io, patch, harness detection. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
-- [ ] [#lr-actor-10] Phase 10: Add GlobalConfigSlot + SessionRegistrySlot for ActorContext. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 <!-- /agent:backlog -->
 
 ## Review
  
 <!-- agent:review -->
+- [/] [#nochange-after-stall-breadth] [recommended] #agent-doc-bug follow-up to #nochange-after-stall: extend the no-change abnormal-cycle diagnostic beyond terminally-abandoned cycles — stale-open preflight detection, repair-only/reap-only closeout with an unconsumed active queue head, and session-check fixtures asserting each shape, plus a spec note in 07-commands.md. Deferred this turn because preflight.rs/session_check.rs had concurrent uncommitted edits that must not be disturbed. Plan: tasks/agent-doc/plan-no-change-after-stalled-cycle.md.
+- [/] [#lr-actor-10] Phase 10: Add GlobalConfigSlot + SessionRegistrySlot for ActorContext. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
+- [/] [#lr-wire-9] Phase 9: Wire RunContext into ops_log, template_io, patch, harness detection. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
+- [/] [#lr-head-8] Phase 8: Add HeadContentSlot + SnapshotCommitStatusSlot for git show HEAD dedup. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
+- [/] [#lr-queue-patchback-miss] [recommended] #agent-doc-bug 2026-06-02: lazily-rs queued free-text prompt with preset was not visibly answered or patched back; mixed #agent-doc-bug capture made this cycle plan_backlog_only and deferred the actionable queue head. Add plan/session-check coverage so the head is either answered, consumed, or explicitly deferred through a committed response. Plan: tasks/agent-doc/plan-lazily-rs-queued-prompt-patchback-miss.md.
+- [/] [#lr-queue-repair-adopt] [recommended] #agent-doc-bug 2026-06-02: if the lazily-rs queued prompt was already completed console-only, recovery must adopt a supplied response through agent-doc write --commit and consume or preserve the matching free-text queue head without rerunning repo work. Plan: tasks/agent-doc/plan-lazily-rs-queue-repair-adopt.md.
+- [/] [#lr-queue-response-miss] [recommended] #agent-doc-bug 2026-06-02: lazily-rs queued free-text prompt with preset had no committed response patchback in tasks/software/lazily-rs.md. Add session-check coverage so a seen queue head requires committed response, consume proof, or explicit deferral. Plan: tasks/agent-doc/plan-lazily-rs-queued-prompt-patchback-miss.md.
 - [/] [#nochange-after-stall] [recommended] #agent-doc-bug 2026-06-02: `src/boost-client/tasks/monsterrodholders.md` follow-up direct run returned plain "Nothing changed since last run" even though recent cycle history showed repeated `recursive_direct_invocation_blocked` abandoned cycles and a repair/reap closeout. Fix by making the no-change short-circuit consult latest abnormal cycle/session state and require durable response/consume/deferral proof before hiding a stalled run behind snapshot equality. Plan: tasks/agent-doc/plan-no-change-after-stalled-cycle.md.
 - [/] [#route-starting-timeout-poll-recovery] #agent-doc-bug 2026-06-02: IMPLEMENTED+tested+shipped (agent-doc 43de6bc8, pointer bc19f9f33, both binaries rebuilt+installed). JB Run Agent Doc on lazily-rs.md failed: 'authoritative actor generation 13 owns pane %71 but route will not bind a new dispatch target because this generation already timed out while starting'. Root cause: starting_actor_timeout is sticky (wait_for_authoritative_actor_ready short-circuits once it is set) and the blocked-timeout recovery did a single dispatch-ready capture, so a heavy gpt-5.5 xhigh Codex still settling into its idle composer after a supervisor restart dead-ended even though it became ready seconds later (session status later recovered it via live_pane_idle). Fix: recover_starting_timeout_blocked_actor_if_dispatch_ready now polls the live pane for a dispatch-ready prompt up to the harness recovery budget before failing closed; busy panes never satisfy current_generation_ready_prompt_proven so the promote-only-proven-idle invariant holds. Spec 08-session-routing + README aligned. make check green. GATED on live-verify / tmux-ci: the poll loop needs a live tmux pane (no Tmux test double in the suite), so exercise a two-session heavy-Codex restart repro before un-gating.
 - [/] [#codex-upgrade-restart-cross-doc-focus] [recommended] #agent-doc-bug 2026-06-02: FOCUS MIS-BINDING IMPLEMENTED+tested+shipped (tmux-router 7a7ddd9, superproject pointer 6494fb190, both binaries rebuilt+installed): sync --focus now selects only the focus document's authoritative registry-owned, alive pane (captured before Phase 1.5/1.75 ephemeral donor/spare assignment) via the new resolve_focus_pane helper; when the document has no live owned pane it preserves the current tmux selection instead of aliasing onto a column-mate's pane (which belongs to a different document — the equityfundingsource.md symptom while focusing agent-doc-bugs2.md). 4 regression tests added; tmux-router 113 lib tests + agent-doc make check green. REMAINING: the session-loss-across-Codex-restart rebind facet (re-provision the focused document's own pane on supervisor restart rather than dropping/aliasing the session) — gated on the two-document upgrade/restart live repro. Shares the focus-by-exact-document-path invariant with #jb-tsift-pane-sync. Plan: tasks/agent-doc/plan-codex-upgrade-restart-cross-document-focus.md

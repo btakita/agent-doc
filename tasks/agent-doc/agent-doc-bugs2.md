@@ -16,7 +16,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -36,10 +36,10 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 3 response topic(s): do #misfire-recovery-snapshot; Is the #backlog-auto-marker-misfire implementation destructive?; Will the agent guide the decision/recovery process?
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:f2ccafea -->
+<!-- agent:boundary:332380c9 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - [#kc5e]
 - [#x8aw]

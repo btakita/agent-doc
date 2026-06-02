@@ -59,7 +59,35 @@ What I added to the plan — two new failure shapes observed in *this* session, 
 2. **Persistence attempted but queue-consume diverged under live IPC.** A `finalize --done` did commit the `### Re:` body and reap the item, but the queue-consume step failed (`snapshot queue state diverged from document queue`, `live_prompt_drift_after_preflight`) while you were live-typing new queue items and a JB `File Cache Conflict` reverted the queue to an older snapshot. The next preflight then hard-blocked on the orphaned bare `[#id]` head, so no subsequent response could land — the document looked stuck. `repair --apply-recovery` committed the lossy side and didn't strike the head; I had to strike `~[#write-closeout-response-shape]~` manually. New fix steps 7–9 make consume head-aware, add a binary-owned orphaned-head strike, and make recovery IPC-listener aware so it never requires fighting a live buffer.
 
 Gating `#codex-direct-writeback-miss` to `[/]` — planning deliverable complete (plan written + enriched), implementation pending. I did **not** auto-loop the remaining queue items: several are real unanswered user prompts (the lazily-rs design questions, the tsift.md stash-pane report, the File-Cache-Conflict snapshot-revert, the `/clear`-while-task-in-progress report) that take precedence over auto-continuation and deserve their own cycles.
-<!-- agent:boundary:815de427 -->
+
+### Re: lazily-rs Context architecture — graph scope + config hot-reload — opus-4-8
+
+> **Queue prompt:**
+>
+> Should the graph be per-file (one context per tracked document) or per-process (one context with file-keyed cells)?: Use your judgement. There can also be multiple contexts.
+
+
+Both answered and recorded as resolved decisions in `tasks/agent-doc/plans/lazily-rs-integration.md` (Open Questions → Resolved Decisions). No code this cycle — phases 8–10 stay backlog (`#lr-head-8`/`#lr-wire-9`/`#lr-actor-10`).
+
+#### Per-file vs per-process graph → multiple contexts, scoped per document
+
+Taking "use your judgement / there can also be multiple contexts" as license to avoid a single process-global file-keyed mega-graph:
+
+- **RunContext** — one per CLI invocation. A run touches one document, so `FilePathCell` is set once; it's per-file in practice and dies at process exit.
+- **ActorContext** — the supervisor/watch daemon holds a **map of `Arc<ActorContext>` keyed by document** (reusing the existing `FileState`/session keying), *not* one global `ThreadSafeContext` with file-keyed cells everywhere.
+- **ProcessContext** — one small shared context for genuinely process-static slots only (`HarnessSlot`, `GlobalConfigSlot` for `~/.config/agent-doc/config.toml`).
+
+Why per-document beats one file-keyed graph: invalidation stays trivial (a file/config change clears only that doc's graph), `ThreadSafeContext`'s per-context lock spreads contention instead of serializing every document through one lock (the Risks-table contention item), and memory is bounded by session lifecycle (drop the `Arc` when the session ends). The shared `ProcessContext` captures the one real per-process case without dragging document-scoped data into a global graph. This adds a third row to the Context Lifetimes table.
+
+#### Config hot-reload → support both, layered on one primitive
+
+- **Floor (always on):** clear-on-next-cycle. Preflight stats the config file(s), compares mtime, and on change calls `ProjectConfigSlot.clear()` / `GlobalConfigSlot.clear()` with transitive dependent clearing. No extra threads; guarantees changes land by the next cycle. Applies to both context kinds.
+- **Opt-in (ActorContext only):** a `notify`-based watcher on `.agent-doc/config.toml` + the global config that fires the *same* `slot.clear()` immediately, so changes apply mid-watch-loop. Gated behind `[watch] config_hot_reload = true` since it adds a watcher thread.
+
+They compose because both reduce to `ProjectConfigSlot.clear()` → transitive clear — the watcher is just an earlier trigger for the clear the cycle-start mtime check would do anyway. Phase 5/10 implement the floor; the watcher is a Phase 5 opt-in extension.
+
+(`CellHandle::set` first → Yes was already resolved last cycle; also recorded in the plan.)
+<!-- agent:boundary:9c5e42cc -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -69,9 +97,10 @@ preset #spec-test-build-install-commit-push
 - ~[#queue-head-struck-on-foreign-exchange-answer]~
 - ~[#lr-cycle-7]~
 - ~[#write-closeout-response-shape]~
-- Should the graph be per-file (one context per tracked document) or per-process (one context with file-keyed cells)?: Use your judgement. There can also be multiple contexts.
-- How to handle config hot-reload in long-lived ActorContext — file watcher on .agent-doc/config.toml or clear on next cycle?: Can you support both?
 - ~agent-doc monsterrodholders.md turns do not apply the response into the document.~
+- ~do [#codex-direct-writeback-miss]~
+- ~Should the graph be per-file (one context per tracked document) or per-process (one context with file-keyed cells)?: Use your judgement. There can also be multiple contexts.~
+- How to handle config hot-reload in long-lived ActorContext — file watcher on .agent-doc/config.toml or clear on next cycle?: Can you support both?
 - When I navigate from this document to tsift.md, the tmux focus is on the tsift.md pane but the tmux pane is in the stash, not in the agent-doc tmux window.
 - As I was writing the previous queue item, a JB `File Cache Concflict` surfaced and I accepted. But the queue items reverted to a previous snapshot without my recent work. I had to manually reapply my changes.
 - [#lr-head-8]
@@ -79,7 +108,6 @@ preset #spec-test-build-install-commit-push
 - [#lr-actor-10]
 - JB `Clear Session Context` on monsterrodholders.md presented me with `Interrupt and Clear`. I applied `Interrupt and Clear` and the Codex session closed with the supervisor presenting Enter to restart or q to quit. I Pressed enter, Codex restarted and I saw an error `'/clear' is disabled while a task is in progress.`.
 - Add a preset attribute to agent:queue, where the value can be a free-text prompt that correctly applies `prompt_presets`.
-- ~do [#codex-direct-writeback-miss]~
 <!-- /agent:queue -->
 ###
 <!--

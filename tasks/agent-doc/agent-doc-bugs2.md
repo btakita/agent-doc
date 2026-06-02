@@ -237,7 +237,19 @@ The only thing that needs to happen is a one-time ownership decision (still your
 - **Or stop `%70`** and **stop this `%71`** session entirely — you have two Claude `agent-doc` sessions on one document, which is the root of every wedge/overwrite/torn-read in this backlog. Run a single session on a freshly-`compact`ed document and the queue drains cleanly.
 
 I'm standing down on `agent-doc-bugs2.md`. There is no action I can take from a non-owner pane that doesn't risk the live owner's work — and the owner is already doing it. If you want me specifically to implement `#codex-upgrade-restart-cross-doc-focus`, stop `%70`, tell me the tree is clean, and I'll do it end-to-end then.
-<!-- agent:boundary:deefd400 -->
+This queue item — *JB `Clear Session Context` → `Interrupt and Clear` → Codex restart → `'/clear' is disabled while a task is in progress`* — is **already triaged**: it maps to **`#clear-stops-running-process`** (review, `[/]`), enriched with this exact post-restart evidence in my earlier "queue triage" response. No new item, no fresh code.
+
+> **Queue prompt:**
+>
+> JB `Clear Session Context` on monsterrodholders.md presented me with `Interrupt and Clear`. I applied `Interrupt and Clear` and the Codex session closed with the supervisor presenting Enter to restart or q to quit. I Pressed enter, Codex restarted and I saw an error `'/clear' is disabled while a task is in progress.`.
+
+
+And the owner pane `%70` has now **drained the entire lazily-rs phase set** — `~[#lr-head-8]~`, `~[#lr-wire-9]~`, `~[#lr-actor-10]~` are all struck. It's working competently. The remaining two queue lines are both already-resolved (`/clear` → `#clear-stops-running-process`; "preset attribute" → `#queue-preset-attribute`, done in `2197dbff0`).
+
+I'm standing down — same reason as the last several turns, stated once more, briefly: this is pane `%71`, the owner is the live `%70`, and I can't finalize or touch the crate without racing its work. The queue is effectively drained of agent-implementable items; the rest is `[/]` done-or-gated or your live-IDE Path A/B sessions.
+
+The single outstanding action remains yours: **consolidate to one owner pane** (keep `%70`, stop this `%71`) and **compact** the document. That ends the two-actor contention that's the root of this whole backlog. Until then there's nothing I can do here that the owner isn't already doing better — from a pane with the clean closeout boundary I lack.
+<!-- agent:boundary:51772604 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -260,7 +272,7 @@ preset #spec-test-build-install-commit-push
 - ~[#lr-head-8]~
 - ~[#lr-wire-9]~
 - ~[#lr-actor-10]~
-- JB `Clear Session Context` on monsterrodholders.md presented me with `Interrupt and Clear`. I applied `Interrupt and Clear` and the Codex session closed with the supervisor presenting Enter to restart or q to quit. I Pressed enter, Codex restarted and I saw an error `'/clear' is disabled while a task is in progress.`.
+- ~JB `Clear Session Context` on monsterrodholders.md presented me with `Interrupt and Clear`. I applied `Interrupt and Clear` and the Codex session closed with the supervisor presenting Enter to restart or q to quit. I Pressed enter, Codex restarted and I saw an error `'/clear' is disabled while a task is in progress.`.~
 - Add a preset attribute to agent:queue, where the value can be a free-text prompt that correctly applies `prompt_presets`.
 <!-- /agent:queue -->
 ###

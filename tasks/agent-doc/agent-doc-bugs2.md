@@ -158,7 +158,15 @@ I have to be direct, because the auto-loop is now re-presenting items I've alrea
 2. **Stop the second session** (this `%66` pane) so one owner drains the queue without two actors racing.
 
 Then the queue tail — all of which is **already triaged or operator/live-IDE work** — drains cleanly, and the live-verify backlog (`#v819`/`#wy0y`, Paths A/B) is yours to run at the keyboard. The agent-implementable backlog is genuinely empty; there is no autonomous work left for me to do on this document in its current state.
-<!-- agent:boundary:48900ad0 -->
+
+### Re: #queue-preset-attribute — gpt-5
+
+Completed the planning item. The committed plan is `tasks/agent-doc/plan-queue-preset-attribute.md`; it covers free-text `agent:queue` `preset` values, expansion of matching `prompt_presets` tokens, literal preservation of unknown tokens, reuse of the existing per-item preset path, and round-trip stability through queue convergence.
+
+I did not implement code in this cycle because the backlog item explicitly says `DO NOT IMPLEMENT in this planning item`. I committed the plan artifact as `2197dbff0` and am reaping `#queue-preset-attribute` as done.
+
+Verification: no code changed; inspected the plan artifact and staged/committed only that file before this finalize.
+<!-- agent:boundary:259973b4 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -181,6 +189,7 @@ preset #spec-test-build-install-commit-push
 - [#lr-actor-10]
 - JB `Clear Session Context` on monsterrodholders.md presented me with `Interrupt and Clear`. I applied `Interrupt and Clear` and the Codex session closed with the supervisor presenting Enter to restart or q to quit. I Pressed enter, Codex restarted and I saw an error `'/clear' is disabled while a task is in progress.`.
 - Add a preset attribute to agent:queue, where the value can be a free-text prompt that correctly applies `prompt_presets`.
+- do [#queue-preset-attribute]
 <!-- /agent:queue -->
 ###
 <!--
@@ -193,7 +202,6 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Backlog
 
 <!-- agent:backlog priority queue=append -->
-- [ ] [#queue-preset-attribute] [recommended] #agent-doc-bug 2026-06-02: Add a free-text preset attribute to agent:queue — value may carry inline prompt_presets #name references + literal text, resolved/expanded like named presets then applied per queue item. Plan: tasks/agent-doc/plan-queue-preset-attribute.md. DO NOT IMPLEMENT in this planning item.
 - [ ] [#lr-head-8] Phase 8: Add HeadContentSlot + SnapshotCommitStatusSlot for git show HEAD dedup. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-wire-9] Phase 9: Wire RunContext into ops_log, template_io, patch, harness detection. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-actor-10] Phase 10: Add GlobalConfigSlot + SessionRegistrySlot for ActorContext. Plan: tasks/agent-doc/plans/lazily-rs-integration.md

@@ -160,7 +160,51 @@ Verification:
 `make check` remains unavailable in `src/lazily-rs` because there is no `check` target. GitHub Actions CI remains unavailable: `gh run list --workflow CI --limit 1` could not find a `CI` workflow, and `gh workflow list` returned no workflows, so there was no tmux CI leg to inspect. Cargo build/bench/install/publish emitted only the existing unused workspace patch warnings for `agent-kit`, `tagpath`, and `tmux-router`.
 
 Changed paths: `src/lazily-rs/README.md`, `src/lazily-rs/SPEC.md`, `src/lazily-rs/benches/context.rs`, `src/lazily-rs/examples/instrumentation_profile.rs`, `src/lazily-rs/scripts/update-benchmark-results.py`, `src/lazily-rs/tests/spec_compliance.rs`, and the superproject `src/lazily-rs` submodule pointer. Escalation: none.
-<!-- agent:boundary:f18525b7 -->
+
+### Re: #ploom — gpt-5
+
+> **Queue prompt:**
+>
+> [#ploom]
+
+
+Completed `#ploom`.
+
+Added a Loom-backed frontier invalidation model in `tests/thread_safe_loom.rs` covering the parallel-invalidation safety envelope:
+
+- duplicate diamond paths coalesce before the join slot is marked;
+- the effect queue is pushed once for the diamond frontier;
+- nested batched invalidations do not flush until the outermost batch exits;
+- duplicate invalidations inside the batch coalesce into one flush;
+- an in-flight join compute that started before the invalidation flush is discarded as stale.
+
+Updated `SPEC.md` to name the frontier invalidation Loom coverage alongside the existing sidecar `Condvar`, stale in-flight completion, effect scheduling/disposal, and re-entrant callback models.
+
+Commits prepared locally:
+
+- `5327cdc` in `src/lazily-rs`: `test: model frontier invalidation invariants`
+- `7c4675e5e` in `agent-loop`: `chore: update lazily-rs loom coverage`
+
+Push will run after this binary-owned document commit so the session document is included in the superproject push.
+
+Verification:
+
+- `cargo fmt`
+- `cargo test --features loom --test thread_safe_loom`
+- `git diff --check`
+- `cargo test`
+- `cargo test --features tokio`
+- `cargo build --all-targets --all-features`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo bench --no-run`
+- `cargo bench --features instrumentation --no-run`
+- `cargo install --path . --example instrumentation_profile --features instrumentation --force`
+- `cargo publish --dry-run --allow-dirty`
+
+`make check` remains unavailable in `src/lazily-rs` because there is no `check` target. GitHub Actions CI remains unavailable: `gh run list --workflow CI --limit 1` could not find a `CI` workflow, and `gh workflow list` returned no workflows, so there was no tmux CI leg to inspect. Cargo build/bench/install/publish emitted only the existing unused workspace patch warnings for `agent-kit`, `tagpath`, and `tmux-router`.
+
+Changed paths: `src/lazily-rs/SPEC.md`, `src/lazily-rs/tests/thread_safe_loom.rs`, and the superproject `src/lazily-rs` submodule pointer. Escalation: none.
+<!-- agent:boundary:8aeb2a4e -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -170,14 +214,13 @@ preset #spec-test-build-install-commit-push
 - ~[#pinv]~
 - ~Are Phase 3, 4, 6 implemented? If not, is now a good time to implement them?~
 - ~[#pben]~
-- [#ploom]
+- ~[#ploom]~
 - [#pshrd]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#ploom] Add Loom or Shuttle coverage for parallel invalidation invariants: duplicate paths mark each slot once, effects coalesce once, in-flight recompute stale results are discarded, and batches flush after the outermost update.
 - [ ] [#pshrd] Evaluate sharded or versioned graph storage only after #pinv and #pben show the remaining bottleneck is the global mutex rather than recursive traversal or duplicate dirty marking.
 <!-- /agent:backlog -->
 

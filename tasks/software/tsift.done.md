@@ -280,3 +280,4 @@
 - 2026-06-02 [#mdsectionspans] Markdown heading/section/list/code-fence stable spans: hierarchy metadata, section boundaries, and source-read/edit target refs.
 - 2026-06-02 [#mdsectionedits] Markdown section edit executor: rename_heading, replace_section_body, insert_section, and move_section with tree-sitter validation.
 - 2026-06-02 [#mdblockedits] Markdown block edit executor: insert_list_item and rewrite_code_fence while preserving syntax and refusing ambiguous targets.
+- 2026-06-02 [#mdverify] Markdown semantic-write verification coverage: dry-run/apply no-mutation tests, temp-worktree verify gates, source-read impact summaries, and refusal regressions.

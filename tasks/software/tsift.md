@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -53,7 +53,7 @@ Priority order added to backlog:
 5. `#astverify` — temp-worktree verification harness for dry-run/apply/reindex/read-impact/test gates.
 
 That order keeps the substrate honest: first improve the AST read/write address space, then add harder Rust mutations, then generalize across languages, then wrap the whole flow in stronger apply-time verification.
-<!-- agent:boundary:d43455b5 -->
+<!-- agent:boundary:cc29e1d9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -62,7 +62,15 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+preset #spec-test-build-install-commit-push
+- [#astspans]
+- [#writerefs]
+- [#writecompound]
+- [#langexecutors]
+- [#astverify]
+- create contract to support additional programming languages
+- Can markdown support ast operations?
 <!-- /agent:queue -->
 
 ## Backlog

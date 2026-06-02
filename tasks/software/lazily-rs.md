@@ -1,5 +1,6 @@
 ---
 agent_doc_session: 9386d273-2288-498c-b9fc-207f224f9fdb
+resume: 019e8608-2fbe-7410-abb8-7538fa69d044
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -301,6 +302,15 @@ Benchmark/profile notes:
 Escalation: none.
 
 Confidence: high for the parking prototype and local regression coverage; the next queued safety-model item should add Loom or Shuttle coverage for the synchronization behavior.
+Preflight now reports no changes. The `#tsc16-safety-model` response is already committed in `tasks/software/lazily-rs.md`, so I’m not emitting another patch block and risking a duplicate response.
+
+Current state:
+- `lazily-rs`: `e541c69 test: model thread-safe synchronization`
+- root gitlink: `1001a4be3 chore: update lazily-rs submodule`
+- session response commit: `9b1985068 agent-doc(lazily-rs): 2026-06-01 21:56:13`
+- root branch is aligned with `origin/main`
+- extra local verification I ran afterward: root `make check` passed
+- CI evidence: root `Agent Doc` run `26793593363` had `tmux-ci` completed successfully; `check` was still in progress with no failed step at last poll.
 
 ### Re: tsc16-safety-model — gpt-5
 
@@ -361,7 +371,7 @@ CI/tmux evidence:
 Escalation: none.
 
 Confidence: high. The remaining risk is that the Loom tests model the synchronization protocol instead of instrumenting the production `ThreadSafeContext` type directly; the model targets the same state transitions and notification rules used by the implementation.
-<!-- agent:boundary:287b85eb -->
+<!-- agent:boundary:32069786 -->
 <!-- /agent:exchange -->7
 
 ## Queue

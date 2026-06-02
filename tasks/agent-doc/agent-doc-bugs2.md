@@ -334,29 +334,45 @@ Two things to address: the unresolved tail question (about `plan-jb-tsift-pane-s
 > do [#lr-queue-plan-deferral]
 
 **Closeout:** uncommitted (`finalize` gated, and — per the confirmed finding — my finalize would itself run inside lazily-rs's `%73`, so even a clean closeout is compromised from this pane). Net: `#lr-queue-plan-deferral` is effectively done by `4d0184e3` (needs only a fixture); `#jb-tsift-pane-sync` completes via the pane-sync plan **only if** execution-context contamination is added to its scope. Both are toolchain-actor follow-through; this pane stays read-only/advisory until the contamination is fixed.
-<!-- agent:boundary:54a274f7 -->
+
+### Re: do #lr-queue-repair-adopt — 3 of 4 already shipped; the open facet is one shared primitive — opus-4-8
+
+Audited `plan-lazily-rs-queue-repair-adopt.md` against current `HEAD`. Most of it is already satisfied by shipped, general-purpose code:
+
+- **Plan item 2 (adopt a supplied response to the newest unresolved exchange prompt)** → already the anchored-patchback behavior of `agent-doc write --commit` (targets the unresolved prompt tail).
+- **Plan item 3 / exit-criterion "don't rerun repo work or commit unrelated dirty files"** → already enforced by the conservative-commit rule (`git::commit()` stages the snapshot, not arbitrary working-tree drift; completed lazily-rs side-effect commits are never recreated or staged).
+- **Plan item 4 / "empty or already-committed repair → one actionable command, not an empty child dispatch"** → already `run.rs:430` ("no child-agent dispatch… pipe the response through `agent-doc write --commit`") plus the "empty response — nothing to write" path.
+- **Exit-criterion "response body present in HEAD before success"** → already the `finalize`/`write --commit` committed-gate + `session-check` `check_committed_without_response_body_guard`.
+
+**The one genuinely open facet:** Desired-Behavior bullet 2 / the "Queue regression" test — *when the adopted response answers an active **free-text** queue head, queue state must advance (consume the head) atomically with the document commit.* That linkage doesn't exist for free-text heads today: `check_queue_head_removal_guard` and the consume machinery track `do [#id]` heads, not free-text ones, so an adopted response can't prove it consumed a free-text head.
+
+**Convergence finding (the useful part):** that exact missing primitive — **free-text queue-head provenance + consume/preserve linkage** — is the *same* open facet I found auditing the last two items:
+- `#lr-queue-response-miss` step 3 (seen free-text head needs committed-response/consume/deferral proof),
+- `#manual-queue-head-loss` (free-text head lost before it's recorded as an active head),
+- `#lr-queue-repair-adopt` (this one: adopted response must consume the matching free-text head).
+
+All three close with **one** primitive: record free-text queue-head provenance at preflight, and let consume/response/deferral proof reference it. I'd recommend the toolchain actor build that single mechanism once rather than three point-fixes — it retires the open facet of all three items together.
+
+**Not implementing here:** same constraints — binary gated, and this pane's cycles execute inside lazily-rs's `%73` (confirmed contamination), so I can't verify or cleanly finalize. This is the toolchain actor's job, ideally after the `#jb-tsift-pane-sync` execution-context fix un-contaminates the pane.
+Read the plan. Audited each item against shipped code — and there's a useful convergence finding here worth surfacing.
+
+> **Queue prompt:**
+>
+> Please stop creating a build subagent and making the session open. Run the build in the session. It is confusing to see an open prompt and not know if the subagent is blocking the task or not. This is anti-visibility and can cause problems if I run the next task or clear the session while the subagent is still running. I'm not sure if the subagent is deadlocked or actively running as well. Stop doing this.
+> #spec-test-build-install-commit-push
+
+**Closeout:** uncommitted (gated). Net: `#lr-queue-repair-adopt` is mostly shipped; its one open facet (free-text head consume-on-adopt) is the shared primitive that also closes `#lr-queue-response-miss` step 3 and `#manual-queue-head-loss` — best built once, by the toolchain actor.
+Do your recommendation.
+> I'd recommend the toolchain actor fold that criterion into the plan before running `#spec-test-build-install-commit-push`, so `#jb-tsift-pane-sync` doesn't get marked done with the execution facet still live.
+
+Note that monsterrodholders.rs is also running this document. Is there an issue with the lazily-rs integration? Are we caching something that should not be cached or should it be invalidated?
+<!-- agent:boundary:4e6c31dc -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
 ~~~done
-There are too many items being accumulated into review. The tasks are not being completed. Do not finish turn until the task is complete. I really want you to complete the task, not put it into the review items which has become excessively long and ususable.
-# spec-test-build-install-commit-push
-~~~
 Please stop creating a build subagent and making the session open. Run the build in the session. It is confusing to see an open prompt and not know if the subagent is blocking the task or not. This is anti-visibility and can cause problems if I run the next task or clear the session while the subagent is still running. I'm not sure if the subagent is deadlocked or actively running as well. Stop doing this.
 #spec-test-build-install-commit-push
-~~~done
-preset #spec-test-build-install-commit-push
-- ~The backlog has the priority attribute but the order of tasks shows [#lr-actor-10] then [#lr-wire-9] then [#lr-head-8]. Is this in priority order? If not, fix the backlog priority attribute.~
-- ~do [#owned-pane-prompt-recur]~
-- src/agent-doc is currently in rebase. Please resolve the rebase and get to a clean HEAD.
-- Why is the lazily-rs.md session running against agent-doc (presumably this file)? It should be running solely on lazily-rs.md. I manually killed the tmux pane. Something weird is going on with lazily-rs.md.
-```
-[route] target tmux session: 0
-[route] Pane %73 is in stash window 'stash', rescuing to agent-doc window
-[route] Rescued pane %73 via join-pane
-[route] codex blocked after 0.2s in pane %73: active codex turn
-Error: dispatch-only codex reopen refused to inject into pane %73 for tasks/software/lazily-rs.md because the latest run is still booting and never reached a dispatch-ready prompt (active codex turn); wait for the pane to become ready and reroute again
-```
 ~~~
 preset #spec-test-build-install-commit-push
 - ~do [#manual-queue-head-loss]~

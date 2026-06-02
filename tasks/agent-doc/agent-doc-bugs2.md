@@ -155,6 +155,11 @@ Update the plan.
 
 ### Re: verify IPC items + queue the bug + update the plan — opus-4-8
 
+> **Queue prompt:**
+>
+> do [#queue-head-struck-on-foreign-exchange-answer]
+
+
 Handling your three inline notes by position.
 
 #### How to verify the not-blanket-closed IPC-dup items
@@ -179,12 +184,12 @@ Updated `tasks/agent-doc/plans/lazily-rs-integration.md` for "lazily-rs is now m
 - Resolved the outdated "lazily-rs is single-threaded (RefCell)" risk; added a graph-lock-contention risk with `loom`/`instrumentation` mitigation; annotated Phase 5/10 ActorContext wiring. Pushed `9332929ef`.
 
 Continuing the queue next — the prioritized `#queue-head-struck-on-foreign-exchange-answer` fix, then I'll reassess at the `#lr` phases.
-<!-- agent:boundary:9abec7ac -->
+<!-- agent:boundary:65fc8731 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#queue-head-struck-on-foreign-exchange-answer]
+- ~do [#queue-head-struck-on-foreign-exchange-answer]~
 - [#lr-content-6]
 - [#lr-cycle-7]
 - [#lr-head-8]
@@ -202,7 +207,7 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Backlog
 
 <!-- agent:backlog priority queue=append -->
-- [ ] [#queue-head-struck-on-foreign-exchange-answer] #agent-doc-bug 2026-06-02 An active agent:queue auto head was struck without its work: a cycle answered two NEW agent:exchange prompts (typing-during-finalize questions) and finalize ALSO consumed the unrelated queue head 'lazily-rs ... update the plan' (struck in HEAD, plan file never edited). Free-text queue-head consumption must require the committed response to actually address that head, not strike it whenever any response commits while exchange prompts are answered. Sibling of #queue-clear-unrun-items. The mis-struck lazily-rs plan-update still needs doing before phases #lr-content-6..#lr-actor-10.
+- [ ] [#queue-head-struck-on-foreign-exchange-answer] #agent-doc-bug 2026-06-02 Free-text agent:queue auto head struck without its work: a cycle that answered NEW agent:exchange prompts also consumed an unrelated free-text queue head (lazily-rs plan-update; struck in HEAD, file never edited). Fix: free-text queue-head consumption must require the committed response to actually address that head, not strike it whenever any response commits. Sibling of #queue-clear-unrun-items. [kept open: queued at top of agent:queue auto for the next loop cycle to implement]
 - [ ] [#lr-content-6] Phase 6: Wire DocContentCell + FrontmatterSlot + ComponentsSlot into session_check guard functions. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-cycle-7] Phase 7: Add CycleStateSlot + SnapshotContentSlot; consolidate snapshot path lookups. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-head-8] Phase 8: Add HeadContentSlot + SnapshotCommitStatusSlot for git show HEAD dedup. Plan: tasks/agent-doc/plans/lazily-rs-integration.md

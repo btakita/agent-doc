@@ -36,10 +36,40 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 4 response topic(s): Is there sufficient logging to understand the 3-pane navigation layout?; 3-pane layout navigating bugs2.md → tsift.md; do #ht5v; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:3b39bef7 -->
+❯ do [#misfire-recovery-snapshot]. #spec-test-build-install-commit-push
+
+### Re: do #misfire-recovery-snapshot — pre-auto-run recovery tag — opus-4-8
+
+Implemented per your call to do the defensive tag (the item was parked because the destructive precondition is unmet, but the auto-run mutation surface is still worth a recovery checkpoint, exactly like compact's). Done.
+
+#### What it does
+
+Before a **queue-sourced** auto-run (`orchestrate --from-queue`, sequential or dag) executes its first task — after the empty-batch / `--dry-run` / `--no-git` / `--plan` guards, before any task mutates the document or backlog — it drops a lightweight git tag `agent-doc/<doc>/pre-auto-run-N` at HEAD. A misfiring multi-cycle auto-run is now recoverable (`git reset`/inspect the tagged HEAD) without git/sidecar archaeology — the exact pain from the original `#backlog-auto-marker-misfire` incident.
+
+#### Implementation
+
+- Generalized compact's tag logic into a shared `create_pre_mutation_tag(file, slug, override)` (`agent-doc-orchestration/src/compact.rs`); `create_pre_compact_tag` now delegates with slug `pre-compact`. `orchestrate.rs` calls it with slug `pre-auto-run`, gated on `from_queue` and skipped for `--dry-run` / `--plan` / `--no-git`. Best-effort and non-fatal — a tag failure logs a warning and the run proceeds.
+- Tests: `create_pre_mutation_tag_auto_increments_ordinal_per_slug` (per-slug ordinals), `create_pre_mutation_tag_honors_override_name`.
+
+#### Verification
+
+Full Rust suite **3541 passed / 0 failed** (230 live-tmux ignored), clippy clean. Built + installed both binaries. Spec updated (`specs/07-orchestration-commands.md` § Pre-auto-run recovery tag); plan `plan-backlog-auto-marker-misfire.md` marks fix #4 implemented. Pushed `agent-doc@8560b7af` (branch `20260422/codex-agent-backend`) + superproject `main`.
+
+#### Scope note
+
+This is binary-only (no JB plugin / tmux-router change). It guards the auto-run mutation surface defensively; the original destructive backlog rewrite remains queue-scoped/inert in current code (fixes #1–#3), so this completes the `#backlog-auto-marker-misfire` cluster.
+<!-- agent:boundary:371d51a9 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+preset #spec-test-build-install-commit-push
+- I have been using agent-doc and have not seen any bugs. Can the gated review items be completed? If yes, complete them. I want to move on to performance improvements.
+- lazily-rs is now multithreaded. Update tasks/agent-doc/plans/lazily-rs-integration.md with recent changes.
+- [#lr-content-6]
+- [#lr-cycle-7]
+- [#lr-head-8]
+- [#lr-wire-9]
+- [#lr-actor-10]
 <!-- /agent:queue -->
 ###
 <!--
@@ -51,7 +81,12 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 
 ## Backlog
 
-<!-- agent:backlog priority queue=prepend -->
+<!-- agent:backlog priority queue=append -->
+- [ ] [#lr-content-6] Phase 6: Wire DocContentCell + FrontmatterSlot + ComponentsSlot into session_check guard functions. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
+- [ ] [#lr-cycle-7] Phase 7: Add CycleStateSlot + SnapshotContentSlot; consolidate snapshot path lookups. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
+- [ ] [#lr-head-8] Phase 8: Add HeadContentSlot + SnapshotCommitStatusSlot for git show HEAD dedup. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
+- [ ] [#lr-wire-9] Phase 9: Wire RunContext into ops_log, template_io, patch, harness detection. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
+- [ ] [#lr-actor-10] Phase 10: Add GlobalConfigSlot + SessionRegistrySlot for ActorContext. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 <!-- /agent:backlog -->
 
 ## Review
@@ -111,7 +146,6 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 <!-- /agent:review -->
 
 <!-- agent:icebox -->
-- [ ] [#misfire-recovery-snapshot] Pre-auto-run recovery snapshot/tag (mirroring `compact`'s pre-mutation tag) so a destructive auto-run misfire is recoverable without git/sidecar archaeology. Proposed fix #4 of `#backlog-auto-marker-misfire` (now IMPLEMENTED for fixes #1–#3). Parked: only worth doing if a new auto-run path can mutate the backlog in place — currently the misfire is inert (queue-scoped) and surfaced (misplaced_component_attr warning). Plan: tasks/agent-doc/plan-backlog-auto-marker-misfire.md.
 <!-- /agent:icebox -->
 
 ## Completed / Reaped

@@ -38,27 +38,19 @@ Compacted content:
 ❯ - Archived 4 response topic(s): do #nochange-after-stall; do #lr-queue-response-miss; commit + push; 1 more
 - Archived 4 response topic(s): do #subagent-blocks-session; do #lr-queue-response-miss; do #lr-queue-response-miss; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ > **Queue prompt:**
-❯ >
 ❯ > do [#subagent-blocks-session]
-❯ > **Queue prompt:**
-❯ >
 ❯ > Gated items in review are not easily runnable. Please enable the user to run gated items by `do [item-id]` or plating the item in the queue. Please focus the runs to complete the gated item. If the gated item can only be partially completed, extract a new task to complete which contains the conditions to complete the item. If no work was done due to preconditions not being met, add a timestamp of the attempts to the item. Ensure the preconditions are present in the gated item description.
 ❯ Not implementing this one blind — handled it per your run policy (precondition unmet → record preconditions + timestamp the attempt).
 ❯ **Why preconditions are unmet.** This is "block the session so no other task runs while a turn waits on a subagent — mostly a Claude issue." agent-doc (the binary) has no control over the Claude Code harness's subagent scheduling, so this almost certainly needs a **harness/hook-level** mechanism — a `Stop`/`PreToolUse` hook gate or a supervisor lease — not an agent-doc source change. Before I implement, the design needs: which layer enforces the block, what exactly counts as "the subagent" being awaited, and how/when the block releases. I recorded those preconditions + a 2026-06-02 attempt timestamp on the `#subagent-blocks-session` item.
 ❯ Also note this head was an **artifact**: my `--pending-add` last turn spawned a `do [#subagent-blocks-session]` queue head, and because that capture was still uncommitted, this preflight read it as the newest directive. This commit clears that drift.
 ❯ **Real queue is next.** In queue order the next actionable head is `do [#lr-queue-response-miss]`, then the other ungated items. Since `session_check.rs` is now committed, I'll take that one next and — per your spec — **audit it first** against the just-committed concurrent session-check work (it may already cover the free-text-queue-head response-patchback guard, in which case I verify + mark done instead of re-implementing). Run again or say "go" and I'll do `#lr-queue-response-miss`.
-❯ > **Queue prompt:**
-❯ >
 ❯ > do [#lr-queue-response-miss]
-❯ > **Queue prompt:**
-❯ >
 ❯ > do [#lr-queue-response-miss]
 
 ### Re: do #nochange-after-stall-breadth — implementation map (binary-declined in this pane; not committed here) — opus-4-8
 
-> **Queue prompt:**
->
+❯ > **Queue prompt:**
+❯ >
 > do [#nochange-after-stall-breadth]
 
 
@@ -104,8 +96,8 @@ I added nothing to review/backlog this cycle.
 
 ### Re: build subagents and open sessions — opus-4-8
 
-> **Queue prompt:**
->
+❯ > **Queue prompt:**
+❯ >
 > There are too many items being accumulated into review. The tasks are not being completed. Do not finish turn until the task is complete. I really want you to complete the task, not put it into the review items which has become excessively long and ususable.
 > #spec-test-build-install-commit-push
 
@@ -116,8 +108,8 @@ One carryover from the repair turn: I fixed the broken `.bin/agent-doc` symlink 
 
 ### Re: do [#owned-pane-prompt-recur] — opus-4-8
 
-> **Queue prompt:**
->
+❯ > **Queue prompt:**
+❯ >
 > The backlog has the priority attribute but the order of tasks shows [#lr-actor-10] then [#lr-wire-9] then [#lr-head-8]. Is this in priority order? If not, fix the backlog priority attribute.
 
 
@@ -198,6 +190,8 @@ Reading it line by line:
 
 So "something weird going on with lazily-rs.md" = its owner pane was stuck in the stash window and the router rescued it on focus but couldn't dispatch because it wasn't ready. You killing the pane is consistent with that — a half-booted codex pane that never reached a ready prompt.
 
+❯ The previous tmux pane that claimed lazily-rs.md was running agent-doc tasks. It seemed to be running this file. Please look in the codex + agent-doc logs to confirm or deny.
+
 This is the existing `#stash-pane-promote-on-focus` backlog item (stash-window pane reparenting on focus), and the uncommitted `route.rs` change above is exactly the dispatch-ready hardening for this class. No new bug to file — the fail-closed behavior is correct; the open work is the reparent + dispatch-ready detection already tracked.
 
 **Preset `#spec-test-build-install-commit-push`:** N/A this cycle — I made no code changes of my own (rebase already resolved, concurrent route work left untouched, lazily-rs is a diagnostic with no code edit). Nothing of mine to test/build/install/commit/push.
@@ -216,8 +210,8 @@ The log is correct fail-closed behavior, not lazily-rs running against agent-doc
 I'm **not** killing it unilaterally — it's a different document's live session and a raw `kill` from this pane would leave registry drift (lazily-rs → dead %73) that then needs `agent-doc gc`/`resync --fix`. **Say "kill it" and I'll stop PID 2341978 now**; otherwise run `session clear` from a toolchain pane for the clean reap.
 Confirmed the mechanism with fresh evidence. The state is now clear and stable:
 
-> **Queue prompt:**
->
+❯ > **Queue prompt:**
+❯ >
 > preset #spec-test-build-install-commit-push
 > - ~The backlog has the priority attribute but the order of tasks shows [#lr-actor-10] then [#lr-wire-9] then [#lr-head-8]. Is this in priority order? If not, fix the backlog priority attribute.~
 > - ~do [#owned-pane-prompt-recur]~
@@ -237,7 +231,33 @@ Confirmed the mechanism with fresh evidence. The state is now clear and stable:
 
 The route log is benign and was **not** touching this file. Here's the tight read:
 **Closeout:** uncommitted (`finalize` gated here). No code change — this was a live-process diagnostic; the fix is one stop-command, gated on your go or a toolchain pane.
-<!-- agent:boundary:082e5a58 -->
+
+### Re: do #manual-queue-head-loss — audited; overlaps concurrent in-flight queue-preservation work — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#manual-queue-head-loss]
+
+
+Audited the plan against current `HEAD`. Most of its surface is **already implemented**, and the rest is being actively worked by the concurrent actor this minute — so I did not implement (would collide + can't verify here).
+
+**Already covered:**
+- Plan step 2/4 "removed `do [#id]` head while backlog item open" → `check_queue_head_removal_guard` (`#queue-clear-unrun-items`) already compares committed queue vs `active_queue_heads` vs `open_backlog` vs resolved ids and fails closed, suppressible only by explicit `<!-- no-queue-removal-guard -->`.
+- Plan step 1/3 "user-authored queue edit dropped in convergence" → `check_dropped_queue_prompt_guard` (`#queue-user-edit-overwrite`) already restores/fails-closed on IPC content_ours drops.
+
+**The genuine remaining gap** (which the plan's own "Distinction" section names): the **stall-specific** case — a *newly inserted* `do [#id]` lost *before the adding cycle recorded it* as an active head. `check_queue_head_removal_guard` returns early when `state.active_queue_heads`/`recorded_ids` is empty (session_check.rs:2450/2459), so a head that never reached `cycle_state` slips past it. Closing that needs preflight-side queue-line provenance (plan step 1) + the cross-state `queue_head_removed_without_execution_proof` diagnostic (step 4) + recovery-that-restores (step 5).
+
+**Why I'm not landing it now:** the concurrent actor just committed `1573d970`/`8a0addb2` (session-check queue preservation) and is mid-edit on `route.rs` — the exact files plan steps 2–5 touch. Two actors editing `session_check.rs` + `route.rs` queue-preservation simultaneously guarantees a conflict, and I can't `make check` from this pane to prove correctness either way. The right sequence is: let their queue-preservation work land, then re-audit `#manual-queue-head-loss` against it — the stall-gap may already be closed by `1573d970` ("catch no-response active queue heads"), which sounds adjacent.
+
+**Handoff:** when a toolchain pane is free, the focused change is preflight queue-line provenance + the empty-`active_queue_heads` stall path in `check_queue_head_removal_guard`, plus the plan's fixture #1 (head survives a stalled/busy dispatch) and #3 (HEAD removes head while backlog open → fail closed). Item stays open.
+The plan is explicit and substantial — it touches `preflight.rs`, `session_check.rs`, **`route.rs`**, and `repair.rs` plus 5 fixtures. Two hard facts make implementing it from this pane the wrong move:
+
+1. **The concurrent actor is actively working this exact surface right now.** The two newest commits are `1573d970 fix(session-check): catch no-response active queue heads` and `8a0addb2 fix(session-check): skip no-op queue preservation` — queue-preservation session-check work — and `route.rs` is uncommitted/dirty with a live test binary running. Step 3 of this plan hardens `route.rs`'s owner-pane/busy-pane paths; I'd collide head-on.
+2. **I can't verify** (`cargo`/`make`/`.bin/agent-doc` still declined here).
+
+So this is an audit + handoff, not an implementation:
+**Closeout:** uncommitted (`finalize` gated here; item left open). This was an audit — no code change, by design, to avoid racing the concurrent actor's live `session_check.rs`/`route.rs` queue-preservation work.
+<!-- agent:boundary:3d358e08 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
@@ -262,7 +282,7 @@ Error: dispatch-only codex reopen refused to inject into pane %73 for tasks/soft
 ```
 ~~~
 preset #spec-test-build-install-commit-push
-- do [#manual-queue-head-loss]
+- ~do [#manual-queue-head-loss]~
 - do [#subagent-blocks-session]
 - do [#lr-queue-plan-deferral]
 - do [#lr-queue-repair-adopt]

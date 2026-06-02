@@ -90,6 +90,7 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Backlog
 
 <!-- agent:backlog priority queue=append -->
+- [ ] [#write-closeout-response-shape] #agent-doc-bug 2026-06-02: `agent-doc write --commit` recovery for `src/boost-client/tasks/monsterrodholders.md` accepted stdin but committed the closeout without a `### Re:` heading, leaving `session-check` to report the original `do [#stevepackets]` prompt as unresolved; adding the heading manually then made `write --commit` dedupe and refuse the visible response as direct patchback. Plan: tasks/agent-doc/plan-write-closeout-response-shape.md. DO NOT IMPLEMENT in this planning item.
 - [ ] [#lr-cycle-7] Phase 7: Add CycleStateSlot + SnapshotContentSlot; consolidate snapshot path lookups. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-head-8] Phase 8: Add HeadContentSlot + SnapshotCommitStatusSlot for git show HEAD dedup. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-wire-9] Phase 9: Wire RunContext into ops_log, template_io, patch, harness detection. Plan: tasks/agent-doc/plans/lazily-rs-integration.md

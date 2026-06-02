@@ -87,7 +87,53 @@ Install note: `cargo metadata --no-deps --format-version 1` shows this crate has
 CI note: `gh workflow list`, `gh run list --workflow CI --limit 1`, and `gh run list --limit 5` found no workflows or runs for this repo, so there was no GitHub/tmux CI result to inspect.
 
 Changed paths: `README.md`, `SPEC.md`, `src/instrumentation.rs`, `src/thread_safe.rs`, `tests/spec_compliance.rs`, `tests/thread_safe_loom.rs`, and the parent `src/lazily-rs` submodule pointer. Confidence: high. Escalation: none.
-<!-- agent:boundary:d3322569 -->
+
+### Re: #lazyperf2 — gpt-5
+
+> **Queue prompt:**
+>
+> [#lazyperf2]
+
+
+Implemented and pushed the `#lazyperf2` prototype for sharded thread-safe dependency and invalidation state.
+
+What changed:
+- Added per-cell and per-slot dependent sidecars keyed by `SlotId`, with dependent kind metadata so independent slot-only `set_cell` invalidations can avoid the graph mutex.
+- Moved thread-safe cell value storage into a per-cell sidecar mutex, while preserving the graph state as the authoritative fallback path.
+- Added fast invalidation fallback guards for active compute/effect callbacks, active batches, missing sidecars, and effect-frontier discovery.
+- Updated reads and `is_set` to honor sidecar dirtiness.
+- Updated the instrumentation profile so slot-only set-cell invalidation profiles may legitimately report zero `SetCellInvalidation` graph-lock acquisitions.
+- Refreshed README benchmark tables and updated the spec to document the sidecar strategy, fallback envelope, benchmark gate, and Loom coverage.
+- Added regression coverage in `tests/spec_compliance.rs` plus a Loom model for callback-discovery fallback.
+
+Benchmark comparison from the refreshed README:
+- `thread_safe_set_cell_invalidation_independent_slot_contention_8`: 72 total graph-lock acquisitions, 2.160 us total graph-lock wait, with zero `set_cell_invalidation` attribution rows.
+- `thread_safe_set_cell_invalidation_independent_slot_contention_16`: 144 total graph-lock acquisitions, 4.320 us total graph-lock wait, with zero `set_cell_invalidation` attribution rows.
+- `thread_safe_contention_independent_slots_8`: `set_cell_invalidation` attribution remains 4 locks, 420 ns wait, 11.691 us hold.
+- `thread_safe_contention_independent_slots_16`: `set_cell_invalidation` attribution remains 5 locks, 76.491 us wait, 13.370 us hold.
+
+Verification passed:
+- `cargo fmt`
+- `cargo check --features instrumentation`
+- `cargo test`
+- `cargo test --features tokio`
+- `cargo test --features instrumentation`
+- `cargo test --features loom --test thread_safe_loom`
+- targeted instrumentation regression test for independent sidecar invalidation
+- targeted Loom fallback test
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo build`
+- `cargo bench --features instrumentation --no-run`
+- `python3 scripts/update-benchmark-results.py --check`
+
+Cargo still emits the pre-existing workspace patch warnings for `agent-kit`, `tagpath`, and `tmux-router` during some builds. GitHub Actions evidence is unchanged: `gh workflow list` returned no workflows, `gh run list --workflow CI --limit 1` reported no `CI` workflow, and `gh run list --limit 5` returned no runs. `cargo metadata` shows no installable package binary target, only the library, examples, tests, and benches.
+
+Commits:
+- `btakita/lazily-rs@96f73b5` `perf: shard thread-safe invalidation frontiers` pushed to `origin/main`.
+- parent repo `97ec7361a` `chore: update lazily-rs pointer` created locally; I will push the parent after `agent-doc session-check` passes.
+
+Note: this cycle's preflight also committed an existing `tasks/software/tsift.md` pending sweep as `1d9c5b4e0 agent-doc(tsift): 2026-06-02 10:59:08`.
+<!-- agent:boundary:e9119f50 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -97,7 +143,7 @@ Changed paths: `README.md`, `SPEC.md`, `src/instrumentation.rs`, `src/thread_saf
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- [#lazyperf2]
+- ~[#lazyperf2]~
 - [#lazyperf3]
 - [#lazyperf4]
 <!-- /agent:queue -->
@@ -105,7 +151,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#lazyperf2] Prototype sharded dependency/invalidation state keyed by SlotId; compare against independent_slots and set_cell_invalidation independent_slot_contention at 8/16 workers.
 - [ ] [#lazyperf3] Optimize batched write bursts by coalescing dirty marking/publish work per batch; target set_cell_invalidation and thread_safe_contention batched_write_bursts / 16.
 - [ ] [#lazyperf4] Add perf regression budgets for the slowest contention profiles and lock-site totals so future benchmark runs flag global-lock regressions before release.
 <!-- /agent:backlog -->

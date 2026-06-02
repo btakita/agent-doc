@@ -38,8 +38,24 @@ queue_active: false
 Compacted content:
 - Archived 7 response topic(s): next steps; tsc16-attrib; tsc16-coalesce-locks; 4 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:758fff69 -->
-<!-- /agent:exchange -->7
+❯ What are #next-steps to optimize thread_safe_contention_16?
+
+### Re: next steps — gpt-5
+
+Top backlog item: #tsc16-matrix.
+
+I would not start with another synchronization rewrite yet. The current source already has the first-order fixes that were queued earlier: lock attribution, dependency edge diffing, a Condvar-backed in-flight wait path, and Loom coverage. The current README attribution still shows `thread_safe_contention_16` dominated by cumulative `in_flight_wait` time, but that bucket now represents parked waiting as well as useful evidence that the single hot computed slot is serializing the benchmark.
+
+I added these next items in priority order:
+
+1. #tsc16-matrix: split the benchmark into same-slot contention, independent per-worker slots, read-mostly waiters, and batched write bursts before changing more internals.
+2. #tsc16-wake-scope: prototype narrower waiter wakeups only after the matrix shows the global Condvar/notify-all path is still hurting realistic cases.
+3. #tsc16-refresh-fastpath: trim remaining `get_refresh`/`publish` lock volume with cached-path coalescing and locked helper variants where callbacks stay outside the graph lock.
+4. #tsc16-optimistic-read: consider a versioned optimistic read path only if the matrix proves non-hot-slot workloads are still mutex-bound, because this may affect visibility semantics.
+
+Commands run: `tsift status`, `tsift status --fix`, `tsift index --workspace .`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, targeted `tsift` searches, and focused source/README inspections. Verification: no source changes or tests this cycle; this is backlog/analysis only. Confidence: medium-high. Escalation: none.
+<!-- agent:boundary:603ebca1 -->
+<!-- /agent:exchange -->
 
 ## Queue
 
@@ -49,6 +65,10 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#tsc16-matrix] #performance #thread-safe Add a thread_safe_contention benchmark matrix that separates same-root/same-slot write+read contention from independent per-worker roots/slots, read-mostly waiters, and batched write bursts; record wall time plus per-site lock wait/hold at 1/2/4/8/16 workers before more synchronization changes
+- [ ] [#tsc16-wake-scope] #performance #thread-safe Prototype narrower recompute wakeups, such as per-slot waiter state or targeted notify_one, and compare with the current global Condvar notify_all under stale-completion, multi-slot, and 16-worker contention cases; keep Loom coverage
+- [ ] [#tsc16-refresh-fastpath] #performance #thread-safe Reduce remaining get_refresh/publish lock volume by merging cached freshness checks with value clone and using locked helper variants only where user callbacks still run outside the graph lock
+- [ ] [#tsc16-optimistic-read] #performance #thread-safe Explore a versioned optimistic read path only if the benchmark matrix shows read-mostly or independent-slot contention is still dominated by the global mutex; document visibility semantics before changing guarantees
 <!-- /agent:backlog -->
 
 ## Review

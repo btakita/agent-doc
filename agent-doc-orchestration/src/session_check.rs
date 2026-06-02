@@ -820,6 +820,15 @@ fn check_no_response_active_queue_head(
     if state.capture_id.is_some() || state.response_sha256.is_some() {
         return Ok(GuardResult::None);
     }
+    let bookkeeping_evidence = state.had_pending_mutations
+        || !state.pending_done_ids.is_empty()
+        || !state.pending_kept_open_ids.is_empty()
+        || !state.reaped_pending_ids.is_empty()
+        || !state.pending_gated_ids.is_empty()
+        || state.pending_added_this_cycle;
+    if !bookkeeping_evidence {
+        return Ok(GuardResult::None);
+    }
     let recorded_ids = do_directive_target_ids(&state.active_queue_heads);
     if recorded_ids.is_empty() {
         return Ok(GuardResult::None);
@@ -4968,6 +4977,35 @@ Body\n\
             }
             other => panic!("expected no-response active-head interruption, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn no_response_active_queue_head_passes_for_noop_queue_preservation() {
+        // A pure no-op closeout can record active queue heads simply because they
+        // were visible at preflight. If it did not run pending/backlog
+        // bookkeeping, preserving the queue head is healthy: the next actor
+        // should run it, not get interrupted by a repair/reap classifier.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: prior — gpt-5\n\nAnswered.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#livehead] Complete the live queue head\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#livehead]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let doc = init_committed_doc_for_queue_guard(tmp.path(), committed);
+
+        assert!(
+            matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
+            "preserved live queue heads without bookkeeping proof are ordinary queued work"
+        );
     }
 
     #[test]

@@ -114,7 +114,7 @@ Implemented and shipped the part that fixes the **reported symptom**.
 - **step 5** — queue-preset coverage.
 
 If you want these tracked as a fresh backlog item, say so and I'll add `#lr-queue-response-miss-guard`; otherwise re-queue `do [#lr-queue-response-miss]` (re-add the item) and I'll continue from step 3.
-<!-- agent:boundary:72626a90 -->
+<!-- agent:boundary:cfa45693 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -122,6 +122,8 @@ If you want these tracked as a fresh backlog item, say so and I'll add `#lr-queu
 - ~Gated items in review are not easily runnable. Please enable the user to run gated items by `do [item-id]` or plating the item in the queue. Please focus the runs to complete the gated item. If the gated item can only be partially completed, extract a new task to complete which contains the conditions to complete the item. If no work was done due to preconditions not being met, add a timestamp of the attempts to the item. Ensure the preconditions are present in the gated item description.~
 - ~do [#nochange-after-stall]~
 - ~do [#lr-queue-response-miss]~
+- `do ...` should finish gated items. Do not stall on gated items.
+- go on #lr-queue-response-miss
 - do [#nochange-after-stall-breadth]
 - do [#lr-queue-plan-deferral]
 - do [#lr-queue-repair-adopt]

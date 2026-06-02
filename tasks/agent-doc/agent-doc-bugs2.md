@@ -122,8 +122,6 @@ If you want these tracked as a fresh backlog item, say so and I'll add `#lr-queu
 - ~Gated items in review are not easily runnable. Please enable the user to run gated items by `do [item-id]` or plating the item in the queue. Please focus the runs to complete the gated item. If the gated item can only be partially completed, extract a new task to complete which contains the conditions to complete the item. If no work was done due to preconditions not being met, add a timestamp of the attempts to the item. Ensure the preconditions are present in the gated item description.~
 - ~do [#nochange-after-stall]~
 - ~do [#lr-queue-response-miss]~
-- `do ...` should finish gated items. Do not stall on gated items.
-- go on #lr-queue-response-miss
 - do [#nochange-after-stall-breadth]
 - do [#lr-queue-plan-deferral]
 - do [#lr-queue-repair-adopt]

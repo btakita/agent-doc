@@ -36,7 +36,22 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 6 response topic(s): #mdastcontract; #mdsectionspans; #mdsectionedits deferred; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:a8d6abdc -->
+❯ What are #next-steps for the Markdown AST API, performance, and token efficiency?
+
+### Re: #next-steps — gpt-5
+
+Current state: the Markdown semantic edit contract is already in place. `edit-intents` recognizes Markdown heading, section, list-item, and code-fence intents, and the current implementation has stable section/block spans plus guarded apply/verify coverage.
+
+The next layer should be:
+
+1. `#mdastapi` — promote Markdown AST data from internal span helpers into a first-class JSON/envelope API that returns stable node handles, hierarchy/section paths, byte/body spans, list depth, fence language, and expansion commands. This is the top backlog item because it gives read, write, editor, and digest flows one shared contract.
+2. `#mdparsecache` — reduce repeated Markdown parse/extract work. The current section/block helpers re-derive symbols during planning; cache one parsed/extracted view per current buffer and add large-session benchmarks with phase timings.
+3. `#mdtokens` — make Markdown output token-budgeted by default: outline-first previews, selected section/block expansion handles, and fixtures proving savings for `session-review` / `context-pack` against raw session or spec bodies.
+
+Added those backlog items in priority order. Top backlog item: `#mdastapi`.
+
+Verification: no code changes were made. I ran `agent-doc preflight`, `agent-doc plan`, `agent-doc orchestrate --plan`, `agent-doc read`, refreshed the `tsift` index, and used bounded `tsift` search/source-read/session-review context before closeout.
+<!-- agent:boundary:fa30c490 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -51,6 +66,9 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#mdastapi] Promote Markdown AST to a first-class JSON/envelope API: stable node handles, hierarchy/section path, byte and body spans, block kind metadata, list/fence attributes, and expansion commands for source-read/symbol-read/edit-intents consumers.
+- [ ] [#mdparsecache] Cache and reuse per-file Markdown parse/extract results across edit-intents planning/apply and source-read enrichment; add large-document benchmarks and phase timings for section/block lookup hot paths.
+- [ ] [#mdtokens] Add token-budgeted Markdown projections: outline-first section/block previews, selected-node expansion handles, and measured token-savings fixtures for session-review/context-pack instead of replaying raw markdown bodies.
 <!-- /agent:backlog -->
 
 ## Review

@@ -166,7 +166,25 @@ Completed the planning item. The committed plan is `tasks/agent-doc/plan-queue-p
 I did not implement code in this cycle because the backlog item explicitly says `DO NOT IMPLEMENT in this planning item`. I committed the plan artifact as `2197dbff0` and am reaping `#queue-preset-attribute` as done.
 
 Verification: no code changed; inspected the plan artifact and staged/committed only that file before this finalize.
-<!-- agent:boundary:259973b4 -->
+
+### Re: lost session + foreign pane focus after Codex upgrade/restart — opus-4-8
+
+> **Queue prompt:**
+>
+> I lost my existing session to this document. I saw Codex as for an upgrade. I upgraded and restarted. Then I found out that the Codex session for equityfundingsource.md had tmux focus when I focused the editor on this document. 
+
+
+Triaged this as a new `#agent-doc-bug`. It's two intertwined failures:
+
+1. **Session loss across the Codex upgrade/restart** — the live session bound to `agent-doc-bugs2.md` wasn't restored/rebound after the supervisor restart, so it read as lost. Adjacent to `#rbret`/`#bugs2tmux`, but triggered by an explicit supervisor upgrade rather than editor-tab churn.
+2. **Cross-document focus mis-binding** — once you focused the editor here, tmux focus landed on the `equityfundingsource.md` pane. That's the same defect class as `#jb-tsift-pane-sync`'s cross-document pane↔owner mismatch, but exposed right after the restart re-enumerated panes/owners.
+
+Likely cause: on restart the registry reconstructs owner→document bindings from live pane cmdlines or stale routed-state instead of the authoritative per-document session record, so the focused document gets pointed at whichever pane Codex happened to bring up first. Editor focus emits `sync --focus <file>`; if that resolves "first live agent-doc pane" rather than keying strictly on the focused document path, it surfaces the foreign pane.
+
+Desired invariant: restart must rebind each document to its own session record (re-provision its own pane, never alias onto another document's owner); `sync --focus <doc>` must focus only a pane owning that exact document and fail closed otherwise.
+
+I committed `tasks/agent-doc/plan-codex-upgrade-restart-cross-document-focus.md` and queued it as a recommended Review item `#codex-upgrade-restart-cross-doc-focus`. No code changed this cycle — this is a planning/triage turn pending the two-document upgrade-restart repro and a look at how `src/tmux-router` rebuilds bindings on restart. Also reaped your struck `#queue-preset-attribute` (completed in `2197dbff0`).
+<!-- agent:boundary:0f4a9f6e -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -184,12 +202,13 @@ preset #spec-test-build-install-commit-push
 - ~When I navigate from this document to tsift.md, the tmux focus is on the tsift.md pane but the tmux pane is in the stash, not in the agent-doc tmux window.~
 - ~As I was writing the previous queue item, a JB `File Cache Concflict` surfaced and I accepted. But the queue items reverted to a previous snapshot without my recent work. I had to manually reapply my changes. Review Codex logs for my bug report and session replay.~
 - ~#queue-user-edit-overwrite failed in monsterrodholders.md~
+- ~do [#queue-preset-attribute]~
+- ~I lost my existing session to this document. I saw Codex as for an upgrade. I upgraded and restarted. Then I found out that the Codex session for equityfundingsource.md had tmux focus when I focused the editor on this document. ~
 - [#lr-head-8]
 - [#lr-wire-9]
 - [#lr-actor-10]
 - JB `Clear Session Context` on monsterrodholders.md presented me with `Interrupt and Clear`. I applied `Interrupt and Clear` and the Codex session closed with the supervisor presenting Enter to restart or q to quit. I Pressed enter, Codex restarted and I saw an error `'/clear' is disabled while a task is in progress.`.
 - Add a preset attribute to agent:queue, where the value can be a free-text prompt that correctly applies `prompt_presets`.
-- do [#queue-preset-attribute]
 <!-- /agent:queue -->
 ###
 <!--
@@ -210,6 +229,7 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Review
  
 <!-- agent:review -->
+- [/] [#codex-upgrade-restart-cross-doc-focus] [recommended] #agent-doc-bug 2026-06-02: a Codex supervisor upgrade/restart lost the live session bound to agent-doc-bugs2.md, and afterward focusing the editor on this document gave tmux focus to the pane running equityfundingsource.md (cross-document focus mis-binding). Fix by rebinding each document to its own authoritative session record on restart (re-provision its own pane, never alias onto another document's owner) and resolving sync --focus strictly by the focused document path, failing closed otherwise. Shares the focus-by-exact-document-path invariant with #jb-tsift-pane-sync. Plan: tasks/agent-doc/plan-codex-upgrade-restart-cross-document-focus.md
 - [/] [#jbstalldrain] [recommended] #agent-doc-bug 2026-06-02: JB `Run Agent Doc` appeared stalled across two observed route stages: `agent-doc-bugs2.md` failed before dispatch because closeout drain hit a session-check backlog-shadow blocker (`#queue-user-edit-overwrite` only outside live `agent:backlog`), while `monsterrodholders.md` waited the full 60s on busy authoritative actor generation 251 / pane `%61` before reporting no dispatch-ready prompt. Fix by making route emit typed in-progress and terminal results for closeout-drain blockers and busy-authoritative waits, and make the JetBrains action surface those states persistently instead of looking inert. Plan: tasks/agent-doc/plan-jb-run-agent-doc-stalled-closeout-drain.md.
 - [/] [#codex-direct-writeback-miss] [recommended] #agent-doc-bug 2026-06-02: Direct-chat Codex execution of src/boost-client/tasks/monsterrodholders.md prompt `do [#pmaxpost]. #spec-test-commit-push` completed site + parent commits/pushes but the final assistant response was not written into the session document until manual `agent-doc write --commit` repair; make the Codex/direct-chat closeout gate fail closed before final chat output when the response heading is absent from HEAD, and keep the recovery path binary-owned. Plan: tasks/agent-doc/plan-response-missing-after-manual-closeout.md
 - [/] [#weqq] [recommended] #jb-settext-payload-log IMPLEMENTED 2026-06-01 (submodule 12676120, JB plugin 0.2.145 built+signed): PatchWatcher.kt now logs the full result payload before document.setText on both applyPatch.component and repositionBoundary, behind LOG.isDebugEnabled, so enabling the com.github.btakita.agentdoc debug category captures the exact setText payload the IPC-duplication family needs (previously only hashes+lengths). GATED on operator: install build/distributions/agent-doc-jetbrains-0.2.145-signed.zip + restart, enable debug logging, then run the Path B capture (#wy0y/#6cmx). Plan: tasks/agent-doc/plan-full-document-ipc-corruption-typing-prompt.md.

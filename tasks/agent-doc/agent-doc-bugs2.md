@@ -16,7 +16,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -103,13 +103,39 @@ Verified, and the answer is **detection was correct, not spurious** — so the c
 Evidence (`/tmp/agent-doc-sync.log`, the tsift navigation): the editor-side projection recorded `columns=[tsift.md, monsterrodholders.md]` — two distinct files in two columns. The JB plugin only emits a ≥2-column `EditorLayout` when `FileEditorManagerEx.windows.size >= 2`, so two columns ⇒ IntelliJ genuinely had two editor split windows. This is a real 2-split editor (tsift left, monsterrodholders right), not a phantom/zero-width/preview split.
 
 Conclusion: `detectEditorLayout` needs no collapse heuristic. The surplus pane is purely a tmux-side reconcile/focus race (`promote_on_focus` join-pane not stashing the displaced pane), which is tracked as `#jb-nav-3pane-promote-swap` — that's where the fix belongs. No code change for `#ht5v`, so the preset's build/install/commit steps are N/A here; the next queue item carries the actual implementation.
-<!-- agent:boundary:32e3b949 -->
+
+### Re: do #jb-nav-3pane-promote-swap — fix the 3-pane navigation race — opus-4-8
+
+> **Queue prompt:**
+>
+> do #jb-nav-3pane-promote-swap
+
+
+Implemented and verified (spec + tests + build + install + commit + push). The fix is two coordinated, low-blast-radius changes so exactly one path owns the 1-in/1-out transition and the window never grows to a phantom pane.
+
+#### Root cause (recap from the logs)
+
+A 1-in/1-out tab switch had two failure surfaces that compounded: (1) the focus-path `promote_pane_to_agent_doc_window` additively `join-pane`s the incoming pane, racing the debounced reconcile; (2) the reconcile's SWAP fast path, when the outgoing pane is **busy/protected**, skipped the swap and fell through to ATTACH-incoming + DETACH-skips-busy-outgoing → 3 panes.
+
+#### Changes
+
+- **tmux-router `reconcile` (`src/sync.rs`):** on a 1-in/1-out where the outgoing pane is protected, **preserve the current layout** instead of falling through to ATTACH — leave the incoming pane stashed and defer; the caller's retry resurfaces it once the busy pane frees. Logs `SWAP preserved layout … outgoing … protected`.
+- **`agent-doc focus --no-stash-promote` (`focus.rs` + `main.rs`):** new flag selects the resolved pane but skips the additive promote, deferring stash reparenting to the follow-up `sync` reconcile. The JB `buildFocusCommand` emits it for tab-to-pane navigation; standalone `agent-doc focus` keeps promotion (unchanged).
+
+#### Verification
+
+- New `IsolatedTmux` regression `test_reconcile_1in1out_protected_outgoing_preserves_layout`: protected 1-in/1-out stays at 2 panes, incoming left in stash. Passing.
+- Full Rust suite: **3539 passed, 0 failed** (230 live-tmux ignored); clippy clean. Live-tmux legs green locally: reconcile (17), focus (11), autoclaim (2).
+- JB plugin builds + tests green; bumped to **0.2.147**.
+- Committed + pushed: `tmux-router@ae2817a` (main), `agent-doc@dbcd68f3` (branch `20260422/codex-agent-backend`), superproject pointer on `main`. Specs updated (`specs/07-session-tmux-commands.md`, tmux-router VERSIONS).
+
+#### Manual-testing gate
+
+Reinstall JB plugin **0.2.147** from `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.147-signed.zip` and reproduce the bugs2 → tsift navigation: the window should stay at 2 panes (or defer surfacing the incoming pane while the other is mid-turn), never 3. `idea.log` `[layout-sync] exec:` will now show `focus … --no-stash-promote`, and `/tmp/agent-doc-sync.log` will log `SWAP preserved layout` when the outgoing pane is busy.
+<!-- agent:boundary:4d35a4da -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~do [#ht5v]~
-- do #jb-nav-3pane-promote-swap
+<!-- agent:queue -->
 <!-- /agent:queue -->
 ###
 <!--
@@ -122,7 +148,6 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Backlog
 
 <!-- agent:backlog priority queue=prepend -->
-- [ ] [#jb-nav-3pane-promote-swap] Fix 1-in/1-out navigation landing at 3 panes for a 2-column editor: the focus-path promote_on_focus join-pane (sync.rs promote_pane_to_agent_doc_window, called from focus.rs:147, #stash-pane-promote-on-focus) rescues the focused file's stashed pane WITHOUT stashing the displaced pane, racing the reconciler's atomic SWAP. Route the promote-on-focus rescue through the same atomic SWAP or defer pane reparenting to the reconciler so exactly one path owns the in/out transition and the displaced pane is always stashed in the same op; add deterministic SimWorld coverage for the 1-in/1-out tab switch. Plan: tasks/agent-doc/plan-jb-tsift-pane-sync-regression.md. Diagnosed 2026-06-01 from /tmp/agent-doc-sync.log.
 <!-- /agent:backlog -->
 
 ## Review

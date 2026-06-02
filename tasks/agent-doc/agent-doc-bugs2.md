@@ -366,7 +366,7 @@ Do your recommendation.
 > I'd recommend the toolchain actor fold that criterion into the plan before running `#spec-test-build-install-commit-push`, so `#jb-tsift-pane-sync` doesn't get marked done with the execution facet still live.
 
 Note that monsterrodholders.rs is also running this document. Is there an issue with the lazily-rs integration? Are we caching something that should not be cached or should it be invalidated?
-<!-- agent:boundary:4e6c31dc -->
+<!-- agent:boundary:78d00f64 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
@@ -412,7 +412,7 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 - [ ] [#lr-wire-9] Phase 9: Wire RunContext into ops_log, template_io, patch, harness detection. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-head-8] Phase 8: Add HeadContentSlot + SnapshotCommitStatusSlot for git show HEAD dedup. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-queue-patchback-miss] [recommended] #agent-doc-bug 2026-06-02: lazily-rs queued free-text prompt with preset was not visibly answered or patched back; mixed #agent-doc-bug capture made this cycle plan_backlog_only and deferred the actionable queue head. Add plan/session-check coverage so the head is either answered, consumed, or explicitly deferred through a committed response. Plan: tasks/agent-doc/plan-lazily-rs-queued-prompt-patchback-miss.md.
-- [ ] [#lr-queue-repair-adopt] [recommended] #agent-doc-bug 2026-06-02: if the lazily-rs queued prompt was already completed console-only, recovery must adopt a supplied response through agent-doc write --commit and consume or preserve the matching free-text queue head without rerunning repo work. Plan: tasks/agent-doc/plan-lazily-rs-queue-repair-adopt.md.
+- [x] [#lr-queue-repair-adopt] [recommended] #agent-doc-bug 2026-06-02: if the lazily-rs queued prompt was already completed console-only, recovery must adopt a supplied response through agent-doc write --commit and consume or preserve the matching free-text queue head without rerunning repo work. Plan: tasks/agent-doc/plan-lazily-rs-queue-repair-adopt.md.
 - [ ] [#run-gated-review-items] [recommended] #agent-doc-bug feature 2026-06-02: gated/review items are not easily runnable. Enable running a gated item directly via `do [#id]` or by placing it in agent:queue, and focus the run to complete that gated item. If it can only be partially completed, extract a new follow-up task containing the conditions to complete it. If no work was done because preconditions were unmet, append a timestamp of the attempt to the item and ensure the item's preconditions are present in its description.
 <!-- /agent:backlog -->
 

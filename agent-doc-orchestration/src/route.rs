@@ -3184,6 +3184,42 @@ fn promote_starting_authoritative_actor_if_dispatch_ready(
     }
 }
 
+/// Poll the live pane of a blocked-by-starting-timeout actor for a dispatch-ready
+/// prompt, up to the harness recovery budget.
+///
+/// A `starting_actor_timeout` is sticky: once recorded, `wait_for_authoritative_actor_ready`
+/// short-circuits and never re-waits, so the only recovery path is catching a
+/// dispatch-ready prompt here. A single capture dead-ends a healthy but slow-starting
+/// harness — e.g. a heavy Codex model with a large cached context that takes several
+/// seconds to present its idle composer after a supervisor restart. Polling lets that
+/// pane recover automatically. Busy panes never satisfy
+/// `current_generation_ready_prompt_proven` (the harness busy cue short-circuits it),
+/// so this preserves the "promote only proven idle panes" fail-closed invariant.
+fn poll_starting_timeout_blocked_actor_dispatch_ready(
+    tmux: &Tmux,
+    actor: &AuthoritativeActorDispatchTarget,
+    harness: &HarnessConfig,
+) -> bool {
+    if !actor_blocked_by_starting_timeout(actor) {
+        return false;
+    }
+    let budget = crate::flow::routed_reopen::authoritative_actor_ready_retry_budget(
+        Some(harness.binary.as_str()),
+        cfg!(test),
+    );
+    let deadline = Instant::now() + budget.timeout;
+    loop {
+        let prompt_ready = current_generation_ready_prompt_proven(tmux, actor, harness);
+        if starting_timeout_blocked_actor_can_recover(actor, prompt_ready) {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(budget.poll_interval);
+    }
+}
+
 fn recover_starting_timeout_blocked_actor_if_dispatch_ready(
     tmux: &Tmux,
     file: &Path,
@@ -3191,10 +3227,7 @@ fn recover_starting_timeout_blocked_actor_if_dispatch_ready(
     actor: &AuthoritativeActorDispatchTarget,
     harness: &HarnessConfig,
 ) -> Option<AuthoritativeActorDispatchTarget> {
-    if !starting_timeout_blocked_actor_can_recover(
-        actor,
-        current_generation_ready_prompt_proven(tmux, actor, harness),
-    ) {
+    if !poll_starting_timeout_blocked_actor_dispatch_ready(tmux, actor, harness) {
         return None;
     }
 

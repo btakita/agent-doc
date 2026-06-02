@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 
@@ -111,19 +111,23 @@ Verification:
 - GitHub Actions `Agent Doc` run `26790225428` for `0516f8c25` completed successfully: `tmux-ci` success and `check` success.
 
 Proof: changed source paths are limited to the `src/lazily-rs` submodule commits listed above and the root `src/lazily-rs` submodule pointer commits; the session document is being closed by this `agent-doc finalize` command. Escalation: none. Confidence: high.
-<!-- agent:boundary:74342bcc -->
+
+### Re: README benchmark results and update harness — gpt-5
+
+> **Queue prompt:**
+>
+> Add benchmark results to README.md. update-harness to ensure benchmark results in README.md are up to date with version info.
+
+
+Completed and pushed. The README now has generated benchmark results for `lazily` `0.4.0`, including Criterion timing rows and instrumentation counter rows. The update harness is `scripts/update-benchmark-results.py`; it runs/reads Criterion results, captures `examples/instrumentation_profile.rs` snapshots, rewrites the marked README section, and supports `--check --no-run` for freshness validation against the saved local benchmark artifacts.
+
+Proof: the source work landed in `lazily-rs` commits `92815a6` and `e6dd0ae`, and the root submodule pointer landed in `agent-loop` commits `6fa6ac59f` and `0516f8c25`. Verification already completed in the previous response: crate tests/build/clippy/bench compile/install smoke all passed; root `make check` passed; GitHub Actions `Agent Doc` run `26790225428` for `0516f8c25` passed both `tmux-ci` and `check`. No additional source edits were made for this queue-drain closeout. Escalation: none. Confidence: high.
+<!-- agent:boundary:a4542b04 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~[#perf-profile-baseline]~
-- ~[#perf-contention-wait]~
-- ~[#perf-edge-diff]~
-- ~[#perf-effect-queue]~
-- ~[#perf-bench-regression]~
-- Add benchmark results to README.md. update-harness to ensure benchmark results in README.md are up to date with version info.
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

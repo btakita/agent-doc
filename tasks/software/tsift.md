@@ -109,7 +109,39 @@ Verification:
 - Installed binary reports `tsift 0.1.62`.
 - GitHub CI for `src/tsift` run `26797215803` passed: `clippy + test` and `live Convex graph acceptance` green. Existing CI annotations are the Node 20 actions deprecation and the optional live Convex deployment configuration note.
 - No tmux CI workflow or `make tmux-ci` target exists in this repo; deterministic SimWorld tests ran through `make check` and passed.
-<!-- agent:boundary:837000dc -->
+
+### Re: #writecompound — gpt-5
+
+> **Queue prompt:**
+>
+> [#writecompound]
+
+
+Completed `#writecompound`.
+
+Implemented Rust structural edit support for `add_method` and `move_declaration` in `packages/tsift-cli/src/lib.rs`. `add_method` now targets indexed Rust structs/enums, validates the replacement as one method, inserts into an existing inherent `impl` when present, or creates a new inherent `impl` near the type. `move_declaration` now treats `file` as the destination, finds the indexed source declaration, supports same-directory Rust destination files, inserts after the destination prelude, normalizes the source module with `mod <destination>;` and `use <destination>::<symbol>;`, and flows through the atomic formatter-before-write rollback path.
+
+Added exit-code coverage for adding a method, moving a declaration between module files, and refusing an invalid move without mutating files. Updated `SPEC.md`, `AGENTS.md`, `CLAUDE.md`, and `VERSIONS.md` for the new structural intent contract.
+
+Commits:
+
+- `e9445fe` in `src/tsift`: `feat: add Rust structural edit intents`
+- `4cd531a0e` in the parent repo: `chore: update tsift submodule`
+
+Verification:
+
+- `cargo check -p tsift-cli`
+- `cargo test -p tsift-cli --test exit_code edit_intents_apply_`
+- `cargo clippy -p tsift-cli --all-targets -- -D warnings`
+- `make check`
+- `cargo build`
+- `cargo install --path . --force`
+- `tsift --version` -> `tsift 0.1.62`
+- `git diff --check`
+- GitHub Actions CI `26797936405` passed: `clippy + test` and `live Convex graph acceptance`
+
+CI only reported the existing Node 20 actions deprecation and optional Convex deployment annotation. I did not find a tmux CI target/workflow in this repo; SimWorld coverage ran as part of `make check`. An extra package-wide `cargo fmt --check --package tsift-cli` still reports existing formatter drift in unrelated command modules, so I left that churn out of this patch.
+<!-- agent:boundary:37f2a54d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -122,7 +154,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 preset #spec-test-build-install-commit-push
 - ~[#astspans]~
 - ~[#writerefs]~
-- [#writecompound]
+- ~[#writecompound]~
 - [#langexecutors]
 - [#astverify]
 - create contract to support additional programming languages
@@ -132,7 +164,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#writecompound] Add Rust structural edit support for add_method and move_declaration, including module-aware placement, import normalization, formatter-before-write, and rollback tests.
 - [ ] [#langexecutors] Add TypeScript, JavaScript, and Python semantic edit executors behind the same edit-intents contract, each with parser-backed spans, formatter integration, and fail-closed unsupported cases.
 - [ ] [#astverify] Add a semantic edit verification harness that can dry-run, apply in temp worktrees, reindex, run source-read or impact summaries, and optionally gate on a caller-provided test command before committing changes.
 <!-- /agent:backlog -->

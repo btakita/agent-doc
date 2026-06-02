@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -54,7 +54,45 @@ I added the backlog in this priority order:
 6. `#astnavfixtures` - add multilingual fixtures and perf gates so search recall, stable handles, and expand commands stay locked across all supported languages.
 
 Verification: ran `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `agent-doc orchestrate --from-exchange --plan`, refreshed `tsift` indexing, checked `src/tsift` status, and inspected the spec plus the relevant search/index/Markdown AST implementation paths. No code changes were made in this cycle.
-<!-- agent:boundary:4405ea00 -->
+
+### Re: #astspansearch — gpt-5
+
+> **Queue prompt:**
+>
+> [#astspansearch]
+
+
+Implemented `#astspansearch` and marked it done.
+
+Changed paths:
+- `src/tsift/SPEC.md`
+- `src/tsift/packages/tsift-cli/src/lib.rs`
+- `src/tsift` submodule pointer in the parent repo
+
+What changed:
+- Search preview symbol-family rows now include `language`, optional `end_line`, and a first-class `ast` artifact for the representative indexed symbol when the source file is readable and the index row has span columns.
+- The `ast` artifact carries `artifact_kind=ast_span`, the `span-*` handle, node kind, byte/body spans, line/body-line ranges, Markdown span metadata where available, and direct `source-read`, body-window, and `symbol-read` expansion commands.
+- Markdown representative spans additionally include `markdown-ast --node <span-*>` so a search result can jump directly to the selected Markdown projection node.
+- Human search-budget output now prints an `ast ...` navigation line when a preview symbol has span data.
+- Added focused unit coverage for generic Rust AST span artifacts and Markdown span-to-`markdown-ast` expansion.
+- Updated the spec search-preview contract to document the new artifact shape.
+
+Verification:
+- `cargo test -p tsift-cli search_budget_report_` passed.
+- `make check` passed: clippy, full workspace tests, doc tests, opencode plugin tests, and npm publish dry-run.
+- `cargo build --workspace` passed.
+- `cargo install --path . --force` passed and installed `tsift 0.1.62` to `~/.cargo/bin/tsift`.
+- `cargo check -p tsift-cli` passed after reverting unrelated `Cargo.lock` drift from cargo commands.
+- Live smoke check: `tsift --envelope search search_budget_report_promotes_ast_span_artifacts_for_symbols --path . --json --budget normal` emitted `report.symbols[].ast` with `span-*`, `source-read`, and `symbol-read` expansions.
+- GitHub Actions: latest `CI` run `26843503622` on `main` was successful; jobs `clippy + test` and `live Convex graph acceptance` were both green. This repo has no `tmux-test` workflow/job or `make tmux-ci` target; deterministic SimWorld coverage ran inside `make check` and passed.
+
+Commits:
+- tsift submodule: `d12bf3f` (`feat: promote ast spans in search preview`) pushed to `btakita/tsift main`.
+- parent repo: `64586add4` (`chore: update tsift submodule`) committed locally. Per the session-document closeout rule, I will push the parent branch after this `agent-doc finalize` commit lands.
+
+Escalation: none.
+Confidence: high.
+<!-- agent:boundary:6f3b43aa -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -65,7 +103,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- [#astspansearch]
+- ~[#astspansearch]~
 - [#astqueryfacets]
 - [#astnavgraph]
 - [#mdembeddedcode]
@@ -76,7 +114,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#astspansearch] Promote AST spans to first-class search artifacts across languages: index/query symbol spans, Markdown headings/list items/code blocks, node_kind, byte/body spans, and return source-read/symbol-read/markdown-ast expand commands from search hits.
 - [ ] [#astqueryfacets] Add cross-language AST query facets and filters: --lang, --kind, --node-kind, --section, --parent, --child, and Markdown-specific fence-language/list-depth/heading-level facets.
 - [ ] [#astnavgraph] Project AST navigation edges into graph-db: contains, parent/child, previous/next sibling, enclosing module/section, call/import/route, and Markdown section/block containment edges with stable handles.
 - [ ] [#mdembeddedcode] Treat Markdown fenced code blocks as embedded language islands: parse supported fence languages, link fence AST nodes to extracted symbols, and let search navigate from prose section to embedded code and back.

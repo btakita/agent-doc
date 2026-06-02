@@ -91,14 +91,16 @@ pub fn terminal_guard_outcome(state: CloseoutState) -> FlowOutcome {
 
 pub fn complete_required_closeout(file: &Path) -> Result<bool> {
     let mut timer = CloseoutTimer::start(file);
+    let rc = crate::graph::RunContext::new(file.to_path_buf());
 
     let mut did_commit = crate::git::commit(file)?;
+    rc.invalidate_head_content();
     timer.mark("git_commit");
     ensure_cycle_committed(file)?;
     timer.mark("cycle_state");
 
     if let crate::git::SnapshotCommitStatus::SnapshotDiffersFromHead { .. } =
-        crate::git::verify_snapshot_committed(file)?
+        rc.snapshot_commit_status()
     {
         eprintln!("[commit] snapshot differs from HEAD after commit - retrying");
         log_closeout_guard_event(
@@ -108,6 +110,7 @@ pub fn complete_required_closeout(file: &Path) -> Result<bool> {
             CloseoutGuardReason::SnapshotDiffersFromHead,
         );
         did_commit |= crate::git::commit(file)?;
+        rc.invalidate_head_content();
         timer.mark("git_commit_retry_snapshot");
         ensure_cycle_committed(file)?;
         timer.mark("cycle_state_retry_snapshot");
@@ -116,6 +119,7 @@ pub fn complete_required_closeout(file: &Path) -> Result<bool> {
     if crate::git::submodule_pointer_drift(file)?.is_some() {
         eprintln!("[commit] parent submodule pointer still stale after commit - retrying");
         did_commit |= crate::git::commit(file)?;
+        rc.invalidate_head_content();
         timer.mark("git_commit_retry_parent_pointer");
         ensure_cycle_committed(file)?;
         timer.mark("cycle_state_retry_parent_pointer");

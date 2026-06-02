@@ -690,7 +690,10 @@ pub fn detect_identity_collisions(content: &str) -> Vec<String> {
 /// leading `#` stripped). Used to reject a colliding `--pending-add id=<id>` /
 /// `[#id]` at mutation time before a new ambiguous identity is written.
 pub fn identity_collision_for_new_id(content: &str, candidate_id: &str) -> Option<Vec<String>> {
-    let norm = candidate_id.trim().trim_start_matches('#').to_ascii_lowercase();
+    let norm = candidate_id
+        .trim()
+        .trim_start_matches('#')
+        .to_ascii_lowercase();
     if norm.is_empty() {
         return None;
     }
@@ -1322,7 +1325,7 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
     Ok((recovered, committed))
 }
 
-fn enforce_no_uncommitted_closeout_drift(file: &Path) -> Result<()> {
+fn enforce_no_uncommitted_closeout_drift(file: &Path, rc: &crate::graph::RunContext) -> Result<()> {
     // Route can enqueue a dispatch behind a busy authoritative actor by writing
     // `agent:queue auto` plus the saved snapshot, then return before a normal
     // response closeout exists. If the user keeps editing that prompt before
@@ -1396,7 +1399,7 @@ fn enforce_no_uncommitted_closeout_drift(file: &Path) -> Result<()> {
     // `session_check::detect_uncommitted_closeout_drift` already returns
     // `Ok(None)` for the same pattern, but the drift will recur on the next
     // call until something actually commits — that "something" lives here.
-    if crate::session_check::detect_jb_cache_conflict_cancel_recoverable(file)? {
+    if crate::session_check::detect_jb_cache_conflict_cancel_recoverable_with_context(file, rc)? {
         crate::ops_log::log_op(
             file,
             &format!(
@@ -1438,7 +1441,9 @@ fn enforce_no_uncommitted_closeout_drift(file: &Path) -> Result<()> {
             }
         }
     }
-    if let Some(message) = crate::session_check::detect_uncommitted_closeout_drift(file)? {
+    if let Some(message) =
+        crate::session_check::detect_uncommitted_closeout_drift_with_context(file, rc)?
+    {
         crate::ops_log::log_op(
             file,
             &format!(
@@ -1796,7 +1801,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         .map(|state| state.is_open())
         .unwrap_or(false);
     if !open_cycle && crate::session_check::detect_unstarted_prompt_bearing_diff(file)?.is_none() {
-        enforce_no_uncommitted_closeout_drift(file)?;
+        enforce_no_uncommitted_closeout_drift(file, &rc)?;
     }
 
     // Step 1: Recover orphaned pending responses.
@@ -1868,7 +1873,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // mutates backlog state or runs the generic commit path. Otherwise a
     // snapshot/file pair that already contains a visible response could be
     // normalized into a misleading `no_changes` result.
-    enforce_no_uncommitted_closeout_drift(file)?;
+    enforce_no_uncommitted_closeout_drift(file, &rc)?;
 
     // Step 1c: Pending component maintenance — lazy backfill, reap, archive, and
     // reorder detection. MUST run BEFORE step 2 commit so the single step-2
@@ -3205,30 +3210,30 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
             }
         }
         if let Some(synced) = crate::queue::sync_backlog_into_queue(&entries, &backlog_ids, mode) {
-        let pre_sync_ids = entries
-            .iter()
-            .filter_map(queue_entry_do_id)
-            .collect::<std::collections::HashSet<String>>();
-        let mut seen_synced_ids = std::collections::HashSet::new();
-        synced_queue_ids = synced
-            .iter()
-            .filter_map(queue_entry_do_id)
-            .filter(|id| !pre_sync_ids.contains(id))
-            .filter(|id| seen_synced_ids.insert(id.clone()))
-            .collect();
-        let new_body = crate::queue::render(&synced);
-        current_content = {
-            let comps = crate::component::parse(&current_content)?;
-            let q = comps.iter().find(|c| c.name == "queue").unwrap();
-            q.replace_content(&current_content, &new_body)
-        };
-        eprintln!(
-            "[preflight] queue: synced backlog → queue ({:?}, {} active id(s))",
-            mode,
-            backlog_ids.len()
-        );
-        entries = synced;
-        mutated = true;
+            let pre_sync_ids = entries
+                .iter()
+                .filter_map(queue_entry_do_id)
+                .collect::<std::collections::HashSet<String>>();
+            let mut seen_synced_ids = std::collections::HashSet::new();
+            synced_queue_ids = synced
+                .iter()
+                .filter_map(queue_entry_do_id)
+                .filter(|id| !pre_sync_ids.contains(id))
+                .filter(|id| seen_synced_ids.insert(id.clone()))
+                .collect();
+            let new_body = crate::queue::render(&synced);
+            current_content = {
+                let comps = crate::component::parse(&current_content)?;
+                let q = comps.iter().find(|c| c.name == "queue").unwrap();
+                q.replace_content(&current_content, &new_body)
+            };
+            eprintln!(
+                "[preflight] queue: synced backlog → queue ({:?}, {} active id(s))",
+                mode,
+                backlog_ids.len()
+            );
+            entries = synced;
+            mutated = true;
         }
     }
 
@@ -6691,8 +6696,13 @@ mod tests {
             .output()
             .unwrap();
         crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(committed), Some(committed))
-            .unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
 
         // Surplus STALE replay of the same topic, body drifted, `(HEAD)` marked.
         let replayed = committed.replace(

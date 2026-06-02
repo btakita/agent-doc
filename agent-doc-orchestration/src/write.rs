@@ -1516,8 +1516,11 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         // cycle introduced a NEW `agent:exchange` prompt that the response
         // answered instead — that is foreign work, and striking the unrelated
         // free-text head would consume it without doing its work.
-        queue_consumption_allowed =
-            !cycle_answered_foreign_exchange_prompt(baseline.as_deref(), &current_content, &head_text);
+        queue_consumption_allowed = !cycle_answered_foreign_exchange_prompt(
+            baseline.as_deref(),
+            &current_content,
+            &head_text,
+        );
     }
 
     // Phase 3c: consume queue prompt after all other strict closeout gates
@@ -8384,7 +8387,8 @@ fn patch_response_headings_already_in_head(
     if headings.is_empty() {
         return true;
     }
-    let Ok(Some(head)) = crate::git::show_head(file) else {
+    let rc = crate::graph::RunContext::new(file.to_path_buf());
+    let Some(head) = rc.head_content() else {
         return false;
     };
     headings.iter().all(|h| head.contains(h.as_str()))
@@ -19277,8 +19281,7 @@ mod submodule_patch_routing_tests {
             "user-edit divergence is a prompt-drift case:\n{log}"
         );
         assert!(
-            log.contains("finalize_typing_during_write")
-                && log.contains("response_present=true"),
+            log.contains("finalize_typing_during_write") && log.contains("response_present=true"),
             "typing-during-finalize must log finalize_typing_during_write with response_present:\n{log}"
         );
     }

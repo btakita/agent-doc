@@ -183,7 +183,7 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
         // and ~10 parses per `inspect` call).
         let rc = crate::graph::RunContext::new(file.to_path_buf());
         rc.set_doc_content(std::fs::read_to_string(file)?);
-        match check_dropped_exchange_prompt_guard(file)? {
+        match check_dropped_exchange_prompt_guard(file, &rc)? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -235,7 +235,7 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
                 return Ok(report);
             }
         }
-        match check_snapshot_committed_guard(file)? {
+        match check_snapshot_committed_guard(file, &rc)? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -395,7 +395,11 @@ fn check_dropped_queue_prompt_guard(
     // document, so check the current file (and HEAD as a committed fallback).
     // Phase 6 (#lr-content-6): cached document content via `DocContentCell`.
     let visible = rc.doc_content();
-    let head = crate::git::show_head(file)?.unwrap_or_default();
+    let head_content = rc.head_content();
+    let head = head_content
+        .as_deref()
+        .map(String::as_str)
+        .unwrap_or_default();
     let resolved_ids = crate::cycle_state::resolved_pending_ids(file)?;
     let still_missing: Vec<String> = state
         .dropped_queue_prompts
@@ -404,9 +408,9 @@ fn check_dropped_queue_prompt_guard(
             // Preserved in the visible/HEAD queue, or answered in the
             // visible/HEAD exchange → kept, not lost.
             if queue_contains_prompt_line(&visible, prompt)
-                || queue_contains_prompt_line(&head, prompt)
+                || queue_contains_prompt_line(head, prompt)
                 || exchange_contains_prompt_line(&visible, prompt)
-                || exchange_contains_prompt_line(&head, prompt)
+                || exchange_contains_prompt_line(head, prompt)
             {
                 return false;
             }
@@ -549,18 +553,25 @@ fn check_queue_response_contamination_guard(
 /// persisted at adoption time, so this guard catches the silent-loss class even
 /// when the editor overwrote the disk prompt via IPC buffer convergence before
 /// the post-commit disk diff could observe it.
-fn check_dropped_exchange_prompt_guard(file: &Path) -> Result<GuardResult> {
+fn check_dropped_exchange_prompt_guard(
+    file: &Path,
+    rc: &crate::graph::RunContext,
+) -> Result<GuardResult> {
     let Some(state) = crate::cycle_state::load(file)? else {
         return Ok(GuardResult::None);
     };
     if state.dropped_exchange_prompts.is_empty() {
         return Ok(GuardResult::None);
     }
-    let head = crate::git::show_head(file)?.unwrap_or_default();
+    let head_content = rc.head_content();
+    let head = head_content
+        .as_deref()
+        .map(String::as_str)
+        .unwrap_or_default();
     let still_missing: Vec<String> = state
         .dropped_exchange_prompts
         .iter()
-        .filter(|prompt| !exchange_contains_prompt_line(&head, prompt))
+        .filter(|prompt| !exchange_contains_prompt_line(head, prompt))
         .cloned()
         .collect();
     if still_missing.is_empty() {
@@ -628,9 +639,12 @@ fn completed_pending_items(body: &str) -> Vec<crate::pending::PendingItem> {
         .collect()
 }
 
-fn check_snapshot_committed_guard(file: &Path) -> Result<GuardResult> {
+fn check_snapshot_committed_guard(
+    file: &Path,
+    rc: &crate::graph::RunContext,
+) -> Result<GuardResult> {
     use crate::git::SnapshotCommitStatus;
-    match crate::git::verify_snapshot_committed(file)? {
+    match rc.snapshot_commit_status() {
         SnapshotCommitStatus::Committed
         | SnapshotCommitStatus::NoSnapshot
         | SnapshotCommitStatus::NoHead
@@ -646,7 +660,7 @@ fn check_snapshot_committed_guard(file: &Path) -> Result<GuardResult> {
             // skip, the guard would still bail with the misleading "cycle
             // state is committed but the snapshot does not match HEAD"
             // message that masks the JB cache-conflict cancel root cause.
-            if detect_jb_cache_conflict_cancel_recoverable(file)? {
+            if detect_jb_cache_conflict_cancel_recoverable_with_context(file, rc)? {
                 return Ok(GuardResult::None);
             }
             let side_effects = tracked_side_effect_note(file)?;
@@ -970,6 +984,14 @@ fn tracked_side_effect_note(file: &Path) -> Result<String> {
 ///
 /// See `tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md` Phase 3.
 pub fn detect_jb_cache_conflict_cancel_recoverable(file: &Path) -> Result<bool> {
+    let rc = crate::graph::RunContext::new(file.to_path_buf());
+    detect_jb_cache_conflict_cancel_recoverable_with_context(file, &rc)
+}
+
+pub fn detect_jb_cache_conflict_cancel_recoverable_with_context(
+    file: &Path,
+    rc: &crate::graph::RunContext,
+) -> Result<bool> {
     let Some(state) = crate::cycle_state::load(file)? else {
         return Ok(false);
     };
@@ -980,14 +1002,14 @@ pub fn detect_jb_cache_conflict_cancel_recoverable(file: &Path) -> Result<bool> 
         return Ok(false);
     }
     if !matches!(
-        crate::git::verify_snapshot_committed(file)?,
+        rc.snapshot_commit_status(),
         crate::git::SnapshotCommitStatus::SnapshotDiffersFromHead { .. }
     ) {
         return Ok(false);
     }
     let doc = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
-    let Some(snapshot) = crate::snapshot::load(file)? else {
+    let Some(snapshot) = rc.snapshot_content() else {
         return Ok(false);
     };
     let normalized_doc = crate::git::normalize_transient_agent_doc_markers(&doc);
@@ -996,6 +1018,14 @@ pub fn detect_jb_cache_conflict_cancel_recoverable(file: &Path) -> Result<bool> 
 }
 
 pub fn detect_uncommitted_closeout_drift(file: &Path) -> Result<Option<String>> {
+    let rc = crate::graph::RunContext::new(file.to_path_buf());
+    detect_uncommitted_closeout_drift_with_context(file, &rc)
+}
+
+pub fn detect_uncommitted_closeout_drift_with_context(
+    file: &Path,
+    rc: &crate::graph::RunContext,
+) -> Result<Option<String>> {
     if crate::git::repair_committed_historical_snapshot_drift(file)?.is_some() {
         return Ok(None);
     }
@@ -1009,7 +1039,7 @@ pub fn detect_uncommitted_closeout_drift(file: &Path) -> Result<Option<String>> 
     // the binary-owned write path actually applied the response but the commit
     // boundary never landed. Preflight's `enforce_no_uncommitted_closeout_drift`
     // separately runs `git::commit` to close the cycle.
-    if detect_jb_cache_conflict_cancel_recoverable(file)? {
+    if detect_jb_cache_conflict_cancel_recoverable_with_context(file, rc)? {
         return Ok(None);
     }
     if let Some(marker) = detect_bypassed_response_write(file)? {
@@ -1031,7 +1061,7 @@ pub fn detect_uncommitted_closeout_drift(file: &Path) -> Result<Option<String>> 
             closeout_recovery_hint(file)
         )));
     }
-    match crate::git::verify_snapshot_committed(file)? {
+    match rc.snapshot_commit_status() {
         crate::git::SnapshotCommitStatus::SnapshotDiffersFromHead {
             snapshot_len,
             head_len,
@@ -1054,10 +1084,7 @@ pub fn detect_uncommitted_closeout_drift(file: &Path) -> Result<Option<String>> 
     }
 }
 
-fn check_shadow_backlog_guard(
-    _file: &Path,
-    rc: &crate::graph::RunContext,
-) -> Result<GuardResult> {
+fn check_shadow_backlog_guard(_file: &Path, rc: &crate::graph::RunContext) -> Result<GuardResult> {
     // Phase 6 (#lr-content-6): cached document content.
     let content = rc.doc_content();
     let report = crate::pending::detect_shadow_open_items(&content)?;
@@ -1148,10 +1175,7 @@ pub fn malformed_tracked_item_message(refs: &[String]) -> String {
     )
 }
 
-fn check_backlog_replay_guard(
-    file: &Path,
-    rc: &crate::graph::RunContext,
-) -> Result<GuardResult> {
+fn check_backlog_replay_guard(file: &Path, rc: &crate::graph::RunContext) -> Result<GuardResult> {
     // Phase 6 (#lr-content-6): cached document content.
     let current_content = rc.doc_content();
 
@@ -1548,10 +1572,7 @@ fn detect_duplicate_response_patchback(file: &Path) -> Result<Option<String>> {
     Ok(crate::dedupe::first_duplicate_response_heading(&content))
 }
 
-fn check_pending_capture_guard(
-    file: &Path,
-    rc: &crate::graph::RunContext,
-) -> Result<GuardResult> {
+fn check_pending_capture_guard(file: &Path, rc: &crate::graph::RunContext) -> Result<GuardResult> {
     // Phase 6 (#lr-content-6): resolve guard mode from the cached frontmatter slot.
     let mode = resolve_pending_capture_guard_mode_with_context(file, rc)?;
     if mode == crate::frontmatter::PendingCaptureGuardMode::Off {
@@ -1701,7 +1722,8 @@ pub fn resolve_pending_capture_guard_mode_with_context(
     if let Some(mode) = fm.pending_capture_guard {
         return Ok(mode);
     }
-    Ok(rc.project_config()
+    Ok(rc
+        .project_config()
         .guards
         .pending_capture
         .unwrap_or_default())
@@ -1798,10 +1820,7 @@ pub fn resolve_auto_done(file: &Path) -> Result<bool> {
         .unwrap_or(false))
 }
 
-pub fn resolve_auto_done_with_context(
-    _file: &Path,
-    rc: &crate::graph::RunContext,
-) -> Result<bool> {
+pub fn resolve_auto_done_with_context(_file: &Path, rc: &crate::graph::RunContext) -> Result<bool> {
     // Phase 6 (#lr-content-6): cached frontmatter + project config slots.
     let fm = rc.frontmatter();
     if let Some(enabled) = fm.auto_done {
@@ -1810,10 +1829,7 @@ pub fn resolve_auto_done_with_context(
     Ok(rc.project_config().guards.auto_done.unwrap_or(false))
 }
 
-fn check_pending_done_guard(
-    file: &Path,
-    rc: &crate::graph::RunContext,
-) -> Result<GuardResult> {
+fn check_pending_done_guard(file: &Path, rc: &crate::graph::RunContext) -> Result<GuardResult> {
     // Phase 6 (#lr-content-6): resolve guard mode from the cached frontmatter slot.
     let mode = resolve_pending_done_guard_mode_with_context(file, rc)?;
     if mode == crate::frontmatter::PendingCaptureGuardMode::Off {
@@ -2562,7 +2578,9 @@ const PARTIAL_CLOSEOUT_REMAINING_PHRASES: &[&str] = &[
 ];
 
 fn text_has_shipped_signal(lower: &str) -> bool {
-    (lower.contains("committed") || lower.contains("commit + push") || lower.contains("commit and push"))
+    (lower.contains("committed")
+        || lower.contains("commit + push")
+        || lower.contains("commit and push"))
         && lower.contains("push")
 }
 
@@ -2887,7 +2905,11 @@ fn check_blocked_closeout_followup_guard(
         .first()
         .map(|id| format!("--pending-add-after {} \"<id>=<concrete next step>\"", id))
         .unwrap_or_default();
-    let repair = format!("agent-doc write {} {} --pending-only --commit", file.display(), edit_hint);
+    let repair = format!(
+        "agent-doc write {} {} --pending-only --commit",
+        file.display(),
+        edit_hint
+    );
     let warn_line = format!(
         "[session-check] warn: `do #id` closeout reported blocked / still-needed work but gated tracked target {} out of agent:backlog with no kept-open edit, new follow-up item, or explicit no-follow-up justification — the remaining steps live only in prose",
         ids
@@ -2913,7 +2935,8 @@ fn check_blocked_closeout_followup_guard(
         crate::frontmatter::PendingCaptureGuardMode::Strict => GuardResult::Error(format!(
             "{}\n[session-check] hint: keep the work tracked with `{}`, split a new follow-up via `{}`, add an explicit \"no additional backlog follow-up is needed because ...\" phrase for a true review-only gate, or set pending_done_guard = \"warn\" to downgrade",
             warn_line.replacen("[session-check] warn:", "[session-check] INTERRUPTED:", 1),
-            repair, add_after_hint
+            repair,
+            add_after_hint
         )),
         crate::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
     })
@@ -3157,7 +3180,10 @@ fn check_queue_audit_partial_completion_guard(file: &Path) -> Result<GuardResult
 
     crate::ops_log::log_op(
         file,
-        &format!("queue_audit_partial_completion_guard_fired file={}", file.display()),
+        &format!(
+            "queue_audit_partial_completion_guard_fired file={}",
+            file.display()
+        ),
     );
 
     Ok(GuardResult::Warn(vec![
@@ -4671,7 +4697,10 @@ Body\n\
         let doc = write_committed_turn_doc(dir.path(), false, true, &[]);
         match check_committed_without_response_body_guard(&doc).unwrap() {
             GuardResult::Error(msg) => {
-                assert!(msg.contains("no assistant response body was captured"), "{msg}");
+                assert!(
+                    msg.contains("no assistant response body was captured"),
+                    "{msg}"
+                );
                 assert!(msg.contains("agent-doc write --commit"), "{msg}");
             }
             other => panic!("expected Error, got {other:?}"),
@@ -4699,7 +4728,10 @@ Body\n\
         let doc = write_committed_turn_doc(dir.path(), false, true, &[]);
         match inspect(&doc).unwrap() {
             SessionCheckStatus::Interrupted(msg) => {
-                assert!(msg.contains("no assistant response body was captured"), "{msg}");
+                assert!(
+                    msg.contains("no assistant response body was captured"),
+                    "{msg}"
+                );
             }
             other => panic!("expected Interrupted, got {other:?}"),
         }
@@ -6864,7 +6896,10 @@ Body\n\
         if !expect_ids.is_empty() {
             crate::cycle_state::record_expect_done_or_gate_ids(
                 &doc,
-                &expect_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>(),
+                &expect_ids
+                    .iter()
+                    .map(|id| id.to_string())
+                    .collect::<Vec<_>>(),
             )
             .unwrap();
         }
@@ -6907,7 +6942,8 @@ Body\n\
         fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
         fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
         let doc = root.join("doc.md");
-        let mut current = String::from("---\nagent_doc_session: test\n---\n\n## Exchange\n\nHello\n");
+        let mut current =
+            String::from("---\nagent_doc_session: test\n---\n\n## Exchange\n\nHello\n");
         if let Some(body) = backlog_body {
             current.push_str("\n<!-- agent:backlog -->\n");
             current.push_str(body);
@@ -6931,21 +6967,30 @@ Body\n\
         if !expect_ids.is_empty() {
             crate::cycle_state::record_expect_done_or_gate_ids(
                 &doc,
-                &expect_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>(),
+                &expect_ids
+                    .iter()
+                    .map(|id| id.to_string())
+                    .collect::<Vec<_>>(),
             )
             .unwrap();
         }
         if !gated_ids.is_empty() {
             crate::cycle_state::record_pending_gated_ids(
                 &doc,
-                &gated_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>(),
+                &gated_ids
+                    .iter()
+                    .map(|id| id.to_string())
+                    .collect::<Vec<_>>(),
             )
             .unwrap();
         }
         if !kept_open_ids.is_empty() {
             crate::cycle_state::record_pending_kept_open_ids(
                 &doc,
-                &kept_open_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>(),
+                &kept_open_ids
+                    .iter()
+                    .map(|id| id.to_string())
+                    .collect::<Vec<_>>(),
             )
             .unwrap();
         }
@@ -6958,8 +7003,7 @@ Body\n\
         doc
     }
 
-    const BLOCKED_RESPONSE: &str =
-        "### Re: do #374n — gpt-5\n\nFound a blocker: Merchant Center still has 17 active legacy rows for #374n. Next steps to complete: remove/expire the rows, deliberately delete them through an approved path, or get approval that they are safe blanks.\n";
+    const BLOCKED_RESPONSE: &str = "### Re: do #374n — gpt-5\n\nFound a blocker: Merchant Center still has 17 active legacy rows for #374n. Next steps to complete: remove/expire the rows, deliberately delete them through an approved path, or get approval that they are safe blanks.\n";
 
     #[test]
     fn blocked_closeout_followup_guard_fails_when_gated_without_followup() {
@@ -6979,7 +7023,9 @@ Body\n\
                 assert!(message.contains("#374n"), "{message}");
                 assert!(message.contains("--pending-edit"), "{message}");
             }
-            other => panic!("expected strict failure for blocked gate without follow-up, got {other:?}"),
+            other => {
+                panic!("expected strict failure for blocked gate without follow-up, got {other:?}")
+            }
         }
     }
 
@@ -6997,7 +7043,9 @@ Body\n\
             false,
         );
         match inspect_with_warnings(&doc).unwrap().status {
-            SessionCheckStatus::Interrupted(message) => assert!(message.contains("#374n"), "{message}"),
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(message.contains("#374n"), "{message}")
+            }
             other => panic!("expected interrupted status, got {other:?}"),
         }
     }
@@ -7005,8 +7053,7 @@ Body\n\
     // `#gated-followup-split-enforcement`: kept-open parent item whose body
     // enumerates multiple gated phases without discrete child ids.
     const MULTI_PHASE_REVIEW: &str = "- [/] [#parentfix] [recommended] Follow-ups from the parent fix. Phase 1 landed. Remaining (gated — needs a live pane): (2b) a live Stop-hook regression asserting in-pane output; (3) live-verify a real same-pane run. Plan: tasks/x.md\n";
-    const SPLIT_RESPONSE: &str =
-        "### Re: do #parentfix — gpt-5\n\nLanded phase 1 and kept the remaining phases noted on the item.\n";
+    const SPLIT_RESPONSE: &str = "### Re: do #parentfix — gpt-5\n\nLanded phase 1 and kept the remaining phases noted on the item.\n";
 
     #[test]
     fn gated_phase_split_guard_warns_on_multi_phase_kept_open_item() {
@@ -7025,7 +7072,9 @@ Body\n\
             GuardResult::Warn(lines) => {
                 assert!(lines.iter().any(|l| l.contains("#parentfix")), "{lines:?}");
                 assert!(
-                    lines.iter().any(|l| l.contains("discrete child backlog IDs")),
+                    lines
+                        .iter()
+                        .any(|l| l.contains("discrete child backlog IDs")),
                     "{lines:?}"
                 );
             }
@@ -7121,19 +7170,14 @@ Body\n\
     fn queue_audit_guard_warns_when_none_complete_collapses_partial_progress() {
         let tmp = tempfile::TempDir::new().unwrap();
         let response = "### Re: which queue items are complete? — gpt-5\n\nNone of the six queue items are complete. Same-day QA is complete and the URL validate-only check was clean, but each row still has at least one remaining action.\n";
-        let doc = setup_blocked_closeout_cycle(
-            tmp.path(),
-            response,
-            None,
-            None,
-            &[],
-            &[],
-            &[],
-            false,
-        );
+        let doc =
+            setup_blocked_closeout_cycle(tmp.path(), response, None, None, &[], &[], &[], false);
         match check_queue_audit_partial_completion_guard(&doc).unwrap() {
             GuardResult::Warn(lines) => {
-                assert!(lines.iter().any(|l| l.contains("partially complete")), "{lines:?}");
+                assert!(
+                    lines.iter().any(|l| l.contains("partially complete")),
+                    "{lines:?}"
+                );
             }
             other => panic!("expected queue-audit collapse warning, got {other:?}"),
         }
@@ -7143,7 +7187,8 @@ Body\n\
     fn queue_audit_guard_quiet_when_partial_states_already_given() {
         let tmp = tempfile::TempDir::new().unwrap();
         let response = "### Re: which queue items are complete? — gpt-5\n\nNone of the queue items are fully complete, but several are partially complete: same-day QA is complete and the validate-only check was clean, each with one remaining action.\n";
-        let doc = setup_blocked_closeout_cycle(tmp.path(), response, None, None, &[], &[], &[], false);
+        let doc =
+            setup_blocked_closeout_cycle(tmp.path(), response, None, None, &[], &[], &[], false);
         assert!(matches!(
             check_queue_audit_partial_completion_guard(&doc).unwrap(),
             GuardResult::None
@@ -7154,7 +7199,8 @@ Body\n\
     fn queue_audit_guard_quiet_when_not_about_queue() {
         let tmp = tempfile::TempDir::new().unwrap();
         let response = "### Re: status — gpt-5\n\nNone of the migration steps are complete. The schema dump is complete and the backup was clean.\n";
-        let doc = setup_blocked_closeout_cycle(tmp.path(), response, None, None, &[], &[], &[], false);
+        let doc =
+            setup_blocked_closeout_cycle(tmp.path(), response, None, None, &[], &[], &[], false);
         assert!(matches!(
             check_queue_audit_partial_completion_guard(&doc).unwrap(),
             GuardResult::None
@@ -7167,7 +7213,8 @@ Body\n\
         // Blanket none-complete with no additional substep-completion evidence is
         // a legitimate "nothing done yet" answer, not a collapse.
         let response = "### Re: which queue items are complete? — gpt-5\n\nNone of the queue items are complete yet; every row is still blocked on input.\n";
-        let doc = setup_blocked_closeout_cycle(tmp.path(), response, None, None, &[], &[], &[], false);
+        let doc =
+            setup_blocked_closeout_cycle(tmp.path(), response, None, None, &[], &[], &[], false);
         assert!(matches!(
             check_queue_audit_partial_completion_guard(&doc).unwrap(),
             GuardResult::None
@@ -7178,7 +7225,8 @@ Body\n\
     fn queue_audit_guard_suppressed_by_marker() {
         let tmp = tempfile::TempDir::new().unwrap();
         let response = "### Re: which queue items are complete? — gpt-5\n\nNone of the six queue items are complete. Same-day QA is complete and the check was clean. <!-- no-queue-audit-guard -->\n";
-        let doc = setup_blocked_closeout_cycle(tmp.path(), response, None, None, &[], &[], &[], false);
+        let doc =
+            setup_blocked_closeout_cycle(tmp.path(), response, None, None, &[], &[], &[], false);
         assert!(matches!(
             check_queue_audit_partial_completion_guard(&doc).unwrap(),
             GuardResult::None
@@ -7313,7 +7361,9 @@ Body\n\
                 assert!(message.contains("--done nstep2"), "{message}");
                 assert!(message.contains("agent:backlog"), "{message}");
             }
-            other => panic!("expected strict-mode failure for open directive target, got {other:?}"),
+            other => {
+                panic!("expected strict-mode failure for open directive target, got {other:?}")
+            }
         }
     }
 
@@ -7438,7 +7488,10 @@ Body\n\
                 let joined = lines.join("\n");
                 assert!(joined.contains("#nstep2"), "{joined}");
                 assert!(joined.contains("--pending-edit"), "{joined}");
-                assert!(joined.contains("next phase") || joined.contains("next-phase"), "{joined}");
+                assert!(
+                    joined.contains("next phase") || joined.contains("next-phase"),
+                    "{joined}"
+                );
             }
             other => panic!("expected WARN for partial closeout, got {other:?}"),
         }
@@ -7882,7 +7935,9 @@ Body\n\
                     "terminal abandoned cycle should report an abandoned OK state: {message}"
                 );
             }
-            other => panic!("abandoned recursive-guard cycle must pass session-check, got {other:?}"),
+            other => {
+                panic!("abandoned recursive-guard cycle must pass session-check, got {other:?}")
+            }
         }
     }
 
@@ -8008,8 +8063,13 @@ Body\n\
             .output()
             .unwrap();
         crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(committed), Some(committed))
-            .unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
 
         // Late-IPC replay re-adds the EARLIER response A at the tail — a
         // non-consecutive duplicate the JB-cache replay detector misses.
@@ -8123,7 +8183,11 @@ Body\n\
             vec!["config", "user.email", "test@example.com"],
             vec!["config", "user.name", "Test"],
         ] {
-            Command::new("git").current_dir(root).args(&args).output().unwrap();
+            Command::new("git")
+                .current_dir(root)
+                .args(&args)
+                .output()
+                .unwrap();
         }
 
         let doc = root.join("doc.md");
@@ -8138,12 +8202,24 @@ Body\n\
         );
         fs::write(&doc, committed).unwrap();
         crate::snapshot::save(&doc, committed).unwrap();
-        for args in [vec!["add", "doc.md"], vec!["commit", "-m", "ours", "--no-verify"]] {
-            Command::new("git").current_dir(root).args(&args).output().unwrap();
+        for args in [
+            vec!["add", "doc.md"],
+            vec!["commit", "-m", "ours", "--no-verify"],
+        ] {
+            Command::new("git")
+                .current_dir(root)
+                .args(&args)
+                .output()
+                .unwrap();
         }
         crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(committed), Some(committed))
-            .unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
         // Adoption-time evidence: the user's "go" was dropped into content_ours.
         crate::cycle_state::record_dropped_exchange_prompts(&doc, &["go".to_string()]).unwrap();
 
@@ -8153,7 +8229,10 @@ Body\n\
                     message.contains("dropped during an IPC content_ours merge"),
                     "expected dropped-prompt classification: {message}"
                 );
-                assert!(message.contains("go"), "should name the dropped prompt: {message}");
+                assert!(
+                    message.contains("go"),
+                    "should name the dropped prompt: {message}"
+                );
             }
             other => panic!("expected dropped-prompt interruption, got {other:?}"),
         }
@@ -8171,7 +8250,11 @@ Body\n\
             vec!["config", "user.email", "test@example.com"],
             vec!["config", "user.name", "Test"],
         ] {
-            Command::new("git").current_dir(root).args(&args).output().unwrap();
+            Command::new("git")
+                .current_dir(root)
+                .args(&args)
+                .output()
+                .unwrap();
         }
 
         let doc = root.join("doc.md");
@@ -8188,12 +8271,24 @@ Body\n\
         );
         fs::write(&doc, committed).unwrap();
         crate::snapshot::save(&doc, committed).unwrap();
-        for args in [vec!["add", "doc.md"], vec!["commit", "-m", "recovered", "--no-verify"]] {
-            Command::new("git").current_dir(root).args(&args).output().unwrap();
+        for args in [
+            vec!["add", "doc.md"],
+            vec!["commit", "-m", "recovered", "--no-verify"],
+        ] {
+            Command::new("git")
+                .current_dir(root)
+                .args(&args)
+                .output()
+                .unwrap();
         }
         crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(committed), Some(committed))
-            .unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
         crate::cycle_state::record_dropped_exchange_prompts(&doc, &["go".to_string()]).unwrap();
 
         assert!(
@@ -8238,8 +8333,13 @@ Body\n\
                 .unwrap();
         }
         crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(committed), Some(committed))
-            .unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
         doc
     }
 
@@ -8600,7 +8700,9 @@ Body\n\
         assert!(!is_queue_continuation_response_heading(
             "### Re: JB Run Agent Doc deadlock — opus-4-8"
         ));
-        assert!(!is_queue_continuation_response_heading("### Re: do this thing"));
+        assert!(!is_queue_continuation_response_heading(
+            "### Re: do this thing"
+        ));
         assert!(!is_queue_continuation_response_heading("not a heading"));
     }
 

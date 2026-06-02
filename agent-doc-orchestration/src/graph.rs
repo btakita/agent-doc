@@ -54,6 +54,12 @@ pub type CycleStateSlot = SlotHandle<Option<Arc<CycleState>>>;
 /// Phase 7 (#lr-cycle-7): cached snapshot content, loaded (with flock) at most
 /// once per context lifetime. `None` when no snapshot exists yet.
 pub type SnapshotContentSlot = SlotHandle<Option<Arc<String>>>;
+/// Phase 8 (#lr-head-8): cached `git show HEAD:<doc>` content, spawned at
+/// most once per context lifetime. `None` when the document is not tracked or
+/// HEAD cannot provide content.
+pub type HeadContentSlot = SlotHandle<Option<Arc<String>>>;
+/// Phase 8 (#lr-head-8): cached comparison of snapshot content against HEAD.
+pub type SnapshotCommitStatusSlot = SlotHandle<crate::git::SnapshotCommitStatus>;
 
 pub struct SshContextValue {
     pub config: Arc<ProjectConfig>,
@@ -76,6 +82,8 @@ pub struct RunContext {
     doc_hash: DocHashSlot,
     cycle_state: CycleStateSlot,
     snapshot_content: SnapshotContentSlot,
+    head_content: HeadContentSlot,
+    snapshot_commit_status: SnapshotCommitStatusSlot,
 }
 
 impl RunContext {
@@ -221,12 +229,64 @@ impl RunContext {
                 match crate::snapshot::load(&path) {
                     Ok(content) => content.map(Arc::new),
                     Err(e) => {
+                        eprintln!("[graph] snapshot load failed for {}: {}", path.display(), e);
+                        None
+                    }
+                }
+            }
+        });
+
+        // Phase 8 (#lr-head-8): load HEAD content once per CLI context instead
+        // of spawning `git show HEAD:<doc>` repeatedly across guards.
+        let head_content = ctx.slot({
+            let cp = canonical_path;
+            let pr = project_root;
+            move |ctx: &Context| -> Option<Arc<String>> {
+                let canonical: PathBuf = ctx.get(&cp);
+                // Register the project-root dependency even though
+                // `git::show_head` performs the final submodule narrowing.
+                let _root: Option<PathBuf> = ctx.get(&pr);
+                match crate::git::show_head(&canonical) {
+                    Ok(content) => content.map(Arc::new),
+                    Err(e) => {
                         eprintln!(
-                            "[graph] snapshot load failed for {}: {}",
-                            path.display(),
+                            "[graph] git show HEAD failed for {}: {}",
+                            canonical.display(),
                             e
                         );
                         None
+                    }
+                }
+            }
+        });
+
+        // Phase 8 (#lr-head-8): cache the snapshot-vs-HEAD status. Keep the
+        // full enum rather than a bool so existing diagnostics retain their
+        // specific NoSnapshot/NoHead/NotInGitRepo/mismatch variants.
+        let snapshot_commit_status = ctx.slot({
+            let fp = file_path_cell;
+            let sc = snapshot_content;
+            let hc = head_content;
+            move |ctx: &Context| -> crate::git::SnapshotCommitStatus {
+                let path: PathBuf = ctx.get_cell(&fp);
+                if !crate::git::is_in_git_repo(&path) {
+                    return crate::git::SnapshotCommitStatus::NotInGitRepo;
+                }
+                let Some(snapshot) = ctx.get(&sc) else {
+                    return crate::git::SnapshotCommitStatus::NoSnapshot;
+                };
+                let Some(head) = ctx.get(&hc) else {
+                    return crate::git::SnapshotCommitStatus::NoHead;
+                };
+                let normalized_snapshot =
+                    crate::git::normalize_transient_agent_doc_markers(&snapshot);
+                let normalized_head = crate::git::normalize_transient_agent_doc_markers(&head);
+                if normalized_snapshot == normalized_head {
+                    crate::git::SnapshotCommitStatus::Committed
+                } else {
+                    crate::git::SnapshotCommitStatus::SnapshotDiffersFromHead {
+                        snapshot_len: normalized_snapshot.len(),
+                        head_len: normalized_head.len(),
                     }
                 }
             }
@@ -248,6 +308,8 @@ impl RunContext {
             doc_hash,
             cycle_state,
             snapshot_content,
+            head_content,
+            snapshot_commit_status,
         }
     }
 
@@ -317,6 +379,16 @@ impl RunContext {
         self.ctx.get(&self.snapshot_content)
     }
 
+    /// Phase 8 (#lr-head-8): cached HEAD content for this document.
+    pub fn head_content(&self) -> Option<Arc<String>> {
+        self.ctx.get(&self.head_content)
+    }
+
+    /// Phase 8 (#lr-head-8): cached snapshot-vs-HEAD comparison.
+    pub fn snapshot_commit_status(&self) -> crate::git::SnapshotCommitStatus {
+        self.ctx.get(&self.snapshot_commit_status)
+    }
+
     /// Invalidate the cached cycle state after a save/mutation so the next read
     /// reloads it (Phase 7).
     pub fn invalidate_cycle_state(&self) {
@@ -328,12 +400,25 @@ impl RunContext {
         self.snapshot_content.clear(&self.ctx);
     }
 
+    /// Invalidate the cached HEAD content after `git::commit`.
+    pub fn invalidate_head_content(&self) {
+        self.head_content.clear(&self.ctx);
+    }
+
     pub fn is_cycle_state_cached(&self) -> bool {
         self.ctx.is_set(&self.cycle_state)
     }
 
     pub fn is_snapshot_content_cached(&self) -> bool {
         self.ctx.is_set(&self.snapshot_content)
+    }
+
+    pub fn is_head_content_cached(&self) -> bool {
+        self.ctx.is_set(&self.head_content)
+    }
+
+    pub fn is_snapshot_commit_status_cached(&self) -> bool {
+        self.ctx.is_set(&self.snapshot_commit_status)
     }
 
     pub fn invalidate_project_root(&self) {
@@ -383,25 +468,41 @@ impl RunContext {
     pub fn snapshot_path_for(&self) -> Option<PathBuf> {
         let root = self.project_root()?;
         let hash = self.doc_hash();
-        Some(root.join(".agent-doc").join("snapshots").join(format!("{}.md", hash)))
+        Some(
+            root.join(".agent-doc")
+                .join("snapshots")
+                .join(format!("{}.md", hash)),
+        )
     }
 
     pub fn lock_path_for(&self) -> Option<PathBuf> {
         let root = self.project_root()?;
         let hash = self.doc_hash();
-        Some(root.join(".agent-doc").join("locks").join(format!("{}.lock", hash)))
+        Some(
+            root.join(".agent-doc")
+                .join("locks")
+                .join(format!("{}.lock", hash)),
+        )
     }
 
     pub fn baseline_path_for(&self) -> Option<PathBuf> {
         let root = self.project_root()?;
         let hash = self.doc_hash();
-        Some(root.join(".agent-doc").join("baselines").join(format!("{}.md", hash)))
+        Some(
+            root.join(".agent-doc")
+                .join("baselines")
+                .join(format!("{}.md", hash)),
+        )
     }
 
     pub fn pending_path_for(&self) -> Option<PathBuf> {
         let root = self.project_root()?;
         let hash = self.doc_hash();
-        Some(root.join(".agent-doc").join("pending").join(format!("{}.json", hash)))
+        Some(
+            root.join(".agent-doc")
+                .join("pending")
+                .join(format!("{}.json", hash)),
+        )
     }
 }
 
@@ -457,11 +558,48 @@ mod tests {
     use super::*;
     use crate::snapshot;
     use std::path::Path;
+    use std::process::Command;
     use tempfile::TempDir;
 
     fn setup_project(dir: &Path) -> PathBuf {
         std::fs::create_dir_all(dir.join(".agent-doc/snapshots")).unwrap();
         dir.join(".agent-doc").join("config.toml")
+    }
+
+    fn init_git_repo(root: &Path) {
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+    }
+
+    fn commit_path(root: &Path, rel: &str, message: &str) {
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", rel])
+            .output()
+            .unwrap();
+        let output = Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", message, "--no-verify"])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git commit failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     #[test]
@@ -801,7 +939,10 @@ mod tests {
         let hash = rc.doc_hash();
         assert_eq!(
             snap_path,
-            dir.path().join(".agent-doc").join("snapshots").join(format!("{}.md", hash))
+            dir.path()
+                .join(".agent-doc")
+                .join("snapshots")
+                .join(format!("{}.md", hash))
         );
     }
 
@@ -818,7 +959,10 @@ mod tests {
         let hash = rc.doc_hash();
         assert_eq!(
             lock_path,
-            dir.path().join(".agent-doc").join("locks").join(format!("{}.lock", hash))
+            dir.path()
+                .join(".agent-doc")
+                .join("locks")
+                .join(format!("{}.lock", hash))
         );
     }
 
@@ -835,7 +979,10 @@ mod tests {
         let hash = rc.doc_hash();
         assert_eq!(
             baseline,
-            dir.path().join(".agent-doc").join("baselines").join(format!("{}.md", hash))
+            dir.path()
+                .join(".agent-doc")
+                .join("baselines")
+                .join(format!("{}.md", hash))
         );
     }
 
@@ -852,7 +999,10 @@ mod tests {
         let hash = rc.doc_hash();
         assert_eq!(
             pending,
-            dir.path().join(".agent-doc").join("pending").join(format!("{}.json", hash))
+            dir.path()
+                .join(".agent-doc")
+                .join("pending")
+                .join(format!("{}.json", hash))
         );
     }
 
@@ -949,8 +1099,85 @@ mod tests {
             "still cached as None until invalidated"
         );
         rc.invalidate_cycle_state();
-        let state = rc.cycle_state().expect("cycle state now present after reload");
+        let state = rc
+            .cycle_state()
+            .expect("cycle state now present after reload");
         assert!(!state.cycle_id.is_empty());
         assert!(rc.is_cycle_state_cached());
+    }
+
+    // ---- Phase 8 (#lr-head-8) ----
+
+    #[test]
+    fn phase8_head_content_slot_loads_caches_and_invalidates() {
+        let dir = TempDir::new().unwrap();
+        setup_project(dir.path());
+        init_git_repo(dir.path());
+        let doc = dir.path().join("file.md");
+        std::fs::write(&doc, "first\n").unwrap();
+        commit_path(dir.path(), "file.md", "first");
+
+        let rc = RunContext::new(doc.clone());
+        assert!(!rc.is_head_content_cached());
+        let first = rc.head_content().expect("tracked file has HEAD content");
+        assert_eq!(first.as_str(), "first\n");
+        assert!(rc.is_head_content_cached());
+
+        std::fs::write(&doc, "second\n").unwrap();
+        commit_path(dir.path(), "file.md", "second");
+        assert_eq!(
+            rc.head_content()
+                .expect("cached HEAD remains present")
+                .as_str(),
+            "first\n",
+            "HEAD content stays cached until explicitly invalidated"
+        );
+
+        rc.invalidate_head_content();
+        assert!(!rc.is_head_content_cached());
+        assert_eq!(
+            rc.head_content()
+                .expect("reloaded HEAD remains present")
+                .as_str(),
+            "second\n"
+        );
+    }
+
+    #[test]
+    fn phase8_snapshot_commit_status_uses_cached_snapshot_and_head() {
+        let dir = TempDir::new().unwrap();
+        setup_project(dir.path());
+        init_git_repo(dir.path());
+        let doc = dir.path().join("file.md");
+        std::fs::write(&doc, "committed\n").unwrap();
+        snapshot::save(&doc, "committed\n").unwrap();
+        commit_path(dir.path(), "file.md", "add doc");
+
+        let rc = RunContext::new(doc.clone());
+        assert!(!rc.is_snapshot_commit_status_cached());
+        assert_eq!(
+            rc.snapshot_commit_status(),
+            crate::git::SnapshotCommitStatus::Committed
+        );
+        assert!(rc.is_snapshot_commit_status_cached());
+
+        snapshot::save(&doc, "snapshot drift\n").unwrap();
+        assert_eq!(
+            rc.snapshot_commit_status(),
+            crate::git::SnapshotCommitStatus::Committed,
+            "status stays cached until the snapshot slot is invalidated"
+        );
+
+        rc.invalidate_snapshot_content();
+        match rc.snapshot_commit_status() {
+            crate::git::SnapshotCommitStatus::SnapshotDiffersFromHead {
+                snapshot_len,
+                head_len,
+            } => {
+                assert_eq!(snapshot_len, "snapshot drift".len());
+                assert_eq!(head_len, "committed".len());
+            }
+            other => panic!("expected snapshot/head drift after invalidation, got {other:?}"),
+        }
     }
 }

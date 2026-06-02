@@ -480,37 +480,49 @@ pub fn clear(file: &Path) -> Result<()> {
     guard_starting_actor_operator_command(&ctx, &tmux, OperatorAction::Clear)?;
     reconcile_idle_projection_before_clear(&ctx, &tmux)?;
     if supervisor_clear_inject_available(&ctx) {
-        send_clear_via_supervisor(&ctx)?;
-        agent_doc_orchestration::ops_log::log_op(
-            &ctx.canonical_file,
-            &format!(
-                "session_clear_sent file={} delivery=supervisor_ipc submit_mode={} pane_source=supervisor_runtime",
-                ctx.canonical_file.display(),
-                SUPERVISOR_INJECT_SUBMIT_MODE
-            ),
-        );
-    } else if let Some((pane, pane_source)) = resolve_direct_submit_pane(&ctx, &tmux) {
-        send_clear_to_pane(&tmux, &pane, &ctx.canonical_file, &ctx.harness)?;
-        agent_doc_orchestration::ops_log::log_op(
-            &ctx.canonical_file,
-            &format!(
-                "session_clear_sent file={} pane={} delivery=direct_pane_submit submit_mode={} pane_source={}",
-                ctx.canonical_file.display(),
-                pane,
-                TMUX_DIRECT_SUBMIT_MODE,
-                pane_source.as_str()
-            ),
-        );
-    } else {
-        send_clear_via_supervisor(&ctx)?;
-        agent_doc_orchestration::ops_log::log_op(
-            &ctx.canonical_file,
-            &format!(
-                "session_clear_sent file={} delivery=supervisor_ipc submit_mode={} pane_source=none",
-                ctx.canonical_file.display(),
-                SUPERVISOR_INJECT_SUBMIT_MODE
-            ),
-        );
+        match send_clear_via_supervisor(&ctx)? {
+            SupervisorClearDelivery::Sent => {
+                agent_doc_orchestration::ops_log::log_op(
+                    &ctx.canonical_file,
+                    &format!(
+                        "session_clear_sent file={} delivery=supervisor_ipc submit_mode={} pane_source=supervisor_runtime",
+                        ctx.canonical_file.display(),
+                        SUPERVISOR_INJECT_SUBMIT_MODE
+                    ),
+                );
+            }
+            SupervisorClearDelivery::LegacyClearUnsupported { error } => {
+                if !send_clear_to_resolved_pane(
+                    &ctx,
+                    &tmux,
+                    Some("legacy_supervisor_clear_ipc_unsupported"),
+                )? {
+                    anyhow::bail!(
+                        "supervisor does not support clear IPC and no live pane is available for direct `/clear` submission for {}: {error}",
+                        ctx.canonical_file.display()
+                    );
+                }
+            }
+        }
+    } else if !send_clear_to_resolved_pane(&ctx, &tmux, None)? {
+        match send_clear_via_supervisor(&ctx)? {
+            SupervisorClearDelivery::Sent => {
+                agent_doc_orchestration::ops_log::log_op(
+                    &ctx.canonical_file,
+                    &format!(
+                        "session_clear_sent file={} delivery=supervisor_ipc submit_mode={} pane_source=none",
+                        ctx.canonical_file.display(),
+                        SUPERVISOR_INJECT_SUBMIT_MODE
+                    ),
+                );
+            }
+            SupervisorClearDelivery::LegacyClearUnsupported { error } => {
+                anyhow::bail!(
+                    "supervisor does not support clear IPC and no live pane is available for direct `/clear` submission for {}: {error}",
+                    ctx.canonical_file.display()
+                );
+            }
+        }
     }
     if matches!(ctx.harness.as_str(), "codex" | "opencode") {
         agent_doc_orchestration::codex_hook::record_external_prompt_for_file(
@@ -566,7 +578,13 @@ fn supervisor_clear_inject_available(ctx: &SessionContext) -> bool {
         && ctx.supervisor_socket.exists()
 }
 
-fn send_clear_via_supervisor(ctx: &SessionContext) -> Result<()> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SupervisorClearDelivery {
+    Sent,
+    LegacyClearUnsupported { error: String },
+}
+
+fn send_clear_via_supervisor(ctx: &SessionContext) -> Result<SupervisorClearDelivery> {
     ensure_supervisor_socket(ctx)?;
     // Use the gate-exempt `Clear` control method so an operator can clear a
     // session whose managed-capability proof failed without `kill -9`
@@ -585,14 +603,45 @@ fn send_clear_via_supervisor(ctx: &SessionContext) -> Result<()> {
         )
     })?;
     if !response.ok {
-        anyhow::bail!(
-            "{}",
-            response
-                .error
-                .unwrap_or_else(|| "supervisor inject request failed".to_string())
-        );
+        let error = response
+            .error
+            .unwrap_or_else(|| "supervisor inject request failed".to_string());
+        if supervisor_clear_legacy_unsupported_error(&error) {
+            return Ok(SupervisorClearDelivery::LegacyClearUnsupported { error });
+        }
+        anyhow::bail!("{error}");
     }
-    Ok(())
+    Ok(SupervisorClearDelivery::Sent)
+}
+
+fn supervisor_clear_legacy_unsupported_error(error: &str) -> bool {
+    error.contains("parse error: unknown variant `clear`") && error.contains("expected one of")
+}
+
+fn send_clear_to_resolved_pane(
+    ctx: &SessionContext,
+    tmux: &Tmux,
+    fallback_reason: Option<&str>,
+) -> Result<bool> {
+    let Some((pane, pane_source)) = resolve_direct_submit_pane(ctx, tmux) else {
+        return Ok(false);
+    };
+    send_clear_to_pane(tmux, &pane, &ctx.canonical_file, &ctx.harness)?;
+    let fallback_suffix = fallback_reason
+        .map(|reason| format!(" fallback_reason={reason}"))
+        .unwrap_or_default();
+    agent_doc_orchestration::ops_log::log_op(
+        &ctx.canonical_file,
+        &format!(
+            "session_clear_sent file={} pane={} delivery=direct_pane_submit submit_mode={} pane_source={}{}",
+            ctx.canonical_file.display(),
+            pane,
+            TMUX_DIRECT_SUBMIT_MODE,
+            pane_source.as_str(),
+            fallback_suffix
+        ),
+    );
+    Ok(true)
 }
 
 fn reconcile_idle_projection_before_clear(ctx: &SessionContext, tmux: &Tmux) -> Result<()> {
@@ -2975,6 +3024,19 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
 
         guard_starting_actor_operator_command(&ctx, &tmux, OperatorAction::Clear)
             .expect("session clear must not be gated by stale starting actor projections");
+    }
+
+    #[test]
+    fn supervisor_clear_legacy_unsupported_error_matches_old_supervisor_parse_failure() {
+        let legacy_error = "parse error: unknown variant `clear`, expected one of `restart`, `inject`, `state`, `pid`, `stop` at line 1 column 17";
+
+        assert!(supervisor_clear_legacy_unsupported_error(legacy_error));
+        assert!(!supervisor_clear_legacy_unsupported_error(
+            "parse error: unknown variant `nonsense`, expected one of `restart`, `inject`, `state`, `pid`, `stop` at line 1 column 17"
+        ));
+        assert!(!supervisor_clear_legacy_unsupported_error(
+            "supervisor response timeout (2s)"
+        ));
     }
 
     #[test]

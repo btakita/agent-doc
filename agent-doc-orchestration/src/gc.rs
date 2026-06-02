@@ -272,7 +272,7 @@ fn clean_old_recovery_tags(project_root: &Path, dry_run: bool) -> Result<(usize,
     let mut kept = 0usize;
     for (_prefix, mut series) in groups {
         // Newest (highest ordinal) first; keep the newest KEEP_RECOVERY_TAGS.
-        series.sort_by(|a, b| b.0.cmp(&a.0));
+        series.sort_by_key(|entry| std::cmp::Reverse(entry.0));
         for (idx, (_n, tag)) in series.iter().enumerate() {
             if idx < KEEP_RECOVERY_TAGS {
                 kept += 1;

@@ -100,7 +100,7 @@ Verification completed before closeout:
 - latest GitHub Actions `CI` run `26793122164` was `completed success` with `clippy + test` and live Convex graph acceptance jobs
 
 The superproject submodule pointer was committed separately as `c61977f82` (`chore: update tsift submodule`) so the root repo now points at the pushed tsift commit.
-<!-- agent:boundary:779b9ea4 -->
+<!-- agent:boundary:b60dfb8c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -120,12 +120,12 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#writeexecutor] Implement the AST-backed write executor with dry-run diffs, formatting, conflict detection against current file content, rollback, and per-language conformance tests.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
-- [/] [#writeexecutor] Implement the AST-backed write executor with dry-run diffs, formatting, conflict detection against current file content, rollback, and per-language conformance tests.
 - [/] [#surrealbulk] Batch SurrealDB projection load: replace per-row upsert loops with bulk/transactional row load plus one-pass secondary-index rebuild; measure refresh/load separately.
 - [/] [#full-e2e-verify] In fresh project: opencode plugin opencode-tsift && opencode then /tsift-status. On success mark #e2e-install done.
 - [/] [#npm-publish-verify] After auth configured, tag release and verify publish-opencode-plugin CI job succeeds and opencode-tsift appears on npmjs.org

@@ -2,7 +2,7 @@
 agent_doc_session: e02128be-5154-406d-9f1f-f919a0150d7c
 agent_doc_format: template
 agent_doc_write: crdt
-agent: opencode
+agent: codex
 claude_model: opus
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access

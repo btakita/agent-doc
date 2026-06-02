@@ -95,7 +95,7 @@ Completed/reaped items live under canonical `<!-- agent:done -->`; legacy `agent
 
 **Cross-document pending rule:** if a prompt preset or user instruction names another backlog file, add the item to that target with `--pending-add-to <target-file> "<item>"` on the final `agent-doc finalize` command. Do not satisfy an explicit target by running `--pending-add` against the current session document. If the target is missing or lacks a backlog component, stop on the binary error and report the blocker.
 
-**Plan-backed pending items:** create the plan file first and include that exact plan file path in the pending text.
+**Plan-backed pending items:** create the plan file first and include that exact plan file path in the pending text. For multi-phase implementation work, prefer one backlog ID per actionable phase (for example `#crdtrespfx1`, `#crdtrespfx2`) instead of one parent ID that gets repeatedly `--pending-gate`d after partial progress; keep the parent plan file as context, but queue and close out concrete phase IDs.
 
 **`do #id` closeout rule:** when the user directs `do #id ...`, record the pending outcome before persistence: `--done <id>` if completed, `--pending-gate <id>` if code-complete but awaiting review/external validation, or explain concretely why it stays open. `session-check` enforces the `pending_done_guard`; projects may opt into `review_done_guard` when review must precede done.
 
@@ -131,7 +131,7 @@ Document format, frontmatter, component naming, and commit-boundary exceptions: 
 
 ## Runbooks
 
-Use runbooks for detail that is not needed every turn. Key runbooks: [runbooks/harness-invocation.md](runbooks/harness-invocation.md), [runbooks/planning-dispatch.md](runbooks/planning-dispatch.md), [runbooks/pending-ops.md](runbooks/pending-ops.md), [runbooks/commit.md](runbooks/commit.md), [runbooks/split-spec-files.md](runbooks/split-spec-files.md). `split-spec-files` applies across agent-doc-managed surfaces; custom root files stay opt-in unless they still match the generated baseline. Full catalog: `compact-exchange`, `transfer-extract`, `model-tier-gate`, `command-synonyms`, `compound-task-steering`, `streaming-checkpoints`, `document-format`, `code-enforced-directives`.
+Use runbooks for detail that is not needed every turn. Key runbooks: [runbooks/harness-invocation.md](runbooks/harness-invocation.md), [runbooks/planning-dispatch.md](runbooks/planning-dispatch.md), [runbooks/pending-ops.md](runbooks/pending-ops.md), [runbooks/commit.md](runbooks/commit.md), [runbooks/split-spec-files.md](runbooks/split-spec-files.md). `split-spec-files` applies across agent-doc-managed surfaces; custom root files stay opt-in unless they still match the generated baseline. Full catalog: `compact-exchange`, `transfer-extract`, `model-tier-gate`, `command-synonyms`, `compound-task-steering`, `streaming-checkpoints`, `document-format`, `code-enforced-directives`, `jb-cache-conflict`, `baseline-drift`.
 
 <!-- tsift:code-navigation v=0.1.62 -->
 ## Code Navigation

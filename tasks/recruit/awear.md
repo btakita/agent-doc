@@ -113,7 +113,8 @@ A standard **one-way (unilateral) NDA**. Awear Inc. (Delaware corp; the "1209 Or
 Nothing predatory, nothing unusual for a candidate NDA — it's a clean, fairly standard unilateral agreement with the carve-outs that matter (especially independent development) intact. **Safe to sign.** The only two behavioral commitments to actually internalize: (1) **don't publicly disclose you're talking to Awear** (§7) — relevant to your streaming, and (2) **don't gift them substantive IP as "feedback"** during discussions (§11). Sign, initial the three pages, date it, and return.
 ❯ Should I leave this out?
 ❯ > I'm working on making agent-doc a truly realtime dynamic agent interface that can be used in a collaborative environment...and to raise visibility into the agentic pipeline.
-### Re: Should I leave the agent-doc vision line out? — opus-4-8
+
+### Re: Should I leave the agent-doc vision line out? — opus-4-8 (HEAD)
 
 First, the NDA angle since you just signed it: **this line is safe** — it describes *your own* project, not Awear's confidential information, so §7 (existence of discussions) and §11 (feedback assignment) don't reach it. §4(d) independent-development keeps agent-doc yours. So this is purely a recruiting-judgment call, not a legal one.
 

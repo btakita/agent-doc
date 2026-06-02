@@ -200,8 +200,60 @@ Within a CLI run, all slots compute at most once. Within an Actor, slots persist
 | Performance regression from graph overhead | Benchmark pre/post Phase 2; slot overhead is HashMap lookup + borrow, negligible vs filesystem stat |
 | lazily-rs not yet on crates.io | Use path dependency: `lazily-rs = { path = "../../lazily-rs" }` |
 
-## Open Questions
+## Resolved Decisions (2026-06-02)
 
-- Should `CellHandle::set(&ctx, value)` be added to lazily-rs first? (Current API is `Context::set_cell()`)
-- Should the graph be per-file (one context per tracked document) or per-process (one context with file-keyed cells)?
-- How to handle config hot-reload in long-lived ActorContext — file watcher on `.agent-doc/config.toml` or clear on next cycle?
+### Q1 — Add `CellHandle::set(&ctx, value)` to lazily-rs first? → **Yes**
+
+Land the handle-style `CellHandle::set(&ctx, value)` ergonomic in lazily-rs before
+the integration so call sites read/write through the same `*Handle` API regardless
+of `Context` vs `ThreadSafeContext` backing (keeps Phase 5/10 ActorContext call
+sites backing-agnostic, per the Phase 2 mitigation). `Context::set_cell()` stays as
+the lower-level primitive.
+
+### Q2 — Per-file or per-process graph? → **Multiple contexts (per-document), not one process-global file-keyed graph**
+
+Decision (judgement call, honoring "there can also be multiple contexts"):
+
+- **RunContext** — one per CLI invocation. A CLI run operates on one document, so the
+  `FilePathCell` is set once and the context is effectively per-file. Dropped at
+  process exit. No keying needed.
+- **ActorContext** — the supervisor/watch daemon holds a **map of
+  `Arc<ActorContext>` keyed by document** (the existing `FileState`/session keying),
+  **not** a single process-global `ThreadSafeContext` with file-keyed cells on every
+  slot.
+- **ProcessContext** (small, shared) — a single process-level context for genuinely
+  process-static slots only: `HarnessSlot` (env vars), `GlobalConfigSlot`
+  (`~/.config/agent-doc/config.toml`). Shared by all documents because the value is
+  identical across them.
+
+Rationale for per-document over one file-keyed mega-graph:
+- **Invalidation stays simple** — a file/config change clears only that document's
+  graph; no need to key every slot by file and selectively clear.
+- **Lock contention** — `ThreadSafeContext`'s graph lock is per-context, so N small
+  per-document contexts spread contention instead of serializing every document's
+  reads through one global lock (directly addresses the Risks-table contention item).
+- **Bounded memory / lifecycle** — drop the `Arc<ActorContext>` when the session ends;
+  no unbounded accumulation of file-keyed slots in a long-lived process.
+- The shared `ProcessContext` captures the one legitimate per-process case (static
+  data) without forcing document-scoped data into a global graph.
+
+### Q3 — Config hot-reload in long-lived ActorContext? → **Support both, layered**
+
+- **Floor (always on): clear-on-next-cycle.** At cycle start (preflight), stat the
+  config file(s) and compare mtime to the cached value; if changed, call
+  `ProjectConfigSlot.clear()` / `GlobalConfigSlot.clear()` and let dependents clear
+  transitively. Zero extra threads; guarantees config changes take effect by the next
+  cycle. This is the baseline for both RunContext and ActorContext.
+- **Opt-in (ActorContext only): file watcher.** A `notify`-based watcher on
+  `.agent-doc/config.toml` and `~/.config/agent-doc/config.toml` that fires the same
+  `slot.clear()` immediately, so changes apply mid-watch-loop without waiting for the
+  next cycle. Gated behind a config flag (e.g. `[watch] config_hot_reload = true`)
+  since it adds a watcher thread to the daemon.
+- Both reduce to the same invalidation primitive (`ProjectConfigSlot.clear()` →
+  transitive clear). The watcher is just an earlier trigger for the clear the
+  cycle-start mtime check would perform anyway, so "both" compose without duplicate
+  logic. Phase 5/10 implement the floor; the watcher is a Phase 5 opt-in extension.
+
+These decisions update the **Architecture → Context Lifetimes** table (add a third
+**ProcessContext** row for static slots) and Phase 5/10 wiring; no code change in this
+planning cycle (phases 8–10 remain backlog `#lr-head-8` / `#lr-wire-9` / `#lr-actor-10`).

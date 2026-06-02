@@ -34,5 +34,9 @@ Steps to compact an agent-doc exchange component when it grows too large.
    - Replaces exchange content with the supplied summary, or when no custom `--message` is provided, with a default session summary that includes archive pointer plus live backlog/queue/icebox context
    - Updates snapshot atomically
    - Closes out via the binary-owned `agent-doc commit` path and verifies the VCS refresh signal when available
+   - Uses the guarded direct-write path for template exchange compaction instead of editor IPC `fullContent`, so a whole-document editor replacement cannot race the next prompt being drafted
+   - If JetBrains reports a stale live buffer or stale file cache, compact fails closed before replacing the document or advancing the snapshot. Look for `visible_write_deferred_live_buffer_changed source=compact_exchange_direct_write`, resolve the IDE buffer by saving, discarding, or reloading it, then rerun the same compact command.
    - If a live template/CRDT session already has a bare `compact exchange` user directive in the diff, later write-back also forces `agent:exchange` replacement semantics so the checkpoint summary cannot silently append over old exchange content
    - Pass `--message "summary text"` to include a custom summary instead of the binary default session summary
+
+See [jb-cache-conflict.md](jb-cache-conflict.md) for the JetBrains File Cache Conflict split between normal response IPC recovery and Compact Exchange guarded direct-write recovery.

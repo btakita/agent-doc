@@ -88,8 +88,58 @@ binary-owned `agent-doc write --commit` path with a closed patch block.
 4. If commit/push completed but response patchback failed, provide a recovery command that appends the last assistant response to the target exchange boundary without rerunning the completed site work.
 5. Cover the recovery path with a test that preserves submodule discipline: site commit remains unchanged, parent pointer remains unchanged unless the recovered task doc commit requires a parent update.
 
+## Additional Evidence: Claude-skill console-only response + queue-consume divergence
+
+On 2026-06-02, on `tasks/agent-doc/agent-doc-bugs2.md` (Claude Code skill path, not
+Codex), the same class surfaced in two compounding shapes within one session:
+
+1. **Console-only response, no persistence command run.** A turn produced a full
+   status/hold response in the console and reported the turn complete, but never
+   piped the body through `finalize` / `write --commit`. The document was unchanged;
+   the response "did not exist." This is the Claude/skill analogue of the Codex
+   direct-writeback miss — the agent simply concludes without persisting, so the
+   existing Codex Stop-hook `committed_without_response_body` backstop never runs.
+
+2. **Persistence attempted but queue-consume diverged under live IPC.** A separate
+   `finalize --done <id>` cycle DID commit the `### Re:` body and reap the backlog
+   item, but the final queue-consume step failed
+   (`queue consume: snapshot queue state diverged from document queue`,
+   invariant `live_prompt_drift_after_preflight`) while the user was live-typing new
+   queue items (JB IPC listener active; a JB `File Cache Conflict` reverted the queue
+   to an older snapshot). The next preflight then hard-blocked on the now-orphaned
+   bare `[#id]` queue head (`open backlog item(s) exist only outside live
+   agent:backlog`), so **subsequent turns could not reach `finalize` at all** — new
+   responses had nowhere to land. `repair --apply-recovery` classified it
+   `sidecar_visible_drift`, committed the lossy working-tree side (dropped an answered
+   free-text queue line), and did not strike the consumed head; the head had to be
+   struck manually.
+
+## Additional Fix Plan (queue-consume / Claude-skill path)
+
+6. Add a Claude/skill-path "response produced but never persisted" detection: a
+   completed skill turn whose console response has no matching committed `### Re:`
+   in HEAD should be detectable at next-preflight / session-check, mirroring the
+   Codex `committed_without_response_body` guard.
+7. Make queue-consume divergence head-aware and non-blocking for the next turn: on
+   divergence, re-resolve the consumed head against the committed response and strike
+   it (`[#id]` -> `~[#id]~`) through the binary-owned commit boundary; never commit a
+   lossy working-tree side that drops sibling queue lines.
+8. Add an `agent-doc repair` / `finalize` sub-path that strikes a consumed orphaned
+   queue head when its referenced backlog item is already in `agent:done` / archived,
+   clearing the orphaned-backlog guard without a manual edit, and update that guard's
+   message to name the repair command.
+9. Make consume/divergence recovery IPC-listener aware: when a live listener is active,
+   push convergence (`converge_queue_auto`) before re-running consume; never require a
+   raw `git checkout` / sed-edit of a live-typed buffer.
+
+Relates to `#write-closeout-response-shape`, `#adoc-queue-ipc-buffer-divergence`,
+`#duplicate-response-after-commit`, and the JB `File Cache Conflict` snapshot-revert
+report queued alongside this item.
+
 ## Exit Criteria
 
 - A completed direct Codex `agent-doc <FILE>` turn cannot silently exit with a prompt-only exchange.
+- A completed Claude/skill `agent-doc <FILE>` turn cannot silently exit with a console-only response and no committed `### Re:` in HEAD.
 - The diagnostic distinguishes "work not done" from "work done but response patchback missing."
 - The recovery path writes the missing response into the original document boundary and does not duplicate commits or rerun side effects.
+- A queue-consume divergence cannot leave an orphaned bare `[#id]` head that hard-blocks the next turn's `finalize`; recovery is a single binary-owned command that strikes the consumed head without fighting a live IPC buffer.

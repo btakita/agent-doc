@@ -63,7 +63,7 @@ Reaped. Its fix stays fully specified in `plan-lazily-rs-queued-prompt-patchback
 Standing state unchanged: the remaining queue (`#lr-head-8`, `#lr-wire-9`, `#lr-actor-10`, `#run-gated-review-items`) needs binary access this pane doesn't have. I'll keep handling read-only audits / plan edits / git here; implementation+`make check`+finalize routes elsewhere. Nothing else requested this turn.
 Single change: you struck `do [#manual-queue-head-loss]` (now also reaped from backlog). Acknowledgment only — no directive this turn.
 **Closeout:** acknowledgment only; nothing to commit. Three plan edits from earlier turns still uncommitted and offered (say "commit it"). Session-doc response uncommitted (`finalize` gated).
-<!-- agent:boundary:7c17bcd9 -->
+<!-- agent:boundary:b1559ba5 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -108,7 +108,6 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 <!-- agent:backlog priority queue=append -->
 - [ ] [#lr-actor-10] Phase 10: Add GlobalConfigSlot + SessionRegistrySlot for ActorContext. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-wire-9] Phase 9: Wire RunContext into ops_log, template_io, patch, harness detection. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
-- [ ] [#lr-head-8] Phase 8: Add HeadContentSlot + SnapshotCommitStatusSlot for git show HEAD dedup. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#run-gated-review-items] [recommended] #agent-doc-bug feature 2026-06-02: gated/review items are not easily runnable. Enable running a gated item directly via `do [#id]` or by placing it in agent:queue, and focus the run to complete that gated item. If it can only be partially completed, extract a new follow-up task containing the conditions to complete it. If no work was done because preconditions were unmet, append a timestamp of the attempt to the item and ensure the item's preconditions are present in its description.
 <!-- /agent:backlog -->
 

@@ -95,14 +95,35 @@ Here's my response for the document (shaped for finalize whenever a toolchain-en
 2. **Hand to the owner pane** with toolchain access — the audit above pins the exact change (new `check_free_text_queue_head_resolution_guard`, wired at `session_check.rs:270`).
 
 I did not retry the declined commands or force unverified edits into the hot path. Your call on which path.
-<!-- agent:boundary:540d36b7 -->
+> **Queue prompt:**
+>
+> do [#lr-queue-response-miss]
+
+### Re: do #lr-queue-response-miss — step 2 shipped (explicit deferral proof) — opus-4-8
+
+Implemented and shipped the part that fixes the **reported symptom**.
+
+**Reported bug:** `agent-doc plan` chose `plan_backlog_only` (because of the `#agent-doc-bug` capture) and **silently deferred** the runnable lazily-rs queue head.
+
+**Fix (step 2, `src/plan.rs`):** new pure helper `plan_backlog_only_deferral_warning` — when `plan_backlog_only` is chosen but the prompt diff also carries runnable imperative directives (a `do [#id]` head, `build + push`, etc.), `plan` now emits an explicit warning naming the suppressed directive(s). Pure bug-capture turns (no imperative directive) stay quiet, so normal plan-only cycles are unchanged. 2 unit tests; `make check` green; both binaries rebuilt + installed. Submodule `4d0184e3`, pointer `cbeec61ce`.
+
+**Note on tracking:** the `#lr-queue-response-miss` backlog item was removed from the document during your live editing (it's no longer in backlog/review/done), so I did not mutate the backlog this cycle to avoid racing your edits. The remaining work is recorded here:
+
+- **step 3** — session-check guard: a *seen* free-text queue head must end the cycle with a committed response / binary-owned consume / explicit deferral reason (the item's stated core; needs careful design so a head that legitimately stays queued doesn't false-fire);
+- **step 4** — missed-response repair diagnostics → `write --commit`, not an empty child dispatch;
+- **step 5** — queue-preset coverage.
+
+If you want these tracked as a fresh backlog item, say so and I'll add `#lr-queue-response-miss-guard`; otherwise re-queue `do [#lr-queue-response-miss]` (re-add the item) and I'll continue from step 3.
+<!-- agent:boundary:72626a90 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 - ~If a turn is waiting for a subagent to complete before the task completes, block the session until the subagent completes. This is mostly a Claude issue. We need to prevent other tasks from running in the agent while the task waiting on the subagent is still running.~
 - ~Gated items in review are not easily runnable. Please enable the user to run gated items by `do [item-id]` or plating the item in the queue. Please focus the runs to complete the gated item. If the gated item can only be partially completed, extract a new task to complete which contains the conditions to complete the item. If no work was done due to preconditions not being met, add a timestamp of the attempts to the item. Ensure the preconditions are present in the gated item description.~
 - ~do [#nochange-after-stall]~
-- do [#lr-queue-response-miss]
+- ~do [#lr-queue-response-miss]~
+- `do ...` should finish gated items. Do not stall on gated items.
+- go on #lr-queue-response-miss
 - do [#nochange-after-stall-breadth]
 - do [#lr-queue-plan-deferral]
 - do [#lr-queue-repair-adopt]

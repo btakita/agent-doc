@@ -81,19 +81,37 @@ I can't safely implement this one right now, and the same is true for most of th
 **Action taken.** Gated the 7 blocked items (`--pending-gate`) so the auto-queue stops churning on them and they're tracked as blocked-on-concurrent-work. None of the dirty files were touched. `#lr-queue-plan-deferral` (plan.rs, clean) is left active as the next runnable head if you want to keep going.
 
 **Resume condition.** Once the other session commits `session_check.rs` / `graph.rs` / `write.rs` / `preflight.rs`, un-gate these and I'll implement them cleanly. If you'd rather not wait, the alternative is isolated worktrees with manual merge later — say the word and I'll take that route instead.
-<!-- agent:boundary:709b6411 -->
+> **User directive:**
+>
+> commit + push
+
+### Re: commit + push — agent-doc docs only — opus-4-8
+
+Done, scoped to your "agent-doc docs only" choice. Commit `58113b52d`, pushed `e49c03c0a..58113b52d` on `main`.
+
+**Included** (50 markdown files): instruction surfaces (`.claude/`, `.codex/`, `.cursor/`, `.opencode/` skill + runbooks, root `AGENTS.md`) with the new `baseline-drift` and `manual-job-packets` runbooks; all `tasks/agent-doc/` plan files; and task `.md`/`.done.md`/`.summary.md` docs.
+
+**Deliberately excluded:**
+- `tasks/dreamable/*` — the settlement agreement zip + signed release (sensitive legal; not publishing to the remote without explicit OK).
+- `.claude/scheduled_tasks.lock` — transient lock state.
+- `tasks/professional/equal-exchange/BrianTakita-sam-akkouche.pdf` — binary, outside the `.md` docs scope.
+- all `src/*` submodules — they hold other sessions' uncommitted work (notably the ~584-line `session_check.rs`/`graph.rs` set).
+- the active session docs (`agent-doc-bugs2.md`, owned by this finalize; `agent-doc-bugs.md`, possibly a concurrent session's live doc).
+
+The auto-queue head is still `do [#lr-queue-plan-deferral]` (the one clean/resumable item); I left it untouched since this turn's directive was the commit+push, not that item. Say the word to run it.
+<!-- agent:boundary:a35ff7a4 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 - ~do [#nochange-after-stall]~
 - ~do [#lr-queue-response-miss]~
-- do [#nochange-after-stall-breadth]
+- ~do [#nochange-after-stall-breadth]~
 - do [#lr-queue-plan-deferral]
-- do [#lr-queue-repair-adopt]
-- do [#lr-queue-patchback-miss]
-- do [#lr-head-8]
-- do [#lr-wire-9]
-- do [#lr-actor-10]
+- ~do [#lr-queue-repair-adopt]~
+- ~do [#lr-queue-patchback-miss]~
+- ~do [#lr-head-8]~
+- ~do [#lr-wire-9]~
+- ~do [#lr-actor-10]~
 <!-- /agent:queue -->
 ###
 <!--

@@ -230,11 +230,15 @@ That turns "49 overwhelming items" into **"2 things I do + 2 sittings you do."**
 
 **`#snrun` — audited, and I was wrong last cycle.** My "genuinely unbuilt" call came from a name-grep for "snrun"; the actual capability is **already implemented** under the route-hardening names. Interactive-shell-substate detection (`reverse-i-search`/`i-search`/clean-exit), a multi-source dispatch-start proof (`RoutedDispatchStartProof`: accepted / consumed / submitted / pane-state-change) and stage-specific diagnostics all exist and are tested. The only genuine remainder is the **live JB Run Agent Doc repro** (plan exit criterion 6) — operator live-verify, which folds into Path A (`#jkvs`). I did **not** fabricate hot-path changes to a live-verify-gated path. (One optional deterministic refinement remains: a dedicated "blocked in interactive substate" guard reason vs. generic busy — say the word if you want it.)
 
+I want `a dedicated "blocked in interactive substate" guard reason`.
+
 ### Re: option 2 — is `com.github.btakita.agentdoc` debug logging enough for Path B? — opus-4-8
 
 **No — not as-is.** That category logs only content **hashes + lengths** (`documentMutationDiagnosticUtil`: `pre=`/`post=` hashes, region lengths, char deltas) and IPC/dedup decisions. It never logs the actual text passed to `document.setText(result)`, which is exactly the "setText payload" the IPC-duplication items (`#ipcfullprompt-recur2`, `#wy0y`/`#6cmx`) need to pin the corruption shape.
 
 To make Path B capturable you need a one-line addition: a `LOG.debug` of `result` in `PatchWatcher.kt`'s `applyPatch` (~line 821, before `document.setText`), behind `LOG.isDebugEnabled`, then bump `pluginVersion` + reinstall the signed plugin. I've queued that as **#jb-settext-payload-log** so the capture session isn't wasted effort. Want me to make that one-line change + bump the plugin now? (The change is agent-doable; the reinstall + capture are yours at the keyboard.)
+
+Yes
 
 #### Heads-up for agent-loop itself
 This BREAKING change means a brand-new plain task `.md` here will now be refused until it opts in. Existing docs are fine (they carry `agent_doc_session`/`agent_doc_format`). If you want agent-loop to keep treating every `tasks/**/*.md` as a session automatically, add to `.agent-doc/config.toml`:
@@ -245,7 +249,29 @@ include = ["tasks/**/*.md"]
 ```
 
 Say the word and I'll add it.
-<!-- agent:boundary:52caf082 -->
+
+### Re: dedicated "blocked in interactive substate" guard reason — done — opus-4-8
+
+Shipped `#snrun`'s last deterministic piece. A dispatch-only `Run Agent Doc` reopen that's refused because the live pane is stuck in an interactive shell substate (`reverse-i-search` / history search) now fails closed with the **dedicated** `RoutedReopenGuardReason::BlockedInInteractiveSubstate` (`prompt_ready_barrier` FlowEvent) and a stage-specific message — "blocked in an interactive terminal substate (…), not a dispatch-ready composer" — instead of the generic `dispatch_only_busy_actor_not_ready`.
+
+- Pure helpers `is_interactive_shell_substate_reason` / `dispatch_only_blocked_guard_reason` (so the classification is unit-tested, not buried in route flow), wired at the dispatch-only fail-closed site that already computes the live blocker reason.
+- Regression `interactive_substate_gets_dedicated_guard_reason`; FlowCore route.rs `guard_` budget 7→12 (audited comment).
+- `make check` green; both binaries reinstalled. Shipped: submodule `12676120`, pointer `1a353909e`.
+- `#snrun`'s only remainder is now the **live JB repro** (operator, Path A).
+
+### Re: "Yes" — JB setText payload logging — done — opus-4-8
+
+Made the change (`#jb-settext-payload-log`) and built the plugin. `PatchWatcher.kt` now logs the **full `result` payload** before `document.setText` on both the `applyPatch.component` and `repositionBoundary` paths, behind `LOG.isDebugEnabled`. So enabling `#com.github.btakita.agentdoc` debug logging **now does** capture the exact setText payload the IPC-duplication family needs (before, it only logged hashes + lengths).
+
+**To use it for Path B (your keyboard):**
+1. Install `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.145-signed.zip` (Settings → Plugins → ⚙ → Install from Disk) and restart.
+2. `Help > Diagnostic Tools > Debug Log Settings` → add `#com.github.btakita.agentdoc`.
+3. Repro the typing-during-`finalize` corruption; the exact payload lands in `idea.log` as `[patch-watcher] setText payload (…)`.
+
+That's the capture that converts the `#wy0y`/`#6cmx` family from "verify" to "cure".
+
+Both shipped + pushed; `make check` green; plugin 0.2.145 built + signed. The remaining work on both items is operator-side (install + live repro).
+<!-- agent:boundary:7e95de8e -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
@@ -280,7 +306,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Review
  
 <!-- agent:review -->
-- [/] [#weqq] [recommended] #jb-settext-payload-log Path B enabler (answers the option-2 question): the com.github.btakita.agentdoc debug category logs only content hashes+lengths (documentMutationDiagnosticUtil), never the setText payload, so it is NOT sufficient to capture the exact setText payload the IPC-duplication family needs. Add a LOG.debug of the result payload in PatchWatcher.kt applyPatch (~line 821) before document.setText, behind LOG.isDebugEnabled; bump pluginVersion + reinstall signed. Unblocks #wy0y/#6cmx capture. Plan: tasks/agent-doc/plan-full-document-ipc-corruption-typing-prompt.md.
+- [/] [#weqq] [recommended] #jb-settext-payload-log IMPLEMENTED 2026-06-01 (submodule 12676120, JB plugin 0.2.145 built+signed): PatchWatcher.kt now logs the full result payload before document.setText on both applyPatch.component and repositionBoundary, behind LOG.isDebugEnabled, so enabling the com.github.btakita.agentdoc debug category captures the exact setText payload the IPC-duplication family needs (previously only hashes+lengths). GATED on operator: install build/distributions/agent-doc-jetbrains-0.2.145-signed.zip + restart, enable debug logging, then run the Path B capture (#wy0y/#6cmx). Plan: tasks/agent-doc/plan-full-document-ipc-corruption-typing-prompt.md.
 - [/] [#6qfn] [recommended] #optindocs-editor follow-up to #4a6p: wire the FFI agent_doc_is_session_document gate into JB SubmitAction.update (hide/disable Run Agent Doc for a non-opted-in .md) and the VS Code extension, then live-verify. Needs a JB pluginVersion bump + signed reinstall. Plan: tasks/agent-doc/plan-opt-in-agent-doc-documents.md.
 - [/] [#v819] Path A (#jkvs — after Step 0): one consolidated live busy-pane verification session to batch-close ~11 live-verify items: #t41j, #jb-busy-queue-deadlock-live-verify, #jb-run-agent-doc-busy-feedback-live-verify, #route-drain-all-surface-live-verify, #codex-owned-pane-stop-hook-live-verify, #codex-owned-pane-prompt-miss-followups (2b/3), #codex-final-response-live-verify, #recovery-drift-apply-live-verify, #jb-load-tmux-window-verify, #j0k8, #stash-pane-promote-on-focus.
 - [/] [#wy0y] Path B (#6cmx — after Step 0): one IPC/typing-corruption capture session with #com.github.btakita.agentdoc debug logging enabled to capture the setText payload, then repro #ipcfullprompt-recur2, #finalize-retry-ipc-response-duplication, #ipc-dup-tracking-double-merge, #adoc-queue-ipc-buffer-divergence, #duplicate-response-after-commit, #prompt-duplicated-while-typing, and the scaffold-dup set #zpc2 / #ipcaa-scaf / #submodule-response-commit-proof. Several convert from verify to one CURE commit once the payload is captured.
@@ -330,7 +356,7 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 - [/] [#duplicate-response-after-commit] Late-IPC reposition signal re-inserts already-committed response body into working tree, wrapped in duplicate boundary markers. Symptom: next preflight interrupts with "direct response patchback without agent-doc cycle"; agent-doc write --commit returns "empty response — nothing to write"; only manual Edit-based dedup recovers. Repro: tasks/dreamable/separation.md cycle after commit 231eafc83 on 2026-05-28. Plan: tasks/agent-doc/plan-duplicate-response-after-commit.md (recommend Option A — both detect over-application in session-check and make IPC reposition idempotent).
 - [/] [#prompt-duplicated-while-typing] [/] [#prompt-duplicated-while-typing] User prompt duplicated in the live editor while typing. PARTIAL FIX 1 (v0.34.0, submodule 2a6f60e5): prefix-agnostic append dedup (strip_user_prompt_prefix) for the ❯-prefix mismatch shape. PARTIAL FIX 2 (this cycle): L1 buffer-snapshot typing race — component::append_patch_already_present now recognizes when a synthesized patch carries an EARLIER keystroke-snapshot of the live region (per-line prefix alignment via patch_is_typing_snapshot_of) and no-ops instead of re-appending the divergent tail. Confirmed live in tasks/resume.md 2026-05-29: half-typed '- [#s93y]: Add to' snapshot vs live '...Add to resume' broke the old contains() substring check and re-appended the entire tail (close marker + Queue/Backlog/Done duplicated). Boundary 70bccf9b stayed intact and no new boundary was minted, ruling out the reposition path. Tests: append_patch_dedupes_midblock_typing_snapshot, append_patch_typing_snapshot_does_not_collapse_distinct_lines, append_with_boundary_does_not_duplicate_typing_snapshot. Both binaries built+installed; cdylib lib-installed for JB hot-reload. GATED on live re-verify (type a prompt into resume.md during an in-flight cycle). RESIDUAL: the exact editor-side full-tail concatenation downstream of the dedup miss was not statically traced — the dedup no-op short-circuits the append entirely so it should not surface, but confirm live. Plan: tasks/agent-doc/plan-prompt-duplicated-while-typing.md.
 - [/] [#queue-auto-no-continue] Queue auto trigger does not continue after finalize session-check warning about pending shadow items. Steps to reproduce: (1) Session document with queue_active=true, queue_trigger=auto, and multiple queued items. (2) finalize --stream completes cycle but session-check issues pending shadow warning for items outside live agent:backlog. (3) Queue consumes head item but auto trigger does not fire for next item. (4) agent-doc write --commit with --done reaps the item, queue reports 9 remaining but auto continues stop. Expected: queue auto should continue to next item after successful closeout. Actual: queue stops after first item. Session: tasks/software/tsift.md. agent-doc version: 0.34.0. The pending shadow warnings about items appearing both inside and outside agent:backlog may be blocking the auto-continue path.
-- [/] [#snrun] [recommended] AUDITED 2026-06-01: the deterministic core is ALREADY implemented in the route hardening (my earlier name-grep miss), not unbuilt — interactive shell substate detection (reverse-i-search/i-search/clean-exit in harness.rs dispatch_blocker_reason + protected_prompt_input_reason + session_actor_cmd codex_pane_in_shell_search_state C-g gate), multi-source dispatch-start proof (RoutedDispatchStartProof CommandAcceptedOnly/HookPromptMatched/HookStateAdvanced/PaneStateChanged) with stage-specific diagnostics (acceptance/consumption/submission/pane-state-change), plus reverse-i-search route regressions. Remaining = live JB Run Agent Doc repro (plan exit criterion 6), operator live-verify -> folds into Path A (#jkvs). Optional deterministic refinement still open: a dedicated blocked-in-interactive-substate guard reason distinct from generic busy. Plan: tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md.
+- [/] [#snrun] [recommended] IMPLEMENTED 2026-06-01 (submodule 12676120): the deterministic core was already present (interactive-substate detection + multi-source RoutedDispatchStartProof + stage diagnostics); this cycle added the dedicated RoutedReopenGuardReason::BlockedInInteractiveSubstate guard reason (prompt_ready_barrier FlowEvent) + stage-specific error on the dispatch-only fail-closed path, distinct from generic dispatch_only_busy_actor_not_ready. Pure helpers is_interactive_shell_substate_reason/dispatch_only_blocked_guard_reason; regression interactive_substate_gets_dedicated_guard_reason; FlowCore route.rs guard_ budget 7->12 (audited). make check green; binaries reinstalled. REMAINING = live JB Run Agent Doc repro (plan exit criterion 6), operator live-verify -> folds into Path A (#jkvs). Plan: tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

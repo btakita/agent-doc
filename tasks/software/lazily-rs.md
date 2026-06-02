@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 
@@ -209,7 +209,44 @@ Commits:
 - parent repo `8acae6f61` `chore: update lazily-rs pointer` created locally; I will push the parent after `agent-doc session-check` passes.
 
 Changed paths in lazily-rs: `Cargo.lock`, `README.md`, `SPEC.md`, `scripts/update-benchmark-results.py`, and `tests/spec_compliance.rs`. Confidence: high. Escalation: none.
-<!-- agent:boundary:1b31a8e9 -->
+
+### Re: CellHandle::set — gpt-5
+
+> **Queue prompt:**
+>
+> Should CellHandle::set(&ctx, value) be added to lazily-rs first? (Current API is Context::set_cell()): Yes
+
+
+Yes. I added `CellHandle::set(&ctx, value)` for the single-threaded `Context` API as an ergonomic alias over `ctx.set_cell(&cell, value)`.
+
+What changed:
+- Added `CellHandle<T>::set(&self, ctx: &Context, value: T)` in `src/cell.rs`.
+- Updated README usage and API docs to show `cell.set(&ctx, value)` while keeping `ctx.set_cell()` documented.
+- Updated SPEC to include the handle alias and its `PartialEq` invalidation semantics.
+- Added `cell_handle_set_updates_and_invalidates_dependents` coverage in `tests/spec_compliance.rs`.
+
+I deliberately kept this scoped to `Context` because `CellHandle` already had a `clear_dependents(&Context)` handle method, while supporting both `Context` and `ThreadSafeContext` under the exact same method name would require introducing a new public generic context trait. `ThreadSafeContext` continues to use `ctx.set_cell(&cell, value)`.
+
+Verification passed:
+- `cargo fmt`
+- targeted `cargo test cell_handle_set_updates_and_invalidates_dependents`
+- `python3 scripts/update-benchmark-results.py --check`
+- `cargo test`
+- `cargo test --features tokio`
+- `cargo test --features instrumentation`
+- `cargo test --features loom --test thread_safe_loom`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo build`
+- `cargo bench --features instrumentation --no-run`
+
+GitHub Actions evidence is unchanged: `gh workflow list` returned no workflows, `gh run list --workflow CI --limit 1` reported no `CI` workflow, and `gh run list --limit 5` returned no runs. `cargo metadata` again shows no installable package binary target, only the library, examples, tests, and benches.
+
+Commits:
+- `btakita/lazily-rs@ea2bf3e` `feat: add cell handle set alias` pushed to `origin/main`.
+- parent repo `d2a34db` `chore: update lazily-rs pointer` created locally; I will push the parent after `agent-doc session-check` passes.
+
+Changed paths in lazily-rs: `README.md`, `SPEC.md`, `src/cell.rs`, and `tests/spec_compliance.rs`. Confidence: high. Escalation: none.
+<!-- agent:boundary:245cc77a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -217,12 +254,7 @@ Changed paths in lazily-rs: `Cargo.lock`, `README.md`, `SPEC.md`, `scripts/updat
 
 ## Queue
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~[#lazyperf2]~
-- ~[#lazyperf3]~
-- ~[#lazyperf4]~
-- Should CellHandle::set(&ctx, value) be added to lazily-rs first? (Current API is Context::set_cell()): Yes
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

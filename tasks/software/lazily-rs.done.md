@@ -1,7 +1,23 @@
 # Agent Doc Completed Work
 
+- 2026-06-01 [#n12s] #ipc-corruption-live-repro-lazily-rs Logged as #zpc2 in agent-doc-bugs2.md backlog. Live repro of scaffold duplication during finalize --stream. Document manually repaired.
+- 2026-06-01 [#exfd] #effect-system Phase 4: Effect system — ctx.effect(|ctx| { ... }) with auto-tracking, scheduling, cleanup, and disposal
+- 2026-06-01 [#rx9y] #batch-updates ctx.batch(|ctx| { ... }) to defer invalidation until the batch completes
+- 2026-06-01 [#fzaf] #memo-guard Memoization guard — prevent unnecessary downstream cascade during invalidation when recomputed value equals prior value (slots are already lazy: invalidated only, recomputed on get())
+- 2026-06-01 [#dpzd] #api-ergonomics ctx.computed() alias and DX improvements
+- 2026-06-01 [#45rh] #release-publish Release + publish after effect system lands
+- 2026-06-01 [#thr-spec] #parallelism Specify the thread-safe contract for lazily-rs: API shape, Send/Sync bounds, lock/re-entrancy rules, single-threaded fast path compatibility, and parity/differences with lazily-zig's mutex-first design
+- 2026-06-01 [#thr-core] #parallelism Implement the thread-safe core after the spec: lock-backed context state, Send + Sync cached values and compute/effect callbacks, safe dependency tracking, and re-entrant user callback boundaries
+- 2026-06-01 [#thr-tests] #parallelism Add thread contention coverage: concurrent first get, concurrent set_cell, batch flush ordering, clear/dispose races, effect coalescing, and deadlock/regression checks modeled after lazily-zig thread_safe tests
+- 2026-06-01 [#tokio-sync] #tokio Add optional Tokio integration after thread safety is sound: async tests and examples that share the synchronous context across tokio::spawn/spawn_blocking without introducing async compute semantics
+- 2026-06-01 [#tokio-async] #tokio Design true async computations/effects only after #tokio-sync: in-flight future deduplication, cancellation, stale future completion, cleanup ordering, and Send vs LocalSet semantics
 - 2026-06-01 [#perf-bench] #performance Add a Criterion benchmark suite for Context and ThreadSafeContext covering cached reads, cold first get, dependency fan-out, memo equality suppression, effect flushing, batch storms, and threaded contention at 1/2/4/8/16 workers
 - 2026-06-01 [#perf-profile] #performance Add lightweight benchmark instrumentation for recompute counts, duplicate speculative computes, dependency edge churn, effect queue depth, allocations, and ThreadSafeContext lock wait/hold time
 - 2026-06-01 [#perf-layout] #performance Use benchmark results to optimize single-threaded Context storage and edge maintenance, starting with node storage locality and avoiding unnecessary HashSet/HashMap churn without changing public semantics
 - 2026-06-01 [#perf-thread-dedup] #performance Prototype ThreadSafeContext in-flight recompute deduplication so concurrent first get callers share one computation when benchmarks show duplicate work is material
 - 2026-06-01 [#perf-lock-eval] #performance Evaluate RwLock, sharded locks, or targeted CAS only after baseline data identifies lock contention, and require Loom/Shuttle safety models before adopting concurrency changes
+- 2026-06-01 [#perf-profile-baseline] #performance Run a full Criterion plus instrumentation baseline across cached reads, cold first get, fan-out, memo equality suppression, effect flushing, batch storms, and 1/2/4/8/16-worker contention; record recomputes, duplicate speculative computes, edge churn, effect queue depth, allocations, and lock wait/hold time
+- 2026-06-01 [#perf-contention-wait] #performance Use the baseline to decide whether ThreadSafeContext in-flight dedup should replace spin-yield waiting with a modeled Condvar or parking path; include Loom or Shuttle coverage before changing the mutex-first synchronization contract
+- 2026-06-01 [#perf-edge-diff] #performance If edge churn dominates fan-out or memo workloads, optimize dependency maintenance by diffing dependency sets and avoiding remove/re-add work that does not change graph semantics
+- 2026-06-01 [#perf-effect-queue] #performance If effect queue depth or scheduling churn dominates batch storms, optimize effect coalescing and flush bookkeeping without changing cleanup, disposal, or rerun ordering
+- 2026-06-01 [#perf-bench-regression] #performance Add a small benchmark-report workflow or script that compares saved Criterion baselines before and after performance patches so regressions are visible before release

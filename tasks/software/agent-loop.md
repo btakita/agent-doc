@@ -32,26 +32,12 @@ Operational task document for agent-loop workspace management.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/18c3ca3007b9c6c5bc21d81a0b9ff27f894487e97141f4cdafe2a9d12a4a19b1-20260527-144457.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/18c3ca3007b9c6c5bc21d81a0b9ff27f894487e97141f4cdafe2a9d12a4a19b1-20260602-151510.md`*
 
 Compacted content:
-- Archived 7 response topic(s): composable skills plan; #0b3x compose-skills implementation; composable-skills packaging; 4 more
+- Archived 1 response topic(s): recursive submodule commit + push
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/18c3ca30...
-recursively commit + push all uncommitted files in the submodule. Note some origins are not available anymore. Commit + push agent-loop.
-### Re: recursive submodule commit + push — opus-4-7
-
-Walked the submodule tree inside-out, committing and pushing each dirty repo:
-
-- `mail/mailboxes/lucas` → `Sync shared conversations` (100 files, +29478/-34) — pushed to `btakita/mailbox-lucas` `main`.
-- `mail` → `Bump lucas mailbox` — pushed to `btakita/mail` `main`.
-- `src/boost-client/src/astro-listings` → `Update .gitignore and node_modules lock` — pushed to `rberkes/astro-listings` `main`.
-- `src/boost-client` → `Bump astro-listings and update task notes` — pushed to `btakita/boost-client` `main`.
-- `src/equityfundingsource-dev` → already clean (`tmp/` is gitignored; foreach output was stale).
-- All other submodules (`src/agent-doc`, `src/agent-kit`, `src/corky`, `src/tmux-router`, `src/tsift`, `src/session-share`, etc.) were already clean — earlier `M` entries in the session-start snapshot reflected pointer bumps that prior cycles had already committed.
-- agent-loop superproject → `Bump mail and boost-client submodules` — pushed to `btakita/agent-loop` `main` (`088981fa2..83e5305e8`).
-
-No origin failures encountered this pass — all pushes succeeded. Session document closing through `finalize`.
-<!-- agent:boundary:aba27cbd -->
+<!-- agent:boundary:ab20fd43 -->
 <!-- /agent:exchange -->
 ###
 <!--

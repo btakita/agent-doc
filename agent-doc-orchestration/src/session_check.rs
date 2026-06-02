@@ -175,6 +175,14 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
         warnings: Vec::new(),
     };
     if matches!(report.status, SessionCheckStatus::Ok(_)) {
+        // Phase 6 (#lr-content-6): build one RunContext for the whole guard
+        // sweep. `set_doc_content` populates `DocContentCell` once; every guard
+        // that needs the document, its frontmatter, or its parsed components
+        // reads from the cached `FrontmatterSlot` / `ComponentsSlot` instead of
+        // independently re-reading + re-parsing the file (previously ~20 reads
+        // and ~10 parses per `inspect` call).
+        let rc = crate::graph::RunContext::new(file.to_path_buf());
+        rc.set_doc_content(std::fs::read_to_string(file)?);
         match check_dropped_exchange_prompt_guard(file)? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
@@ -183,7 +191,7 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
                 return Ok(report);
             }
         }
-        match check_dropped_queue_prompt_guard(file)? {
+        match check_dropped_queue_prompt_guard(file, &rc)? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -191,7 +199,7 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
                 return Ok(report);
             }
         }
-        match check_queue_response_contamination_guard(file)? {
+        match check_queue_response_contamination_guard(file, &rc)? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -199,11 +207,11 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
                 return Ok(report);
             }
         }
-        if let Some(message) = check_completed_pending_reap_guard(file)? {
+        if let Some(message) = check_completed_pending_reap_guard(file, &rc)? {
             report.status = SessionCheckStatus::Interrupted(message);
             return Ok(report);
         }
-        match check_shadow_backlog_guard(file)? {
+        match check_shadow_backlog_guard(file, &rc)? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -211,7 +219,7 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
                 return Ok(report);
             }
         }
-        match check_malformed_tracked_item_guard(file)? {
+        match check_malformed_tracked_item_guard(file, &rc)? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -219,7 +227,7 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
                 return Ok(report);
             }
         }
-        match check_backlog_replay_guard(file)? {
+        match check_backlog_replay_guard(file, &rc)? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -251,7 +259,7 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
                 return Ok(report);
             }
         }
-        match check_prompt_only_exchange_tail_guard(file)? {
+        match check_prompt_only_exchange_tail_guard(file, &rc)? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -260,14 +268,14 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
             }
         }
         for guard in [
-            check_pending_capture_guard(file)?,
-            check_pending_done_guard(file)?,
-            check_expect_done_or_gate_guard(file)?,
+            check_pending_capture_guard(file, &rc)?,
+            check_pending_done_guard(file, &rc)?,
+            check_expect_done_or_gate_guard(file, &rc)?,
             check_partial_closeout_state_guard(file)?,
-            check_blocked_closeout_followup_guard(file)?,
-            check_gated_phase_split_guard(file)?,
+            check_blocked_closeout_followup_guard(file, &rc)?,
+            check_gated_phase_split_guard(file, &rc)?,
             check_queue_audit_partial_completion_guard(file)?,
-            check_queue_head_removal_guard(file)?,
+            check_queue_head_removal_guard(file, &rc)?,
         ] {
             match guard {
                 GuardResult::None => {}
@@ -371,7 +379,10 @@ fn queue_contains_prompt_line(doc: &str, prompt: &str) -> bool {
 /// lifecycle outcome this cycle). A preserved queue line (reached HEAD's queue
 /// or exchange) or a consumed head clears the marker; a silently-deleted user
 /// queue edit fails closed.
-fn check_dropped_queue_prompt_guard(file: &Path) -> Result<GuardResult> {
+fn check_dropped_queue_prompt_guard(
+    file: &Path,
+    rc: &crate::graph::RunContext,
+) -> Result<GuardResult> {
     let Some(state) = crate::cycle_state::load(file)? else {
         return Ok(GuardResult::None);
     };
@@ -382,7 +393,8 @@ fn check_dropped_queue_prompt_guard(file: &Path) -> Result<GuardResult> {
     // HEAD: `content_ours` adoption preserves it on disk so it re-surfaces as a
     // next-cycle diff. The loss case is the edit vanishing from the visible
     // document, so check the current file (and HEAD as a committed fallback).
-    let visible = std::fs::read_to_string(file).unwrap_or_default();
+    // Phase 6 (#lr-content-6): cached document content via `DocContentCell`.
+    let visible = rc.doc_content();
     let head = crate::git::show_head(file)?.unwrap_or_default();
     let resolved_ids = crate::cycle_state::resolved_pending_ids(file)?;
     let still_missing: Vec<String> = state
@@ -469,11 +481,13 @@ fn is_queue_directive_prompt(text: &str) -> bool {
 /// (copied from a `### Re:` body) to `agent:queue auto`. Detect a free-text
 /// queue prompt whose text appears inside an assistant response body and fail
 /// closed naming the contaminating candidate.
-fn check_queue_response_contamination_guard(file: &Path) -> Result<GuardResult> {
-    let content = std::fs::read_to_string(file)?;
-    let Ok(components) = crate::component::parse(&content) else {
-        return Ok(GuardResult::None);
-    };
+fn check_queue_response_contamination_guard(
+    file: &Path,
+    rc: &crate::graph::RunContext,
+) -> Result<GuardResult> {
+    // Phase 6 (#lr-content-6): cached content + parsed components.
+    let content = rc.doc_content();
+    let components = rc.components();
     let Some(queue) = components.iter().find(|c| c.name == "queue") else {
         return Ok(GuardResult::None);
     };
@@ -570,13 +584,15 @@ fn check_dropped_exchange_prompt_guard(file: &Path) -> Result<GuardResult> {
     )))
 }
 
-fn check_completed_pending_reap_guard(file: &Path) -> Result<Option<String>> {
-    let content = std::fs::read_to_string(file)?;
-    let Ok(components) = crate::component::parse(&content) else {
-        return Ok(None);
-    };
+fn check_completed_pending_reap_guard(
+    _file: &Path,
+    rc: &crate::graph::RunContext,
+) -> Result<Option<String>> {
+    // Phase 6 (#lr-content-6): cached content + parsed components.
+    let content = rc.doc_content();
+    let components = rc.components();
     let completed: Vec<crate::pending::PendingItem> = components
-        .into_iter()
+        .iter()
         .filter(|component| is_tracked_work_component(&component.name))
         .flat_map(|component| completed_pending_items(component.content(&content)))
         .collect();
@@ -889,8 +905,12 @@ fn check_parent_submodule_pointer_guard(file: &Path) -> Result<GuardResult> {
     Ok(GuardResult::Error(msg))
 }
 
-fn check_prompt_only_exchange_tail_guard(file: &Path) -> Result<GuardResult> {
-    let content = std::fs::read_to_string(file)?;
+fn check_prompt_only_exchange_tail_guard(
+    file: &Path,
+    rc: &crate::graph::RunContext,
+) -> Result<GuardResult> {
+    // Phase 6 (#lr-content-6): cached document content.
+    let content = rc.doc_content();
     let Some(prompt) = prompt_only_exchange_tail(&content) else {
         return Ok(GuardResult::None);
     };
@@ -1027,8 +1047,12 @@ pub fn detect_uncommitted_closeout_drift(file: &Path) -> Result<Option<String>> 
     }
 }
 
-fn check_shadow_backlog_guard(file: &Path) -> Result<GuardResult> {
-    let content = std::fs::read_to_string(file)?;
+fn check_shadow_backlog_guard(
+    _file: &Path,
+    rc: &crate::graph::RunContext,
+) -> Result<GuardResult> {
+    // Phase 6 (#lr-content-6): cached document content.
+    let content = rc.doc_content();
     let report = crate::pending::detect_shadow_open_items(&content)?;
     if !report.shadow_only.is_empty() {
         return Ok(GuardResult::Error(format!(
@@ -1053,8 +1077,14 @@ fn format_shadow_refs(items: &[crate::pending::ShadowPendingItem]) -> String {
         .join(", ")
 }
 
-fn check_malformed_tracked_item_guard(file: &Path) -> Result<GuardResult> {
-    let refs = malformed_tracked_item_refs(file, None)?;
+fn check_malformed_tracked_item_guard(
+    _file: &Path,
+    rc: &crate::graph::RunContext,
+) -> Result<GuardResult> {
+    // Phase 6 (#lr-content-6): cached content + parsed components.
+    let content = rc.doc_content();
+    let components = rc.components();
+    let refs = malformed_tracked_item_refs_in(&content, &components, None);
     if refs.is_empty() {
         return Ok(GuardResult::None);
     }
@@ -1070,12 +1100,28 @@ pub fn malformed_tracked_item_refs(
     let Ok(components) = crate::component::parse(&content) else {
         return Ok(Vec::new());
     };
-    let malformed = components
-        .into_iter()
+    Ok(malformed_tracked_item_refs_in(
+        &content,
+        &components,
+        completed_by_response,
+    ))
+}
+
+/// Shared malformed-item detection over already-read content + parsed
+/// components. Phase 6 (#lr-content-6) lets `inspect`'s guard read these from
+/// the cached graph slots while external callers still pass a freshly read
+/// document.
+fn malformed_tracked_item_refs_in(
+    content: &str,
+    components: &[crate::component::Component],
+    completed_by_response: Option<&str>,
+) -> Vec<String> {
+    components
+        .iter()
         .filter(|component| is_tracked_work_component(&component.name))
         .flat_map(|component| {
             let name = component.name.clone();
-            crate::pending::detect_malformed_item_lines(component.content(&content))
+            crate::pending::detect_malformed_item_lines(component.content(content))
                 .into_iter()
                 .map(move |item| (name.clone(), item))
         })
@@ -1085,8 +1131,7 @@ pub fn malformed_tracked_item_refs(
                 .unwrap_or(true)
         })
         .map(|(name, item)| format!("{} {}", name, item.reference()))
-        .collect::<Vec<_>>();
-    Ok(malformed)
+        .collect::<Vec<_>>()
 }
 
 pub fn malformed_tracked_item_message(refs: &[String]) -> String {
@@ -1096,8 +1141,12 @@ pub fn malformed_tracked_item_message(refs: &[String]) -> String {
     )
 }
 
-fn check_backlog_replay_guard(file: &Path) -> Result<GuardResult> {
-    let current_content = std::fs::read_to_string(file)?;
+fn check_backlog_replay_guard(
+    file: &Path,
+    rc: &crate::graph::RunContext,
+) -> Result<GuardResult> {
+    // Phase 6 (#lr-content-6): cached document content.
+    let current_content = rc.doc_content();
 
     let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
     let hash = crate::snapshot::doc_hash(&canonical).unwrap_or_default();
@@ -1492,8 +1541,12 @@ fn detect_duplicate_response_patchback(file: &Path) -> Result<Option<String>> {
     Ok(crate::dedupe::first_duplicate_response_heading(&content))
 }
 
-fn check_pending_capture_guard(file: &Path) -> Result<GuardResult> {
-    let mode = resolve_pending_capture_guard_mode(file)?;
+fn check_pending_capture_guard(
+    file: &Path,
+    rc: &crate::graph::RunContext,
+) -> Result<GuardResult> {
+    // Phase 6 (#lr-content-6): resolve guard mode from the cached frontmatter slot.
+    let mode = resolve_pending_capture_guard_mode_with_context(file, rc)?;
     if mode == crate::frontmatter::PendingCaptureGuardMode::Off {
         return Ok(GuardResult::None);
     }
@@ -1630,11 +1683,14 @@ pub fn resolve_pending_capture_guard_mode(
 }
 
 pub fn resolve_pending_capture_guard_mode_with_context(
-    file: &Path,
+    _file: &Path,
     rc: &crate::graph::RunContext,
 ) -> Result<crate::frontmatter::PendingCaptureGuardMode> {
-    let content = std::fs::read_to_string(file)?;
-    let (fm, _) = crate::frontmatter::parse(&content)?;
+    // Phase 6 (#lr-content-6): read frontmatter from the cached `FrontmatterSlot`
+    // instead of re-reading + re-parsing the document. The slot already parsed
+    // `DocContentCell` (set once per inspect cycle); these guard-mode fields are
+    // SSH-resolution-independent so the resolved value is identical.
+    let fm = rc.frontmatter();
     if let Some(mode) = fm.pending_capture_guard {
         return Ok(mode);
     }
@@ -1669,11 +1725,12 @@ pub fn resolve_pending_done_guard_mode(
 }
 
 pub fn resolve_pending_done_guard_mode_with_context(
-    file: &Path,
+    _file: &Path,
     rc: &crate::graph::RunContext,
 ) -> Result<crate::frontmatter::PendingCaptureGuardMode> {
-    let content = std::fs::read_to_string(file)?;
-    let (fm, _) = crate::frontmatter::parse(&content)?;
+    // Phase 6 (#lr-content-6): frontmatter from the cached slot, project config
+    // from the cached `ProjectConfigSlot`.
+    let fm = rc.frontmatter();
     if let Some(mode) = fm.pending_done_guard {
         return Ok(mode);
     }
@@ -1708,11 +1765,11 @@ pub fn resolve_review_done_guard_mode(
 }
 
 pub fn resolve_review_done_guard_mode_with_context(
-    file: &Path,
+    _file: &Path,
     rc: &crate::graph::RunContext,
 ) -> Result<crate::frontmatter::PendingCaptureGuardMode> {
-    let content = std::fs::read_to_string(file)?;
-    let (fm, _) = crate::frontmatter::parse(&content)?;
+    // Phase 6 (#lr-content-6): cached frontmatter + project config slots.
+    let fm = rc.frontmatter();
     if let Some(mode) = fm.review_done_guard {
         return Ok(mode);
     }
@@ -1735,19 +1792,23 @@ pub fn resolve_auto_done(file: &Path) -> Result<bool> {
 }
 
 pub fn resolve_auto_done_with_context(
-    file: &Path,
+    _file: &Path,
     rc: &crate::graph::RunContext,
 ) -> Result<bool> {
-    let content = std::fs::read_to_string(file)?;
-    let (fm, _) = crate::frontmatter::parse(&content)?;
+    // Phase 6 (#lr-content-6): cached frontmatter + project config slots.
+    let fm = rc.frontmatter();
     if let Some(enabled) = fm.auto_done {
         return Ok(enabled);
     }
     Ok(rc.project_config().guards.auto_done.unwrap_or(false))
 }
 
-fn check_pending_done_guard(file: &Path) -> Result<GuardResult> {
-    let mode = resolve_pending_done_guard_mode(file)?;
+fn check_pending_done_guard(
+    file: &Path,
+    rc: &crate::graph::RunContext,
+) -> Result<GuardResult> {
+    // Phase 6 (#lr-content-6): resolve guard mode from the cached frontmatter slot.
+    let mode = resolve_pending_done_guard_mode_with_context(file, rc)?;
     if mode == crate::frontmatter::PendingCaptureGuardMode::Off {
         return Ok(GuardResult::None);
     }
@@ -2211,8 +2272,12 @@ fn open_backlog_ids(file: &Path) -> Result<Vec<String>> {
 /// response (queue cleared, status updated) but the target id is still open in
 /// `agent:backlog` and was not recorded as done / kept-open / reaped this cycle,
 /// fail closed so the directive cannot silently leave its target `[ ]`.
-fn check_expect_done_or_gate_guard(file: &Path) -> Result<GuardResult> {
-    let mode = resolve_pending_done_guard_mode(file)?;
+fn check_expect_done_or_gate_guard(
+    file: &Path,
+    rc: &crate::graph::RunContext,
+) -> Result<GuardResult> {
+    // Phase 6 (#lr-content-6): resolve guard mode from the cached frontmatter slot.
+    let mode = resolve_pending_done_guard_mode_with_context(file, rc)?;
     if mode == crate::frontmatter::PendingCaptureGuardMode::Off {
         return Ok(GuardResult::None);
     }
@@ -2347,8 +2412,12 @@ fn committed_queue_head_ids(content: &str) -> Vec<String> {
 /// cycle never targeted it, fail closed and name each lost id so the queue can
 /// be restored. Suppress an intentional user removal with
 /// `<!-- no-queue-removal-guard -->`.
-fn check_queue_head_removal_guard(file: &Path) -> Result<GuardResult> {
-    let mode = resolve_pending_done_guard_mode(file)?;
+fn check_queue_head_removal_guard(
+    file: &Path,
+    rc: &crate::graph::RunContext,
+) -> Result<GuardResult> {
+    // Phase 6 (#lr-content-6): resolve guard mode from the cached frontmatter slot.
+    let mode = resolve_pending_done_guard_mode_with_context(file, rc)?;
     if mode == crate::frontmatter::PendingCaptureGuardMode::Off {
         return Ok(GuardResult::None);
     }
@@ -2367,7 +2436,8 @@ fn check_queue_head_removal_guard(file: &Path) -> Result<GuardResult> {
     if recorded_ids.is_empty() {
         return Ok(GuardResult::None);
     }
-    let content = std::fs::read_to_string(file)?;
+    // Phase 6 (#lr-content-6): cached document content.
+    let content = rc.doc_content();
     // Explicit user removal already reconciled — do not second-guess it.
     if content.contains("<!-- no-queue-removal-guard -->") {
         return Ok(GuardResult::None);
@@ -2698,8 +2768,12 @@ fn open_review_ids(file: &Path) -> Result<std::collections::HashSet<String>> {
 /// (`--pending-edit <id>=...`), adding a new follow-up item (`--pending-add*`),
 /// or an explicit no-follow-up justification phrase in the response. A
 /// `<!-- no-blocked-followup-guard -->` marker also suppresses it.
-fn check_blocked_closeout_followup_guard(file: &Path) -> Result<GuardResult> {
-    let mode = resolve_pending_done_guard_mode(file)?;
+fn check_blocked_closeout_followup_guard(
+    file: &Path,
+    rc: &crate::graph::RunContext,
+) -> Result<GuardResult> {
+    // Phase 6 (#lr-content-6): resolve guard mode from the cached frontmatter slot.
+    let mode = resolve_pending_done_guard_mode_with_context(file, rc)?;
     if mode == crate::frontmatter::PendingCaptureGuardMode::Off {
         return Ok(GuardResult::None);
     }
@@ -2849,7 +2923,10 @@ fn check_blocked_closeout_followup_guard(file: &Path) -> Result<GuardResult> {
 ///
 /// Warn-first advisory only — it never blocks closeout. Suppressible via a
 /// `<!-- no-gated-phase-split-guard -->` response marker.
-fn check_gated_phase_split_guard(file: &Path) -> Result<GuardResult> {
+fn check_gated_phase_split_guard(
+    file: &Path,
+    rc: &crate::graph::RunContext,
+) -> Result<GuardResult> {
     let Some(state) = crate::cycle_state::load(file)? else {
         return Ok(GuardResult::None);
     };
@@ -2891,12 +2968,11 @@ fn check_gated_phase_split_guard(file: &Path) -> Result<GuardResult> {
         .filter(|id| !id.is_empty())
         .collect();
 
-    let content = std::fs::read_to_string(file)?;
-    let Ok(components) = crate::component::parse(&content) else {
-        return Ok(GuardResult::None);
-    };
+    // Phase 6 (#lr-content-6): cached content + parsed components.
+    let content = rc.doc_content();
+    let components = rc.components();
     let mut flagged: Vec<String> = Vec::new();
-    for component in &components {
+    for component in components.iter() {
         let trackable = crate::component::is_backlog_component(&component.name)
             || crate::component::is_review_component(&component.name);
         if !trackable {
@@ -3881,6 +3957,83 @@ mod tests {
     fn inspect_with_warnings(file: &std::path::Path) -> Result<SessionCheckReport> {
         let _process_global_lock = crate::test_support::env_lock();
         super::inspect_with_warnings(file)
+    }
+
+    /// Phase 6 (#lr-content-6): build a `RunContext` whose `DocContentCell` holds
+    /// the file's current content, mirroring how `inspect_with_warnings` shares
+    /// one context across the guard sweep.
+    fn test_rc(file: &std::path::Path) -> crate::graph::RunContext {
+        let rc = crate::graph::RunContext::new(file.to_path_buf());
+        rc.set_doc_content(std::fs::read_to_string(file).unwrap_or_default());
+        rc
+    }
+
+    // Phase 6 (#lr-content-6): test-module wrappers that supply the shared
+    // `RunContext` the guards now require, so existing single-arg call sites keep
+    // working (same shadowing pattern as the `inspect` wrappers above).
+    fn check_blocked_closeout_followup_guard(file: &std::path::Path) -> Result<GuardResult> {
+        super::check_blocked_closeout_followup_guard(file, &test_rc(file))
+    }
+    fn check_gated_phase_split_guard(file: &std::path::Path) -> Result<GuardResult> {
+        super::check_gated_phase_split_guard(file, &test_rc(file))
+    }
+    fn check_expect_done_or_gate_guard(file: &std::path::Path) -> Result<GuardResult> {
+        super::check_expect_done_or_gate_guard(file, &test_rc(file))
+    }
+    fn check_queue_response_contamination_guard(file: &std::path::Path) -> Result<GuardResult> {
+        super::check_queue_response_contamination_guard(file, &test_rc(file))
+    }
+
+    /// Phase 6 (#lr-content-6): the `_with_context` guard-mode resolvers read
+    /// frontmatter from the cached `FrontmatterSlot` (populated once via
+    /// `set_doc_content`) instead of re-reading the file. Proven by resolving a
+    /// guard mode against a path that does not exist on disk — only the slot
+    /// content can supply the value.
+    #[test]
+    fn phase6_guard_mode_resolves_from_frontmatter_slot_not_file() {
+        let missing = std::path::Path::new("/nonexistent/phase6-content-slot.md");
+
+        let rc = crate::graph::RunContext::new(missing.to_path_buf());
+        rc.set_doc_content(
+            "---\nagent_doc_session: test\npending_done_guard: strict\n---\n\nBody\n".to_string(),
+        );
+        assert_eq!(
+            resolve_pending_done_guard_mode_with_context(missing, &rc).unwrap(),
+            crate::frontmatter::PendingCaptureGuardMode::Strict,
+        );
+
+        let rc_off = crate::graph::RunContext::new(missing.to_path_buf());
+        rc_off.set_doc_content(
+            "---\nagent_doc_session: test\npending_done_guard: off\n---\n\nBody\n".to_string(),
+        );
+        assert_eq!(
+            resolve_pending_done_guard_mode_with_context(missing, &rc_off).unwrap(),
+            crate::frontmatter::PendingCaptureGuardMode::Off,
+        );
+    }
+
+    /// Phase 6 (#lr-content-6): the shared `ComponentsSlot` parses the same
+    /// `DocContentCell` the guards read, so component offsets stay consistent
+    /// with `doc_content()` and the slot is cached (parsed once).
+    #[test]
+    fn phase6_components_slot_matches_doc_content() {
+        let missing = std::path::Path::new("/nonexistent/phase6-components.md");
+        let content =
+            "---\nagent_doc_session: test\n---\n\n<!-- agent:exchange -->\nhi\n<!-- /agent:exchange -->\n"
+                .to_string();
+        let rc = crate::graph::RunContext::new(missing.to_path_buf());
+        rc.set_doc_content(content.clone());
+
+        let doc = rc.doc_content();
+        assert_eq!(doc, content);
+        let components = rc.components();
+        let exchange = components
+            .iter()
+            .find(|c| c.name == "exchange")
+            .expect("exchange component parsed from the cached slot");
+        // Offsets index the same string `doc_content()` returns.
+        assert!(doc[exchange.open_end..exchange.close_start].contains("hi"));
+        assert!(rc.is_components_cached());
     }
 
     struct EnvGuard {

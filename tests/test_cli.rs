@@ -304,7 +304,14 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // regression test-fn names for `check_queue_head_removal_guard` (its
         // `resolve_pending_done_guard_mode` reuse + `queue_head_removal_guard_fired`
         // ops diagnostic are already counted in the #lr-config-3 line above).
-        ("agent-doc-orchestration/src/session_check.rs", "guard_") => 72,
+        // +3 (#lr-content-6): the Phase 6 regression that proves the guard-mode
+        // resolvers read from the cached `FrontmatterSlot` — the
+        // `phase6_guard_mode_resolves_from_frontmatter_slot_not_file` test-fn name
+        // plus its two `resolve_pending_done_guard_mode_with_context` call sites.
+        // The guard sweep converting `check_pending_*` / `check_expect_*` /
+        // `check_blocked_*` / `check_queue_head_removal_guard` over to the
+        // `_with_context` resolvers is a 1:1 token-for-token swap (no net change).
+        ("agent-doc-orchestration/src/session_check.rs", "guard_") => 75,
         ("agent-doc-orchestration/src/write.rs", "guard_") => 70,
         // +1 for the audited `bare_write_escalated_to_commit ... reason=response_body_placed`
         // ops_log diagnostic on the #bare-write-captured-uncommitted escalation path.

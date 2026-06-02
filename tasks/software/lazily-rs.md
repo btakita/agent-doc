@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 
@@ -60,7 +60,15 @@ Verification:
 - `gh run list --workflow CI --limit 1` reported no existing remote workflow named `CI`; expected before this new workflow is pushed, and there was no existing lazily-rs CI/tmux leg to inspect.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:86e7ec99 -->
+
+### Re: Add a gh action for CI on lazily-rs. — gpt-5
+
+Complete. Added the lazily-rs GitHub Actions CI workflow in `src/lazily-rs/.github/workflows/ci.yml`, committed it in the submodule as `81ca43c`, and committed the parent submodule pointer update as `5fcc6c09a`.
+
+Verification remained green: formatting, strict clippy, all-targets/all-features build, default tests, Tokio feature tests, and loom model tests all passed locally. `make check` is not defined in the lazily-rs submodule, and `gh run list --workflow CI --limit 1` found no existing remote CI workflow yet, which is expected before this new workflow is pushed.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:2a879a13 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -68,8 +76,7 @@ Confidence: high. Escalation: none.
 
 ## Queue
 
-<!-- agent:queue auto -->
-- Add a gh action for CI on lazily-rs.
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

@@ -1232,14 +1232,37 @@ fn current_child_prompt_visible(
     harness: &crate::harness::HarnessConfig,
 ) -> bool {
     let output = child_output_for_detection(shared);
-    if harness.binary == "opencode" && harness.is_idle_chrome_only_output(&output) {
+    child_output_prompt_visible(harness, &output)
+}
+
+fn child_output_prompt_visible(harness: &crate::harness::HarnessConfig, output: &str) -> bool {
+    if harness.binary == "opencode" && harness.is_idle_chrome_only_output(output) {
         return true;
     }
-    let Some(line) = harness.last_prompt_candidate(&output) else {
+    let Some(line) = harness.last_prompt_candidate(output) else {
         return false;
     };
     let stripped = crate::prompt::strip_ansi(&line);
     harness.matches_prompt(stripped.trim())
+}
+
+fn idle_queue_prompt_visible(
+    shared: &SupervisorShared,
+    harness: &crate::harness::HarnessConfig,
+) -> bool {
+    let output = child_output_for_detection(shared);
+    if harness.dispatch_blocker_reason(&output).is_some() {
+        return false;
+    }
+    if shared
+        .actor_state
+        .lock()
+        .unwrap()
+        .is_some_and(|state| state == crate::session_actor::ActorState::Ready)
+    {
+        return true;
+    }
+    child_output_prompt_visible(harness, &output)
 }
 
 fn opencode_permission_prompt_active(shared: &SupervisorShared) -> bool {
@@ -1489,7 +1512,7 @@ fn spawn_idle_queue_watch_thread(
                     continue;
                 }
                 let active_head = idle_watch_active_queue_head(&path);
-                let prompt_visible = current_child_prompt_visible(&shared, &harness);
+                let prompt_visible = idle_queue_prompt_visible(&shared, &harness);
                 match idle_queue_drain_decision(
                     prompt_visible,
                     active_head.as_deref(),
@@ -5629,6 +5652,45 @@ Done.
             .as_bytes(),
         );
         assert!(current_child_prompt_visible(&shared, &harness));
+    }
+
+    #[test]
+    fn idle_queue_prompt_visible_trusts_ready_actor_over_stale_renderer_tail() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = crate::harness::HarnessConfig::claude();
+        *shared.actor_state.lock().unwrap() = Some(crate::session_actor::ActorState::Ready);
+        record_recent_output(&shared, b"turn committed, renderer tail has no composer\n");
+
+        assert!(
+            !current_child_prompt_visible(&shared, &harness),
+            "stale output alone should not prove an idle composer"
+        );
+        assert!(
+            idle_queue_prompt_visible(&shared, &harness),
+            "the supervisor's ready actor state should let the idle queue drain"
+        );
+    }
+
+    #[test]
+    fn idle_queue_prompt_visible_keeps_blocker_over_ready_actor() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = crate::harness::HarnessConfig::claude();
+        *shared.actor_state.lock().unwrap() = Some(crate::session_actor::ActorState::Ready);
+        record_recent_output(
+            &shared,
+            concat!(
+                "✶ Generating… (3s · esc to interrupt)\n",
+                "❯\n",
+                "  Opus 4.8 ctx:40% ~/work/btakita/agent-loop main brian@host\n",
+                "  ⏵⏵ bypass permissions on · 1 shell\n",
+            )
+            .as_bytes(),
+        );
+
+        assert!(
+            !idle_queue_prompt_visible(&shared, &harness),
+            "active-turn blockers must win over a stale ready actor state"
+        );
     }
 
     #[test]

@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -103,7 +103,7 @@ Verification:
 ### Re: #mdsectionedits deferred — gpt-5
 
 No implementation was started for `#mdsectionedits` in this cycle. It remains the next queued backlog item; this closeout only repairs the binary-owned boundary after completing and reaping `#mdsectionspans`.
-<!-- agent:boundary:baad7415 -->
+<!-- agent:boundary:81d954da -->
 <!-- /agent:exchange -->
 ###
 <!--

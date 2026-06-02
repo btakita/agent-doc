@@ -65,7 +65,38 @@ The bug shape is a foreign prompt that *was* answered this turn, and `classify_p
 - `make check` clean (clippy `-D warnings`, `agent-doc-orchestration` 2159, `test_cli` 69, `finalize_integration` 52); both binaries rebuilt (v0.34.0).
 
 Next auto-queue head is `#lr-cycle-7` (Phase 7). Note: you added a new tail item — "Add a preset attribute to `agent:queue` … free-text prompt that applies `prompt_presets`" — it's preserved in the queue and will surface after the lazily-rs phases.
-<!-- agent:boundary:1d34ca06 -->
+
+### Re: #lr-cycle-7 — Phase 7: CycleStateSlot + SnapshotContentSlot — opus-4-8
+
+> **Queue prompt:**
+>
+> [#lr-cycle-7]
+
+
+Landed Phase 7 of the lazily-rs integration (submodule `1f945a85`), bounded-increment scope as agreed.
+
+#### What changed
+
+`graph.rs` gains two cached slots so the per-cycle re-reads of cycle state and snapshot content collapse to one load each per context lifetime:
+
+- **`CycleStateSlot`** (`Option<Arc<CycleState>>`) — loads the cycle-state JSON once; `None` when no sidecar exists.
+- **`SnapshotContentSlot`** (`Option<Arc<String>>`) — loads the snapshot (under flock) once.
+- Accessors `cycle_state()` / `snapshot_content()`, `invalidate_*` methods (clear after a save/delete), and `is_*_cached` flags.
+- A real load error is surfaced to stderr (never swallowed, per the crate's no-silent-failure rule); a missing sidecar is the normal `None`.
+
+`DocHashSlot` and the snapshot-path accessors (`snapshot_path_for`, `lock_path_for`, `baseline_path_for`, `pending_path_for`) already existed from earlier phases.
+
+#### Scope boundary
+
+This phase lands the **slot infrastructure + tests** — the plan's stated Phase 7 verification ("new slot tests pass; existing tests unchanged"). The **broad threading** of `RunContext` into the 120+ `cycle_state::load` and 160+ `snapshot::load` call sites is the explicit job of **Phase 9 (`#lr-wire-9`)**; doing it here would be a 280+-site change and the `cycle_state` path is mutation-heavy (caching across an `inspect` sweep that also mutates state is unsafe without per-mutation invalidation). Keeping that out of Phase 7 matches the bounded-increment plan.
+
+#### Verification
+
+- 3 `graph` regressions: snapshot loads + caches; `None` when absent; cycle state `None` until created, then reloads on `invalidate_cycle_state`.
+- `make check` green (clippy `-D warnings`, `agent-doc-orchestration` 2162, `test_cli` 69, sim-medium, version-sync); both binaries rebuilt (v0.34.0).
+
+Next head is `#lr-cycle-8`… actually `#write-closeout-response-shape` is now queued ahead of `#lr-head-8` (you added it mid-cycle), so that's the next head. You also queued a JB `/clear`-while-busy report and the `agent:queue` preset-attribute request — all preserved behind it.
+<!-- agent:boundary:18f6256d -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -73,10 +104,15 @@ preset #spec-test-build-install-commit-push
 - ~do [#queue-head-struck-on-foreign-exchange-answer]~
 - ~[#lr-content-6]~
 - ~[#queue-head-struck-on-foreign-exchange-answer]~
-- [#lr-cycle-7]
+- ~[#lr-cycle-7]~
+- [#write-closeout-response-shape]
+- Should CellHandle::set(&ctx, value) be added to lazily-rs first? (Current API is Context::set_cell()): Yes
+  Should the graph be per-file (one context per tracked document) or per-process (one context with file-keyed cells)?
+  How to handle config hot-reload in long-lived ActorContext — file watcher on .agent-doc/config.toml or clear on next cycle?
 - [#lr-head-8]
 - [#lr-wire-9]
 - [#lr-actor-10]
+- JB `Clear Session Context` on monsterrodholders.md presented me with `Interrupt and Clear`. I applied `Interrupt and Clear` and the Codex session closed with the supervisor presenting Enter to restart or q to quit. I Pressed enter, Codex restarted and I saw an error `'/clear' is disabled while a task is in progress.`.
 - Add a preset attribute to agent:queue, where the value can be a free-text prompt that correctly applies `prompt_presets`.
 <!-- /agent:queue -->
 ###
@@ -90,7 +126,7 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Backlog
 
 <!-- agent:backlog priority queue=append -->
-- [ ] [#lr-cycle-7] Phase 7: Add CycleStateSlot + SnapshotContentSlot; consolidate snapshot path lookups. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
+- [ ] [#write-closeout-response-shape] #agent-doc-bug 2026-06-02: `agent-doc write --commit` recovery for `src/boost-client/tasks/monsterrodholders.md` accepted stdin but committed the closeout without a `### Re:` heading, leaving `session-check` to report the original `do [#stevepackets]` prompt as unresolved; adding the heading manually then made `write --commit` dedupe and refuse the visible response as direct patchback. Plan: tasks/agent-doc/plan-write-closeout-response-shape.md. DO NOT IMPLEMENT in this planning item.
 - [ ] [#lr-head-8] Phase 8: Add HeadContentSlot + SnapshotCommitStatusSlot for git show HEAD dedup. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-wire-9] Phase 9: Wire RunContext into ops_log, template_io, patch, harness detection. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-actor-10] Phase 10: Add GlobalConfigSlot + SessionRegistrySlot for ActorContext. Plan: tasks/agent-doc/plans/lazily-rs-integration.md

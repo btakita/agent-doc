@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 
@@ -87,7 +87,7 @@ Install note: `cargo metadata --no-deps --format-version 1` shows this crate has
 CI note: `gh workflow list`, `gh run list --workflow CI --limit 1`, and `gh run list --limit 5` found no workflows or runs for this repo, so there was no GitHub/tmux CI result to inspect.
 
 Changed paths: `README.md`, `SPEC.md`, `src/instrumentation.rs`, `src/thread_safe.rs`, `tests/spec_compliance.rs`, `tests/thread_safe_loom.rs`, and the parent `src/lazily-rs` submodule pointer. Confidence: high. Escalation: none.
-<!-- agent:boundary:053137f6 -->
+<!-- agent:boundary:d3322569 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -97,7 +97,6 @@ Changed paths: `README.md`, `SPEC.md`, `src/instrumentation.rs`, `src/thread_saf
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- [#lazyperf1]
 - [#lazyperf2]
 - [#lazyperf3]
 - [#lazyperf4]
@@ -106,7 +105,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#lazyperf1] Prototype per-slot recompute/value-publish state for same-slot 16-worker write/read contention; target lower in-flight/get_refresh/publish wait while preserving stale-completion semantics with Loom.
 - [ ] [#lazyperf2] Prototype sharded dependency/invalidation state keyed by SlotId; compare against independent_slots and set_cell_invalidation independent_slot_contention at 8/16 workers.
 - [ ] [#lazyperf3] Optimize batched write bursts by coalescing dirty marking/publish work per batch; target set_cell_invalidation and thread_safe_contention batched_write_bursts / 16.
 - [ ] [#lazyperf4] Add perf regression budgets for the slowest contention profiles and lock-site totals so future benchmark runs flag global-lock regressions before release.

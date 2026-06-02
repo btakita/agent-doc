@@ -31,84 +31,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260602-211202.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260602-211732.md`*
 
 Compacted content:
-
-### Re: do #lr-queue-patchback-miss — same cluster as #lr-queue-response-miss; consolidated the spec into the shared plan — opus-4-8
-
-> **Queue prompt:**
->
-> do [#manual-queue-head-loss]
-
-
-`#lr-queue-patchback-miss` and `#lr-queue-response-miss` **share this exact plan file** (`plan-lazily-rs-queued-prompt-patchback-miss.md`) — they're effectively one work item. Auditing it confirms the same split I've now found across the whole lazily-rs queue cluster:
-
-- **Implementation item 2** (plan deferral proof) → already shipped: `plan_backlog_only_deferral_warning` (`src/plan.rs:422`, `4d0184e3`).
-- **Implementation item 4** (missed-response repair → `write --commit`, not empty child dispatch) → already shipped: `run.rs:430`.
-- **Implementation item 3** (session-check guard requiring a *seen* free-text head to be answered/consumed/deferred) → the one remaining primitive, shared by all four cluster items.
-
-**Concrete deliverable this turn:** rather than a 4th verbal audit, I edited the shared plan to add a **"Shared Primitive (cluster consolidation)"** section. It states the four items (`#lr-queue-response-miss`, `#lr-queue-patchback-miss`, `#manual-queue-head-loss`, `#lr-queue-repair-adopt`) all close on one mechanism, marks items 2 + 4 as already-shipped (so nobody re-implements them), and specifies the primitive concretely:
-
-1. preflight records each non-`do [#id]` queue head's normalized text + content hash + source tag, persisted alongside `cycle_state.active_queue_heads` (which today only carries ids, so `check_queue_head_removal_guard` early-returns on free-text — `session_check.rs:2459`);
-2. closeout requires committed-response / binary-consume / concrete-deferral proof per recorded free-text head, else fails closed naming it;
-3. the same provenance record powers `write --commit` consume-on-adopt (`#lr-queue-repair-adopt`) and stall-restore (`#manual-queue-head-loss`).
-
-So the toolchain actor now has one implementable spec that retires the open facet of all four items instead of four overlapping point-fixes. The plan edit is on disk, uncommitted (same as last turn — I won't `git commit` to `main` unasked; say "commit it" and I'll commit both plan edits as one non-session change).
-
-**Not implementing the code here:** binary gated + this pane executes in the wrong tmux pane (the confirmed contamination). The primitive itself is the toolchain actor's job, ideally after the `#jb-tsift-pane-sync` execution-context guard (Phase 3c) un-contaminates the pane.
-Consolidated. The response:
-**Closeout:** the durable deliverable is the cluster consolidation written into `plan-lazily-rs-queued-prompt-patchback-miss.md` (uncommitted, offered alongside last turn's `plan-jb-tsift-pane-sync-regression.md` edit). `#lr-queue-patchback-miss` ≈ `#lr-queue-response-miss`; both close with the one free-text-head provenance primitive now fully specified in the shared plan. Session-doc response uncommitted (`finalize` gated).
-- Archived 15 response topic(s): do #nochange-after-stall-breadth; queue repair closeout; review accumulation and "complete but gated"; 12 more
-- Prior summary/context: ### Session Summary ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039...
-
-### Re: do #jb-busy-inactive-queue-dispatch — already fully planned; split deterministic core from the live gate — opus-4-8
-
-This item is **already covered end-to-end** by `plan-jb-run-agent-doc-busy-queue-dispatch-deadlock.md` — its "Fresh Repro: Pre-existing inactive queue head" section reproduces your exact evidence (`route_owned_reap_decision policy=auto decision=keep_alive reason=live_pane_busy_blocked_prompt`, `queue_continuation_required=false`, pane `%61`/gen 255), and "Fix direction" bullet 2 is precisely the ask: explicit `Run Agent Doc` seeing a runnable `agent:queue auto` head while `queue_active:false` on a busy pane must **activate the queue + arm idle-drain, or fail closed with a typed deferred/busy diagnostic — never a silent keep-alive no-op.**
-
-The grounded code path is already traced in the plan: `route.rs:4003` (`DispatchOnlyBusyQueue`) + `enqueue_route_dispatch_prompt` (`route.rs:1806`, which sets `queue_active:true` for the *route-appended* case) + the Codex `Stop`-hook drain (`codex_hook.rs:293`). The gap is that the **pre-existing inactive head** never goes through `enqueue_route_dispatch_prompt`, so the queue is never armed.
-
-**What I changed this turn:** the plan's Status said "do not implement" (left over from the `#agent-doc-bug` capture). Your `do` supersedes that, so I split the scope in the plan:
-- **Implementable + unit-testable now, no live pane:** bullet 2 (arm-or-fail-closed for the `queue_active:false` busy-head case) + bullet 3 (deferred-queued operator feedback) — route.rs / session-check / `queue_continuation.rs` logic with deterministic SimWorld coverage. This **extends the already-shipped** `spawn_idle_queue_watch_thread` / `idle_queue_drain_decision` watcher (submodule `4b3f4835`, which handles the `queue_active:true` route-appended case) to the inactive-head case — not a new mechanism.
-- **Still gated:** only the live two-session Codex repro (Verification → Live).
-
-So the deterministic core is buildable now and should not wait on a live pane. That's the toolchain actor's job — I can't `make check`/finalize from this gated, pane-contaminated session.
-
-(Side note on the queue's `Compact Exchange` error — "visible editor buffer differs from expected disk state, 2nd attempt worked" — that's the existing `#jb-compact-*` / editor-buffer-vs-disk class, already tracked in review; not part of this directive.)
-Plan updated with the deterministic-vs-gated split. The response:
-**Closeout:** durable deliverable = the deterministic-vs-gated split now in `plan-jb-run-agent-doc-busy-queue-dispatch-deadlock.md` (uncommitted, with the prior two plan edits — say "commit it" and I'll commit all three as one non-session change). `#jb-busy-inactive-queue-dispatch` is fully planned; its deterministic core is implementable now (extends the shipped idle-drain watcher), only the live repro gated. Session-doc response uncommitted (`finalize` gated).
-
-### Re: Implement plan-jb-tsift-pane-sync-regression.md — opus-4-8
-
-Confirmed, and **yes** — `#jb-tsift-pane-sync` is resolved by this. I audited the plan against the code first (per the "mostly already implemented" pattern) and found most of it already landed: the cross-document predicate (`cmdline_owns_other_document`, `reject_cross_document_owner_pane`, `pane_runs_other_document_owner`), the `#jb-nav-3pane-promote-swap` defer-promote-to-reconcile fix in `focus.rs`, the contamination logging (`log_cross_document_execution_context`), and the spec contracts in `specs/07-session-tmux-commands.md`.
-
-But there was a **genuine remaining gap in exactly the operator's repro**: the cross-document guard was only wired into the *normal-path* resolver (`find_normal_path_owner_pane*`, used by route/start/sync). The **focus path** — navigating from `agent-doc-bugs2.md` to `tsift.md` — resolves owners through the *heuristic recovery* resolver `find_live_owner_pane_quiet` → `find_live_owner_pane_excluding_with_logging`, which was **unguarded**. So a stale-registry / process-tree match could still surface the visible bugs2 pane as `tsift.md`'s owner and alias two documents onto one pane. The normal-path guard alone never covered the focus path.
-
-#### Fix
-- `sync.rs`: funnel the heuristic resolver's resolved candidate through `reject_cross_document_owner_pane`, so `focus.rs` navigation and resync recovery enforce the same one-live-pane-per-document invariant as route/start/sync. Pass-through is preserved for the navigated file's own owner and bare non-owner panes — the focus happy path is unchanged.
-- `sync.rs` tests: added `reject_cross_document_owner_pane_preserves_non_contaminated_candidates`, a deterministic pass-through regression guarding against over-rejection on the focus hot path (the wrong-document rejection branch stays covered by the predicate test + live `make tmux-ci`).
-- `specs/07-session-tmux-commands.md`: broadened the `#jb-tsift-pane-sync` contract to name **both** resolvers (`find_normal_path_owner_pane*` and `find_live_owner_pane*`) and call out the focus path as the repro that the normal-path guard missed.
-
-#### Verification
-- `make check` → exit 0; sync module 88 passed / 92 ignored (live-tmux); new test green.
-- `cargo build --release` + `cargo install --path .` → both binaries refreshed (`.bin/agent-doc` + `~/.cargo/bin/agent-doc`).
-- Committed + pushed: `9fac6238` on `20260422/codex-agent-backend`. CI run `26848443567` pending; prior two runs green; this change adds no new live-tmux CI behavior.
-
-Marking `#jb-tsift-pane-sync` **done** — all plan phases are implemented, code-complete, unit-tested, and shipped to both binaries. The residual is live-JB verification (navigate bugs2→tsift, run manual `Sync Tmux Layout`), which is the standing `make tmux-ci` / live-session modality for this class, not unfinished implementation.
-
-### Re: struck #subagent-blocks-session + #jb-busy-inactive-queue-dispatch — acknowledged, with one stale-text flag — opus-4-8
-
-Both queue heads struck — acknowledged. Their real state, so nothing reads as more-done than it is:
-
-- **`#subagent-blocks-session`** — now `[/]` in review. **Design decision delivered** (the item's actual blocker): two-layer = instruction-surface rule (run build/test synchronously in-foreground, no in-cycle subagent/`run_in_background`) + a `session_check` closeout guard. **Implementation not yet landed** (instruction-surface edit + guard + `audit-docs`/`make check`). ⚠️ Its review text still reads *"PRECONDITIONS (unmet)"* — that's now **stale**; the preconditions are met. Recommend a `--review-edit` to "design decided, ready to implement (instruction rule + closeout guard)" so it doesn't read as blocked. I can't do that edit from this gated pane.
-- **`#jb-busy-inactive-queue-dispatch`** — fully planned; the deterministic core (arm-or-fail-closed for the `queue_active:false` busy-head case, extending the shipped `idle_queue_drain_decision` watcher) is implementable now, only the live two-session Codex repro gated. Plan carries the deterministic-vs-gated split I added last turn.
-
-**Notable:** the concurrent actor shipped **`#jb-tsift-pane-sync`** (`9fac6238`, both binaries refreshed) — including the focus-path cross-document guard (`reject_cross_document_owner_pane` now also funnels `find_live_owner_pane*`, not just the normal-path resolver). That's the **execution-context contamination fix** — the root cause that's had *my* cycles running inside lazily-rs's / monsterrodholders' panes. Once this session re-routes onto a freshly-resolved owner pane, the gated-binary + wrong-pane condition that's blocked me from verifying/finalizing all session should clear. Worth a fresh `Run Agent Doc` to rebind this document to its own `%70` owner.
-
-No code or plan changes this turn — nothing was requested beyond reaping the two heads.
-The two changes are strikethroughs (content_edits) — you're reaping `do [#subagent-blocks-session]` and `do [#jb-busy-inactive-queue-dispatch]`, both of which I answered last turn. No new work requested; this is an acknowledgment turn. One important state change landed too: `#jb-tsift-pane-sync` shipped.
-**Closeout:** acknowledgment only; no deliverable to commit. Three uncommitted plan edits from prior turns still stand (`plan-jb-tsift-pane-sync-regression.md`, `plan-lazily-rs-queued-prompt-patchback-miss.md`, `plan-jb-run-agent-doc-busy-queue-dispatch-deadlock.md`) — say "commit it" to land all three as one non-session change. The one actionable follow-up is updating `#subagent-blocks-session`'s stale "preconditions unmet" review text. Session-doc response uncommitted (`finalize` gated; though `#jb-tsift-pane-sync` shipping should be what finally un-gates this pane).
-<!-- agent:boundary:198343be -->
+- Archived 4 response topic(s): do #lr-queue-patchback-miss; do #jb-busy-inactive-queue-dispatch; Implement plan-jb-tsift-pane-sync-regression.md; 1 more
+- Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
+<!-- agent:boundary:1581996f -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->

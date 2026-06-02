@@ -262,7 +262,7 @@ CI / repo state:
 - No commit or push was needed for `src/lazily-rs`; this was a benchmark-only queue item.
 
 The benchmark snapshot is consistent with the `#lazybatch3` outcome: the read-mostly sidecar keeps hot batched `get_refresh` acquisitions very low, and the important 8-/16-worker raw contention numbers remain below the older accepted README baselines.
-<!-- agent:boundary:3a50d80c -->
+<!-- agent:boundary:7e35774a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -275,7 +275,7 @@ preset #spec-test-build-install-commit-push
 - ~[#lazybatch1]~
 - ~[#lazybatch2]~
 - ~[#lazybatch3]~
-- Run performance benchmarks
+- ~Run performance benchmarks~
 - release + publish
 <!-- /agent:queue -->
 

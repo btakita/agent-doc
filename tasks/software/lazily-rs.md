@@ -145,7 +145,60 @@ Git state:
 CI evidence: the lazily-rs repo has no listed GitHub Actions workflows, and the root repo has no workflow named `CI`. The latest root `Agent Doc` run observed before this finalize was `26842458985`, in progress on `main`.
 
 No escalation was required. Confidence is high: the changed behavior is covered by targeted Loom, spec-compliance tests, the crate’s full feature matrix, clippy/build/package checks, and the root suite.
-<!-- agent:boundary:2b1e8efc -->
+
+### Re: #lazyperf7 — gpt-5
+
+> **Queue prompt:**
+>
+> [#lazyperf7]
+
+Completed `#lazyperf7`.
+
+I added effect-heavy contention profiles without changing synchronization behavior. The new instrumentation rows isolate `ThreadSafeContext` effect queue coalescing, cleanup execution, and nested batch flush behavior at 8 and 16 workers, then keep the current graph-lock strategy as the documented decision boundary until a sharded design has matching profile, budget, and model-checking evidence.
+
+Updated paths:
+
+- `src/lazily-rs/examples/instrumentation_profile.rs`
+- `src/lazily-rs/scripts/update-benchmark-results.py`
+- `src/lazily-rs/README.md`
+- `src/lazily-rs/SPEC.md`
+- `src/lazily-rs/tests/spec_compliance.rs`
+- root `src/lazily-rs` submodule pointer
+
+What changed:
+
+- Added `thread_safe_effect_contention_queue_coalescing_{8,16}`.
+- Added `thread_safe_effect_contention_cleanup_execution_{8,16}`.
+- Added `thread_safe_effect_contention_batch_flush_{8,16}`.
+- Added 16-worker deterministic lock-site budgets for those effect-heavy rows.
+- Included effect-heavy rows in ThreadSafe lock attribution reporting.
+- Recalibrated `thread_safe_contention_same_slot_write_read_16` publish/total lock budgets to the current waiter/optimistic-read implementation profile.
+- Updated SPEC to keep effect queues, cleanup, and batch flush under one graph-lock mutation boundary until sharding has profile and Loom/Shuttle proof.
+
+Commits pushed:
+
+- `btakita/lazily-rs@36b38f3` (`perf: add effect contention profiles`).
+- `agent-loop@35e254e30` (`chore: update lazily-rs submodule`) is included in current `main` history.
+
+Verification passed:
+
+- `cargo fmt --check`
+- `cargo test --features loom --test thread_safe_loom`
+- `cargo test --features instrumentation readme_benchmark_results_cover_required_scenarios`
+- `cargo test storage_strategy_evaluation`
+- `cargo test`
+- `cargo test --features tokio`
+- `cargo test --all-features`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo build --all-targets --all-features`
+- `python3 scripts/update-benchmark-results.py --check`
+- `cargo package --allow-dirty`
+- root `make check`
+
+CI evidence: the lazily-rs repo has no listed GitHub Actions workflows, and the root repo still has no workflow named `CI`. Before this finalize, the latest root `Agent Doc` runs observed were in progress: `26843091328` for `agent-doc(agent-doc-bugs2): 2026-06-02 15:29:30` and `26843003959` for `chore: update lazily-rs submodule`.
+
+No escalation was required. Confidence is high: this is an instrumentation/spec/reporting gate with full local verification, and it deliberately avoids a synchronization rewrite.
+<!-- agent:boundary:d3ae20d5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -157,14 +210,13 @@ No escalation was required. Confidence is high: the changed behavior is covered 
 preset #spec-test-build-install-commit-push
 - ~[#lazyperf5]~
 - ~[#lazyperf6]~
-- [#lazyperf7]
+- ~[#lazyperf7]~
 - [#lazyperf8]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#lazyperf7] Add effect-heavy contention profiles before changing synchronization: isolate effect queue coalescing, cleanup execution, and batch flush behavior at 8/16 workers, then decide between sharding and keeping the graph lock.
 - [ ] [#lazyperf8] Compare synchronization strategies with a fixed adoption gate: current Condvar, narrower wakeups, parking_lot-style parking, and targeted CAS must report throughput plus p50/p95 latency and lock-site budgets before release.
 <!-- /agent:backlog -->
 

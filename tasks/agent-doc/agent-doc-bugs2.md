@@ -71,14 +71,38 @@ I did **not** ship a fix this cycle. The correct change is a focused 5-step pass
 Per your run policy I recorded the **audit findings + 5 completion conditions + a 2026-06-02 attempt timestamp** on `#lr-queue-response-miss` and kept it open/runnable (not gated). It's ready for a dedicated focused run.
 
 **Recommendation:** let me take this one in a clean, dedicated pass rather than as the tail of this long multi-item session — I'll implement all 5 steps with tests, build, install, and verify. Say "go on #lr-queue-response-miss" when you want that focused session.
-<!-- agent:boundary:5109f0d6 -->
+
+### Re: do #lr-queue-response-miss — audited to a pinned single-guard gap; implementation blocked on toolchain in this pane — opus-4-8
+
+Re-audited all 5 completion conditions against current `HEAD`. The scope is now much smaller than the original write-up implied — **3 of 5 are already implemented**:
+
+- **(1) plan.rs deferral proof** ✅ — `plan_backlog_only_deferral_warning` (`src/plan.rs:422`) already fires when `execution_scope=plan_backlog_only` and the same prompt diff carries runnable directives, naming each deferred directive via `diff::extract_imperative_directives`. This was the helper the earlier audit said it "couldn't cleanly locate."
+- **(3) missed-response repair → `write --commit`** ✅ — `run.rs:430` fails *before* child-agent dispatch when the pre-commit repair closed the doc as already committed, pointing recovery at `agent-doc write --commit`, not an empty dispatch.
+- **(2) seen free-text queue head needs response/consume/deferral** ❌ — the real remaining gap, now pinned: `check_queue_head_removal_guard` computes `recorded_ids = do_directive_target_ids(&state.active_queue_heads)` and **early-returns `None` when that is empty** (`session_check.rs:2459`). A free-text head (no `#id`) never reaches enforcement. `check_queue_response_contamination_guard` only catches response prose leaking *into* the queue; `check_dropped_queue_prompt_guard` only fires on IPC-dropped user edits. None require a *seen free-text head* to end the cycle answered/consumed/deferred.
+- **(4) fixtures / (5) preset coverage** — follow (2).
+
+**Remaining design (narrow, one new guard).** Add `check_free_text_queue_head_resolution_guard(file, &rc)` to the closeout array at `session_check.rs:270–279`. On a committed (`!state.is_open()`) closeout, for each `state.active_queue_heads` entry where `!is_queue_directive_prompt(head)` (free-text), require one of: the head text answered by a `### Re:` block in the visible/HEAD exchange; the head consumed (absent from committed queue with a recorded consume); or an explicit deferral reason (a `plan_backlog_only` deferral warning / `<!-- no-queue-removal-guard -->`). Else fail closed naming the unresolved free-text head. Gate it through `resolve_pending_done_guard_mode_with_context` like the sibling removal guard. Then deterministic fixtures (4) and a `queue ... preset=` coverage case (5).
+
+**Why no code landed this cycle.** This pane has the binary/build toolchain declined — `cargo`, `make`, and `.bin/agent-doc` (preflight/finalize) all return "requires approval." I can't run `make check` to verify a hot-path `session_check.rs` change, and I can't run `agent-doc finalize` to close out. Shipping an unverified guard into dispatch-critical code is the precise regression risk this item was deferred over, so I held.
+
+**To finish:** run this from a toolchain-enabled pane (or approve the binary commands here) — `go on #lr-queue-response-miss` — and I'll implement the single guard + fixtures + preset case, `make check`, build+install, and finalize end-to-end. Item stays open/runnable; the audit above is now precise enough that the implementation is a focused single-guard pass.
+Confirmed — `cargo` is hard-gated in this pane (not a phrasing issue), same class as `make` and `.bin/agent-doc`. So build, test, and the mandatory `agent-doc finalize` closeout are all declined here. I won't retry the declined binary class, and I won't blast unverified edits into `session_check.rs` (the most invariant-dense hot-path file) without `make check` — that's exactly the hot-path regression risk the prior audit flagged.
+
+Here's my response for the document (shaped for finalize whenever a toolchain-enabled pane runs it):
+**Closeout status (honest):** the response above is **not committed to the document** — `agent-doc finalize` is in the declined binary class in this pane, so I can't cross the closeout boundary here. Two ways forward:
+
+1. **Approve the binary** (`cargo`/`make`/`.bin/agent-doc`) in this pane and reply `go` — I'll implement condition (2)'s guard + fixtures + preset coverage, run `make check`, build+install, and finalize.
+2. **Hand to the owner pane** with toolchain access — the audit above pins the exact change (new `check_free_text_queue_head_resolution_guard`, wired at `session_check.rs:270`).
+
+I did not retry the declined commands or force unverified edits into the hot path. Your call on which path.
+<!-- agent:boundary:32f59b2c -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 - ~If a turn is waiting for a subagent to complete before the task completes, block the session until the subagent completes. This is mostly a Claude issue. We need to prevent other tasks from running in the agent while the task waiting on the subagent is still running.~
 - ~Gated items in review are not easily runnable. Please enable the user to run gated items by `do [item-id]` or plating the item in the queue. Please focus the runs to complete the gated item. If the gated item can only be partially completed, extract a new task to complete which contains the conditions to complete the item. If no work was done due to preconditions not being met, add a timestamp of the attempts to the item. Ensure the preconditions are present in the gated item description.~
 - ~do [#nochange-after-stall]~
-- ~do [#lr-queue-response-miss]~
+- do [#lr-queue-response-miss]
 - do [#nochange-after-stall-breadth]
 - do [#lr-queue-plan-deferral]
 - do [#lr-queue-repair-adopt]

@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -202,7 +202,49 @@ Blocked commands:
 - A direct write probe under `.git/modules/src/tsift` also failed with `Read-only file system`.
 
 Escalation: none available in this harness because approval policy is `never`. Confidence is high for the code change and local verification, but `#surrealbulk` remains gated on restoring writable `.git` access so the intended tsift commit, superproject submodule commit, push, and post-push CI watch can run.
-<!-- agent:boundary:3d5b5b86 -->
+
+### Re: #surrealbench — gpt-5
+
+> **Queue prompt:**
+>
+> [#surrealbench]
+
+Completed `#surrealbench`.
+
+I ran repeated promotion-grade SurrealDB samples through `metric-digest` after the hot-read index and batch-load changes. All three full-projection samples were cache-hit runs and all three returned `promotion=hold` for SurrealDB.
+
+Benchmark medians from the three cache-hit samples:
+
+| workload | SQLite total | SurrealDB total | decision signal |
+| --- | ---: | ---: | --- |
+| real | 2.6 ms | 573.2 ms | SurrealDB still blocks promotion |
+| full-projection | 544.2 ms | 535.0 ms | aggregate competitive, operation gates still fail |
+| synthetic high-degree | 11.0 ms | 7.4 ms | SurrealDB faster |
+| synthetic deep-chain | 12.0 ms | 4.3 ms | SurrealDB faster |
+
+Refresh/load medians were SQLite 0.18 ms vs SurrealDB 88.6 ms on the real workload, and SQLite 541.8 ms vs SurrealDB 82.7 ms on full-projection rows. The conclusion is unchanged: SurrealDB is much better after batch load and derived indexes, but it cannot promote because the real workload and operation-level gates still fail on edge lookup, edge-property scan, incident edges, neighborhood, and path tiers.
+
+Changed paths:
+
+- `src/tsift/SPEC.md`
+- `src/tsift` submodule pointer
+
+Commits pushed:
+
+- `src/tsift`: `d2e9646 docs(graph): record surrealdb benchmark hold`
+- `agent-loop`: `1c11e95d6 chore: update tsift submodule`
+
+Verification:
+
+- `for sample in 1 2 3; do tsift graph-db --path . --json backend-eval --candidate surrealdb --target gval --full-projection; done | tsift metric-digest --baseline fixtures/graph-db-performance-history.json --json --top 12` passed and loaded the repeated sample set.
+- Compact extraction command confirmed the three samples had `cache_hit=1.0` and `decision=hold`.
+- `git diff --check` passed.
+- `make check` passed via digest-runner artifact `tart-d37d79b095`.
+- `cargo install --path .` passed via digest-runner artifact `tart-cb7781a6ea`; `tsift --version` reports `tsift 0.1.62`.
+- GitHub Actions `CI` run `26792481164` passed: `clippy + test` and `live Convex graph acceptance` both succeeded. The root repo has no workflow named `CI`.
+
+Escalation: none. Confidence: high. `#surrealbench` is complete; the remaining open follow-up is `#surrealpush`.
+<!-- agent:boundary:75d36372 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -211,19 +253,13 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~[#surrealidx]~
-- ~[#surrealbulk]~
-- ~[#surrealpush]~
-- [#surrealbench]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
 - [ ] [#surrealpush] Compare SurrealDB query pushdown vs Rust-derived indexes behind backend-surrealdb and keep the faster design that preserves GraphStore parity.
-- [ ] [#surrealbench] Run repeated backend-eval --full-projection samples through metric-digest after SurrealDB optimizations and keep promotion on hold unless it beats SQLite across required workloads.
 <!-- /agent:backlog -->
 
 ## Review

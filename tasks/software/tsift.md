@@ -80,7 +80,36 @@ Commits:
 - parent repo gitlink: `e46e0129e chore: update tsift submodule`
 
 Queue note: `#astspans` is complete; the remaining queue items are still pending.
-<!-- agent:boundary:6afafe61 -->
+
+### Re: #writerefs — gpt-5
+
+> **Queue prompt:**
+>
+> [#writerefs]
+
+
+Implemented `#writerefs`.
+
+`edit-intents --apply` now supports Rust `rewrite_call_sites` and `update_call_signature` using indexed same-file call refs plus AST validation. Plans expose `call_refs`; cross-file call refs fail closed for now. `update_call_signature` rewrites the function signature and requires `call_replacement` when indexed same-file calls must change. The executor still routes every mutation through formatter-before-write staging and the existing atomic backup/rollback write path.
+
+Updated the docs/spec/version notes to include the new call-site rewrite surface and `call_replacement` contract. Added fixture coverage for successful call-site apply, successful signature-and-call-site apply, and no-write refusal when a signature update is missing `call_replacement`.
+
+Commits:
+
+- `src/tsift`: `a160e70` (`feat: add Rust call-site edit intents`), pushed to `origin/main`.
+- parent repo: `89398d7f5` (`chore: update tsift submodule`), ready to push after this document closeout commit.
+
+Verification:
+
+- `cargo check -p tsift-cli` passed.
+- `cargo test -p tsift-cli --test exit_code edit_intents_apply_` passed: 6 tests.
+- `make check` passed: workspace clippy, workspace tests/doc-tests, OpenCode npm tests, and npm dry-run publish check.
+- `cargo build` passed.
+- `cargo install --path . --force` passed.
+- Installed binary reports `tsift 0.1.62`.
+- GitHub CI for `src/tsift` run `26797215803` passed: `clippy + test` and `live Convex graph acceptance` green. Existing CI annotations are the Node 20 actions deprecation and the optional live Convex deployment configuration note.
+- No tmux CI workflow or `make tmux-ci` target exists in this repo; deterministic SimWorld tests ran through `make check` and passed.
+<!-- agent:boundary:837000dc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -92,7 +121,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~[#astspans]~
-- [#writerefs]
+- ~[#writerefs]~
 - [#writecompound]
 - [#langexecutors]
 - [#astverify]
@@ -103,7 +132,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#writerefs] Implement Rust reference and call-site rewrite support for rewrite_call_sites and update_call_signature using indexed refs plus AST validation, with conflict checks and conformance fixtures.
 - [ ] [#writecompound] Add Rust structural edit support for add_method and move_declaration, including module-aware placement, import normalization, formatter-before-write, and rollback tests.
 - [ ] [#langexecutors] Add TypeScript, JavaScript, and Python semantic edit executors behind the same edit-intents contract, each with parser-backed spans, formatter integration, and fail-closed unsupported cases.
 - [ ] [#astverify] Add a semantic edit verification harness that can dry-run, apply in temp worktrees, reindex, run source-read or impact summaries, and optionally gate on a caller-provided test command before committing changes.

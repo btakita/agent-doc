@@ -83,14 +83,28 @@ The review pile (55 gated items) is mostly **already-implemented work gated on l
 The `lazily-rs` actor's half-done `src/agent-doc` tree committed itself as its closeout fired (racing my kill): **`6e83e3f2`** (`#lr-head-8` — HeadContentSlot / cache HEAD reads, already reaped) and **`c85fe72f`** (`#lr-wire-9` — wire RunContext through ops_log/template_io/patch/template paths). I verified both: `make check` green (0 failures), both binaries rebuilt + installed. Marking `#lr-wire-9` done. `#lr-actor-10` (GlobalConfigSlot + SessionRegistrySlot) is **not** in the commits — left queued.
 
 Also landed earlier this turn: `#manual-queue-head-loss` phase-1 detection (`observe_live_queue_heads`, in `6e83e3f2`); plan + commits `8a9737037` / `e28617a07`.
-<!-- agent:boundary:3f9eab10 -->
+
+### Re: #next-steps — IPC admin API for actor control (filed `#ipc-admin-api`) — opus-4-8
+
+Filed **`#ipc-admin-api`** (plan: `tasks/agent-doc/plan-ipc-admin-api-actor-control.md`), placed **after `#xdoc`** in priority — fix the owner-agnostic sweep first (the root cause), then add the management tooling on top of a clean ownership model.
+
+The capability, as you framed it, on **all** agent-doc IPC processes (per-project supervisor sockets + route/registry):
+
+- **Detect** — `agent-doc admin list/detect`: enumerate every live actor fleet-wide (doc, pane, supervisor/child pid, harness, generation, state, `queue_active`) and flag competing / cross-document ones (reuses the cross-document execution-context signal). This replaces the manual `ps`/`pstree`/`sessions.json` forensics this incident required.
+- **Rebind** — `agent-doc admin rebind <doc> --to-pane/--to-session`: programmatic claim/reroute repair of a misbound document.
+- **Stop / terminate** — `agent-doc admin stop <doc> --halt-queue --terminate`: the durable stop this incident proved we lack — halt `queue_active` first so the loop can't continue, quiesce the supervisor so route/sync won't re-provision, then terminate. Fail-closed on the caller's own session.
+
+Logic is FFI/supervisor-owned with thin CLI + editor menu actions (pairs with `#plugin-cleanup-menu-command`).
+
+**Top of backlog:** `#xdoc-route-sweep-commits-sibling-docs` (the sweep fix), with `#ipc-admin-api` directly beneath it.
+<!-- agent:boundary:ac40ef32 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#lr-queue-patchback-miss]~
 - ~do [#lr-head-8]~
-- do [#lr-wire-9]
+- ~do [#lr-wire-9]~
 - do [#lr-actor-10]
 - do [#run-gated-review-items]
 - I removed "Do not implement from" plan-jb-run-agent-doc-busy-queue-dispatch-deadlock.md. Go ahead and execute the plan if needed. Ensure any associated items are completed. I'm confused by the amount and length of the review items. #spec-test-build-install-commit-push
@@ -121,6 +135,7 @@ Error: authoritative actor generation 221 for tasks/agent-doc/agent-doc-bugs2.md
 #spec-test-build-install-commit-push
 ---
 - ~do [#manual-queue-head-loss]~
+- do [#xdoc-route-sweep-commits-sibling-docs]
 <!-- /agent:queue -->
 ###
 <!--

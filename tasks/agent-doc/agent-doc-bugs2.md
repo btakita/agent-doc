@@ -16,7 +16,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -249,31 +249,24 @@ And the owner pane `%70` has now **drained the entire lazily-rs phase set** — 
 I'm standing down — same reason as the last several turns, stated once more, briefly: this is pane `%71`, the owner is the live `%70`, and I can't finalize or touch the crate without racing its work. The queue is effectively drained of agent-implementable items; the rest is `[/]` done-or-gated or your live-IDE Path A/B sessions.
 
 The single outstanding action remains yours: **consolidate to one owner pane** (keep `%70`, stop this `%71`) and **compact** the document. That ends the two-actor contention that's the root of this whole backlog. Until then there's nothing I can do here that the owner isn't already doing better — from a pane with the clean closeout boundary I lack.
-<!-- agent:boundary:51772604 -->
+This queue line — *"Add a preset attribute to agent:queue ... applies `prompt_presets`"* — is **`#queue-preset-attribute`, already completed**: the planning deliverable (its `DO NOT IMPLEMENT` scope means plan-only) was committed as `2197dbff0` (`tasks/agent-doc/plan-queue-preset-attribute.md`) and the item reaped done. The queue is just re-presenting a finished item.
+
+> **Queue prompt:**
+>
+> Add a preset attribute to agent:queue, where the value can be a free-text prompt that correctly applies `prompt_presets`.
+
+
+Nothing to do here, and nothing I *can* do from this pane (`%71`) — the live owner `%70` holds the session and the working tree. Standing down.
+
+The situation is fully stable and the resolution is unchanged and entirely operator-side:
+- **Stop this `%71` session** and keep the single owner `%70`.
+- **Compact** the document (`agent-doc compact tasks/agent-doc/agent-doc-bugs2.md --commit`).
+
+Every remaining queue line is already done or already triaged; the review backlog is `[/]` done-or-gated or your live-IDE Path A/B work. There is no autonomous agent work left on `agent-doc-bugs2.md` for me to pick up, and continuing to dispatch into the non-owner pane only re-surfaces finished items. I'll keep standing down until this is a single-owner, compacted document.
+<!-- agent:boundary:ed480c3d -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~do [#queue-head-struck-on-foreign-exchange-answer]~
-- ~[#lr-content-6]~
-- ~[#queue-head-struck-on-foreign-exchange-answer]~
-- ~[#lr-cycle-7]~
-- ~[#write-closeout-response-shape]~
-- ~agent-doc monsterrodholders.md turns do not apply the response into the document.~
-- ~do [#codex-direct-writeback-miss]~
-- ~Should the graph be per-file (one context per tracked document) or per-process (one context with file-keyed cells)?: Use your judgement. There can also be multiple contexts.~
-- ~JB `Run Agent Doc` took a long time to dispatch in this document.~
-- ~How to handle config hot-reload in long-lived ActorContext — file watcher on .agent-doc/config.toml or clear on next cycle?: Can you support both?~
-- ~When I navigate from this document to tsift.md, the tmux focus is on the tsift.md pane but the tmux pane is in the stash, not in the agent-doc tmux window.~
-- ~As I was writing the previous queue item, a JB `File Cache Concflict` surfaced and I accepted. But the queue items reverted to a previous snapshot without my recent work. I had to manually reapply my changes. Review Codex logs for my bug report and session replay.~
-- ~#queue-user-edit-overwrite failed in monsterrodholders.md~
-- ~do [#queue-preset-attribute]~
-- ~I lost my existing session to this document. I saw Codex as for an upgrade. I upgraded and restarted. Then I found out that the Codex session for equityfundingsource.md had tmux focus when I focused the editor on this document.~
-- ~[#lr-head-8]~
-- ~[#lr-wire-9]~
-- ~[#lr-actor-10]~
-- ~JB `Clear Session Context` on monsterrodholders.md presented me with `Interrupt and Clear`. I applied `Interrupt and Clear` and the Codex session closed with the supervisor presenting Enter to restart or q to quit. I Pressed enter, Codex restarted and I saw an error `'/clear' is disabled while a task is in progress.`.~
-- Add a preset attribute to agent:queue, where the value can be a free-text prompt that correctly applies `prompt_presets`.
+<!-- agent:queue -->
 <!-- /agent:queue -->
 ###
 <!--

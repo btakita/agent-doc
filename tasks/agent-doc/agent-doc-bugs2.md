@@ -31,109 +31,27 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260602-185534.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260602-192708.md`*
 
 Compacted content:
-- Archived 9 response topic(s): #write-closeout-response-shape; response not written into the document (#codex-direct-writeback-miss); lazily-rs Context architecture; 6 more
+- Archived 4 response topic(s): do #nochange-after-stall; do #lr-queue-response-miss; commit + push; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-> **Queue prompt:**
->
-> do [#nochange-after-stall]
-
-### Re: do #nochange-after-stall — no-change run now surfaces a prior abnormal cycle — opus-4-8
-
-Implemented the core fix and shipped it.
-
-**The bug.** A direct `agent-doc <FILE>` run that finds no diff since the snapshot printed plain `Nothing changed since last run` even when the *previous* run abandoned its cycle — e.g. the recursive owner-pane guard (`recursive_direct_invocation_blocked`) that abandons the cycle with no durable closeout. The snapshot-only verdict hid the stalled prior run.
-
-**Fix** (`run.rs`, the no-change short-circuit). `run_once` now classifies the latest `cycle_state` before the no-change message via a pure `classify_no_change_cycle_state`:
-- a terminally **abandoned** prior cycle (recursive-block or generic) → typed diagnostic naming the prior state + a recovery action (dispatch from the managed pane / `agent-doc start <FILE>`);
-- a **committed** cycle (the healthy completed state) → unchanged plain no-change output.
-
-So normal no-change behavior is preserved; only genuinely abnormal prior states get the extra context.
-
-**Verification:** 3 new unit tests (recursive-block, generic-abandoned, committed-clean/none) + `make check` green (exit 0). Both binaries rebuilt (`cargo build --release` + `cargo install --path .`).
-
-**Commits:** `agent-doc` `940d57c7` (run.rs only — committed selectively on the live `20260422/codex-agent-backend` branch; the concurrent session's other uncommitted edits left untouched); superproject pointer `d763bae4e`.
-
-**Why gated, not done.** I scoped this turn to the run-path diagnostic because the plan's broader surfaces — stale-open preflight detection, repair-only/reap-only closeout with an unconsumed queue head, and the session-check fixtures — live in `preflight.rs`/`session_check.rs`, which currently hold **another session's uncommitted edits** I must not disturb (can't cleanly separate by file). I `--pending-gate`d `#nochange-after-stall` (core implemented, awaiting live-verify of the monsterrodholders recursive repro) and captured the deferred breadth as `#nochange-after-stall-breadth`. The remaining queue heads (`#lr-queue-*`, `#lr-head/wire/actor`) are next.
-
-Pushing now (see closeout).
-> **Queue prompt:**
->
-> do [#lr-queue-response-miss]
-
-### Re: do #lr-queue-response-miss — blocked on concurrent work, pausing the queue — opus-4-8
-
-I can't safely implement this one right now, and the same is true for most of the queue. Stopping per your "pause + gate" call.
-
-**Why blocked.** `#lr-queue-response-miss`'s core deliverable is "add session-check coverage" — that lives in `session_check.rs`, which currently holds **another session's uncommitted work**: ~584 insertions / 176 deletions across `session_check.rs` (278 lines), `graph.rs` (249), `preflight.rs` (74), `write.rs`, `closeout.rs`, `session_actor_cmd.rs`. Editing any of those would clobber that work or force a conflict-heavy fork. The remaining queue heads collide the same way:
-
-| Queue head | Core file | State |
-|---|---|---|
-| `#lr-queue-response-miss` | `session_check.rs` | blocked (dirty) |
-| `#lr-queue-repair-adopt` | `write.rs` | blocked (dirty) |
-| `#lr-queue-patchback-miss` | `session_check.rs` | blocked (dirty) |
-| `#lr-head-8` / `#lr-wire-9` / `#lr-actor-10` | `graph.rs` | blocked (dirty — likely the same lazily-rs integration that session is doing) |
-| `#nochange-after-stall-breadth` | `session_check.rs` / `preflight.rs` | blocked (dirty) |
-| `#lr-queue-plan-deferral` | `plan.rs` | **clean — resumable** |
-
-**Action taken.** Gated the 7 blocked items (`--pending-gate`) so the auto-queue stops churning on them and they're tracked as blocked-on-concurrent-work. None of the dirty files were touched. `#lr-queue-plan-deferral` (plan.rs, clean) is left active as the next runnable head if you want to keep going.
-
-**Resume condition.** Once the other session commits `session_check.rs` / `graph.rs` / `write.rs` / `preflight.rs`, un-gate these and I'll implement them cleanly. If you'd rather not wait, the alternative is isolated worktrees with manual merge later — say the word and I'll take that route instead.
-> **User directive:**
->
-> commit + push
-
-### Re: commit + push — agent-doc docs only — opus-4-8
-
-Done, scoped to your "agent-doc docs only" choice. Commit `58113b52d`, pushed `e49c03c0a..58113b52d` on `main`.
-
-**Included** (50 markdown files): instruction surfaces (`.claude/`, `.codex/`, `.cursor/`, `.opencode/` skill + runbooks, root `AGENTS.md`) with the new `baseline-drift` and `manual-job-packets` runbooks; all `tasks/agent-doc/` plan files; and task `.md`/`.done.md`/`.summary.md` docs.
-
-**Deliberately excluded:**
-- `tasks/dreamable/*` — the settlement agreement zip + signed release (sensitive legal; not publishing to the remote without explicit OK).
-- `.claude/scheduled_tasks.lock` — transient lock state.
-- `tasks/professional/equal-exchange/BrianTakita-sam-akkouche.pdf` — binary, outside the `.md` docs scope.
-- all `src/*` submodules — they hold other sessions' uncommitted work (notably the ~584-line `session_check.rs`/`graph.rs` set).
-- the active session docs (`agent-doc-bugs2.md`, owned by this finalize; `agent-doc-bugs.md`, possibly a concurrent session's live doc).
-
-The auto-queue head is still `do [#lr-queue-plan-deferral]` (the one clean/resumable item); I left it untouched since this turn's directive was the commit+push, not that item. Say the word to run it.
-> **User directive:**
->
-> commit src/agent-doc so we can move forward. Ungate the recently gated items so I can run them.
-
-### Re: committed src/agent-doc + ungated the blocked items — opus-4-8
-
-> **Queue prompt:**
->
-> If a turn is waiting for a subagent to complete before the task completes, block the session until the subagent completes. This is mostly a Claude issue. We need to prevent other tasks from running in the agent while the task waiting on the subagent is still running.
-
-
-Both done.
-
-**Committed `src/agent-doc`.** The concurrent working-tree work (585 ins / 177 del across `session_check.rs`, `graph.rs`, `preflight.rs`, `write.rs`, `flow/closeout.rs`, `session_actor_cmd.rs`) is now committed — submodule `ee48b55a`, superproject pointer `e09ad500b`. I ran `make check` first (green) so we're moving forward on a verified tree, and the submodule working tree is now clean. Those files are no longer occupied, so the items that land in them are implementable.
-
-**Ungated 7 items** (back in active `agent:backlog`, runnable via `do [#id]`): `#lr-queue-response-miss`, `#lr-queue-repair-adopt`, `#lr-queue-patchback-miss`, `#lr-head-8`, `#lr-wire-9`, `#lr-actor-10`, `#nochange-after-stall-breadth`.
-
-**Captured your UX point** as `#run-gated-review-items`: gated items should be runnable via `do [#id]` or queue placement without a manual ungate step. Your note cut off mid-sentence ("If the gated item cannot be completed…") — left it as a question on the captured item; tell me the intended fallback and I'll fold it in.
-
-You can now `do [#id]` any of the ungated items. The clean `#lr-queue-plan-deferral` is also still queued.
-<!-- agent:boundary:4ec80b8f -->
+<!-- agent:boundary:a33c83f5 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
-- ~do [#nochange-after-stall]~
-- ~do [#lr-queue-response-miss]~
-- ~do [#nochange-after-stall-breadth]~
 - ~If a turn is waiting for a subagent to complete before the task completes, block the session until the subagent completes. This is mostly a Claude issue. We need to prevent other tasks from running in the agent while the task waiting on the subagent is still running.~
 - Gated items in review are not easily runnable. Please enable the user to run gated items by `do [item-id]` or plating the item in the queue. Please focus the runs to complete the gated item. If the gated item can only be partially completed, extract a new task to complete which contains the conditions to complete the item. If no work was done due to preconditions not being met, add a timestamp of the attempts to the item. Ensure the preconditions are present in the gated item description.
+- ~do [#nochange-after-stall]~
+- do [#lr-queue-response-miss]
+- do [#nochange-after-stall-breadth]
 - do [#lr-queue-plan-deferral]
-- ~do [#lr-queue-repair-adopt]~
-- ~do [#lr-queue-patchback-miss]~
-- ~do [#lr-head-8]~
-- ~do [#lr-wire-9]~
-- ~do [#lr-actor-10]~
+- do [#lr-queue-repair-adopt]
+- do [#lr-queue-patchback-miss]
+- do [#lr-head-8]
+- do [#lr-wire-9]
+- do [#lr-actor-10]
+- do [#run-gated-review-items]
 <!-- /agent:queue -->
 ###
 <!--
@@ -146,6 +64,7 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Backlog
 
 <!-- agent:backlog priority queue=append -->
+- [ ] [#subagent-blocks-session] [recommended] #agent-doc-bug feature 2026-06-02: when a turn is waiting on a subagent to complete, block the session so no other task runs in the agent until that subagent finishes (mostly a Claude-harness concurrency issue). Captured from a queue prompt that was auto-consumed without a response.
 - [ ] [#nochange-after-stall-breadth] [recommended] #agent-doc-bug follow-up to #nochange-after-stall: extend the no-change abnormal-cycle diagnostic beyond terminally-abandoned cycles — stale-open preflight detection, repair-only/reap-only closeout with an unconsumed active queue head, and session-check fixtures asserting each shape, plus a spec note in 07-commands.md. Deferred this turn because preflight.rs/session_check.rs had concurrent uncommitted edits that must not be disturbed. Plan: tasks/agent-doc/plan-no-change-after-stalled-cycle.md.
 - [ ] [#lr-actor-10] Phase 10: Add GlobalConfigSlot + SessionRegistrySlot for ActorContext. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-wire-9] Phase 9: Wire RunContext into ops_log, template_io, patch, harness detection. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
@@ -153,7 +72,7 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 - [ ] [#lr-queue-patchback-miss] [recommended] #agent-doc-bug 2026-06-02: lazily-rs queued free-text prompt with preset was not visibly answered or patched back; mixed #agent-doc-bug capture made this cycle plan_backlog_only and deferred the actionable queue head. Add plan/session-check coverage so the head is either answered, consumed, or explicitly deferred through a committed response. Plan: tasks/agent-doc/plan-lazily-rs-queued-prompt-patchback-miss.md.
 - [ ] [#lr-queue-repair-adopt] [recommended] #agent-doc-bug 2026-06-02: if the lazily-rs queued prompt was already completed console-only, recovery must adopt a supplied response through agent-doc write --commit and consume or preserve the matching free-text queue head without rerunning repo work. Plan: tasks/agent-doc/plan-lazily-rs-queue-repair-adopt.md.
 - [ ] [#lr-queue-response-miss] [recommended] #agent-doc-bug 2026-06-02: lazily-rs queued free-text prompt with preset had no committed response patchback in tasks/software/lazily-rs.md. Add session-check coverage so a seen queue head requires committed response, consume proof, or explicit deferral. Plan: tasks/agent-doc/plan-lazily-rs-queued-prompt-patchback-miss.md.
-- [ ] [#run-gated-review-items] [recommended] #agent-doc-bug feature 2026-06-02: gated/review items are not easily runnable — enable running a gated item directly via `do [#id]` or by placing it in agent:queue, focusing the run to complete that gated item (auto-ungate-on-run or run-in-place). Reported after gating moved blocked items out of easy reach. (user note truncated mid-sentence after 'If the gated item cannot be completed' — confirm intended fallback behavior.)
+- [ ] [#run-gated-review-items] [recommended] #agent-doc-bug feature 2026-06-02: gated/review items are not easily runnable. Enable running a gated item directly via `do [#id]` or by placing it in agent:queue, and focus the run to complete that gated item. If it can only be partially completed, extract a new follow-up task containing the conditions to complete it. If no work was done because preconditions were unmet, append a timestamp of the attempt to the item and ensure the item's preconditions are present in its description.
 - [ ] [#lr-queue-plan-deferral] [recommended] #agent-doc-bug 2026-06-02: mixed #agent-doc-bug capture plus #spec-test-build-install-commit-push queue head made agent-doc plan choose plan_backlog_only, deferring runnable lazily-rs work without making the deferral contract explicit. Plan: tasks/agent-doc/plan-lazily-rs-queue-plan-deferral.md. [kept open 2026-06-02: this turn's directive was commit+push, not this item; remains the resumable clean plan.rs head.]
 <!-- /agent:backlog -->
 

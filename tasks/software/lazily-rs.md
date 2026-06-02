@@ -97,7 +97,55 @@ Install note: `lazily` is a library crate with no binary target or install scrip
 CI evidence: `gh run list --workflow CI --limit 1` reports no workflow named `CI` in both `btakita/lazily-rs` and the superproject. The superproject has an `Agent Doc` workflow; its latest run was `in_progress` when checked.
 
 Changed paths in `lazily-rs`: `SPEC.md`, `src/thread_safe.rs`, `tests/spec_compliance.rs`, `tests/thread_safe_loom.rs`. Changed path in `agent-loop`: `src/lazily-rs`. Confidence: high. Escalation: none.
-<!-- agent:boundary:6c8713f7 -->
+
+### Re: #lazyperf6 — gpt-5
+
+> **Queue prompt:**
+>
+> [#lazyperf6]
+
+Completed `#lazyperf6`.
+
+I added versioned optimistic validation around thread-safe cached reads without changing the graph publication model into a lock-free pointer swap. Each thread-safe slot now has an atomic `cache_revision`; cached reads sample that revision before cloning the retained `Arc`, then re-check the revision plus dirty/force flags afterward. If invalidation or publication races with the clone, the read returns `None` and falls back to the existing graph refresh path.
+
+Updated paths:
+
+- `src/lazily-rs/src/thread_safe.rs`
+- `src/lazily-rs/tests/thread_safe_loom.rs`
+- `src/lazily-rs/tests/spec_compliance.rs`
+- `src/lazily-rs/SPEC.md`
+- `src/lazily-rs` submodule pointer in the root repo
+
+Coverage added/updated:
+
+- Loom model for mid-read invalidation rejection on optimistic cached reads.
+- Spec compliance assertions for `cache_revision`, post-clone validation, and the fallback boundary.
+- SPEC wording that explicitly says this is versioned optimistic cache validation, not a full lock-free graph replacement.
+
+Verification passed:
+
+- `cargo fmt --check`
+- `cargo test --features loom --test thread_safe_loom`
+- `cargo test --features instrumentation readme_benchmark_results_cover_required_scenarios`
+- `cargo test storage_strategy_evaluation`
+- `cargo test`
+- `cargo test --features tokio`
+- `cargo test --all-features`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo build --all-targets --all-features`
+- `python3 scripts/update-benchmark-results.py --check`
+- `cargo package --allow-dirty`
+- root `make check`
+
+Git state:
+
+- Submodule commit pushed: `btakita/lazily-rs@69eef7d` (`perf: validate cached reads with revisions`).
+- Root commit created: `agent-loop@15bce73` (`chore: update lazily-rs submodule`); root push happens after this document finalize so the session document stays on the binary-owned closeout path.
+
+CI evidence: the lazily-rs repo has no listed GitHub Actions workflows, and the root repo has no workflow named `CI`. The latest root `Agent Doc` run observed before this finalize was `26842458985`, in progress on `main`.
+
+No escalation was required. Confidence is high: the changed behavior is covered by targeted Loom, spec-compliance tests, the crate’s full feature matrix, clippy/build/package checks, and the root suite.
+<!-- agent:boundary:2b1e8efc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -108,7 +156,7 @@ Changed paths in `lazily-rs`: `SPEC.md`, `src/thread_safe.rs`, `tests/spec_compl
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~[#lazyperf5]~
-- [#lazyperf6]
+- ~[#lazyperf6]~
 - [#lazyperf7]
 - [#lazyperf8]
 <!-- /agent:queue -->
@@ -116,7 +164,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#lazyperf6] Prototype a versioned optimistic cached-read path for read-mostly and independent-slot workloads, falling back under dirty/dependency/callback/batch ambiguity and proving visibility semantics before adoption.
 - [ ] [#lazyperf7] Add effect-heavy contention profiles before changing synchronization: isolate effect queue coalescing, cleanup execution, and batch flush behavior at 8/16 workers, then decide between sharding and keeping the graph lock.
 - [ ] [#lazyperf8] Compare synchronization strategies with a fixed adoption gate: current Condvar, narrower wakeups, parking_lot-style parking, and targeted CAS must report throughput plus p50/p95 latency and lock-site budgets before release.
 <!-- /agent:backlog -->

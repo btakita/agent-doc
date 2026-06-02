@@ -39,7 +39,23 @@ queue_active: false
 Compacted content:
 - Archived 2 response topic(s): Add lazily-rs CI; Add a gh action for CI on lazily-rs.
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:a49b25ed -->
+❯ What are #next-steps to optimize concurrency in lazily-rs? Can we reduce the lock contention further? What is actionable from [#lazyperf8]?
+### Re: lock contention next steps — gpt-5
+
+Yes, there is still lock contention to reduce, but the actionable path from `#lazyperf8` is evidence-first rather than another broad synchronization rewrite.
+
+`#lazyperf8` made synchronization replacement release-gated on throughput, p50/p95 latency, lock-site budgets, and Loom/Shuttle proof. The current README report has throughput means/CI and deterministic lock-site budgets, but it still does not emit the p50/p95 latency evidence that the gate now requires. That should be the next item, because without it we cannot honestly compare current `std::sync` mutex/Condvar, parking, targeted CAS, or any sharded graph prototype.
+
+The remaining hotspots worth attacking after that are specific:
+
+1. `thread_safe_contention_independent_slots_16` is still graph-lock shaped: the generated report shows `5.907 ms` mean, with `get_refresh` at `542` acquisitions / `6.993 ms` wait and `publish` at `542` acquisitions / `9.334 ms` wait. That is the best candidate for a bounded partitioning or split-publish experiment keyed by `SlotId`.
+2. `thread_safe_effect_contention_batch_flush_16` and `queue_coalescing_16` still carry high `other` lock wait (`13.813 ms` and `6.309 ms` respectively in the current report). Effects are riskier than slot reads because cleanup/disposal ordering is correctness-sensitive, so this should be a targeted effect-drain/schedule coalescing item, not a lock-free rewrite.
+3. Same-slot write/read can probably be improved at the margins, but it is inherently serialized by same-root mutation and stale-completion semantics. I would not make that the next design axis unless the new latency data shows a clear tail-latency regression from wakeup handoff rather than expected serialization.
+
+I added the backlog in priority order. Top backlog item: `#lazyperf9`.
+
+Changed paths: session document/backlog only. No lazily-rs source changes were made, so I did not run the Rust test suite for this response cycle.
+<!-- agent:boundary:a8e9000c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -53,6 +69,9 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#lazyperf9] Add p50/p95 latency evidence to the benchmark/report harness required by #lazyperf8: capture latency distributions for same-slot, read-mostly, batched-write, and effect-heavy 8/16-worker cases, emit them in README.md beside throughput and lock-site budgets, and make --check fail when required latency rows are missing.
+- [ ] [#lazyperf10] Reduce remaining independent-slot ThreadSafeContext publish/get_refresh lock contention: profile thread_safe_contention_independent_slots_16 with the new latency rows, then prototype splitting or partitioning the publish/get_refresh graph-mutation path by SlotId while preserving dependency-edge, effect, batch, and stale-completion semantics under Loom.
+- [ ] [#lazyperf11] Reduce effect-heavy ThreadSafeContext lock contention after #lazyperf8: target thread_safe_effect_contention_batch_flush_16 and queue_coalescing_16, especially the high other/dependency_edge waits, by coalescing effect drain/schedule mutations or adding effect-sidecar state without weakening cleanup/disposal ordering.
 <!-- /agent:backlog -->
 
 ## Review

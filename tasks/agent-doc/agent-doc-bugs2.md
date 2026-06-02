@@ -65,7 +65,7 @@ The bug shape is a foreign prompt that *was* answered this turn, and `classify_p
 - `make check` clean (clippy `-D warnings`, `agent-doc-orchestration` 2159, `test_cli` 69, `finalize_integration` 52); both binaries rebuilt (v0.34.0).
 
 Next auto-queue head is `#lr-cycle-7` (Phase 7). Note: you added a new tail item — "Add a preset attribute to `agent:queue` … free-text prompt that applies `prompt_presets`" — it's preserved in the queue and will surface after the lazily-rs phases.
-<!-- agent:boundary:b71b42d5 -->
+<!-- agent:boundary:1d34ca06 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -90,7 +90,6 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Backlog
 
 <!-- agent:backlog priority queue=append -->
-- [ ] [#write-closeout-response-shape] #agent-doc-bug 2026-06-02: `agent-doc write --commit` recovery for `src/boost-client/tasks/monsterrodholders.md` accepted stdin but committed the closeout without a `### Re:` heading, leaving `session-check` to report the original `do [#stevepackets]` prompt as unresolved; adding the heading manually then made `write --commit` dedupe and refuse the visible response as direct patchback. Plan: tasks/agent-doc/plan-write-closeout-response-shape.md. DO NOT IMPLEMENT in this planning item.
 - [ ] [#lr-cycle-7] Phase 7: Add CycleStateSlot + SnapshotContentSlot; consolidate snapshot path lookups. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-head-8] Phase 8: Add HeadContentSlot + SnapshotCommitStatusSlot for git show HEAD dedup. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-wire-9] Phase 9: Wire RunContext into ops_log, template_io, patch, harness detection. Plan: tasks/agent-doc/plans/lazily-rs-integration.md

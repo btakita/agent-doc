@@ -40,7 +40,27 @@ Compacted content:
 - Archived 5 response topic(s): lock contention next steps; #lazyperf5; #lazyperf6; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
 Add a gh action for CI on lazily-rs.
-<!-- agent:boundary:2490f11f -->
+
+### Re: Add lazily-rs CI — gpt-5
+
+Added a GitHub Actions CI workflow for lazily-rs at `src/lazily-rs/.github/workflows/ci.yml`. The workflow runs on pushes to `main`, pull requests, and manual dispatch; it installs stable Rust with rustfmt and clippy, then runs formatting, strict clippy, all-targets/all-features build, default tests, Tokio feature tests, and the loom model test target.
+
+Committed changes:
+- `81ca43c` in `src/lazily-rs`: `ci: add Rust workflow`
+- `5fcc6c09a` in `agent-loop`: `chore: update lazily-rs CI workflow` for the submodule pointer update
+
+Verification:
+- `make check` returned `No rule to make target 'check'` in `src/lazily-rs`, so the submodule has no make check target.
+- `cargo +stable fmt --all --check` passed.
+- `cargo +stable clippy --locked --all-targets --all-features -- -D warnings` passed.
+- `cargo +stable build --locked --all-targets --all-features` passed.
+- `cargo +stable test --locked` passed.
+- `cargo +stable test --locked --features tokio` passed.
+- `cargo +stable test --locked --features loom --test thread_safe_loom` passed.
+- `gh run list --workflow CI --limit 1` reported no existing remote workflow named `CI`; expected before this new workflow is pushed, and there was no existing lazily-rs CI/tmux leg to inspect.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:86e7ec99 -->
 <!-- /agent:exchange -->
 ###
 <!--

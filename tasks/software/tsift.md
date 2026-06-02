@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -167,7 +167,40 @@ Verification:
 - No tmux CI target/workflow was found in this repo (`rg "tmux|tmux-test|tmux-ci" .github Makefile packages src tests` returned no matches).
 
 `#mdverify` remains the next queued Markdown item.
-<!-- agent:boundary:e3236188 -->
+
+### Re: #mdverify — gpt-5
+
+> **Queue prompt:**
+>
+> [#mdverify]
+
+Implemented and committed `#mdverify`.
+
+What changed:
+- Added compiled CLI coverage for Markdown block dry-runs that prove no source mutation, stable Markdown span metadata, diff previews, and `source-read` follow-up commands.
+- Added a no-mutation apply refusal regression for `rewrite_code_fence` replacements that include fence markers.
+- Added Markdown `--verify` coverage proving temp-worktree apply/reindex, source-read windows, impact summaries, and verify-only no-mutation behavior.
+- Added Markdown `--verify-command --apply` coverage proving a failing verify command blocks the real tree from being mutated.
+- Updated `SPEC.md`, `CLAUDE.md`, and `VERSIONS.md` to document Markdown verification gates.
+
+Committed:
+- `src/tsift` submodule: `33475fa test: cover markdown semantic verify gates`
+- Superproject pointer: `63654b24e agent-doc(tsift): update submodule pointer`
+
+Verification:
+- `cargo test -p tsift-cli edit_intents_markdown_block_dry_run_reports_source_windows_without_mutating` passed.
+- `cargo test -p tsift-cli edit_intents_markdown_block_apply_refuses_fence_marker_replacement_without_mutating` passed.
+- `cargo test -p tsift-cli edit_intents_markdown_verify_reports_temp_worktree_source_read_and_impact` passed.
+- `cargo test -p tsift-cli edit_intents_markdown_verify_command_failure_blocks_real_mutation` passed.
+- `cargo test -p tsift-cli markdown` passed.
+- `cargo test -p tsift-cli edit_intents` passed.
+- `make check` passed via digest artifact `tart-694b0acaa7`.
+- `cargo install --path .` passed via digest artifact `tart-19585fec8b`; installed binary reports `tsift 0.1.62`.
+- Latest GitHub Actions CI before this new root push, run `26831900513`, was green: `clippy + test` and `live Convex graph acceptance` both succeeded.
+- No tmux CI target/workflow was found in this repo (`rg "tmux|tmux-test|tmux-ci" .github Makefile packages src tests` returned no matches).
+
+`src/tsift` has already been pushed. The superproject push is pending until after this binary-owned document closeout.
+<!-- agent:boundary:1a8d77ca -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -176,19 +209,12 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~[#mdastcontract]~
-- ~[#mdsectionspans]~
-- ~[#mdsectionedits]~
-- ~[#mdblockedits]~
-- [#mdverify]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#mdverify] Markdown semantic-write verification coverage: dry-run/apply no-mutation tests, temp-worktree verify gates, source-read impact summaries, and refusal regressions.
 <!-- /agent:backlog -->
 
 ## Review

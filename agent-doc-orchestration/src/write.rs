@@ -8972,6 +8972,9 @@ fn persist_already_applied_socket_content_ours_snapshot(
     {
         let response_present = response_materialized_in_content(expected_response, current)
             || baseline.is_some_and(|base| response_already_in_current(base, ours, current));
+        let prompt_drift = baseline.is_some_and(|base| {
+            ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(base, current, ours)
+        });
         crate::ops_log::log_op(
             file,
             &format!(
@@ -8983,11 +8986,28 @@ fn persist_already_applied_socket_content_ours_snapshot(
                 crate::ops_log::content_hash(current),
                 ours.len(),
                 crate::ops_log::content_hash(ours),
-                baseline.is_some_and(|base| {
-                    ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(base, current, ours)
-                })
+                prompt_drift
             ),
         );
+        // #6cmx/#wy0y verification marker: an explicit, greppable record that the
+        // operator typed into the document while finalize was writing (the live
+        // buffer diverged from our content with prompt drift). `typed_delta_bytes`
+        // is the live-vs-ours byte delta (their keystrokes); `response_present`
+        // confirms the assistant response is still materialized in the buffer, so
+        // grepping `finalize_typing_during_write` verifies a typing-during-finalize
+        // run was exercised and whether the response survived intact.
+        if prompt_drift {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "finalize_typing_during_write file={} patch_id={} typed_delta_bytes={} response_present={} resolution=content_ours_adopted",
+                    file.display(),
+                    patch_id,
+                    current.len() as i64 - ours.len() as i64,
+                    response_present
+                ),
+            );
+        }
 
         if !response_present {
             log_ipc_proof_failure(
@@ -19145,6 +19165,18 @@ mod submodule_patch_routing_tests {
                 && log.contains("ipc_socket_already_applied_snapshot")
                 && log.contains("snap_source=file_read"),
             "already_applied disk adoption should be auditable:\n{log}"
+        );
+        // #6cmx/#wy0y: this scenario IS typing-during-finalize (live buffer has a
+        // user edit beyond our content), so it must emit the explicit verification
+        // marker with the response intact — one greppable line proving completion.
+        assert!(
+            log.contains("prompt_drift=true"),
+            "user-edit divergence is a prompt-drift case:\n{log}"
+        );
+        assert!(
+            log.contains("finalize_typing_during_write")
+                && log.contains("response_present=true"),
+            "typing-during-finalize must log finalize_typing_during_write with response_present:\n{log}"
         );
     }
 

@@ -31,72 +31,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260602-143240.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260602-151927.md`*
 
 Compacted content:
-- Archived 2 response topic(s): #lr-content-6; JB File Cache Conflict accepted late left the response uncommitted
+- Archived 2 response topic(s): #queue-head-struck-on-foreign-exchange-answer; #lr-cycle-7
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: #queue-head-struck-on-foreign-exchange-answer — free-text head no longer struck by a foreign answer — opus-4-8
-
-> **Queue prompt:**
->
-> [#queue-head-struck-on-foreign-exchange-answer]
-
-
-Fixed (submodule `9c8b5577`).
-
-#### The bug
-
-A free-text `agent:queue auto` head (no `#id`) is meant to be consumed by being *answered*. But the consumption gate (`write.rs`, `#free-text-queue-head-consume`) struck it whenever **any** non-empty response committed this cycle — so a cycle that answered a NEW, unrelated `agent:exchange` prompt also struck the free-text head, consuming work that was never done (the live repro: a `lazily-rs plan-update` head struck in HEAD with the file never edited).
-
-#### The fix
-
-Gate free-text consumption on the bug's own discriminator — a **foreign exchange prompt**. `cycle_answered_foreign_exchange_prompt` scans this cycle's diff for an added canonical `❯` user-prompt line whose text isn't the queue head:
-
-- **Drain cycle** (only this turn's `### Re:` response added, no new prompt) → not foreign → the head drains as before.
-- **Foreign cycle** (a new unrelated `❯` exchange prompt was added and answered) → foreign → the free-text head stays queued for a later cycle.
-
-The bug shape is a foreign prompt that *was* answered this turn, and `classify_prompt_bearing_changes` suppresses already-answered prompts — so the raw added `❯` lines are scanned instead of the suppressed classifier. Id-bearing `do [#id]` / `#preset` heads are unaffected (they still require an explicit completion flag, preserving `#queue-strike-on-halt`).
-
-#### Verification
-
-- New unit regression (drain vs. foreign discriminator) + a `finalize` integration test reproducing the live shape (free-text head + foreign exchange prompt → head kept). The existing drain test (`finalize_echoes_consumed_free_text_queue_prompt_into_response`) stays green.
-- `make check` clean (clippy `-D warnings`, `agent-doc-orchestration` 2159, `test_cli` 69, `finalize_integration` 52); both binaries rebuilt (v0.34.0).
-
-Next auto-queue head is `#lr-cycle-7` (Phase 7). Note: you added a new tail item — "Add a preset attribute to `agent:queue` … free-text prompt that applies `prompt_presets`" — it's preserved in the queue and will surface after the lazily-rs phases.
-
-### Re: #lr-cycle-7 — Phase 7: CycleStateSlot + SnapshotContentSlot — opus-4-8
-
-> **Queue prompt:**
->
-> [#lr-cycle-7]
-
-
-Landed Phase 7 of the lazily-rs integration (submodule `1f945a85`), bounded-increment scope as agreed.
-
-#### What changed
-
-`graph.rs` gains two cached slots so the per-cycle re-reads of cycle state and snapshot content collapse to one load each per context lifetime:
-
-- **`CycleStateSlot`** (`Option<Arc<CycleState>>`) — loads the cycle-state JSON once; `None` when no sidecar exists.
-- **`SnapshotContentSlot`** (`Option<Arc<String>>`) — loads the snapshot (under flock) once.
-- Accessors `cycle_state()` / `snapshot_content()`, `invalidate_*` methods (clear after a save/delete), and `is_*_cached` flags.
-- A real load error is surfaced to stderr (never swallowed, per the crate's no-silent-failure rule); a missing sidecar is the normal `None`.
-
-`DocHashSlot` and the snapshot-path accessors (`snapshot_path_for`, `lock_path_for`, `baseline_path_for`, `pending_path_for`) already existed from earlier phases.
-
-#### Scope boundary
-
-This phase lands the **slot infrastructure + tests** — the plan's stated Phase 7 verification ("new slot tests pass; existing tests unchanged"). The **broad threading** of `RunContext` into the 120+ `cycle_state::load` and 160+ `snapshot::load` call sites is the explicit job of **Phase 9 (`#lr-wire-9`)**; doing it here would be a 280+-site change and the `cycle_state` path is mutation-heavy (caching across an `inspect` sweep that also mutates state is unsafe without per-mutation invalidation). Keeping that out of Phase 7 matches the bounded-increment plan.
-
-#### Verification
-
-- 3 `graph` regressions: snapshot loads + caches; `None` when absent; cycle state `None` until created, then reloads on `invalidate_cycle_state`.
-- `make check` green (clippy `-D warnings`, `agent-doc-orchestration` 2162, `test_cli` 69, sim-medium, version-sync); both binaries rebuilt (v0.34.0).
-
-Next head is `#lr-cycle-8`… actually `#write-closeout-response-shape` is now queued ahead of `#lr-head-8` (you added it mid-cycle), so that's the next head. You also queued a JB `/clear`-while-busy report and the `agent:queue` preset-attribute request — all preserved behind it.
-<!-- agent:boundary:18f6256d -->
+<!-- agent:boundary:c20cc62e -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -107,8 +47,8 @@ preset #spec-test-build-install-commit-push
 - ~[#lr-cycle-7]~
 - [#write-closeout-response-shape]
 - Should CellHandle::set(&ctx, value) be added to lazily-rs first? (Current API is Context::set_cell()): Yes
-  Should the graph be per-file (one context per tracked document) or per-process (one context with file-keyed cells)?
-  How to handle config hot-reload in long-lived ActorContext — file watcher on .agent-doc/config.toml or clear on next cycle?
+- Should the graph be per-file (one context per tracked document) or per-process (one context with file-keyed cells)?: Use your judgement. There can also be multiple contexts.
+- How to handle config hot-reload in long-lived ActorContext — file watcher on .agent-doc/config.toml or clear on next cycle?: Can you support both?
 - [#lr-head-8]
 - [#lr-wire-9]
 - [#lr-actor-10]

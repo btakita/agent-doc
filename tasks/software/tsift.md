@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -70,6 +70,11 @@ Verification:
 
 ### Re: #mdtokens — gpt-5
 
+> **Queue prompt:**
+>
+> [#mdtokens]
+
+
 Completed `#mdparsecache` and `#mdtokens`.
 
 Implemented a reusable in-process Markdown projection cache keyed by file/content hash, then routed Markdown section/block edit lookups through it so repeated edit-intents planning/apply paths reuse one extracted tree. The Markdown projection now reports cache evidence, node counts, and phase timings for parse/extract and outline projection.
@@ -90,7 +95,7 @@ Verification:
 - `cargo install --path . --force` passed.
 - Installed smoke checks passed for `markdown-ast` outline/phase fields and `source-read` Markdown window outlines.
 - GitHub Actions CI run `26843503622` passed. The tsift CI workflow has no tmux-named job to inspect, so there was no tmux leg to rerun.
-<!-- agent:boundary:06a24c84 -->
+<!-- agent:boundary:cfff7cec -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -99,18 +104,12 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~[#mdastapi]~
-- ~[#mdparsecache]~
-- [#mdtokens]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [x] [#mdparsecache] Cache and reuse per-file Markdown parse/extract results across edit-intents planning/apply and source-read enrichment; add large-document benchmarks and phase timings for section/block lookup hot paths.
-- [x] [#mdtokens] Add token-budgeted Markdown projections: outline-first section/block previews, selected-node expansion handles, and measured token-savings fixtures for session-review/context-pack instead of replaying raw markdown bodies.
 <!-- /agent:backlog -->
 
 ## Review

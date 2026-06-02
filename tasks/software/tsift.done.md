@@ -279,3 +279,4 @@
 - 2026-06-02 [#mdastcontract] Markdown semantic edit language contract: canonical language id, formatter policy, supported Markdown intent kinds, and fail-closed capability checks.
 - 2026-06-02 [#mdsectionspans] Markdown heading/section/list/code-fence stable spans: hierarchy metadata, section boundaries, and source-read/edit target refs.
 - 2026-06-02 [#mdsectionedits] Markdown section edit executor: rename_heading, replace_section_body, insert_section, and move_section with tree-sitter validation.
+- 2026-06-02 [#mdblockedits] Markdown block edit executor: insert_list_item and rewrite_code_fence while preserving syntax and refusing ambiguous targets.

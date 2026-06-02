@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -54,7 +54,7 @@ I added the backlog in this priority order:
 6. `#astnavfixtures` - add multilingual fixtures and perf gates so search recall, stable handles, and expand commands stay locked across all supported languages.
 
 Verification: ran `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `agent-doc orchestrate --from-exchange --plan`, refreshed `tsift` indexing, checked `src/tsift` status, and inspected the spec plus the relevant search/index/Markdown AST implementation paths. No code changes were made in this cycle.
-<!-- agent:boundary:331029d4 -->
+<!-- agent:boundary:4405ea00 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -63,7 +63,14 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+preset #spec-test-build-install-commit-push
+- [#astspansearch]
+- [#astqueryfacets]
+- [#astnavgraph]
+- [#mdembeddedcode]
+- [#astrankingmerge]
+- [#astnavfixtures]
 <!-- /agent:queue -->
 
 ## Backlog

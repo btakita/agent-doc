@@ -244,7 +244,46 @@ Verification:
 - GitHub Actions `CI` run `26792481164` passed: `clippy + test` and `live Convex graph acceptance` both succeeded. The root repo has no workflow named `CI`.
 
 Escalation: none. Confidence: high. `#surrealbench` is complete; the remaining open follow-up is `#surrealpush`.
-<!-- agent:boundary:55f61a29 -->
+❯ - do [#surrealpush]. #spec-test-build-install-commit-push
+❯ - Should we continue optimizing SurrealDB or focus on Sqlite? Would Rust-derived indexes improve performance with Sqlite as well?
+
+### Re: #surrealpush — gpt-5
+
+> **User prompt:**
+>
+> do [#surrealpush]. #spec-test-build-install-commit-push
+>
+> Should we continue optimizing SurrealDB or focus on Sqlite? Would Rust-derived indexes improve performance with Sqlite as well?
+
+Completed `#surrealpush`.
+
+I kept the SurrealDB adapter on Rust-derived indexes for hot GraphStore reads and documented native SurrealQL pushdown as a persistence/parity probe, not the selected hot path. The new test compares a direct SurrealQL edge query against the adapter's derived-index `outgoing_edges` result, then locks the public paged read diagnostics to the Rust-side kind/property/incoming/outgoing indexes. This gives us a regression check for the design choice without replacing the faster current adapter path.
+
+Strategy answer: focus production optimization on SQLite and shared GraphStore/query preparation, not more SurrealDB promotion work right now. SurrealDB is now useful as a parity and load/write spike, and it is competitive on synthetic aggregate totals, but the repeated benchmark still holds promotion because real-workload operation gates lose badly on edge lookup, edge-property scan, incident edges, neighborhood, and path tiers. Rust-derived indexes are not likely to improve SQLite's current hot reads because SQLite already pushes those operations into indexed SQL and materialized property tables. Add Rust-side SQLite indexes only for a specific measured preparation cache or operation that indexed SQL cannot satisfy.
+
+Changed paths:
+
+- `src/tsift/SPEC.md`
+- `src/tsift/packages/tsift-surrealdb/src/lib.rs`
+- `src/tsift` submodule pointer
+
+Commits pushed:
+
+- `src/tsift`: `8037f95 test(graph): lock surrealdb derived index reads`
+- `agent-loop`: `08cc2ed99 chore: update tsift submodule`
+
+Verification:
+
+- `cargo fmt --package tsift-surrealdb` completed.
+- `git diff --check` passed.
+- `cargo test --manifest-path packages/tsift-surrealdb/Cargo.toml` passed via digest-runner artifact `tart-3868ab8662`.
+- `cargo test -p tsift-cli --features backend-surrealdb graph_db_backend_eval_benchmarks_candidate_stores_against_sqlite -- --nocapture` passed via artifact `tart-0edc2214b1`.
+- `make check` passed via artifact `tart-5a696cc1c7`.
+- `cargo install --path .` passed via artifact `tart-14dd3ee1e5`; `tsift --version` reports `tsift 0.1.62`.
+- GitHub Actions `CI` run `26793122164` passed: `clippy + test` and `live Convex graph acceptance` both succeeded. The root repo has no workflow named `CI`.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:8dc29862 -->
 <!-- /agent:exchange -->
 ###
 <!--

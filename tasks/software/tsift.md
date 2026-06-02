@@ -244,7 +244,7 @@ Verification:
 - GitHub Actions `CI` run `26792481164` passed: `clippy + test` and `live Convex graph acceptance` both succeeded. The root repo has no workflow named `CI`.
 
 Escalation: none. Confidence: high. `#surrealbench` is complete; the remaining open follow-up is `#surrealpush`.
-<!-- agent:boundary:75d36372 -->
+<!-- agent:boundary:55f61a29 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -259,7 +259,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#surrealpush] Compare SurrealDB query pushdown vs Rust-derived indexes behind backend-surrealdb and keep the faster design that preserves GraphStore parity.
 <!-- /agent:backlog -->
 
 ## Review

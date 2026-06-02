@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 
@@ -198,7 +198,48 @@ Verification passed:
 CI evidence: the lazily-rs repo has no listed GitHub Actions workflows, and the root repo still has no workflow named `CI`. Before this finalize, the latest root `Agent Doc` runs observed were in progress: `26843091328` for `agent-doc(agent-doc-bugs2): 2026-06-02 15:29:30` and `26843003959` for `chore: update lazily-rs submodule`.
 
 No escalation was required. Confidence is high: this is an instrumentation/spec/reporting gate with full local verification, and it deliberately avoids a synchronization rewrite.
-<!-- agent:boundary:d3ae20d5 -->
+
+### Re: #lazyperf8 — gpt-5
+
+> **Queue prompt:**
+>
+> [#lazyperf8]
+
+Completed `#lazyperf8`.
+
+I added the fixed synchronization strategy adoption gate without changing the runtime synchronization strategy. The generated README benchmark section now compares `current_std_mutex_condvar`, `narrower_condvar_wakeups`, `parking_lot_style_parking`, and `targeted_cas`; the gate requires throughput, p50/p95 latency, deterministic lock-site budgets, and Loom/Shuttle proof before any synchronization replacement can ship.
+
+Changed paths:
+- `src/lazily-rs/README.md`
+- `src/lazily-rs/SPEC.md`
+- `src/lazily-rs/scripts/update-benchmark-results.py`
+- `src/lazily-rs/tests/spec_compliance.rs`
+- `src/lazily-rs` superproject pointer
+
+Commits:
+- `abcf850` in `src/lazily-rs`: `perf: add synchronization adoption gate`
+- `de7568627` in the superproject: `chore: update lazily-rs submodule`
+
+Verification:
+- `python3 scripts/update-benchmark-results.py --check`
+- `cargo test --features instrumentation readme_benchmark_results_cover_required_scenarios`
+- `cargo test storage_strategy_evaluation`
+- `cargo fmt --check`
+- `cargo test --features loom --test thread_safe_loom`
+- `cargo test`
+- `cargo test --features tokio`
+- `cargo test --all-features`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo build --all-targets --all-features`
+- `cargo package --allow-dirty`
+- root `make check`
+
+CI evidence:
+- `src/lazily-rs`: `gh workflow list` returned no workflows.
+- superproject: `gh run list --workflow CI --limit 1` reports no workflow named `CI`; `Agent Doc` run `26843472095` for `chore: update lazily-rs submodule` was in progress when checked.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:721f367e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -206,18 +247,12 @@ No escalation was required. Confidence is high: this is an instrumentation/spec/
 
 ## Queue
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~[#lazyperf5]~
-- ~[#lazyperf6]~
-- ~[#lazyperf7]~
-- [#lazyperf8]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#lazyperf8] Compare synchronization strategies with a fixed adoption gate: current Condvar, narrower wakeups, parking_lot-style parking, and targeted CAS must report throughput plus p50/p95 latency and lock-site budgets before release.
 <!-- /agent:backlog -->
 
 ## Review

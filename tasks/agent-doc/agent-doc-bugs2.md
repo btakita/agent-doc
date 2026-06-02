@@ -144,25 +144,52 @@ Your edit during finalize on `lazily-rs.md` produced exactly the safe path:
 
 The broader Path B family (`#ipc-dup-tracking-double-merge`, `#adoc-queue-ipc-buffer-divergence`, `#duplicate-response-after-commit`, `#finalize-retry-ipc-response-duplication`, `#prompt-duplicated-while-typing`, and the `#wy0y`/`#6cmx` consolidators) involves **JB-plugin paths** (PromptPoller double-tracking, plugin↔buffer protocol, late-IPC reposition) that a binary-side type-during-finalize on one doc doesn't exercise. This test is strong positive evidence for the class, but I won't mark those done without their specific repros (several need the JB `setText` debug capture / live plugin).
 
+How can I verify these items?
+
 #### Carried over
 
 - Logged the **queue-consumption bug** I hit last cycle as `#queue-head-struck-on-foreign-exchange-answer` (the `lazily-rs` plan-update head was struck without its work). That plan-update still needs redoing before the phases.
+Add a backlog item and place at the top of the queue.
 - The remaining queue (`#lr-content-6 … #lr-actor-10`) is **Phases 6–10 of the lazily-rs integration — major core code**, made more involved by "lazily-rs is now multithreaded." I'm holding the auto-loop there pending your go-ahead + any multithreading context to fold into the plan.
-<!-- agent:boundary:5827d749 -->
+Update the plan.
+
+### Re: verify IPC items + queue the bug + update the plan — opus-4-8
+
+Handling your three inline notes by position.
+
+#### How to verify the not-blanket-closed IPC-dup items
+
+Each needs a specific repro + a log/state signal. The binary-side ones you can verify exactly like you just did for `lazily-rs`; the JB-plugin ones need the plugin:
+
+- **`#prompt-duplicated-while-typing` / `#finalize-retry-ipc-response-duplication`** — type during `finalize --stream` (you did). Verify: `grep finalize_typing_during_write` shows `response_present=true`, and the committed doc has exactly one copy of the prompt + response (no duplicate). For the retry variant, force an IPC timeout (kill the IDE listener mid-finalize) and confirm the local-write fallback still commits one response.
+- **`#duplicate-response-after-commit`** — after a normal commit, watch for a late IPC reposition re-inserting the response. Verify: `grep -E "late.*fallback|duplicate_response|already-committed" ops.log` is empty and `git show HEAD:<doc>` has one response block.
+- **`#ipc-dup-tracking-double-merge` (PromptPoller double-tracking)** — JB-plugin path. Open the same doc via two registration routes (tab switch + Run), then confirm `trackedFiles` keys by canonical path (one entry) — needs JB debug logging; grep `idea.log` for a single `mergeOrReload` per change, not two.
+- **`#adoc-queue-ipc-buffer-divergence`** — JB-plugin↔buffer protocol. Type during finalize with `queue auto` active; the binary side is already proven (`ipc_snapshot_adoption_blocked` + `finalize_typing_during_write`), but full closure needs the JB `setText` payload capture (`#weqq`, install plugin 0.2.145+ and enable `#com.github.btakita.agentdoc` debug).
+
+Net: the binary-side dup defenses are now self-verifiable from `ops.log`; the remaining gaps are genuinely in the JB plugin and need a live IDE.
+
+#### Backlog item at top of queue
+
+Done already — `#queue-head-struck-on-foreign-exchange-answer` was added to the backlog last cycle, and you've queued `do [#queue-head-struck-on-foreign-exchange-answer]` at the top (ahead of the `#lr-*` phases). So the bug fix is prioritized as the next queue head. (If you meant a *different* new item, name it and I'll add it.)
+
+#### Updated the plan
+
+Updated `tasks/agent-doc/plans/lazily-rs-integration.md` for "lazily-rs is now multithreaded" (this is the redo of the plan-update that was mis-struck last cycle):
+- New rule: **RunContext** keeps the single-threaded `Context`; **ActorContext** uses `ThreadSafeContext` (`Send + Sync`, mutex-backed) because the supervisor/watch daemon shares one reactive graph across worker threads (idle-queue-watch, IPC listener). Store as `Arc<ActorContext>` in `SupervisorShared`.
+- Resolved the outdated "lazily-rs is single-threaded (RefCell)" risk; added a graph-lock-contention risk with `loom`/`instrumentation` mitigation; annotated Phase 5/10 ActorContext wiring. Pushed `9332929ef`.
+
+Continuing the queue next — the prioritized `#queue-head-struck-on-foreign-exchange-answer` fix, then I'll reassess at the `#lr` phases.
+<!-- agent:boundary:9abec7ac -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- ~[#kc5e]~
-- ~[#x8aw]~
-- ~I have been using agent-doc and have not seen any bugs. Can the gated review items be completed? If yes, complete them. I want to move on to performance improvements.~
-- ~lazily-rs is now multithreaded. Update tasks/agent-doc/plans/lazily-rs-integration.md with recent changes.~
+- do [#queue-head-struck-on-foreign-exchange-answer]
 - [#lr-content-6]
 - [#lr-cycle-7]
 - [#lr-head-8]
 - [#lr-wire-9]
 - [#lr-actor-10]
-- ~do [#x8aw]~
 <!-- /agent:queue -->
 ###
 <!--

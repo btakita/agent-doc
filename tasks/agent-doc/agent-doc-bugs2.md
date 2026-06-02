@@ -16,7 +16,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -90,11 +90,26 @@ This is the same regression family as `#jb-tsift-pane-sync`. I recorded the full
 #### Scope this turn
 
 You gave a repro detail, not a fix directive (no `#spec-test-build-install-commit-push`), so I diagnosed and captured rather than editing reconcile/focus code — that path is high-risk and the plan calls for atomic-SWAP routing plus SimWorld coverage. Queued the concrete fix as `#jb-nav-3pane-promote-swap`. Say the word (or add the preset) and I'll implement it.
-<!-- agent:boundary:0d4412be -->
+
+### Re: do #ht5v — live-verify the 3-pane navigation detection — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#ht5v]
+
+
+Verified, and the answer is **detection was correct, not spurious** — so the conditional "collapse near-zero-width / preview splits" branch does not apply. Marking `#ht5v` done.
+
+Evidence (`/tmp/agent-doc-sync.log`, the tsift navigation): the editor-side projection recorded `columns=[tsift.md, monsterrodholders.md]` — two distinct files in two columns. The JB plugin only emits a ≥2-column `EditorLayout` when `FileEditorManagerEx.windows.size >= 2`, so two columns ⇒ IntelliJ genuinely had two editor split windows. This is a real 2-split editor (tsift left, monsterrodholders right), not a phantom/zero-width/preview split.
+
+Conclusion: `detectEditorLayout` needs no collapse heuristic. The surplus pane is purely a tmux-side reconcile/focus race (`promote_on_focus` join-pane not stashing the displaced pane), which is tracked as `#jb-nav-3pane-promote-swap` — that's where the fix belongs. No code change for `#ht5v`, so the preset's build/install/commit steps are N/A here; the next queue item carries the actual implementation.
+<!-- agent:boundary:32e3b949 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue -->
-- do [#ht5v]
+<!-- agent:queue auto -->
+preset #spec-test-build-install-commit-push
+- ~do [#ht5v]~
+- do #jb-nav-3pane-promote-swap
 <!-- /agent:queue -->
 ###
 <!--
@@ -108,7 +123,6 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 
 <!-- agent:backlog priority queue=prepend -->
 - [ ] [#jb-nav-3pane-promote-swap] Fix 1-in/1-out navigation landing at 3 panes for a 2-column editor: the focus-path promote_on_focus join-pane (sync.rs promote_pane_to_agent_doc_window, called from focus.rs:147, #stash-pane-promote-on-focus) rescues the focused file's stashed pane WITHOUT stashing the displaced pane, racing the reconciler's atomic SWAP. Route the promote-on-focus rescue through the same atomic SWAP or defer pane reparenting to the reconciler so exactly one path owns the in/out transition and the displaced pane is always stashed in the same op; add deterministic SimWorld coverage for the 1-in/1-out tab switch. Plan: tasks/agent-doc/plan-jb-tsift-pane-sync-regression.md. Diagnosed 2026-06-01 from /tmp/agent-doc-sync.log.
-- [ ] [#ht5v] [recommended] Live-verify the 3-pane navigation repro with the new [layout-detect] logging (JB plugin 0.2.146): capture whether IntelliJ actually reports 2 editor windows (correct 2-col -> 2 editor + 1 agent-doc = 3 panes) or a spurious 2-column grouping; if spurious, decide whether detectEditorLayout should collapse near-zero-width / preview splits before emitting a 2-column layout. Requested 2026-06-01.
 <!-- /agent:backlog -->
 
 ## Review

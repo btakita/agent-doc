@@ -95,7 +95,48 @@ Verification:
 Notes: `cargo build` and bench compile still emit existing workspace patch warnings for `agent-kit`, `tagpath`, and `tmux-router` not being used in this crate graph. `cargo install --path .` is not applicable because `lazily` is a library crate with no binary targets. `make check` is not applicable in `src/lazily-rs` because there is no `Makefile`. GitHub workflow inspection found no workflows listed for `btakita/lazily-rs`, so there was no CI/tmux workflow run to inspect.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:e3052a3e -->
+
+### Re: #tsc16-wake-scope — gpt-5
+
+> **Queue prompt:**
+>
+> [#tsc16-wake-scope]
+
+
+Completed #tsc16-wake-scope.
+
+Changed paths in `src/lazily-rs`: `src/thread_safe.rs`, `tests/spec_compliance.rs`, `tests/thread_safe_loom.rs`, `SPEC.md`, and `README.md`. I also committed the parent `agent-loop` submodule pointer update for `src/lazily-rs`.
+
+What changed:
+
+1. Replaced the context-wide recompute waiter `Condvar` with per-slot sidecar `Condvar`s. Same-slot waiters still get `notify_all`, but unrelated in-flight slots no longer wake each other.
+2. Added instrumentation coverage proving a waiter parked behind slot B does not reacquire after slot A completes.
+3. Added Loom coverage for scoped slot notification before stale-completion, effect, and re-entrant callback models.
+4. Updated `SPEC.md` and README to document scoped per-slot recompute notifications.
+5. Refreshed README benchmark results after the synchronization change. The full Criterion run completed and rewrote the matrix/lock-attribution rows.
+
+Commits pushed:
+
+- `src/lazily-rs`: `006e0eb perf: scope thread-safe recompute wakeups`
+- `agent-loop`: `624db1e64 chore: update lazily-rs submodule`
+
+Verification:
+
+- `cargo fmt`
+- `cargo test`
+- `cargo test --features instrumentation`
+- `cargo test --features tokio`
+- `cargo test --features loom --test thread_safe_loom`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo build`
+- `cargo bench --features instrumentation --no-run`
+- `python3 scripts/update-benchmark-results.py`
+- `python3 scripts/update-benchmark-results.py --check`
+
+Notes: `cargo build` and bench compile still emit existing workspace patch warnings for `agent-kit`, `tagpath`, and `tmux-router` not being used in this crate graph. `cargo install --path .` is not applicable because `lazily` is a library crate with no binary targets. `make check` is not applicable in `src/lazily-rs` because there is no `Makefile`. GitHub workflow inspection found no workflows listed for `btakita/lazily-rs`, so there was no CI/tmux workflow run to inspect.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:09a0e562 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -103,7 +144,7 @@ Confidence: high. Escalation: none.
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~[#tsc16-matrix]~
-- [#tsc16-wake-scope]
+- ~[#tsc16-wake-scope]~
 - [#tsc16-refresh-fastpath]
 - [#tsc16-optimistic-read]
 <!-- /agent:queue -->
@@ -111,7 +152,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#tsc16-wake-scope] #performance #thread-safe Prototype narrower recompute wakeups, such as per-slot waiter state or targeted notify_one, and compare with the current global Condvar notify_all under stale-completion, multi-slot, and 16-worker contention cases; keep Loom coverage
 - [ ] [#tsc16-refresh-fastpath] #performance #thread-safe Reduce remaining get_refresh/publish lock volume by merging cached freshness checks with value clone and using locked helper variants only where user callbacks still run outside the graph lock
 - [ ] [#tsc16-optimistic-read] #performance #thread-safe Explore a versioned optimistic read path only if the benchmark matrix shows read-mostly or independent-slot contention is still dominated by the global mutex; document visibility semantics before changing guarantees
 <!-- /agent:backlog -->

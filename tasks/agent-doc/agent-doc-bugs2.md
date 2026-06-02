@@ -31,72 +31,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260602-052315.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260602-143240.md`*
 
 Compacted content:
-- Archived 5 response topic(s): do #kc5e + #x8aw; Can the gated review items be completed?; Logs of typing during finalize + added verification logging; 2 more
+- Archived 2 response topic(s): #lr-content-6; JB File Cache Conflict accepted late left the response uncommitted
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: #lr-content-6 — wire content/frontmatter/component slots into session_check — opus-4-8
-
-> **Queue prompt:**
->
-> [#lr-content-6]
-
-
-Implemented Phase 6 of the lazily-rs integration (submodule `29febcf0`).
-
-#### What changed
-
-`session_check` guards each used to re-`read_to_string` + re-parse the document independently — ~20 reads and ~10 parses per `inspect` call. Phase 6 collapses that to one read + one parse via the cached graph slots:
-
-- `inspect_with_warnings` now builds **one** `RunContext`, calls `set_doc_content` once (populating `DocContentCell`), and threads `&rc` into every content-, frontmatter-, and component-reading guard.
-- Guards converted to read from slots: `check_dropped_queue_prompt_guard`, `check_queue_response_contamination_guard`, `check_completed_pending_reap_guard`, `check_shadow_backlog_guard`, `check_malformed_tracked_item_guard`, `check_backlog_replay_guard`, `check_prompt_only_exchange_tail_guard`, `check_gated_phase_split_guard`, `check_queue_head_removal_guard`, plus the `check_pending_capture` / `check_pending_done` / `check_expect_done_or_gate` / `check_blocked_closeout_followup` guards (frontmatter via the slot).
-- The four `resolve_*_guard_mode_with_context` resolvers now read `rc.frontmatter()` instead of re-reading the file. These guard-mode fields are SSH-resolution-independent, so the resolved value is identical.
-- `malformed_tracked_item_refs` factored into a shared `_in(content, components, …)` helper so the slot-backed guard and external file-reading callers share one implementation.
-
-`inspect_core`'s `detect_*` functions (snapshot / cycle-state / `git show HEAD`) are untouched — those are Phases 7 (#lr-cycle-7) and 8 (#lr-head-8).
-
-#### Verification
-
-- New regressions: `phase6_guard_mode_resolves_from_frontmatter_slot_not_file` (proves resolution comes from the slot, not a file read — resolves against a non-existent path) and `phase6_components_slot_matches_doc_content` (offsets stay consistent with `doc_content()`; slot cached).
-- `make check` clippy (`-D warnings`): clean.
-- `agent-doc-orchestration`: 2151 passed. `test_cli`: 69 passed.
-- FlowCore `guard_` budget for `session_check.rs` bumped 72→75 with an audited Phase 6 comment (the test-fn name + its two `_with_context` call sites; the guard-conversion swaps are 1:1, no net change).
-- Both binaries rebuilt (`cargo build --release` + `cargo install --path .`, v0.34.0).
-
-Behavior is unchanged — pure per-cycle dedup. Next queue head is `#lr-cycle-7` (snapshot-path / cycle-state / snapshot-content slots).
-
-### Re: JB File Cache Conflict accepted late left the response uncommitted — opus-4-8
-
-Postponed the Phase 7 loop. Diagnosed and fixed the cache-conflict class (submodule `6c679dd8`, plan `tasks/agent-doc/plan-jb-cache-conflict-stale-accept-replay.md`).
-
-#### What actually happened
-
-The Phase 6 response **was** committed correctly to HEAD (`aecf69f0d`). But the commit step queued an IPC reposition patch carrying a **stale draft** of that response — the body from my first `finalize --stream` attempt that had timed out on IPC (it still had a "Note: …stuck_captured_cycle…" paragraph the successful `--force-disk` retry dropped). When you accepted the JB **File Cache Conflict** hours later, that stale patch replayed into the buffer, so disk became HEAD **plus a surplus `### Re:` duplicate** (same heading, `(HEAD)`-marked, drifted body) before the boundary. `git` showed the file modified → it looked uncommitted.
-
-`session-check` then **misclassified** it as a "direct response patchback" and told you to `write --commit` — which would have committed the duplicated/stale body.
-
-#### Why the existing guards missed it
-
-The late-replay recovery only recognized a **byte-identical** duplicate: `is_committed_response_overapplication` requires the response *sets* to match (`cur_set == head_set`), and `dedupe`/`first_duplicate_response_heading` only collapse consecutive identical blocks. A stale (edited) replay differs in body, so all three fell through to the generic patchback guard.
-
-#### The fix (general mechanism)
-
-- `dedupe::is_committed_response_replay_including_stale(current, head)` — a heading-**topic**-tolerant superset: scaffold must match HEAD, every committed response body must still be present unchanged, and every surplus block must duplicate an already-committed topic (the `(HEAD)` suffix is normalized away). A raw-line safety net fails closed if the working tree introduces any **new** user directive/prompt (`❯`, an id-bearing `do`/`re`, `preset`/`dispatch`, or a bare `[#id]`), so restoring HEAD can never silently drop a user prompt.
-- `detect_late_ipc_response_overapplication` falls back to it, so **both** `inspect_core` (→ INTERRUPTED pointing at `preflight`) and `preflight`'s auto-repair now restore the committed HEAD for the stale-replay class instead of accusing a patchback.
-
-#### Verification
-
-- 6 `dedupe` regressions (stale drifted-body match; reject new topic / lost-or-altered committed body / scaffold drift / identical doc; strict-is-a-subset) + 1 `preflight` integration test reproducing the exact live shape and asserting auto-repair to HEAD.
-- `make check` clean (clippy `-D warnings`, `agent-doc-orchestration` 2158, `test_cli` 69); both binaries rebuilt (v0.34.0).
-
-#### This instance
-
-The live duplicate self-resolved while I was building the fix (the IDE re-synced — disk is now HEAD modulo transient `(HEAD)` markers, `session-check` ok, response intact in HEAD `aecf69f0d`). Nothing further to recover here. From now on, a stale JB-accept replay auto-repairs on the next `preflight` rather than wedging as a phantom patchback.
-
-The Phase 7 (`#lr-cycle-7`) bounded-increment loop stays postponed; say the word and I'll resume it.
-<!-- agent:boundary:bb33a7d4 -->
+<!-- agent:boundary:8fe21f1b -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->

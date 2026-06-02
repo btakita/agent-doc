@@ -301,7 +301,7 @@ Pushed both repos:
 So when you navigate to this document, `sync --focus` resolves to `%70` (the document's own registry-owned, alive pane) — which is exactly the behavior you're observing. That's the fix working: focus keys on the document's own pane, and since the binding is intact and the pane is alive, focus stays on `%70` instead of jumping to a neighbor.
 
 The only scenario still open is the *session-loss* one — if a Codex supervisor restart actually kills `%70`, the owner needs to re-provision a fresh pane for this document rather than dropping the session. That's tracked on `#codex-upgrade-restart-cross-doc-focus` and needs the two-document upgrade/restart live repro. As long as the pane survives, association and focus are correct now.
-<!-- agent:boundary:ef04c75e -->
+<!-- agent:boundary:535e1faf -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
@@ -326,6 +326,10 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Backlog
 
 <!-- agent:backlog priority queue=append -->
+- [ ] [#lr-queue-response-miss] [recommended] #agent-doc-bug 2026-06-02: lazily-rs queued free-text prompt with preset had no committed response patchback in tasks/software/lazily-rs.md. Add session-check coverage so a seen queue head requires committed response, consume proof, or explicit deferral. Plan: tasks/agent-doc/plan-lazily-rs-queued-prompt-patchback-miss.md.
+- [ ] [#lr-queue-plan-deferral] [recommended] #agent-doc-bug 2026-06-02: mixed #agent-doc-bug capture plus #spec-test-build-install-commit-push queue head made agent-doc plan choose plan_backlog_only, deferring runnable lazily-rs work without making the deferral contract explicit. Plan: tasks/agent-doc/plan-lazily-rs-queue-plan-deferral.md.
+- [ ] [#lr-queue-repair-adopt] [recommended] #agent-doc-bug 2026-06-02: if the lazily-rs queued prompt was already completed console-only, recovery must adopt a supplied response through agent-doc write --commit and consume or preserve the matching free-text queue head without rerunning repo work. Plan: tasks/agent-doc/plan-lazily-rs-queue-repair-adopt.md.
+- [ ] [#lr-queue-patchback-miss] [recommended] #agent-doc-bug 2026-06-02: lazily-rs queued free-text prompt with preset was not visibly answered or patched back; mixed #agent-doc-bug capture made this cycle plan_backlog_only and deferred the actionable queue head. Add plan/session-check coverage so the head is either answered, consumed, or explicitly deferred through a committed response. Plan: tasks/agent-doc/plan-lazily-rs-queued-prompt-patchback-miss.md.
 - [ ] [#lr-head-8] Phase 8: Add HeadContentSlot + SnapshotCommitStatusSlot for git show HEAD dedup. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-wire-9] Phase 9: Wire RunContext into ops_log, template_io, patch, harness detection. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-actor-10] Phase 10: Add GlobalConfigSlot + SessionRegistrySlot for ActorContext. Plan: tasks/agent-doc/plans/lazily-rs-integration.md

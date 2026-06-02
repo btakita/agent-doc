@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -53,7 +53,34 @@ Priority order added to backlog:
 5. `#astverify` — temp-worktree verification harness for dry-run/apply/reindex/read-impact/test gates.
 
 That order keeps the substrate honest: first improve the AST read/write address space, then add harder Rust mutations, then generalize across languages, then wrap the whole flow in stronger apply-time verification.
-<!-- agent:boundary:cc29e1d9 -->
+
+### Re: #astspans — gpt-5
+
+> **Queue prompt:**
+>
+> [#astspans]
+
+
+Done.
+
+Implemented AST-backed symbol spans for `tsift`: tree-sitter extraction now persists declaration node kind, start/end byte offsets, and body byte offsets; the index migrates those columns additively and keeps read-only fallback behavior for older DBs. `source-read`, `symbol-read`, and `edit-intents` now expose stable `span-*` metadata with byte ranges, line projections, body ranges, and parent/child span refs where available. I also updated the spec/docs/version note and added regression assertions for the three user-facing packet surfaces.
+
+Verification completed:
+- `cargo check -p tsift-cli`
+- `cargo test -p tsift-graph resolve_edges -- --nocapture`
+- `cargo test -p tsift-cli --test exit_code read_json_reports -- --nocapture`
+- `cargo test -p tsift-cli --test exit_code edit_intents_json_validates_semantic_write_plan_without_mutating -- --nocapture`
+- `make check`
+- `cargo build`
+- `cargo install --path . --force`; installed binary reports `tsift 0.1.62`
+- GitHub CI run `26796469963` passed: `clippy + test` and `live Convex graph acceptance`. No tmux-specific CI job is configured in the `tsift` workflow.
+
+Commits:
+- `src/tsift`: `d5f7eba feat: add AST symbol spans` (pushed to `btakita/tsift` `main`)
+- parent repo gitlink: `e46e0129e chore: update tsift submodule`
+
+Queue note: `#astspans` is complete; the remaining queue items are still pending.
+<!-- agent:boundary:185eeddf -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -64,7 +91,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- [#astspans]
+- ~[#astspans]~
 - [#writerefs]
 - [#writecompound]
 - [#langexecutors]
@@ -76,7 +103,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#astspans] Replace line-range heuristics with AST-backed symbol spans: byte ranges, node kind, body range, parent/child refs, and stable span handles for symbol-read and edit-intents.
 - [ ] [#writerefs] Implement Rust reference and call-site rewrite support for rewrite_call_sites and update_call_signature using indexed refs plus AST validation, with conflict checks and conformance fixtures.
 - [ ] [#writecompound] Add Rust structural edit support for add_method and move_declaration, including module-aware placement, import normalization, formatter-before-write, and rollback tests.
 - [ ] [#langexecutors] Add TypeScript, JavaScript, and Python semantic edit executors behind the same edit-intents contract, each with parser-backed spans, formatter integration, and fail-closed unsupported cases.

@@ -847,7 +847,14 @@ pub fn detect_late_ipc_response_overapplication(
     let Some(head) = crate::git::show_head(file)? else {
         return Ok(None);
     };
-    if crate::dedupe::is_committed_response_overapplication(&current, &head) {
+    // Strict path: surplus block is a byte-identical copy of a committed
+    // response. Stale path (#jb-cache-conflict-stale-accept-replay): a JB File
+    // Cache Conflict accepted late replayed an *earlier draft* of the same
+    // response, so the surplus block shares a committed heading topic but its
+    // body drifted — `cur_set != head_set`. Both restore the committed HEAD.
+    if crate::dedupe::is_committed_response_overapplication(&current, &head)
+        || crate::dedupe::is_committed_response_replay_including_stale(&current, &head)
+    {
         return Ok(Some(LateIpcResponseOverapplication {
             remediated_content: head,
         }));

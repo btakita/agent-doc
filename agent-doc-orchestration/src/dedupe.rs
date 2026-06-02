@@ -122,6 +122,109 @@ pub fn is_committed_response_overapplication(current: &str, head: &str) -> bool 
     cur_responses.len() > head_responses.len()
 }
 
+/// Heading-topic-tolerant superset of [`is_committed_response_overapplication`].
+///
+/// Recognizes a **stale** JB File Cache Conflict accept-replay: the working tree
+/// (`current`) contains every committed `head` response **plus** one or more
+/// surplus `### Re:` blocks whose heading *topic* (the heading line with the
+/// transient ` (HEAD)` suffix removed) already appears in `head`, even when the
+/// surplus block's *body* differs from the committed copy (an earlier/edited
+/// draft that a stale queued IPC reposition patch replayed when the conflict was
+/// accepted late).
+///
+/// This is the shape the strict [`is_committed_response_overapplication`] misses:
+/// that function requires the surplus block to be a byte-identical copy of a
+/// committed response (`cur_set == head_set`), so a drifted replay body slips
+/// through to the generic direct-patchback guard.
+///
+/// Returns `true` only when restoring `head` is provably safe:
+/// - the non-response scaffold matches `head` exactly (modulo transient markers),
+/// - every committed `head` response body is still present unchanged on disk
+///   (none lost, none altered),
+/// - every surplus block duplicates an already-committed heading topic, and
+/// - there is at least one surplus block.
+///
+/// Any genuinely new heading topic, a lost or edited committed response, or
+/// scaffold drift returns `false` so the caller falls through to the normal
+/// patchback guard.
+pub fn is_committed_response_replay_including_stale(current: &str, head: &str) -> bool {
+    let (cur_scaffold, cur_responses) = split_scaffold_and_responses(current);
+    let (head_scaffold, head_responses) = split_scaffold_and_responses(head);
+
+    if cur_scaffold != head_scaffold {
+        return false;
+    }
+    if cur_responses.len() <= head_responses.len() {
+        return false; // no surplus block — not a replay over-application
+    }
+
+    // Every committed response must still be present unchanged. Consume one
+    // current block per head block by exact (normalized) body match so a lost or
+    // edited committed response fails closed instead of being silently restored.
+    let mut remaining: Vec<&String> = cur_responses.iter().collect();
+    for head_block in &head_responses {
+        if let Some(pos) = remaining.iter().position(|cur| *cur == head_block) {
+            remaining.remove(pos);
+        } else {
+            return false;
+        }
+    }
+
+    // Every surplus block must duplicate an already-committed heading topic. The
+    // first line of each normalized block is its heading with ` (HEAD)` already
+    // stripped by `normalize_response_block_line`, so equal first lines mean the
+    // same prompt position / topic.
+    let head_topics: std::collections::HashSet<&str> = head_responses
+        .iter()
+        .filter_map(|block| block.lines().next())
+        .collect();
+    let every_surplus_is_committed_topic = remaining.iter().all(|surplus| {
+        surplus
+            .lines()
+            .next()
+            .is_some_and(|heading| head_topics.contains(heading))
+    });
+    if remaining.is_empty() || !every_surplus_is_committed_topic {
+        return false;
+    }
+
+    // Safety net (scanned on the RAW working tree, before normalization strips
+    // `❯` prefixes): restoring HEAD must never silently discard a NEW user
+    // directive/prompt. The block parser greedily absorbs a trailing prompt into
+    // the preceding response block, so a topic match alone is not enough — fail
+    // closed if `current` carries any directive/prompt line that HEAD lacks.
+    let head_lines: std::collections::HashSet<&str> = head.lines().map(str::trim).collect();
+    let introduces_new_directive = current
+        .lines()
+        .map(str::trim)
+        .any(|line| line_carries_user_directive(line) && !head_lines.contains(line));
+    !introduces_new_directive
+}
+
+/// A line that carries user-authored directive/prompt content which restoring
+/// HEAD would silently discard. Deliberately conservative: only recognized
+/// agent-doc prompt shapes — an explicit `❯` prompt prefix, an id-bearing
+/// `do`/`re` directive, a `preset`/`dispatch` line, or a bare `[#id]` / `- [#id]`
+/// queue entry — never ordinary response prose that merely starts with "do"/"re".
+fn line_carries_user_directive(line: &str) -> bool {
+    let t = line.trim();
+    if t.starts_with('❯') || t.starts_with("preset ") || t.starts_with("dispatch ") {
+        return true;
+    }
+    // id-bearing directives: `do [#x]`, `do #x`, `re [#x]`, `re #x`.
+    for kw in ["do ", "re "] {
+        if let Some(rest) = t.strip_prefix(kw) {
+            let rest = rest.trim_start();
+            if rest.starts_with("[#") || rest.starts_with('#') {
+                return true;
+            }
+        }
+    }
+    // bare queue / backlog entry: `[#id]` or `- [#id]`.
+    let bare = t.strip_prefix("- ").unwrap_or(t).trim_start();
+    bare.starts_with("[#")
+}
+
 fn is_response_heading(trimmed: &str) -> bool {
     trimmed.starts_with("### Re:")
         || trimmed.starts_with("#### Re:")
@@ -439,6 +542,116 @@ do [#another-thing]
 <!-- /agent:exchange -->
 ";
         assert!(!is_committed_response_overapplication(current, HEAD_DOC));
+    }
+
+    // ---- #jb-cache-conflict-stale-accept-replay ----
+
+    #[test]
+    fn stale_replay_detects_drifted_body_duplicate_of_committed_topic() {
+        // A JB File Cache Conflict accepted late replayed a STALE draft of the
+        // committed response: same `### Re:` topic (with a transient `(HEAD)`
+        // marker), but the body carries an extra paragraph the committed copy
+        // dropped. The strict over-application check misses it (bodies differ),
+        // the topic-tolerant check recognizes it as safe to restore HEAD.
+        let current = "\
+<!-- agent:exchange -->
+do [#fix-thing]
+### Re: fix thing — opus-4-8
+Fixed it.
+<!-- agent:boundary:88409761 -->
+### Re: fix thing — opus-4-8 (HEAD)
+Fixed it.
+Note: stale draft paragraph the committed copy dropped.
+<!-- agent:boundary:stale -->
+<!-- /agent:exchange -->
+";
+        assert!(
+            !is_committed_response_overapplication(current, HEAD_DOC),
+            "strict check must NOT match a drifted-body replay"
+        );
+        assert!(
+            is_committed_response_replay_including_stale(current, HEAD_DOC),
+            "topic-tolerant check must recognize the stale replay"
+        );
+    }
+
+    #[test]
+    fn stale_replay_is_superset_of_strict_overapplication() {
+        // An exact-copy over-application is also a (degenerate) replay.
+        let current = "\
+<!-- agent:exchange -->
+do [#fix-thing]
+### Re: fix thing — opus-4-8
+Fixed it.
+<!-- agent:boundary:88409761 -->
+### Re: fix thing — opus-4-8 (HEAD)
+Fixed it.
+<!-- agent:boundary:88409761 -->
+<!-- /agent:exchange -->
+";
+        assert!(is_committed_response_replay_including_stale(current, HEAD_DOC));
+    }
+
+    #[test]
+    fn stale_replay_rejects_new_topic() {
+        // A surplus block answering a DIFFERENT topic is a real new response,
+        // never a replay we may silently discard.
+        let current = "\
+<!-- agent:exchange -->
+do [#fix-thing]
+### Re: fix thing — opus-4-8
+Fixed it.
+<!-- agent:boundary:88409761 -->
+### Re: a brand new topic — opus-4-8
+Genuinely new answer.
+<!-- agent:boundary:newone -->
+<!-- /agent:exchange -->
+";
+        assert!(!is_committed_response_replay_including_stale(current, HEAD_DOC));
+    }
+
+    #[test]
+    fn stale_replay_rejects_lost_or_altered_committed_response() {
+        // The committed response body must survive unchanged. If disk only has a
+        // drifted single copy (committed body absent), restoring HEAD would be a
+        // guess, not a proof — fail closed.
+        let current = "\
+<!-- agent:exchange -->
+do [#fix-thing]
+### Re: fix thing — opus-4-8 (HEAD)
+Fixed it.
+Note: stale draft paragraph; committed body is gone.
+<!-- agent:boundary:stale -->
+<!-- /agent:exchange -->
+";
+        assert!(!is_committed_response_replay_including_stale(current, HEAD_DOC));
+    }
+
+    #[test]
+    fn stale_replay_rejects_scaffold_drift() {
+        // A new user prompt outside the response is scaffold drift — not a safe
+        // restore-to-HEAD even if a duplicate topic is present.
+        let current = "\
+<!-- agent:exchange -->
+do [#fix-thing]
+### Re: fix thing — opus-4-8
+Fixed it.
+<!-- agent:boundary:88409761 -->
+### Re: fix thing — opus-4-8 (HEAD)
+Fixed it.
+Note: stale draft.
+<!-- agent:boundary:stale -->
+do [#another-thing]
+<!-- /agent:exchange -->
+";
+        assert!(!is_committed_response_replay_including_stale(current, HEAD_DOC));
+    }
+
+    #[test]
+    fn stale_replay_rejects_identical_document() {
+        // No surplus block → not a replay (transient-only drift is another
+        // guard's concern).
+        assert!(!is_committed_response_replay_including_stale(HEAD_DOC, HEAD_DOC));
     }
 
     #[test]

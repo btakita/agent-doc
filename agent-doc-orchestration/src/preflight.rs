@@ -6657,6 +6657,77 @@ mod tests {
     }
 
     #[test]
+    fn preflight_repairs_stale_jb_cache_conflict_accept_replay() {
+        // #jb-cache-conflict-stale-accept-replay: a JB File Cache Conflict
+        // accepted hours later replayed a STALE queued IPC reposition patch — an
+        // earlier draft of a response whose final version is already committed.
+        // Disk becomes HEAD plus a surplus block with the same `### Re:` topic
+        // (and a `(HEAD)` marker) but a DRIFTED body. The strict over-application
+        // detector misses it (bodies differ); the topic-tolerant fallback must
+        // still auto-repair to committed HEAD instead of accusing a patchback.
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: fix thing — opus-4-8\n\n",
+            "Final answer.\n",
+            "<!-- agent:boundary:committed -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, committed).unwrap();
+        snapshot::save(&doc, committed).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "committed response", "--no-verify"])
+            .output()
+            .unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(committed), Some(committed))
+            .unwrap();
+
+        // Surplus STALE replay of the same topic, body drifted, `(HEAD)` marked.
+        let replayed = committed.replace(
+            "<!-- agent:boundary:committed -->\n<!-- /agent:exchange -->",
+            "### Re: fix thing — opus-4-8 (HEAD)\n\nFinal answer.\nNote: stale draft paragraph the committed copy dropped.\n<!-- agent:boundary:stale -->\n<!-- /agent:exchange -->",
+        );
+        std::fs::write(&doc, &replayed).unwrap();
+
+        assert!(
+            !crate::dedupe::is_committed_response_overapplication(&replayed, committed),
+            "preconditions: strict over-application must NOT match a drifted-body replay"
+        );
+        assert!(
+            crate::session_check::detect_late_ipc_response_overapplication(&doc)
+                .unwrap()
+                .is_some(),
+            "the stale-replay fallback should detect the over-application"
+        );
+
+        run(&doc).unwrap();
+
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), committed);
+        assert_eq!(snapshot::load(&doc).unwrap().unwrap(), committed);
+        let diff = Command::new("git")
+            .current_dir(root)
+            .args(["diff", "--", "session.md"])
+            .output()
+            .unwrap();
+        assert!(
+            diff.stdout.is_empty(),
+            "preflight repair should restore the working tree to committed HEAD"
+        );
+    }
+
+    #[test]
     fn preflight_refreshes_capture_after_user_committed_baseline_drift() {
         let dir = setup_project();
         let root = dir.path();

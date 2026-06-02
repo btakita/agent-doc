@@ -61,13 +61,30 @@ Consolidated. The response:
 **Closeout:** the durable deliverable is the cluster consolidation written into `plan-lazily-rs-queued-prompt-patchback-miss.md` (uncommitted, offered alongside last turn's `plan-jb-tsift-pane-sync-regression.md` edit). `#lr-queue-patchback-miss` ≈ `#lr-queue-response-miss`; both close with the one free-text-head provenance primitive now fully specified in the shared plan. Session-doc response uncommitted (`finalize` gated).
 - Archived 15 response topic(s): do #nochange-after-stall-breadth; queue repair closeout; review accumulation and "complete but gated"; 12 more
 - Prior summary/context: ### Session Summary ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039...
-<!-- agent:boundary:9084a46b -->
+
+### Re: do #jb-busy-inactive-queue-dispatch — already fully planned; split deterministic core from the live gate — opus-4-8
+
+This item is **already covered end-to-end** by `plan-jb-run-agent-doc-busy-queue-dispatch-deadlock.md` — its "Fresh Repro: Pre-existing inactive queue head" section reproduces your exact evidence (`route_owned_reap_decision policy=auto decision=keep_alive reason=live_pane_busy_blocked_prompt`, `queue_continuation_required=false`, pane `%61`/gen 255), and "Fix direction" bullet 2 is precisely the ask: explicit `Run Agent Doc` seeing a runnable `agent:queue auto` head while `queue_active:false` on a busy pane must **activate the queue + arm idle-drain, or fail closed with a typed deferred/busy diagnostic — never a silent keep-alive no-op.**
+
+The grounded code path is already traced in the plan: `route.rs:4003` (`DispatchOnlyBusyQueue`) + `enqueue_route_dispatch_prompt` (`route.rs:1806`, which sets `queue_active:true` for the *route-appended* case) + the Codex `Stop`-hook drain (`codex_hook.rs:293`). The gap is that the **pre-existing inactive head** never goes through `enqueue_route_dispatch_prompt`, so the queue is never armed.
+
+**What I changed this turn:** the plan's Status said "do not implement" (left over from the `#agent-doc-bug` capture). Your `do` supersedes that, so I split the scope in the plan:
+- **Implementable + unit-testable now, no live pane:** bullet 2 (arm-or-fail-closed for the `queue_active:false` busy-head case) + bullet 3 (deferred-queued operator feedback) — route.rs / session-check / `queue_continuation.rs` logic with deterministic SimWorld coverage. This **extends the already-shipped** `spawn_idle_queue_watch_thread` / `idle_queue_drain_decision` watcher (submodule `4b3f4835`, which handles the `queue_active:true` route-appended case) to the inactive-head case — not a new mechanism.
+- **Still gated:** only the live two-session Codex repro (Verification → Live).
+
+So the deterministic core is buildable now and should not wait on a live pane. That's the toolchain actor's job — I can't `make check`/finalize from this gated, pane-contaminated session.
+
+(Side note on the queue's `Compact Exchange` error — "visible editor buffer differs from expected disk state, 2nd attempt worked" — that's the existing `#jb-compact-*` / editor-buffer-vs-disk class, already tracked in review; not part of this directive.)
+Plan updated with the deterministic-vs-gated split. The response:
+**Closeout:** durable deliverable = the deterministic-vs-gated split now in `plan-jb-run-agent-doc-busy-queue-dispatch-deadlock.md` (uncommitted, with the prior two plan edits — say "commit it" and I'll commit all three as one non-session change). `#jb-busy-inactive-queue-dispatch` is fully planned; its deterministic core is implementable now (extends the shipped idle-drain watcher), only the live repro gated. Session-doc response uncommitted (`finalize` gated).
+<!-- agent:boundary:29c58306 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#manual-queue-head-loss]~
 - do [#subagent-blocks-session]
+- do [#jb-busy-inactive-queue-dispatch]
 - do [#lr-queue-patchback-miss]
 - do [#lr-head-8]
 - do [#lr-wire-9]
@@ -80,9 +97,7 @@ agent-doc command failed (exit 1): [agent-doc] Tagged pre-compact state as agent
 ```
 #spec-test-build-install-commit-push
 ---
-<!-- /agent:queue -->
-###
-<!--
+JB error
 ```
 [route] target tmux session: 0
 [preflight] review: 55 item(s), 55 gated
@@ -92,7 +107,11 @@ agent-doc command failed (exit 1): [agent-doc] Tagged pre-compact state as agent
 [perf] commit total: 23ms
 Error: authoritative actor generation 221 for tasks/agent-doc/agent-doc-bugs2.md owns pane %70 but route could not drain the active closeout before dispatch: [session-check] INTERRUPTED: agent:queue contains assistant response prose copied from a `### Re:` body, not a user prompt or `do [#id]` directive: "There are too many items being accumulated into review. The tasks are not being ". Remove the contaminating line(s) from `agent:queue` (only user prompts, `do [#id]`, `preset`/`dispatch`, or backlog-derived entries are valid queue sources) and re-run finalize (see #jb-run-agent-doc-response-queue-contamination).
 ```
+#spec-test-build-install-commit-push
 ---
+<!-- /agent:queue -->
+###
+<!--
 The last run had a code fence stripped away by agent-doc.
 #spec-test-build-install-commit-push
 ---

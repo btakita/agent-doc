@@ -235,6 +235,8 @@ fn run_once(
 
     // Ensure the document has a session UUID (for tmux routing)
     let raw_content = std::fs::read_to_string(file)?;
+    // Opt-in gate: a plain `.md` must not be auto-converted into a session.
+    frontmatter::require_agent_doc_document(&raw_content, file)?;
     let (mut content_original, session_id) =
         frontmatter::ensure_session_for_file(&raw_content, file)?;
     if content_original != raw_content {

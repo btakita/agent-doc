@@ -1553,6 +1553,8 @@ pub fn run_with_tmux(
     // Ensure session UUID exists in frontmatter (generate if missing)
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
+    // Opt-in gate: a plain `.md` must not be auto-converted into a session.
+    frontmatter::require_agent_doc_document(&content, file)?;
     let (mut updated_content, session_id) = frontmatter::ensure_session_for_file(&content, file)?;
     if updated_content != content {
         std::fs::write(file, &updated_content)

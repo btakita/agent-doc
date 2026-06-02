@@ -104,6 +104,42 @@ fn resolve_ssh_context_inputs(file: &Path) -> (project_config::ProjectConfig, St
     (project, doc_relative)
 }
 
+/// Is `file` an agent-doc session document under the current project config?
+///
+/// Resolves the project config + project-relative path from the filesystem,
+/// then delegates to the pure
+/// [`agent_doc_core::project_config::is_agent_doc_document`] predicate. Used as
+/// the opt-in gate so a plain `.md` is not silently converted into a session.
+pub fn is_agent_doc_document_for_file(content: &str, file: &Path) -> bool {
+    let (project, doc_relative) = resolve_ssh_context_inputs(file);
+    project_config::is_agent_doc_document(&doc_relative, content, &project)
+}
+
+/// Fail closed unless `file` is an opted-in agent-doc document.
+///
+/// Returns `Ok(())` for documents that carry agent-doc frontmatter, match a
+/// `[documents] include` glob, or run under the `auto_session_for_all_md`
+/// escape hatch. Otherwise returns an error with an actionable opt-in message
+/// and the caller must **not** mutate the file. Callers run this immediately
+/// before [`ensure_session_for_file`] so a plain `.md` is never converted.
+pub fn require_agent_doc_document(content: &str, file: &Path) -> Result<()> {
+    // A malformed frontmatter block must surface its own contextual parse
+    // error downstream (via `ensure_session_for_file`) rather than be masked
+    // by the opt-in message — only gate documents that parse cleanly.
+    if parse(content).is_err() {
+        return Ok(());
+    }
+    if is_agent_doc_document_for_file(content, file) {
+        return Ok(());
+    }
+    let display = file.display();
+    anyhow::bail!(
+        "{display} is not an agent-doc document. Run `agent-doc init {display}` to scaffold a session, \
+add an `agent_doc_format: template` frontmatter field, or list it under `[documents] include` \
+(or set `auto_session_for_all_md = true`) in `.agent-doc/config.toml` to opt in."
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -153,5 +189,54 @@ mod tests {
         );
         assert!(result_direct.0.contains("agent: opencode"));
         assert!(result_ctx.0.contains("agent: opencode"));
+    }
+
+    #[test]
+    fn gate_rejects_plain_md_and_leaves_file_untouched() {
+        let dir = TempDir::new().unwrap();
+        setup_project(dir.path());
+        let doc = dir.path().join("notes.md");
+        let content = "# Plain notes\n\nNot a session.\n";
+        std::fs::write(&doc, content).unwrap();
+
+        assert!(!is_agent_doc_document_for_file(content, &doc));
+        let err = require_agent_doc_document(content, &doc).unwrap_err();
+        assert!(err.to_string().contains("is not an agent-doc document"));
+        // Gate must not mutate the file (no session injection).
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
+    }
+
+    #[test]
+    fn gate_allows_frontmatter_opt_in() {
+        let dir = TempDir::new().unwrap();
+        setup_project(dir.path());
+        let doc = dir.path().join("plan.md");
+        let content = "---\nagent_doc_format: template\n---\nbody\n";
+        std::fs::write(&doc, content).unwrap();
+
+        assert!(is_agent_doc_document_for_file(content, &doc));
+        assert!(require_agent_doc_document(content, &doc).is_ok());
+    }
+
+    #[test]
+    fn gate_allows_config_include_glob() {
+        let dir = TempDir::new().unwrap();
+        let config_path = setup_project(dir.path());
+        std::fs::write(
+            &config_path,
+            "[documents]\ninclude = [\"tasks/**/*.md\"]\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks/agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/agent-doc/work.md");
+        let content = "# plain body, no frontmatter\n";
+        std::fs::write(&doc, content).unwrap();
+
+        assert!(is_agent_doc_document_for_file(content, &doc));
+
+        // A sibling outside the glob stays gated.
+        let other = dir.path().join("README.md");
+        std::fs::write(&other, content).unwrap();
+        assert!(!is_agent_doc_document_for_file(content, &other));
     }
 }

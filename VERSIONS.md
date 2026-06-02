@@ -6,6 +6,29 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **BREAKING CHANGE: opt-in agent-doc documents (`#4a6p`).** A plain `.md` is no
+  longer auto-converted into an agent-doc session. `route`, `run`, and `start`
+  now fail closed before injecting `agent_doc_session:` frontmatter unless the
+  document opts in via (1) any agent-doc-managed frontmatter field
+  (`Frontmatter::has_agent_doc_marker()` — `agent_doc_*`, `session`, `agent`,
+  `resume`, model overrides, `*_args`, `branch`, `queue_active`,
+  `prompt_presets`, …), (2) a `[documents] include = [...]` glob in
+  `.agent-doc/config.toml`, or (3) the `documents.auto_session_for_all_md = true`
+  escape hatch (restores old behavior). Existing session docs already carry
+  `agent_doc_session:`/`agent_doc_format:` so they are unaffected; only brand-new
+  plain notes/README `.md` change behavior. The gate does **not** mutate the file
+  when it refuses, and a malformed frontmatter block bypasses the gate so its own
+  contextual YAML error surfaces. New pure predicate
+  `project_config::is_agent_doc_document(rel_path, content, config)` + minimal
+  zero-dep glob matcher `project_config::glob_match` (`*`/`?`/`**`); FFI
+  `agent_doc_is_session_document(path)` for editor plugins to gate Run Agent Doc /
+  SubmitAction. `agent-doc init`/`claim` remain explicit per-file opt-ins.
+  Regressions: `documents_gate_tests::*` (core truth table + glob),
+  `frontmatter_io::tests::gate_*` (fail-closed, file untouched, frontmatter +
+  config-glob opt-in). Plan: `tasks/agent-doc/plan-opt-in-agent-doc-documents.md`.
+  Follow-up (editor-side): wire the FFI gate into JB `SubmitAction.update` + the
+  VS Code extension (needs a plugin version bump + live-verify).
+
 - **Queue no longer re-mints completed `do [#id]` refs (`#ynra`).** The preflight
   backlog→queue sync now excludes ids already archived in `agent:done` before
   minting `do [#id]` prompts. Previously a lingering active backlog `[ ]` bullet

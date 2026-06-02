@@ -566,6 +566,38 @@ pub fn resolve_prompt_preset_key(
 }
 
 impl Frontmatter {
+    /// Does this frontmatter carry any agent-doc-managed field?
+    ///
+    /// Used by the opt-in document gate
+    /// ([`crate::project_config::is_agent_doc_document`]) to recognize a `.md`
+    /// that the user clearly authored as an agent-doc session. Plain
+    /// notes/README frontmatter (title/date/tags) carries none of these, so it
+    /// is not auto-converted. This is the single source of truth — keep it in
+    /// sync when adding new session-defining frontmatter fields.
+    pub fn has_agent_doc_marker(&self) -> bool {
+        self.session.is_some()
+            || self.format.is_some()
+            || self.write_mode.is_some()
+            || self.mode.is_some()
+            || self.stream_config.is_some()
+            || self.agent.is_some()
+            || self.resume.is_some()
+            || self.model.is_some()
+            || self.claude_model.is_some()
+            || self.codex_model.is_some()
+            || self.opencode_model.is_some()
+            || self.agent_args.is_some()
+            || self.claude_args.is_some()
+            || self.codex_args.is_some()
+            || self.opencode_args.is_some()
+            || self.branch.is_some()
+            || self.tmux_session.is_some()
+            || self.queue_active.is_some()
+            || self.dispatch.is_some()
+            || self.collaboration.is_some()
+            || !self.prompt_presets.is_empty()
+    }
+
     /// Resolve the canonical (format, write) pair from all three fields.
     ///
     /// Priority:

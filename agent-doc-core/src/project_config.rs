@@ -113,6 +113,25 @@ fn default_merge_strategy() -> String {
     "append-friendly".to_string()
 }
 
+/// Opt-in document gating (`[documents]` section in `.agent-doc/config.toml`).
+///
+/// Controls which `.md` files agent-doc may auto-convert into a session. By
+/// default a plain `.md` is **not** an agent-doc document — it must opt in via
+/// frontmatter (an `agent_doc_*` field), a matching `include` glob here, or the
+/// `auto_session_for_all_md` escape hatch. See
+/// [`is_agent_doc_document`].
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DocumentsConfig {
+    /// Project-relative globs whose matching `.md` files are treated as
+    /// agent-doc session documents (e.g. `["tasks/**/*.md", "plan.md"]`).
+    #[serde(default)]
+    pub include: Vec<String>,
+    /// Legacy escape hatch restoring the old "every `.md` is a session"
+    /// behavior. Default `false`.
+    #[serde(default)]
+    pub auto_session_for_all_md: bool,
+}
+
 /// Project-level configuration, read from `.agent-doc/config.toml` relative to CWD.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct ProjectConfig {
@@ -135,6 +154,9 @@ pub struct ProjectConfig {
     /// Component-specific configuration (patch modes, timestamps, max_entries, hooks).
     #[serde(default)]
     pub components: BTreeMap<String, ComponentConfig>,
+    /// Opt-in gating for which `.md` files become agent-doc session documents.
+    #[serde(default)]
+    pub documents: DocumentsConfig,
 }
 
 /// Parse a TOML string into a [`ProjectConfig`]. Pure — no fs I/O.
@@ -150,4 +172,191 @@ pub fn parse_project_toml(content: &str) -> Result<ProjectConfig> {
 /// in `crate::project_config_io`.
 pub fn parse_legacy_components_toml(content: &str) -> Result<BTreeMap<String, ComponentConfig>> {
     toml::from_str(content).map_err(anyhow::Error::from)
+}
+
+/// Opt-in predicate: is this `.md` an agent-doc session document?
+///
+/// Pure — takes the project-relative path, the document content (for
+/// frontmatter inspection), and the resolved project config. Returns `true`
+/// when ANY of the following hold (in cheapest-first order):
+///
+/// 1. `documents.auto_session_for_all_md = true` (legacy escape hatch).
+/// 2. Frontmatter already carries any agent-doc-managed field (see
+///    [`crate::frontmatter::Frontmatter::has_agent_doc_marker`]) — existing
+///    sessions and harness/model/preset config stay sessions.
+/// 3. The project-relative path matches a `documents.include` glob.
+///
+/// A plain `.md` with no agent-doc frontmatter, not matching any configured
+/// glob, with the escape hatch off, returns `false` — callers must fail closed
+/// instead of silently converting it.
+pub fn is_agent_doc_document(rel_path: &str, content: &str, config: &ProjectConfig) -> bool {
+    if config.documents.auto_session_for_all_md {
+        return true;
+    }
+    if let Ok((fm, _)) = crate::frontmatter::parse(content)
+        && fm.has_agent_doc_marker()
+    {
+        return true;
+    }
+    let norm = rel_path.trim_start_matches("./");
+    config
+        .documents
+        .include
+        .iter()
+        .any(|pattern| glob_match(pattern.trim_start_matches("./"), norm))
+}
+
+/// Minimal path-glob matcher supporting `*` (any run of non-`/` chars), `?`
+/// (one non-`/` char), and `**` (spans `/` boundaries, including zero
+/// segments). Both inputs are `/`-separated, project-relative paths. Pure, no
+/// I/O — avoids pulling in a glob crate for the small set of patterns
+/// `[documents] include` needs.
+pub fn glob_match(pattern: &str, path: &str) -> bool {
+    let pat: Vec<&str> = pattern.split('/').collect();
+    let seg: Vec<&str> = path.split('/').collect();
+    glob_match_segments(&pat, &seg)
+}
+
+fn glob_match_segments(pat: &[&str], seg: &[&str]) -> bool {
+    match pat.first() {
+        None => seg.is_empty(),
+        Some(&"**") => {
+            // `**` matches zero or more whole path segments.
+            if pat.len() == 1 {
+                return true;
+            }
+            // Try consuming 0..=seg.len() leading segments.
+            (0..=seg.len()).any(|skip| glob_match_segments(&pat[1..], &seg[skip..]))
+        }
+        Some(first) => match seg.first() {
+            Some(s) if glob_match_segment(first, s) => {
+                glob_match_segments(&pat[1..], &seg[1..])
+            }
+            _ => false,
+        },
+    }
+}
+
+/// Match a single path segment against a pattern segment containing `*`/`?`
+/// (neither of which may match a `/`, which never appears inside a segment).
+fn glob_match_segment(pattern: &str, text: &str) -> bool {
+    let pat: Vec<char> = pattern.chars().collect();
+    let txt: Vec<char> = text.chars().collect();
+    let (mut pi, mut ti) = (0usize, 0usize);
+    let (mut star_pi, mut star_ti): (Option<usize>, usize) = (None, 0);
+    while ti < txt.len() {
+        if pi < pat.len() && (pat[pi] == '?' || pat[pi] == txt[ti]) {
+            pi += 1;
+            ti += 1;
+        } else if pi < pat.len() && pat[pi] == '*' {
+            star_pi = Some(pi);
+            star_ti = ti;
+            pi += 1;
+        } else if let Some(sp) = star_pi {
+            pi = sp + 1;
+            star_ti += 1;
+            ti = star_ti;
+        } else {
+            return false;
+        }
+    }
+    while pi < pat.len() && pat[pi] == '*' {
+        pi += 1;
+    }
+    pi == pat.len()
+}
+
+#[cfg(test)]
+mod documents_gate_tests {
+    use super::*;
+
+    fn cfg(include: &[&str], all_md: bool) -> ProjectConfig {
+        ProjectConfig {
+            documents: DocumentsConfig {
+                include: include.iter().map(|s| s.to_string()).collect(),
+                auto_session_for_all_md: all_md,
+            },
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn glob_match_literal_and_star() {
+        assert!(glob_match("plan.md", "plan.md"));
+        assert!(!glob_match("plan.md", "other.md"));
+        assert!(glob_match("*.md", "notes.md"));
+        assert!(!glob_match("*.md", "notes.txt"));
+        // `*` does not cross a path separator.
+        assert!(!glob_match("*.md", "tasks/notes.md"));
+    }
+
+    #[test]
+    fn glob_match_doublestar_spans_dirs() {
+        assert!(glob_match("tasks/**/*.md", "tasks/agent-doc/bugs.md"));
+        assert!(glob_match("tasks/**/*.md", "tasks/a/b/c/deep.md"));
+        // `**` matches zero segments too.
+        assert!(glob_match("tasks/**/*.md", "tasks/flat.md"));
+        assert!(!glob_match("tasks/**/*.md", "other/flat.md"));
+        assert!(glob_match("**/*.md", "anything/here.md"));
+        assert!(glob_match("**", "anything/at/all.md"));
+    }
+
+    #[test]
+    fn glob_match_question_mark() {
+        assert!(glob_match("plan?.md", "plan1.md"));
+        assert!(!glob_match("plan?.md", "plan.md"));
+        assert!(!glob_match("plan?.md", "plan12.md"));
+    }
+
+    #[test]
+    fn plain_md_is_not_a_session_by_default() {
+        let c = cfg(&[], false);
+        assert!(!is_agent_doc_document("notes.md", "# Just notes\n", &c));
+        assert!(!is_agent_doc_document(
+            "tasks/foo.md",
+            "---\ntitle: foo\n---\nbody\n",
+            &c
+        ));
+    }
+
+    #[test]
+    fn frontmatter_agent_doc_field_opts_in() {
+        let c = cfg(&[], false);
+        assert!(is_agent_doc_document(
+            "notes.md",
+            "---\nagent_doc_format: template\n---\nbody\n",
+            &c
+        ));
+        assert!(is_agent_doc_document(
+            "notes.md",
+            "---\nagent_doc_session: 123\n---\nbody\n",
+            &c
+        ));
+        assert!(is_agent_doc_document(
+            "notes.md",
+            "---\nsession: legacy-id\n---\nbody\n",
+            &c
+        ));
+        assert!(is_agent_doc_document(
+            "notes.md",
+            "---\nagent_doc_write: crdt\n---\nbody\n",
+            &c
+        ));
+    }
+
+    #[test]
+    fn include_glob_opts_in() {
+        let c = cfg(&["tasks/**/*.md", "plan.md"], false);
+        assert!(is_agent_doc_document("tasks/agent-doc/x.md", "plain\n", &c));
+        assert!(is_agent_doc_document("plan.md", "plain\n", &c));
+        assert!(is_agent_doc_document("./plan.md", "plain\n", &c));
+        assert!(!is_agent_doc_document("README.md", "plain\n", &c));
+    }
+
+    #[test]
+    fn escape_hatch_opts_in_everything() {
+        let c = cfg(&[], true);
+        assert!(is_agent_doc_document("README.md", "plain notes\n", &c));
+        assert!(is_agent_doc_document("anywhere/file.md", "plain\n", &c));
+    }
 }

@@ -1270,6 +1270,14 @@ fn test_cli_start_not_in_tmux() {
 #[test]
 fn test_cli_route_generates_session_for_bare_file() {
     let tmp = tempfile::TempDir::new().unwrap();
+    // Opt the bare file in via the `auto_session_for_all_md` escape hatch so the
+    // session-generation behavior is still exercised under the opt-in gate (#4a6p).
+    std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+    std::fs::write(
+        tmp.path().join(".agent-doc/config.toml"),
+        "[documents]\nauto_session_for_all_md = true\n",
+    )
+    .unwrap();
     let doc = tmp.path().join("test.md");
     std::fs::write(&doc, "# No frontmatter\n").unwrap();
 
@@ -1294,6 +1302,29 @@ fn test_cli_route_generates_session_for_bare_file() {
         content.contains("session:"),
         "frontmatter should have been generated"
     );
+}
+
+#[test]
+fn test_cli_route_rejects_plain_md_without_opt_in() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("notes.md");
+    let original = "# Plain notes\n\nNot a session.\n";
+    std::fs::write(&doc, original).unwrap();
+
+    let mut cmd = agent_doc_cmd();
+    cmd.arg("route");
+    cmd.arg(&doc);
+    cmd.current_dir(tmp.path());
+    cmd.env("AGENT_DOC_NO_AUTOSTART", "1");
+    let output = cmd.output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("is not an agent-doc document"),
+        "route should fail closed on a plain .md, got: {}",
+        stderr
+    );
+    // The gate must not mutate the file (no session injected).
+    assert_eq!(std::fs::read_to_string(&doc).unwrap(), original);
 }
 
 #[test]
@@ -1332,6 +1363,14 @@ fn test_cli_route_generates_session_for_null_session() {
 #[test]
 fn test_cli_start_generates_session_for_bare_file() {
     let tmp = tempfile::TempDir::new().unwrap();
+    // Opt in via the escape hatch so the session-generation path runs under the
+    // opt-in gate (#4a6p).
+    std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+    std::fs::write(
+        tmp.path().join(".agent-doc/config.toml"),
+        "[documents]\nauto_session_for_all_md = true\n",
+    )
+    .unwrap();
     let doc = tmp.path().join("test.md");
     std::fs::write(&doc, "# No frontmatter\n").unwrap();
 
@@ -1353,10 +1392,31 @@ fn test_cli_start_generates_session_for_bare_file() {
 }
 
 #[test]
+fn test_cli_start_rejects_plain_md_without_opt_in() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let doc = tmp.path().join("notes.md");
+    let original = "# Plain notes\n";
+    std::fs::write(&doc, original).unwrap();
+
+    let mut cmd = agent_doc_cmd();
+    cmd.arg("start");
+    cmd.arg(&doc);
+    cmd.env_remove("TMUX");
+    cmd.env_remove("TMUX_PANE");
+    // The opt-in gate fails closed before the tmux check.
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("is not an agent-doc document"));
+    // The gate must not mutate the file.
+    assert_eq!(std::fs::read_to_string(&doc).unwrap(), original);
+}
+
+#[test]
 fn test_cli_start_generates_session_for_null_session() {
     let tmp = tempfile::TempDir::new().unwrap();
     let doc = tmp.path().join("test.md");
-    std::fs::write(&doc, "---\nsession: null\n---\n# Test\n").unwrap();
+    // `agent:` is an agent-doc marker, so this opts in even with a null session.
+    std::fs::write(&doc, "---\nsession: null\nagent: claude\n---\n# Test\n").unwrap();
 
     let mut cmd = agent_doc_cmd();
     cmd.arg("start");

@@ -82,8 +82,20 @@ Fields:
 - `agent_doc_auto_compact = <line-threshold>` — explicit opt-in for automatic compaction/reload policies. Session-accretion warnings, repeated no-op closeouts, and Claude skill auto-update must not compact by default when this setting is absent.
 - `ssh.profiles.<name>.targets = ["alias-or-host", ...]` — named SSH target groups for ops docs.
 - `ssh.docs."<relative/path.md>"` — per-document SSH defaults for known ops docs. Each entry may set `profile = "<name>"`, direct `targets = [...]`, or both. If an entry exists but resolves no targets, preflight/startup must fail closed.
+- `documents.include = ["tasks/**/*.md", "plan.md", ...]` — project-relative globs whose matching `.md` files are treated as agent-doc session documents (opt-in gate). Globs support `*` (within a path segment), `?` (one char), and `**` (spans `/`, including zero segments).
+- `documents.auto_session_for_all_md = <bool>` — legacy escape hatch restoring the old "every `.md` is a session" behavior. Default `false`.
 
 **Auto-sync:** When the configured `tmux_session` is dead (session no longer exists), the route path falls back to `current_tmux_session()` and auto-updates `config.toml` with the new session name. This prevents stale config after session destruction.
+
+## Opt-in Document Gate
+
+A plain `.md` is **not** auto-converted into an agent-doc session. `route`, `run`, and `start` fail closed before injecting `agent_doc_session:` frontmatter unless the document opts in. The pure predicate `agent_doc_core::project_config::is_agent_doc_document(rel_path, content, config)` (FFI: `agent_doc_is_session_document(path)`) returns true when ANY of:
+
+1. `documents.auto_session_for_all_md = true` (escape hatch).
+2. Frontmatter carries any agent-doc-managed field — `Frontmatter::has_agent_doc_marker()` (e.g. `agent_doc_session`/`session`, `agent_doc_format`, `agent_doc_write`, `agent_doc_mode`, `agent_doc_stream`, `agent`, `resume`, model overrides, `*_args`, `branch`, `queue_active`, `prompt_presets`). Existing sessions stay sessions.
+3. The project-relative path matches a `documents.include` glob.
+
+When none hold, the gate returns an error naming the opt-in paths (`agent-doc init <file>`, an `agent_doc_format:` field, a `[documents] include` glob, or the escape hatch) and **does not mutate the file**. A malformed frontmatter block bypasses the gate so its own contextual YAML parse error surfaces. `agent-doc init <file>` and `agent-doc claim <file>` remain explicit per-file opt-ins that scaffold. Editor plugins should call the FFI gate so **Run Agent Doc** / SubmitAction is hidden for non-opted-in `.md`.
 
 ## Socket IPC
 

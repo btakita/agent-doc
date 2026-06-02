@@ -358,6 +358,33 @@ pub unsafe extern "C" fn agent_doc_is_busy(file_path: *const c_char) -> i32 {
     agent_doc_orchestration::debounce::is_busy(path) as i32
 }
 
+/// Check whether a `.md` file is an opted-in agent-doc session document.
+///
+/// Returns `1` when the file carries agent-doc frontmatter, matches a
+/// `[documents] include` glob in `.agent-doc/config.toml`, or runs under the
+/// `auto_session_for_all_md` escape hatch; `0` otherwise (including unreadable
+/// paths). Editor plugins call this to gate **Run Agent Doc** / SubmitAction so
+/// a plain `.md` is not offered as a session. Mirrors the binary opt-in gate.
+///
+/// # Safety
+///
+/// `file_path` must be a valid, NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_is_session_document(file_path: *const c_char) -> i32 {
+    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return 0,
+    };
+    let content = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(_) => return 0,
+    };
+    agent_doc_orchestration::frontmatter::is_agent_doc_document_for_file(
+        &content,
+        std::path::Path::new(path),
+    ) as i32
+}
+
 /// Report the current editor buffer state for a document.
 ///
 /// IDE plugins call this on every document change to provide editor-authoritative

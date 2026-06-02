@@ -334,7 +334,7 @@ Two things to address: the unresolved tail question (about `plan-jb-tsift-pane-s
 > do [#lr-queue-plan-deferral]
 
 **Closeout:** uncommitted (`finalize` gated, and — per the confirmed finding — my finalize would itself run inside lazily-rs's `%73`, so even a clean closeout is compromised from this pane). Net: `#lr-queue-plan-deferral` is effectively done by `4d0184e3` (needs only a fixture); `#jb-tsift-pane-sync` completes via the pane-sync plan **only if** execution-context contamination is added to its scope. Both are toolchain-actor follow-through; this pane stays read-only/advisory until the contamination is fixed.
-<!-- agent:boundary:b76017ab -->
+<!-- agent:boundary:54a274f7 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
@@ -398,7 +398,6 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 - [ ] [#lr-queue-patchback-miss] [recommended] #agent-doc-bug 2026-06-02: lazily-rs queued free-text prompt with preset was not visibly answered or patched back; mixed #agent-doc-bug capture made this cycle plan_backlog_only and deferred the actionable queue head. Add plan/session-check coverage so the head is either answered, consumed, or explicitly deferred through a committed response. Plan: tasks/agent-doc/plan-lazily-rs-queued-prompt-patchback-miss.md.
 - [ ] [#lr-queue-repair-adopt] [recommended] #agent-doc-bug 2026-06-02: if the lazily-rs queued prompt was already completed console-only, recovery must adopt a supplied response through agent-doc write --commit and consume or preserve the matching free-text queue head without rerunning repo work. Plan: tasks/agent-doc/plan-lazily-rs-queue-repair-adopt.md.
 - [ ] [#run-gated-review-items] [recommended] #agent-doc-bug feature 2026-06-02: gated/review items are not easily runnable. Enable running a gated item directly via `do [#id]` or by placing it in agent:queue, and focus the run to complete that gated item. If it can only be partially completed, extract a new follow-up task containing the conditions to complete it. If no work was done because preconditions were unmet, append a timestamp of the attempt to the item and ensure the item's preconditions are present in its description.
-- [x] [#lr-queue-plan-deferral] [recommended] #agent-doc-bug 2026-06-02: mixed #agent-doc-bug capture plus #spec-test-build-install-commit-push queue head made agent-doc plan choose plan_backlog_only, deferring runnable lazily-rs work without making the deferral contract explicit. Plan: tasks/agent-doc/plan-lazily-rs-queue-plan-deferral.md. [kept open 2026-06-02: this turn's directive was commit+push, not this item; remains the resumable clean plan.rs head.]
 <!-- /agent:backlog -->
 
 ## Review

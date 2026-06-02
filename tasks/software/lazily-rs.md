@@ -96,7 +96,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [x] [#lazyperf10] Reduce remaining independent-slot ThreadSafeContext publish/get_refresh lock contention: profile thread_safe_contention_independent_slots_16 with the new latency rows, then prototype splitting or partitioning the publish/get_refresh graph-mutation path by SlotId while preserving dependency-edge, effect, batch, and stale-completion semantics under Loom.
 - [ ] [#lazyperf11] Reduce effect-heavy ThreadSafeContext lock contention after #lazyperf8: target thread_safe_effect_contention_batch_flush_16 and queue_coalescing_16, especially the high other/dependency_edge waits, by coalescing effect drain/schedule mutations or adding effect-sidecar state without weakening cleanup/disposal ordering.
 <!-- /agent:backlog -->
 

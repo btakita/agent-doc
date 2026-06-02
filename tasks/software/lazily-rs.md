@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 
@@ -170,23 +170,54 @@ Verification run:
 - `git diff --check`
 
 Applicability notes: `cargo install --path .` is not applicable because `lazily` is a library crate with no binaries; `make check` is not available because there is no `Makefile`; GitHub has no workflows listed for this submodule, so there was no CI/tmux run to inspect.
-<!-- agent:boundary:3345e72b -->
+
+### Re: #tsc16-optimistic-read — gpt-5
+
+> **Queue prompt:**
+>
+> [#tsc16-optimistic-read]
+
+
+Completed `#tsc16-optimistic-read` as an explicit deferral rather than a storage rewrite.
+
+After the fresh-cache fast path, the read-mostly benchmark rows improved substantially and no longer justify a lock-free/versioned optimistic read change by themselves. The remaining high-contention rows are mostly write/invalidation/publish/in-flight contention, and the current `ThreadSafeContext` stores erased cached values behind the context mutex. A true lock-free optimistic read would need independently retained value snapshots plus atomic dirty/revision validation; otherwise a getter could race a cross-thread invalidation and return a pre-invalidation cached value.
+
+Changes made:
+
+- Added `SPEC.md` language deferring versioned optimistic reads under the current erased-value storage and stating the cross-thread visibility requirement for any future implementation.
+- Added a README threading-roadmap note with the same storage-design boundary.
+- Added instrumentation coverage proving an invalidated cached slot read recomputes and does not return through the one-lock fresh cached path.
+
+Committed and pushed:
+
+- `lazily-rs`: `e9a9373 docs: defer thread-safe optimistic reads`
+- `agent-loop`: `c51363f4f chore: update lazily-rs submodule`
+
+Verification run:
+
+- `cargo fmt`
+- `cargo test`
+- `cargo test --features instrumentation`
+- `cargo test --features tokio`
+- `cargo test --features loom --test thread_safe_loom`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo build`
+- `cargo bench --features instrumentation --no-run`
+- `python3 scripts/update-benchmark-results.py --check`
+- `git diff --check`
+
+Applicability notes: `cargo install --path .` is not applicable because `lazily` is a library crate with no binaries; `make check` is not available because there is no `Makefile`; GitHub has no workflows listed for this submodule, so there was no CI/tmux run to inspect.
+<!-- agent:boundary:5349c70b -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~[#tsc16-matrix]~
-- ~[#tsc16-wake-scope]~
-- ~[#tsc16-refresh-fastpath]~
-- [#tsc16-optimistic-read]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#tsc16-optimistic-read] #performance #thread-safe Explore a versioned optimistic read path only if the benchmark matrix shows read-mostly or independent-slot contention is still dominated by the global mutex; document visibility semantics before changing guarantees
 <!-- /agent:backlog -->
 
 ## Review

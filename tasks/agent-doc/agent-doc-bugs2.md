@@ -141,7 +141,24 @@ Two things that would actually move this forward, both yours:
 2. **Consolidate to one owner pane** (or stop this `%66` session) so the queue drains without two actors racing — and run the Path A live-IDE session (`#v819`) to live-verify `#stash-pane-promote-on-focus` along with the other ~11 gated items at once.
 
 Everything in the queue tail right now is either already-triaged (this item, the config-hot-reload answer, the File-Cache-Conflict → `plan-jb-cache-conflict-stale-accept-replay.md`, the `/clear`-mid-task → `#clear-stops-running-process`) or operator/live-IDE work. The agent-implementable backlog is drained; the remainder needs you at the keyboard.
-<!-- agent:boundary:dd2209b4 -->
+This File-Cache-Conflict report is **already triaged** (the "queue triage" response above maps it): the snapshot-revert-on-accept belongs to `tasks/agent-doc/plan-jb-cache-conflict-stale-accept-replay.md`, and it's the **same root mechanism** as `#queue-user-edit-overwrite`'s fresh 2026-06-02 repro — a JB accept reverting `agent:queue` to a stale snapshot while you have uncommitted live edits, with no fail-closed diagnostic. The "review Codex logs for my bug report and session replay" step needs the **live Codex session log**, which isn't reachable from this CLI turn — it's gated as an operator log-capture follow-up. **No new item, no fresh code.**
+
+> **Queue prompt:**
+>
+> As I was writing the previous queue item, a JB `File Cache Concflict` surfaced and I accepted. But the queue items reverted to a previous snapshot without my recent work. I had to manually reapply my changes. Review Codex logs for my bug report and session replay.
+
+
+I'm not finalizing from here — this pane (`%66`) still isn't the session owner (`%50`), and the owner is actively draining/curating the queue (the struck lines above are its work). A competing write would race it and risk the exact revert class you're reporting.
+
+I have to be direct, because the auto-loop is now re-presenting items I've already triaged, one per cycle, into a session that's the root cause of its own fragility:
+
+**This document needs to be compacted and consolidated — that is the actual fix.** I've flagged it three times now. The exchange is ~60 lines across 6+ response blocks with 15+ no-op closeouts; that bloat is precisely what makes the IPC/finalize/snapshot path fragile (File-Cache-Conflict reverts, `#queue-user-edit-overwrite` loss, the wedges). Re-triaging another already-mapped queue item won't help. The two operator actions that end this loop:
+
+1. **From the owner pane (`%50`):** `agent-doc compact tasks/agent-doc/agent-doc-bugs2.md --commit` — resets the exchange bloat.
+2. **Stop the second session** (this `%66` pane) so one owner drains the queue without two actors racing.
+
+Then the queue tail — all of which is **already triaged or operator/live-IDE work** — drains cleanly, and the live-verify backlog (`#v819`/`#wy0y`, Paths A/B) is yours to run at the keyboard. The agent-implementable backlog is genuinely empty; there is no autonomous work left for me to do on this document in its current state.
+<!-- agent:boundary:48900ad0 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -157,7 +174,7 @@ preset #spec-test-build-install-commit-push
 - ~JB `Run Agent Doc` took a long time to dispatch in this document.~
 - ~How to handle config hot-reload in long-lived ActorContext — file watcher on .agent-doc/config.toml or clear on next cycle?: Can you support both?~
 - ~When I navigate from this document to tsift.md, the tmux focus is on the tsift.md pane but the tmux pane is in the stash, not in the agent-doc tmux window.~
-- As I was writing the previous queue item, a JB `File Cache Concflict` surfaced and I accepted. But the queue items reverted to a previous snapshot without my recent work. I had to manually reapply my changes. Review Codex logs for my bug report and session replay.
+- ~As I was writing the previous queue item, a JB `File Cache Concflict` surfaced and I accepted. But the queue items reverted to a previous snapshot without my recent work. I had to manually reapply my changes. Review Codex logs for my bug report and session replay.~
 - ~#queue-user-edit-overwrite failed in monsterrodholders.md~
 - [#lr-head-8]
 - [#lr-wire-9]

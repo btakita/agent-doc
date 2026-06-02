@@ -60,7 +60,7 @@ For replacing `Read`, the priority is to make `tsift` return complete symbol-cen
 For replacing `Write`, the next step is specification first: define the semantic edit intent schema before implementation. Then build an AST-backed executor that can apply those intents with dry-run diffs, formatting, conflict checks, rollback, and language fixtures. Until that exists, `tsift edit` remains useful for atomic string replacements but should not be treated as a general Write replacement.
 
 I added the follow-up backlog in priority order: `#readast`, `#readrewrite`, `#writeintents`, `#writeexecutor`.
-<!-- agent:boundary:0b2437fb -->
+<!-- agent:boundary:eb9d4e64 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -75,8 +75,8 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#readast] Add a  /  surface that returns a token-budgeted symbol packet: signature, body range, child declarations, imports, callers/callees, summaries, and expansion commands.
-- [ ] [#readrewrite] Route broad Read-style file opens through  / hooks for source windows, session docs, diffs, logs, and tests; keep raw Read as the explicit fallback.
+- [ ] [#readast] Add a `tsift symbol-read` / `tsift ast-read` surface that returns a token-budgeted symbol packet: signature, body range, child declarations, imports, callers/callees, summaries, and expansion commands.
+- [ ] [#readrewrite] Route broad Read-style file opens through `tsift rewrite --run` / hooks for source windows, session docs, diffs, logs, and tests; keep raw Read as the explicit fallback.
 - [ ] [#writeintents] Specify semantic write intents for AST-backed edits: rename symbol, replace function body, insert import, add method, update call signature, move declaration, and rewrite call sites.
 - [ ] [#writeexecutor] Implement the AST-backed write executor with dry-run diffs, formatting, conflict detection against current file content, rollback, and per-language conformance tests.
 <!-- /agent:backlog -->

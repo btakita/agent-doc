@@ -301,22 +301,50 @@ Pushed both repos:
 So when you navigate to this document, `sync --focus` resolves to `%70` (the document's own registry-owned, alive pane) — which is exactly the behavior you're observing. That's the fix working: focus keys on the document's own pane, and since the binding is intact and the pane is alive, focus stays on `%70` instead of jumping to a neighbor.
 
 The only scenario still open is the *session-loss* one — if a Codex supervisor restart actually kills `%70`, the owner needs to re-provision a fresh pane for this document rather than dropping the session. That's tracked on `#codex-upgrade-restart-cross-doc-focus` and needs the two-document upgrade/restart live repro. As long as the pane survives, association and focus are correct now.
-<!-- agent:boundary:535e1faf -->
+❯ In general, it seems that since the supervisor processes were restarted in a previous run, the environment is not acting well. Before the restart, the environment was functioning at the highest capacity that I have experienced with agent-doc.
+❯ JB `Run Agent Doc` on lazily-rs.md failed:
+```
+[route] target tmux session: 0
+Error: authoritative actor generation 13 for tasks/software/lazily-rs.md owns pane %71 but route will not bind a new dispatch target because this generation already timed out while starting. Inspect the pane diagnostics, then restart the owner with `agent-doc start tasks/software/lazily-rs.md`.
+```
+❯ #spec-test-build-install-commit-push
+> **Queue prompt:**
+>
+> In general the environment is degraded since the supervisor restart; JB `Run Agent Doc` on lazily-rs.md failed with `authoritative actor generation 13 ... already timed out while starting`. #spec-test-build-install-commit-push
+
+### Re: degraded after supervisor restart — starting-timeout recovery now polls — opus-4-8
+
+Diagnosed and fixed. First, the reassuring part: I inspected the live state and **the lazily-rs.md session has already self-recovered** — generation 13 on pane `%71` is now `state=ready`, `live_pane: alive-idle prompt_ready=true` (it transitioned back via `live_pane_idle`). So the environment isn't permanently broken; you hit a transient dead-end.
+
+**Root cause.** The `gpt-5.5 xhigh` Codex (11.6M cached context) was slow to present its idle composer after the supervisor restart, so route's startup ready-wait timed out and recorded a `starting_actor_timeout` → actor `Blocked`. That timeout record is **sticky**: once set, `wait_for_authoritative_actor_ready` short-circuits and never re-waits, and the blocked-timeout branch did a **single** dispatch-ready capture before hard-bailing. At the instant you clicked Run Agent Doc the composer hadn't appeared yet, so the one-shot check failed and route dead-ended with the manual-`agent-doc start` error — even though the pane became ready moments later.
+
+**Fix** (`recover_starting_timeout_blocked_actor_if_dispatch_ready`): it now **polls** the live pane for a dispatch-ready prompt up to the harness recovery budget before failing closed, instead of a single capture. A heavy/slow harness recovers automatically within the same reroute. Crucially, a **busy** pane never satisfies `current_generation_ready_prompt_proven` (the harness busy cue short-circuits it), so this preserves the "promote only proven idle panes" fail-closed invariant — it can't stomp an active turn.
+
+**Shipped** (`#spec-test-build-install-commit-push`):
+- spec: `specs/08-session-routing.md` + `README.md` aligned with the bounded-poll recovery.
+- test: `make check` green (exit 0); the pure recovery predicate stays unit-tested. The poll loop itself needs a live tmux pane (the suite has no `Tmux` double), so it's gated on tmux-ci / live-verify.
+- build + install: both binaries rebuilt (`cargo build --release` + `cargo install --path .`).
+- commit: `agent-doc` `43de6bc8` (route.rs + spec + README, committed selectively on the live `20260422/codex-agent-backend` branch — I left the concurrent session's other uncommitted edits untouched); superproject pointer `bc19f9f33`.
+- push: pushing now (see closeout).
+
+**For your `%71` right now:** nothing to do — it's already idle/ready, so Run Agent Doc on lazily-rs.md should work. If you ever hit this again before the new binary is the one your tmux panes use, `agent-doc start tasks/software/lazily-rs.md` remains the manual recovery.
+
+Tracked as `#route-starting-timeout-poll-recovery` (gated on the two-session heavy-Codex restart live repro).
+<!-- agent:boundary:28bdf596 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+- do [#nochange-after-stall]
+- do [#lr-queue-response-miss]
+- do [#lr-queue-plan-deferral]
+- do [#lr-queue-repair-adopt]
+- do [#lr-queue-patchback-miss]
 - do [#lr-head-8]
 - do [#lr-wire-9]
 - do [#lr-actor-10]
 <!-- /agent:queue -->
 ###
 <!--
-JB `Run Agent Doc` on lazily-rs.md failed:
-```
-[route] target tmux session: 0
-Error: authoritative actor generation 13 for tasks/software/lazily-rs.md owns pane %71 but route will not bind a new dispatch target because this generation already timed out while starting. Inspect the pane diagnostics, then restart the owner with `agent-doc start tasks/software/lazily-rs.md`.
-```
----
 The last run had a code fence stripped away by agent-doc.
 #spec-test-build-install-commit-push
 ---
@@ -326,6 +354,7 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Backlog
 
 <!-- agent:backlog priority queue=append -->
+- [ ] [#nochange-after-stall] [recommended] #agent-doc-bug 2026-06-02: `src/boost-client/tasks/monsterrodholders.md` follow-up direct run returned plain "Nothing changed since last run" even though recent cycle history showed repeated `recursive_direct_invocation_blocked` abandoned cycles and a repair/reap closeout. Fix by making the no-change short-circuit consult latest abnormal cycle/session state and require durable response/consume/deferral proof before hiding a stalled run behind snapshot equality. Plan: tasks/agent-doc/plan-no-change-after-stalled-cycle.md.
 - [ ] [#lr-queue-response-miss] [recommended] #agent-doc-bug 2026-06-02: lazily-rs queued free-text prompt with preset had no committed response patchback in tasks/software/lazily-rs.md. Add session-check coverage so a seen queue head requires committed response, consume proof, or explicit deferral. Plan: tasks/agent-doc/plan-lazily-rs-queued-prompt-patchback-miss.md.
 - [ ] [#lr-queue-plan-deferral] [recommended] #agent-doc-bug 2026-06-02: mixed #agent-doc-bug capture plus #spec-test-build-install-commit-push queue head made agent-doc plan choose plan_backlog_only, deferring runnable lazily-rs work without making the deferral contract explicit. Plan: tasks/agent-doc/plan-lazily-rs-queue-plan-deferral.md.
 - [ ] [#lr-queue-repair-adopt] [recommended] #agent-doc-bug 2026-06-02: if the lazily-rs queued prompt was already completed console-only, recovery must adopt a supplied response through agent-doc write --commit and consume or preserve the matching free-text queue head without rerunning repo work. Plan: tasks/agent-doc/plan-lazily-rs-queue-repair-adopt.md.
@@ -338,6 +367,7 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Review
  
 <!-- agent:review -->
+- [/] [#route-starting-timeout-poll-recovery] #agent-doc-bug 2026-06-02: IMPLEMENTED+tested+shipped (agent-doc 43de6bc8, pointer bc19f9f33, both binaries rebuilt+installed). JB Run Agent Doc on lazily-rs.md failed: 'authoritative actor generation 13 owns pane %71 but route will not bind a new dispatch target because this generation already timed out while starting'. Root cause: starting_actor_timeout is sticky (wait_for_authoritative_actor_ready short-circuits once it is set) and the blocked-timeout recovery did a single dispatch-ready capture, so a heavy gpt-5.5 xhigh Codex still settling into its idle composer after a supervisor restart dead-ended even though it became ready seconds later (session status later recovered it via live_pane_idle). Fix: recover_starting_timeout_blocked_actor_if_dispatch_ready now polls the live pane for a dispatch-ready prompt up to the harness recovery budget before failing closed; busy panes never satisfy current_generation_ready_prompt_proven so the promote-only-proven-idle invariant holds. Spec 08-session-routing + README aligned. make check green. GATED on live-verify / tmux-ci: the poll loop needs a live tmux pane (no Tmux test double in the suite), so exercise a two-session heavy-Codex restart repro before un-gating.
 - [/] [#codex-upgrade-restart-cross-doc-focus] [recommended] #agent-doc-bug 2026-06-02: FOCUS MIS-BINDING IMPLEMENTED+tested+shipped (tmux-router 7a7ddd9, superproject pointer 6494fb190, both binaries rebuilt+installed): sync --focus now selects only the focus document's authoritative registry-owned, alive pane (captured before Phase 1.5/1.75 ephemeral donor/spare assignment) via the new resolve_focus_pane helper; when the document has no live owned pane it preserves the current tmux selection instead of aliasing onto a column-mate's pane (which belongs to a different document — the equityfundingsource.md symptom while focusing agent-doc-bugs2.md). 4 regression tests added; tmux-router 113 lib tests + agent-doc make check green. REMAINING: the session-loss-across-Codex-restart rebind facet (re-provision the focused document's own pane on supervisor restart rather than dropping/aliasing the session) — gated on the two-document upgrade/restart live repro. Shares the focus-by-exact-document-path invariant with #jb-tsift-pane-sync. Plan: tasks/agent-doc/plan-codex-upgrade-restart-cross-document-focus.md
 - [/] [#jbstalldrain] [recommended] #agent-doc-bug 2026-06-02: JB `Run Agent Doc` appeared stalled across two observed route stages: `agent-doc-bugs2.md` failed before dispatch because closeout drain hit a session-check backlog-shadow blocker (`#queue-user-edit-overwrite` only outside live `agent:backlog`), while `monsterrodholders.md` waited the full 60s on busy authoritative actor generation 251 / pane `%61` before reporting no dispatch-ready prompt. Fix by making route emit typed in-progress and terminal results for closeout-drain blockers and busy-authoritative waits, and make the JetBrains action surface those states persistently instead of looking inert. Plan: tasks/agent-doc/plan-jb-run-agent-doc-stalled-closeout-drain.md.
 - [/] [#codex-direct-writeback-miss] [recommended] #agent-doc-bug 2026-06-02: Direct-chat Codex execution of src/boost-client/tasks/monsterrodholders.md prompt `do [#pmaxpost]. #spec-test-commit-push` completed site + parent commits/pushes but the final assistant response was not written into the session document until manual `agent-doc write --commit` repair; make the Codex/direct-chat closeout gate fail closed before final chat output when the response heading is absent from HEAD, and keep the recovery path binary-owned. Plan: tasks/agent-doc/plan-response-missing-after-manual-closeout.md

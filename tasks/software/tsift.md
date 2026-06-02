@@ -203,7 +203,51 @@ Escalation: none.
 
 
 Closeout repair only: recorded the missing `--done mdembeddedcode` proof after the response commit landed, so the auto queue can advance. No code changes.
-<!-- agent:boundary:75efb740 -->
+
+### Re: astrankingmerge — gpt-5
+
+> **Queue prompt:**
+>
+> [#astrankingmerge]
+
+
+Done `#astrankingmerge`.
+
+Implemented a merged AST-aware search ranking preview in `src/tsift`:
+
+- Added `report.ranking` and `report.ranked` to search budget reports, with stable `srnk-*` handles and ranked rows for `symbol_span`, `symbol`, and capped `lexical_file` evidence.
+- Merged indexed symbol score, exact-name signal, precise AST span presence, cached summary references, and AST/traversal-neighborhood proxy evidence from parent/child handles and Markdown embedded-code symbols.
+- Kept lexical file hits visible as fallback evidence while weighting them below precise symbol/span matches.
+- Added human preview ranking output and evidence counts for summary refs / graph neighbors.
+- Added regression coverage for precise AST spans outranking broad lexical file hits, plus summary and graph evidence appearing in ranked reasons.
+- Updated `SPEC.md` to document the merged ranking path and scoring evidence.
+
+Changed paths:
+
+- `src/tsift/SPEC.md`
+- `src/tsift/packages/tsift-cli/src/lib.rs`
+- `src/tsift` submodule pointer in the parent repo
+
+Commits:
+
+- `src/tsift`: `892b717 feat: add ast-aware search ranking preview` (pushed to `btakita/tsift main`)
+- parent repo: `2c05fb374 chore: update tsift submodule`
+
+Verification:
+
+- `cargo test -p tsift-cli search_budget_ranked_preview` passed.
+- `cargo test -p tsift-cli search_budget_report` passed.
+- `cargo test -p tsift-cli search` passed.
+- `make check` passed, including clippy, workspace tests, doc tests, OpenCode npm tests, and npm dry-run publish check.
+- `cargo install --path . --force` passed and installed `tsift 0.1.62`.
+- Installed CLI smoke passed: `tsift --envelope search "build search budget report" --path packages/tsift-cli/src/lib.rs --json --budget small` emitted `report.ranked` with `symbol_span` rows above lexical hits.
+- Tmux CI evidence: `rg -n "tmux" .github Makefile packages src tests` returned no matches, and `make -n tmux-ci` reports no such target.
+- GitHub Actions CI run `26849880228` passed: `clippy + test` and `live Convex graph acceptance` both green. The run still has the existing annotations for Node 20 action deprecation and missing `TSIFT_LIVE_CONVEX_GRAPH_URL` configuration.
+
+Confidence: high. The ranking behavior is covered by focused tests, the full local suite, installed-binary smoke, and green remote CI.
+
+Escalation: none.
+<!-- agent:boundary:3cbd7dee -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -218,14 +262,13 @@ preset #spec-test-build-install-commit-push
 - ~[#astqueryfacets]~
 - ~[#astnavgraph]~
 - ~[#mdembeddedcode]~
-- [#astrankingmerge]
+- ~[#astrankingmerge]~
 - [#astnavfixtures]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#astrankingmerge] Merge symbol, span, lexical, summary, and graph-neighborhood evidence into one AST-aware ranking path so file-level lexical matches do not drown out precise span hits.
 - [ ] [#astnavfixtures] Add multilingual AST navigation fixtures and perf gates covering Rust/Python/TS/JS/Kotlin/Zig/Bash plus Markdown headings, lists, fenced code, stable handles, ranking recall, and expand-command validity.
 <!-- /agent:backlog -->
 

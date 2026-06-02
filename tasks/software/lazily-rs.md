@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 
@@ -54,12 +54,17 @@ I added these next items in priority order:
 4. #tsc16-optimistic-read: consider a versioned optimistic read path only if the matrix proves non-hot-slot workloads are still mutex-bound, because this may affect visibility semantics.
 
 Commands run: `tsift status`, `tsift status --fix`, `tsift index --workspace .`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, targeted `tsift` searches, and focused source/README inspections. Verification: no source changes or tests this cycle; this is backlog/analysis only. Confidence: medium-high. Escalation: none.
-<!-- agent:boundary:603ebca1 -->
+<!-- agent:boundary:292e6c4f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+preset #spec-test-build-install-commit-push
+- [#tsc16-matrix]
+- [#tsc16-wake-scope]
+- [#tsc16-refresh-fastpath]
+- [#tsc16-optimistic-read]
 <!-- /agent:queue -->
 
 ## Backlog

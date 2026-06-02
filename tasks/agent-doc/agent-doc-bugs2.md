@@ -51,7 +51,7 @@ The item carries an explicit **DO NOT IMPLEMENT in this planning item** marker, 
 
 You're right — my previous turn produced a console-only "holding" response and never crossed `finalize`, so per the agent-doc contract that response did not exist. Finishing it now, and folding this into the existing bug rather than spawning a duplicate.
 
-**This bug is already tracked.** `#codex-direct-writeback-miss` (backlog) + `tasks/agent-doc/plan-response-missing-after-manual-closeout.md` already cover "a completed turn must not exit with only the prompt persisted in the exchange." The queued free-text report (about monsterrodholders turns failing to persist their closeout) is the same class, so I enriched the existing plan instead of creating a separate duplicate plan (deleted).
+**This bug is already tracked.** `#codex-direct-writeback-miss` (backlog) + `tasks/agent-doc/plan-response-missing-after-manual-closeout.md` already cover "a completed turn must not exit with only the prompt persisted in the exchange." The queued free-text item *"agent-doc monsterrodholders.md turns do not apply the response into the document"* is the same class, so I enriched the existing plan instead of creating `plan-turn-response-not-applied-to-document.md` (deleted as a duplicate).
 
 What I added to the plan — two new failure shapes observed in *this* session, on the Claude-skill path (the existing plan was Codex-only):
 
@@ -59,7 +59,20 @@ What I added to the plan — two new failure shapes observed in *this* session, 
 2. **Persistence attempted but queue-consume diverged under live IPC.** A `finalize --done` did commit the `### Re:` body and reap the item, but the queue-consume step failed (`snapshot queue state diverged from document queue`, `live_prompt_drift_after_preflight`) while you were live-typing new queue items and a JB `File Cache Conflict` reverted the queue to an older snapshot. The next preflight then hard-blocked on the orphaned bare `[#id]` head, so no subsequent response could land — the document looked stuck. `repair --apply-recovery` committed the lossy side and didn't strike the head; I had to strike `~[#write-closeout-response-shape]~` manually. New fix steps 7–9 make consume head-aware, add a binary-owned orphaned-head strike, and make recovery IPC-listener aware so it never requires fighting a live buffer.
 
 Gating `#codex-direct-writeback-miss` to `[/]` — planning deliverable complete (plan written + enriched), implementation pending. I did **not** auto-loop the remaining queue items: several are real unanswered user prompts (the lazily-rs design questions, the tsift.md stash-pane report, the File-Cache-Conflict snapshot-revert, the `/clear`-while-task-in-progress report) that take precedence over auto-continuation and deserve their own cycles.
-<!-- agent:boundary:7d805a21 -->
+
+### Re: response not written into the document (#codex-direct-writeback-miss) — opus-4-8
+
+You're right — my previous turn produced a console-only "holding" response and never crossed `finalize`, so per the agent-doc contract that response did not exist. Finishing it now, and folding this into the existing bug rather than spawning a duplicate.
+
+**This bug is already tracked.** `#codex-direct-writeback-miss` (backlog) + `tasks/agent-doc/plan-response-missing-after-manual-closeout.md` already cover "a completed turn must not exit with only the prompt persisted in the exchange." The queued free-text item *"agent-doc monsterrodholders.md turns do not apply the response into the document"* is the same class, so I enriched the existing plan instead of creating a duplicate plan (deleted).
+
+What I added to the plan — two new failure shapes observed in *this* session, on the Claude-skill path (the existing plan was Codex-only):
+
+1. **Console-only response, no persistence command run.** The skill turn concluded with the answer in the console but never piped it through `finalize`/`write --commit`. The Codex Stop-hook `committed_without_response_body` backstop doesn't run on the Claude path, so nothing caught it. New fix step 6 + the new exit criterion add a skill-path "response produced but never persisted" guard.
+2. **Persistence attempted but queue-consume diverged under live IPC.** A `finalize --done` did commit the `### Re:` body and reap the item, but the queue-consume step failed (`snapshot queue state diverged from document queue`, `live_prompt_drift_after_preflight`) while you were live-typing new queue items and a JB `File Cache Conflict` reverted the queue to an older snapshot. The next preflight then hard-blocked on the orphaned bare `[#id]` head, so no subsequent response could land. `repair --apply-recovery` committed the lossy side and didn't strike the head; I struck `~[#write-closeout-response-shape]~` manually. New fix steps 7–9 make consume head-aware, add a binary-owned orphaned-head strike, and make recovery IPC-listener aware.
+
+Gating `#codex-direct-writeback-miss` to `[/]` — planning deliverable complete (plan written + enriched), implementation pending. I did **not** auto-loop the remaining queue items: several are real unanswered user prompts (the lazily-rs design questions, the tsift.md stash-pane report, the File-Cache-Conflict snapshot-revert, the `/clear`-while-task-in-progress report) that take precedence over auto-continuation and deserve their own cycles.
+<!-- agent:boundary:2316373a -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -71,7 +84,7 @@ preset #spec-test-build-install-commit-push
 - ~[#write-closeout-response-shape]~
 - Should the graph be per-file (one context per tracked document) or per-process (one context with file-keyed cells)?: Use your judgement. There can also be multiple contexts.
 - How to handle config hot-reload in long-lived ActorContext — file watcher on .agent-doc/config.toml or clear on next cycle?: Can you support both?
-- ~agent-doc monsterrodholders.md turns do not apply the response into the document.~
+- agent-doc monsterrodholders.md turns do not apply the response into the document.
 - When I navigate from this document to tsift.md, the tmux focus is on the tsift.md pane but the tmux pane is in the stash, not in the agent-doc tmux window.
 - As I was writing the previous queue item, a JB `File Cache Concflict` surfaced and I accepted. But the queue items reverted to a previous snapshot without my recent work. I had to manually reapply my changes.
 - [#lr-head-8]
@@ -79,7 +92,7 @@ preset #spec-test-build-install-commit-push
 - [#lr-actor-10]
 - JB `Clear Session Context` on monsterrodholders.md presented me with `Interrupt and Clear`. I applied `Interrupt and Clear` and the Codex session closed with the supervisor presenting Enter to restart or q to quit. I Pressed enter, Codex restarted and I saw an error `'/clear' is disabled while a task is in progress.`.
 - Add a preset attribute to agent:queue, where the value can be a free-text prompt that correctly applies `prompt_presets`.
-- ~do [#codex-direct-writeback-miss]~
+- do [#codex-direct-writeback-miss]
 <!-- /agent:queue -->
 ###
 <!--

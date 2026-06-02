@@ -32,6 +32,7 @@ use hex;
 use lazily::{CellHandle, Context, SlotHandle};
 use sha2::{Digest, Sha256};
 
+use crate::cycle_state::CycleState;
 use crate::fs_util;
 use crate::project_config_io;
 
@@ -47,6 +48,12 @@ pub type SshContextSlot = SlotHandle<Arc<SshContextValue>>;
 pub type FrontmatterSlot = SlotHandle<Arc<Frontmatter>>;
 pub type ComponentsSlot = SlotHandle<Arc<Vec<Component>>>;
 pub type DocHashSlot = SlotHandle<String>;
+/// Phase 7 (#lr-cycle-7): cached per-document cycle state, loaded at most once
+/// per context lifetime. `None` when no cycle-state sidecar exists yet.
+pub type CycleStateSlot = SlotHandle<Option<Arc<CycleState>>>;
+/// Phase 7 (#lr-cycle-7): cached snapshot content, loaded (with flock) at most
+/// once per context lifetime. `None` when no snapshot exists yet.
+pub type SnapshotContentSlot = SlotHandle<Option<Arc<String>>>;
 
 pub struct SshContextValue {
     pub config: Arc<ProjectConfig>,
@@ -67,6 +74,8 @@ pub struct RunContext {
     frontmatter: FrontmatterSlot,
     components: ComponentsSlot,
     doc_hash: DocHashSlot,
+    cycle_state: CycleStateSlot,
+    snapshot_content: SnapshotContentSlot,
 }
 
 impl RunContext {
@@ -183,6 +192,46 @@ impl RunContext {
             }
         });
 
+        // Phase 7 (#lr-cycle-7): load the per-document cycle state once. A real
+        // load error is surfaced to stderr (never swallowed); a missing sidecar
+        // is the normal `None` case.
+        let cycle_state = ctx.slot({
+            let fp = file_path_cell;
+            move |ctx: &Context| -> Option<Arc<CycleState>> {
+                let path: PathBuf = ctx.get_cell(&fp);
+                match crate::cycle_state::load(&path) {
+                    Ok(state) => state.map(Arc::new),
+                    Err(e) => {
+                        eprintln!(
+                            "[graph] cycle_state load failed for {}: {}",
+                            path.display(),
+                            e
+                        );
+                        None
+                    }
+                }
+            }
+        });
+
+        // Phase 7 (#lr-cycle-7): load the snapshot content (with flock) once.
+        let snapshot_content = ctx.slot({
+            let fp = file_path_cell;
+            move |ctx: &Context| -> Option<Arc<String>> {
+                let path: PathBuf = ctx.get_cell(&fp);
+                match crate::snapshot::load(&path) {
+                    Ok(content) => content.map(Arc::new),
+                    Err(e) => {
+                        eprintln!(
+                            "[graph] snapshot load failed for {}: {}",
+                            path.display(),
+                            e
+                        );
+                        None
+                    }
+                }
+            }
+        });
+
         Self {
             ctx,
             file_path: file_path_cell,
@@ -197,6 +246,8 @@ impl RunContext {
             frontmatter,
             components,
             doc_hash,
+            cycle_state,
+            snapshot_content,
         }
     }
 
@@ -254,6 +305,35 @@ impl RunContext {
 
     pub fn doc_hash(&self) -> String {
         self.ctx.get(&self.doc_hash)
+    }
+
+    /// Phase 7 (#lr-cycle-7): cached cycle state for this document (loaded once).
+    pub fn cycle_state(&self) -> Option<Arc<CycleState>> {
+        self.ctx.get(&self.cycle_state)
+    }
+
+    /// Phase 7 (#lr-cycle-7): cached snapshot content for this document.
+    pub fn snapshot_content(&self) -> Option<Arc<String>> {
+        self.ctx.get(&self.snapshot_content)
+    }
+
+    /// Invalidate the cached cycle state after a save/mutation so the next read
+    /// reloads it (Phase 7).
+    pub fn invalidate_cycle_state(&self) {
+        self.cycle_state.clear(&self.ctx);
+    }
+
+    /// Invalidate the cached snapshot content after a save/delete (Phase 7).
+    pub fn invalidate_snapshot_content(&self) {
+        self.snapshot_content.clear(&self.ctx);
+    }
+
+    pub fn is_cycle_state_cached(&self) -> bool {
+        self.ctx.is_set(&self.cycle_state)
+    }
+
+    pub fn is_snapshot_content_cached(&self) -> bool {
+        self.ctx.is_set(&self.snapshot_content)
     }
 
     pub fn invalidate_project_root(&self) {
@@ -816,5 +896,61 @@ mod tests {
 
         assert!(!rc.is_frontmatter_cached());
         assert!(!rc.is_components_cached());
+    }
+
+    // ---- Phase 7 (#lr-cycle-7) ----
+
+    #[test]
+    fn phase7_snapshot_content_slot_loads_and_caches() {
+        let dir = TempDir::new().unwrap();
+        setup_project(dir.path());
+        let doc = dir.path().join("file.md");
+        std::fs::write(&doc, "hello").unwrap();
+        snapshot::save(&doc, "snapshot body").unwrap();
+
+        let rc = RunContext::new(doc);
+        assert!(!rc.is_snapshot_content_cached());
+        let content = rc.snapshot_content().expect("snapshot present");
+        assert_eq!(content.as_str(), "snapshot body");
+        assert!(
+            rc.is_snapshot_content_cached(),
+            "snapshot loaded once and cached for the context lifetime"
+        );
+    }
+
+    #[test]
+    fn phase7_snapshot_content_none_when_absent() {
+        let dir = TempDir::new().unwrap();
+        setup_project(dir.path());
+        let doc = dir.path().join("file.md");
+        std::fs::write(&doc, "hello").unwrap();
+
+        let rc = RunContext::new(doc);
+        assert!(rc.snapshot_content().is_none());
+        assert!(rc.is_snapshot_content_cached(), "the None result is cached");
+    }
+
+    #[test]
+    fn phase7_cycle_state_slot_loads_and_invalidates() {
+        let dir = TempDir::new().unwrap();
+        setup_project(dir.path());
+        let doc = dir.path().join("file.md");
+        std::fs::write(&doc, "hello").unwrap();
+
+        let rc = RunContext::new(doc.clone());
+        // No sidecar yet → None, and the None is cached.
+        assert!(rc.cycle_state().is_none());
+        assert!(rc.is_cycle_state_cached());
+
+        // Create a cycle-state sidecar, then prove invalidation reloads it.
+        crate::cycle_state::start_preflight(&doc, Some("hello"), Some("hello")).unwrap();
+        assert!(
+            rc.cycle_state().is_none(),
+            "still cached as None until invalidated"
+        );
+        rc.invalidate_cycle_state();
+        let state = rc.cycle_state().expect("cycle state now present after reload");
+        assert!(!state.cycle_id.is_empty());
+        assert!(rc.is_cycle_state_cached());
     }
 }

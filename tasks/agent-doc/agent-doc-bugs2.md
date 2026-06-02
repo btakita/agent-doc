@@ -184,7 +184,29 @@ Likely cause: on restart the registry reconstructs owner→document bindings fro
 Desired invariant: restart must rebind each document to its own session record (re-provision its own pane, never alias onto another document's owner); `sync --focus <doc>` must focus only a pane owning that exact document and fail closed otherwise.
 
 I committed `tasks/agent-doc/plan-codex-upgrade-restart-cross-document-focus.md` and queued it as a recommended Review item `#codex-upgrade-restart-cross-doc-focus`. No code changed this cycle — this is a planning/triage turn pending the two-document upgrade-restart repro and a look at how `src/tmux-router` rebuilds bindings on restart. Also reaped your struck `#queue-preset-attribute` (completed in `2197dbff0`).
-<!-- agent:boundary:0f4a9f6e -->
+My ownership check (from the interrupted prior turn) is decisive: the session's authoritative actor is now **pane `%67`** (`state=ready`, `live_pane: alive-idle prompt_ready=true`) — ownership shifted off `%50`/`%66` after the Codex upgrade/restart you reported (the new `#codex-upgrade-restart-cross-doc-focus` item). The crate tree has a small 2-file WIP, and `HeadContentSlot`/`SnapshotCommitStatusSlot` are **not** in HEAD — so `[#lr-head-8]` is **genuinely unimplemented** (unlike the recent re-presented items).
+
+> **Queue prompt:**
+>
+> [#lr-head-8]
+
+
+So this is the one bit of real agent work left in the queue — but it can't be done well from here, and not for lack of willingness:
+
+1. **Finalize requires the owner pane.** The session is owned by a live, prompt-ready `%67`; my finalize fails closed on ownership mismatch (it has every recent cycle). Implementing `#lr-head-8` and then being unable to commit/close it just leaves the crate in a half-state that the owner pane would collide with.
+2. **`#lr-head-8` is real Context-architecture work** (new `HeadContentSlot` + `SnapshotCommitStatusSlot`, wired for `git show HEAD` dedup per `tasks/agent-doc/plans/lazily-rs-integration.md`) — a multi-file implementation that needs a clean single-owner tree + build + test, not a tail-of-marathon attempt on a contended document where ownership just shuffled.
+
+The honest path, and it's short: **`%67` is alive and prompt-ready right now — let it drain `[#lr-head-8]` directly.** It's the authoritative owner; it has the clean closeout boundary I don't. The three lazily-rs phases (`#lr-head-8` → `#lr-wire-9` → `#lr-actor-10`) are the *only* remaining agent-implementable items; everything else in review is `[/]` done-or-gated or operator/live-IDE work.
+
+Two operator actions still stand and would end this loop for good (I've flagged them repeatedly and they're now overdue):
+- **Compact** from the owner pane: `agent-doc compact tasks/agent-doc/agent-doc-bugs2.md --commit` — the ~250-line exchange is the direct cause of the IPC/finalize/queue-overwrite fragility.
+- **Run as a single owner** (`%67`) so the lazily-rs phases get implemented and committed without two actors racing the branch.
+
+I'm not going to start a multi-file Context-graph implementation I can't finalize from a non-owner pane — that would risk exactly the half-committed-crate and queue-overwrite damage the backlog is full of. `[#lr-head-8]` is ready and well-specified for the owner pane to pick up.
+Continue with the work to complete #codex-upgrade-restart-cross-doc-focus using tasks/agent-doc/plan-codex-upgrade-restart-cross-document-focus.md. #spec-test-build-install-commit-push
+
+Then continue with the queue work.
+<!-- agent:boundary:42319f92 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -203,8 +225,8 @@ preset #spec-test-build-install-commit-push
 - ~As I was writing the previous queue item, a JB `File Cache Concflict` surfaced and I accepted. But the queue items reverted to a previous snapshot without my recent work. I had to manually reapply my changes. Review Codex logs for my bug report and session replay.~
 - ~#queue-user-edit-overwrite failed in monsterrodholders.md~
 - ~do [#queue-preset-attribute]~
-- ~I lost my existing session to this document. I saw Codex as for an upgrade. I upgraded and restarted. Then I found out that the Codex session for equityfundingsource.md had tmux focus when I focused the editor on this document. ~
-- [#lr-head-8]
+- ~I lost my existing session to this document. I saw Codex as for an upgrade. I upgraded and restarted. Then I found out that the Codex session for equityfundingsource.md had tmux focus when I focused the editor on this document.~
+- ~[#lr-head-8]~
 - [#lr-wire-9]
 - [#lr-actor-10]
 - JB `Clear Session Context` on monsterrodholders.md presented me with `Interrupt and Clear`. I applied `Interrupt and Clear` and the Codex session closed with the supervisor presenting Enter to restart or q to quit. I Pressed enter, Codex restarted and I saw an error `'/clear' is disabled while a task is in progress.`.

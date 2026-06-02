@@ -6,6 +6,32 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Dedicated `blocked_in_interactive_substate` route guard reason (`#snrun`).**
+  When a dispatch-only `Run Agent Doc` reopen is refused because the live pane is
+  stuck in an interactive shell substate (`reverse-i-search` / history search)
+  rather than a dispatch-ready composer, the fail-closed path now emits the
+  dedicated `RoutedReopenGuardReason::BlockedInInteractiveSubstate`
+  (`prompt_ready_barrier` FlowEvent) and a stage-specific error ("blocked in an
+  interactive terminal substate") instead of the generic
+  `dispatch_only_busy_actor_not_ready`. Pure helpers
+  `routed_reopen::is_interactive_shell_substate_reason` /
+  `dispatch_only_blocked_guard_reason`; regression
+  `interactive_substate_gets_dedicated_guard_reason`. FlowCore hot-path token
+  budget bumped (route.rs `guard_` 7→12, audited). The interactive-substate
+  detection + multi-source dispatch-start proof were already implemented; this
+  closes the remaining deterministic diagnostic refinement.
+  Plan: `tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md`.
+
+- **JB plugin logs the exact `setText` payload at debug level
+  (`#jb-settext-payload-log`, plugin 0.2.145).** `PatchWatcher.kt` now logs the
+  full `result` payload before `document.setText` on both the
+  `applyPatch.component` and `repositionBoundary` paths, behind
+  `LOG.isDebugEnabled` (only when `#com.github.btakita.agentdoc` debug logging is
+  on). Previously the category logged only content hashes + lengths
+  (`documentMutationDiagnosticUtil`), which was insufficient to capture the exact
+  corrupting payload for the IPC-duplication family (`#ipcfullprompt-recur2`,
+  `#wy0y`/`#6cmx`). Unblocks the Path B capture session.
+
 - **BREAKING CHANGE: opt-in agent-doc documents (`#4a6p`).** A plain `.md` is no
   longer auto-converted into an agent-doc session. `route`, `run`, and `start`
   now fail closed before injecting `agent_doc_session:` frontmatter unless the

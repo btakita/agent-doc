@@ -172,7 +172,7 @@ use crate::flow::routed_reopen::{
     classify_dispatch_start_proof, decide_authoritative_reopen,
     degraded_authoritative_actor_direct_submit_log_message,
     direct_pane_submit_outcome as flow_direct_pane_submit_outcome,
-    dispatch_only_dispatch_start_proof_required as flow_dispatch_only_dispatch_start_proof_required,
+    dispatch_only_blocked_guard_reason, dispatch_only_dispatch_start_proof_required as flow_dispatch_only_dispatch_start_proof_required,
     dispatch_only_focus_only_should_fail_closed, dispatch_only_sent_console_message,
     dispatch_only_sent_log_message, dispatch_only_starting_pane_ready_retry_budget,
     dispatch_only_starting_pane_recovery_retry_budget, log_dispatch_proof_failed,
@@ -2448,6 +2448,20 @@ fn dispatch_only_send_reopen(
             return Ok(dispatch_pane);
         }
         let recovery = dispatch_blocker_recovery_hint(harness, &reason, file);
+        // #snrun: name the interactive shell substate distinctly from a generic
+        // busy actor so the failure says which terminal state blocked dispatch.
+        let guard_reason = dispatch_only_blocked_guard_reason(&reason);
+        log_prompt_ready_barrier_failed(file, guard_reason);
+        if guard_reason == RoutedReopenGuardReason::BlockedInInteractiveSubstate {
+            anyhow::bail!(
+                "dispatch-only {} reopen refused to inject into pane {} for {} because the pane is blocked in an interactive terminal substate ({}), not a dispatch-ready composer; {}",
+                harness.binary,
+                dispatch_pane,
+                file.display(),
+                reason,
+                recovery
+            );
+        }
         anyhow::bail!(
             "dispatch-only {} reopen refused to inject into pane {} for {} because the pane still shows {}; {}",
             harness.binary,

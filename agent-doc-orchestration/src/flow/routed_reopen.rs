@@ -871,6 +871,12 @@ pub enum RoutedReopenGuardReason {
     StartingActorNotReady,
     StartingActorNotReadyUnpersisted,
     DispatchOnlyBusyActorNotReady,
+    /// The reopen was refused because the live pane is stuck in an interactive
+    /// shell substate (e.g. `reverse-i-search` / history search) that is not a
+    /// dispatch-ready composer (`#snrun`). Distinct from the generic
+    /// `DispatchOnlyBusyActorNotReady` busy actor so the failure names the
+    /// terminal substate that blocked dispatch.
+    BlockedInInteractiveSubstate,
 }
 
 impl RoutedReopenGuardReason {
@@ -880,7 +886,31 @@ impl RoutedReopenGuardReason {
             Self::StartingActorNotReady => "starting_actor_not_ready",
             Self::StartingActorNotReadyUnpersisted => "starting_actor_not_ready_unpersisted",
             Self::DispatchOnlyBusyActorNotReady => "dispatch_only_busy_actor_not_ready",
+            Self::BlockedInInteractiveSubstate => "blocked_in_interactive_substate",
         }
+    }
+}
+
+/// Does a live dispatch-blocker reason denote an interactive shell substate
+/// (reverse/history search) rather than a normal busy harness turn?
+///
+/// Mirrors the `"interactive shell ..."` reasons produced by
+/// [`crate::harness::HarnessConfig::dispatch_blocker_reason`] (e.g.
+/// `interactive shell reverse-i-search`, `interactive shell history search`).
+/// Pure — used to pick the dedicated [`RoutedReopenGuardReason`] for the
+/// dispatch-only fail-closed path.
+pub fn is_interactive_shell_substate_reason(reason: &str) -> bool {
+    reason.trim_start().starts_with("interactive shell")
+}
+
+/// Select the fail-closed guard reason for a refused dispatch-only reopen,
+/// preferring the dedicated interactive-substate reason when the live blocker
+/// is an interactive shell substate.
+pub fn dispatch_only_blocked_guard_reason(blocker_reason: &str) -> RoutedReopenGuardReason {
+    if is_interactive_shell_substate_reason(blocker_reason) {
+        RoutedReopenGuardReason::BlockedInInteractiveSubstate
+    } else {
+        RoutedReopenGuardReason::DispatchOnlyBusyActorNotReady
     }
 }
 
@@ -913,6 +943,35 @@ pub fn log_dispatch_proof_failed(file: &Path, reason: RoutedReopenGuardReason) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn interactive_substate_gets_dedicated_guard_reason() {
+        // #snrun: a refused dispatch-only reopen on an interactive shell substate
+        // (reverse/history search) must carry the dedicated guard reason, distinct
+        // from the generic busy-actor reason.
+        for reason in [
+            "interactive shell reverse-i-search",
+            "interactive shell history search",
+            "  interactive shell reverse-i-search",
+        ] {
+            assert!(is_interactive_shell_substate_reason(reason), "{reason}");
+            assert_eq!(
+                dispatch_only_blocked_guard_reason(reason),
+                RoutedReopenGuardReason::BlockedInInteractiveSubstate,
+            );
+            assert_eq!(
+                dispatch_only_blocked_guard_reason(reason).as_str(),
+                "blocked_in_interactive_substate",
+            );
+        }
+        for reason in ["active codex turn", "queued draft in composer", "active claude turn"] {
+            assert!(!is_interactive_shell_substate_reason(reason), "{reason}");
+            assert_eq!(
+                dispatch_only_blocked_guard_reason(reason),
+                RoutedReopenGuardReason::DispatchOnlyBusyActorNotReady,
+            );
+        }
+    }
 
     #[test]
     fn starting_actor_waits_for_prompt_ready_barrier() {

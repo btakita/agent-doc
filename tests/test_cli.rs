@@ -247,7 +247,15 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         ("agent-doc-orchestration/src/repair.rs", "reason=") => 5,
         ("agent-doc-orchestration/src/route.rs", "accepted_only") => 4,
         ("agent-doc-orchestration/src/route.rs", "flow_reason=") => 2,
-        ("agent-doc-orchestration/src/route.rs", "guard_") => 7,
+        // +5 for the audited `#snrun` blocked-in-interactive-substate guard:
+        // the `dispatch_only_blocked_guard_reason` import + its `guard_reason`
+        // binding, the `log_prompt_ready_barrier_failed(file, guard_reason)`
+        // emission, and the `guard_reason == ...BlockedInInteractiveSubstate`
+        // branch that names the interactive terminal substate distinctly from a
+        // generic busy actor on the dispatch-only fail-closed path. Routed
+        // through the `RoutedReopenGuardReason` enum + `prompt_ready_barrier`
+        // FlowEvent.
+        ("agent-doc-orchestration/src/route.rs", "guard_") => 12,
         ("agent-doc-orchestration/src/route.rs", "proof=") => 2,
         // +1 for the audited route resilience diagnostic
         // `route_queue_dispatch_unparseable_preserved ... reason={parse_err}`:

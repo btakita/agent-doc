@@ -477,6 +477,13 @@ class PatchWatcher(private val project: Project) : Disposable {
                                 content, result, document.modificationStamp, true,
                             )
                         )
+                        // #jb-settext-payload-log: capture the exact setText
+                        // payload at debug level for IPC-corruption forensics.
+                        if (LOG.isDebugEnabled) {
+                            LOG.debug(
+                                "[patch-watcher] setText payload (repositionBoundary) for $filePath boundaryId=$boundaryId (${result.length} chars):\n$result"
+                            )
+                        }
                         document.setText(result)
                     } else if (result != content) {
                         LOG.warn("[patch-watcher] stale editor generation before reposition for $filePath; retrying")
@@ -818,6 +825,15 @@ class PatchWatcher(private val project: Project) : Disposable {
                     content, result, document.modificationStamp, true,
                 )
             )
+            // #jb-settext-payload-log: the diagnostic above logs only hashes +
+            // lengths. To capture the exact corrupting payload for the IPC
+            // duplication family, log the full setText payload at debug level
+            // (only when `#com.github.btakita.agentdoc` debug logging is on).
+            if (LOG.isDebugEnabled) {
+                LOG.debug(
+                    "[patch-watcher] setText payload (applyPatch.component) for ${patch.file} patchId=${patch.patchId} (${result.length} chars):\n$result"
+                )
+            }
             document.setText(result)
             wrote = true
             LOG.info("Patch applied to ${patch.file} (${result.length - content.length} chars changed)")

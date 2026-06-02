@@ -260,10 +260,10 @@ I treated this as the `#agent-doc-bug` capture that the planning record required
 
 Transferred backlog items now committed in `agent-doc-bugs2.md`:
 
-- `#lr-queue-patchback-miss` [recommended] Umbrella capture for the lazily-rs queued free-text prompt that was not visibly answered or patched back.
-- `#lr-queue-response-miss` [recommended] The lazily-rs free-text queue head with `#spec-test-build-install-commit-push` had no committed response patchback in `tasks/software/lazily-rs.md`.
-- `#lr-queue-plan-deferral` [recommended] The mixed `#agent-doc-bug` capture plus runnable queue head made `agent-doc plan` choose `plan_backlog_only`, deferring the actual lazily-rs work without explicit queue-head deferral proof.
-- `#lr-queue-repair-adopt` [recommended] If the queued work was already completed console-only, recovery must adopt a supplied response through `agent-doc write --commit` and preserve or consume the matching free-text queue head without rerunning repo work.
+- [ ] [#lr-queue-patchback-miss] [recommended] Umbrella capture for the lazily-rs queued free-text prompt that was not visibly answered or patched back.
+- [ ] [#lr-queue-response-miss] [recommended] The lazily-rs free-text queue head with `#spec-test-build-install-commit-push` had no committed response patchback in `tasks/software/lazily-rs.md`.
+- [ ] [#lr-queue-plan-deferral] [recommended] The mixed `#agent-doc-bug` capture plus runnable queue head made `agent-doc plan` choose `plan_backlog_only`, deferring the actual lazily-rs work without explicit queue-head deferral proof.
+- [ ] [#lr-queue-repair-adopt] [recommended] If the queued work was already completed console-only, recovery must adopt a supplied response through `agent-doc write --commit` and preserve or consume the matching free-text queue head without rerunning repo work.
 
 Plan: tasks/agent-doc/plan-lazily-rs-queued-prompt-patchback-miss.md
 Plan: tasks/agent-doc/plan-lazily-rs-queue-plan-deferral.md
@@ -278,7 +278,7 @@ Verification: `make check` passed after the plan additions. GitHub: no workflow 
 Note: `agent-doc-bugs2.md` is owned by pane `%70`, so a target-document exchange repair response was blocked from this pane; the backlog items themselves are committed.
 Changed paths: `tasks/agent-doc/plan-lazily-rs-queued-prompt-patchback-miss.md`, `tasks/agent-doc/plan-lazily-rs-queue-plan-deferral.md`, `tasks/agent-doc/plan-lazily-rs-queue-repair-adopt.md`, `tasks/agent-doc/agent-doc-bugs2.md`, and this session document.
 Confidence: medium-high because the bug capture is committed, but the target document owner blocked a separate repair response in `agent-doc-bugs2.md`. Escalation: none.
-<!-- agent:boundary:0c806dde -->
+<!-- agent:boundary:f665ec10 -->
 <!-- /agent:exchange -->
 ###
 <!--

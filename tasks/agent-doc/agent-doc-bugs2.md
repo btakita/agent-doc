@@ -101,6 +101,11 @@ So: your new reports are captured and in-flight under the owner pane. The action
 
 > **Queue prompt:**
 >
+> When I navigate from this document to tsift.md, the tmux focus is on the tsift.md pane but the tmux pane is in the stash, not in the agent-doc tmux window.
+
+
+> **Queue prompt:**
+>
 > How to handle config hot-reload in long-lived ActorContext — file watcher on .agent-doc/config.toml or clear on next cycle?: Can you support both?
 
 
@@ -125,7 +130,18 @@ Answered last cycle in the lazily-rs Context response: **support both** — clea
 - `#lr-head-8` / `#lr-wire-9` / `#lr-actor-10` stay backlog — real implementation phases of the lazily-rs plan.
 
 You're curating the queue directly, so I left the mapped bug-report lines for you to strike — each now points at its tracked item. **Strong recommendation: compact this session** — 59 exchange lines / 15 no-op closeouts is the real source of the IPC/finalize fragility. Say the word and I'll run `agent-doc compact`.
-<!-- agent:boundary:763fa85e -->
+The new queue head — *"navigate to tsift.md → focus lands on the tsift.md pane but it's in the stash window, not the agent-doc window"* — was **already triaged in this exchange** (the "queue triage" response above maps it). It's not new work; it's a clean repro of a tracked bug.
+
+**This maps to `#stash-pane-promote-on-focus`** (review, `[/]`): the focus fix (`submodule e6dafa52`) correctly *selects* the live-owner pane for the navigated file, but it **doesn't reparent/promote it out of the stash window into `0:agent-doc`** — so you see the right pane focused, but still sitting in the stash. That's precisely this item's gap. It's also tied to `#jb-tsift-pane-sync` (the navigation/sync owner-surfacing contract). The fix lives in `focus.rs`/`sync.rs`: after resolving the owner pane, `move-pane` it into the `0:agent-doc` window (or `join-pane`) rather than only `select-pane`. Both items are `[/]` gated on live-IDE verification (folded into Path A, `#v819`/`#jkvs`).
+
+So: **no new item, no fresh implementation** — your report confirms `#stash-pane-promote-on-focus` and adds a clean repro. I'm not finalizing it from here (this pane `%66` isn't the session owner `%50`, which is actively draining the queue — the struck items above are its work). A competing write would race the owner.
+
+Two things that would actually move this forward, both yours:
+1. **Compact the session.** I've flagged it twice now — 59 exchange lines / 15 no-op closeouts is the direct cause of the IPC/finalize/queue-overwrite fragility you keep hitting (`#queue-user-edit-overwrite`, File-Cache-Conflict reverts). `agent-doc compact tasks/agent-doc/agent-doc-bugs2.md --commit` from the owner pane resets that.
+2. **Consolidate to one owner pane** (or stop this `%66` session) so the queue drains without two actors racing — and run the Path A live-IDE session (`#v819`) to live-verify `#stash-pane-promote-on-focus` along with the other ~11 gated items at once.
+
+Everything in the queue tail right now is either already-triaged (this item, the config-hot-reload answer, the File-Cache-Conflict → `plan-jb-cache-conflict-stale-accept-replay.md`, the `/clear`-mid-task → `#clear-stops-running-process`) or operator/live-IDE work. The agent-implementable backlog is drained; the remainder needs you at the keyboard.
+<!-- agent:boundary:dd2209b4 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -140,7 +156,7 @@ preset #spec-test-build-install-commit-push
 - ~Should the graph be per-file (one context per tracked document) or per-process (one context with file-keyed cells)?: Use your judgement. There can also be multiple contexts.~
 - ~JB `Run Agent Doc` took a long time to dispatch in this document.~
 - ~How to handle config hot-reload in long-lived ActorContext — file watcher on .agent-doc/config.toml or clear on next cycle?: Can you support both?~
-- When I navigate from this document to tsift.md, the tmux focus is on the tsift.md pane but the tmux pane is in the stash, not in the agent-doc tmux window.
+- ~When I navigate from this document to tsift.md, the tmux focus is on the tsift.md pane but the tmux pane is in the stash, not in the agent-doc tmux window.~
 - As I was writing the previous queue item, a JB `File Cache Concflict` surfaced and I accepted. But the queue items reverted to a previous snapshot without my recent work. I had to manually reapply my changes. Review Codex logs for my bug report and session replay.
 - ~#queue-user-edit-overwrite failed in monsterrodholders.md~
 - [#lr-head-8]

@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -210,6 +210,11 @@ No project `tmux-ci` target or tmux workflow exists in `src/tsift`; deterministi
 
 ### Re: create contract to support additional programming languages — gpt-5
 
+> **Queue prompt:**
+>
+> Can markdown support ast operations?
+
+
 Created the semantic edit language-extension contract.
 
 `edit-intents` language support now flows through a `SemanticEditLanguageContract` table that declares each executor's canonical language id, display name, `graph::Lang` parser binding, formatter staging suffix, aliases, file extensions, supported intent kinds, script-family behavior, and formatter policy. The existing Rust, TypeScript/TSX, JavaScript/JSX, and Python behavior is preserved, but language/file resolution, supported-intent checks, and formatter selection now come from the contract instead of scattered matches.
@@ -235,7 +240,7 @@ Verification passed:
 - GitHub Actions CI `26800161158` passed both live Convex acceptance and `clippy + test`
 
 No project `tmux-ci` target or tmux workflow exists in `src/tsift`; deterministic SimWorld coverage ran through `make check`. Remote CI annotations were the existing Node 20 action deprecation and optional live Convex configuration notes, not failures.
-<!-- agent:boundary:4b5e30d9 -->
+<!-- agent:boundary:efbecd27 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -244,15 +249,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~[#astspans]~
-- ~[#writerefs]~
-- ~[#writecompound]~
-- ~[#langexecutors]~
-- ~[#astverify]~
-- create contract to support additional programming languages
-- Can markdown support ast operations?
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

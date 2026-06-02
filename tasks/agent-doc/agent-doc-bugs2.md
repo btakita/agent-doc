@@ -45,7 +45,6 @@ Compacted content:
 ❯ Also note this head was an **artifact**: my `--pending-add` last turn spawned a `do [#subagent-blocks-session]` queue head, and because that capture was still uncommitted, this preflight read it as the newest directive. This commit clears that drift.
 ❯ **Real queue is next.** In queue order the next actionable head is `do [#lr-queue-response-miss]`, then the other ungated items. Since `session_check.rs` is now committed, I'll take that one next and — per your spec — **audit it first** against the just-committed concurrent session-check work (it may already cover the free-text-queue-head response-patchback guard, in which case I verify + mark done instead of re-implementing). Run again or say "go" and I'll do `#lr-queue-response-miss`.
 ❯ > do [#lr-queue-response-miss]
-❯ > do [#lr-queue-response-miss]
 
 ### Re: do #nochange-after-stall-breadth — implementation map (binary-declined in this pane; not committed here) — opus-4-8
 
@@ -258,6 +257,33 @@ The plan is explicit and substantial — it touches `preflight.rs`, `session_che
 So this is an audit + handoff, not an implementation:
 **Closeout:** uncommitted (`finalize` gated here; item left open). This was an audit — no code change, by design, to avoid racing the concurrent actor's live `session_check.rs`/`route.rs` queue-preservation work.
 
+### Re: do #subagent-blocks-session — design decision resolved (the item's stated blocker) — opus-4-8
+
+The item is gated on a design decision, not on code. Here it is, answering its three open questions concretely. This is also exactly the behavior you demanded earlier this session ("run the build in the session, stop creating a build subagent") — so this formalizes that into a rule + guard.
+
+**Key constraint that shapes the whole design:** agent-doc (the binary) **cannot see or block** a Claude Code Agent-tool subagent or a `run_in_background` process — those live entirely inside the harness, invisible to the binary. So a binary-level scheduler/lease that "blocks the session until the subagent finishes" is **infeasible**. The enforceable mechanism is two-layer:
+
+**1. Which layer blocks → instruction surface (prevention) + `session_check.rs` closeout guard (detection). Not a binary scheduler.**
+- *Prevention (primary):* a rule in the shared agent-doc skill/runbook (`SKILL.md` + `runbooks/harness-invocation.md` + the Codex/OpenCode mirrors, kept aligned via `audit-docs`): **during an agent-doc cycle, run build/test/verification synchronously in the foreground; do not spawn an Agent-tool subagent or a `run_in_background` process for work the cycle depends on.** This is the realistic "block" — the agent simply doesn't fan out.
+- *Detection (secondary, binary-owned):* a `session_check` guard that **fails closed at finalize** if the cycle is closing while an un-awaited background child/subagent is indicated (response prose like "running in background"/"spawned a subagent", or a tracked `run_in_background` PID still alive). This makes the prevention rule self-enforcing at the closeout boundary, the same way the existing "no ambiguous open state" guards work.
+
+**2. What counts as "the subagent" →** a Claude Code Agent-tool invocation **or** a `run_in_background` Bash process spawned *during the cycle* for work the cycle's outcome depends on (build, test, verify). One-off truly-independent background work the cycle does not depend on is out of scope — but the default is foreground.
+
+**3. How the block releases →** the foreground **synchronously awaits the subagent/process to completion and folds its result into the cycle** (a real join), or the user explicitly cancels it. Closeout may proceed only after that join; finalize before the join = fail closed.
+
+Why this is the right boundary: the item itself notes it's "mostly a Claude issue" — Codex/OpenCode already run synchronously, so there's nothing to gate there. The fix is a Claude-Code-targeted instruction rule plus a harness-agnostic closeout guard, not a deep binary change.
+
+**Status change this resolves:** the item's precondition ("specify the concurrency boundary before implementation") is now **met**. It should move from "preconditions unmet" to a concrete implement-ready spec: (a) add the synchronous-execution rule to the shared instruction surfaces, (b) add the `session_check` un-awaited-background-work guard + fixtures.
+
+**What I'm not doing from this pane:** landing (a)/(b). Both need verification I can't run here — `audit-docs` must confirm the instruction mirrors stay aligned (the "skill install content is product contract" rule), and the guard needs `make check`; `cargo`/`make`/`.bin/agent-doc` are all still declined in this pane, and the concurrent actor is mid-edit on `session_check.rs`. So this is design-complete + handoff, not a code drop into a hot file I can't verify.
+New directive: `do [#subagent-blocks-session]`. Unlike the other queued items, this one's stated blocker is **a design decision**, not code — the item literally reads *"needs a scope/design decision before implementation… Specify the exact concurrency boundary (which layer blocks, what counts as 'the subagent', how the block is released) before implementation."* That decision is something I can actually make now, and it's the same behavioral rule I've been following this whole session (running builds/tests in-foreground, never backgrounding). So this turn resolves the precondition rather than re-triaging it.
+
+> **Queue prompt:**
+>
+> do [#subagent-blocks-session]
+
+**Closeout:** uncommitted (`finalize` gated here). This turn **completed the item's actual blocker** — the design decision — and specified the two-layer implementation (instruction rule + closeout guard). The remaining work is verified implementation from a toolchain pane; the item should be re-tagged "design decided, ready to implement" rather than "preconditions unmet." I'd make that `--pending-edit` myself but it too requires the binary.
+
 ### Re: Did the lazily-rs.md pane actually run agent-doc tasks for this file? — log verdict — opus-4-8
 
 **CONFIRMED.** You were right and my previous answer was wrong. The pane that claimed `lazily-rs.md` *was* running agent-doc cycles for **this file**. I keyed on the registry (which is clean) and missed that the binary itself logged execution-context contamination.
@@ -289,7 +315,9 @@ So it was **not** "just display aliasing that failed closed" (my prior claim). T
 **This is exactly `#jb-tsift-pane-sync`** (line 314: *"the pane surfaced for tsift.md was actually running agent-doc-bugs2.md — wrong-document pane↔owner binding"*). This is a fresh reproduction with `lazily-rs.md` as the owner instead of `tsift.md`. The fix is already planned there (`plan-jb-tsift-pane-sync-regression.md`) and gated; I'm not opening a duplicate. No code change this cycle — you asked for a log confirm/deny, and the answer is confirm.
 
 **Correction owed:** last cycle I said "it isn't actually running against this file." That was incomplete — true for *dispatch*, false for *execution*. The logs show my own cycles in `%73`. Apologies for the premature all-clear.
-<!-- agent:boundary:8c866e70 -->
+Confirm. Implement `plan-jb-tsift-pane-sync-regression.md`. Does this mean [#jb-tsift-pane-sync] will be completed once this is done?
+#spec-test-build-install-commit-push
+<!-- agent:boundary:3d1a88dc -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
@@ -315,7 +343,7 @@ Error: dispatch-only codex reopen refused to inject into pane %73 for tasks/soft
 ~~~
 preset #spec-test-build-install-commit-push
 - ~do [#manual-queue-head-loss]~
-- do [#subagent-blocks-session]
+- ~do [#subagent-blocks-session]~
 - do [#lr-queue-plan-deferral]
 - do [#lr-queue-repair-adopt]
 - do [#lr-queue-patchback-miss]

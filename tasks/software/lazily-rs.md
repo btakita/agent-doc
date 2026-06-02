@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 
@@ -204,24 +204,58 @@ Verification:
 `make check` remains unavailable in `src/lazily-rs` because there is no `check` target. GitHub Actions CI remains unavailable: `gh run list --workflow CI --limit 1` could not find a `CI` workflow, and `gh workflow list` returned no workflows, so there was no tmux CI leg to inspect. Cargo build/bench/install/publish emitted only the existing unused workspace patch warnings for `agent-kit`, `tagpath`, and `tmux-router`.
 
 Changed paths: `src/lazily-rs/SPEC.md`, `src/lazily-rs/tests/thread_safe_loom.rs`, and the superproject `src/lazily-rs` submodule pointer. Escalation: none.
-<!-- agent:boundary:8aeb2a4e -->
+
+### Re: #pshrd — gpt-5
+
+> **Queue prompt:**
+>
+> [#pshrd]
+
+
+Completed `#pshrd` as an evaluation item, not as a storage rewrite.
+
+I added a SPEC section for the sharded/versioned graph storage decision after the frontier invalidation and isolated `set_cell_invalidation` benchmark work. The conclusion is that the current benchmark evidence still points at the global graph mutex as a measured bottleneck for independent invalidation workloads, but a sharded or versioned replacement should stay gated behind a narrower prototype because it affects shared aggregates, effect queue ordering, batching, disposal, and dynamic edge maintenance. The next storage experiment is scoped to sharding independent `ThreadSafeState` mutation by stable node id with deterministic merge boundaries and Loom/Shuttle coverage before adoption.
+
+Changed paths:
+
+- `src/lazily-rs/SPEC.md`
+- `src/lazily-rs/tests/spec_compliance.rs`
+- `src/lazily-rs` submodule pointer in the superproject
+
+Verification run:
+
+- `cargo fmt`
+- `cargo test sharded_storage_evaluation_is_benchmark_gated`
+- `git diff --check`
+- `cargo test`
+- `cargo test --features tokio`
+- `cargo test --features loom --test thread_safe_loom`
+- `cargo build --all-targets --all-features`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo bench --no-run`
+- `cargo bench --features instrumentation --no-run`
+- `cargo install --path . --example instrumentation_profile --features instrumentation --force`
+- `cargo publish --dry-run --allow-dirty`
+
+Local `make check` is unavailable in `src/lazily-rs` (`No rule to make target 'check'`). GitHub Actions has no `CI` workflow for this repo, and `gh workflow list` returned no workflows, so there was no CI/tmux leg to inspect. The Cargo build/install/publish commands only emitted the existing unused workspace patch warnings for `agent-kit`, `tagpath`, and `tmux-router`; publish dry run also noted that `lazily@0.4.0` already exists, then completed the dry-run verification.
+
+Commits:
+
+- `edd0fb7` in `src/lazily-rs`: `docs: evaluate thread-safe storage strategy`
+- `466f103ed` in the superproject: `chore: update lazily-rs storage evaluation`
+
+Escalation: none.
+<!-- agent:boundary:aadbff23 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~[#pinv]~
-- ~Are Phase 3, 4, 6 implemented? If not, is now a good time to implement them?~
-- ~[#pben]~
-- ~[#ploom]~
-- [#pshrd]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#pshrd] Evaluate sharded or versioned graph storage only after #pinv and #pben show the remaining bottleneck is the global mutex rather than recursive traversal or duplicate dirty marking.
 <!-- /agent:backlog -->
 
 ## Review

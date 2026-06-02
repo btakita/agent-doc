@@ -36,13 +36,43 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 5 response topic(s): do #kc5e + #x8aw; Can the gated review items be completed?; Logs of typing during finalize + added verification logging; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:bd2b21ba -->
+
+### Re: #lr-content-6 — wire content/frontmatter/component slots into session_check — opus-4-8
+
+> **Queue prompt:**
+>
+> [#lr-content-6]
+
+
+Implemented Phase 6 of the lazily-rs integration (submodule `29febcf0`).
+
+#### What changed
+
+`session_check` guards each used to re-`read_to_string` + re-parse the document independently — ~20 reads and ~10 parses per `inspect` call. Phase 6 collapses that to one read + one parse via the cached graph slots:
+
+- `inspect_with_warnings` now builds **one** `RunContext`, calls `set_doc_content` once (populating `DocContentCell`), and threads `&rc` into every content-, frontmatter-, and component-reading guard.
+- Guards converted to read from slots: `check_dropped_queue_prompt_guard`, `check_queue_response_contamination_guard`, `check_completed_pending_reap_guard`, `check_shadow_backlog_guard`, `check_malformed_tracked_item_guard`, `check_backlog_replay_guard`, `check_prompt_only_exchange_tail_guard`, `check_gated_phase_split_guard`, `check_queue_head_removal_guard`, plus the `check_pending_capture` / `check_pending_done` / `check_expect_done_or_gate` / `check_blocked_closeout_followup` guards (frontmatter via the slot).
+- The four `resolve_*_guard_mode_with_context` resolvers now read `rc.frontmatter()` instead of re-reading the file. These guard-mode fields are SSH-resolution-independent, so the resolved value is identical.
+- `malformed_tracked_item_refs` factored into a shared `_in(content, components, …)` helper so the slot-backed guard and external file-reading callers share one implementation.
+
+`inspect_core`'s `detect_*` functions (snapshot / cycle-state / `git show HEAD`) are untouched — those are Phases 7 (#lr-cycle-7) and 8 (#lr-head-8).
+
+#### Verification
+
+- New regressions: `phase6_guard_mode_resolves_from_frontmatter_slot_not_file` (proves resolution comes from the slot, not a file read — resolves against a non-existent path) and `phase6_components_slot_matches_doc_content` (offsets stay consistent with `doc_content()`; slot cached).
+- `make check` clippy (`-D warnings`): clean.
+- `agent-doc-orchestration`: 2151 passed. `test_cli`: 69 passed.
+- FlowCore `guard_` budget for `session_check.rs` bumped 72→75 with an audited Phase 6 comment (the test-fn name + its two `_with_context` call sites; the guard-conversion swaps are 1:1, no net change).
+- Both binaries rebuilt (`cargo build --release` + `cargo install --path .`, v0.34.0).
+
+Behavior is unchanged — pure per-cycle dedup. Next queue head is `#lr-cycle-7` (snapshot-path / cycle-state / snapshot-content slots).
+<!-- agent:boundary:084ab455 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#queue-head-struck-on-foreign-exchange-answer]~
-- [#lr-content-6]
+- ~[#lr-content-6]~
 - [#lr-cycle-7]
 - [#lr-head-8]
 - [#lr-wire-9]
@@ -60,7 +90,6 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 
 <!-- agent:backlog priority queue=append -->
 - [ ] [#queue-head-struck-on-foreign-exchange-answer] #agent-doc-bug 2026-06-02 Free-text agent:queue auto head struck without its work: a cycle that answered NEW agent:exchange prompts also consumed an unrelated free-text queue head (lazily-rs plan-update; struck in HEAD, file never edited). Fix: free-text queue-head consumption must require the committed response to actually address that head, not strike it whenever any response commits. Sibling of #queue-clear-unrun-items. [kept open: queued at top of agent:queue auto for the next loop cycle to implement]
-- [ ] [#lr-content-6] Phase 6: Wire DocContentCell + FrontmatterSlot + ComponentsSlot into session_check guard functions. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-cycle-7] Phase 7: Add CycleStateSlot + SnapshotContentSlot; consolidate snapshot path lookups. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-head-8] Phase 8: Add HeadContentSlot + SnapshotCommitStatusSlot for git show HEAD dedup. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-wire-9] Phase 9: Wire RunContext into ops_log, template_io, patch, harness detection. Plan: tasks/agent-doc/plans/lazily-rs-integration.md

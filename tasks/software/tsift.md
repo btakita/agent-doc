@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -36,7 +36,38 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 10 response topic(s): next steps for read/write AST support; #astspans; #writerefs; 7 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:e4300271 -->
+
+### Re: #mdastcontract — gpt-5
+
+> **Queue prompt:**
+>
+> [#mdastcontract]
+
+
+Implemented the Markdown semantic edit language contract for `tsift edit-intents`.
+
+What changed:
+- Added canonical Markdown language contract support: `.md` / `.mdx` resolve to `markdown`, aliases include `markdown`, `md`, and `mdx`, parser binding is `graph::Lang::Markdown`, and formatter policy is `None`.
+- Split semantic edit contract metadata into recognized intent kinds vs apply-supported intent kinds.
+- Added recognized Markdown intents: `rename_heading`, `replace_section_body`, `insert_section`, `move_section`, `insert_list_item`, and `rewrite_code_fence`.
+- Kept Markdown apply support intentionally empty for this queue item, so dry-runs recognize/validate Markdown intents but report `unsupported` with `apply_supported=false`; `--apply` fails closed without mutating Markdown files.
+- Updated `SPEC.md`, `CLAUDE.md`, and `VERSIONS.md` to document the dry-run-only Markdown contract state.
+- Added compiled CLI regressions for Markdown heading dry-run metadata/span resolution and no-mutation apply refusal.
+
+Commits created:
+- `70301c8` in `src/tsift`: `feat: add markdown edit intent contract`
+- `47c1ee4bc` in the superproject: `agent-doc(tsift): update submodule pointer`
+
+Verification:
+- `cargo test -p tsift-cli semantic_edit_language_contracts_resolve_current_executor_surface` passed.
+- `cargo test -p tsift-cli edit_intents_markdown` passed.
+- `make check` passed with exit code 0 via digest artifact `tart-c68dee9489` after rerunning the full suite. The first full run exposed a concurrency-sensitive existing lock-fallback test failure; that test passed isolated and passed in the final full-suite rerun.
+- `cargo install --path .` passed; installed binary reports `tsift 0.1.62`.
+- Latest GitHub Actions `CI` run inspected: `26800161158` completed successfully, with `clippy + test` and `live Convex graph acceptance` jobs green.
+- No `tmux-test` job, `tmux-ci` target, or tmux-test reference exists in this tsift repo/workflow, so there was no separate tmux CI leg to inspect.
+
+Push is pending until after this binary-owned document closeout, per the agent-doc commit/push ordering.
+<!-- agent:boundary:61c50472 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -47,7 +78,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- [#mdastcontract]
+- ~[#mdastcontract]~
 - [#mdsectionspans]
 - [#mdsectionedits]
 - [#mdblockedits]
@@ -57,7 +88,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#mdastcontract] Markdown semantic edit language contract: canonical language id, formatter policy, supported Markdown intent kinds, and fail-closed capability checks.
 - [ ] [#mdsectionspans] Markdown heading/section/list/code-fence stable spans: hierarchy metadata, section boundaries, and source-read/edit target refs.
 - [ ] [#mdsectionedits] Markdown section edit executor: rename_heading, replace_section_body, insert_section, and move_section with tree-sitter validation.
 - [ ] [#mdblockedits] Markdown block edit executor: insert_list_item and rewrite_code_fence while preserving syntax and refusing ambiguous targets.

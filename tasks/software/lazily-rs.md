@@ -172,7 +172,44 @@ Commits:
 - parent repo `531e3530a` `chore: update lazily-rs pointer` created locally; I will push the parent after `agent-doc session-check` passes.
 
 Changed paths in lazily-rs: `README.md`, `SPEC.md`, `src/thread_safe.rs`, and `tests/spec_compliance.rs`. Confidence: high. Escalation: none.
-<!-- agent:boundary:d8115674 -->
+
+### Re: #lazyperf4 — gpt-5
+
+Completed `#lazyperf4`.
+
+Added regression budgets for the slow thread-safe contention profiles and their lock-site acquisition totals in `scripts/update-benchmark-results.py`. The script now fails `--check` if a guarded instrumentation profile is missing, if total lock acquisitions exceed its budget, or if any guarded lock-site acquisition count exceeds its site budget. The generated README benchmark section now publishes the budget table, and SPEC/tests require that budget surface.
+
+Guarded profiles now include:
+- `thread_safe_set_cell_invalidation_independent_slot_contention_16`
+- `thread_safe_set_cell_invalidation_batched_write_bursts_16`
+- `thread_safe_contention_same_slot_write_read_16`
+- `thread_safe_contention_independent_slots_16`
+- `thread_safe_contention_read_mostly_waiters_16`
+- `thread_safe_contention_batched_write_bursts_16`
+
+The budgets intentionally use deterministic lock acquisition counts rather than elapsed wait/hold timings, because wait/hold timings are sensitive to local machine load. I also included the cargo-generated `Cargo.lock` cleanup that removed stale `[[patch.unused]]` entries for `agent-kit`, `tagpath`, and `tmux-router`; after that cleanup, the final build/bench commands no longer emitted the previous unused-patch warnings.
+
+Verification passed:
+- `cargo fmt`
+- `python3 scripts/update-benchmark-results.py --no-run`
+- `python3 scripts/update-benchmark-results.py --check`
+- targeted `cargo test --features instrumentation readme_benchmark_results_cover_required_scenarios`
+- `cargo test`
+- `cargo test --features tokio`
+- `cargo test --features instrumentation`
+- `cargo test --features loom --test thread_safe_loom`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo build`
+- `cargo bench --features instrumentation --no-run`
+
+GitHub Actions evidence is unchanged: `gh workflow list` returned no workflows, `gh run list --workflow CI --limit 1` reported no `CI` workflow, and `gh run list --limit 5` returned no runs. `cargo metadata` again shows no installable package binary target, only the library, examples, tests, and benches.
+
+Commits:
+- `btakita/lazily-rs@096c678` `test: add contention regression budgets` pushed to `origin/main`.
+- parent repo `8acae6f61` `chore: update lazily-rs pointer` created locally; I will push the parent after `agent-doc session-check` passes.
+
+Changed paths in lazily-rs: `Cargo.lock`, `README.md`, `SPEC.md`, `scripts/update-benchmark-results.py`, and `tests/spec_compliance.rs`. Confidence: high. Escalation: none.
+<!-- agent:boundary:1b31a8e9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -184,13 +221,13 @@ Changed paths in lazily-rs: `README.md`, `SPEC.md`, `src/thread_safe.rs`, and `t
 preset #spec-test-build-install-commit-push
 - ~[#lazyperf2]~
 - ~[#lazyperf3]~
-- [#lazyperf4]
+- ~[#lazyperf4]~
+- Should CellHandle::set(&ctx, value) be added to lazily-rs first? (Current API is Context::set_cell()): Yes
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#lazyperf4] Add perf regression budgets for the slowest contention profiles and lock-site totals so future benchmark runs flag global-lock regressions before release.
 <!-- /agent:backlog -->
 
 ## Review

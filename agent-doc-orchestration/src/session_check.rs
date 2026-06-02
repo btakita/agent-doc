@@ -259,6 +259,14 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
                 return Ok(report);
             }
         }
+        match check_no_response_active_queue_head(file, &rc)? {
+            GuardResult::None => {}
+            GuardResult::Warn(lines) => report.warnings.extend(lines),
+            GuardResult::Error(message) => {
+                report.status = SessionCheckStatus::Interrupted(message);
+                return Ok(report);
+            }
+        }
         match check_prompt_only_exchange_tail_guard(file, &rc)? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
@@ -786,6 +794,110 @@ fn check_committed_without_response_body_guard(file: &Path) -> Result<GuardResul
         ),
     );
     Ok(GuardResult::Error(msg))
+}
+
+/// `#nochange-after-stall-breadth`: a no-response repair/reap-only closeout
+/// must not make an active queue head look complete. The missing-response guard
+/// intentionally skips no-op bookkeeping commits to avoid deadlocking ordinary
+/// `--done` repairs, but when the same cycle recorded a runnable `agent:queue`
+/// head and that head is still both queued and open in `agent:backlog`, the
+/// turn made no durable progress on executable work. Fail closed so the next
+/// actor runs the head instead of reporting a plain no-change/clean closeout.
+fn check_no_response_active_queue_head(
+    file: &Path,
+    rc: &crate::graph::RunContext,
+) -> Result<GuardResult> {
+    let mode = resolve_pending_done_guard_mode_with_context(file, rc)?;
+    if mode == crate::frontmatter::PendingCaptureGuardMode::Off {
+        return Ok(GuardResult::None);
+    }
+    let Some(state) = crate::cycle_state::load(file)? else {
+        return Ok(GuardResult::None);
+    };
+    if !matches!(state.phase, crate::cycle_state::CyclePhase::Committed) {
+        return Ok(GuardResult::None);
+    }
+    if state.capture_id.is_some() || state.response_sha256.is_some() {
+        return Ok(GuardResult::None);
+    }
+    let recorded_ids = do_directive_target_ids(&state.active_queue_heads);
+    if recorded_ids.is_empty() {
+        return Ok(GuardResult::None);
+    }
+
+    let content = rc.doc_content();
+    let still_queued: std::collections::HashSet<String> = committed_queue_head_ids(&content)
+        .into_iter()
+        .map(|id| crate::pending::normalize_pending_id(&id))
+        .collect();
+    let open_backlog: std::collections::HashSet<String> =
+        open_backlog_ids(file)?.into_iter().collect();
+    let mut resolved_or_deferred = crate::cycle_state::resolved_pending_ids(file)?;
+    resolved_or_deferred.extend(
+        state
+            .pending_gated_ids
+            .iter()
+            .chain(state.pending_kept_open_ids.iter())
+            .map(|id| crate::pending::normalize_pending_id(id)),
+    );
+
+    let mut live: Vec<String> = Vec::new();
+    for id in recorded_ids {
+        let norm = crate::pending::normalize_pending_id(&id);
+        if norm.is_empty() {
+            continue;
+        }
+        if !still_queued.contains(&norm) || !open_backlog.contains(&norm) {
+            continue;
+        }
+        if resolved_or_deferred.contains(&norm) {
+            continue;
+        }
+        if !live.iter().any(|existing| existing == &norm) {
+            live.push(norm);
+        }
+    }
+
+    if live.is_empty() {
+        return Ok(GuardResult::None);
+    }
+
+    let ids = live
+        .iter()
+        .map(|id| format!("#{}", id))
+        .collect::<Vec<_>>()
+        .join(", ");
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "no_response_active_queue_head_fired file={} cycle_id={} last_event={} ids={}",
+            file.display(),
+            state.cycle_id,
+            state.last_event,
+            live.join(",")
+        ),
+    );
+    let warn_line = format!(
+        "[session-check] warn: cycle `{}` committed without an assistant response body while runnable agent:queue head(s) {} remained queued and open in agent:backlog; this was a no-response repair/reap-only closeout, not a completed queue turn",
+        state.cycle_id, ids
+    );
+    let repair = format!(
+        "run `agent-doc {}` from the owning session so the queued head is answered, or resolve each id through `agent-doc write --commit {}` with `--done`, `--pending-gate`, or `--pending-edit` proof before closing",
+        file.display(),
+        file.display()
+    );
+
+    Ok(match mode {
+        crate::frontmatter::PendingCaptureGuardMode::Warn => GuardResult::Warn(vec![
+            warn_line,
+            format!("[session-check] hint: {repair} (see #nochange-after-stall-breadth)"),
+        ]),
+        crate::frontmatter::PendingCaptureGuardMode::Strict => GuardResult::Error(format!(
+            "{}\n[session-check] hint: {repair} (see #nochange-after-stall-breadth)",
+            warn_line.replacen("[session-check] warn:", "[session-check] INTERRUPTED:", 1),
+        )),
+        crate::frontmatter::PendingCaptureGuardMode::Off => GuardResult::None,
+    })
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -4795,6 +4907,93 @@ Body\n\
         ));
     }
 
+    #[test]
+    fn stale_open_preflight_with_no_diff_still_interrupts() {
+        // #nochange-after-stall-breadth: even when document == snapshot, a
+        // non-terminal preflight cycle is not a healthy no-change state. It
+        // must surface the stale-open phase and recovery instead of returning OK.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = make_project(tmp.path());
+        let current = fs::read_to_string(&doc).unwrap();
+        crate::snapshot::save(&doc, &current).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(message.contains("preflight_started"), "{message}");
+                assert!(
+                    message.contains("cycle started but no write/commit followed"),
+                    "{message}"
+                );
+            }
+            other => panic!("expected stale-open interruption, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn no_response_active_queue_head_fails_on_reap_only_unconsumed_head() {
+        // A bookkeeping-only/no-response closeout may be a legitimate no-op when
+        // no runnable work is live. It is not legitimate when the cycle recorded
+        // an active queue head that remains queued and open in backlog: that is
+        // unconsumed executable work hidden behind a clean snapshot.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: prior — gpt-5\n\nAnswered.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#livehead] Complete the live queue head\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#livehead]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let doc = init_committed_doc_for_queue_guard(tmp.path(), committed);
+        crate::cycle_state::record_reaped_pending_ids(&doc, &["alreadydone".to_string()]).unwrap();
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(
+                    message.contains("committed without an assistant response body"),
+                    "{message}"
+                );
+                assert!(message.contains("#livehead"), "{message}");
+                assert!(
+                    message.contains("#nochange-after-stall-breadth"),
+                    "{message}"
+                );
+            }
+            other => panic!("expected no-response active-head interruption, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn no_response_active_queue_head_passes_for_healthy_no_change() {
+        // Healthy committed/no-change state with no active queue head remains OK.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: prior — gpt-5\n\nAnswered.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let doc = init_committed_doc_for_queue_guard(tmp.path(), committed);
+
+        assert!(
+            matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
+            "no active queue head means ordinary no-response bookkeeping stays clean"
+        );
+    }
+
     fn write_backlog_doc(path: &Path, backlog_body: &str) {
         let content = format!(
             "---\nagent_doc_session: target\n---\n\n<!-- agent:backlog -->\n{backlog_body}<!-- /agent:backlog -->\n"
@@ -8461,6 +8660,14 @@ Body\n\
         crate::cycle_state::record_active_queue_heads(doc, &heads).unwrap();
     }
 
+    fn capture_test_response_and_commit(doc: &Path, response: &str) {
+        crate::capture::capture_response(doc, response).unwrap();
+        let content = fs::read_to_string(doc).unwrap();
+        crate::cycle_state::mark_committed(doc, "commit_success", Some(&content), Some(&content))
+            .unwrap();
+        crate::capture::mark_committed(doc).unwrap();
+    }
+
     #[test]
     fn queue_head_removal_guard_fails_closed_on_silently_dropped_open_heads() {
         let tmp = tempfile::TempDir::new().unwrap();
@@ -8507,8 +8714,14 @@ Body\n\
             "- do [#accessorymargin]\n",
         ));
         let doc = init_committed_doc_for_queue_guard(tmp.path(), &committed);
+        let current = fs::read_to_string(&doc).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
         record_queue_clear_heads(&doc);
         crate::cycle_state::record_pending_done_ids(&doc, &["convqa-rerun".to_string()]).unwrap();
+        capture_test_response_and_commit(
+            &doc,
+            "### Re: do #convqa-rerun — gpt-5\n\nRefreshed the conversion QA gate.",
+        );
 
         assert!(
             matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),

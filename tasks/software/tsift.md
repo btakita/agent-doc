@@ -175,7 +175,39 @@ No tmux CI workflow/target was present for this repo; the SimWorld coverage ran 
 ### Re: #langexecutors closeout repair — gpt-5
 
 Recorded a binary closeout repair for `#langexecutors`: the implementation response, done-state, and queue reap were already present in the committed document after the IPC visible-buffer recovery, but the recovery cycle lacked a captured response body. This write adds the missing agent-doc capture/commit boundary only; no tsift code, tests, or parent pointer changed in this repair step.
-<!-- agent:boundary:32135ed8 -->
+
+### Re: #astverify — gpt-5
+
+> **Queue prompt:**
+>
+> [#astverify]
+
+
+Implemented the semantic edit verification harness for `tsift edit-intents`.
+
+The new `--verify` path creates a detached temporary git worktree, reindexes it before planning, applies supported semantic edit intents there, reindexes again, runs bounded `source-read` windows and an impact summary, and optionally runs a caller-provided `--verify-command`. `--verify` by itself reports verification without mutating the original tree; `--verify --apply` runs the full verification gate before applying to the real tree.
+
+Added integration coverage for verify-only no mutation, verify-plus-apply command gating, and failed verify command blocking real mutation. Documentation was updated in `AGENTS.md`, `CLAUDE.md`, `SPEC.md`, and `VERSIONS.md`.
+
+Commits:
+- `src/tsift`: `9515b68 feat: verify semantic edit intents`
+- parent repo pointer: `d6e6d14d0 chore: update tsift submodule`
+
+Verification passed:
+- `cargo check -p tsift-cli`
+- `cargo clippy -p tsift-cli --all-targets -- -D warnings`
+- `cargo test -p tsift-cli --test exit_code edit_intents_verify_ -- --nocapture`
+- `cargo test -p tsift-cli --test exit_code edit_intents_ -- --nocapture`
+- `git diff --check`
+- `make check`
+- `cargo build`
+- `cargo install --path . --force`
+- `tsift --version` -> `tsift 0.1.62`
+- `tsift status` -> fresh index, instructions current
+- GitHub Actions CI `26799671257` passed both live Convex acceptance and `clippy + test`
+
+No project `tmux-ci` target or tmux workflow exists in `src/tsift`; deterministic SimWorld coverage ran through `make check`. The remote CI annotations were existing workflow notes about Node 20 action deprecation and optional live Convex configuration, not test failures.
+<!-- agent:boundary:bc649ad0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -190,7 +222,7 @@ preset #spec-test-build-install-commit-push
 - ~[#writerefs]~
 - ~[#writecompound]~
 - ~[#langexecutors]~
-- [#astverify]
+- ~[#astverify]~
 - create contract to support additional programming languages
 - Can markdown support ast operations?
 <!-- /agent:queue -->
@@ -198,7 +230,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#astverify] Add a semantic edit verification harness that can dry-run, apply in temp worktrees, reindex, run source-read or impact summaries, and optionally gate on a caller-provided test command before committing changes.
 <!-- /agent:backlog -->
 
 ## Review

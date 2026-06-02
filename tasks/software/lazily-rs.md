@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 
@@ -301,24 +301,77 @@ Benchmark/profile notes:
 Escalation: none.
 
 Confidence: high for the parking prototype and local regression coverage; the next queued safety-model item should add Loom or Shuttle coverage for the synchronization behavior.
-<!-- agent:boundary:08304e84 -->
+
+### Re: tsc16-safety-model — gpt-5
+
+> **Queue prompt:**
+>
+> [#tsc16-safety-model]
+
+
+Done. I added Loom-based safety coverage for the thread-safe synchronization model introduced by the Condvar waiter path.
+
+What changed:
+
+- Added an optional `loom` feature and `loom = "0.7"` dev-dependency.
+- Added `tests/thread_safe_loom.rs`, gated behind `#[cfg(feature = "loom")]`.
+- The Loom model covers concurrent first-get in-flight deduplication, stale in-flight completion and retry after invalidation during compute, effect scheduling/disposal cleanup races, and re-entrant callback graph access while compute is in flight.
+- Updated README with the Loom command: `cargo test --features loom --test thread_safe_loom`.
+- Updated `SPEC.md` to require the Loom target for the current sidecar Condvar waiter path and to list model checking in the benchmark/test coverage surface.
+
+Changed paths in `lazily-rs`:
+
+- `Cargo.toml`
+- `Cargo.lock`
+- `tests/thread_safe_loom.rs`
+- `README.md`
+- `SPEC.md`
+
+Commits:
+
+- lazily-rs: `e541c69 test: model thread-safe synchronization`, pushed to `origin/main`.
+- superproject gitlink: `1001a4be3 chore: update lazily-rs submodule`, committed locally; it will be pushed after this `finalize` completes.
+
+Verification:
+
+- `cargo fmt`
+- `cargo test`
+- `cargo test --features instrumentation`
+- `cargo test --features tokio`
+- `cargo test --features loom`
+- `cargo test --all-features`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo build --all-features`
+- `cargo bench --features instrumentation --no-run`
+- `python3 scripts/update-benchmark-results.py --no-run --check`
+- `git diff --check`
+- `git diff --cached --check`
+
+Install/check notes:
+
+- `cargo install --path .` is not applicable because `lazily` has no binaries; Cargo returned that explicit library-crate error.
+- `make check` is not available in `src/lazily-rs`; `make` returned `No rule to make target 'check'`.
+- `gh run list --workflow CI --limit 1` in `src/lazily-rs` reports no workflow named `CI`.
+
+CI/tmux evidence:
+
+- Latest root `Agent Doc` run before closeout was `26793427789`, still in progress for a tsift push.
+- The prior lazily-rs root run `26793319833` completed successfully, including `tmux-ci` success.
+
+Escalation: none.
+
+Confidence: high. The remaining risk is that the Loom tests model the synchronization protocol instead of instrumenting the production `ThreadSafeContext` type directly; the model targets the same state transitions and notification rules used by the implementation.
+<!-- agent:boundary:287b85eb -->
 <!-- /agent:exchange -->7
 
 ## Queue
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~[#tsc16-attrib]~
-- ~[#tsc16-coalesce-locks]~
-- ~[#tsc16-edge-diff]~
-- ~[#tsc16-wait-park]~
-- [#tsc16-safety-model]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#tsc16-safety-model] #performance #thread-safe Add Loom or Shuttle coverage for any ThreadSafeContext synchronization change, covering stale in-flight completion, invalidation during compute, effect scheduling/disposal, and re-entrant callbacks
 <!-- /agent:backlog -->
 
 ## Review

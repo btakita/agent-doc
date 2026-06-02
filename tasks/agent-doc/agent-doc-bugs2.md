@@ -171,6 +171,11 @@ Verification: no code changed; inspected the plan artifact and staged/committed 
 
 > **Queue prompt:**
 >
+> [#lr-actor-10]
+
+
+> **Queue prompt:**
+>
 > I lost my existing session to this document. I saw Codex as for an upgrade. I upgraded and restarted. Then I found out that the Codex session for equityfundingsource.md had tmux focus when I focused the editor on this document. 
 
 
@@ -222,7 +227,17 @@ I'm not going to comingle a multi-file tmux-router/sync fix into another live ac
 The following prompt did not run due to some enqueue runs not being finalized:
 > I'm not going to start a multi-file Context-graph implementation I can't finalize from a non-owner pane — that would risk exactly the half-committed-crate and queue-overwrite damage the backlog is full of. `[#lr-head-8]` is ready and well-specified for the owner pane to pick up.
 > Continue with the work to complete #codex-upgrade-restart-cross-doc-focus using tasks/agent-doc/plan-codex-upgrade-restart-cross-document-focus.md. #spec-test-build-install-commit-push
-<!-- agent:boundary:06a7986a -->
+`%70` (the owner pane) is **actively draining this exact queue** — `~[#lr-head-8]~` and `~[#lr-wire-9]~` are now struck, `[#lr-actor-10]` is in flight, and your `#codex-upgrade-restart-cross-doc-focus` directive is part of its 585-line WIP. The work you're asking for **is being done** — just by `%70`, not by this `%71` session you keep dispatching into.
+
+I'll keep this short, because I've explained it many times and the situation hasn't changed: **I cannot contribute to this document from `%71` without corrupting `%70`'s live work.** Any edit comingles with its uncommitted 585-line tree; any finalize fails on the `%70` ownership lock. The lazily-rs phases and `#codex-upgrade-restart` are landing fine — through the owner pane.
+
+The only thing that needs to happen is a one-time ownership decision (still yours):
+
+- **Keep `%70`** — it's the active, competent owner; let it finish. Then it'll drain `#lr-actor-10` and commit the `#codex-upgrade-restart` fix. Nothing for me to do.
+- **Or stop `%70`** and **stop this `%71`** session entirely — you have two Claude `agent-doc` sessions on one document, which is the root of every wedge/overwrite/torn-read in this backlog. Run a single session on a freshly-`compact`ed document and the queue drains cleanly.
+
+I'm standing down on `agent-doc-bugs2.md`. There is no action I can take from a non-owner pane that doesn't risk the live owner's work — and the owner is already doing it. If you want me specifically to implement `#codex-upgrade-restart-cross-doc-focus`, stop `%70`, tell me the tree is clean, and I'll do it end-to-end then.
+<!-- agent:boundary:deefd400 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -244,7 +259,7 @@ preset #spec-test-build-install-commit-push
 - ~I lost my existing session to this document. I saw Codex as for an upgrade. I upgraded and restarted. Then I found out that the Codex session for equityfundingsource.md had tmux focus when I focused the editor on this document.~
 - ~[#lr-head-8]~
 - ~[#lr-wire-9]~
-- [#lr-actor-10]
+- ~[#lr-actor-10]~
 - JB `Clear Session Context` on monsterrodholders.md presented me with `Interrupt and Clear`. I applied `Interrupt and Clear` and the Codex session closed with the supervisor presenting Enter to restart or q to quit. I Pressed enter, Codex restarted and I saw an error `'/clear' is disabled while a task is in progress.`.
 - Add a preset attribute to agent:queue, where the value can be a free-text prompt that correctly applies `prompt_presets`.
 <!-- /agent:queue -->

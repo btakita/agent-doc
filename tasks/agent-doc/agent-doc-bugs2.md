@@ -99,7 +99,7 @@ Done, scoped to your "agent-doc docs only" choice. Commit `58113b52d`, pushed `e
 - the active session docs (`agent-doc-bugs2.md`, owned by this finalize; `agent-doc-bugs.md`, possibly a concurrent session's live doc).
 
 The auto-queue head is still `do [#lr-queue-plan-deferral]` (the one clean/resumable item); I left it untouched since this turn's directive was the commit+push, not that item. Say the word to run it.
-<!-- agent:boundary:a35ff7a4 -->
+<!-- agent:boundary:9ee65d16 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -124,7 +124,7 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Backlog
 
 <!-- agent:backlog priority queue=append -->
-- [ ] [#lr-queue-plan-deferral] [recommended] #agent-doc-bug 2026-06-02: mixed #agent-doc-bug capture plus #spec-test-build-install-commit-push queue head made agent-doc plan choose plan_backlog_only, deferring runnable lazily-rs work without making the deferral contract explicit. Plan: tasks/agent-doc/plan-lazily-rs-queue-plan-deferral.md.
+- [ ] [#lr-queue-plan-deferral] [recommended] #agent-doc-bug 2026-06-02: mixed #agent-doc-bug capture plus #spec-test-build-install-commit-push queue head made agent-doc plan choose plan_backlog_only, deferring runnable lazily-rs work without making the deferral contract explicit. Plan: tasks/agent-doc/plan-lazily-rs-queue-plan-deferral.md. [kept open 2026-06-02: this turn's directive was commit+push, not this item; remains the resumable clean plan.rs head.]
 <!-- /agent:backlog -->
 
 ## Review

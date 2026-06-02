@@ -251,7 +251,16 @@ Yes, for read/index/query operations; not yet for guarded semantic writes.
 For `edit-intents --apply`, Markdown should stay out of the current Rust/TS/JS/Python executor set until it has its own language contract and intent model. Markdown edits are document-structure operations, not source-code function/import operations, so the likely safe intents are things like `rename_heading`, `replace_section_body`, `insert_section`, `move_section`, `insert_list_item`, and `rewrite_code_fence`. Those would need tree-sitter validation, section-boundary tests, no-mutation refusal coverage, and temp-worktree verification just like the code-language executors.
 
 So the short answer is: Markdown AST operations are viable and partially present today for reads; Markdown semantic write operations are feasible but should be added as a separate contract-backed executor with Markdown-specific intents.
-<!-- agent:boundary:97c73966 -->
+❯ Add the #next-steps into the backlog.
+
+### Re: #next-steps backlog — gpt-5
+
+Added the Markdown AST operation follow-ups to the backlog in priority order.
+
+Top backlog item: `#mdastcontract`.
+
+Changed path: `tasks/software/tsift.md` only. Commands used for this cycle: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, and `agent-doc write --commit` with granular backlog edits. Verification is the document closeout itself: this is a backlog-only mutation, so no source tests or build commands were applicable. Confidence is high because the backlog was empty and the added order follows the dependency chain: contract, spans, section edits, block edits, verification. Escalation: none.
+<!-- agent:boundary:16a61648 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -266,6 +275,11 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#mdastcontract] Markdown semantic edit language contract: canonical language id, formatter policy, supported Markdown intent kinds, and fail-closed capability checks.
+- [ ] [#mdsectionspans] Markdown heading/section/list/code-fence stable spans: hierarchy metadata, section boundaries, and source-read/edit target refs.
+- [ ] [#mdsectionedits] Markdown section edit executor: rename_heading, replace_section_body, insert_section, and move_section with tree-sitter validation.
+- [ ] [#mdblockedits] Markdown block edit executor: insert_list_item and rewrite_code_fence while preserving syntax and refusing ambiguous targets.
+- [ ] [#mdverify] Markdown semantic-write verification coverage: dry-run/apply no-mutation tests, temp-worktree verify gates, source-read impact summaries, and refusal regressions.
 <!-- /agent:backlog -->
 
 ## Review

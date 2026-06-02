@@ -103,6 +103,22 @@ The queue-provenance cluster + these two items are now either implemented-and-te
 
 #### Shipped
 Submodule `f8e84282`, superproject pointer `964645d33`.
+The `#ynra` wedge is cleared, but `session-check` now shows a transient open `preflight_started` cycle (from my recovery `preflight` runs) plus a pending IPC no-ack patch — both auto-recover and aren't blocking. I'm stopping here rather than spawning more recovery cycles. Final state for this turn:
+
+> **Queue prompt:**
+>
+> [#v819]
+
+
+**Done + committed:**
+- **`#xt3v` closed out** (`4b791e523`) — response committed, item reaped, queue head consumed. Path C's agent-implementable work is exhausted (every item implemented + tested; the two genuinely-missing pieces — `#preset-item-id-collision-enforce` Part 1 `f8e84282`, `#free-text-queue-skip-diagnostic` — shipped/confirmed). Residual is operator live-verify (`#v819`/`#wy0y`) and deferred-by-design parts.
+- **`#ynra` queue wedge cleared** — struck the stale `- ~[#ynra]~` ref that was fail-closing `preflight`/`repair`/`finalize`.
+
+**New follow-up bug I surfaced (worth a backlog item):** the queue done-strike (`e43516c9`) only scans the **inline** `agent:done` component, not the **external** `agent:done archive=tasks/agent-doc-bugs2.done.md` file. So an item reaped to the external archive (like `#ynra`) leaves a stale `[#id]` queue ref that the auto-strike can't clean and `--done` can't fix (not in backlog) — which **wedges the backlog-shadow guard and blocks all binary paths**. This is a direct sibling of `#ynra` itself: *the done-id collection for both the backlog→queue sync exclusion and the queue auto-strike must read the external `.done.md` archive, not just inline `agent:done`.* That's the real fix; striking the ref by hand (as I did) is only the per-incident unwedge.
+
+**Transient, no action needed:** the open `preflight_started` cycle + pending IPC `no_ack` patch are artifacts of my recovery `preflight`/`repair` probes; they auto-abandon (empty no-capture cycle) and the next genuine dispatch recovers cleanly.
+
+The document is unwedged and the queue is consumable again (`~[#xt3v]~`, `~[#ynra]~` struck; `[#v819]`, `[#wy0y]` remaining — both operator live-verify sessions). The one remaining agent-doable item is that new external-archive done-strike fix; everything else needs you at the keyboard for live verification.
 
 ### Re: queue churn — #ynra fixed — opus-4-8
 
@@ -150,16 +166,16 @@ So `#xt3v`'s purpose — "implement the no-live-pane review items in priority or
 **Note on repo state:** submodule HEAD is `e43516c9` but the superproject `src/agent-doc` pointer is still dirty (`M src/agent-doc`) — the parent pointer should be bumped to record `f8e84282`/`e43516c9` (this is exactly the `#submodule-response-commit-proof` hygiene). I left it for the single owner to commit rather than race the 1-file in-progress edit still in the submodule tree; say the word and I'll bump + push the pointer.
 
 Proof: audited the review component + ran the queue-provenance regressions (15 passing) in prior cycles; `f8e84282` (collision Part 1) and `e43516c9` (#ynra) confirmed ancestors of HEAD. No new code this turn — this is the `#xt3v` closeout/audit. Confidence: high. Escalation: none — remaining work is operator live-verify (`#v819`/`#wy0y`).
-<!-- agent:boundary:cc9432c6 -->
+<!-- agent:boundary:e4ede095 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~[#sfmt]: 0.2.144 is installed~
 - ~[#xt3v]~
-- [#v819]
+- ~[#v819]~
 - [#wy0y]
-- [#ynra]
+- ~[#ynra]~
 <!-- /agent:queue -->
 ###
 <!--

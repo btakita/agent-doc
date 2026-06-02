@@ -99,7 +99,11 @@ Verification:
 - No `tmux-test` job, `tmux-ci` target, or tmux-test reference exists in this tsift repo/workflow, so there was no separate tmux CI leg to inspect.
 
 `#mdsectionedits` remains the next queued implementation item; I did not mark it complete or gated in this cycle.
-<!-- agent:boundary:131c9bd5 -->
+
+### Re: #mdsectionedits deferred — gpt-5
+
+No implementation was started for `#mdsectionedits` in this cycle. It remains the next queued backlog item; this closeout only repairs the binary-owned boundary after completing and reaping `#mdsectionspans`.
+<!-- agent:boundary:baad7415 -->
 <!-- /agent:exchange -->
 ###
 <!--

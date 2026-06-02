@@ -91,7 +91,20 @@ Even after that, I would not assume SurrealDB wins. SQLite has a very favorable 
 So the pragmatic answer is: `yes, SurrealDB is optimizable, and the current adapter has obvious low-hanging fruit; no, we should not treat current parity as performance parity until it gets the same indexed/pushdown treatment SQLite already has and then passes repeated backend-eval samples.`
 
 Commands/evidence used: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `tsift --envelope search`, `rg`, and source inspection of `packages/tsift-surrealdb/src/lib.rs`, `packages/tsift-core/src/lib.rs`, `packages/tsift-sqlite/src/lib.rs`, `packages/tsift-cli/src/lib.rs`, and `SPEC.md`. No repo code files were changed.
-<!-- agent:boundary:bf49ebcd -->
+❯ What are #next-steps to optimize SurrealDB performance?
+### Re: SurrealDB performance next steps — gpt-5
+
+Top backlog item: `#surrealidx`.
+
+Priority order:
+
+1. `#surrealidx` — optimize hot reads first. Add secondary indexes to `SurrealdbGraphStore` and override the same high-impact `GraphStore` methods SQLite already optimizes: `edge`, `sample_edge`, `sample_edge_with_property`, `incident_edges`, `paged_edges`, `paged_incident_edges`, `edges_between_nodes`, and bounded path reads. This is the highest leverage because current full-projection losses are dominated by edge lookup, edge property scan, incident scan, related, and path probes paying scan-heavy costs.
+2. `#surrealbulk` — optimize projection load second. Replace the per-row `upsert_node` / `upsert_edge` loop in `replace_projection_rows()` with bulk or transactional loading, then rebuild derived indexes once. This separates “SurrealDB load cost” from “adapter loop overhead.”
+3. `#surrealpush` — decide the adapter shape. Compare native SurrealDB query pushdown/indexes against Rust-side derived indexes backed by SurrealKV durability. The Rust-side index path is likely the fastest way to test whether SurrealDB can catch SQLite on the current benchmark; native query pushdown is cleaner only if it is fast enough.
+4. `#surrealbench` — remeasure with promotion-grade evidence. After the above changes, run repeated `backend-eval --full-projection` samples through `metric-digest`, not one-off samples. SurrealDB should stay on hold unless it beats SQLite across real, full-projection, high-degree, and deep-chain workloads while preserving parity, install portability, and lock behavior.
+
+I added those four items to the backlog in that order. No repo code files were changed.
+<!-- agent:boundary:34f5ef02 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -106,6 +119,10 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#surrealidx] Optimize SurrealDB GraphStore hot reads: add secondary indexes and override edge/sample/incident/paged/edges_between/path methods so full_projection no longer pays full-edge scan costs.
+- [ ] [#surrealbulk] Batch SurrealDB projection load: replace per-row upsert loops with bulk/transactional row load plus one-pass secondary-index rebuild; measure refresh/load separately.
+- [ ] [#surrealpush] Compare SurrealDB query pushdown vs Rust-derived indexes behind backend-surrealdb and keep the faster design that preserves GraphStore parity.
+- [ ] [#surrealbench] Run repeated backend-eval --full-projection samples through metric-digest after SurrealDB optimizations and keep promotion on hold unless it beats SQLite across required workloads.
 <!-- /agent:backlog -->
 
 ## Review

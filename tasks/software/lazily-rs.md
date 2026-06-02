@@ -146,7 +146,74 @@ CI notes:
 - Parent `Agent Doc` run `26799752916`: `tmux-ci` passed. The `check` job failed on the pre-existing unrelated `agent-doc-orchestration/src/gc.rs:275` clippy `sort_by_key` lint, outside this lazily-rs change.
 
 Confidence is high for the intended read-side lock-churn reduction and acquisition-count targets. The 16-worker wall-clock benchmark remains noisy/neutral, but the lock metrics moved in the requested direction.
-<!-- agent:boundary:694cdfc0 -->
+
+### Re: #lazybatch3 — gpt-5
+
+> **Queue prompt:**
+>
+> [#lazybatch3]
+
+
+Completed `#lazybatch3` and pushed both repositories.
+
+The accepted implementation keeps `ThreadSafeContext` on the existing mutex-backed graph, then adds a per-slot read-mostly cached-value sidecar. Fresh cached `get` calls now read through the sidecar and bypass the `get_refresh` graph-lock path; invalidation, clean validation, recompute publication, and clear paths synchronize the sidecar with graph state. Recompute waiters now use a generation-guarded Condvar handoff so a waiter can park outside the graph mutex without missing a stale-completion notification.
+
+I also tested and rejected a broader full-graph `RwLock` prototype. It improved several cases but regressed `thread_safe_contention/batched_write_bursts/8` to `2.6982 ms` with Criterion reporting `+20.880%`, which violates the no-tradeoff requirement. The final sidecar design removed that regression while still reducing fresh-read graph contention.
+
+Changed files in `src/lazily-rs`:
+
+- `src/thread_safe.rs`
+- `tests/spec_compliance.rs`
+- `tests/thread_safe_loom.rs`
+- `SPEC.md`
+- `README.md`
+
+Key benchmark evidence from the final accepted design, using `cargo bench --features instrumentation --bench context -- thread_safe_contention`:
+
+| case | 8 workers | 16 workers |
+| --- | ---: | ---: |
+| `same_slot_write_read` | `5.9001 ms` | `30.995 ms` |
+| `independent_slots` | `3.0729 ms` | `8.8710 ms` |
+| `read_mostly_waiters` | `440.08 us` | `851.45 us` |
+| `batched_write_bursts` | `2.1989 ms` | `6.6081 ms` |
+
+The full 1/2/4/8/16 matrix was run. The final `batched_write_bursts` numbers stayed below the accepted prior raw means at the important 8- and 16-worker points, including the prior `#lazybatch2` values of `2.2892 ms` and `7.6168 ms`.
+
+Instrumentation profile evidence for the final sidecar path:
+
+- `thread_safe_contention_batched_write_bursts_8`: `get_refresh=4:150:6650`, down from the prior `#lazybatch2` acquisition count of `133`.
+- `thread_safe_contention_batched_write_bursts_16`: `get_refresh=4:210:12250`, down from the prior `#lazybatch2` acquisition count of `263`.
+
+Verification completed in `src/lazily-rs`:
+
+- `cargo fmt`
+- `cargo test --features instrumentation thread_safe_cached_get`
+- `cargo test --features loom --test thread_safe_loom read_mostly_waiter_generation_prevents_missed_stale_completion`
+- `cargo test storage_strategy_evaluation`
+- `tsift rewrite --run 'cargo test'`
+- `tsift rewrite --run 'cargo test --features instrumentation'`
+- `tsift rewrite --run 'cargo test --features tokio'`
+- `tsift rewrite --run 'cargo test --features loom --test thread_safe_loom'`
+- `tsift rewrite --run 'cargo check'`
+- `tsift rewrite --run 'cargo build'`
+- `tsift rewrite --run 'cargo clippy'`
+- `cargo run --example instrumentation_profile --features instrumentation --quiet`
+
+`cargo install --path .` is not applicable because `lazily-rs` is a library crate with no binary target.
+
+Commits pushed:
+
+- `src/lazily-rs`: `bfe2b24 perf: add thread-safe cached read sidecar`
+- parent repo gitlink: `7f59833cd chore: update lazily-rs submodule`
+
+CI/tmux closeout:
+
+- `src/lazily-rs` has no GitHub workflows.
+- The parent repo has no workflow named `CI`.
+- Parent `Agent Doc` run `26800732002` started for the parent push. Its `tmux-ci` job passed. Its `check` job failed on the existing unrelated parent clippy lint at `agent-doc-orchestration/src/gc.rs:275`: `consider using sort_by_key` for `series.sort_by(|a, b| b.0.cmp(&a.0));`.
+
+So `#lazybatch3` is complete: the read-mostly fast path is implemented, covered by spec/instrumentation/loom tests, benchmarked against the relevant contention cases, committed, and pushed.
+<!-- agent:boundary:93f6ffa5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -158,14 +225,14 @@ Confidence is high for the intended read-side lock-churn reduction and acquisiti
 preset #spec-test-build-install-commit-push
 - ~[#lazybatch1]~
 - ~[#lazybatch2]~
-- [#lazybatch3]
+- ~[#lazybatch3]~
 - Run performance benchmarks
+- release + publish
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#lazybatch3] [recommended] Re-evaluate thread-safe graph storage only after #lazybatch1/#lazybatch2: prototype partitioned locks or read-mostly storage with loom/spec coverage and compare same_slot_write_read, independent_slots, read_mostly_waiters, and batched_write_bursts so the fix does not trade one contention case for another.
 <!-- /agent:backlog -->
 
 ## Review

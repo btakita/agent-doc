@@ -64,21 +64,49 @@ This is the guided exit the recovery tags were missing — the answer to "will t
 #### Verification
 
 Full Rust suite **3545 passed / 0 failed**, clippy clean. Built + installed. Live-verified: `agent-doc checkpoint` lists this doc's checkpoints; `agent-doc gc --dry-run` reports the prune. New tests: `parse_recovery_tags_*` (2), `clean_old_recovery_tags_*` (2). Spec updated (`specs/07-core-commands.md` gc + checkpoint). Pushed `agent-doc@c6b5f2b3` + superproject `5a96471f6`. This completes the recovery-tag tooling pair.
-<!-- agent:boundary:a7c0dd5c -->
+
+### Re: Can the gated review items be completed? — opus-4-8
+
+> **Queue prompt:**
+>
+> I have been using agent-doc and have not seen any bugs. Can the gated review items be completed? If yes, complete them. I want to move on to performance improvements.
+
+
+Honest answer: **mostly no — not from a headless agent session.** Of the 51 gated `[/]` items, the dominant gate is *live verification*, which needs operator/IDE/tmux actions I can't perform here. Marking them done without that would falsely claim completion, so I've left them gated and am pausing the auto-loop for your call rather than churning.
+
+#### Triage of the 51
+
+- **~22 are live-verify / live-pane gated** — explicitly require installing a signed JB plugin + restarting IntelliJ, driving a *live busy/Codex pane mid-turn*, or capturing IPC `setText` payloads while typing during `finalize --stream`. Examples: `#t41j`, `#jb-busy-queue-deadlock-live-verify`, `#route-drain-all-surface-live-verify`, `#j0k8`, `#jb-load-tmux-window-verify`, `#recovery-drift-apply-live-verify`, the IPC-corruption family (`#ipcfullprompt-recur2`, `#ipc-dup-tracking-double-merge`, `#adoc-queue-ipc-buffer-divergence`, `#duplicate-response-after-commit`, `#prompt-duplicated-while-typing`).
+- **~13 are already IMPLEMENTED + tested**, gated *only* on that same live-verify (`#4a6p`, `#free-text-queue-skip-diagnostic`, `#preset-item-id-collision-enforce`, `#do-id-partial-closeout-state`, `#weqq`, `#snrun`, `#codex-owned-pane-prompt-miss-followups`, …). The code + unit tests exist; the gate is live behavior, by design.
+- **The rest are the Path C no-live-pane implementable cluster** (`#qasm`: queue-provenance, Option-A fixes, closeout-guard hardening, the `#backlog-priority`/`#backlog-queue-sync` feature pair, hygiene/UX) — genuinely doable headlessly, though some may already be landed and several are multi-cycle.
+
+#### What actually unblocks the bulk
+
+The document already tracks the two operator-driven consolidation sessions that clear the live-gated majority — these need *you* at a live IDE:
+- **Path A** (`#jkvs` / `#v819`): one live busy-pane session — install the current signed JB plugin (0.2.147) + restart the route-owned process, then drive one mid-active-turn pane through ~11 busy-pane items.
+- **Path B** (`#wy0y` / `#6cmx`): one IPC/typing-corruption capture session — enable `#com.github.btakita.agentdoc` debug logging, type into a doc during `finalize --stream`, capture the `setText` payload; several items convert from verify to a single cure-commit once captured.
+
+#### Loop paused — your call
+
+I'm not auto-marking 51 items done, and I've stopped the auto-loop here (the remaining queue is the `lazily-rs` plan update + `#lr-*` items, which *are* doable headlessly). Tell me which you want:
+1. **Work the Path C implementable subset** — I'll audit each (most are likely already landed) and complete/mark-done what's genuinely done + headlessly verifiable.
+2. **Continue the loop to the `lazily-rs` queue items** — skip the live-gated review work for now.
+3. **Pause for you to run Path A + Path B** live-verify sessions, which is what actually clears the live-gated majority.
+<!-- agent:boundary:ad8db598 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~[#kc5e]~
 - ~[#x8aw]~
-- I have been using agent-doc and have not seen any bugs. Can the gated review items be completed? If yes, complete them. I want to move on to performance improvements.
+- ~I have been using agent-doc and have not seen any bugs. Can the gated review items be completed? If yes, complete them. I want to move on to performance improvements.~
 - lazily-rs is now multithreaded. Update tasks/agent-doc/plans/lazily-rs-integration.md with recent changes.
 - [#lr-content-6]
 - [#lr-cycle-7]
 - [#lr-head-8]
 - [#lr-wire-9]
 - [#lr-actor-10]
-- do [#x8aw]
+- ~do [#x8aw]~
 <!-- /agent:queue -->
 ###
 <!--

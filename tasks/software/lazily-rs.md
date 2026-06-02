@@ -99,7 +99,58 @@ CI/tmux evidence:
 Escalation: used approved `rm -rf scripts/__pycache__` only to remove a generated Python cache directory created during README generator inspection.
 
 Confidence: high.
-<!-- agent:boundary:f146ae54 -->
+
+### Re: tsc16-coalesce-locks — gpt-5
+
+> **Queue prompt:**
+>
+> [#tsc16-coalesce-locks]
+
+
+Implemented `#tsc16-coalesce-locks` and marked it done.
+
+What changed:
+- Removed separate dependency node-kind probe locks during `ThreadSafeContext::refresh_slot`; dependency ids now recursively call `refresh_slot`, which already returns `false` for non-slot nodes.
+- Folded clean dirty-flag clearing into the refresh decision lock instead of taking a second helper lock.
+- Batched stale dependency edge removal inside the recompute publish mutation before user compute callbacks run, replacing one lock per old edge with locked helper variants.
+- Kept the key safety boundary unchanged: user compute/effect/cleanup callbacks still run outside the graph lock.
+- Added a spec-compliance instrumentation test proving stale edge removal no longer contributes one `dependency_edge` lock per removed edge.
+- Updated `SPEC.md` and regenerated the README benchmark report.
+
+Benchmark/profile result from the regenerated report:
+- `thread_safe_contention | 16` is now `23.842 ms` mean in the README sample.
+- `thread_safe_contention_16` lock acquisitions dropped to `6750`; `dependency_edge` acquisitions are `123`, matching the recompute count instead of old-edge removal churn.
+- Contention Criterion output reported improvements at 1, 2, 4, 8, and 16 workers; `batch_storms/thread_safe_context/64` showed a small local regression.
+
+Commits:
+- `lazily-rs`: `045f9a6 perf: coalesce thread-safe refresh locks`, pushed to `origin/main`.
+- `lazily-rs`: `282c17a fix: silence edge removal cfg warning`, pushed to `origin/main`.
+- Superproject gitlink: `36cf4b2b9 chore: update lazily-rs submodule`, committed locally; it will be pushed with this document closeout after `finalize` completes.
+
+Verification:
+- `cargo fmt`
+- `cargo test`
+- `cargo test --features instrumentation`
+- `cargo test --features tokio`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo build --all-features` (passed; Cargo reported existing unused workspace patch warnings for `agent-kit`, `tagpath`, and `tmux-router`)
+- `cargo bench --features instrumentation --no-run` (passed with the same workspace patch warnings)
+- `python3 scripts/update-benchmark-results.py`
+- `python3 scripts/update-benchmark-results.py --no-run --check`
+- `git diff --check`
+
+Local install/check notes:
+- `cargo install --path .` is not applicable because `lazily` is a library crate with no binaries; Cargo returned that explicit error.
+- `make check` is not available in `src/lazily-rs`; `make` returned `No rule to make target 'check'`.
+
+CI/tmux evidence:
+- `gh run list --workflow CI --limit 1` still reports no workflow named `CI` for `lazily-rs`.
+- Latest superproject `Agent Doc` run `26792079378` reports success and includes a successful `make tmux-ci` step.
+
+Escalation: none for this cycle.
+
+Confidence: high.
+<!-- agent:boundary:521639e6 -->
 <!-- /agent:exchange -->7
 
 ## Queue
@@ -107,7 +158,7 @@ Confidence: high.
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~[#tsc16-attrib]~
-- [#tsc16-coalesce-locks]
+- ~[#tsc16-coalesce-locks]~
 - [#tsc16-edge-diff]
 - [#tsc16-wait-park]
 - [#tsc16-safety-model]
@@ -116,7 +167,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#tsc16-coalesce-locks] #performance #thread-safe Reduce ThreadSafeContext lock churn in get/refresh/recompute by coalescing adjacent state reads/writes and replacing extra helper-level lock acquisitions with locked helper variants where callbacks still run outside the graph lock
 - [ ] [#tsc16-edge-diff] #performance #thread-safe Optimize thread-safe dependency edge maintenance by diffing old/new dependency sets and batching edge updates during recompute publish instead of unconditional drain/remove/re-add work
 - [ ] [#tsc16-wait-park] #performance #thread-safe Prototype a Condvar or parking wait path for in-flight ThreadSafeContext recompute waiters only after attribution shows the spin-yield wait loop materially contributes to thread_safe_contention_16
 - [ ] [#tsc16-safety-model] #performance #thread-safe Add Loom or Shuttle coverage for any ThreadSafeContext synchronization change, covering stale in-flight completion, invalidation during compute, effect scheduling/disposal, and re-entrant callbacks

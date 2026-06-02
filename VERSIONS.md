@@ -6,6 +6,15 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Queue no longer re-mints completed `do [#id]` refs (`#ynra`).** The preflight
+  backlog→queue sync now excludes ids already archived in `agent:done` before
+  minting `do [#id]` prompts. Previously a lingering active backlog `[ ]` bullet
+  whose id was also in `agent:done` was minted into the queue, struck by the
+  done-strike pass that same cycle, then re-minted the next cycle — churning
+  forever on a completed ref. `agent:done` ids are computed once up front and
+  reused by both the sync filter and the strike pass. Regression:
+  `run_queue_maintenance_excludes_done_ids_from_backlog_sync`.
+
 - **Mutation-time identity-collision rejection (`#preset-item-id-collision-enforce`,
   part 1).** `agent-doc write --pending-add` / `--pending-add-after` /
   `--pending-add-before` / `--pending-add-back` / `--pending-add-to` now fail

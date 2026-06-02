@@ -3171,13 +3171,40 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
     let mut queue_warnings = Vec::new();
     let mut synced_queue_ids = Vec::new();
 
+    // `#ynra`: collect `agent:done` ids ONCE up front. The backlog→queue sync
+    // below must never re-mint a `do [#id]` whose id is already completed
+    // (archived in `agent:done`) — otherwise the strike pass removes it every
+    // cycle, the sync re-injects it the next cycle, and the queue churns forever
+    // on a completed ref. `agent:done` is not mutated by any queue maintenance
+    // step, so this set is valid for both the sync filter and the later strike.
+    let project_root = file.canonicalize().ok().and_then(|canonical| {
+        snapshot::find_project_root(&canonical)
+            .or_else(|| canonical.parent().map(std::path::Path::to_path_buf))
+    });
+    let done_ids = collect_agent_done_ids_with_root(&content, project_root.as_deref());
+
     // Backlog→queue sync (#backlog-queue-sync-attr): when an `agent:backlog` /
     // `agent:icebox` component carries a `queue` attribute, regenerate the queue
     // `do [#id]` prompts from its active items BEFORE activation so a freshly
     // synced queue can auto-activate on the same cycle.
-    if let Some((mode, backlog_ids)) = collect_backlog_queue_sync(&components, &content)
-        && let Some(synced) = crate::queue::sync_backlog_into_queue(&entries, &backlog_ids, mode)
-    {
+    if let Some((mode, mut backlog_ids)) = collect_backlog_queue_sync(&components, &content) {
+        // Drop ids already in `agent:done` so completed refs are never
+        // re-injected into the queue (#ynra). A lingering active backlog `[ ]`
+        // bullet whose id is also archived in `agent:done` would otherwise be
+        // minted → struck → minted on every cycle.
+        if !done_ids.is_empty() {
+            let done_lower: std::collections::HashSet<String> =
+                done_ids.iter().map(|id| id.to_ascii_lowercase()).collect();
+            let before = backlog_ids.len();
+            backlog_ids.retain(|id| !done_lower.contains(&id.trim().to_ascii_lowercase()));
+            let excluded = before - backlog_ids.len();
+            if excluded > 0 {
+                eprintln!(
+                    "[preflight] queue: excluded {excluded} completed id(s) from backlog→queue sync (already in agent:done; #ynra)"
+                );
+            }
+        }
+        if let Some(synced) = crate::queue::sync_backlog_into_queue(&entries, &backlog_ids, mode) {
         let pre_sync_ids = entries
             .iter()
             .filter_map(queue_entry_do_id)
@@ -3202,6 +3229,7 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
         );
         entries = synced;
         mutated = true;
+        }
     }
 
     // Queue priority ordering (#backlog-priority-attribute): when the queue
@@ -3279,11 +3307,9 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
     // items.
     //
     // Fixes the user-reported "queue gets stuck after 1 turn" symptom.
-    let project_root = file.canonicalize().ok().and_then(|canonical| {
-        snapshot::find_project_root(&canonical)
-            .or_else(|| canonical.parent().map(std::path::Path::to_path_buf))
-    });
-    let done_ids = collect_agent_done_ids_with_root(&current_content, project_root.as_deref());
+    // `project_root` / `done_ids` were computed once before the backlog→queue
+    // sync (above) and reused here — `agent:done` is untouched by queue
+    // maintenance, so the set is still current.
     let gated_ids = collect_agent_review_gated_ids(&current_content);
     let mut eligible_ids: std::collections::HashSet<String> = done_ids.clone();
     for id in &gated_ids {
@@ -5259,6 +5285,54 @@ mod tests {
             !updated.contains("- do [#gated]"),
             "gated item must not be queued:\n{updated}"
         );
+    }
+
+    #[test]
+    fn run_queue_maintenance_excludes_done_ids_from_backlog_sync() {
+        // #ynra: a lingering active backlog `[ ]` bullet whose id is also archived
+        // in `agent:done` must NOT be re-minted into the queue (it would be struck
+        // every cycle and re-injected the next → forever churn). The fresh active
+        // id is still minted.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog queue=sync -->\n",
+            "- [ ] [#na3x] completed-but-lingering\n",
+            "- [ ] [#fresh] genuinely open\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:done -->\n",
+            "- 2026-06-01 [#na3x] completed-but-lingering\n",
+            "<!-- /agent:done -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            !updated.contains("[#na3x]") || !updated.contains("do [#na3x]"),
+            "completed id must not be minted into the queue:\n{updated}"
+        );
+        assert!(
+            !updated.contains("do [#na3x]"),
+            "completed id must not appear as a queue do-prompt:\n{updated}"
+        );
+        assert!(
+            updated.contains("do [#fresh]"),
+            "fresh active id must still be queued:\n{updated}"
+        );
+        assert_eq!(state.synced_queue_ids, vec!["fresh".to_string()]);
     }
 
     #[test]

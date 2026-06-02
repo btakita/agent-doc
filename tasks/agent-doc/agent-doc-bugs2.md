@@ -36,12 +36,30 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 4 response topic(s): do #nochange-after-stall; do #lr-queue-response-miss; commit + push; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:a33c83f5 -->
+> **Queue prompt:**
+>
+> do [#subagent-blocks-session]
+
+### Re: do #subagent-blocks-session — triaged, preconditions unmet — opus-4-8
+
+> **Queue prompt:**
+>
+> Gated items in review are not easily runnable. Please enable the user to run gated items by `do [item-id]` or plating the item in the queue. Please focus the runs to complete the gated item. If the gated item can only be partially completed, extract a new task to complete which contains the conditions to complete the item. If no work was done due to preconditions not being met, add a timestamp of the attempts to the item. Ensure the preconditions are present in the gated item description.
+
+
+Not implementing this one blind — handled it per your run policy (precondition unmet → record preconditions + timestamp the attempt).
+
+**Why preconditions are unmet.** This is "block the session so no other task runs while a turn waits on a subagent — mostly a Claude issue." agent-doc (the binary) has no control over the Claude Code harness's subagent scheduling, so this almost certainly needs a **harness/hook-level** mechanism — a `Stop`/`PreToolUse` hook gate or a supervisor lease — not an agent-doc source change. Before I implement, the design needs: which layer enforces the block, what exactly counts as "the subagent" being awaited, and how/when the block releases. I recorded those preconditions + a 2026-06-02 attempt timestamp on the `#subagent-blocks-session` item.
+
+Also note this head was an **artifact**: my `--pending-add` last turn spawned a `do [#subagent-blocks-session]` queue head, and because that capture was still uncommitted, this preflight read it as the newest directive. This commit clears that drift.
+
+**Real queue is next.** In queue order the next actionable head is `do [#lr-queue-response-miss]`, then the other ungated items. Since `session_check.rs` is now committed, I'll take that one next and — per your spec — **audit it first** against the just-committed concurrent session-check work (it may already cover the free-text-queue-head response-patchback guard, in which case I verify + mark done instead of re-implementing). Run again or say "go" and I'll do `#lr-queue-response-miss`.
+<!-- agent:boundary:a746f862 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 - ~If a turn is waiting for a subagent to complete before the task completes, block the session until the subagent completes. This is mostly a Claude issue. We need to prevent other tasks from running in the agent while the task waiting on the subagent is still running.~
-- Gated items in review are not easily runnable. Please enable the user to run gated items by `do [item-id]` or plating the item in the queue. Please focus the runs to complete the gated item. If the gated item can only be partially completed, extract a new task to complete which contains the conditions to complete the item. If no work was done due to preconditions not being met, add a timestamp of the attempts to the item. Ensure the preconditions are present in the gated item description.
+- ~Gated items in review are not easily runnable. Please enable the user to run gated items by `do [item-id]` or plating the item in the queue. Please focus the runs to complete the gated item. If the gated item can only be partially completed, extract a new task to complete which contains the conditions to complete the item. If no work was done due to preconditions not being met, add a timestamp of the attempts to the item. Ensure the preconditions are present in the gated item description.~
 - ~do [#nochange-after-stall]~
 - do [#lr-queue-response-miss]
 - do [#nochange-after-stall-breadth]
@@ -52,6 +70,7 @@ Compacted content:
 - do [#lr-wire-9]
 - do [#lr-actor-10]
 - do [#run-gated-review-items]
+- do [#subagent-blocks-session]
 <!-- /agent:queue -->
 ###
 <!--
@@ -64,7 +83,7 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Backlog
 
 <!-- agent:backlog priority queue=append -->
-- [ ] [#subagent-blocks-session] [recommended] #agent-doc-bug feature 2026-06-02: when a turn is waiting on a subagent to complete, block the session so no other task runs in the agent until that subagent finishes (mostly a Claude-harness concurrency issue). Captured from a queue prompt that was auto-consumed without a response.
+- [ ] [#subagent-blocks-session] [recommended] #agent-doc-bug feature 2026-06-02: when a turn is waiting on a subagent to complete, block the session so no other task runs in the agent until that subagent finishes (mostly a Claude-harness concurrency issue). PRECONDITIONS (unmet, attempted 2026-06-02): needs a scope/design decision before implementation — agent-doc cannot control the Claude Code harness's subagent scheduling, so this likely requires a harness/hook-level gate (e.g. a Stop / PreToolUse hook or supervisor lease) rather than an agent-doc binary change. Specify the exact concurrency boundary (which layer blocks, what counts as 'the subagent', how the block is released) before implementation.
 - [ ] [#nochange-after-stall-breadth] [recommended] #agent-doc-bug follow-up to #nochange-after-stall: extend the no-change abnormal-cycle diagnostic beyond terminally-abandoned cycles — stale-open preflight detection, repair-only/reap-only closeout with an unconsumed active queue head, and session-check fixtures asserting each shape, plus a spec note in 07-commands.md. Deferred this turn because preflight.rs/session_check.rs had concurrent uncommitted edits that must not be disturbed. Plan: tasks/agent-doc/plan-no-change-after-stalled-cycle.md.
 - [ ] [#lr-actor-10] Phase 10: Add GlobalConfigSlot + SessionRegistrySlot for ActorContext. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-wire-9] Phase 9: Wire RunContext into ops_log, template_io, patch, harness detection. Plan: tasks/agent-doc/plans/lazily-rs-integration.md

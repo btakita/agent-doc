@@ -40,6 +40,7 @@ Compacted content:
 - Archived 2 response topic(s): Add lazily-rs CI; Add a gh action for CI on lazily-rs.
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
 ❯ What are #next-steps to optimize concurrency in lazily-rs? Can we reduce the lock contention further? What is actionable from [#lazyperf8]?
+
 ### Re: lock contention next steps — gpt-5
 
 Yes, there is still lock contention to reduce, but the actionable path from `#lazyperf8` is evidence-first rather than another broad synchronization rewrite.
@@ -55,6 +56,7 @@ The remaining hotspots worth attacking after that are specific:
 I added the backlog in priority order. Top backlog item: `#lazyperf9`.
 
 Changed paths: session document/backlog only. No lazily-rs source changes were made, so I did not run the Rust test suite for this response cycle.
+❯ Can we use a "shadow" graph to quickly understand the invalidation structure, then run the invalidations in one batch?
 
 ### Re: shadow invalidation graph — gpt-5
 
@@ -78,7 +80,7 @@ Changed paths: session document/backlog only.
 Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `tsift index --workspace .`, targeted source/spec reads.
 Verification: `agent-doc finalize` will run commit/session guards; no Rust tests were run because no lazily-rs source changed.
 Escalation: none. Confidence: high.
-<!-- agent:boundary:afde2947 -->
+<!-- agent:boundary:418589dc -->
 <!-- /agent:exchange -->
 ###
 <!--

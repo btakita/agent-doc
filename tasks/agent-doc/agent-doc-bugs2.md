@@ -122,13 +122,41 @@ What remains in `agent:queue auto`:
 So the auto-loop has nothing actionable left and will just keep re-presenting `#xt3v`. **Recommend halting it**: add a `- --- stop` line at the top of `agent:queue`, or set `queue_active: false` in frontmatter, or strike the three remaining items. Then the live-verify work (Paths A/B + the now-implemented Path C guards) is yours to run at the IDE.
 
 I paused the auto-loop rather than spin on the moot head.
-<!-- agent:boundary:fc5fc726 -->
+
+### Re: [#xt3v] — Path C agent-implementation is exhausted — opus-4-8
+
+> **Queue prompt:**
+>
+> [#xt3v]
+
+
+I audited every item under `#xt3v` against HEAD, and the fresh agent-implementable work is **done**. Marking `#xt3v` complete — the residual is operator live-verify (already tracked by `#v819`/`#wy0y`) and a few intentionally-deferred enhancements, not new implementation.
+
+**What landed (this session + prior cycles), all in HEAD `e43516c9`:**
+- **Queue-provenance cluster** — `#prompt-preempts-auto-queue`, `#queue-user-edit-overwrite`, `#jb-run-agent-doc-response-queue-contamination`: implemented + 15 regressions passing (audited).
+- **Option-A fixes** — `#cancel-orphans-preflight-cycle`, `#exchange-prompt-dropped-on-merge`, `#duplicate-response-after-commit`: guards implemented (`[/]` in review).
+- **Closeout-guard hardening** — `#do-id-partial-closeout-state` (WARN guard landed), `#queue-clear-unrun-items` (landed), `#free-text-queue-skip-diagnostic` (already implemented — `write::queue_skip_diagnostic_for_content`), and `#preset-item-id-collision-enforce` **Part 1 shipped this session** (`f8e84282`: mutation-time identity-collision rejection).
+- **Feature pair** — `#backlog-priority-attribute` / `#backlog-queue-sync-attribute`: implemented (this very backlog runs `priority queue=prepend`).
+- **Hygiene/UX** — `#stash-session-ttl-prune`, `#plugin-cleanup-menu-command`, `#clear-stops-running-process`, `#jb-stale-busy-idle-footer`, `#snrun`: all `[/]` (implemented, gated on live-verify).
+- Plus `#ynra` (queue re-mint of completed `do[#id]` refs) fixed in `e43516c9`.
+
+**Residual is NOT agent implementation:**
+- **Live verification** → owned by `#v819` (Path A, one busy-pane IDE session) and `#wy0y` (Path B, one IPC-capture session). Both need you at the keyboard; I can't drive live IntelliJ/tmux or enable JB debug logging from here.
+- **Deferred by design** → `#preset-item-id-collision-enforce` Parts 2/3 (hard dispatch-block on a *pre-existing* collision risks bricking live sessions — kept as the existing warning); per-item enhancement notes (e.g. `#do-id-partial-closeout-state` per-id edit-vs-gate tracking) stay in their own `[/]` items.
+- `#nbsearch` / `#gscaccess` in the list are boost-client/monsterrodholders items, not agent-doc.
+
+So `#xt3v`'s purpose — "implement the no-live-pane review items in priority order" — is fulfilled. The next real work is the two **operator** sessions (`#v819`, `#wy0y`); everything agent-side is implemented and gated on your live verification.
+
+**Note on repo state:** submodule HEAD is `e43516c9` but the superproject `src/agent-doc` pointer is still dirty (`M src/agent-doc`) — the parent pointer should be bumped to record `f8e84282`/`e43516c9` (this is exactly the `#submodule-response-commit-proof` hygiene). I left it for the single owner to commit rather than race the 1-file in-progress edit still in the submodule tree; say the word and I'll bump + push the pointer.
+
+Proof: audited the review component + ran the queue-provenance regressions (15 passing) in prior cycles; `f8e84282` (collision Part 1) and `e43516c9` (#ynra) confirmed ancestors of HEAD. No new code this turn — this is the `#xt3v` closeout/audit. Confidence: high. Escalation: none — remaining work is operator live-verify (`#v819`/`#wy0y`).
+<!-- agent:boundary:cc9432c6 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~[#sfmt]: 0.2.144 is installed~
-- [#xt3v]
+- ~[#xt3v]~
 - [#v819]
 - [#wy0y]
 - [#ynra]
@@ -158,7 +186,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog priority queue=prepend -->
-- [ ] [#xt3v] Path C (#qasm — agent-executable now, no live pane): implement the no-live-pane review items in priority order — queue-provenance cluster (#prompt-preempts-auto-queue, #queue-user-edit-overwrite, #jb-run-agent-doc-response-queue-contamination) -> Option-A fixes (#cancel-orphans-preflight-cycle, #exchange-prompt-dropped-on-merge, #duplicate-response-after-commit) -> closeout-guard hardening (#do-id-partial-closeout-state, #preset-item-id-collision-enforce, #queue-clear-unrun-items, #free-text-queue-skip-diagnostic) -> feature pair (#backlog-priority-attribute, #backlog-queue-sync-attribute) -> hygiene/UX (#stash-session-ttl-prune, #plugin-cleanup-menu-command, #clear-stops-running-process, #jb-stale-busy-idle-footer, #snrun, #4a6p, #nbsearch, #gscaccess).
 - [ ] [#v819] Path A (#jkvs — after Step 0): one consolidated live busy-pane verification session to batch-close ~11 live-verify items: #t41j, #jb-busy-queue-deadlock-live-verify, #jb-run-agent-doc-busy-feedback-live-verify, #route-drain-all-surface-live-verify, #codex-owned-pane-stop-hook-live-verify, #codex-owned-pane-prompt-miss-followups (2b/3), #codex-final-response-live-verify, #recovery-drift-apply-live-verify, #jb-load-tmux-window-verify, #j0k8, #stash-pane-promote-on-focus.
 - [ ] [#wy0y] Path B (#6cmx — after Step 0): one IPC/typing-corruption capture session with #com.github.btakita.agentdoc debug logging enabled to capture the setText payload, then repro #ipcfullprompt-recur2, #finalize-retry-ipc-response-duplication, #ipc-dup-tracking-double-merge, #adoc-queue-ipc-buffer-divergence, #duplicate-response-after-commit, #prompt-duplicated-while-typing, and the scaffold-dup set #zpc2 / #ipcaa-scaf / #submodule-response-commit-proof. Several convert from verify to one CURE commit once the payload is captured.
 <!-- /agent:backlog -->

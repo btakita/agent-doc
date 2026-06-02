@@ -55,7 +55,15 @@ That's why re-queuing `do [#manual-queue-head-loss]` won't produce an implementa
 I don't think it's useful for me to keep emitting audits into a pane that can't close the loop. Which way do you want to go?
 Still declined — and that re-confirms an important correction I owe you. Let me be precise about the actual gate.
 **Closeout:** uncommitted (`finalize` gated). No new audit this turn — `#manual-queue-head-loss` is already fully specified in the consolidated plan; the honest blocker is this pane's command-approval policy (now disentangled from the fixed contamination). Three plan edits still uncommitted and offered. Your call on unblock path 1 vs 2.
-<!-- agent:boundary:0ab842b2 -->
+
+### Re: struck #manual-queue-head-loss — acknowledged — opus-4-8
+
+Reaped. Its fix stays fully specified in `plan-lazily-rs-queued-prompt-patchback-miss.md` → "Shared Primitive" (the free-text queue-head provenance primitive that also closes `#lr-queue-patchback-miss`), ready for a binary-enabled pane or the toolchain actor.
+
+Standing state unchanged: the remaining queue (`#lr-head-8`, `#lr-wire-9`, `#lr-actor-10`, `#run-gated-review-items`) needs binary access this pane doesn't have. I'll keep handling read-only audits / plan edits / git here; implementation+`make check`+finalize routes elsewhere. Nothing else requested this turn.
+Single change: you struck `do [#manual-queue-head-loss]` (now also reaped from backlog). Acknowledgment only — no directive this turn.
+**Closeout:** acknowledgment only; nothing to commit. Three plan edits from earlier turns still uncommitted and offered (say "commit it"). Session-doc response uncommitted (`finalize` gated).
+<!-- agent:boundary:7c17bcd9 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -85,7 +93,7 @@ Error: authoritative actor generation 221 for tasks/agent-doc/agent-doc-bugs2.md
 ```
 #spec-test-build-install-commit-push
 ---
-- do [#manual-queue-head-loss]
+- ~do [#manual-queue-head-loss]~
 <!-- /agent:queue -->
 ###
 <!--

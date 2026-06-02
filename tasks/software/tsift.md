@@ -240,7 +240,17 @@ Verification passed:
 - GitHub Actions CI `26800161158` passed both live Convex acceptance and `clippy + test`
 
 No project `tmux-ci` target or tmux workflow exists in `src/tsift`; deterministic SimWorld coverage ran through `make check`. Remote CI annotations were the existing Node 20 action deprecation and optional live Convex configuration notes, not failures.
-<!-- agent:boundary:efbecd27 -->
+
+### Re: Can markdown support ast operations? — gpt-5
+
+Yes, for read/index/query operations; not yet for guarded semantic writes.
+
+`tsift` already has Markdown AST support through `tree-sitter-md`: `.md` and `.mdx` map to `Lang::Markdown`, the graph extractor parses Markdown, and the spec documents heading plus fenced-code-block extraction. That means Markdown can participate in AST-backed search/index surfaces, symbol extraction, lint/entity lookup, source windows, session projection, and graph evidence.
+
+For `edit-intents --apply`, Markdown should stay out of the current Rust/TS/JS/Python executor set until it has its own language contract and intent model. Markdown edits are document-structure operations, not source-code function/import operations, so the likely safe intents are things like `rename_heading`, `replace_section_body`, `insert_section`, `move_section`, `insert_list_item`, and `rewrite_code_fence`. Those would need tree-sitter validation, section-boundary tests, no-mutation refusal coverage, and temp-worktree verification just like the code-language executors.
+
+So the short answer is: Markdown AST operations are viable and partially present today for reads; Markdown semantic write operations are feasible but should be added as a separate contract-backed executor with Markdown-specific intents.
+<!-- agent:boundary:cb09a35b -->
 <!-- /agent:exchange -->
 ###
 <!--

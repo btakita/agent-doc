@@ -34,60 +34,12 @@ queue_active: false
 <!-- agent:exchange -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260602-041943.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260602-043228.md`*
 
 Compacted content:
-- Archived 6 response topic(s): set_cell_invalidation parallelization next steps; #pinv; Phase 3, 4, and 6 status; 3 more
+- Archived 1 response topic(s): release + publish
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-❯ release + publish
-
-### Re: release + publish — gpt-5
-
-Released and published `lazily v0.5.0`.
-
-I did not try to republish `0.4.0`: crates.io already had `lazily = "0.4.0"`, and the current `main` contained substantial post-`v0.4.0` work, including the additive public `instrumentation` feature/API. I bumped the current release to `0.5.0`, published it, and created the GitHub release.
-
-Release artifacts:
-
-- crates.io now reports `lazily = "0.5.0"`.
-- GitHub release: https://github.com/btakita/lazily-rs/releases/tag/v0.5.0
-- `src/lazily-rs` commit: `9aa03e0` (`chore: release v0.5.0`), pushed to `origin/main`.
-- Tag: `v0.5.0`, pushed to origin.
-- Superproject commit: `324f948b5` (`chore: release lazily v0.5.0`), pushed to `agent-loop` `origin/main`.
-- Dependent lockfile commit: `src/agent-doc` `639c93e6` (`chore: update lazily lockfile`), pushed to `origin/20260422/codex-agent-backend`.
-
-Changed paths:
-
-- `src/lazily-rs/Cargo.toml`
-- `src/lazily-rs/Cargo.lock`
-- `src/lazily-rs/README.md`
-- `src/agent-doc/Cargo.lock` (path dependency lockfile update from `lazily 0.4.0` to `0.5.0`)
-- Superproject gitlinks for `src/lazily-rs` and `src/agent-doc`
-
-Verification run:
-
-- `cargo test`
-- `cargo test --features tokio`
-- `cargo test --features loom --test thread_safe_loom`
-- `cargo build --all-targets --all-features`
-- `cargo clippy --all-targets --all-features -- -D warnings`
-- `cargo fmt --check`
-- `python3 scripts/update-benchmark-results.py --check`
-- `git diff --check`
-- `cargo bench --no-run`
-- `cargo bench --features instrumentation --no-run`
-- `cargo install --path . --example instrumentation_profile --features instrumentation --force`
-- `cargo publish --dry-run --allow-dirty`
-- clean `cargo publish --dry-run`
-- `cargo publish`
-- root `make check`
-- `cargo search lazily --limit 1`
-- `gh release view v0.5.0 --json url,tagName,isDraft,isPrerelease,publishedAt`
-
-Notes: `src/lazily-rs` has no `make check` target, and `gh run list --workflow CI --limit 1` found no workflow named `CI`; `gh workflow list` for `lazily-rs` returned no workflows, while the root repo only listed `Agent Doc`. Cargo build/package commands emitted the existing unused workspace patch warnings for `agent-kit`, `tagpath`, and `tmux-router`. Root `make check` passed with pre-existing warnings in other subprojects. The unrelated dirty `src/agent-doc/src/session_actor_cmd.rs` remains untouched.
-
-Confidence: high. Escalation: none.
-<!-- agent:boundary:de71bbf2 -->
+<!-- agent:boundary:9db8e0e5 -->
 <!-- /agent:exchange -->
 
 ## Queue

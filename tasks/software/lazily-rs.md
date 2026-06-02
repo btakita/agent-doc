@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 
@@ -262,7 +262,54 @@ CI / repo state:
 - No commit or push was needed for `src/lazily-rs`; this was a benchmark-only queue item.
 
 The benchmark snapshot is consistent with the `#lazybatch3` outcome: the read-mostly sidecar keeps hot batched `get_refresh` acquisitions very low, and the important 8-/16-worker raw contention numbers remain below the older accepted README baselines.
-<!-- agent:boundary:7e35774a -->
+
+### Re: release + publish — gpt-5
+
+> **Queue prompt:**
+>
+> release + publish
+
+
+Released and published `lazily` as `0.5.1`.
+
+I bumped from `0.5.0` because crates.io already had `0.5.0`, refreshed the generated benchmark/instrumentation README section, and committed the release files in `src/lazily-rs`:
+- `Cargo.toml`
+- `Cargo.lock`
+- `README.md`
+
+Submodule release:
+- commit `c03ecc2 chore: release v0.5.1`
+- tag `v0.5.1`
+- pushed `main` and `v0.5.1`
+- `cargo search lazily --limit 1` now reports `lazily = "0.5.1"`
+
+Parent repo:
+- committed and pushed the submodule gitlink update as `d344b962e chore: update lazily-rs submodule for v0.5.1`
+- left existing `tasks/software/lazily-rs.done.md` working tree change unstaged and untouched
+
+Verification:
+- `python3 scripts/update-benchmark-results.py --check --no-run`
+- `cargo fmt`
+- `cargo test`
+- `cargo test --features instrumentation`
+- `cargo test --features tokio`
+- `cargo test --features loom --test thread_safe_loom`
+- `cargo check`
+- `cargo build`
+- `cargo clippy`
+- `cargo publish --dry-run` after committing release files
+- `cargo publish`
+
+CI/tmux:
+- this repo has no workflow named `CI`
+- GitHub `Agent Doc` run `26801764683`: `tmux-ci` passed; `check` failed on the existing parent clippy lint in `agent-doc-orchestration/src/gc.rs:275` (`sort_by_key` suggestion), outside the release path
+
+Current state:
+- `src/lazily-rs` is clean on `main...origin/main`
+- parent repo is clean for `src/lazily-rs`; only `tasks/software/lazily-rs.done.md` remains modified from earlier archive handling
+
+Confidence: high. Escalation: none; crates.io publish used the existing cargo authentication.
+<!-- agent:boundary:f56c9014 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -270,13 +317,7 @@ The benchmark snapshot is consistent with the `#lazybatch3` outcome: the read-mo
 
 ## Queue
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~[#lazybatch1]~
-- ~[#lazybatch2]~
-- ~[#lazybatch3]~
-- ~Run performance benchmarks~
-- release + publish
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

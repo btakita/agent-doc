@@ -2026,6 +2026,43 @@ Starting codex...
 }
 
 #[test]
+fn ready_prompt_candidate_accepts_claude_idle_footer_after_stale_busy_scrollback() {
+    let harness = HarnessConfig::claude();
+    let content = "\
+● Running 1 shell command…
+
+✶ Tempering… (2m 21s · ↓ 9.7k tokens · thinking with high effort)
+
+  ❯ /clear
+
+────────────────────────────────────────────────────────────────────────────────── Check subagent status and deadlock ──
+❯ Press up to edit queued messages
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Opus 4.8 ctx:30% ~/work/btakita/agent-loop main brian@host
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents
+";
+    assert!(
+        ready_prompt_candidate(content, &harness).is_some(),
+        "a later Claude dispatch-ready footer should supersede stale busy scrollback"
+    );
+}
+
+#[test]
+fn ready_prompt_candidate_rejects_claude_active_spinner_footer() {
+    let harness = HarnessConfig::claude();
+    let content = "\
+✶ Generating… (3s · esc to interrupt)
+❯
+  Opus 4.8 ctx:40% ~/work/btakita/agent-loop main brian@host
+  ⏵⏵ bypass permissions on · 1 shell
+";
+    assert!(
+        ready_prompt_candidate(content, &harness).is_none(),
+        "an active Claude turn must remain blocked when the latest footer is not dispatch-ready"
+    );
+}
+
+#[test]
 fn ready_prompt_candidate_accepts_opencode_status_without_proof_output() {
     let harness = HarnessConfig::opencode();
     let content = "\

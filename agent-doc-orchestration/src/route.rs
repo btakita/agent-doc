@@ -8329,15 +8329,19 @@ fn wait_for_agent_ready_outcome(
 }
 
 fn ready_prompt_candidate(content: &str, harness: &HarnessConfig) -> Option<String> {
+    let latest_dispatch_ready_prompt = harness
+        .last_prompt_candidate(content)
+        .filter(|line| harness.is_dispatch_ready_prompt_line(line));
+    if harness.binary == "claude" && latest_dispatch_ready_prompt.is_some() {
+        return latest_dispatch_ready_prompt;
+    }
     if harness.has_busy_cue(content) {
         return None;
     }
     if harness.binary == "opencode" && harness.is_idle_chrome_only_output(content) {
         return Some("opencode idle status chrome".to_string());
     }
-    harness
-        .last_prompt_candidate(content)
-        .filter(|line| harness.is_dispatch_ready_prompt_line(line))
+    latest_dispatch_ready_prompt
 }
 
 fn truncate_log_line(text: &str, max_chars: usize) -> String {

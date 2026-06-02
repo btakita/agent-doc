@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -92,7 +92,11 @@ Commits:
 
 Escalation: none.
 Confidence: high.
-<!-- agent:boundary:6f3b43aa -->
+
+### Re: #astspansearch closeout recovery — gpt-5
+
+Closeout recovery note: the `#astspansearch` implementation response was already committed and the item was marked done; this write reopens the binary-owned document closeout after the IPC boundary/session-check drift. No additional code changes were made in this repair write. The remaining active queue head is `#astqueryfacets`.
+<!-- agent:boundary:14468cbf -->
 <!-- /agent:exchange -->
 ###
 <!--

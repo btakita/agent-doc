@@ -113,7 +113,54 @@ So this is not the right moment to implement Phases 3, 4, or 6 from scratch; the
 Commands used: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `tsift status`, targeted `rg`/`sed` inspection, web lookup for current docs/registry context, `cargo publish --dry-run`, and `cargo info lazily --registry crates-io`.
 
 Verification: publish dry run and crates.io registry metadata check only; no code changed. Changed paths: session document status/exchange only, via `agent-doc finalize`. Escalation: none.
-<!-- agent:boundary:17f2d720 -->
+
+### Re: #pben — gpt-5
+
+> **Queue prompt:**
+>
+> [#pben]
+
+
+Completed `#pben`.
+
+Added a dedicated `set_cell_invalidation` Criterion benchmark group that isolates changed-cell invalidation from dependent reads/recompute work:
+
+- `high_fan_out / 512`
+- `same_slot_contention / 1/2/4/8/16`
+- `independent_slot_contention / 1/2/4/8/16`
+- `batched_write_bursts / 1/2/4/8/16`
+
+Added matching instrumentation profile rows in `examples/instrumentation_profile.rs` with assertions that the `set_cell_invalidation` lock-site bucket is populated, extended the benchmark report generator to sort and print lock attribution for those rows, updated `SPEC.md` and spec-compliance checks, and regenerated the README benchmark section with the filtered Criterion estimates plus fresh instrumentation CSV output.
+
+Commits prepared locally:
+
+- `71f2f2a` in `src/lazily-rs`: `bench: isolate set_cell invalidation profiles`
+- `95ffd81ba` in `agent-loop`: `chore: update lazily-rs benchmarks`
+
+Push will run after this binary-owned document commit so the session document is included in the superproject push.
+
+Verification:
+
+- `cargo fmt`
+- `cargo bench --features instrumentation --no-run`
+- `cargo run --example instrumentation_profile --features instrumentation --quiet`
+- `cargo bench --features instrumentation set_cell_invalidation`
+- `python3 scripts/update-benchmark-results.py --no-run`
+- `python3 scripts/update-benchmark-results.py --check`
+- `git diff --check`
+- `cargo test`
+- `cargo test --features tokio`
+- `cargo test --features loom --test thread_safe_loom`
+- `cargo build --all-targets --all-features`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo bench --no-run`
+- `cargo install --path . --example instrumentation_profile --features instrumentation --force`
+- `cargo publish --dry-run --allow-dirty`
+
+`make check` remains unavailable in `src/lazily-rs` because there is no `check` target. GitHub Actions CI remains unavailable: `gh run list --workflow CI --limit 1` could not find a `CI` workflow, and `gh workflow list` returned no workflows, so there was no tmux CI leg to inspect. Cargo build/bench/install/publish emitted only the existing unused workspace patch warnings for `agent-kit`, `tagpath`, and `tmux-router`.
+
+Changed paths: `src/lazily-rs/README.md`, `src/lazily-rs/SPEC.md`, `src/lazily-rs/benches/context.rs`, `src/lazily-rs/examples/instrumentation_profile.rs`, `src/lazily-rs/scripts/update-benchmark-results.py`, `src/lazily-rs/tests/spec_compliance.rs`, and the superproject `src/lazily-rs` submodule pointer. Escalation: none.
+<!-- agent:boundary:f18525b7 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -122,7 +169,7 @@ Verification: publish dry run and crates.io registry metadata check only; no cod
 preset #spec-test-build-install-commit-push
 - ~[#pinv]~
 - ~Are Phase 3, 4, 6 implemented? If not, is now a good time to implement them?~
-- [#pben]
+- ~[#pben]~
 - [#ploom]
 - [#pshrd]
 <!-- /agent:queue -->
@@ -130,7 +177,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#pben] Add Criterion/instrumentation profiles that isolate set_cell_invalidation on high fan-out, same-slot contention, independent-slot contention, and batched write bursts before and after the parallel prototype.
 - [ ] [#ploom] Add Loom or Shuttle coverage for parallel invalidation invariants: duplicate paths mark each slot once, effects coalesce once, in-flight recompute stale results are discarded, and batches flush after the outermost update.
 - [ ] [#pshrd] Evaluate sharded or versioned graph storage only after #pinv and #pben show the remaining bottleneck is the global mutex rather than recursive traversal or duplicate dirty marking.
 <!-- /agent:backlog -->

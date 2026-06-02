@@ -281,3 +281,6 @@
 - 2026-06-02 [#mdsectionedits] Markdown section edit executor: rename_heading, replace_section_body, insert_section, and move_section with tree-sitter validation.
 - 2026-06-02 [#mdblockedits] Markdown block edit executor: insert_list_item and rewrite_code_fence while preserving syntax and refusing ambiguous targets.
 - 2026-06-02 [#mdverify] Markdown semantic-write verification coverage: dry-run/apply no-mutation tests, temp-worktree verify gates, source-read impact summaries, and refusal regressions.
+- 2026-06-02 [#mdastapi] Promote Markdown AST to a first-class JSON/envelope API: stable node handles, hierarchy/section path, byte and body spans, block kind metadata, list/fence attributes, and expansion commands for source-read/symbol-read/edit-intents consumers.
+- 2026-06-02 [#mdparsecache] Cache and reuse per-file Markdown parse/extract results across edit-intents planning/apply and source-read enrichment; add large-document benchmarks and phase timings for section/block lookup hot paths.
+- 2026-06-02 [#mdtokens] Add token-budgeted Markdown projections: outline-first section/block previews, selected-node expansion handles, and measured token-savings fixtures for session-review/context-pack instead of replaying raw markdown bodies.

@@ -103,7 +103,26 @@ The queue-provenance cluster + these two items are now either implemented-and-te
 
 #### Shipped
 Submodule `f8e84282`, superproject pointer `964645d33`.
-<!-- agent:boundary:eebca9a8 -->
+
+### Re: queue churn — #ynra fixed — opus-4-8
+
+Fixed `#ynra` (the real, agent-doable bug in the queue) — which is the exact churn you've been watching this session: the `[preflight] queue: auto-struck already-resolved head prompt … source=done` line every cycle.
+
+#### Root cause
+Preflight's backlog→queue sync minted `do [#id]` for every active backlog `[ ]` item, then a later pass struck any queue head whose id was in `agent:done`. But `done_ids` was computed **after** the sync, so a lingering active backlog bullet whose id is also archived in `agent:done` got minted → struck → re-minted next cycle. Forever.
+
+#### Fix (`#ynra`)
+`agent:done` ids are now collected **once before** the backlog→queue sync and excluded from the minted set (and reused by the strike pass — `agent:done` isn't touched by queue maintenance). Completed refs are never re-injected. Regression `run_queue_maintenance_excludes_done_ids_from_backlog_sync`; `make check` green; both binaries rebuilt + installed. Submodule `e43516c9`, pointer `365e7890a`. Marked `#ynra` done.
+
+#### The queue is now exhausted of agent work
+What remains in `agent:queue auto`:
+- `#xt3v` (head) — Path C implementation, **already done/gated** (audited last cycle); nothing to implement.
+- `#v819`, `#wy0y` — **operator-only** live-IDE verification/capture sessions; I can't drive them.
+
+So the auto-loop has nothing actionable left and will just keep re-presenting `#xt3v`. **Recommend halting it**: add a `- --- stop` line at the top of `agent:queue`, or set `queue_active: false` in frontmatter, or strike the three remaining items. Then the live-verify work (Paths A/B + the now-implemented Path C guards) is yours to run at the IDE.
+
+I paused the auto-loop rather than spin on the moot head.
+<!-- agent:boundary:fc5fc726 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -142,7 +161,6 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 - [ ] [#xt3v] Path C (#qasm — agent-executable now, no live pane): implement the no-live-pane review items in priority order — queue-provenance cluster (#prompt-preempts-auto-queue, #queue-user-edit-overwrite, #jb-run-agent-doc-response-queue-contamination) -> Option-A fixes (#cancel-orphans-preflight-cycle, #exchange-prompt-dropped-on-merge, #duplicate-response-after-commit) -> closeout-guard hardening (#do-id-partial-closeout-state, #preset-item-id-collision-enforce, #queue-clear-unrun-items, #free-text-queue-skip-diagnostic) -> feature pair (#backlog-priority-attribute, #backlog-queue-sync-attribute) -> hygiene/UX (#stash-session-ttl-prune, #plugin-cleanup-menu-command, #clear-stops-running-process, #jb-stale-busy-idle-footer, #snrun, #4a6p, #nbsearch, #gscaccess).
 - [ ] [#v819] Path A (#jkvs — after Step 0): one consolidated live busy-pane verification session to batch-close ~11 live-verify items: #t41j, #jb-busy-queue-deadlock-live-verify, #jb-run-agent-doc-busy-feedback-live-verify, #route-drain-all-surface-live-verify, #codex-owned-pane-stop-hook-live-verify, #codex-owned-pane-prompt-miss-followups (2b/3), #codex-final-response-live-verify, #recovery-drift-apply-live-verify, #jb-load-tmux-window-verify, #j0k8, #stash-pane-promote-on-focus.
 - [ ] [#wy0y] Path B (#6cmx — after Step 0): one IPC/typing-corruption capture session with #com.github.btakita.agentdoc debug logging enabled to capture the setText payload, then repro #ipcfullprompt-recur2, #finalize-retry-ipc-response-duplication, #ipc-dup-tracking-double-merge, #adoc-queue-ipc-buffer-divergence, #duplicate-response-after-commit, #prompt-duplicated-while-typing, and the scaffold-dup set #zpc2 / #ipcaa-scaf / #submodule-response-commit-proof. Several convert from verify to one CURE commit once the payload is captured.
-- [ ] [#ynra] [recommended][agent-doc-bug] Queue re-mints resolved `do [#…]` items (#na3x/#yqkg/#t5vx) that already live in agent:done; preflight auto-strikes them each cycle (source=done) and drains the queue, but they keep reappearing. File/fix against agent-doc so completed queue refs are not re-injected into agent:queue.
 <!-- /agent:backlog -->
 
 ## Review

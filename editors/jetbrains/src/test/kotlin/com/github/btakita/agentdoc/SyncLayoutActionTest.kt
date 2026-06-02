@@ -335,6 +335,43 @@ class SyncLayoutActionTest {
         )
     }
 
+    @Test
+    fun `build columns groups windows by x into separate columns`() {
+        // Two editor windows at distinct x positions → a 2-column (2-editor-pane)
+        // layout, which sync mirrors as 2 editor panes + 1 agent-doc pane.
+        val columns = LayoutDetector.buildColumnsFromSnapshots(
+            listOf(
+                LayoutDetector.LayoutWindowSnapshot(x = 0, y = 0, file = "left.md"),
+                LayoutDetector.LayoutWindowSnapshot(x = 900, y = 0, file = "right.md"),
+            )
+        )
+
+        assertEquals(
+            listOf(
+                LayoutColumn(listOf("left.md")),
+                LayoutColumn(listOf("right.md")),
+            ),
+            columns,
+        )
+    }
+
+    @Test
+    fun `build columns merges windows within x tolerance into one column`() {
+        // Stacked windows (same x, different y) stay a single column → one editor
+        // pane, so navigation does not spuriously grow the tmux layout.
+        val columns = LayoutDetector.buildColumnsFromSnapshots(
+            listOf(
+                LayoutDetector.LayoutWindowSnapshot(x = 4, y = 300, file = "bottom.md"),
+                LayoutDetector.LayoutWindowSnapshot(x = 0, y = 0, file = "top.md"),
+            )
+        )
+
+        assertEquals(
+            listOf(LayoutColumn(listOf("top.md", "bottom.md"))),
+            columns,
+        )
+    }
+
     private class FakeVirtualFile(private val rawPath: String) :
         com.intellij.testFramework.LightVirtualFile(
             java.io.File(rawPath).name,

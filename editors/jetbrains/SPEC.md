@@ -99,6 +99,16 @@ Two strategies for detecting the file's position in the editor split:
 - Enable debug output: `Help > Diagnostic Tools > Debug Log Settings` → add `#com.github.btakita.agentdoc`.
 - Output appears in `idea.log`. No temp files.
 
+#### Layout sync diagnostics
+
+Navigation/tab-switch layout decisions are traceable end to end across these prefixes:
+
+- `[layout-detect]` (`LayoutDetector.detectEditorLayout`) — the **editor-side input** to every sync. Logs the editor window count, each window's on-screen position and selected `.md` file (`x=… y=… file=…`), and the resulting column grouping (e.g. `grouped into 2 column(s): [left.md] | [right.md]`). This is the line that explains *why* a navigation produced an N-editor-pane layout: a 2-column grouping is what makes sync provision two editor panes plus the agent-doc pane. Detection failures are logged via `LOG.warn` instead of being silently swallowed.
+- `[layout-sync]` (`EditorTabSyncListener`) — `selectionChanged`, immediate `focus-fast`, the full `exec:` command (including the `--col` editor-layout args derived from `[layout-detect]`), the `result:` line, plus debounce/guard/deferred/timeout/generation diagnostics.
+- `[sync:PHASE]` (tmux-router reconciler, stderr; merged into the `[layout-sync] result:` line because `runCommandWithTimeout` redirects stderr) — `GLOBAL` window+pane state at sync-start/sync-end and `SELECT`/`ATTACH`/`DETACH`/`REORDER`/`VERIFY`/`SWAP` phases. The `DETACH` phase names the reason each pane is kept or stashed (last pane in window, protected busy pane, registered to another session, stashed/broke, focus-steal), which explains *why* an extra pane survived into the visible window.
+
+Binary auto-start forensics also land in `/tmp/agent-doc-sync.log` and the per-document `.agent-doc/logs/ops.log` (`[sync] auto-started %XX for <file>` plus batch summaries and per-phase latency).
+
 ### Dynamic Lifecycle
 
 - `PluginLifecycleListener` handles `projectOpened`/`projectClosing`.

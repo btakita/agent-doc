@@ -367,6 +367,7 @@ data class EditorLayout(val columns: List<LayoutColumn>)
  * layout stable regardless of focus.
  */
 object LayoutDetector {
+    private val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(LayoutDetector::class.java)
     private const val COLUMN_X_TOLERANCE_PX = 8
 
     internal data class LayoutWindowSnapshot(
@@ -383,10 +384,17 @@ object LayoutDetector {
         try {
             val managerEx = FileEditorManagerEx.getInstanceEx(project)
             val windows = managerEx.windows
-            if (windows.size < 2) return null
+            if (windows.size < 2) {
+                LOG.info("[layout-detect] single editor window (count=${windows.size}); no split layout to mirror")
+                return null
+            }
 
             val splitters = managerEx.splitters
-            val splittersComponent = splitters as? java.awt.Component ?: return null
+            val splittersComponent = splitters as? java.awt.Component
+            if (splittersComponent == null) {
+                LOG.info("[layout-detect] ${windows.size} editor windows but splitters component unavailable; cannot resolve columns")
+                return null
+            }
 
             val snapshots = windows.map { window ->
                 val file = window.selectedFile?.takeIf { it.name.endsWith(".md") }?.let {
@@ -402,14 +410,33 @@ object LayoutDetector {
                     file = file,
                 )
             }
-            if (snapshots.none { it.file != null }) return null
+            LOG.info(
+                "[layout-detect] ${windows.size} editor window(s): " +
+                    snapshots.joinToString(", ") { "x=${it.x} y=${it.y} file=${it.file ?: "<none>"}" }
+            )
+            if (snapshots.none { it.file != null }) {
+                LOG.info("[layout-detect] no .md file selected in any editor window; no layout to mirror")
+                return null
+            }
 
             val columns = buildColumnsFromSnapshots(snapshots)
+            LOG.info(
+                "[layout-detect] grouped into ${columns.size} column(s): " +
+                    columns.joinToString(" | ") { col ->
+                        "[" + col.files.joinToString(", ").ifEmpty { "<empty>" } + "]"
+                    }
+            )
 
             // Return layout if at least 2 columns exist (even if some are empty).
             // Empty columns tell sync to leave that tmux pane position alone.
-            return if (columns.size >= 2) EditorLayout(columns) else null
-        } catch (_: Exception) {
+            return if (columns.size >= 2) {
+                EditorLayout(columns)
+            } else {
+                LOG.info("[layout-detect] fewer than 2 columns after grouping; treating as single-column layout")
+                null
+            }
+        } catch (e: Exception) {
+            LOG.warn("[layout-detect] editor layout detection failed: ${e.message}", e)
             return null
         }
     }

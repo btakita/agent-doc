@@ -509,6 +509,12 @@ enum Commands {
         /// Explicit tmux pane ID — overrides session lookup
         #[arg(long)]
         pane: Option<String>,
+        /// Defer stash-pane reparenting to the sync reconciler instead of
+        /// additively promoting on focus. Editor-navigation focus sets this so
+        /// the promote does not race the follow-up sync and grow the window to
+        /// an extra pane (#jb-nav-3pane-promote-swap).
+        #[arg(long)]
+        no_stash_promote: bool,
     },
     /// Arrange tmux panes to mirror editor split layout
     Layout {
@@ -1767,8 +1773,16 @@ fn main() -> anyhow::Result<()> {
             force,
             isolate,
         ),
-        Commands::Focus { file, pane } => {
-            agent_doc_orchestration::focus::run(&file, pane.as_deref())
+        Commands::Focus {
+            file,
+            pane,
+            no_stash_promote,
+        } => {
+            if no_stash_promote {
+                agent_doc_orchestration::focus::run_no_promote(&file, pane.as_deref())
+            } else {
+                agent_doc_orchestration::focus::run(&file, pane.as_deref())
+            }
         }
         Commands::Layout {
             files,

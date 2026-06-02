@@ -51,8 +51,10 @@ class SyncLayoutActionTest {
 
     @Test
     fun `focus command targets a single document without sync args`() {
+        // Navigation focus defers stash-pane reparenting to the reconciler
+        // (#jb-nav-3pane-promote-swap) via --no-stash-promote.
         assertEquals(
-            listOf("agent-doc", "focus", "tasks/one.md"),
+            listOf("agent-doc", "focus", "tasks/one.md", "--no-stash-promote"),
             SyncLayoutAction.buildFocusCommand(
                 agentDoc = "agent-doc",
                 focusedFile = "tasks/one.md",

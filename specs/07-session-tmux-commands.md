@@ -134,6 +134,17 @@ This file covers the session-bound command surface: pane ownership, routing, syn
   single-pane scoped (`sync::promote_pane_to_agent_doc_window`): a failed move is
   logged and focus still selects the pane in place. It does not run full stash
   consolidation. Keep this aligned in `focus.rs`, `sync.rs`, and this spec.
+- Navigation focus defers promotion (`#jb-nav-3pane-promote-swap`): `agent-doc
+  focus <FILE> --no-stash-promote` selects the resolved pane but skips the
+  additive `join-pane` promotion, leaving stash reparenting to the debounced
+  `sync` reconcile that follows editor navigation. Without this, the focus-path
+  promote and the reconcile race on a 1-in/1-out tab switch: the promote joins
+  the incoming pane while the reconcile (operating on a stale snapshot, or unable
+  to stash a busy outgoing pane) does not remove the displaced pane, growing the
+  `agent-doc` window to an extra pane (the "3 panes for a 2-column editor"
+  symptom). Editor plugins emit `--no-stash-promote` for tab-to-pane navigation
+  focus; standalone `agent-doc focus` keeps promotion. Keep this aligned in
+  `focus.rs`, the editor `buildFocusCommand`, and this spec.
 - Editor automatic tab-to-pane sync must not use `focus` as a substitute for
   passive `sync --no-autostart`; beyond the single-pane stash promotion above,
   focus does not own full stash consolidation, safe passive replacement, or
@@ -177,6 +188,7 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 - Once a live pane is reserved for one file during the pass, later files in the same pass must treat it as unavailable.
 - The auto-start pre-sync pass must make at most one pane decision per document. The same document may appear in more than one requested column (column memory, focus + column overlap, repeated layout requests), but its candidate set is deduped by path (first-seen order) before resolution. Without this, a document requested twice can cold-start a second pane on its second occurrence — before the first freshly-provisioned pane has recorded a registry / session-log binding that the second occurrence's lookup or `find_associated_panes` could see — producing the duplicate-editor-pane regression ("3 tmux panes with 2 editor panes"). This complements `find_associated_panes` (which dedups against already-discoverable live panes) by closing the same-run, not-yet-discoverable window.
 - If a registered pane is stashed, sync must rescue it back into the visible `agent-doc` window rather than treating the stash copy as disposable.
+- Protected outgoing on a 1-in/1-out reconcile preserves layout (`#jb-nav-3pane-promote-swap`): when the reconciler's SWAP fast path detects exactly one pane to attach and one to detach, and the outgoing pane is protected (busy / `protect_pane`), it must NOT fall through to ATTACH (join the incoming) while DETACH skips the protected outgoing pane — that grows the window to N+1 panes. Instead it preserves the current layout, leaves the incoming pane in its stash, and defers; the caller's deferred-retry resurfaces it once the busy pane frees. Keep this aligned in the `tmux-router` reconciler (`sync.rs`) and this spec.
 - Manual/full sync is also the operator repair surface behind editor
   `Sync Tmux Layout`: before reconciliation it runs `repair_layout` for the
   inferred target session, so the visible layout is repaired to `0:agent-doc`,

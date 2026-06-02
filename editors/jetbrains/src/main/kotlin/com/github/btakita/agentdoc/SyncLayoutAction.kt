@@ -241,7 +241,7 @@ class SyncLayoutAction : AnAction() {
         internal fun buildFocusCommand(
             agentDoc: String,
             focusedFile: String,
-        ): List<String> = listOf(agentDoc, "focus", focusedFile)
+        ): List<String> = listOf(agentDoc, "focus", focusedFile, "--no-stash-promote")
 
         /**
          * Syncs tmux layout to match the IDE editor split. Can be called from

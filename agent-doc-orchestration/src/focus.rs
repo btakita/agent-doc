@@ -138,19 +138,43 @@ pub fn run(file: &Path, pane: Option<&str>) -> Result<()> {
     run_with_tmux(file, pane, &Tmux::default_server())
 }
 
+/// Like [`run`] but defers stash-pane reparenting to the sync reconciler
+/// (`#jb-nav-3pane-promote-swap`). Editor-navigation focus uses this so the
+/// additive `promote_pane_to_agent_doc_window` join does not race the reconcile
+/// and grow the window to an extra pane; the debounced `sync` that follows owns
+/// the atomic in/out transition. Standalone `agent-doc focus` keeps promotion.
+pub fn run_no_promote(file: &Path, pane: Option<&str>) -> Result<()> {
+    run_with_tmux_opts(file, pane, &Tmux::default_server(), true)
+}
+
 /// Promote a live-owner pane out of the stash window (best-effort) and then
 /// select it, so editor focus surfaces the session in the working agent-doc
 /// layout instead of selecting it in place inside the stash
 /// (`#stash-pane-promote-on-focus`). tmux preserves the pane id across the
 /// reparent, so we select the same pane id either way.
-fn promote_and_select(tmux: &Tmux, pane: &str) -> Result<()> {
-    if let Err(e) = crate::sync::promote_pane_to_agent_doc_window(tmux, pane) {
+///
+/// When `no_stash_promote` is set the additive promote is skipped and we only
+/// select the pane, leaving any stash reparenting to the sync reconciler
+/// (`#jb-nav-3pane-promote-swap`).
+fn promote_and_select(tmux: &Tmux, pane: &str, no_stash_promote: bool) -> Result<()> {
+    if !no_stash_promote
+        && let Err(e) = crate::sync::promote_pane_to_agent_doc_window(tmux, pane)
+    {
         eprintln!("[focus] stash promotion check failed for {}: {}", pane, e);
     }
     tmux.select_pane(pane)
 }
 
 pub fn run_with_tmux(file: &Path, pane_override: Option<&str>, tmux: &Tmux) -> Result<()> {
+    run_with_tmux_opts(file, pane_override, tmux, false)
+}
+
+pub fn run_with_tmux_opts(
+    file: &Path,
+    pane_override: Option<&str>,
+    tmux: &Tmux,
+    no_stash_promote: bool,
+) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
@@ -158,7 +182,7 @@ pub fn run_with_tmux(file: &Path, pane_override: Option<&str>, tmux: &Tmux) -> R
     // If an explicit pane was provided, use it directly
     if let Some(p) = pane_override {
         if tmux.pane_alive(p) {
-            promote_and_select(tmux, p)?;
+            promote_and_select(tmux, p, no_stash_promote)?;
             eprintln!("Focused pane {} ({})", p, file.display());
             return Ok(());
         } else {
@@ -182,7 +206,7 @@ pub fn run_with_tmux(file: &Path, pane_override: Option<&str>, tmux: &Tmux) -> R
         // it still owns this document. After a reroute / fresh-restart the
         // session may have moved; defer to the live owner when one exists.
         if let Some(owner) = live_owner_override(file, &session_id, &actor_pane, tmux) {
-            promote_and_select(tmux, &owner)?;
+            promote_and_select(tmux, &owner, no_stash_promote)?;
             eprintln!(
                 "Focused live-owner pane {} (stale actor projection {}) ({})",
                 owner,
@@ -191,7 +215,7 @@ pub fn run_with_tmux(file: &Path, pane_override: Option<&str>, tmux: &Tmux) -> R
             );
             return Ok(());
         }
-        promote_and_select(tmux, &actor_pane)?;
+        promote_and_select(tmux, &actor_pane, no_stash_promote)?;
         eprintln!("Focused pane {} ({})", actor_pane, file.display());
         return Ok(());
     }
@@ -203,7 +227,7 @@ pub fn run_with_tmux(file: &Path, pane_override: Option<&str>, tmux: &Tmux) -> R
             // owns the document — its owner process may be gone while the live
             // session runs in another pane. Prefer the provable live owner.
             if let Some(owner) = live_owner_override(file, &session_id, &pane_id, tmux) {
-                promote_and_select(tmux, &owner)?;
+                promote_and_select(tmux, &owner, no_stash_promote)?;
                 eprintln!(
                     "Focused live-owner pane {} (stale registry pane {}) ({})",
                     owner,
@@ -212,7 +236,7 @@ pub fn run_with_tmux(file: &Path, pane_override: Option<&str>, tmux: &Tmux) -> R
                 );
                 return Ok(());
             }
-            promote_and_select(tmux, &pane_id)?;
+            promote_and_select(tmux, &pane_id, no_stash_promote)?;
             eprintln!("Focused pane {} ({})", pane_id, file.display());
             Ok(())
         }
@@ -222,7 +246,7 @@ pub fn run_with_tmux(file: &Path, pane_override: Option<&str>, tmux: &Tmux) -> R
             if let Some(owner) = crate::sync::find_live_owner_pane_quiet(tmux, file, &session_id)
                 .filter(|owner| tmux.pane_alive(owner))
             {
-                promote_and_select(tmux, &owner)?;
+                promote_and_select(tmux, &owner, no_stash_promote)?;
                 eprintln!(
                     "Focused live-owner pane {} (registered pane {} is dead) ({})",
                     owner,
@@ -239,7 +263,7 @@ pub fn run_with_tmux(file: &Path, pane_override: Option<&str>, tmux: &Tmux) -> R
             if let Some(owner) = crate::sync::find_live_owner_pane_quiet(tmux, file, &session_id)
                 .filter(|owner| tmux.pane_alive(owner))
             {
-                promote_and_select(tmux, &owner)?;
+                promote_and_select(tmux, &owner, no_stash_promote)?;
                 eprintln!(
                     "Focused live-owner pane {} (no registry entry) ({})",
                     owner,

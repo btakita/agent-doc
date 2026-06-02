@@ -31,71 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260602-185822.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260602-194853.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #next-steps
+- Archived 2 response topic(s): #mdastapi; #mdtokens
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
-### Re: #mdastapi — gpt-5
-
-> **Queue prompt:**
->
-> [#mdparsecache]
-
-
-> **Queue prompt:**
->
-> [#mdastapi]
-
-
-Completed `#mdastapi`.
-
-Implemented `tsift markdown-ast` as a first-class Markdown JSON/envelope projection with stable `mdast-*` node handles plus `span-*` bridge handles, hierarchy and section paths, byte/body spans, heading/list/fence metadata, and node/source/edit expansion commands. Wired Markdown `source-read` and Markdown `symbol-read` to surface `markdown-ast` follow-ups, including `symbol-read` to `markdown-ast --node <span-*>`.
-
-Updated `SPEC.md` and added compiled CLI coverage for the new command, source-read expansion, and symbol-read span expansion.
-
-Commits pushed:
-- `btakita/tsift@1b141b6` `feat: add markdown ast projection`
-- `btakita/agent-loop@7e82414e1` `chore: update tsift submodule`
-
-Verification:
-- `cargo check -p tsift-cli` passed.
-- `cargo test -p tsift-cli markdown` passed.
-- `make check` passed after the final edit.
-- `cargo build --workspace` passed.
-- `cargo install --path . --force` passed.
-- Installed smoke test passed: `tsift --envelope markdown-ast SPEC.md --path . --budget small --json`.
-- GitHub Actions CI run `26842414251` passed. The latest CI workflow has no tmux-named job to inspect, so there was no tmux leg to rerun.
-
-### Re: #mdtokens — gpt-5
-
-> **Queue prompt:**
->
-> [#mdtokens]
-
-
-Completed `#mdparsecache` and `#mdtokens`.
-
-Implemented a reusable in-process Markdown projection cache keyed by file/content hash, then routed Markdown section/block edit lookups through it so repeated edit-intents planning/apply paths reuse one extracted tree. The Markdown projection now reports cache evidence, node counts, and phase timings for parse/extract and outline projection.
-
-Added token-budgeted Markdown projections: `markdown-ast` now exposes outline-first mode, selected-node mode via `--node <mdast-*|span-*>`, and selected-node expansion handles; `source-read` now includes a bounded Markdown window outline for visible nodes. The real-session token-savings fixture now measures raw session Markdown body replay against compact outline plus selected-node expansion handles.
-
-Commits pushed:
-- `btakita/tsift@ebf9395` `feat: cache markdown projections`
-- `btakita/agent-loop@5baf64498` `chore: update tsift submodule`
-
-Verification:
-- `cargo check -p tsift-cli` passed.
-- `cargo test -p tsift-cli markdown_ast` passed.
-- `cargo test -p tsift-cli token_savings` passed.
-- `cargo test -p tsift-cli markdown` passed.
-- `make check` passed after the final edit.
-- `cargo build --workspace` passed.
-- `cargo install --path . --force` passed.
-- Installed smoke checks passed for `markdown-ast` outline/phase fields and `source-read` Markdown window outlines.
-- GitHub Actions CI run `26843503622` passed. The tsift CI workflow has no tmux-named job to inspect, so there was no tmux leg to rerun.
-<!-- agent:boundary:cfff7cec -->
+<!-- agent:boundary:ae09901e -->
 <!-- /agent:exchange -->
 ###
 <!--

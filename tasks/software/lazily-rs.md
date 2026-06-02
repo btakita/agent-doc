@@ -133,7 +133,46 @@ Commits:
 - parent repo `97ec7361a` `chore: update lazily-rs pointer` created locally; I will push the parent after `agent-doc session-check` passes.
 
 Note: this cycle's preflight also committed an existing `tasks/software/tsift.md` pending sweep as `1d9c5b4e0 agent-doc(tsift): 2026-06-02 10:59:08`.
-<!-- agent:boundary:e9119f50 -->
+
+### Re: #lazyperf3 — gpt-5
+
+> **Queue prompt:**
+>
+> [#lazyperf3]
+
+
+Completed `#lazyperf3`.
+
+Implemented local same-thread batch queueing for `ThreadSafeContext`: each batch now pushes a thread-local batch frame keyed by context id, queues changed cells and explicit clears in that frame during the closure, and merges the frame into the graph-owned batch queue at batch exit. Cross-thread writes during another active batch, effect/callback cases, dependency graph mutation, and the final dirty/effect flush still use the graph-owned path.
+
+Updated `SPEC.md` to document the local batch-frame behavior and benchmark gate, added an instrumentation regression proving same-thread batched writes take zero `SetCellInvalidation` locks before batch exit and one coalesced lock at flush, and refreshed the generated README benchmark section.
+
+Refreshed instrumentation evidence for the targeted 16-worker batched burst profiles:
+- `thread_safe_set_cell_invalidation_batched_write_bursts_16`: raw lock events in the instrumentation row dropped from `1736` to `713`; total graph-lock wait in that row dropped from `9.617 ms` to `6.618 ms`.
+- `thread_safe_contention_batched_write_bursts_16`: raw lock events dropped from `1751` to `737`; total graph-lock wait dropped from `9.294 ms` to `6.565 ms`.
+
+Verification passed:
+- `cargo fmt`
+- `cargo check --features instrumentation`
+- targeted `cargo test --features instrumentation thread_safe_batch_queues_same_thread_writes_before_graph_flush`
+- `python3 scripts/update-benchmark-results.py --no-run`
+- `python3 scripts/update-benchmark-results.py --check`
+- `cargo test`
+- `cargo test --features tokio`
+- `cargo test --features instrumentation`
+- `cargo test --features loom --test thread_safe_loom`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo build`
+- `cargo bench --features instrumentation --no-run`
+
+Cargo still emits the pre-existing workspace patch warnings for `agent-kit`, `tagpath`, and `tmux-router` during some builds. GitHub Actions evidence is unchanged: `gh workflow list` returned no workflows, `gh run list --workflow CI --limit 1` reported no `CI` workflow, and `gh run list --limit 5` returned no runs. `cargo metadata` again shows no installable package binary target, only the library, examples, tests, and benches.
+
+Commits:
+- `btakita/lazily-rs@293dbf1` `perf: queue thread-safe batch writes locally` pushed to `origin/main`.
+- parent repo `531e3530a` `chore: update lazily-rs pointer` created locally; I will push the parent after `agent-doc session-check` passes.
+
+Changed paths in lazily-rs: `README.md`, `SPEC.md`, `src/thread_safe.rs`, and `tests/spec_compliance.rs`. Confidence: high. Escalation: none.
+<!-- agent:boundary:d8115674 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -144,14 +183,13 @@ Note: this cycle's preflight also committed an existing `tasks/software/tsift.md
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~[#lazyperf2]~
-- [#lazyperf3]
+- ~[#lazyperf3]~
 - [#lazyperf4]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#lazyperf3] Optimize batched write bursts by coalescing dirty marking/publish work per batch; target set_cell_invalidation and thread_safe_contention batched_write_bursts / 16.
 - [ ] [#lazyperf4] Add perf regression budgets for the slowest contention profiles and lock-site totals so future benchmark runs flag global-lock regressions before release.
 <!-- /agent:backlog -->
 

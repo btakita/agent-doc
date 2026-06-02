@@ -72,7 +72,34 @@ Verification:
 - No `tmux-test` job, `tmux-ci` target, or tmux-test reference exists in this tsift repo/workflow, so there was no separate tmux CI leg to inspect.
 
 Push is pending until after this binary-owned document closeout, per the agent-doc commit/push ordering.
-<!-- agent:boundary:48e1306b -->
+
+### Re: #mdsectionspans — gpt-5
+
+Implemented the Markdown stable span layer for read/write planning.
+
+What changed:
+- Markdown indexing now creates full-section heading spans: a heading extends through nested content until the next same-or-higher heading, with body byte/line ranges preserved separately.
+- Markdown list items are indexed as `list_item` symbols, and fenced code blocks expose code-body byte ranges plus their fence language.
+- `source-read`, `symbol-read`, and `edit-intents` span JSON now include Markdown metadata: `heading_level`, `section_path`, `section_handle`, `list_depth`, and `fence_language` when applicable.
+- Full-projection backend-eval watermarks now continue to exclude agent-doc/session Markdown from the full-project cache key, so richer Markdown symbols do not make task-doc edits invalidate full-projection caches.
+- The graph-db API paging regression test no longer assumes a specific global `mentions` edge ordering now that Markdown emits more symbol rows.
+- Updated `SPEC.md`, `CLAUDE.md`, and `VERSIONS.md` for the new Markdown span contract.
+
+Commits created:
+- `90e18f7` in `src/tsift`: `feat: add markdown section spans`
+- `051707461` in the superproject: `agent-doc(tsift): update submodule pointer`
+
+Verification:
+- `cargo test -p tsift-graph markdown` passed.
+- `cargo test -p tsift-cli markdown` passed.
+- `cargo test -p tsift-cli graph_db_api_queries_sqlite_neighborhood_and_schema` passed after updating the order-sensitive assertion.
+- Full `make check` passed with exit code 0 via digest artifact `tart-7fb46342af`.
+- `cargo install --path .` passed via digest artifact `tart-29733f2bf2`; installed binary reports `tsift 0.1.62`.
+- Latest GitHub Actions `CI` run inspected: `26800161158` completed successfully. Jobs `clippy + test` and `live Convex graph acceptance` are both green.
+- No `tmux-test` job, `tmux-ci` target, or tmux-test reference exists in this tsift repo/workflow, so there was no separate tmux CI leg to inspect.
+
+`#mdsectionedits` remains the next queued implementation item; I did not mark it complete or gated in this cycle.
+<!-- agent:boundary:131c9bd5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -93,7 +120,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#mdsectionspans] Markdown heading/section/list/code-fence stable spans: hierarchy metadata, section boundaries, and source-read/edit target refs.
 - [ ] [#mdsectionedits] Markdown section edit executor: rename_heading, replace_section_body, insert_section, and move_section with tree-sitter validation.
 - [ ] [#mdblockedits] Markdown block edit executor: insert_list_item and rewrite_code_fence while preserving syntax and refusing ambiguous targets.
 - [ ] [#mdverify] Markdown semantic-write verification coverage: dry-run/apply no-mutation tests, temp-worktree verify gates, source-read impact summaries, and refusal regressions.

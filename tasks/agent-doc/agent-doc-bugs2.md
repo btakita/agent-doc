@@ -16,7 +16,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -166,16 +166,27 @@ So `#xt3v`'s purpose — "implement the no-live-pane review items in priority or
 **Note on repo state:** submodule HEAD is `e43516c9` but the superproject `src/agent-doc` pointer is still dirty (`M src/agent-doc`) — the parent pointer should be bumped to record `f8e84282`/`e43516c9` (this is exactly the `#submodule-response-commit-proof` hygiene). I left it for the single owner to commit rather than race the 1-file in-progress edit still in the submodule tree; say the word and I'll bump + push the pointer.
 
 Proof: audited the review component + ran the queue-provenance regressions (15 passing) in prior cycles; `f8e84282` (collision Part 1) and `e43516c9` (#ynra) confirmed ancestors of HEAD. No new code this turn — this is the `#xt3v` closeout/audit. Confidence: high. Escalation: none — remaining work is operator live-verify (`#v819`/`#wy0y`).
-<!-- agent:boundary:e4ede095 -->
+Final state for this turn:
+
+> **Queue prompt:**
+>
+> [#wy0y]
+
+
+**`[#wy0y]` is operator-only — and it's the last item.** The auto-queue is now **drained of agent-doable work**: `~[#sfmt]~`, `~[#xt3v]~`, `~[#ynra]~` are all consumed/struck, and the only two remaining backlog items — `#v819` (Path A) and `#wy0y` (Path B) — are **live-IDE operator sessions** I can't drive from a terminal (busy-pane verification, and JB-debug-logging `setText`-payload capture during `finalize --stream`).
+
+**I could not commit the closeout** — `finalize` fail-closed with `pane ownership mismatch: session owned by pane %50, current pane is %66`. This document's session is registered to a different pane (`%50`); I'm in `%66`. That's the correct guard, and I won't `agent-doc claim`-force it and race the owner pane. So the gating of `#v819`/`#wy0y` didn't persist this cycle — it needs to run from the owner pane (`%50`), or you can halt the loop directly.
+
+**To stop the loop cleanly** (it will otherwise keep re-presenting `#wy0y`, which nothing can drain autonomously), do one of:
+- set `queue_active: false` in the frontmatter, or
+- strike the last live head: change `- [#wy0y]` → `- ~[#wy0y]~` in `agent:queue`, or
+- from the owner pane `%50`, gate them: `agent-doc write --commit … --pending-gate wy0y --pending-gate v819`.
+
+**Honest bottom line after this long run:** the agent-implementable backlog is genuinely exhausted — everything is implemented + tested and `[/]` gated on **your** live verification (Paths A/B). The one remaining thing I *could* still implement autonomously, if you re-queue it from the owner pane as a fresh `#agent-doc-bug`, is the wedge I hit last cycle: **the queue done-strike / backlog→queue-sync exclusion must read the external `agent:done archive=…` file, not just the inline `agent:done` component** — otherwise externally-archived items (like `#ynra`) leave stale `[#id]` queue refs that fail-close every binary path. Everything else is yours at the keyboard.
+<!-- agent:boundary:f17974a6 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~[#sfmt]: 0.2.144 is installed~
-- ~[#xt3v]~
-- ~[#v819]~
-- [#wy0y]
-- ~[#ynra]~
+<!-- agent:queue -->
 <!-- /agent:queue -->
 ###
 <!--
@@ -202,13 +213,13 @@ In addition to diagnosing and fixing the issue, please provide a mermaid showing
 ## Backlog
 
 <!-- agent:backlog priority queue=prepend -->
-- [ ] [#v819] Path A (#jkvs — after Step 0): one consolidated live busy-pane verification session to batch-close ~11 live-verify items: #t41j, #jb-busy-queue-deadlock-live-verify, #jb-run-agent-doc-busy-feedback-live-verify, #route-drain-all-surface-live-verify, #codex-owned-pane-stop-hook-live-verify, #codex-owned-pane-prompt-miss-followups (2b/3), #codex-final-response-live-verify, #recovery-drift-apply-live-verify, #jb-load-tmux-window-verify, #j0k8, #stash-pane-promote-on-focus.
-- [ ] [#wy0y] Path B (#6cmx — after Step 0): one IPC/typing-corruption capture session with #com.github.btakita.agentdoc debug logging enabled to capture the setText payload, then repro #ipcfullprompt-recur2, #finalize-retry-ipc-response-duplication, #ipc-dup-tracking-double-merge, #adoc-queue-ipc-buffer-divergence, #duplicate-response-after-commit, #prompt-duplicated-while-typing, and the scaffold-dup set #zpc2 / #ipcaa-scaf / #submodule-response-commit-proof. Several convert from verify to one CURE commit once the payload is captured.
 <!-- /agent:backlog -->
 
 ## Review
  
 <!-- agent:review -->
+- [/] [#v819] Path A (#jkvs — after Step 0): one consolidated live busy-pane verification session to batch-close ~11 live-verify items: #t41j, #jb-busy-queue-deadlock-live-verify, #jb-run-agent-doc-busy-feedback-live-verify, #route-drain-all-surface-live-verify, #codex-owned-pane-stop-hook-live-verify, #codex-owned-pane-prompt-miss-followups (2b/3), #codex-final-response-live-verify, #recovery-drift-apply-live-verify, #jb-load-tmux-window-verify, #j0k8, #stash-pane-promote-on-focus.
+- [/] [#wy0y] Path B (#6cmx — after Step 0): one IPC/typing-corruption capture session with #com.github.btakita.agentdoc debug logging enabled to capture the setText payload, then repro #ipcfullprompt-recur2, #finalize-retry-ipc-response-duplication, #ipc-dup-tracking-double-merge, #adoc-queue-ipc-buffer-divergence, #duplicate-response-after-commit, #prompt-duplicated-while-typing, and the scaffold-dup set #zpc2 / #ipcaa-scaf / #submodule-response-commit-proof. Several convert from verify to one CURE commit once the payload is captured.
 - [/] [#qasm] [recommended] Path C - continue the no-live-pane implementable review items in priority order, starting with the queue-provenance cluster (#prompt-preempts-auto-queue, #queue-user-edit-overwrite, #jb-run-agent-doc-response-queue-contamination), then the Option-A fixes (#cancel-orphans-preflight-cycle, #exchange-prompt-dropped-on-merge, #duplicate-response-after-commit), closeout-guard hardening (#do-id-partial-closeout-state, #preset-item-id-collision-enforce, #queue-clear-unrun-items), the feature pair (#backlog-priority-attribute, #backlog-queue-sync-attribute), then hygiene/UX (#stash-session-ttl-prune, #plugin-cleanup-menu-command, #stash-pane-promote-on-focus, #clear-stops-running-process, #jb-stale-busy-idle-footer, #snrun).
 - [/] [#submodule-response-commit-proof] [recommended] #agent-doc-bug 2026-06-01: a response to `src/boost-client/tasks/monsterrodholders.md` was committed inside the `boost-client` submodule (`6cbff1d`), but the parent `agent-loop` repo still showed `M src/boost-client`, and the closeout wording did not distinguish target-doc commit proof, parent submodule-pointer dirtiness, and the fact that the response bypassed binary-owned `agent-doc write` / `finalize` after recursive same-pane dispatch failed. Fix by making nested-repo commit ownership explicit in session-check/final diagnostics and fail closed on unverified manual fallback. Plan: tasks/agent-doc/plan-submodule-response-commit-proof.md.
 - [/] [#ipcaa-scaf] [recommended] #agent-doc-bug 2026-06-01: socket IPC already_applied accepted a prompt-drifted, scaffold-duplicated live buffer for tasks/software/lazily-rs.md (prompt_drift=true, snap_source=file_read), then committed a structurally invalid document with duplicated Queue/Backlog/Review/Done scaffold and partial typed prompt fragments. Fix already_applied snapshot adoption to fail closed or use content_ours when prompt drift or duplicated scaffold is detected. Plan: tasks/agent-doc/plan-ipc-already-applied-scaffold-drift.md.

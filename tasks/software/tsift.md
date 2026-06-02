@@ -31,106 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260602-015206.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260602-030752.md`*
 
 Compacted content:
-- Archived 8 response topic(s): SurrealDB parity; SurrealDB performance; SurrealDB optimization potential; 5 more
+- Archived 4 response topic(s): tsift as Read/Write substrate; next steps for tsift Read/Write replacement; queued tsift read/write replacement work; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ - Can tsift be a token-efficient replacement for the Read tool for agents by providing lookups, the ast of the specified abstraction, and other navigation/search capabilities?
-❯ - Can tsift be a token-efficient replacement for the Write tool by providing an ast interface to modify the code?
-
-### Re: tsift as Read/Write substrate — gpt-5
-
-Yes for a large part of `Read`, but I would frame it as a token-efficient read/navigation front end rather than a total replacement. The current surface already does the important token-saving work: `search`, `explain`, and `graph` locate relevant symbols and relationships; `source-read` returns bounded source windows with intersecting symbol refs, summary refs, and expansion commands; `context-pack`, `diff-digest`, `session-review`, and digest-runner replace raw reads of transcripts, diffs, logs, and test output. That lets agents widen context progressively instead of opening whole files.
-
-The missing piece is that current `source-read` is still a source-window reader with index annotations, not a true exported AST subtree for a selected abstraction. A stronger `Read` replacement would add a `symbol-read` / `ast-read` surface that returns the selected symbol's signature, body range, child declarations, outgoing calls, inbound callers, imports, summaries, and expansion handles under an explicit token budget. With that, raw `Read` becomes the fallback for exact full-file inspection, unsupported languages, binary/non-text assets, generated files, or index-freshness uncertainty.
-
-For `Write`: not yet. `tsift edit` is useful, but it is currently an atomic old/new string replacement batch with uniqueness checks, staging, backup, and rollback. That can replace some repetitive patch applications, but it is not an AST mutation interface. A real `Write` replacement would need tree-sitter-backed edit intents such as rename symbol, replace function body, insert import, add method, move declaration, update call signature, and rewrite call sites, plus formatting, dry-run diffs, conflict detection against current file content, and per-language conformance tests.
-
-So the practical answer is: `tsift` is plausibly a strong replacement for most exploratory `Read` usage, and should probably become the default first step before raw `Read`. It is only a partial `Write` helper today. The strategic direction is sound, but the write side needs semantic edit operations before it can be treated as a tool replacement instead of a convenience wrapper.
-❯ What are #next-steps for replacing Read usage with tsift?
-❯ What are #next-steps for replacing Write usage with tsift?
-
-### Re: next steps for tsift Read/Write replacement — gpt-5
-
-Top backlog item: `#readast`.
-
-For replacing `Read`, the priority is to make `tsift` return complete symbol-centered packets, not just annotated source windows. That means adding `symbol-read` / `ast-read`, then routing broad raw file/session/diff/log/test reads through `tsift rewrite --run` or harness hooks, with raw `Read` reserved for exact fallback cases.
-
-For replacing `Write`, the next step is specification first: define the semantic edit intent schema before implementation. Then build an AST-backed executor that can apply those intents with dry-run diffs, formatting, conflict checks, rollback, and language fixtures. Until that exists, `tsift edit` remains useful for atomic string replacements but should not be treated as a general Write replacement.
-
-I added the follow-up backlog in priority order: `#readast`, `#readrewrite`, `#writeintents`, `#writeexecutor`.
-
-### Re: queued tsift read/write replacement work — gpt-5
-
-> **Queue prompt:**
->
-> [#readast]
->
-> [#readrewrite]
->
-> [#writeintents]
-
-
-Implemented the queued tsift read/write replacement work in `src/tsift` and pushed the tsift commit `01f2160` to `origin/main`.
-
-What changed:
-
-- Added `tsift symbol-read`, a bounded symbol packet reader that resolves indexed symbols and returns metadata, source body lines, child symbol refs, summaries, and expansion commands for source window, whole file, explain, callers, and callees.
-- Routed `source-read` symbol references toward `tsift --envelope symbol-read ...` so broad source navigation can move through narrower symbol handles.
-- Added `tsift edit-intents`, a JSON semantic edit planning surface for rename, replace function body, import insertion, method addition, call signature update, move declaration, and call-site rewrite intents. It validates targets and content hashes and emits dry-run plans without mutating files.
-- Updated `SPEC.md`, `CLAUDE.md`, `AGENTS.md`, `README.md`, and `VERSIONS.md` for the new read and write-intent surfaces.
-- Added CLI regression tests for `symbol-read`, the updated `source-read` expansion command, and `edit-intents` dry-run validation.
-
-Queue outcome:
-
-- `#readast`: done.
-- `#readrewrite`: done.
-- `#writeintents`: done.
-- `#writeexecutor`: gated. The current implementation is the safe validating dry-run executor surface; the actual mutating per-language AST executor with rollback and conformance coverage remains deferred.
-
-Verification completed before closeout:
-
-- `cargo check`
-- targeted `cargo test -p tsift-cli --test exit_code ...` coverage for `symbol-read`, `source-read`, and `edit-intents`
-- `make check`
-- `cargo build`
-- `cargo install --path . --force`
-- `tsift --version` reports `tsift 0.1.62`
-- latest GitHub Actions `CI` run `26793122164` was `completed success` with `clippy + test` and live Convex graph acceptance jobs
-
-The superproject submodule pointer was committed separately as `c61977f82` (`chore: update tsift submodule`) so the root repo now points at the pushed tsift commit.
-
-### Re: write executor — gpt-5
-
-> **Queue prompt:**
->
-> [#writeexecutor]
-
-
-Completed `#writeexecutor` in `src/tsift` and pushed the tsift submodule commit `a5cfabb` (`feat: apply semantic edit intents`) to `origin/main`.
-
-The semantic write surface now has an actual guarded executor:
-
-- `tsift edit-intents --apply` applies supported Rust intents for `rename_symbol`, `replace_function_body`, and `insert_import`.
-- Dry-run mode now emits bounded diff previews and reports `apply_supported`, `applied`, `applied_total`, and `formatted_total` fields.
-- Apply mode composes edits per file, runs `rustfmt --edition 2024` on staged content before any source file is swapped, then commits through the existing atomic backup/rollback edit path.
-- Stale `expected_content_hash` values, unsupported languages/kinds, and formatter failures fail closed before source mutation.
-- Docs and harness notes now describe the apply contract instead of the previous dry-run-only boundary.
-
-Verification completed:
-
-- `cargo check -p tsift-cli`
-- `cargo test -p tsift-cli --test exit_code edit_intents`
-- `make check` (workspace clippy/tests, opencode plugin tests, npm publish dry-run)
-- `cargo build`
-- `cargo install --path . --force`
-- `tsift --version` -> `tsift 0.1.62`
-
-GitHub evidence: `gh workflow list` shows `CI` and `Release` only, with no separate tmux workflow. The previous CI run for `01f2160` was green; the new CI run for `a5cfabb` is currently `in_progress` (`26794927451`).
-
-The superproject gitlink has been committed locally as `329b31102` (`chore: update tsift submodule`) so the root repo points at `a5cfabb`; root push follows this closeout.
-<!-- agent:boundary:c300e58e -->
+<!-- agent:boundary:de2fed26 -->
 <!-- /agent:exchange -->
 ###
 <!--

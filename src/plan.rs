@@ -237,6 +237,9 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     );
     let mut blockers = shared_doc_security_blockers(file, &fm, &pending_mutations);
     let mut warnings = Vec::new();
+    if let Some(deferral) = plan_backlog_only_deferral_warning(execution_scope, &prompt_diff_text) {
+        warnings.push(deferral);
+    }
     let mut manual_packet_only = false;
     let graph_targets = prompt_targets
         .iter()
@@ -408,6 +411,29 @@ fn execution_scope_for_prompt_targets(
             ExecutionScope::Normal
         }
     }
+}
+
+/// `#lr-queue-response-miss` (step 2): when a `#agent-doc-bug` capture forces
+/// `execution_scope=plan_backlog_only` but the same prompt diff also carries
+/// runnable imperative directives (a `do [#id]` head, `build + push`, etc.),
+/// surface the deferral explicitly so the actionable work is not silently
+/// suppressed. Returns `None` for the pure bug-capture case (no imperative
+/// directive) so normal plan-only turns stay quiet.
+fn plan_backlog_only_deferral_warning(
+    execution_scope: ExecutionScope,
+    prompt_diff_text: &str,
+) -> Option<String> {
+    if execution_scope != ExecutionScope::PlanBacklogOnly {
+        return None;
+    }
+    let deferred = diff::extract_imperative_directives(prompt_diff_text);
+    if deferred.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "execution_scope=plan_backlog_only suppressed runnable directive(s) this cycle to capture the #agent-doc-bug plan/backlog: [{}]. The deferral is explicit — run the directive(s) in a later cycle.",
+        deferred.join("; ")
+    ))
 }
 
 fn finalize_placeholder_commands(
@@ -2324,6 +2350,36 @@ Waiting.
                 .any(|m| m.kind == PendingMutationKind::ResolveExisting && m.id == "rev1"),
             "plain done should require auto_done, got {:?}",
             plan.pending_mutations
+        );
+    }
+
+    #[test]
+    fn plan_backlog_only_deferral_warning_names_suppressed_directive() {
+        // #lr-queue-response-miss step 2: a runnable directive deferred by
+        // plan_backlog_only must be surfaced by name.
+        let diff = "--- snapshot\n+++ document\n@@ -0,0 +1 @@\n+do [#lr-queue-response-miss]\n";
+        let warning =
+            plan_backlog_only_deferral_warning(ExecutionScope::PlanBacklogOnly, diff).unwrap();
+        assert!(warning.contains("plan_backlog_only"));
+        assert!(
+            warning.contains("lr-queue-response-miss"),
+            "deferral warning must name the suppressed directive: {warning}"
+        );
+    }
+
+    #[test]
+    fn plan_backlog_only_deferral_warning_quiet_without_directive_or_in_normal_scope() {
+        // Pure bug-capture (no imperative directive) stays quiet.
+        assert!(
+            plan_backlog_only_deferral_warning(
+                ExecutionScope::PlanBacklogOnly,
+                "+ just a clarifying question about the design?\n"
+            )
+            .is_none()
+        );
+        // Normal scope never warns even with a directive.
+        assert!(
+            plan_backlog_only_deferral_warning(ExecutionScope::Normal, "+do [#x]\n").is_none()
         );
     }
 

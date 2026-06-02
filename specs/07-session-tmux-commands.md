@@ -106,20 +106,25 @@ This file covers the session-bound command surface: pane ownership, routing, syn
   registry. The owner-resolution stays quiet (no per-hit stderr) on the navigation
   fast path, and the happy path is unchanged because the resolver returns the
   candidate when it is already the owner.
-- Cross-document owner guard (`#jb-tsift-pane-sync`): the normal navigation /
-  sync / autostart owner-resolution path
-  (`sync::find_normal_path_owner_pane*`) must never surface or reuse a pane that
-  is actually running a *different* document's agent-doc/codex session. Stale
-  registry provenance or geometry-only reconciliation could otherwise return the
-  currently-visible pane (for example one owning `agent-doc-bugs2.md`) as the
-  owner for the navigated file (for example `tsift.md`), binding two documents to
-  one pane. The resolver rejects a candidate when
-  `sync::pane_runs_other_document_owner` proves it owns another document, returns
-  `None`, and the caller cold-starts a correct owner for the navigated file. A
-  candidate that already owns the navigated file, or a bare non-owner pane, is
-  preserved (`cmdline_owns_other_document`), so the happy path and legitimate
-  reuse are unchanged. This is the focus/sync sibling of the `claim`
-  one-live-pane-per-document guard.
+- Cross-document owner guard (`#jb-tsift-pane-sync`): both owner-resolution
+  paths must never surface or reuse a pane that is actually running a *different*
+  document's agent-doc/codex session — the normal navigation / sync / autostart
+  path (`sync::find_normal_path_owner_pane*`, used by route/start/sync) **and**
+  the heuristic recovery resolver (`sync::find_live_owner_pane*`) that `focus.rs`
+  navigation and resync recovery use. The focus path was the operator's exact
+  repro: navigating from `agent-doc-bugs2.md` to `tsift.md` resolved the owner
+  through `find_live_owner_pane_quiet`, which is *not*
+  `find_normal_path_owner_pane*`, so the normal-path guard alone left the
+  contaminating pane reachable. Stale registry provenance or a process-tree match
+  could otherwise return the currently-visible pane (for example one owning
+  `agent-doc-bugs2.md`) as the owner for the navigated file (for example
+  `tsift.md`), binding two documents to one pane. Each resolver rejects a
+  candidate when `sync::pane_runs_other_document_owner` proves it owns another
+  document, returns `None`, and the caller cold-starts a correct owner for the
+  navigated file. A candidate that already owns the navigated file, or a bare
+  non-owner pane, is preserved (`cmdline_owns_other_document`), so the happy path
+  and legitimate reuse are unchanged. This is the focus/sync sibling of the
+  `claim` one-live-pane-per-document guard.
 - Focus must also recover instead of failing closed when the registered pane is
   dead, or no registry entry exists, but the document is still served by a live
   owner in another pane.

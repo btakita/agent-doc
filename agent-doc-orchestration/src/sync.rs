@@ -5237,27 +5237,37 @@ fn find_live_owner_pane_excluding_with_logging(
     // Full heuristic recovery remains available for explicit repair/resync paths.
     // Normal route/start/sync ownership decisions must use
     // `find_normal_path_owner_pane*` instead.
-    find_registered_pane_via_path_provenance(tmux, file, session_id, excluded_pane, log_hits)
-        .or_else(|| {
-            find_alive_pane_via_supervisor_pid(tmux, file, session_id)
-                .filter(|pane| excluded_pane != Some(pane.as_str()))
-        })
-        .or_else(|| {
-            find_alive_pane_via_open_session_log(tmux, file, session_id, excluded_pane, log_hits)
-        })
-        .or_else(|| {
-            find_alive_pane_via_registry_rebind_successor(
-                tmux,
-                file,
-                session_id,
-                excluded_pane,
-                log_hits,
-            )
-        })
-        .or_else(|| {
-            let file_path = file.to_string_lossy();
-            find_alive_pane_for_file_inner(tmux, file_path.as_ref(), excluded_pane, log_hits)
-        })
+    let candidate =
+        find_registered_pane_via_path_provenance(tmux, file, session_id, excluded_pane, log_hits)
+            .or_else(|| {
+                find_alive_pane_via_supervisor_pid(tmux, file, session_id)
+                    .filter(|pane| excluded_pane != Some(pane.as_str()))
+            })
+            .or_else(|| {
+                find_alive_pane_via_open_session_log(tmux, file, session_id, excluded_pane, log_hits)
+            })
+            .or_else(|| {
+                find_alive_pane_via_registry_rebind_successor(
+                    tmux,
+                    file,
+                    session_id,
+                    excluded_pane,
+                    log_hits,
+                )
+            })
+            .or_else(|| {
+                let file_path = file.to_string_lossy();
+                find_alive_pane_for_file_inner(tmux, file_path.as_ref(), excluded_pane, log_hits)
+            });
+    // Cross-document guard (#jb-tsift-pane-sync): the focus path
+    // (`focus.rs` -> `find_live_owner_pane_quiet`) and resync recovery resolve
+    // owners through this heuristic resolver, not `find_normal_path_owner_pane*`.
+    // Stale registry provenance or a process-tree match can otherwise surface
+    // the currently-visible pane (e.g. one owning `agent-doc-bugs2.md`) as the
+    // owner for the navigated file (e.g. `tsift.md`), aliasing two documents
+    // onto one pane. Reject the wrong-document candidate so the caller
+    // cold-starts / fails closed instead of focusing a contaminated pane.
+    reject_cross_document_owner_pane(tmux, candidate, file, log_hits)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -6775,6 +6785,32 @@ mod tests {
             "/home/brian/.cargo/bin/agent-doc start --route-owned tasks/agent-doc/agent-doc-bugs2.md",
             cycle_doc,
         ));
+    }
+
+    #[test]
+    fn reject_cross_document_owner_pane_preserves_non_contaminated_candidates() {
+        // #jb-tsift-pane-sync focus-path wiring: the heuristic resolver
+        // (`find_live_owner_pane_excluding_with_logging`, used by `focus.rs` and
+        // resync recovery) now funnels its candidate through this guard. The
+        // guard must only drop a pane that PROVABLY runs another document's
+        // owner — it must never over-reject on the focus hot path, or normal
+        // editor navigation would spuriously cold-start instead of focusing the
+        // existing owner.
+        let tmux = Tmux::default_server();
+        let file = Path::new("tasks/software/tsift.md");
+
+        // No candidate stays no candidate.
+        assert_eq!(reject_cross_document_owner_pane(&tmux, None, file, false), None);
+
+        // A candidate pane id with no resolvable process tree (no `#{pane_pid}`)
+        // is not provably a cross-document owner, so it passes through unchanged.
+        // This is the focus happy path: the resolved owner survives the guard.
+        let bare = Some("%agent-doc-nonexistent-pane".to_string());
+        assert_eq!(
+            reject_cross_document_owner_pane(&tmux, bare.clone(), file, false),
+            bare,
+            "guard must not reject a candidate it cannot prove owns another document"
+        );
     }
 
     #[test]

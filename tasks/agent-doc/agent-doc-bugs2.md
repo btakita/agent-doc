@@ -36,11 +36,34 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 9 response topic(s): #write-closeout-response-shape; response not written into the document (#codex-direct-writeback-miss); lazily-rs Context architecture; 6 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:5d47aeb6 -->
+> **Queue prompt:**
+>
+> do [#nochange-after-stall]
+
+### Re: do #nochange-after-stall — no-change run now surfaces a prior abnormal cycle — opus-4-8
+
+Implemented the core fix and shipped it.
+
+**The bug.** A direct `agent-doc <FILE>` run that finds no diff since the snapshot printed plain `Nothing changed since last run` even when the *previous* run abandoned its cycle — e.g. the recursive owner-pane guard (`recursive_direct_invocation_blocked`) that abandons the cycle with no durable closeout. The snapshot-only verdict hid the stalled prior run.
+
+**Fix** (`run.rs`, the no-change short-circuit). `run_once` now classifies the latest `cycle_state` before the no-change message via a pure `classify_no_change_cycle_state`:
+- a terminally **abandoned** prior cycle (recursive-block or generic) → typed diagnostic naming the prior state + a recovery action (dispatch from the managed pane / `agent-doc start <FILE>`);
+- a **committed** cycle (the healthy completed state) → unchanged plain no-change output.
+
+So normal no-change behavior is preserved; only genuinely abnormal prior states get the extra context.
+
+**Verification:** 3 new unit tests (recursive-block, generic-abandoned, committed-clean/none) + `make check` green (exit 0). Both binaries rebuilt (`cargo build --release` + `cargo install --path .`).
+
+**Commits:** `agent-doc` `940d57c7` (run.rs only — committed selectively on the live `20260422/codex-agent-backend` branch; the concurrent session's other uncommitted edits left untouched); superproject pointer `d763bae4e`.
+
+**Why gated, not done.** I scoped this turn to the run-path diagnostic because the plan's broader surfaces — stale-open preflight detection, repair-only/reap-only closeout with an unconsumed queue head, and the session-check fixtures — live in `preflight.rs`/`session_check.rs`, which currently hold **another session's uncommitted edits** I must not disturb (can't cleanly separate by file). I `--pending-gate`d `#nochange-after-stall` (core implemented, awaiting live-verify of the monsterrodholders recursive repro) and captured the deferred breadth as `#nochange-after-stall-breadth`. The remaining queue heads (`#lr-queue-*`, `#lr-head/wire/actor`) are next.
+
+Pushing now (see closeout).
+<!-- agent:boundary:a5155782 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
-- do [#nochange-after-stall]
+- ~do [#nochange-after-stall]~
 - do [#lr-queue-response-miss]
 - do [#lr-queue-plan-deferral]
 - do [#lr-queue-repair-adopt]
@@ -60,7 +83,7 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Backlog
 
 <!-- agent:backlog priority queue=append -->
-- [ ] [#nochange-after-stall] [recommended] #agent-doc-bug 2026-06-02: `src/boost-client/tasks/monsterrodholders.md` follow-up direct run returned plain "Nothing changed since last run" even though recent cycle history showed repeated `recursive_direct_invocation_blocked` abandoned cycles and a repair/reap closeout. Fix by making the no-change short-circuit consult latest abnormal cycle/session state and require durable response/consume/deferral proof before hiding a stalled run behind snapshot equality. Plan: tasks/agent-doc/plan-no-change-after-stalled-cycle.md.
+- [ ] [#nochange-after-stall-breadth] [recommended] #agent-doc-bug follow-up to #nochange-after-stall: extend the no-change abnormal-cycle diagnostic beyond terminally-abandoned cycles — stale-open preflight detection, repair-only/reap-only closeout with an unconsumed active queue head, and session-check fixtures asserting each shape, plus a spec note in 07-commands.md. Deferred this turn because preflight.rs/session_check.rs had concurrent uncommitted edits that must not be disturbed. Plan: tasks/agent-doc/plan-no-change-after-stalled-cycle.md.
 - [ ] [#lr-queue-response-miss] [recommended] #agent-doc-bug 2026-06-02: lazily-rs queued free-text prompt with preset had no committed response patchback in tasks/software/lazily-rs.md. Add session-check coverage so a seen queue head requires committed response, consume proof, or explicit deferral. Plan: tasks/agent-doc/plan-lazily-rs-queued-prompt-patchback-miss.md.
 - [ ] [#lr-queue-plan-deferral] [recommended] #agent-doc-bug 2026-06-02: mixed #agent-doc-bug capture plus #spec-test-build-install-commit-push queue head made agent-doc plan choose plan_backlog_only, deferring runnable lazily-rs work without making the deferral contract explicit. Plan: tasks/agent-doc/plan-lazily-rs-queue-plan-deferral.md.
 - [ ] [#lr-queue-repair-adopt] [recommended] #agent-doc-bug 2026-06-02: if the lazily-rs queued prompt was already completed console-only, recovery must adopt a supplied response through agent-doc write --commit and consume or preserve the matching free-text queue head without rerunning repo work. Plan: tasks/agent-doc/plan-lazily-rs-queue-repair-adopt.md.
@@ -73,6 +96,7 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Review
  
 <!-- agent:review -->
+- [/] [#nochange-after-stall] [recommended] #agent-doc-bug 2026-06-02: `src/boost-client/tasks/monsterrodholders.md` follow-up direct run returned plain "Nothing changed since last run" even though recent cycle history showed repeated `recursive_direct_invocation_blocked` abandoned cycles and a repair/reap closeout. Fix by making the no-change short-circuit consult latest abnormal cycle/session state and require durable response/consume/deferral proof before hiding a stalled run behind snapshot equality. Plan: tasks/agent-doc/plan-no-change-after-stalled-cycle.md.
 - [/] [#route-starting-timeout-poll-recovery] #agent-doc-bug 2026-06-02: IMPLEMENTED+tested+shipped (agent-doc 43de6bc8, pointer bc19f9f33, both binaries rebuilt+installed). JB Run Agent Doc on lazily-rs.md failed: 'authoritative actor generation 13 owns pane %71 but route will not bind a new dispatch target because this generation already timed out while starting'. Root cause: starting_actor_timeout is sticky (wait_for_authoritative_actor_ready short-circuits once it is set) and the blocked-timeout recovery did a single dispatch-ready capture, so a heavy gpt-5.5 xhigh Codex still settling into its idle composer after a supervisor restart dead-ended even though it became ready seconds later (session status later recovered it via live_pane_idle). Fix: recover_starting_timeout_blocked_actor_if_dispatch_ready now polls the live pane for a dispatch-ready prompt up to the harness recovery budget before failing closed; busy panes never satisfy current_generation_ready_prompt_proven so the promote-only-proven-idle invariant holds. Spec 08-session-routing + README aligned. make check green. GATED on live-verify / tmux-ci: the poll loop needs a live tmux pane (no Tmux test double in the suite), so exercise a two-session heavy-Codex restart repro before un-gating.
 - [/] [#codex-upgrade-restart-cross-doc-focus] [recommended] #agent-doc-bug 2026-06-02: FOCUS MIS-BINDING IMPLEMENTED+tested+shipped (tmux-router 7a7ddd9, superproject pointer 6494fb190, both binaries rebuilt+installed): sync --focus now selects only the focus document's authoritative registry-owned, alive pane (captured before Phase 1.5/1.75 ephemeral donor/spare assignment) via the new resolve_focus_pane helper; when the document has no live owned pane it preserves the current tmux selection instead of aliasing onto a column-mate's pane (which belongs to a different document — the equityfundingsource.md symptom while focusing agent-doc-bugs2.md). 4 regression tests added; tmux-router 113 lib tests + agent-doc make check green. REMAINING: the session-loss-across-Codex-restart rebind facet (re-provision the focused document's own pane on supervisor restart rather than dropping/aliasing the session) — gated on the two-document upgrade/restart live repro. Shares the focus-by-exact-document-path invariant with #jb-tsift-pane-sync. Plan: tasks/agent-doc/plan-codex-upgrade-restart-cross-document-focus.md
 - [/] [#jbstalldrain] [recommended] #agent-doc-bug 2026-06-02: JB `Run Agent Doc` appeared stalled across two observed route stages: `agent-doc-bugs2.md` failed before dispatch because closeout drain hit a session-check backlog-shadow blocker (`#queue-user-edit-overwrite` only outside live `agent:backlog`), while `monsterrodholders.md` waited the full 60s on busy authoritative actor generation 251 / pane `%61` before reporting no dispatch-ready prompt. Fix by making route emit typed in-progress and terminal results for closeout-drain blockers and busy-authoritative waits, and make the JetBrains action surface those states persistently instead of looking inert. Plan: tasks/agent-doc/plan-jb-run-agent-doc-stalled-closeout-drain.md.

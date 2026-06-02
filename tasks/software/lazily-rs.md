@@ -55,7 +55,30 @@ The remaining hotspots worth attacking after that are specific:
 I added the backlog in priority order. Top backlog item: `#lazyperf9`.
 
 Changed paths: session document/backlog only. No lazily-rs source changes were made, so I did not run the Rust test suite for this response cycle.
-<!-- agent:boundary:a8e9000c -->
+
+### Re: shadow invalidation graph — gpt-5
+
+Yes, but I would frame it as an explicit invalidation plan, not a second source-of-truth graph.
+
+The current implementation already has the first version of this idea. `invalidate_frontier_locked` builds a frontier work queue, uses `simulated_slots` to understand which nodes would become dirty/forced, coalesces duplicate diamond paths, collects `slots_to_mark` and `effects_to_schedule`, then applies dirty/revision/effect scheduling in one mutation phase. `flush_batched_invalidations` also drains all changed cells at outermost batch exit and runs one coalesced frontier invalidation. Separately, `try_mark_slot_frontier_fast` uses sidecar dependents for slot-only changed-cell invalidation without taking the graph mutex.
+
+The next useful step would be making that implicit frontier computation into a named `InvalidationPlan` or shadow-plan structure:
+
+1. Snapshot only the dependency frontier needed for the roots: slot dependents, effect dependents, current dirty/force flags, and root force upgrades.
+2. Compute the plan from that snapshot: ordered slots to dirty, forced slots, effects to schedule, hard clears, and whether the plan must fall back because callbacks/disposal/effects/dynamic dependencies make the snapshot unsafe.
+3. Apply the plan in one short graph-lock batch: bump revisions, mirror fast-path dirty state, schedule effects once, then release the lock and flush effects.
+
+That can reduce lock hold time because traversal, duplicate coalescing, and force propagation stop being mixed with mutation. It also gives us a clear unit to benchmark and model. The caution is that the shadow plan cannot be authoritative across user callbacks, effect disposal, or dependency discovery. If a dependency edge can change while planning, the plan must either hold the graph lock for that snapshot or carry a revision/epoch check and fall back to the existing locked path.
+
+So the answer is: yes, it is actionable, and it is probably the right shape before a broader sharded-lock rewrite. I added `#lazyperf12` immediately after `#lazyperf9`, because latency evidence should still come first, then the shadow invalidation plan can target the remaining batch/effect lock-hold hotspots before `#lazyperf10` tries broader partitioning.
+
+Top backlog item remains `#lazyperf9`.
+
+Changed paths: session document/backlog only.
+Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `tsift index --workspace .`, targeted source/spec reads.
+Verification: `agent-doc finalize` will run commit/session guards; no Rust tests were run because no lazily-rs source changed.
+Escalation: none. Confidence: high.
+<!-- agent:boundary:afde2947 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -70,6 +93,7 @@ Changed paths: session document/backlog only. No lazily-rs source changes were m
 
 <!-- agent:backlog -->
 - [ ] [#lazyperf9] Add p50/p95 latency evidence to the benchmark/report harness required by #lazyperf8: capture latency distributions for same-slot, read-mostly, batched-write, and effect-heavy 8/16-worker cases, emit them in README.md beside throughput and lock-site budgets, and make --check fail when required latency rows are missing.
+- [ ] [#lazyperf12] Prototype an explicit ThreadSafeContext shadow invalidation plan: snapshot slot/effect frontier structure, compute slots_to_mark/effects_to_schedule/clears as a deterministic plan, then apply dirty/revision/effect mutations in one graph-lock batch; benchmark lock hold/wait against batched_write_bursts_16, independent_slots_16, and effect batch_flush_16 with Loom coverage for dynamic dependency, disposal, and stale in-flight races.
 - [ ] [#lazyperf10] Reduce remaining independent-slot ThreadSafeContext publish/get_refresh lock contention: profile thread_safe_contention_independent_slots_16 with the new latency rows, then prototype splitting or partitioning the publish/get_refresh graph-mutation path by SlotId while preserving dependency-edge, effect, batch, and stale-completion semantics under Loom.
 - [ ] [#lazyperf11] Reduce effect-heavy ThreadSafeContext lock contention after #lazyperf8: target thread_safe_effect_contention_batch_flush_16 and queue_coalescing_16, especially the high other/dependency_edge waits, by coalescing effect drain/schedule mutations or adding effect-sidecar state without weakening cleanup/disposal ordering.
 <!-- /agent:backlog -->

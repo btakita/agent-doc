@@ -64,10 +64,37 @@ So "why did an extra pane survive the reconcile?" was already answerable.
 Verification: `./gradlew test` green (full JB suite); `buildPlugin signPlugin` succeeded. Change is Kotlin + editor SPEC only, so the Rust `make check` suite is unaffected. Pushed `agent-doc@1f7a8c4f` (branch `20260422/codex-agent-backend`) + superproject pointer on `main`. Left the unrelated concurrent `src/session_actor_cmd.rs` edit untouched.
 
 To test live, reinstall from disk: `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.146-signed.zip`, restart, reproduce the navigation, then read `idea.log` for `[layout-detect]` — it will state whether the 3-pane layout is a true 2-split editor or a detection artifact.
-<!-- agent:boundary:e762ce59 -->
+❯ The 3 pane layout occurred when I navigated from this document to tsift.md
+
+### Re: 3-pane layout navigating bugs2.md → tsift.md — opus-4-8
+
+That repro detail let me pull the actual sync logs from this machine, and the answer to your original question is now a firm **yes — the logging is sufficient, and it already pinpoints the cause.** I didn't even need the new `[layout-detect]` line (the editor side turned out to be correct here); the binary's `/tmp/agent-doc-sync.log` had everything.
+
+#### What the logs show for your navigation
+
+The editor genuinely had a **2-column** layout (`columns=[tsift.md, monsterrodholders.md]`), so "2 editor panes" is real, not a detection artifact. The 3rd pane is a **tmux reconcile/focus race**, fully logged:
+
+- **Clean transition** (atomic SWAP, lands at 2 panes):
+  `pre-reconcile ["%57","%61"]` → `SWAP: %62 ↔ %57 (atomic)` → `post-reconcile ["%62","%61"]` ✓
+- **Failing transition** (3 panes):
+  `pre-reconcile ["%62","%61"]`, `desired=["%57","%61"]`, then
+  `promote_on_focus_action=join-pane src=%57 dst=%61 … ok=true`, then
+  `post-reconcile ["%57","%61","%62"]` ✗ — the displaced pane `%62` was never stashed.
+
+#### Root cause
+
+`promote_pane_to_agent_doc_window` (`sync.rs`, called from the **focus path** `focus.rs:147`, `#stash-pane-promote-on-focus`) reparents the focused file's stashed live-owner pane into the `agent-doc` window with `join-pane` — it **adds** a pane. On a 1-in/1-out tab switch this races the debounced `sync --no-autostart --exact-visible` reconcile: the focus-path rescue runs independently, so the reconcile works off a stale pre-reconcile snapshot and never stashes the displaced pane. Net result: 2 editor columns + 1 leftover = 3 panes. This is exactly the "sync rescues a stashed pane before reconcile" anti-pattern the reconciler's atomic **SWAP** fast path was meant to eliminate — when SWAP owns the transition it lands at 2 panes; when the focus-path rescue fires first, it lands at 3.
+
+This is the same regression family as `#jb-tsift-pane-sync`. I recorded the full evidence + the convergence contract in `tasks/agent-doc/plan-jb-tsift-pane-sync-regression.md` (new "3 panes for a 2-column editor" section).
+
+#### Scope this turn
+
+You gave a repro detail, not a fix directive (no `#spec-test-build-install-commit-push`), so I diagnosed and captured rather than editing reconcile/focus code — that path is high-risk and the plan calls for atomic-SWAP routing plus SimWorld coverage. Queued the concrete fix as `#jb-nav-3pane-promote-swap`. Say the word (or add the preset) and I'll implement it.
+<!-- agent:boundary:0d4412be -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
+- do [#ht5v]
 <!-- /agent:queue -->
 ###
 <!--
@@ -80,6 +107,7 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Backlog
 
 <!-- agent:backlog priority queue=prepend -->
+- [ ] [#jb-nav-3pane-promote-swap] Fix 1-in/1-out navigation landing at 3 panes for a 2-column editor: the focus-path promote_on_focus join-pane (sync.rs promote_pane_to_agent_doc_window, called from focus.rs:147, #stash-pane-promote-on-focus) rescues the focused file's stashed pane WITHOUT stashing the displaced pane, racing the reconciler's atomic SWAP. Route the promote-on-focus rescue through the same atomic SWAP or defer pane reparenting to the reconciler so exactly one path owns the in/out transition and the displaced pane is always stashed in the same op; add deterministic SimWorld coverage for the 1-in/1-out tab switch. Plan: tasks/agent-doc/plan-jb-tsift-pane-sync-regression.md. Diagnosed 2026-06-01 from /tmp/agent-doc-sync.log.
 - [ ] [#ht5v] [recommended] Live-verify the 3-pane navigation repro with the new [layout-detect] logging (JB plugin 0.2.146): capture whether IntelliJ actually reports 2 editor windows (correct 2-col -> 2 editor + 1 agent-doc = 3 panes) or a spurious 2-column grouping; if spurious, decide whether detectEditorLayout should collapse near-zero-width / preview splits before emitting a 2-column layout. Requested 2026-06-01.
 <!-- /agent:backlog -->
 

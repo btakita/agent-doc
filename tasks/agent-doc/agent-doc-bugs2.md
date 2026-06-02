@@ -58,10 +58,23 @@ Full Rust suite **3541 passed / 0 failed** (230 live-tmux ignored), clippy clean
 #### Scope note
 
 This is binary-only (no JB plugin / tmux-router change). It guards the auto-run mutation surface defensively; the original destructive backlog rewrite remains queue-scoped/inert in current code (fixes #1–#3), so this completes the `#backlog-auto-marker-misfire` cluster.
-<!-- agent:boundary:371d51a9 -->
+Is the #backlog-auto-marker-misfire implementation destructive?
+
+### Re: Is the #backlog-auto-marker-misfire implementation destructive? — opus-4-8
+
+No — it's non-destructive by construction. Nothing across the four fixes rewrites, moves, or deletes document/backlog/working-tree content:
+
+- **Fix #1 (preflight warning):** purely a non-blocking `misplaced_component_attr` warning for a misplaced `auto`/unknown attr on `agent:backlog`. It emits guidance text and mutates nothing.
+- **Fixes #2/#3:** no code change. The original destructive misfire (an auto-run rewriting the backlog with minted `do [#id]` stubs) is prevented by *queue-scoping* — the destructive path simply doesn't run. It wasn't replaced by something destructive; it was gated off.
+- **Fix #4 (the pre-auto-run tag I just shipped):** the only new side effect is `git tag agent-doc/<doc>/pre-auto-run-N` at HEAD — a lightweight ref pointing at an existing commit. It *creates* a recovery point; it doesn't rewrite, move, or delete anything. It's the opposite of destructive (its whole purpose is to make a hypothetical misfire recoverable). It's best-effort/non-fatal (a tag failure logs a warning and the run continues), and it never force-overwrites — `git tag` without `-f`, so a name collision fails closed and is warned rather than clobbering an existing tag.
+
+**One housekeeping caveat (not destructive):** the `pre-auto-run-N` tags accumulate, one per queue auto-run (same as compact's `pre-compact-N`). They're cheap refs but grow over time; prune with `git tag -d agent-doc/<doc>/pre-auto-run-*` if they ever clutter the tag namespace. I queued a `[recommended]` item to add automatic tag GC.
+
+So: fix #1 only warns, the destructive original path is gated off (not replaced), and fix #4 only adds a recovery tag. No part of it performs a destructive mutation.
+<!-- agent:boundary:694f7b55 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - I have been using agent-doc and have not seen any bugs. Can the gated review items be completed? If yes, complete them. I want to move on to performance improvements.
 - lazily-rs is now multithreaded. Update tasks/agent-doc/plans/lazily-rs-integration.md with recent changes.
@@ -82,6 +95,7 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Backlog
 
 <!-- agent:backlog priority queue=append -->
+- [ ] [#x8aw] [recommended] GC/prune accumulated recovery tags (agent-doc/<doc>/pre-auto-run-N and pre-compact-N) — one is created per queue auto-run / compact, so they grow unbounded over a doc's life. Add a retention cap (keep last N) to gc.rs or a  path, mirroring the stash/diagnostic GC. Low priority; surfaced by #misfire-recovery-snapshot 2026-06-02.
 - [ ] [#lr-content-6] Phase 6: Wire DocContentCell + FrontmatterSlot + ComponentsSlot into session_check guard functions. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-cycle-7] Phase 7: Add CycleStateSlot + SnapshotContentSlot; consolidate snapshot path lookups. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-head-8] Phase 8: Add HeadContentSlot + SnapshotCommitStatusSlot for git show HEAD dedup. Plan: tasks/agent-doc/plans/lazily-rs-integration.md

@@ -159,7 +159,49 @@ Registry confirms the real state. Both questions now have evidence-backed answer
 
 I can't finalize from this pane (binary still gated), so this is an uncommitted console response — but the diagnostics are done and concrete:
 **Closeout:** uncommitted (`finalize` gated in this pane). Neither ask required a code change — #1 was already resolved by the concurrent actor's rebase + its in-flight route work, and #2 is a correct registry with a survivor supervisor process. The only *action* available is stopping PID 2341978 for lazily-rs, which I'm holding on until you confirm given the live concurrent work.
-<!-- agent:boundary:d438a4c6 -->
+
+### Re: Resolve the src/agent-doc rebase and get to a clean HEAD — opus-4-8
+
+The rebase is **already resolved** — there is no rebase in progress.
+
+- `src/agent-doc` is on branch `20260422/codex-agent-backend` at `8a0addb2` (`fix(session-check): skip no-op queue preservation`).
+- No `rebase-merge` / `rebase-apply` dir in `.git/modules/agent-doc` — HEAD is clean of rebase. The reflog shows `pull --rebase --autostash origin main` completed and the autostash was re-applied.
+
+What remains is **uncommitted working-tree work, not a rebase**:
+
+```
+ M agent-doc-orchestration/src/route.rs        (+7 -3)
+ M agent-doc-orchestration/src/route/tests.rs  (+37, two new tests)
+```
+
+This is a concurrent in-progress route fix (the codex-agent-backend session's), not mine: `route.rs` makes `ready_prompt_candidate` prefer a *later* Claude dispatch-ready footer over stale busy scrollback, plus two tests (`..._accepts_claude_idle_footer_after_stale_busy_scrollback`, `..._rejects_claude_active_spinner_footer`). It came back via `--autostash`, so it predates the rebase.
+
+I left it untouched — discarding it would destroy active work and committing it would adopt unverified concurrent changes under my name. So: **rebase resolved, HEAD clean of rebase, but the working tree is not pristine.** Tell me if you want me to commit these two files on `20260422/codex-agent-backend`, stash them, or discard — I won't pick for you on someone else's in-flight dispatch-ready fix.
+
+---
+
+### Re: Why is the lazily-rs.md session "running against agent-doc"? — opus-4-8
+
+It isn't actually running against this file — the log is the tmux router doing pane placement, and it **failed closed** (nothing was injected):
+
+```
+[route] Pane %73 is in stash window 'stash', rescuing to agent-doc window
+[route] Rescued pane %73 via join-pane
+[route] codex blocked after 0.2s in pane %73: active codex turn
+Error: dispatch-only codex reopen refused to inject into pane %73 for tasks/software/lazily-rs.md ... never reached a dispatch-ready prompt
+```
+
+Reading it line by line:
+
+1. **"rescuing to agent-doc window"** — `agent-doc` here is the router's *shared* tmux window name for all agent-doc-managed sessions, not this document. The lazily-rs owner pane (%73) was parked in the `stash` window, so the router pulled it into the working window via `join-pane`. That's the pane being co-located in the same window, not lazily-rs targeting `agent-doc-bugs2.md`.
+2. **"codex blocked ... active codex turn"** then **"refused to inject ... never reached a dispatch-ready prompt"** — this is the prompt-gated dispatch invariant working correctly. The pane was still booting an active codex turn, so the route **failed closed and injected nothing**. No cross-contamination of `agent-doc-bugs2.md` occurred.
+
+So "something weird going on with lazily-rs.md" = its owner pane was stuck in the stash window and the router rescued it on focus but couldn't dispatch because it wasn't ready. You killing the pane is consistent with that — a half-booted codex pane that never reached a ready prompt.
+
+This is the existing `#stash-pane-promote-on-focus` backlog item (stash-window pane reparenting on focus), and the uncommitted `route.rs` change above is exactly the dispatch-ready hardening for this class. No new bug to file — the fail-closed behavior is correct; the open work is the reparent + dispatch-ready detection already tracked.
+
+**Preset `#spec-test-build-install-commit-push`:** N/A this cycle — I made no code changes of my own (rebase already resolved, concurrent route work left untouched, lazily-rs is a diagnostic with no code edit). Nothing of mine to test/build/install/commit/push.
+<!-- agent:boundary:2f4a9452 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->

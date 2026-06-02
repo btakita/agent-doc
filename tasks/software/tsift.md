@@ -48,7 +48,19 @@ The missing piece is that current `source-read` is still a source-window reader 
 For `Write`: not yet. `tsift edit` is useful, but it is currently an atomic old/new string replacement batch with uniqueness checks, staging, backup, and rollback. That can replace some repetitive patch applications, but it is not an AST mutation interface. A real `Write` replacement would need tree-sitter-backed edit intents such as rename symbol, replace function body, insert import, add method, move declaration, update call signature, and rewrite call sites, plus formatting, dry-run diffs, conflict detection against current file content, and per-language conformance tests.
 
 So the practical answer is: `tsift` is plausibly a strong replacement for most exploratory `Read` usage, and should probably become the default first step before raw `Read`. It is only a partial `Write` helper today. The strategic direction is sound, but the write side needs semantic edit operations before it can be treated as a tool replacement instead of a convenience wrapper.
-<!-- agent:boundary:3db2d2d4 -->
+❯ What are #next-steps for replacing Read usage with tsift?
+❯ What are #next-steps for replacing Write usage with tsift?
+
+### Re: next steps for tsift Read/Write replacement — gpt-5
+
+Top backlog item: `#readast`.
+
+For replacing `Read`, the priority is to make `tsift` return complete symbol-centered packets, not just annotated source windows. That means adding `symbol-read` / `ast-read`, then routing broad raw file/session/diff/log/test reads through `tsift rewrite --run` or harness hooks, with raw `Read` reserved for exact fallback cases.
+
+For replacing `Write`, the next step is specification first: define the semantic edit intent schema before implementation. Then build an AST-backed executor that can apply those intents with dry-run diffs, formatting, conflict checks, rollback, and language fixtures. Until that exists, `tsift edit` remains useful for atomic string replacements but should not be treated as a general Write replacement.
+
+I added the follow-up backlog in priority order: `#readast`, `#readrewrite`, `#writeintents`, `#writeexecutor`.
+<!-- agent:boundary:0b2437fb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -63,6 +75,10 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#readast] Add a  /  surface that returns a token-budgeted symbol packet: signature, body range, child declarations, imports, callers/callees, summaries, and expansion commands.
+- [ ] [#readrewrite] Route broad Read-style file opens through  / hooks for source windows, session docs, diffs, logs, and tests; keep raw Read as the explicit fallback.
+- [ ] [#writeintents] Specify semantic write intents for AST-backed edits: rename symbol, replace function body, insert import, add method, update call signature, move declaration, and rewrite call sites.
+- [ ] [#writeexecutor] Implement the AST-backed write executor with dry-run diffs, formatting, conflict detection against current file content, rollback, and per-language conformance tests.
 <!-- /agent:backlog -->
 
 ## Review

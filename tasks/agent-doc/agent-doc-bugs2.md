@@ -36,15 +36,31 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 4 response topic(s): do #lr-queue-patchback-miss; do #jb-busy-inactive-queue-dispatch; Implement plan-jb-tsift-pane-sync-regression.md; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:873ab5ca -->
+
+### Re: do #manual-queue-head-loss (re-queued) — the real blocker is this pane's command-approval, not the (now-fixed) contamination — opus-4-8
+
+I just re-tested `.bin/agent-doc preflight` — still "requires approval." So a correction to what I've said the last several turns: I conflated two separate things, and only one of them got fixed.
+
+- **tmux execution-context contamination** (my cycles physically running in lazily-rs's/monsterrodholders' panes) → **fixed** by `#jb-tsift-pane-sync` (`9fac6238`) last turn. Good.
+- **this pane's command-approval policy** → **still in effect, unchanged.** Every `.bin/agent-doc` / `cargo` / `make` call from this Claude Code session returns "requires approval" and is auto-declined. That's a permission-mode setting on *this session*, independent of the tmux routing — so the contamination fix did not (and could not) un-gate it.
+
+That's why re-queuing `do [#manual-queue-head-loss]` won't produce an implementation from this pane no matter how many times it cycles: I can edit files and run `git`, but I cannot build, `make check`, or `finalize`.
+
+**On the item itself:** there's nothing left to *audit* — `#manual-queue-head-loss` is one of the four cluster items, and its fix is already a complete, implementation-ready spec in `plan-lazily-rs-queued-prompt-patchback-miss.md` → "Shared Primitive (cluster consolidation)": free-text queue-head provenance recorded at preflight (text + hash + source) alongside `cycle_state.active_queue_heads`, closeout proof per recorded head, and the stall-restore path. The stall-specific gap (head lost before it's recorded as active) is the precise delta. The toolchain actor can implement it directly from that section.
+
+**To actually move the remaining queue (`#manual-queue-head-loss`, `#lr-head-8/9/10`, `#run-gated-review-items`), pick one:**
+1. **Approve the binary in this pane** (allow `cargo` / `make` / `.bin/agent-doc`) and re-queue — I'll implement each with tests, build+install, and finalize end-to-end.
+2. **Route these to the toolchain actor** — the specs are all written (three plan edits + the cluster consolidation); it can drain them.
+
+I don't think it's useful for me to keep emitting audits into a pane that can't close the loop. Which way do you want to go?
+Still declined — and that re-confirms an important correction I owe you. Let me be precise about the actual gate.
+**Closeout:** uncommitted (`finalize` gated). No new audit this turn — `#manual-queue-head-loss` is already fully specified in the consolidated plan; the honest blocker is this pane's command-approval policy (now disentangled from the fixed contamination). Three plan edits still uncommitted and offered. Your call on unblock path 1 vs 2.
+<!-- agent:boundary:d8393d8c -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- ~do [#manual-queue-head-loss]~
-- ~do [#subagent-blocks-session]~
-- ~do [#jb-busy-inactive-queue-dispatch]~
-- do [#lr-queue-patchback-miss]
+- ~do [#lr-queue-patchback-miss]~
 - do [#lr-head-8]
 - do [#lr-wire-9]
 - do [#lr-actor-10]
@@ -69,6 +85,7 @@ Error: authoritative actor generation 221 for tasks/agent-doc/agent-doc-bugs2.md
 ```
 #spec-test-build-install-commit-push
 ---
+- do [#manual-queue-head-loss]
 <!-- /agent:queue -->
 ###
 <!--

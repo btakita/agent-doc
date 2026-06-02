@@ -41,6 +41,11 @@ Compacted content:
 
 > **Queue prompt:**
 >
+> [#mdsectionspans]
+
+
+> **Queue prompt:**
+>
 > [#mdastcontract]
 
 
@@ -67,7 +72,7 @@ Verification:
 - No `tmux-test` job, `tmux-ci` target, or tmux-test reference exists in this tsift repo/workflow, so there was no separate tmux CI leg to inspect.
 
 Push is pending until after this binary-owned document closeout, per the agent-doc commit/push ordering.
-<!-- agent:boundary:61c50472 -->
+<!-- agent:boundary:48e1306b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -79,7 +84,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~[#mdastcontract]~
-- [#mdsectionspans]
+- ~[#mdsectionspans]~
 - [#mdsectionedits]
 - [#mdblockedits]
 - [#mdverify]

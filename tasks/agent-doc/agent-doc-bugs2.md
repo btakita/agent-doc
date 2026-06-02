@@ -132,7 +132,34 @@ Audited the full deterministic surface before any code change (these items are u
 Together these make owner-pane self-invocation an executable current-turn contract (fail-closed diagnostic + structured handoff + Stop-hook gate), not just a terminal diagnostic — which is exactly what this item asked for. Marking done.
 
 The only remaining work is live re-verification on a real Codex pane, and it is **already tracked** by the existing review items `#codex-owned-pane-stop-hook-live-verify` and `#codex-owned-pane-prompt-miss-followups` (2b live Stop-hook regression, 3 live same-pane repro of the monsterrodholders.md ShipStation prompt). I did not create a duplicate gated item. This turn ran under Claude Code, which cannot drive Codex owner-pane Stop-hook behavior.
-<!-- agent:boundary:e718f412 -->
+
+### Re: resolve src/agent-doc rebase + why lazily-rs.md runs against agent-doc — opus-4-8
+
+Both handled as diagnostics (git is available in this pane; the agent-doc binary is not). Findings:
+
+**1. The rebase is already resolved — nothing to do, and the dirty files are live concurrent work I won't touch.**
+
+- `src/agent-doc` is **not** mid-rebase. There's no `rebase-merge/`/`rebase-apply/` directory in the gitdir (`.git/modules/agent-doc`) — only a stale `REBASE_HEAD` ref (→ `8c6dfd59`), which is a harmless leftover pointer that does not affect HEAD or `git status`.
+- The reflog confirms your report was accurate *earlier*: `HEAD@{4..7}` are `pull --rebase --autostash origin main (pick)` steps. That rebase **concluded** — HEAD moved to branch `20260422/codex-agent-backend` and 3 fresh commits landed on top (`1573d970`, `f3d063d2`, `8a0addb2`). HEAD is clean.
+- The only working-tree dirtiness (`-dirty` in the superproject pointer) is **2 uncommitted files**: `agent-doc-orchestration/src/route.rs` and `route/tests.rs`. These were modified **16:46:39 / 16:46:52** — ~1 minute before I looked — and there's a **live test binary running right now** (`agent_doc-…--test-threads=2`, PID 2364572). That's the concurrent gpt-5 actor mid-`make check` on its route work. **I did not commit, stash, or `checkout` them** — clobbering a live build/test is exactly the hazard. HEAD goes clean on its own once that actor commits.
+- I left the stale `REBASE_HEAD` ref alone too (cosmetic; touching the gitdir during a live test run is needless risk). Say the word if you want it cleared (`git -C src/agent-doc update-ref -d REBASE_HEAD`).
+
+**2. lazily-rs.md is NOT bound to agent-doc — what you saw was transient focus/sync aliasing.**
+
+Per `.agent-doc/sessions.json`, lazily-rs.md is correctly registered **solely to its own pane %73** (stash window @4, session `9386d273…`, file `tasks/software/lazily-rs.md`) — distinct from agent-doc-bugs2.md (%70, session `b26b9957…`). No registry mis-binding exists right now.
+
+Two real mechanisms behind what you observed:
+- **Kill-pane ≠ stop-actor.** You killed the lazily-rs tmux pane, but its route-owned supervisor (`agent-doc start --route-owned tasks/software/lazily-rs.md`, **PID 2341978**) survived and **re-provisioned pane %73 at 20:46:28Z** (a minute ago). The supervisor keeps respawning the pane — that's why it won't stay gone.
+- **Cross-document focus surfacing.** When you focused the editor on agent-doc-bugs2.md, a concurrent `focus`/`sync` (PIDs 2364990 `focus tsift.md`, 2365230 `sync --focus tsift.md`) was churning the layout. The lazily-rs pane getting surfaced/selected against the wrong document is the already-tracked bug `#jb-tsift-pane-sync` / `#codex-upgrade-restart-cross-doc-focus` (wrong-document pane↔owner surfacing) — a *display* aliasing, not an ownership swap. The registry binding stayed correct throughout.
+
+**To actually stop the lazily-rs session** (so the pane stops coming back), the supervisor must be terminated, not the pane: `kill 2341978` — or the binary-owned path `agent-doc gc` / `agent-doc session clear tasks/software/lazily-rs.md`. I did **not** kill it unilaterally: there's heavy live routing churn right now (two `controller serve` processes, an active sync+focus, and the running test) and a stray kill mid-churn could worsen the layout state. Confirm and I'll stop PID 2341978; or run the `session clear` yourself from a toolchain pane.
+Registry confirms the real state. Both questions now have evidence-backed answers.
+
+**Registry is clean** — lazily-rs.md is bound *solely* to its own pane %73 (own session_id `9386d273…`, file `tasks/software/lazily-rs.md`), entirely separate from agent-doc-bugs2.md's %70/`b26b9957…`. There is no actual cross-document mis-binding to fix.
+
+I can't finalize from this pane (binary still gated), so this is an uncommitted console response — but the diagnostics are done and concrete:
+**Closeout:** uncommitted (`finalize` gated in this pane). Neither ask required a code change — #1 was already resolved by the concurrent actor's rebase + its in-flight route work, and #2 is a correct registry with a survivor supervisor process. The only *action* available is stopping PID 2341978 for lazily-rs, which I'm holding on until you confirm given the live concurrent work.
+<!-- agent:boundary:d438a4c6 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
@@ -145,8 +172,19 @@ Please stop creating a build subagent and making the session open. Run the build
 ---
 preset #spec-test-build-install-commit-push
 - ~The backlog has the priority attribute but the order of tasks shows [#lr-actor-10] then [#lr-wire-9] then [#lr-head-8]. Is this in priority order? If not, fix the backlog priority attribute.~
+- ~do [#owned-pane-prompt-recur]~
+- src/agent-doc is currently in rebase. Please resolve the rebase and get to a clean HEAD.
+- Why is the lazily-rs.md session running against agent-doc (presumably this file)? It should be running solely on lazily-rs.md. I manually killed the tmux pane. Something weird is going on with lazily-rs.md.
+```
+[route] target tmux session: 0
+[route] Pane %73 is in stash window 'stash', rescuing to agent-doc window
+[route] Rescued pane %73 via join-pane
+[route] codex blocked after 0.2s in pane %73: active codex turn
+Error: dispatch-only codex reopen refused to inject into pane %73 for tasks/software/lazily-rs.md because the latest run is still booting and never reached a dispatch-ready prompt (active codex turn); wait for the pane to become ready and reroute again
+```
+---
+preset #spec-test-build-install-commit-push
 - do [#manual-queue-head-loss]
-- do [#owned-pane-prompt-recur]
 - do [#subagent-blocks-session]
 - do [#lr-queue-plan-deferral]
 - do [#lr-queue-repair-adopt]

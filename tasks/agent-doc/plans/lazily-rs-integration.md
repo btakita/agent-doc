@@ -21,10 +21,21 @@ Wire `lazily-rs` into agent-doc to cache filesystem-derived computations (`proje
 
 ### Context Lifetimes
 
-| Context | Lifetime | Owner | Invalidation |
-|---------|----------|-------|-------------|
-| **RunContext** | Single CLI invocation (`preflight → write → commit`) | Created at top of `main.rs` dispatch, dropped at exit | Implicit — process exit clears everything |
-| **ActorContext** | Long-lived (watch daemon, supervisor, session actor) | Created at daemon/actor startup, held in `SupervisorShared` or `watch.rs` event loop | Explicit — `slot.clear()` or `cell.set()` on file/config change events |
+> **Multithreading update (2026-06-02):** lazily-rs now ships a `ThreadSafeContext`
+> (mutex-backed, `Send + Sync + 'static`) alongside the single-threaded `Context`.
+> `SlotHandle<T>` / `CellHandle<T>` / `EffectHandle` are `Send + Sync` when `T` is.
+> This changes the lifetime mapping below: **RunContext** stays the lightweight
+> single-threaded `Context` (one CLI invocation runs on one thread), but
+> **ActorContext** must use `ThreadSafeContext` because the supervisor/watch
+> daemon genuinely shares one reactive graph across threads (idle-queue-watch
+> thread, IPC listener thread, event loop). `loom`/`tokio` features exist for the
+> thread-safe model and async integration. This supersedes the old "lazily-rs is
+> single-threaded (RefCell)" risk below.
+
+| Context | lazily-rs backing | Lifetime | Owner | Invalidation |
+|---------|-------------------|----------|-------|-------------|
+| **RunContext** | `Context` (single-threaded) | Single CLI invocation (`preflight → write → commit`) | Created at top of `main.rs` dispatch, dropped at exit | Implicit — process exit clears everything |
+| **ActorContext** | `ThreadSafeContext` (`Send + Sync`, mutex-backed) | Long-lived (watch daemon, supervisor, session actor) | Created at daemon/actor startup, held in `SupervisorShared` or `watch.rs` event loop, shared across worker threads | Explicit — `slot.clear()` or `cell.set()` on file/config change events |
 
 ### Slot/Cell Graph
 
@@ -111,11 +122,12 @@ Within a CLI run, all slots compute at most once. Within an Actor, slots persist
 
 ### Phase 5: ActorContext for long-lived processes (#lr-actor-5)
 
-**Wire `ActorContext` into watch daemon and supervisor.**
+**Wire `ActorContext` (backed by `ThreadSafeContext`) into watch daemon and supervisor.**
 
+- `ActorContext` wraps `ThreadSafeContext` (not `Context`) so the same graph can be shared across the supervisor's worker threads (idle-queue-watch, IPC listener) — store it as `Arc<ActorContext>` in `SupervisorShared`.
 - `ActorContext` held in `watch.rs` event loop state alongside existing `FileState`/`StreamState` maps
 - `ActorContext` held in `SupervisorShared` for session actor
-- On file change events: `CellHandle::set(&ctx, &mut file_path, new_path)` or `SlotHandle::clear(&ctx, project_root)` to invalidate stale cached data
+- On file change events: `CellHandle::set(&ctx, &mut file_path, new_path)` or `SlotHandle::clear(&ctx, project_root)` to invalidate stale cached data (the `ThreadSafeContext` graph lock serializes concurrent reads/invalidations)
 - On config file change: clear `ProjectConfigSlot` and all dependents transitively
 
 **Verification:** Watch daemon and supervisor tests pass. Manual test: edit `.agent-doc/config.toml` during a running watch loop, verify config changes take effect without restart.
@@ -182,9 +194,10 @@ Within a CLI run, all slots compute at most once. Within an Actor, slots persist
 
 | Risk | Mitigation |
 |------|-----------|
-| lazily-rs is single-threaded (RefCell) | agent-doc runs are sequential; ActorContext is per-actor, not shared across threads |
-| API surface change (threading &Context everywhere) | Phase gradually; each phase only changes one layer of callers |
-| Performance regression from graph overhead | Benchmark pre/post Phase 2; slot overhead is HashMap lookup + RefCell borrow, negligible vs filesystem stat |
+| ~~lazily-rs is single-threaded (RefCell)~~ **(resolved 2026-06-02)** | lazily-rs now ships `ThreadSafeContext` (`Send + Sync`, mutex-backed). RunContext uses the single-threaded `Context` (one-thread CLI run); ActorContext uses `ThreadSafeContext` because the supervisor/watch daemon shares one graph across worker threads. |
+| `ThreadSafeContext` graph-lock contention in the supervisor | Keep slot graphs coarse and reads short; the lock is held only for graph traversal, not for the underlying fs/parse work. Benchmark with the `instrumentation` feature (lock timing) if contention appears; verify the model with the `loom` feature. |
+| API surface change (threading `&Context` everywhere) | Phase gradually; each phase only changes one layer of callers. RunContext and ActorContext expose the same slot/cell read API so call sites are backing-agnostic. |
+| Performance regression from graph overhead | Benchmark pre/post Phase 2; slot overhead is HashMap lookup + borrow, negligible vs filesystem stat |
 | lazily-rs not yet on crates.io | Use path dependency: `lazily-rs = { path = "../../lazily-rs" }` |
 
 ## Open Questions

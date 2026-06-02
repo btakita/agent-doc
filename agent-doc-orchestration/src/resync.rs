@@ -891,7 +891,10 @@ fn registry_for_project_root<'a>(
     cache
         .registries
         .entry(project_root.to_path_buf())
-        .or_insert_with(|| sessions::load_in(project_root).unwrap_or_default())
+        .or_insert_with(|| {
+            let actor = crate::graph::ActorContext::for_project_root(project_root.to_path_buf());
+            (*actor.context().session_registry()).clone()
+        })
 }
 
 fn live_supervisors_for_project_root<'a>(

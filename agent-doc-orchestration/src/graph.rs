@@ -35,6 +35,7 @@ use sha2::{Digest, Sha256};
 use crate::cycle_state::CycleState;
 use crate::fs_util;
 use crate::project_config_io;
+use crate::{config, sessions};
 
 pub type FilePathCell = CellHandle<PathBuf>;
 pub type DocContentCell = CellHandle<String>;
@@ -63,6 +64,13 @@ pub type SnapshotCommitStatusSlot = SlotHandle<crate::git::SnapshotCommitStatus>
 /// Phase 9 (#lr-wire-9): cached harness detection. Harness env vars are
 /// process-static for a CLI run, so compute once per [`RunContext`].
 pub type HarnessSlot = SlotHandle<String>;
+/// Phase 10 (#lr-actor-10): cached global user configuration. For CLI runs this
+/// is process-static; for long-lived actors it is invalidated by config-change
+/// events before the next read.
+pub type GlobalConfigSlot = SlotHandle<Arc<config::Config>>;
+/// Phase 10 (#lr-actor-10): cached session registry for the current document's
+/// project root. Read-modify-write callers still load under `RegistryLock`.
+pub type SessionRegistrySlot = SlotHandle<Arc<sessions::SessionRegistry>>;
 
 pub struct SshContextValue {
     pub config: Arc<ProjectConfig>,
@@ -88,6 +96,8 @@ pub struct RunContext {
     head_content: HeadContentSlot,
     snapshot_commit_status: SnapshotCommitStatusSlot,
     harness: HarnessSlot,
+    global_config: GlobalConfigSlot,
+    session_registry: SessionRegistrySlot,
 }
 
 impl RunContext {
@@ -298,6 +308,41 @@ impl RunContext {
 
         let harness = ctx.slot(|_ctx: &Context| agent_doc_core::model_tier::detect_harness());
 
+        let global_config = ctx.slot(|_ctx: &Context| -> Arc<config::Config> {
+            Arc::new(match config::load() {
+                Ok(config) => config,
+                Err(e) => {
+                    eprintln!("[graph] global config load failed: {e}");
+                    config::Config::default()
+                }
+            })
+        });
+
+        let session_registry = ctx.slot({
+            let pr = project_root;
+            move |ctx: &Context| -> Arc<sessions::SessionRegistry> {
+                let root: Option<PathBuf> = ctx.get(&pr);
+                let loaded = match root {
+                    Some(ref root) => sessions::load_in(root).map_err(|e| {
+                        anyhow::anyhow!(
+                            "failed to load session registry from {}: {e}",
+                            sessions::registry_path_in(root).display()
+                        )
+                    }),
+                    None => sessions::load()
+                        .map_err(|e| anyhow::anyhow!("failed to load session registry: {e}")),
+                };
+
+                Arc::new(match loaded {
+                    Ok(registry) => registry,
+                    Err(e) => {
+                        eprintln!("[graph] {e}");
+                        sessions::SessionRegistry::new()
+                    }
+                })
+            }
+        });
+
         Self {
             ctx,
             file_path: file_path_cell,
@@ -317,7 +362,13 @@ impl RunContext {
             head_content,
             snapshot_commit_status,
             harness,
+            global_config,
+            session_registry,
         }
+    }
+
+    pub fn from_project_root(project_root: PathBuf) -> Self {
+        Self::new(project_root.join(".agent-doc"))
     }
 
     pub fn file_path(&self) -> PathBuf {
@@ -401,6 +452,18 @@ impl RunContext {
         self.ctx.get(&self.harness)
     }
 
+    /// Phase 10 (#lr-actor-10): cached global user configuration.
+    pub fn global_config(&self) -> Arc<config::Config> {
+        self.ctx.get(&self.global_config)
+    }
+
+    /// Phase 10 (#lr-actor-10): cached session registry for this document's
+    /// project root. This is for read-only point-in-time queries; mutation paths
+    /// must continue to load while holding `RegistryLock`.
+    pub fn session_registry(&self) -> Arc<sessions::SessionRegistry> {
+        self.ctx.get(&self.session_registry)
+    }
+
     /// Invalidate the cached cycle state after a save/mutation so the next read
     /// reloads it (Phase 7).
     pub fn invalidate_cycle_state(&self) {
@@ -415,6 +478,18 @@ impl RunContext {
     /// Invalidate the cached HEAD content after `git::commit`.
     pub fn invalidate_head_content(&self) {
         self.head_content.clear(&self.ctx);
+    }
+
+    /// Invalidate cached global config after a config-file change.
+    pub fn invalidate_global_config(&self) {
+        self.global_config.clear(&self.ctx);
+    }
+
+    /// Invalidate cached session registry after registry mutation or a watcher
+    /// event. Registry mutation paths generally create a fresh `RunContext`;
+    /// long-lived `ActorContext`s call this before the next read.
+    pub fn invalidate_session_registry(&self) {
+        self.session_registry.clear(&self.ctx);
     }
 
     pub fn is_cycle_state_cached(&self) -> bool {
@@ -435,6 +510,14 @@ impl RunContext {
 
     pub fn is_harness_cached(&self) -> bool {
         self.ctx.is_set(&self.harness)
+    }
+
+    pub fn is_global_config_cached(&self) -> bool {
+        self.ctx.is_set(&self.global_config)
+    }
+
+    pub fn is_session_registry_cached(&self) -> bool {
+        self.ctx.is_set(&self.session_registry)
     }
 
     pub fn invalidate_project_root(&self) {
@@ -552,16 +635,29 @@ impl ActorContext {
         }
     }
 
+    pub fn for_project_root(project_root: PathBuf) -> Self {
+        Self {
+            inner: RunContext::from_project_root(project_root),
+        }
+    }
+
     pub fn on_file_change(&self, new_path: PathBuf) {
         self.inner.set_file_path(new_path);
     }
 
     pub fn on_config_change(&self) {
         self.inner.invalidate_project_root();
+        self.inner.invalidate_global_config();
+    }
+
+    pub fn on_session_registry_change(&self) {
+        self.inner.invalidate_session_registry();
     }
 
     pub fn invalidate_all(&self) {
         self.inner.invalidate_project_root();
+        self.inner.invalidate_global_config();
+        self.inner.invalidate_session_registry();
     }
 
     pub fn context(&self) -> &RunContext {
@@ -616,6 +712,47 @@ mod tests {
             "git commit failed: {}",
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+
+    struct EnvVarRestore {
+        key: &'static str,
+        old: Option<std::ffi::OsString>,
+    }
+
+    impl EnvVarRestore {
+        fn set(key: &'static str, value: &std::path::Path) -> Self {
+            let old = std::env::var_os(key);
+            unsafe { std::env::set_var(key, value) };
+            Self { key, old }
+        }
+    }
+
+    impl Drop for EnvVarRestore {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.old {
+                    Some(value) => std::env::set_var(self.key, value),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
+
+    fn registry_entry(pane: &str, session_id: &str, file: &Path) -> sessions::SessionEntry {
+        sessions::SessionEntry {
+            pane: pane.to_string(),
+            pid: 12345,
+            cwd: file
+                .parent()
+                .unwrap_or_else(|| Path::new(""))
+                .to_string_lossy()
+                .to_string(),
+            started: "2026-01-01T00:00:00Z".to_string(),
+            session_id: session_id.to_string(),
+            file: file.to_string_lossy().to_string(),
+            window: String::new(),
+            supervisor_instance_id: String::new(),
+        }
     }
 
     #[test]
@@ -1233,5 +1370,105 @@ mod tests {
         );
 
         unsafe { std::env::remove_var("OPENCODE") };
+    }
+
+    // ---- Phase 10 (#lr-actor-10) ----
+
+    #[test]
+    fn phase10_global_config_slot_loads_caches_and_invalidates() {
+        let _env_guard = crate::test_support::env_lock();
+        let config_root = TempDir::new().unwrap();
+        let config_dir = config_root.path().join("agent-doc");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        std::fs::write(
+            config_dir.join("config.toml"),
+            "default_agent = \"claude\"\nagent_args = \"--first\"\n",
+        )
+        .unwrap();
+        let _xdg = EnvVarRestore::set("XDG_CONFIG_HOME", config_root.path());
+
+        let rc = RunContext::new(PathBuf::from("doc.md"));
+        assert!(!rc.is_global_config_cached());
+        let first = rc.global_config();
+        assert_eq!(first.default_agent.as_deref(), Some("claude"));
+        assert_eq!(first.agent_args.as_deref(), Some("--first"));
+        assert!(rc.is_global_config_cached());
+
+        std::fs::write(
+            config_dir.join("config.toml"),
+            "default_agent = \"codex\"\nagent_args = \"--second\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            rc.global_config().default_agent.as_deref(),
+            Some("claude"),
+            "global config remains cached until invalidated"
+        );
+
+        rc.invalidate_global_config();
+        let second = rc.global_config();
+        assert_eq!(second.default_agent.as_deref(), Some("codex"));
+        assert_eq!(second.agent_args.as_deref(), Some("--second"));
+    }
+
+    #[test]
+    fn phase10_session_registry_slot_loads_caches_and_invalidates() {
+        let dir = TempDir::new().unwrap();
+        setup_project(dir.path());
+        let doc = dir.path().join("file.md");
+        std::fs::write(&doc, "").unwrap();
+
+        let mut first_registry = sessions::SessionRegistry::new();
+        first_registry.insert("first".to_string(), registry_entry("%1", "first", &doc));
+        sessions::save_in(dir.path(), &first_registry).unwrap();
+
+        let rc = RunContext::new(doc.clone());
+        assert!(!rc.is_session_registry_cached());
+        let first = rc.session_registry();
+        assert!(first.values().any(|entry| entry.pane == "%1"));
+        assert!(rc.is_session_registry_cached());
+
+        let mut second_registry = sessions::SessionRegistry::new();
+        second_registry.insert("second".to_string(), registry_entry("%2", "second", &doc));
+        sessions::save_in(dir.path(), &second_registry).unwrap();
+
+        assert!(
+            rc.session_registry()
+                .values()
+                .any(|entry| entry.pane == "%1"),
+            "session registry remains cached until invalidated"
+        );
+        rc.invalidate_session_registry();
+        let second = rc.session_registry();
+        assert!(second.values().any(|entry| entry.pane == "%2"));
+        assert!(!second.values().any(|entry| entry.pane == "%1"));
+    }
+
+    #[test]
+    fn phase10_actor_context_invalidates_session_registry() {
+        let dir = TempDir::new().unwrap();
+        setup_project(dir.path());
+        let doc = dir.path().join("file.md");
+        std::fs::write(&doc, "").unwrap();
+
+        let ac = ActorContext::new(doc.clone());
+        assert!(ac.context().session_registry().is_empty());
+        assert!(ac.context().is_session_registry_cached());
+
+        let mut registry = sessions::SessionRegistry::new();
+        registry.insert("live".to_string(), registry_entry("%9", "live", &doc));
+        sessions::save_in(dir.path(), &registry).unwrap();
+
+        assert!(
+            ac.context().session_registry().is_empty(),
+            "actor registry stays cached until an actor event invalidates it"
+        );
+        ac.on_session_registry_change();
+        assert!(
+            ac.context()
+                .session_registry()
+                .values()
+                .any(|entry| entry.pane == "%9")
+        );
     }
 }

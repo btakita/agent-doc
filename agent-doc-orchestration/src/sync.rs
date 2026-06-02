@@ -1025,8 +1025,9 @@ fn lookup_registry_entry_for_file_session(
     file: &Path,
     session_id: &str,
 ) -> Option<sessions::SessionEntry> {
-    let (_, project_root, registry_key) = registry_location_for_file(file)?;
-    let registry = sessions::load_in(&project_root).ok()?;
+    let (_, _project_root, registry_key) = registry_location_for_file(file)?;
+    let rc = crate::graph::RunContext::new(file.to_path_buf());
+    let registry = rc.session_registry();
     let entry = registry.get(&registry_key)?.clone();
     (entry.session_id == session_id).then_some(entry)
 }
@@ -1301,10 +1302,10 @@ struct OpenCycleProtectedPaneState {
 
 fn resolve_harness_for_sync(file: &Path) -> crate::harness::HarnessConfig {
     let content = std::fs::read_to_string(file).unwrap_or_default();
-    let fm = frontmatter::parse(&content)
-        .map(|(frontmatter, _)| frontmatter)
-        .unwrap_or_default();
-    let global_config = crate::config::load().unwrap_or_default();
+    let rc = crate::graph::RunContext::new(file.to_path_buf());
+    rc.set_doc_content(content);
+    let fm = rc.frontmatter();
+    let global_config = rc.global_config();
     crate::harness::HarnessConfig::from_context(&fm, &global_config)
 }
 

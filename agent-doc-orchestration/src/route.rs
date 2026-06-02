@@ -1065,7 +1065,7 @@ fn managed_capability_proof_status(
     #[cfg(test)]
     let global_config = crate::config::Config::default();
     #[cfg(not(test))]
-    let global_config = crate::config::load().unwrap_or_default();
+    let global_config = rc.global_config();
     if !crate::agent::codex::managed_capability_contract_required_for_doc_and_harness(
         file,
         &fm,
@@ -1608,7 +1608,7 @@ pub fn run_with_tmux(
     let rc = crate::graph::RunContext::new(file.to_path_buf());
     let fm =
         frontmatter::parse_for_file_with_context(&updated_content, file, &rc).map(|(f, _)| f)?;
-    let global_config = crate::config::load().unwrap_or_default();
+    let global_config = rc.global_config();
     let mut harness = HarnessConfig::from_context(&fm, &global_config);
     if plain_trigger {
         apply_plain_trigger_override(&mut harness);
@@ -7948,10 +7948,10 @@ fn acquire_startup_locks(file: &Path, session_name: &str) -> Result<Option<Start
 /// Resolve HarnessConfig from a file's frontmatter + global config.
 fn resolve_harness_for_file(file: &Path) -> HarnessConfig {
     let content = std::fs::read_to_string(file).unwrap_or_default();
-    let fm = frontmatter::parse(&content)
-        .map(|(f, _)| f)
-        .unwrap_or_default();
-    let global_config = crate::config::load().unwrap_or_default();
+    let rc = crate::graph::RunContext::new(file.to_path_buf());
+    rc.set_doc_content(content);
+    let fm = rc.frontmatter();
+    let global_config = rc.global_config();
     HarnessConfig::from_context(&fm, &global_config)
 }
 

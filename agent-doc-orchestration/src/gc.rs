@@ -563,7 +563,8 @@ fn clean_orphaned_sockets(project_root: &Path, dry_run: bool) -> Result<(usize, 
         return Ok((0, 0));
     }
 
-    let registry = sessions::load_in(project_root).unwrap_or_default();
+    let actor = crate::graph::ActorContext::for_project_root(project_root.to_path_buf());
+    let registry = actor.context().session_registry();
     let mut deleted = 0;
     let mut kept = 0;
     let mut keys_to_prune: Vec<String> = Vec::new();
@@ -619,7 +620,7 @@ fn clean_orphaned_sockets(project_root: &Path, dry_run: bool) -> Result<(usize, 
 
     // Phase 2: prune sessions.json entries for dead sockets
     // Also find entries whose PID is dead and socket doesn't exist
-    for (registry_key, entry) in &registry {
+    for (registry_key, entry) in registry.iter() {
         if keys_to_prune.contains(registry_key) {
             continue; // already marked
         }

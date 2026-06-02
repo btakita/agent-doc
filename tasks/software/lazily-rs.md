@@ -122,7 +122,7 @@ Proof: changed source paths are limited to the `src/lazily-rs` submodule commits
 Completed and pushed. The README now has generated benchmark results for `lazily` `0.4.0`, including Criterion timing rows and instrumentation counter rows. The update harness is `scripts/update-benchmark-results.py`; it runs/reads Criterion results, captures `examples/instrumentation_profile.rs` snapshots, rewrites the marked README section, and supports `--check --no-run` for freshness validation against the saved local benchmark artifacts.
 
 Proof: the source work landed in `lazily-rs` commits `92815a6` and `e6dd0ae`, and the root submodule pointer landed in `agent-loop` commits `6fa6ac59f` and `0516f8c25`. Verification already completed in the previous response: crate tests/build/clippy/bench compile/install smoke all passed; root `make check` passed; GitHub Actions `Agent Doc` run `26790225428` for `0516f8c25` passed both `tmux-ci` and `check`. No additional source edits were made for this queue-drain closeout. Escalation: none. Confidence: high.
-<!-- agent:boundary:a4542b04 -->
+<!-- agent:boundary:115d69d6 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -148,15 +148,4 @@ Proof: the source work landed in `lazily-rs` commits `92815a6` and `e6dd0ae`, an
 ## Completed / Reaped
 
 <!-- agent:done archive=tasks/software/lazily-rs.done.md -->
-- 2026-06-01 [#n12s] #ipc-corruption-live-repro-lazily-rs Logged as #zpc2 in agent-doc-bugs2.md backlog. Live repro of scaffold duplication during finalize --stream. Document manually repaired.
-- 2026-06-01 [#exfd] #effect-system Phase 4: Effect system — ctx.effect(|ctx| { ... }) with auto-tracking, scheduling, cleanup, and disposal
-- 2026-06-01 [#rx9y] #batch-updates ctx.batch(|ctx| { ... }) to defer invalidation until the batch completes
-- 2026-06-01 [#fzaf] #memo-guard Memoization guard — prevent unnecessary downstream cascade during invalidation when recomputed value equals prior value (slots are already lazy: invalidated only, recomputed on get())
-- 2026-06-01 [#dpzd] #api-ergonomics ctx.computed() alias and DX improvements
-- 2026-06-01 [#45rh] #release-publish Release + publish after effect system lands
-- 2026-06-01 [#thr-spec] #parallelism Specify the thread-safe contract for lazily-rs: API shape, Send/Sync bounds, lock/re-entrancy rules, single-threaded fast path compatibility, and parity/differences with lazily-zig's mutex-first design
-- 2026-06-01 [#thr-core] #parallelism Implement the thread-safe core after the spec: lock-backed context state, Send + Sync cached values and compute/effect callbacks, safe dependency tracking, and re-entrant user callback boundaries
-- 2026-06-01 [#thr-tests] #parallelism Add thread contention coverage: concurrent first get, concurrent set_cell, batch flush ordering, clear/dispose races, effect coalescing, and deadlock/regression checks modeled after lazily-zig thread_safe tests
-- 2026-06-01 [#tokio-sync] #tokio Add optional Tokio integration after thread safety is sound: async tests and examples that share the synchronous context across tokio::spawn/spawn_blocking without introducing async compute semantics
-- 2026-06-01 [#tokio-async] #tokio Design true async computations/effects only after #tokio-sync: in-flight future deduplication, cancellation, stale future completion, cleanup ordering, and Send vs LocalSet semantics
 <!-- /agent:done -->

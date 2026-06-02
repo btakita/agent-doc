@@ -260,10 +260,10 @@ I treated this as the `#agent-doc-bug` capture that the planning record required
 
 Transferred backlog items now committed in `agent-doc-bugs2.md`:
 
-- [ ] [#lr-queue-patchback-miss] [recommended] Umbrella capture for the lazily-rs queued free-text prompt that was not visibly answered or patched back.
-- [ ] [#lr-queue-response-miss] [recommended] The lazily-rs free-text queue head with `#spec-test-build-install-commit-push` had no committed response patchback in `tasks/software/lazily-rs.md`.
-- [ ] [#lr-queue-plan-deferral] [recommended] The mixed `#agent-doc-bug` capture plus runnable queue head made `agent-doc plan` choose `plan_backlog_only`, deferring the actual lazily-rs work without explicit queue-head deferral proof.
-- [ ] [#lr-queue-repair-adopt] [recommended] If the queued work was already completed console-only, recovery must adopt a supplied response through `agent-doc write --commit` and preserve or consume the matching free-text queue head without rerunning repo work.
+- `#lr-queue-patchback-miss` [recommended] Umbrella capture for the lazily-rs queued free-text prompt that was not visibly answered or patched back.
+- `#lr-queue-response-miss` [recommended] The lazily-rs free-text queue head with `#spec-test-build-install-commit-push` had no committed response patchback in `tasks/software/lazily-rs.md`.
+- `#lr-queue-plan-deferral` [recommended] The mixed `#agent-doc-bug` capture plus runnable queue head made `agent-doc plan` choose `plan_backlog_only`, deferring the actual lazily-rs work without explicit queue-head deferral proof.
+- `#lr-queue-repair-adopt` [recommended] If the queued work was already completed console-only, recovery must adopt a supplied response through `agent-doc write --commit` and preserve or consume the matching free-text queue head without rerunning repo work.
 
 Plan: tasks/agent-doc/plan-lazily-rs-queued-prompt-patchback-miss.md
 Plan: tasks/agent-doc/plan-lazily-rs-queue-plan-deferral.md

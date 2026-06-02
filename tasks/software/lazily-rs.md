@@ -1,6 +1,5 @@
 ---
-agent_doc_session: 9386d273-2288-498c-b9fc-207f224f9fdb
-resume: 019e8608-2fbe-7410-abb8-7538fa69d044
+agent_doc_session: 3d9ff8e4-bafd-4e1f-b48d-550d3c976904
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -80,7 +79,7 @@ Changed paths: session document/backlog only.
 Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `tsift index --workspace .`, targeted source/spec reads.
 Verification: `agent-doc finalize` will run commit/session guards; no Rust tests were run because no lazily-rs source changed.
 Escalation: none. Confidence: high.
-<!-- agent:boundary:14af0c6d -->
+<!-- agent:boundary:6aac4a59 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -99,7 +98,7 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#lazyperf9] Add p50/p95 latency evidence to the benchmark/report harness required by #lazyperf8: capture latency distributions for same-slot, read-mostly, batched-write, and effect-heavy 8/16-worker cases, emit them in README.md beside throughput and lock-site budgets, and make --check fail when required latency rows are missing.
+- [x] [#lazyperf9] Add p50/p95 latency evidence to the benchmark/report harness required by #lazyperf8: capture latency distributions for same-slot, read-mostly, batched-write, and effect-heavy 8/16-worker cases, emit them in README.md beside throughput and lock-site budgets, and make --check fail when required latency rows are missing.
 - [ ] [#lazyperf12] Prototype an explicit ThreadSafeContext shadow invalidation plan: snapshot slot/effect frontier structure, compute slots_to_mark/effects_to_schedule/clears as a deterministic plan, then apply dirty/revision/effect mutations in one graph-lock batch; benchmark lock hold/wait against batched_write_bursts_16, independent_slots_16, and effect batch_flush_16 with Loom coverage for dynamic dependency, disposal, and stale in-flight races.
 - [ ] [#lazyperf10] Reduce remaining independent-slot ThreadSafeContext publish/get_refresh lock contention: profile thread_safe_contention_independent_slots_16 with the new latency rows, then prototype splitting or partitioning the publish/get_refresh graph-mutation path by SlotId while preserving dependency-edge, effect, batch, and stale-completion semantics under Loom.
 - [ ] [#lazyperf11] Reduce effect-heavy ThreadSafeContext lock contention after #lazyperf8: target thread_safe_effect_contention_batch_flush_16 and queue_coalescing_16, especially the high other/dependency_edge waits, by coalescing effect drain/schedule mutations or adding effect-sidecar state without weakening cleanup/disposal ordering.

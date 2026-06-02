@@ -60,7 +60,47 @@ For replacing `Read`, the priority is to make `tsift` return complete symbol-cen
 For replacing `Write`, the next step is specification first: define the semantic edit intent schema before implementation. Then build an AST-backed executor that can apply those intents with dry-run diffs, formatting, conflict checks, rollback, and language fixtures. Until that exists, `tsift edit` remains useful for atomic string replacements but should not be treated as a general Write replacement.
 
 I added the follow-up backlog in priority order: `#readast`, `#readrewrite`, `#writeintents`, `#writeexecutor`.
-<!-- agent:boundary:861846f9 -->
+
+### Re: queued tsift read/write replacement work — gpt-5
+
+> **Queue prompt:**
+>
+> [#readast]
+>
+> [#readrewrite]
+>
+> [#writeintents]
+
+
+Implemented the queued tsift read/write replacement work in `src/tsift` and pushed the tsift commit `01f2160` to `origin/main`.
+
+What changed:
+
+- Added `tsift symbol-read`, a bounded symbol packet reader that resolves indexed symbols and returns metadata, source body lines, child symbol refs, summaries, and expansion commands for source window, whole file, explain, callers, and callees.
+- Routed `source-read` symbol references toward `tsift --envelope symbol-read ...` so broad source navigation can move through narrower symbol handles.
+- Added `tsift edit-intents`, a JSON semantic edit planning surface for rename, replace function body, import insertion, method addition, call signature update, move declaration, and call-site rewrite intents. It validates targets and content hashes and emits dry-run plans without mutating files.
+- Updated `SPEC.md`, `CLAUDE.md`, `AGENTS.md`, `README.md`, and `VERSIONS.md` for the new read and write-intent surfaces.
+- Added CLI regression tests for `symbol-read`, the updated `source-read` expansion command, and `edit-intents` dry-run validation.
+
+Queue outcome:
+
+- `#readast`: done.
+- `#readrewrite`: done.
+- `#writeintents`: done.
+- `#writeexecutor`: gated. The current implementation is the safe validating dry-run executor surface; the actual mutating per-language AST executor with rollback and conformance coverage remains deferred.
+
+Verification completed before closeout:
+
+- `cargo check`
+- targeted `cargo test -p tsift-cli --test exit_code ...` coverage for `symbol-read`, `source-read`, and `edit-intents`
+- `make check`
+- `cargo build`
+- `cargo install --path . --force`
+- `tsift --version` reports `tsift 0.1.62`
+- latest GitHub Actions `CI` run `26793122164` was `completed success` with `clippy + test` and live Convex graph acceptance jobs
+
+The superproject submodule pointer was committed separately as `c61977f82` (`chore: update tsift submodule`) so the root repo now points at the pushed tsift commit.
+<!-- agent:boundary:779b9ea4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -71,24 +111,21 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- [#readast]
-- [#readrewrite]
-- [#writeintents]
+- ~[#readast]~
+- ~[#readrewrite]~
+- ~[#writeintents]~
 - [#writeexecutor]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#readast] Add a `tsift symbol-read` / `tsift ast-read` surface that returns a token-budgeted symbol packet: signature, body range, child declarations, imports, callers/callees, summaries, and expansion commands.
-- [ ] [#readrewrite] Route broad Read-style file opens through `tsift rewrite --run` / hooks for source windows, session docs, diffs, logs, and tests; keep raw Read as the explicit fallback.
-- [ ] [#writeintents] Specify semantic write intents for AST-backed edits: rename symbol, replace function body, insert import, add method, update call signature, move declaration, and rewrite call sites.
-- [ ] [#writeexecutor] Implement the AST-backed write executor with dry-run diffs, formatting, conflict detection against current file content, rollback, and per-language conformance tests.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#writeexecutor] Implement the AST-backed write executor with dry-run diffs, formatting, conflict detection against current file content, rollback, and per-language conformance tests.
 - [/] [#surrealbulk] Batch SurrealDB projection load: replace per-row upsert loops with bulk/transactional row load plus one-pass secondary-index rebuild; measure refresh/load separately.
 - [/] [#full-e2e-verify] In fresh project: opencode plugin opencode-tsift && opencode then /tsift-status. On success mark #e2e-install done.
 - [/] [#npm-publish-verify] After auth configured, tag release and verify publish-opencode-plugin CI job succeeds and opencode-tsift appears on npmjs.org

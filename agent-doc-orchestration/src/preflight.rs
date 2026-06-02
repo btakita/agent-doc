@@ -5358,6 +5358,56 @@ mod tests {
     }
 
     #[test]
+    fn run_queue_maintenance_excludes_external_archive_done_ids() {
+        // #ynra (external-archive variant): a completed id reaped to the EXTERNAL
+        // `agent:done archive=<file>` (not inline) must also be excluded from the
+        // backlog→queue sync and struck from the queue. Done-id collection reads
+        // the archive file, so the queue must not churn on an externally-archived
+        // completed ref.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let archive_rel = "session.done.md";
+        std::fs::write(
+            dir.path().join(archive_rel),
+            "# Done\n\n- 2026-06-01 [#extdone] archived externally\n",
+        )
+        .unwrap();
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#extdone]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog queue=sync -->\n",
+            "- [ ] [#extdone] lingering active dup of an externally-archived id\n",
+            "- [ ] [#fresh] genuinely open\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:done archive=session.done.md -->\n",
+            "<!-- /agent:done -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        run_queue_maintenance(&doc, None).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            !updated.contains("- do [#extdone]"),
+            "externally-archived completed ref must be struck/excluded, not left live:\n{updated}"
+        );
+        assert!(
+            updated.contains("do [#fresh]"),
+            "fresh active id must still be queued:\n{updated}"
+        );
+    }
+
+    #[test]
     fn run_queue_maintenance_backlog_sync_is_idempotent() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");

@@ -84,7 +84,9 @@ Same structural situation as the last two turns: this pane is binary-declined (`
 Recovered the `agent-doc-bugs2.md` auto-queue cycle after the child run completed `#lr-queue-response-miss` and produced an implementation map for `#nochange-after-stall-breadth` without completing code work. I removed assistant-prose contamination from `agent:queue`, restored snapshot/HEAD alignment, and gated `#nochange-after-stall-breadth` with the recorded implementation-map attempt so the queue does not loop that unfinished item.
 
 The next runnable queue head is now `do [#owned-pane-prompt-recur]`.
-<!-- agent:boundary:33e3a8be -->
+There are too many items being accumulated into review. The tasks are not being completed. Do not finish turn until the task is complete. I really want you to complete the task, not put it into the review items which has become excessively long and ususable.
+#spec-test-build-install-commit-push
+<!-- agent:boundary:50c2ced8 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -103,6 +105,10 @@ The next runnable queue head is now `do [#owned-pane-prompt-recur]`.
 - do [#lr-actor-10]
 - do [#run-gated-review-items]
 - do [#subagent-blocks-session]
+---
+There are too many items being accumulated into review. The tasks are not being completed. Do not finish turn until the task is complete. I really want you to complete the task, not put it into the review items which has become excessively long and ususable.
+#spec-test-build-install-commit-push
+---
 <!-- /agent:queue -->
 ###
 <!--

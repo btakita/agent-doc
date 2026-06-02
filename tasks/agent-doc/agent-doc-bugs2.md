@@ -257,7 +257,39 @@ The plan is explicit and substantial — it touches `preflight.rs`, `session_che
 
 So this is an audit + handoff, not an implementation:
 **Closeout:** uncommitted (`finalize` gated here; item left open). This was an audit — no code change, by design, to avoid racing the concurrent actor's live `session_check.rs`/`route.rs` queue-preservation work.
-<!-- agent:boundary:3d358e08 -->
+
+### Re: Did the lazily-rs.md pane actually run agent-doc tasks for this file? — log verdict — opus-4-8
+
+**CONFIRMED.** You were right and my previous answer was wrong. The pane that claimed `lazily-rs.md` *was* running agent-doc cycles for **this file**. I keyed on the registry (which is clean) and missed that the binary itself logged execution-context contamination.
+
+**Evidence — `.agent-doc/logs/` `cross_document_execution_context` (16 entries for `agent-doc-bugs2.md`):**
+
+```
+[16:18–16:46] ... origin=write/run current_pane=%71 pane_owns=tasks/software/lazily-rs.md
+[16:46:18]    origin=run    current_pane=%73 pane_owns=tasks/software/lazily-rs.md
+[16:50:13]    origin=write  current_pane=%73 pane_owns=tasks/software/lazily-rs.md
+[16:50:13]    origin=stream current_pane=%73 pane_owns=tasks/software/lazily-rs.md
+[16:50:39]    origin=run    current_pane=%73 pane_owns=tasks/software/lazily-rs.md
+note=agent-doc cycle running inside a pane that owns a different document (#jb-tsift-pane-sync contamination vector)
+```
+
+`origin=run/write/stream` are **my** `agent-doc preflight/finalize` invocations for `agent-doc-bugs2.md` — and they physically executed inside lazily-rs's codex pane (`%71` gen 13, then `%73` gen 15 after the supervisor re-provisioned). That 16:50:13 `write`/`stream` pair is literally last cycle's commit of my response, running in lazily-rs's pane.
+
+**Two layers — both true, which is why it looked confusing:**
+
+| Layer | State | Verdict |
+|-------|-------|---------|
+| Registry ownership (`session-actors.json`) | `%73`→`lazily-rs.md` (codex, `9386d273`), `%70`→`agent-doc-bugs2.md` (claude, `b26b9957`) | **Clean** — no mis-binding, separate panes/sessions |
+| Execution context | this file's `agent-doc` cycles ran *inside* `%71`/`%73` | **Contaminated** — confirmed by the binary |
+
+So it was **not** "just display aliasing that failed closed" (my prior claim). The `dispatch-only codex reopen` into `%73` *did* fail closed — no codex injection happened — but separately, **this Claude Code session is itself routed into lazily-rs's owned pane `%73`**, so every `agent-doc` cycle I run for `agent-doc-bugs2.md` executes in lazily-rs's pane. Ownership stayed correct; execution did not.
+
+**Why the pane "won't stay dead":** you killed the tmux pane, but lazily-rs's route-owned codex **supervisor** survived and re-provisioned it (`%71` gen 13 → `%73` gen 15, `route_starting_actor_ready ... elapsed_ms=28354`). Killing the pane ≠ stopping the actor.
+
+**This is exactly `#jb-tsift-pane-sync`** (line 314: *"the pane surfaced for tsift.md was actually running agent-doc-bugs2.md — wrong-document pane↔owner binding"*). This is a fresh reproduction with `lazily-rs.md` as the owner instead of `tsift.md`. The fix is already planned there (`plan-jb-tsift-pane-sync-regression.md`) and gated; I'm not opening a duplicate. No code change this cycle — you asked for a log confirm/deny, and the answer is confirm.
+
+**Correction owed:** last cycle I said "it isn't actually running against this file." That was incomplete — true for *dispatch*, false for *execution*. The logs show my own cycles in `%73`. Apologies for the premature all-clear.
+<!-- agent:boundary:8c866e70 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->

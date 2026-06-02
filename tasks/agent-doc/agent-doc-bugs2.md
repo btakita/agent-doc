@@ -59,7 +59,20 @@ What I added to the plan — two new failure shapes observed in *this* session, 
 2. **Persistence attempted but queue-consume diverged under live IPC.** A `finalize --done` did commit the `### Re:` body and reap the item, but the queue-consume step failed (`snapshot queue state diverged from document queue`, `live_prompt_drift_after_preflight`) while you were live-typing new queue items and a JB `File Cache Conflict` reverted the queue to an older snapshot. The next preflight then hard-blocked on the orphaned bare `[#id]` head, so no subsequent response could land — the document looked stuck. `repair --apply-recovery` committed the lossy side and didn't strike the head; I had to strike `~[#write-closeout-response-shape]~` manually. New fix steps 7–9 make consume head-aware, add a binary-owned orphaned-head strike, and make recovery IPC-listener aware so it never requires fighting a live buffer.
 
 Gating `#codex-direct-writeback-miss` to `[/]` — planning deliverable complete (plan written + enriched), implementation pending. I did **not** auto-loop the remaining queue items: several are real unanswered user prompts (the lazily-rs design questions, the tsift.md stash-pane report, the File-Cache-Conflict snapshot-revert, the `/clear`-while-task-in-progress report) that take precedence over auto-continuation and deserve their own cycles.
-<!-- agent:boundary:12c74052 -->
+
+### Re: response not written into the document (#codex-direct-writeback-miss) — opus-4-8
+
+You're right — my previous turn produced a console-only "holding" response and never crossed `finalize`, so per the agent-doc contract that response did not exist. Finishing it now, and folding this into the existing bug rather than spawning a duplicate.
+
+**This bug is already tracked.** `#codex-direct-writeback-miss` (backlog) + `tasks/agent-doc/plan-response-missing-after-manual-closeout.md` already cover "a completed turn must not exit with only the prompt persisted in the exchange." The queued free-text item *"agent-doc monsterrodholders.md turns do not apply the response into the document"* is the same class, so I enriched the existing plan instead of creating a duplicate plan (deleted).
+
+What I added to the plan — two new failure shapes observed in *this* session, on the Claude-skill path (the existing plan was Codex-only):
+
+1. **Console-only response, no persistence command run.** The skill turn concluded with the answer in the console but never piped it through `finalize`/`write --commit`. The Codex Stop-hook `committed_without_response_body` backstop doesn't run on the Claude path, so nothing caught it. New fix step 6 + the new exit criterion add a skill-path "response produced but never persisted" guard.
+2. **Persistence attempted but queue-consume diverged under live IPC.** A `finalize --done` did commit the `### Re:` body and reap the item, but the queue-consume step failed (`snapshot queue state diverged from document queue`, `live_prompt_drift_after_preflight`) while you were live-typing new queue items and a JB `File Cache Conflict` reverted the queue to an older snapshot. The next preflight then hard-blocked on the orphaned bare `[#id]` head, so no subsequent response could land. `repair --apply-recovery` committed the lossy side and didn't strike the head; I struck `~[#write-closeout-response-shape]~` manually. New fix steps 7–9 make consume head-aware, add a binary-owned orphaned-head strike, and make recovery IPC-listener aware.
+
+Gating `#codex-direct-writeback-miss` to `[/]` — planning deliverable complete (plan written + enriched), implementation pending. I did **not** auto-loop the remaining queue items: several are real unanswered user prompts (the lazily-rs design questions, the tsift.md stash-pane report, the File-Cache-Conflict snapshot-revert, the `/clear`-while-task-in-progress report) that take precedence over auto-continuation and deserve their own cycles.
+<!-- agent:boundary:7d805a21 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->

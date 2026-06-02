@@ -263,13 +263,40 @@ The situation is fully stable and the resolution is unchanged and entirely opera
 - **Compact** the document (`agent-doc compact tasks/agent-doc/agent-doc-bugs2.md --commit`).
 
 Every remaining queue line is already done or already triaged; the review backlog is `[/]` done-or-gated or your live-IDE Path A/B work. There is no autonomous agent work left on `agent-doc-bugs2.md` for me to pick up, and continuing to dispatch into the non-owner pane only re-surfaces finished items. I'll keep standing down until this is a single-owner, compacted document.
-<!-- agent:boundary:ed480c3d -->
+> **User directive:**
+>
+> Fix the ownership issue on this document. Associate the running session with the document so tmux focuses when I focus the editor on the document.
+
+### Re: ownership fix — focus selects the document's own pane — opus-4-8
+
+Done — the cross-document focus mis-binding facet is fixed in code, tested, built, and installed.
+
+**Root cause.** In `tmux-router`'s `sync_with_options`, `--focus` resolved its target pane from `file_to_pane` (and a `find_column_pane` fallback). When the focus document's registered pane was dead — exactly the post-Codex-upgrade/restart case — Phase 1.5 had already ephemerally assigned that document a *column-neighbor's* pane, so focus selected a pane running a **different** document's session. That's how focusing `agent-doc-bugs2.md` handed tmux focus to the `equityfundingsource.md` pane.
+
+**Fix.** I capture the focus document's authoritative pane — its registry-resolved, *alive* pane — **before** any ephemeral donor/spare assignment runs, and focus selects only that pane. Extracted `resolve_focus_pane` as a pure helper with the invariant: a managed focus file selects its own owned pane, or `None` (preserve the current tmux selection) when it has none — it never aliases onto a neighbor's pane.
+
+- `src/tmux-router/src/sync.rs`: new `resolve_focus_pane`, `focus_owned_pane` captured pre-Phase-1.5, focus block rewritten to use it. Submodule `7a7ddd9`; superproject pointer `6494fb190`.
+- 4 regression tests (own-pane select, never-alias-onto-neighbor, non-managed preserves selection, no-focus selects anchor). `tmux-router` 113 lib tests green; agent-doc `make check` green (exit 0). Both binaries rebuilt (`cargo build --release` + `cargo install --path .`).
+
+**On the live association you asked about:** the registry already binds this document correctly — `tasks/agent-doc/agent-doc-bugs2.md → pane %70`, which is this live pane (alive). So focusing the editor here will now resolve to `%70` rather than a neighbor. The remaining gap is the *session-loss-on-restart* facet: if a Codex supervisor restart kills the document's pane, the owner must re-provision **its own** new pane rather than dropping the session — that rebind work stays open on `#codex-upgrade-restart-cross-doc-focus`, pending the two-document upgrade/restart live repro (it can't be exercised deterministically from here).
+
+Not pushed to the remote — say the word and I'll push the `tmux-router` commit + the superproject pointer.
+<!-- agent:boundary:6b003594 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
+- do [#lr-head-8]
+- do [#lr-wire-9]
+- do [#lr-actor-10]
 <!-- /agent:queue -->
 ###
 <!--
+JB `Run Agent Doc` on lazily-rs.md failed:
+```
+[route] target tmux session: 0
+Error: authoritative actor generation 13 for tasks/software/lazily-rs.md owns pane %71 but route will not bind a new dispatch target because this generation already timed out while starting. Inspect the pane diagnostics, then restart the owner with `agent-doc start tasks/software/lazily-rs.md`.
+```
+---
 The last run had a code fence stripped away by agent-doc.
 #spec-test-build-install-commit-push
 ---
@@ -287,7 +314,7 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Review
  
 <!-- agent:review -->
-- [/] [#codex-upgrade-restart-cross-doc-focus] [recommended] #agent-doc-bug 2026-06-02: a Codex supervisor upgrade/restart lost the live session bound to agent-doc-bugs2.md, and afterward focusing the editor on this document gave tmux focus to the pane running equityfundingsource.md (cross-document focus mis-binding). Fix by rebinding each document to its own authoritative session record on restart (re-provision its own pane, never alias onto another document's owner) and resolving sync --focus strictly by the focused document path, failing closed otherwise. Shares the focus-by-exact-document-path invariant with #jb-tsift-pane-sync. Plan: tasks/agent-doc/plan-codex-upgrade-restart-cross-document-focus.md
+- [/] [#codex-upgrade-restart-cross-doc-focus] [recommended] #agent-doc-bug 2026-06-02: FOCUS MIS-BINDING IMPLEMENTED+tested+shipped (tmux-router 7a7ddd9, superproject pointer 6494fb190, both binaries rebuilt+installed): sync --focus now selects only the focus document's authoritative registry-owned, alive pane (captured before Phase 1.5/1.75 ephemeral donor/spare assignment) via the new resolve_focus_pane helper; when the document has no live owned pane it preserves the current tmux selection instead of aliasing onto a column-mate's pane (which belongs to a different document — the equityfundingsource.md symptom while focusing agent-doc-bugs2.md). 4 regression tests added; tmux-router 113 lib tests + agent-doc make check green. REMAINING: the session-loss-across-Codex-restart rebind facet (re-provision the focused document's own pane on supervisor restart rather than dropping/aliasing the session) — gated on the two-document upgrade/restart live repro. Shares the focus-by-exact-document-path invariant with #jb-tsift-pane-sync. Plan: tasks/agent-doc/plan-codex-upgrade-restart-cross-document-focus.md
 - [/] [#jbstalldrain] [recommended] #agent-doc-bug 2026-06-02: JB `Run Agent Doc` appeared stalled across two observed route stages: `agent-doc-bugs2.md` failed before dispatch because closeout drain hit a session-check backlog-shadow blocker (`#queue-user-edit-overwrite` only outside live `agent:backlog`), while `monsterrodholders.md` waited the full 60s on busy authoritative actor generation 251 / pane `%61` before reporting no dispatch-ready prompt. Fix by making route emit typed in-progress and terminal results for closeout-drain blockers and busy-authoritative waits, and make the JetBrains action surface those states persistently instead of looking inert. Plan: tasks/agent-doc/plan-jb-run-agent-doc-stalled-closeout-drain.md.
 - [/] [#codex-direct-writeback-miss] [recommended] #agent-doc-bug 2026-06-02: Direct-chat Codex execution of src/boost-client/tasks/monsterrodholders.md prompt `do [#pmaxpost]. #spec-test-commit-push` completed site + parent commits/pushes but the final assistant response was not written into the session document until manual `agent-doc write --commit` repair; make the Codex/direct-chat closeout gate fail closed before final chat output when the response heading is absent from HEAD, and keep the recovery path binary-owned. Plan: tasks/agent-doc/plan-response-missing-after-manual-closeout.md
 - [/] [#weqq] [recommended] #jb-settext-payload-log IMPLEMENTED 2026-06-01 (submodule 12676120, JB plugin 0.2.145 built+signed): PatchWatcher.kt now logs the full result payload before document.setText on both applyPatch.component and repositionBoundary, behind LOG.isDebugEnabled, so enabling the com.github.btakita.agentdoc debug category captures the exact setText payload the IPC-duplication family needs (previously only hashes+lengths). GATED on operator: install build/distributions/agent-doc-jetbrains-0.2.145-signed.zip + restart, enable debug logging, then run the Path B capture (#wy0y/#6cmx). Plan: tasks/agent-doc/plan-full-document-ipc-corruption-typing-prompt.md.

@@ -366,7 +366,29 @@ Do your recommendation.
 > I'd recommend the toolchain actor fold that criterion into the plan before running `#spec-test-build-install-commit-push`, so `#jb-tsift-pane-sync` doesn't get marked done with the execution facet still live.
 
 Note that monsterrodholders.rs is also running this document. Is there an issue with the lazily-rs integration? Are we caching something that should not be cached or should it be invalidated?
-<!-- agent:boundary:6e4f0f37 -->
+
+### Re: did my recommendation + is the lazily-rs integration caching something wrong — opus-4-8
+
+**1. "Do your recommendation" — done.** I edited `tasks/agent-doc/plan-jb-tsift-pane-sync-regression.md`:
+- Added **Phase 3c — execution-context contamination guard (run/write/stream/preflight)**: the existing plan only guards *display/surfacing* (Phase 3b: which pane is shown for a doc). The confirmed facet is *execution* — `cross_document_execution_context` logs show this file's `run/write/stream` cycles physically running inside `lazily-rs`'s `%71`/`%73` and `monsterrodholders`'s pane. Phase 3c promotes that best-effort LOG into an actionable guard at the run/write/stream/preflight entry: re-home to the target doc's owner pane, or fail closed with `executing_pane_owns_other_document file=F pane=%N owns=G` — never commit a cycle for `F` from inside `G`'s pane.
+- Added a matching **acceptance criterion**, so `#jb-tsift-pane-sync` can't be marked done with the execution facet still live (directly answering last turn's "only if scope is extended").
+
+Edit is on disk, uncommitted (I won't `git commit` to `main` unprompted; say "commit it" or let the toolchain actor pick it up).
+
+**2. Is the lazily-rs integration caching something it shouldn't? — Not currently. But your instinct is right about one not-yet-shipped piece.**
+
+I checked `graph.rs`. The caching is **per-document**, so it is **not** the cause:
+- `RunContext` is *"a short-lived context for a single CLI invocation"*, built `RunContext::new(file_path)` keyed to one document, with explicit `invalidate_cycle_state / snapshot_content / head_content / project_root / project_config / doc_content` hooks. Each `run`/`write`/`preflight` process serves one file and dies — no cross-document carryover.
+- `ActorContext` (the long-lived supervisor wrapper) holds one `RunContext` and exposes `invalidate_all()`; each route-owned supervisor is bound to one document.
+
+So agent-doc-bugs2's cycles running inside lazily-rs's / monsterrodholders' panes is **execution location** (tmux pane placement chosen by routing/focus/sync), not a stale cached value. monsterrodholders "also running this document" is another instance of the same `#jb-tsift-pane-sync` pane-aliasing class, not a separate cache bug — multiple documents' panes are being used to run this file's cycles.
+
+**Where your caching worry IS valid (and now captured in the plan):** `#lr-actor-10` — still *unimplemented* in the backlog — adds a `SessionRegistrySlot` + `GlobalConfigSlot` to the **long-lived** `ActorContext`. A process-global session-registry cache that *isn't* invalidated on registry change would cache stale pane↔document bindings and could *introduce* exactly this contamination class. So I added a constraint to Phase 3c: that slot must ship with an `invalidate` hook keyed to registry mtime/epoch, mirroring the existing `RunContext::invalidate_*` pattern. Right now it's a future risk, not the live cause.
+
+**Bottom line:** the contamination is routing (`#jb-tsift-pane-sync` execution facet), not caching. The real fix is Phase 3c's execution-context guard + the registry-cache invalidation discipline for `#lr-actor-10` when it lands — both now in the plan.
+Plan edited. Now the response — and I'm leaving the plan edit uncommitted (not git-committing to `main` unasked; the conservative-commit path won't sweep it into the session-doc finalize, so it sits clean for the toolchain actor or your go to commit).
+**Closeout:** the plan-file edit is the concrete deliverable this turn (uncommitted, offered). The session-doc response is uncommitted as before (`finalize` gated; and per the confirmed contamination my finalize would run in the wrong pane anyway — which is exactly what Phase 3c now targets). Net: recommendation executed into the plan; caching question answered with code evidence (per-document `RunContext`, not a leak) plus the one forward-looking invalidation constraint captured.
+<!-- agent:boundary:bac524dc -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
@@ -378,7 +400,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#manual-queue-head-loss]~
 - ~do [#subagent-blocks-session]~
 - ~do [#lr-queue-plan-deferral]~
-- do [#lr-queue-repair-adopt]
+- ~do [#lr-queue-repair-adopt]~
 - do [#lr-queue-patchback-miss]
 - do [#lr-head-8]
 - do [#lr-wire-9]

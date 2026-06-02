@@ -46,7 +46,7 @@ Planning item complete. The deliverable for this `#agent-doc-bug` item is the pl
 - **Plan** — 7 steps: two fixtures (compacted-tail closeout without `### Re:`; visible-direct-patchback state), a response-normalization step before unmatched-content insertion, a recovery-adoption reorder so a visible matching response commits before dedup short-circuits, shape-aware `session-check` recovery text (no body / visible-but-uncommitted / committed-target-but-stale-pointer), and regressions across all three states.
 
 The item carries an explicit **DO NOT IMPLEMENT in this planning item** marker, so the queue preset's `#spec-test-build-install-commit-push` does not apply here — the item-level scope (plan only) governs. The plan file is the tracking artifact for the eventual fix; reaping `#write-closeout-response-shape` as done since its planning deliverable is satisfied.
-<!-- agent:boundary:7398f016 -->
+<!-- agent:boundary:aa195c9b -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -56,9 +56,10 @@ preset #spec-test-build-install-commit-push
 - ~[#queue-head-struck-on-foreign-exchange-answer]~
 - ~[#lr-cycle-7]~
 - [#write-closeout-response-shape]
-- Should CellHandle::set(&ctx, value) be added to lazily-rs first? (Current API is Context::set_cell()): Yes
 - Should the graph be per-file (one context per tracked document) or per-process (one context with file-keyed cells)?: Use your judgement. There can also be multiple contexts.
 - How to handle config hot-reload in long-lived ActorContext — file watcher on .agent-doc/config.toml or clear on next cycle?: Can you support both?
+- When I navigate from this document to tsift.md, the tmux focus is on the tsift.md pane but the tmux pane is in the stash, not in the agent-doc tmux window.
+- As I was writing the previous queue item, 
 - [#lr-head-8]
 - [#lr-wire-9]
 - [#lr-actor-10]

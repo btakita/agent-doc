@@ -1168,6 +1168,40 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     // committing agent-doc-bugs2.md's response).
     crate::sync::log_cross_document_execution_context(file, "write");
 
+    // #manual-queue-head-loss: extend the `#queue-clear-unrun-items` removal-proof
+    // anchor to user queue heads inserted AFTER preflight (for example a
+    // `do [#id]` typed into `agent:queue` during a stalled / busy-pane dispatch
+    // attempt). Read the live working-tree document here — before any pending
+    // mutation or queue convergence mutates it — and union its directive heads
+    // into the recorded set so closeout cannot silently drop a runnable manual
+    // head whose backlog item is still open. Best-effort: an absent cycle state
+    // is a no-op, and a read failure is logged (the real write path below reads
+    // the document again and surfaces any genuine I/O error).
+    match std::fs::read_to_string(file) {
+        Ok(live_doc) => {
+            if let Err(err) = crate::cycle_state::observe_live_queue_heads(file, &live_doc) {
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "observe_live_queue_heads_failed file={} err={}",
+                        file.display(),
+                        err
+                    ),
+                );
+            }
+        }
+        Err(err) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "observe_live_queue_heads_read_failed file={} err={}",
+                    file.display(),
+                    err
+                ),
+            );
+        }
+    }
+
     let has_pending_ops = !options.pending_add.is_empty()
         || !options.pending_add_to.is_empty()
         || !options.pending_add_gated.is_empty()

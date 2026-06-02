@@ -384,14 +384,17 @@ fn remove_duplicate_answered_exchange_prompt_tail_for_preflight(file: &Path) -> 
     Ok(true)
 }
 
-fn remove_post_exchange_duplicate_prompt_comments_for_preflight(file: &Path) -> Result<bool> {
+fn remove_post_exchange_duplicate_prompt_comments_for_preflight(
+    file: &Path,
+    rc: &crate::graph::RunContext,
+) -> Result<bool> {
     let current = std::fs::read_to_string(file)?;
     let snapshot_doc = crate::snapshot::load(file).ok().flatten();
-    let head_doc = crate::git::show_head(file).ok().flatten();
+    let head_doc = rc.head_content();
     let mut preserve_docs = Vec::new();
     preserve_docs.push(current.as_str());
     if let Some(head_doc) = head_doc.as_deref() {
-        preserve_docs.push(head_doc);
+        preserve_docs.push(head_doc.as_str());
     }
     if let Some(snapshot_doc) = snapshot_doc.as_deref() {
         preserve_docs.push(snapshot_doc);
@@ -1333,7 +1336,7 @@ fn enforce_no_uncommitted_closeout_drift(file: &Path, rc: &crate::graph::RunCont
     // snapshot and the generic snapshot-vs-HEAD guard used to require a manual
     // `write --commit`. Commit the route-owned snapshot first; the later live
     // edit stays unstaged and becomes the next prompt diff.
-    if recover_route_queue_snapshot_commit_boundary(file)? {
+    if recover_route_queue_snapshot_commit_boundary(file, rc)? {
         return Ok(());
     }
 
@@ -1342,7 +1345,9 @@ fn enforce_no_uncommitted_closeout_drift(file: &Path, rc: &crate::graph::RunCont
     // drift is an adjacent duplicate response and dedupe(current) is HEAD, drop
     // the replay before the generic direct-patchback guard fires.
     if let Some(replay) =
-        crate::session_check::detect_jb_cache_conflict_accept_duplicate_replay(file)?
+        crate::session_check::detect_jb_cache_conflict_accept_duplicate_replay_with_context(
+            file, rc,
+        )?
     {
         crate::ops_log::log_op(
             file,
@@ -1369,7 +1374,7 @@ fn enforce_no_uncommitted_closeout_drift(file: &Path, rc: &crate::graph::RunCont
     // HEAD over the working tree + snapshot before the generic direct-patchback
     // guard fires. See tasks/agent-doc/plan-duplicate-response-after-commit.md.
     if let Some(overapplication) =
-        crate::session_check::detect_late_ipc_response_overapplication(file)?
+        crate::session_check::detect_late_ipc_response_overapplication_with_context(file, rc)?
     {
         crate::ops_log::log_op(
             file,
@@ -1413,6 +1418,7 @@ fn enforce_no_uncommitted_closeout_drift(file: &Path, rc: &crate::graph::RunCont
         );
         match crate::git::commit(file) {
             Ok(_) => {
+                rc.invalidate_head_content();
                 crate::ops_log::log_op(
                     file,
                     &format!(
@@ -1457,8 +1463,11 @@ fn enforce_no_uncommitted_closeout_drift(file: &Path, rc: &crate::graph::RunCont
     Ok(())
 }
 
-fn recover_route_queue_snapshot_commit_boundary(file: &Path) -> Result<bool> {
-    if !detect_route_queue_snapshot_commit_boundary_recoverable(file)? {
+fn recover_route_queue_snapshot_commit_boundary(
+    file: &Path,
+    rc: &crate::graph::RunContext,
+) -> Result<bool> {
+    if !detect_route_queue_snapshot_commit_boundary_recoverable(file, rc)? {
         return Ok(false);
     }
     crate::ops_log::log_op(
@@ -1474,6 +1483,7 @@ fn recover_route_queue_snapshot_commit_boundary(file: &Path) -> Result<bool> {
     );
     match crate::git::commit(file) {
         Ok(_) => {
+            rc.invalidate_head_content();
             crate::ops_log::log_op(
                 file,
                 &format!(
@@ -1502,7 +1512,10 @@ fn recover_route_queue_snapshot_commit_boundary(file: &Path) -> Result<bool> {
     }
 }
 
-fn detect_route_queue_snapshot_commit_boundary_recoverable(file: &Path) -> Result<bool> {
+fn detect_route_queue_snapshot_commit_boundary_recoverable(
+    file: &Path,
+    rc: &crate::graph::RunContext,
+) -> Result<bool> {
     let Some(state) = crate::cycle_state::load(file)? else {
         return Ok(false);
     };
@@ -1510,16 +1523,16 @@ fn detect_route_queue_snapshot_commit_boundary_recoverable(file: &Path) -> Resul
         return Ok(false);
     }
     if !matches!(
-        crate::git::verify_snapshot_committed(file)?,
+        rc.snapshot_commit_status(),
         crate::git::SnapshotCommitStatus::SnapshotDiffersFromHead { .. }
     ) {
         return Ok(false);
     }
 
-    let Some(snapshot) = crate::snapshot::load(file)? else {
+    let Some(snapshot) = rc.snapshot_content() else {
         return Ok(false);
     };
-    let Some(head) = crate::git::show_head(file)? else {
+    let Some(head) = rc.head_content() else {
         return Ok(false);
     };
     if crate::session_check::detect_bypassed_response_write_between(&head, &snapshot).is_some() {
@@ -1901,11 +1914,11 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         });
     }
     enforce_no_shadow_open_backlog(file)?;
-    enforce_no_dropped_backlog(file)?;
+    enforce_no_dropped_backlog(file, &rc)?;
     if remove_duplicate_answered_exchange_prompt_tail_for_preflight(file)? {
         recovered = true;
     }
-    if remove_post_exchange_duplicate_prompt_comments_for_preflight(file)? {
+    if remove_post_exchange_duplicate_prompt_comments_for_preflight(file, &rc)? {
         recovered = true;
     }
 
@@ -1913,7 +1926,12 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     eprintln!("[preflight] step 2: commit");
     let committed = committed_prior
         || match git::commit(file) {
-            Ok(did_commit) => did_commit,
+            Ok(did_commit) => {
+                if did_commit {
+                    rc.invalidate_head_content();
+                }
+                did_commit
+            }
             Err(e) => {
                 eprintln!("[preflight] commit warning: {}", e);
                 false
@@ -1940,7 +1958,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     if remove_duplicate_answered_exchange_prompt_tail_for_preflight(file)? {
         recovered = true;
     }
-    if remove_post_exchange_duplicate_prompt_comments_for_preflight(file)? {
+    if remove_post_exchange_duplicate_prompt_comments_for_preflight(file, &rc)? {
         recovered = true;
     }
 
@@ -3006,8 +3024,8 @@ fn format_shadow_refs(items: &[crate::pending::ShadowPendingItem]) -> String {
         .join(", ")
 }
 
-fn enforce_no_dropped_backlog(file: &Path) -> Result<()> {
-    let head_content = match crate::git::show_head(file)? {
+fn enforce_no_dropped_backlog(file: &Path, rc: &crate::graph::RunContext) -> Result<()> {
+    let head_content = match rc.head_content() {
         Some(content) => content,
         None => return Ok(()),
     };
@@ -6255,12 +6273,13 @@ mod tests {
             crate::git::verify_snapshot_committed(&doc).unwrap(),
             crate::git::SnapshotCommitStatus::SnapshotDiffersFromHead { .. }
         ));
+        let rc = crate::graph::RunContext::new(doc.clone());
         assert!(
-            detect_route_queue_snapshot_commit_boundary_recoverable(&doc).unwrap(),
+            detect_route_queue_snapshot_commit_boundary_recoverable(&doc, &rc).unwrap(),
             "drained-queue maintenance drift must be recoverable"
         );
 
-        assert!(recover_route_queue_snapshot_commit_boundary(&doc).unwrap());
+        assert!(recover_route_queue_snapshot_commit_boundary(&doc, &rc).unwrap());
         assert!(
             matches!(
                 crate::git::verify_snapshot_committed(&doc).unwrap(),
@@ -6331,8 +6350,9 @@ mod tests {
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(active), Some(active))
             .unwrap();
 
+        let rc = crate::graph::RunContext::new(doc.clone());
         assert!(
-            !detect_route_queue_snapshot_commit_boundary_recoverable(&doc).unwrap(),
+            !detect_route_queue_snapshot_commit_boundary_recoverable(&doc, &rc).unwrap(),
             "a user edit alongside the drain must block auto-commit"
         );
     }
@@ -7168,7 +7188,8 @@ mod tests {
         let report = run_pending_maintenance(&doc).unwrap();
         assert!(!report.reordered);
         assert_eq!(report.pending_gated_count, 0);
-        enforce_no_dropped_backlog(&doc)
+        let rc = crate::graph::RunContext::new(doc.clone());
+        enforce_no_dropped_backlog(&doc, &rc)
             .expect("same-cycle reap should count as intentional completion");
     }
 
@@ -8651,7 +8672,9 @@ mod tests {
             .output()
             .unwrap();
 
-        let changed = remove_post_exchange_duplicate_prompt_comments_for_preflight(&doc).unwrap();
+        let rc = crate::graph::RunContext::new(doc.clone());
+        let changed =
+            remove_post_exchange_duplicate_prompt_comments_for_preflight(&doc, &rc).unwrap();
 
         let file_after = std::fs::read_to_string(&doc).unwrap();
         assert!(

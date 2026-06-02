@@ -229,9 +229,7 @@ fn glob_match_segments(pat: &[&str], seg: &[&str]) -> bool {
             (0..=seg.len()).any(|skip| glob_match_segments(&pat[1..], &seg[skip..]))
         }
         Some(first) => match seg.first() {
-            Some(s) if glob_match_segment(first, s) => {
-                glob_match_segments(&pat[1..], &seg[1..])
-            }
+            Some(s) if glob_match_segment(first, s) => glob_match_segments(&pat[1..], &seg[1..]),
             _ => false,
         },
     }

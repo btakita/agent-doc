@@ -589,7 +589,9 @@ Fixed it.
 <!-- agent:boundary:88409761 -->
 <!-- /agent:exchange -->
 ";
-        assert!(is_committed_response_replay_including_stale(current, HEAD_DOC));
+        assert!(is_committed_response_replay_including_stale(
+            current, HEAD_DOC
+        ));
     }
 
     #[test]
@@ -607,7 +609,9 @@ Genuinely new answer.
 <!-- agent:boundary:newone -->
 <!-- /agent:exchange -->
 ";
-        assert!(!is_committed_response_replay_including_stale(current, HEAD_DOC));
+        assert!(!is_committed_response_replay_including_stale(
+            current, HEAD_DOC
+        ));
     }
 
     #[test]
@@ -624,7 +628,9 @@ Note: stale draft paragraph; committed body is gone.
 <!-- agent:boundary:stale -->
 <!-- /agent:exchange -->
 ";
-        assert!(!is_committed_response_replay_including_stale(current, HEAD_DOC));
+        assert!(!is_committed_response_replay_including_stale(
+            current, HEAD_DOC
+        ));
     }
 
     #[test]
@@ -644,14 +650,18 @@ Note: stale draft.
 do [#another-thing]
 <!-- /agent:exchange -->
 ";
-        assert!(!is_committed_response_replay_including_stale(current, HEAD_DOC));
+        assert!(!is_committed_response_replay_including_stale(
+            current, HEAD_DOC
+        ));
     }
 
     #[test]
     fn stale_replay_rejects_identical_document() {
         // No surplus block → not a replay (transient-only drift is another
         // guard's concern).
-        assert!(!is_committed_response_replay_including_stale(HEAD_DOC, HEAD_DOC));
+        assert!(!is_committed_response_replay_including_stale(
+            HEAD_DOC, HEAD_DOC
+        ));
     }
 
     #[test]

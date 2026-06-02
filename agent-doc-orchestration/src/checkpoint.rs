@@ -221,7 +221,11 @@ mod tests {
             } else {
                 "2026-05-30"
             };
-            ("abc1234".to_string(), date.to_string(), "checkpoint".to_string())
+            (
+                "abc1234".to_string(),
+                date.to_string(),
+                "checkpoint".to_string(),
+            )
         };
         let tags = parse_recovery_tags(lines, &mut meta);
         // Only the two pre-auto-run + one pre-compact checkpoints; unrelated dropped.

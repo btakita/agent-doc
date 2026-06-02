@@ -157,9 +157,7 @@ pub fn run_no_promote(file: &Path, pane: Option<&str>) -> Result<()> {
 /// select the pane, leaving any stash reparenting to the sync reconciler
 /// (`#jb-nav-3pane-promote-swap`).
 fn promote_and_select(tmux: &Tmux, pane: &str, no_stash_promote: bool) -> Result<()> {
-    if !no_stash_promote
-        && let Err(e) = crate::sync::promote_pane_to_agent_doc_window(tmux, pane)
-    {
+    if !no_stash_promote && let Err(e) = crate::sync::promote_pane_to_agent_doc_window(tmux, pane) {
         eprintln!("[focus] stash promotion check failed for {}: {}", pane, e);
     }
     tmux.select_pane(pane)

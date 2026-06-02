@@ -926,6 +926,14 @@ pub struct JbCacheConflictAcceptDuplicateReplay {
 pub fn detect_jb_cache_conflict_accept_duplicate_replay(
     file: &Path,
 ) -> Result<Option<JbCacheConflictAcceptDuplicateReplay>> {
+    let rc = crate::graph::RunContext::new(file.to_path_buf());
+    detect_jb_cache_conflict_accept_duplicate_replay_with_context(file, &rc)
+}
+
+pub fn detect_jb_cache_conflict_accept_duplicate_replay_with_context(
+    file: &Path,
+    rc: &crate::graph::RunContext,
+) -> Result<Option<JbCacheConflictAcceptDuplicateReplay>> {
     let current = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     let Some(heading) = crate::dedupe::first_duplicate_response_heading(&current) else {
@@ -935,7 +943,7 @@ pub fn detect_jb_cache_conflict_accept_duplicate_replay(
     if deduped == current {
         return Ok(None);
     }
-    let Some(head) = crate::git::show_head(file)? else {
+    let Some(head) = rc.head_content() else {
         return Ok(None);
     };
     if crate::git::normalize_transient_agent_doc_markers(&deduped)
@@ -946,7 +954,7 @@ pub fn detect_jb_cache_conflict_accept_duplicate_replay(
 
     Ok(Some(JbCacheConflictAcceptDuplicateReplay {
         heading,
-        deduped_content: head,
+        deduped_content: head.to_string(),
     }))
 }
 
@@ -975,11 +983,19 @@ pub struct LateIpcResponseOverapplication {
 pub fn detect_late_ipc_response_overapplication(
     file: &Path,
 ) -> Result<Option<LateIpcResponseOverapplication>> {
+    let rc = crate::graph::RunContext::new(file.to_path_buf());
+    detect_late_ipc_response_overapplication_with_context(file, &rc)
+}
+
+pub fn detect_late_ipc_response_overapplication_with_context(
+    file: &Path,
+    rc: &crate::graph::RunContext,
+) -> Result<Option<LateIpcResponseOverapplication>> {
     let current = match std::fs::read_to_string(file) {
         Ok(content) => content,
         Err(_) => return Ok(None),
     };
-    let Some(head) = crate::git::show_head(file)? else {
+    let Some(head) = rc.head_content() else {
         return Ok(None);
     };
     // Strict path: surplus block is a byte-identical copy of a committed
@@ -991,7 +1007,7 @@ pub fn detect_late_ipc_response_overapplication(
         || crate::dedupe::is_committed_response_replay_including_stale(&current, &head)
     {
         return Ok(Some(LateIpcResponseOverapplication {
-            remediated_content: head,
+            remediated_content: head.to_string(),
         }));
     }
     Ok(None)
@@ -1308,8 +1324,8 @@ fn check_backlog_replay_guard(file: &Path, rc: &crate::graph::RunContext) -> Res
 
     let baseline = match baseline_content {
         Some(content) => content,
-        None => match crate::git::show_head(file)? {
-            Some(content) => content,
+        None => match rc.head_content() {
+            Some(content) => content.to_string(),
             None => return Ok(GuardResult::None),
         },
     };
@@ -8765,6 +8781,92 @@ Body\n\
             matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
             "guard must not fire when the only removed head was consumed and the rest stay queued"
         );
+    }
+
+    // `#manual-queue-head-loss` — a fixture mirroring the monsterrodholders repro:
+    // backlog keeps `#shipstationaudit` open; the committed queue does NOT contain
+    // the head (it was dropped during a stalled dispatch). The head was never in
+    // the preflight-recorded set; only `observe_live_queue_heads` (the live
+    // pre-write working tree the user typed into) makes it visible to the guard.
+    fn manual_head_loss_fixture(queue_body: &str) -> String {
+        format!(
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+                "## Exchange\n\n",
+                "<!-- agent:exchange -->\n",
+                "### Re: prior — gpt-5\n\nAnswered.\n",
+                "<!-- /agent:exchange -->\n\n",
+                "## Backlog\n\n",
+                "<!-- agent:backlog -->\n",
+                "- [ ] [#shipstationaudit] audit shipstation sync\n",
+                "<!-- /agent:backlog -->\n\n",
+                "<!-- agent:queue auto -->\n{}<!-- /agent:queue -->\n",
+            ),
+            queue_body
+        )
+    }
+
+    #[test]
+    fn observe_live_queue_heads_catches_dropped_manual_head_added_after_preflight() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // Committed queue keeps an unrelated head; #shipstationaudit was dropped.
+        let committed = manual_head_loss_fixture("- do [#unrelated]\n");
+        let doc = init_committed_doc_for_queue_guard(tmp.path(), &committed);
+        // preflight recorded only `do [#unrelated]` (no manual head). Simulate the
+        // live pre-write working tree the user typed the manual head into.
+        let live = manual_head_loss_fixture("- do [#unrelated]\n- do [#shipstationaudit]\n");
+        crate::cycle_state::observe_live_queue_heads(&doc, &live).unwrap();
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(
+                    message.contains("shipstationaudit"),
+                    "should name the dropped manual head #shipstationaudit: {message}"
+                );
+            }
+            other => panic!("expected manual-head-loss interruption, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn observe_live_queue_heads_allows_manual_head_still_queued() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // The manual head is preserved in the committed queue — no silent drop.
+        let committed = manual_head_loss_fixture("- do [#unrelated]\n- do [#shipstationaudit]\n");
+        let doc = init_committed_doc_for_queue_guard(tmp.path(), &committed);
+        let live = committed.clone();
+        crate::cycle_state::observe_live_queue_heads(&doc, &live).unwrap();
+
+        assert!(
+            matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
+            "guard must not fire when the manual head stays queued in the committed doc"
+        );
+    }
+
+    #[test]
+    fn observe_live_queue_heads_allows_manual_head_consumed_this_cycle() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // The manual head is gone from the committed queue, but it was consumed
+        // and the backlog item marked done this cycle — legitimate removal.
+        let committed = manual_head_loss_fixture("- do [#unrelated]\n");
+        let doc = init_committed_doc_for_queue_guard(tmp.path(), &committed);
+        let live = manual_head_loss_fixture("- do [#unrelated]\n- do [#shipstationaudit]\n");
+        crate::cycle_state::observe_live_queue_heads(&doc, &live).unwrap();
+        crate::cycle_state::record_pending_done_ids(&doc, &["shipstationaudit".to_string()])
+            .unwrap();
+
+        // #shipstationaudit is still in `agent:backlog` in the fixture, but the
+        // done-id proof for this cycle must clear it from the removal guard.
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(
+                    !message.contains("shipstationaudit"),
+                    "consumed/done manual head must not be flagged: {message}"
+                );
+            }
+            SessionCheckStatus::Ok(_) => {}
+            other => panic!("unexpected status: {other:?}"),
+        }
     }
 
     #[test]

@@ -5244,7 +5244,13 @@ fn find_live_owner_pane_excluding_with_logging(
                     .filter(|pane| excluded_pane != Some(pane.as_str()))
             })
             .or_else(|| {
-                find_alive_pane_via_open_session_log(tmux, file, session_id, excluded_pane, log_hits)
+                find_alive_pane_via_open_session_log(
+                    tmux,
+                    file,
+                    session_id,
+                    excluded_pane,
+                    log_hits,
+                )
             })
             .or_else(|| {
                 find_alive_pane_via_registry_rebind_successor(
@@ -6800,7 +6806,10 @@ mod tests {
         let file = Path::new("tasks/software/tsift.md");
 
         // No candidate stays no candidate.
-        assert_eq!(reject_cross_document_owner_pane(&tmux, None, file, false), None);
+        assert_eq!(
+            reject_cross_document_owner_pane(&tmux, None, file, false),
+            None
+        );
 
         // A candidate pane id with no resolvable process tree (no `#{pane_pid}`)
         // is not provably a cross-document owner, so it passes through unchanged.

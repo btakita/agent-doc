@@ -2378,9 +2378,7 @@ Waiting.
             .is_none()
         );
         // Normal scope never warns even with a directive.
-        assert!(
-            plan_backlog_only_deferral_warning(ExecutionScope::Normal, "+do [#x]\n").is_none()
-        );
+        assert!(plan_backlog_only_deferral_warning(ExecutionScope::Normal, "+do [#x]\n").is_none());
     }
 
     #[test]

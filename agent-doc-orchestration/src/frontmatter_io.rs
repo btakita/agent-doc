@@ -222,11 +222,7 @@ mod tests {
     fn gate_allows_config_include_glob() {
         let dir = TempDir::new().unwrap();
         let config_path = setup_project(dir.path());
-        std::fs::write(
-            &config_path,
-            "[documents]\ninclude = [\"tasks/**/*.md\"]\n",
-        )
-        .unwrap();
+        std::fs::write(&config_path, "[documents]\ninclude = [\"tasks/**/*.md\"]\n").unwrap();
         std::fs::create_dir_all(dir.path().join("tasks/agent-doc")).unwrap();
         let doc = dir.path().join("tasks/agent-doc/work.md");
         let content = "# plain body, no frontmatter\n";

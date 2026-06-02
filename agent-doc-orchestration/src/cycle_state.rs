@@ -250,6 +250,44 @@ pub fn record_active_queue_heads(file: &Path, heads: &[String]) -> Result<Option
     Ok(Some(state))
 }
 
+/// `#manual-queue-head-loss`: union the live working-tree `agent:queue` directive
+/// heads into the recorded removal-proof anchor. `start_preflight` records
+/// `active_queue_heads` once, from the document as it stood at preflight. A user
+/// who types a fresh `do [#id]` into `agent:queue` AFTER that point — e.g. while a
+/// dispatch attempt is stalled on owner-pane recursion or a busy authoritative
+/// actor — is invisible to the `#queue-clear-unrun-items` removal guard, so a
+/// later closeout convergence can silently drop that runnable manual head while
+/// its backlog item stays open. Observing the live heads at the write/commit
+/// boundary (before any pending mutation or queue convergence) extends the same
+/// durable-proof requirement to manually inserted heads. Only ADDS heads; never
+/// removes an already-recorded head, so a legitimately consumed head still
+/// resolves through the existing done/gate/reap proof in the removal guard.
+pub fn observe_live_queue_heads(file: &Path, doc: &str) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+    let mut changed = false;
+    for head in active_queue_directive_heads(doc) {
+        let head = head.trim().to_string();
+        if head.is_empty() {
+            continue;
+        }
+        if !state
+            .active_queue_heads
+            .iter()
+            .any(|existing| existing == &head)
+        {
+            state.active_queue_heads.push(head);
+            changed = true;
+        }
+    }
+    if changed {
+        state.updated_at = now_secs();
+        save(file, &state)?;
+    }
+    Ok(Some(state))
+}
+
 pub fn mark_write_applied(
     file: &Path,
     event: &str,

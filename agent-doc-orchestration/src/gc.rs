@@ -1020,10 +1020,16 @@ mod tests {
 
         // 22 pre-auto-run tags (2 over the cap), 3 pre-compact, 1 unrelated.
         for n in 1..=22 {
-            git_in(root, &["tag", &format!("agent-doc/session/pre-auto-run-{n}")]);
+            git_in(
+                root,
+                &["tag", &format!("agent-doc/session/pre-auto-run-{n}")],
+            );
         }
         for n in 1..=3 {
-            git_in(root, &["tag", &format!("agent-doc/session/pre-compact-{n}")]);
+            git_in(
+                root,
+                &["tag", &format!("agent-doc/session/pre-compact-{n}")],
+            );
         }
         git_in(root, &["tag", "v1.0.0"]);
 

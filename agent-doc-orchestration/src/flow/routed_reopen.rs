@@ -23,10 +23,7 @@ pub fn routed_dispatch_start_timeout(test_mode: bool) -> Duration {
     routed_dispatch_start_timeout_for_binary(None, test_mode)
 }
 
-pub fn routed_dispatch_start_timeout_for_binary(
-    binary: Option<&str>,
-    test_mode: bool,
-) -> Duration {
+pub fn routed_dispatch_start_timeout_for_binary(binary: Option<&str>, test_mode: bool) -> Duration {
     if test_mode {
         if matches!(binary, Some("opencode")) {
             Duration::from_secs(2)
@@ -369,9 +366,7 @@ pub fn dispatch_only_sent_log_message(facts: DispatchOnlyProofOutcomeFacts<'_>) 
     )
 }
 
-pub fn dispatch_only_sent_console_message(
-    facts: DispatchOnlyProofOutcomeFacts<'_>,
-) -> String {
+pub fn dispatch_only_sent_console_message(facts: DispatchOnlyProofOutcomeFacts<'_>) -> String {
     format!(
         "[route] dispatch-only {} reopen for {} was sent to pane {} via {} ({}) with {} proof ({})",
         facts.harness_binary,
@@ -556,9 +551,7 @@ pub enum PromptReadyBarrierDecision {
     Continue,
 }
 
-pub fn classify_prompt_ready_barrier(
-    facts: PromptReadyBarrierFacts,
-) -> PromptReadyBarrierDecision {
+pub fn classify_prompt_ready_barrier(facts: PromptReadyBarrierFacts) -> PromptReadyBarrierDecision {
     if facts.actor_state == ActorDispatchState::Ready
         && facts.prompt_ready
         && facts.dispatch_eligible
@@ -703,9 +696,7 @@ pub const fn actor_start_wait_terminal_state(state: ActorDispatchState) -> bool 
     )
 }
 
-pub const fn actor_dispatch_blocker_reason(
-    state: ActorDispatchState,
-) -> Option<&'static str> {
+pub const fn actor_dispatch_blocker_reason(state: ActorDispatchState) -> Option<&'static str> {
     match state {
         ActorDispatchState::Ready => None,
         ActorDispatchState::Starting => Some("the authoritative actor is still starting"),
@@ -784,9 +775,7 @@ pub struct BusyPaneAutoFixFacts {
     pub restarted_supervisor: bool,
 }
 
-pub fn busy_existing_pane_auto_fix_outcome(
-    facts: BusyPaneAutoFixFacts,
-) -> BusyPaneAutoFixOutcome {
+pub fn busy_existing_pane_auto_fix_outcome(facts: BusyPaneAutoFixFacts) -> BusyPaneAutoFixOutcome {
     if facts.restarted_supervisor {
         return BusyPaneAutoFixOutcome::RetryRouteAfterSupervisorRestart;
     }
@@ -827,9 +816,7 @@ pub struct DegradedAuthoritativeActorFacts<'a> {
     pub live_owner_pane: Option<&'a str>,
 }
 
-pub fn can_use_degraded_authoritative_actor(
-    facts: DegradedAuthoritativeActorFacts<'_>,
-) -> bool {
+pub fn can_use_degraded_authoritative_actor(facts: DegradedAuthoritativeActorFacts<'_>) -> bool {
     if facts.transition_caller == "register" && facts.transition_reason == "register" {
         return false;
     }
@@ -964,7 +951,11 @@ mod tests {
                 "blocked_in_interactive_substate",
             );
         }
-        for reason in ["active codex turn", "queued draft in composer", "active claude turn"] {
+        for reason in [
+            "active codex turn",
+            "queued draft in composer",
+            "active claude turn",
+        ] {
             assert!(!is_interactive_shell_substate_reason(reason), "{reason}");
             assert_eq!(
                 dispatch_only_blocked_guard_reason(reason),

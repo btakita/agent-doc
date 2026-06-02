@@ -218,7 +218,10 @@ impl Default for ManagedProofPolicy {
 
 /// Resolve the managed-capability-proof policy, preferring frontmatter over the
 /// project/global config, falling back to built-in defaults.
-pub fn resolve_managed_proof_policy(fm: &Frontmatter, global_config: &Config) -> ManagedProofPolicy {
+pub fn resolve_managed_proof_policy(
+    fm: &Frontmatter,
+    global_config: &Config,
+) -> ManagedProofPolicy {
     let max_attempts = fm
         .managed_proof_max_attempts
         .or(global_config.managed_proof_max_attempts)

@@ -191,7 +191,8 @@ fn reject_colliding_explicit_id(full_content: &str, item: &str) -> Result<()> {
     let Some(candidate) = pending::explicit_custom_id(item) else {
         return Ok(());
     };
-    if let Some(sources) = crate::preflight::identity_collision_for_new_id(full_content, &candidate) {
+    if let Some(sources) = crate::preflight::identity_collision_for_new_id(full_content, &candidate)
+    {
         anyhow::bail!(
             "pending add: refusing to add item with explicit id `#{candidate}` — that identity is already active under {sources}. Each #id must have exactly one active meaning per document so `do #id`, queue generation, and \"top backlog item\" stay unambiguous (#preset-item-id-collision-enforce). Choose a different id, or rename the existing {sources} entry first.",
             sources = sources.join(" + ")

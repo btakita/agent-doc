@@ -202,6 +202,61 @@ pub fn run_with_context(
     }
 }
 
+/// Verdict for a direct run that found no document changes since the snapshot.
+///
+/// `#nochange-after-stall`: a plain "Nothing changed" verdict hides the fact
+/// that the previous run ended abnormally — for example a recursive owner-pane
+/// invocation that abandoned its cycle, leaving the operator with no durable
+/// closeout. Classify the latest cycle state so the no-change path can surface
+/// the prior terminal state and the recovery action instead of a snapshot-only
+/// result. Healthy committed cycles stay `Clean`, so normal no-change behavior
+/// is unchanged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum NoChangeVerdict {
+    Clean,
+    Abnormal { summary: String, recovery: String },
+}
+
+fn classify_no_change_cycle_state(
+    state: Option<&crate::cycle_state::CycleState>,
+) -> NoChangeVerdict {
+    use crate::cycle_state::CyclePhase;
+    let Some(state) = state else {
+        return NoChangeVerdict::Clean;
+    };
+    // Only a terminally `abandoned` prior cycle is unambiguously abnormal at
+    // no-change time: `committed` is the healthy completed state, and an open
+    // phase can legitimately be this same direct run's own freshly-started
+    // cycle. Broader stale-open / repair-only-reap detection (which needs
+    // consume-proof cross-checks) is left to the session-check path.
+    if state.phase != CyclePhase::Abandoned {
+        return NoChangeVerdict::Clean;
+    }
+    if state
+        .last_event
+        .starts_with("recursive_direct_invocation_blocked")
+    {
+        return NoChangeVerdict::Abnormal {
+            summary: format!(
+                "the previous run was blocked as a recursive direct invocation and its cycle ({}) was abandoned, so no normal dispatch/response completed",
+                state.cycle_id
+            ),
+            recovery:
+                "dispatch from the document's managed pane (editor Run Agent Doc) or restart the owner with `agent-doc start <FILE>` instead of a nested direct `agent-doc <FILE>`"
+                    .to_string(),
+        };
+    }
+    NoChangeVerdict::Abnormal {
+        summary: format!(
+            "the previous cycle ({}) was abandoned (last_event={}) and never reached a committed response",
+            state.cycle_id, state.last_event
+        ),
+        recovery:
+            "re-run `agent-doc <FILE>` to start a fresh cycle, or inspect `.agent-doc/logs/` for that cycle id"
+                .to_string(),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn run_once(
     file: &Path,
@@ -221,10 +276,22 @@ fn run_once(
 
     // Compute diff
     let Some((the_diff, queue_synthetic_diff)) = compute_run_diff(file)? else {
-        eprintln!(
-            "[run] Nothing changed since last run for {}",
-            file.display()
-        );
+        match classify_no_change_cycle_state(crate::cycle_state::load(file)?.as_ref()) {
+            NoChangeVerdict::Abnormal { summary, recovery } => {
+                eprintln!(
+                    "[run] no document changes since last run for {}, but {}. Recovery: {}",
+                    file.display(),
+                    summary,
+                    recovery
+                );
+            }
+            NoChangeVerdict::Clean => {
+                eprintln!(
+                    "[run] Nothing changed since last run for {}",
+                    file.display()
+                );
+            }
+        }
         return Ok(RunCycleOutcome {
             dispatched: false,
             queue_synthetic_diff: false,
@@ -1391,6 +1458,51 @@ mod tests {
         assert!(msg.contains("agent-doc finalize tasks/x.md"));
         assert!(msg.contains("Do NOT re-run"));
         assert!(msg.contains("No pre-commit, snapshot, or queue mutation was made"));
+    }
+
+    #[test]
+    fn no_change_after_recursive_block_reports_typed_diagnostic() {
+        // #nochange-after-stall: a direct run that finds no diff but whose latest
+        // cycle was abandoned by the recursive-owner guard must surface the prior
+        // state + recovery instead of plain "Nothing changed".
+        let st: crate::cycle_state::CycleState = serde_json::from_str(
+            r#"{"cycle_id":"cycle-1","file":"x.md","phase":"abandoned","last_event":"recursive_direct_invocation_blocked recursive direct invocation would deadlock","started_at":0,"updated_at":0}"#,
+        )
+        .unwrap();
+        match classify_no_change_cycle_state(Some(&st)) {
+            NoChangeVerdict::Abnormal { summary, recovery } => {
+                assert!(summary.contains("recursive direct invocation"));
+                assert!(summary.contains("cycle-1"));
+                assert!(recovery.contains("managed pane"));
+            }
+            NoChangeVerdict::Clean => panic!("expected an abnormal no-change verdict"),
+        }
+    }
+
+    #[test]
+    fn no_change_after_generic_abandoned_cycle_reports_typed_diagnostic() {
+        let st: crate::cycle_state::CycleState = serde_json::from_str(
+            r#"{"cycle_id":"cycle-2","file":"x.md","phase":"abandoned","last_event":"stale_preflight","started_at":0,"updated_at":0}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            classify_no_change_cycle_state(Some(&st)),
+            NoChangeVerdict::Abnormal { .. }
+        ));
+    }
+
+    #[test]
+    fn no_change_with_committed_cycle_stays_clean() {
+        // Normal healthy completed session: no-change behavior must be unchanged.
+        let st: crate::cycle_state::CycleState = serde_json::from_str(
+            r#"{"cycle_id":"cycle-3","file":"x.md","phase":"committed","last_event":"commit","started_at":0,"updated_at":0}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            classify_no_change_cycle_state(Some(&st)),
+            NoChangeVerdict::Clean
+        );
+        assert_eq!(classify_no_change_cycle_state(None), NoChangeVerdict::Clean);
     }
 
     #[test]

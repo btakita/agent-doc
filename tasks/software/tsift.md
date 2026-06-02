@@ -125,7 +125,39 @@ Verification:
 - Installed CLI smoke passed: `tsift --envelope search search_budget_report --path . --json --budget normal --lang rust --kind function --node-kind function_item` returned `report.filters` with `languages=[rust]`, `kinds=[function]`, and `node_kinds=[function_item]`.
 - GitHub Actions CI for `btakita/tsift@02b7d8e`, run `26846278352`, passed on rerun attempt 2: `clippy + test` and `live Convex graph acceptance` both succeeded. Attempt 1 had a transient live-acceptance job failure before the acceptance step while the cache/build step still had no failed-step log.
 - Tmux CI evidence: the workflow has no tmux job, `rg -n "tmux" .github Makefile packages src tests` returned no matches, and `make -n tmux-ci` reports no such target.
-<!-- agent:boundary:d75de561 -->
+
+### Re: astnavgraph — gpt-5
+
+> **Queue prompt:**
+>
+> [#astnavgraph]
+
+
+Done `#astnavgraph`.
+
+Implemented AST navigation graph rows for tsift traversal: Rust and Markdown AST spans now project as `ast_span` nodes with span metadata, source expansion commands, symbol/route/import/call connections, and sibling/parent/section containment edges. I updated `SPEC.md`, the graph projection implementation, and conformance coverage for Rust AST navigation plus Markdown section/block edges.
+
+Changed paths:
+- `src/tsift/SPEC.md`
+- `src/tsift/packages/tsift-cli/src/lib.rs`
+- `src/tsift/packages/tsift-cli/tests/graph_db_conformance.rs`
+- parent submodule pointer `src/tsift`
+
+Commits:
+- `df40709` in `src/tsift`: `feat: project ast navigation graph rows`
+- `e4f48b9fb` in parent repo: `chore: update tsift submodule`
+
+Verification:
+- `cargo test -p tsift-cli traversal_graph_projects`
+- `cargo test -p tsift-cli --test graph_db_conformance graph_db_cli_covers_agent_loop_workspace_fixture_rows`
+- `make check`
+- `cargo install --path . --force`; `tsift --version` reports `tsift 0.1.62`
+- `rg -n "tmux" .github Makefile packages src tests` returned no matches, so there was no tsift `make tmux-ci` target or tmux leg to run.
+- GitHub Actions CI run `26847835290` for `df40709` passed both `live Convex graph acceptance` and `clippy + test`. The only annotations were existing workflow notices for Node.js 20 action deprecation and live Convex configuration guidance.
+
+Confidence: high.
+Escalation: none.
+<!-- agent:boundary:f9d62819 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -138,7 +170,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 preset #spec-test-build-install-commit-push
 - ~[#astspansearch]~
 - ~[#astqueryfacets]~
-- [#astnavgraph]
+- ~[#astnavgraph]~
 - [#mdembeddedcode]
 - [#astrankingmerge]
 - [#astnavfixtures]
@@ -147,7 +179,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#astnavgraph] Project AST navigation edges into graph-db: contains, parent/child, previous/next sibling, enclosing module/section, call/import/route, and Markdown section/block containment edges with stable handles.
 - [ ] [#mdembeddedcode] Treat Markdown fenced code blocks as embedded language islands: parse supported fence languages, link fence AST nodes to extracted symbols, and let search navigate from prose section to embedded code and back.
 - [ ] [#astrankingmerge] Merge symbol, span, lexical, summary, and graph-neighborhood evidence into one AST-aware ranking path so file-level lexical matches do not drown out precise span hits.
 - [ ] [#astnavfixtures] Add multilingual AST navigation fixtures and perf gates covering Rust/Python/TS/JS/Kotlin/Zig/Bash plus Markdown headings, lists, fenced code, stable handles, ranking recall, and expand-command validity.

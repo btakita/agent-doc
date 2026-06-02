@@ -1964,13 +1964,16 @@ fn live_pane_prompt_ready(
     harness: &agent_doc_orchestration::harness::HarnessConfig,
     captured: &str,
 ) -> bool {
+    let latest_dispatch_ready_prompt = harness
+        .last_prompt_candidate(captured)
+        .is_some_and(|line| harness.is_dispatch_ready_prompt_line(&line));
+    if harness.binary == "claude" && latest_dispatch_ready_prompt {
+        return true;
+    }
     if harness.has_busy_cue(captured) {
         return false;
     }
-    if harness
-        .last_prompt_candidate(captured)
-        .is_some_and(|line| harness.is_dispatch_ready_prompt_line(&line))
-    {
+    if latest_dispatch_ready_prompt {
         return true;
     }
     if harness.binary == "opencode" && harness.is_idle_chrome_only_output(captured) {
@@ -2654,6 +2657,35 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             "  ⏵⏵ bypass permissions on · 1 shell\n",
         );
         assert!(!live_pane_prompt_ready(&harness, busy));
+    }
+
+    #[test]
+    fn live_pane_prompt_ready_accepts_claude_idle_footer_after_stale_busy_scrollback() {
+        let harness = agent_doc_orchestration::harness::HarnessConfig::claude();
+        let idle_after_clear = concat!(
+            "✶ Generating… (3s · esc to interrupt)\n",
+            "  ❯ /clear\n",
+            "────────────────────\n",
+            "❯ Press up to edit queued messages\n",
+            "────────────────────\n",
+            "  Opus 4.8 ctx:10% ~/work/btakita/agent-loop main brian@host\n",
+            "  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents\n",
+        );
+
+        assert!(live_pane_prompt_ready(&harness, idle_after_clear));
+    }
+
+    #[test]
+    fn live_pane_prompt_ready_rejects_claude_active_spinner_footer() {
+        let harness = agent_doc_orchestration::harness::HarnessConfig::claude();
+        let active = concat!(
+            "✶ Generating… (3s · esc to interrupt)\n",
+            "❯\n",
+            "  Opus 4.8 ctx:40% ~/work/btakita/agent-loop main brian@host\n",
+            "  ⏵⏵ bypass permissions on · 1 shell\n",
+        );
+
+        assert!(!live_pane_prompt_ready(&harness, active));
     }
 
     #[test]

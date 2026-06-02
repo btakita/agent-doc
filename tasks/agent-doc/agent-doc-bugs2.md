@@ -78,7 +78,13 @@ I have the full map now. The parent `#nochange-after-stall` (run.rs:220) **expli
 
 Same structural situation as the last two turns: this pane is binary-declined (`cargo`/`make`/`.bin/agent-doc` all "requires approval"), and a concurrent toolchain-enabled actor is landing the actual code on this same document (step 2 shipped `4d0184e3`/`cbeec61ce` while I was read-only). I can't `make check` or `finalize` here, so I won't force unverified edits into the hot path. What I can deliver is the precise implementation map.
 **Closeout:** uncommitted — `finalize` is declined in this pane, consistent with the last two turns. The map above is the deliverable; implementation/`make check`/finalize needs the toolchain pane.
-<!-- agent:boundary:e6240193 -->
+
+### Re: queue repair closeout — gpt-5
+
+Recovered the `agent-doc-bugs2.md` auto-queue cycle after the child run completed `#lr-queue-response-miss` and produced an implementation map for `#nochange-after-stall-breadth` without completing code work. I removed assistant-prose contamination from `agent:queue`, restored snapshot/HEAD alignment, and gated `#nochange-after-stall-breadth` with the recorded implementation-map attempt so the queue does not loop that unfinished item.
+
+The next runnable queue head is now `do [#owned-pane-prompt-recur]`.
+<!-- agent:boundary:33e3a8be -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->

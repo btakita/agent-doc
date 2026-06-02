@@ -36,13 +36,41 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 3 response topic(s): do #misfire-recovery-snapshot; Is the #backlog-auto-marker-misfire implementation destructive?; Will the agent guide the decision/recovery process?
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:332380c9 -->
+
+### Re: do #kc5e + #x8aw — recovery-tag tooling (guided recovery + GC) — opus-4-8
+
+> **Queue prompt:**
+>
+> [#kc5e]
+>
+> [#x8aw]
+
+
+Both done — they're the two halves of "make the recovery checkpoints self-service," so I implemented them together this cycle.
+
+#### #kc5e — `agent-doc checkpoint <FILE>`
+
+New command (named `checkpoint` because `recover` is already a `repair` alias for orphaned-response recovery):
+- **default:** lists the document's `pre-auto-run-N` / `pre-compact-N` tags newest-first (short SHA, date, subject) + inspect/restore hints.
+- **`--diff <TAG>`:** `git diff <TAG> -- <FILE>` to see what changed since the checkpoint.
+- **`--restore <TAG>`:** `git checkout <TAG> -- <FILE>` — restores **only** that document (other files untouched), then prompts to review + commit. Surgical, never resets the tree.
+
+This is the guided exit the recovery tags were missing — the answer to "will the agent guide recovery?" is now "yes, via `checkpoint`."
+
+#### #x8aw — recovery-tag GC
+
+`agent-doc gc` now prunes accumulated checkpoint tags, keeping the newest 20 per `<doc>/<slug>` series. Live evidence this was needed: **415 `pre-compact` tags** had accumulated on this one document; a dry-run across the repo would prune **619** stale recovery tags.
+
+#### Verification
+
+Full Rust suite **3545 passed / 0 failed**, clippy clean. Built + installed. Live-verified: `agent-doc checkpoint` lists this doc's checkpoints; `agent-doc gc --dry-run` reports the prune. New tests: `parse_recovery_tags_*` (2), `clean_old_recovery_tags_*` (2). Spec updated (`specs/07-core-commands.md` gc + checkpoint). Pushed `agent-doc@c6b5f2b3` + superproject `5a96471f6`. This completes the recovery-tag tooling pair.
+<!-- agent:boundary:a7c0dd5c -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- [#kc5e]
-- [#x8aw]
+- ~[#kc5e]~
+- ~[#x8aw]~
 - I have been using agent-doc and have not seen any bugs. Can the gated review items be completed? If yes, complete them. I want to move on to performance improvements.
 - lazily-rs is now multithreaded. Update tasks/agent-doc/plans/lazily-rs-integration.md with recent changes.
 - [#lr-content-6]
@@ -63,8 +91,6 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Backlog
 
 <!-- agent:backlog priority queue=append -->
-- [ ] [#kc5e] [recommended] Add guided recovery for pre-auto-run / pre-compact recovery tags: a command (agent-doc recover <FILE>, or extend agent-doc undo) that lists a doc's recovery tags newest-first and offers to reset/inspect HEAD at the chosen tag, optionally with misfire detection that points the operator at the latest tag. Today the tag is a passive checkpoint with no binary-owned guidance. Pairs with the tag-GC item. Surfaced 2026-06-02.
-- [ ] [#x8aw] [recommended] GC/prune accumulated recovery tags (agent-doc/<doc>/pre-auto-run-N and pre-compact-N) — one is created per queue auto-run / compact, so they grow unbounded over a doc's life. Add a retention cap (keep last N) to gc.rs or a  path, mirroring the stash/diagnostic GC. Low priority; surfaced by #misfire-recovery-snapshot 2026-06-02.
 - [ ] [#lr-content-6] Phase 6: Wire DocContentCell + FrontmatterSlot + ComponentsSlot into session_check guard functions. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-cycle-7] Phase 7: Add CycleStateSlot + SnapshotContentSlot; consolidate snapshot path lookups. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-head-8] Phase 8: Add HeadContentSlot + SnapshotCommitStatusSlot for git show HEAD dedup. Plan: tasks/agent-doc/plans/lazily-rs-integration.md

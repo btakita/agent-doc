@@ -134,7 +134,40 @@ Verification:
 - No tmux CI target/workflow was found in this repo (`rg "tmux|tmux-test|tmux-ci" .github Makefile packages src tests` returned no matches).
 
 Note: I also ran `cargo fmt --check`; it reports pre-existing rustfmt drift in unrelated files, so I restored that unrelated formatting churn and kept this commit scoped to the Markdown executor/docs/tests.
-<!-- agent:boundary:8a0289e2 -->
+
+### Re: #mdblockedits — gpt-5
+
+> **Queue prompt:**
+>
+> [#mdblockedits]
+
+
+Implemented and committed `#mdblockedits`.
+
+What changed:
+- `edit-intents --apply` now supports Markdown block intents: `insert_list_item` and `rewrite_code_fence`.
+- `insert_list_item` requires a unique indexed list-item target, preserves the target marker and indentation, and supports `position` (`before`/`after`).
+- `rewrite_code_fence` requires a unique fenced-code target, rewrites only the fence body, refuses replacement text that includes fence markers, and preserves the existing fence syntax/language.
+- Apply refusal diagnostics now include the unsupported plan message, so ambiguous Markdown list/code-fence targets report the exact ambiguity before mutation.
+
+Committed:
+- `src/tsift` submodule: `7a02458 feat: add markdown block edit executor`
+- Superproject pointer: `c1438ba2c agent-doc(tsift): update submodule pointer`
+
+Verification:
+- `cargo test -p tsift-cli edit_intents_apply_mutates_markdown_block_intents` passed.
+- `cargo test -p tsift-cli edit_intents_markdown_block_apply_refuses_ambiguous_targets_without_mutating` passed.
+- `cargo test -p tsift-cli markdown` passed.
+- `cargo test -p tsift-cli edit_intents` passed.
+- `cargo test -p tsift-graph markdown` passed.
+- `cargo test -p tsift-cli semantic_edit_language_contracts_resolve_current_executor_surface` passed.
+- `make check` passed via digest artifact `tart-d349462e1a`.
+- `cargo install --path .` passed via digest artifact `tart-830d792d19`; installed binary reports `tsift 0.1.62`.
+- Latest GitHub Actions CI before this new push, run `26830983751`, was green: `clippy + test` and `live Convex graph acceptance` both succeeded.
+- No tmux CI target/workflow was found in this repo (`rg "tmux|tmux-test|tmux-ci" .github Makefile packages src tests` returned no matches).
+
+`#mdverify` remains the next queued Markdown item.
+<!-- agent:boundary:e3236188 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -148,14 +181,13 @@ preset #spec-test-build-install-commit-push
 - ~[#mdastcontract]~
 - ~[#mdsectionspans]~
 - ~[#mdsectionedits]~
-- [#mdblockedits]
+- ~[#mdblockedits]~
 - [#mdverify]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#mdblockedits] Markdown block edit executor: insert_list_item and rewrite_code_fence while preserving syntax and refusing ambiguous targets.
 - [ ] [#mdverify] Markdown semantic-write verification coverage: dry-run/apply no-mutation tests, temp-worktree verify gates, source-read impact summaries, and refusal regressions.
 <!-- /agent:backlog -->
 

@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -92,6 +92,7 @@ So the pragmatic answer is: `yes, SurrealDB is optimizable, and the current adap
 
 Commands/evidence used: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `tsift --envelope search`, `rg`, and source inspection of `packages/tsift-surrealdb/src/lib.rs`, `packages/tsift-core/src/lib.rs`, `packages/tsift-sqlite/src/lib.rs`, `packages/tsift-cli/src/lib.rs`, and `SPEC.md`. No repo code files were changed.
 ❯ What are #next-steps to optimize SurrealDB performance?
+
 ### Re: SurrealDB performance next steps — gpt-5
 
 Top backlog item: `#surrealidx`.
@@ -104,7 +105,38 @@ Priority order:
 4. `#surrealbench` — remeasure with promotion-grade evidence. After the above changes, run repeated `backend-eval --full-projection` samples through `metric-digest`, not one-off samples. SurrealDB should stay on hold unless it beats SQLite across real, full-projection, high-degree, and deep-chain workloads while preserving parity, install portability, and lock behavior.
 
 I added those four items to the backlog in that order. No repo code files were changed.
-<!-- agent:boundary:34f5ef02 -->
+
+### Re: #surrealidx — gpt-5
+
+> **Queue prompt:**
+>
+> [#surrealidx]
+
+
+Completed `#surrealidx`.
+
+Implemented Rust-side secondary edge indexes in `SurrealdbGraphStore` for stable edge id lookup, ordered edge scans, edge-kind scans, outgoing adjacency, incoming adjacency, and edge-property probes. The SurrealDB adapter now overrides the hot `GraphStore` reads that were falling back to full-edge scans: `edge`, `sample_edge`, `sample_edge_with_property`, `incident_edges`, `paged_edges`, `paged_incident_edges`, `edges_between_nodes`, and bounded path reads. The indexes rebuild on open/load and stay in sync across upsert, edge delete, node delete, and clear.
+
+Changed paths:
+
+- `src/tsift/packages/tsift-surrealdb/src/lib.rs`
+- `src/tsift/SPEC.md`
+
+Commits pushed:
+
+- `src/tsift`: `9336a14 feat(graph): index surrealdb hot reads` pushed to `btakita/tsift main`
+- `agent-loop`: `73622ef97 chore: update tsift submodule` pushed to `btakita/agent-loop main`
+
+Verification:
+
+- `cargo test --manifest-path packages/tsift-surrealdb/Cargo.toml` passed
+- `make check` passed
+- `cargo install --path .` passed; installed binary reports `tsift 0.1.62`
+- `cargo test -p tsift-cli --features backend-surrealdb cli_parses_graph_db_backend_eval_surrealdb_candidate` passed
+- Latest GitHub Actions `CI` run checked: `26784235057` on `main`, conclusion `success`; jobs `clippy + test` and `live Convex graph acceptance` both succeeded. This repo lists `CI` and `Release` workflows; no separate tmux-test workflow is present.
+
+No escalation was used. Confidence: high for the adapter hot-read optimization and parity-preserving behavior covered by tests. I did not run repeated `backend-eval --full-projection` samples here because that is the queued `#surrealbench` item; the next queue item is `#surrealbulk`.
+<!-- agent:boundary:23123073 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -113,13 +145,17 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+preset #spec-test-build-install-commit-push
+- ~[#surrealidx]~
+- [#surrealbulk]
+- [#surrealpush]
+- [#surrealbench]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#surrealidx] Optimize SurrealDB GraphStore hot reads: add secondary indexes and override edge/sample/incident/paged/edges_between/path methods so full_projection no longer pays full-edge scan costs.
 - [ ] [#surrealbulk] Batch SurrealDB projection load: replace per-row upsert loops with bulk/transactional row load plus one-pass secondary-index rebuild; measure refresh/load separately.
 - [ ] [#surrealpush] Compare SurrealDB query pushdown vs Rust-derived indexes behind backend-surrealdb and keep the faster design that preserves GraphStore parity.
 - [ ] [#surrealbench] Run repeated backend-eval --full-projection samples through metric-digest after SurrealDB optimizations and keep promotion on hold unless it beats SQLite across required workloads.

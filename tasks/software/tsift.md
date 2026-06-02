@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -36,7 +36,33 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): #next-steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:031c458f -->
+
+### Re: #mdastapi — gpt-5
+
+> **Queue prompt:**
+>
+> [#mdastapi]
+
+
+Completed `#mdastapi`.
+
+Implemented `tsift markdown-ast` as a first-class Markdown JSON/envelope projection with stable `mdast-*` node handles plus `span-*` bridge handles, hierarchy and section paths, byte/body spans, heading/list/fence metadata, and node/source/edit expansion commands. Wired Markdown `source-read` and Markdown `symbol-read` to surface `markdown-ast` follow-ups, including `symbol-read` to `markdown-ast --node <span-*>`.
+
+Updated `SPEC.md` and added compiled CLI coverage for the new command, source-read expansion, and symbol-read span expansion.
+
+Commits pushed:
+- `btakita/tsift@1b141b6` `feat: add markdown ast projection`
+- `btakita/agent-loop@7e82414e1` `chore: update tsift submodule`
+
+Verification:
+- `cargo check -p tsift-cli` passed.
+- `cargo test -p tsift-cli markdown` passed.
+- `make check` passed after the final edit.
+- `cargo build --workspace` passed.
+- `cargo install --path . --force` passed.
+- Installed smoke test passed: `tsift --envelope markdown-ast SPEC.md --path . --budget small --json`.
+- GitHub Actions CI run `26842414251` passed. The latest CI workflow has no tmux-named job to inspect, so there was no tmux leg to rerun.
+<!-- agent:boundary:1c0dceaa -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -47,7 +73,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- [#mdastapi]
+- ~[#mdastapi]~
 - [#mdparsecache]
 - [#mdtokens]
 <!-- /agent:queue -->
@@ -55,7 +81,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#mdastapi] Promote Markdown AST to a first-class JSON/envelope API: stable node handles, hierarchy/section path, byte and body spans, block kind metadata, list/fence attributes, and expansion commands for source-read/symbol-read/edit-intents consumers.
 - [ ] [#mdparsecache] Cache and reuse per-file Markdown parse/extract results across edit-intents planning/apply and source-read enrichment; add large-document benchmarks and phase timings for section/block lookup hot paths.
 - [ ] [#mdtokens] Add token-budgeted Markdown projections: outline-first section/block previews, selected-node expansion handles, and measured token-savings fixtures for session-review/context-pack instead of replaying raw markdown bodies.
 <!-- /agent:backlog -->

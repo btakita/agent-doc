@@ -31,108 +31,12 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260602-022511.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260602-034746.md`*
 
 Compacted content:
-- Archived 10 response topic(s): do [#sfmt]; do Path C queue-provenance cluster; implement the real remaining items; 7 more
+- Archived 4 response topic(s): Is there sufficient logging to understand the 3-pane navigation layout?; 3-pane layout navigating bugs2.md → tsift.md; do #ht5v; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ When I navigate to another agent doc, the tmux window layout goes into 3 panes with a 2 editor pane layout. Is there sufficient logging to understand why?
-❯ #spec-test-build-install-commit-push
-
-### Re: Is there sufficient logging to understand the 3-pane navigation layout? — opus-4-8
-
-Mostly yes — but the one part that actually decides "2 editor panes" was a silent black box. I closed that gap.
-
-#### What was already logged (the pane-survival side)
-
-The navigation → layout path is traceable across three sinks:
-
-- **`[layout-sync]`** (`EditorTabSyncListener`, `idea.log`) — `selectionChanged` (new file + visible `.md` set), immediate `focus-fast`, the full `exec:` command including the `--col` layout args, the `result:` line, and debounce/guard/deferred/timeout/generation diagnostics.
-- **`[sync:PHASE]`** (tmux-router reconciler, stderr, merged into the `result:` line because `runCommandWithTimeout` redirects stderr) — `GLOBAL` window+pane state at sync-start/sync-end and `SELECT`/`ATTACH`/`DETACH`/`REORDER`/`VERIFY`/`SWAP`. The `DETACH` phase already names *why each pane is kept or stashed* (last pane in window, protected busy pane, registered to another session, focus-steal). That is exactly what tells you why an unwanted pane survived into the visible window.
-- **`/tmp/agent-doc-sync.log`** + per-doc **`.agent-doc/logs/ops.log`** — `[sync] auto-started %XX for <file>`, batch summaries, per-phase latency.
-
-So "why did an extra pane survive the reconcile?" was already answerable.
-
-#### The gap (the editor-detection side)
-
-`LayoutDetector.detectEditorLayout` — the function that turns the IDE's editor splits into the column list that drives the whole sync — logged **nothing**, and swallowed exceptions silently (`catch (_: Exception)`). Since your symptom *is* "2 editor panes," the decisive question — *did IntelliJ really report 2 editor windows, or did grouping spuriously split one into two columns?* — could only be **inferred** from the downstream `--col` args, never observed at the source.
-
-#### Fix (committed + pushed, JB plugin `0.2.146`)
-
-`detectEditorLayout` now logs under **`[layout-detect]`**: the editor window count, each window's on-screen `x=… y=… file=…`, and the resulting grouping (e.g. `grouped into 2 column(s): [left.md] | [right.md]`), plus the early-return reasons. Detection failures now go through `LOG.warn` instead of vanishing. Added deterministic `buildColumnsFromSnapshots` tests for the 2-column and stacked-single-column cases, and documented the full `[layout-detect]` → `[layout-sync]` → `[sync:PHASE]` chain in the JetBrains SPEC.
-
-Verification: `./gradlew test` green (full JB suite); `buildPlugin signPlugin` succeeded. Change is Kotlin + editor SPEC only, so the Rust `make check` suite is unaffected. Pushed `agent-doc@1f7a8c4f` (branch `20260422/codex-agent-backend`) + superproject pointer on `main`. Left the unrelated concurrent `src/session_actor_cmd.rs` edit untouched.
-
-To test live, reinstall from disk: `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.146-signed.zip`, restart, reproduce the navigation, then read `idea.log` for `[layout-detect]` — it will state whether the 3-pane layout is a true 2-split editor or a detection artifact.
-❯ The 3 pane layout occurred when I navigated from this document to tsift.md
-
-### Re: 3-pane layout navigating bugs2.md → tsift.md — opus-4-8
-
-That repro detail let me pull the actual sync logs from this machine, and the answer to your original question is now a firm **yes — the logging is sufficient, and it already pinpoints the cause.** I didn't even need the new `[layout-detect]` line (the editor side turned out to be correct here); the binary's `/tmp/agent-doc-sync.log` had everything.
-
-#### What the logs show for your navigation
-
-The editor genuinely had a **2-column** layout (`columns=[tsift.md, monsterrodholders.md]`), so "2 editor panes" is real, not a detection artifact. The 3rd pane is a **tmux reconcile/focus race**, fully logged:
-
-- **Clean transition** (atomic SWAP, lands at 2 panes):
-  `pre-reconcile ["%57","%61"]` → `SWAP: %62 ↔ %57 (atomic)` → `post-reconcile ["%62","%61"]` ✓
-- **Failing transition** (3 panes):
-  `pre-reconcile ["%62","%61"]`, `desired=["%57","%61"]`, then
-  `promote_on_focus_action=join-pane src=%57 dst=%61 … ok=true`, then
-  `post-reconcile ["%57","%61","%62"]` ✗ — the displaced pane `%62` was never stashed.
-
-#### Root cause
-
-`promote_pane_to_agent_doc_window` (`sync.rs`, called from the **focus path** `focus.rs:147`, `#stash-pane-promote-on-focus`) reparents the focused file's stashed live-owner pane into the `agent-doc` window with `join-pane` — it **adds** a pane. On a 1-in/1-out tab switch this races the debounced `sync --no-autostart --exact-visible` reconcile: the focus-path rescue runs independently, so the reconcile works off a stale pre-reconcile snapshot and never stashes the displaced pane. Net result: 2 editor columns + 1 leftover = 3 panes. This is exactly the "sync rescues a stashed pane before reconcile" anti-pattern the reconciler's atomic **SWAP** fast path was meant to eliminate — when SWAP owns the transition it lands at 2 panes; when the focus-path rescue fires first, it lands at 3.
-
-This is the same regression family as `#jb-tsift-pane-sync`. I recorded the full evidence + the convergence contract in `tasks/agent-doc/plan-jb-tsift-pane-sync-regression.md` (new "3 panes for a 2-column editor" section).
-
-#### Scope this turn
-
-You gave a repro detail, not a fix directive (no `#spec-test-build-install-commit-push`), so I diagnosed and captured rather than editing reconcile/focus code — that path is high-risk and the plan calls for atomic-SWAP routing plus SimWorld coverage. Queued the concrete fix as `#jb-nav-3pane-promote-swap`. Say the word (or add the preset) and I'll implement it.
-
-### Re: do #ht5v — live-verify the 3-pane navigation detection — opus-4-8
-
-> **Queue prompt:**
->
-> do [#ht5v]
-
-
-Verified, and the answer is **detection was correct, not spurious** — so the conditional "collapse near-zero-width / preview splits" branch does not apply. Marking `#ht5v` done.
-
-Evidence (`/tmp/agent-doc-sync.log`, the tsift navigation): the editor-side projection recorded `columns=[tsift.md, monsterrodholders.md]` — two distinct files in two columns. The JB plugin only emits a ≥2-column `EditorLayout` when `FileEditorManagerEx.windows.size >= 2`, so two columns ⇒ IntelliJ genuinely had two editor split windows. This is a real 2-split editor (tsift left, monsterrodholders right), not a phantom/zero-width/preview split.
-
-Conclusion: `detectEditorLayout` needs no collapse heuristic. The surplus pane is purely a tmux-side reconcile/focus race (`promote_on_focus` join-pane not stashing the displaced pane), which is tracked as `#jb-nav-3pane-promote-swap` — that's where the fix belongs. No code change for `#ht5v`, so the preset's build/install/commit steps are N/A here; the next queue item carries the actual implementation.
-
-### Re: do #jb-nav-3pane-promote-swap — fix the 3-pane navigation race — opus-4-8
-
-> **Queue prompt:**
->
-> do #jb-nav-3pane-promote-swap
-
-
-Implemented and verified (spec + tests + build + install + commit + push). The fix is two coordinated, low-blast-radius changes so exactly one path owns the 1-in/1-out transition and the window never grows to a phantom pane.
-
-#### Root cause (recap from the logs)
-
-A 1-in/1-out tab switch had two failure surfaces that compounded: (1) the focus-path `promote_pane_to_agent_doc_window` additively `join-pane`s the incoming pane, racing the debounced reconcile; (2) the reconcile's SWAP fast path, when the outgoing pane is **busy/protected**, skipped the swap and fell through to ATTACH-incoming + DETACH-skips-busy-outgoing → 3 panes.
-
-#### Changes
-
-- **tmux-router `reconcile` (`src/sync.rs`):** on a 1-in/1-out where the outgoing pane is protected, **preserve the current layout** instead of falling through to ATTACH — leave the incoming pane stashed and defer; the caller's retry resurfaces it once the busy pane frees. Logs `SWAP preserved layout … outgoing … protected`.
-- **`agent-doc focus --no-stash-promote` (`focus.rs` + `main.rs`):** new flag selects the resolved pane but skips the additive promote, deferring stash reparenting to the follow-up `sync` reconcile. The JB `buildFocusCommand` emits it for tab-to-pane navigation; standalone `agent-doc focus` keeps promotion (unchanged).
-
-#### Verification
-
-- New `IsolatedTmux` regression `test_reconcile_1in1out_protected_outgoing_preserves_layout`: protected 1-in/1-out stays at 2 panes, incoming left in stash. Passing.
-- Full Rust suite: **3539 passed, 0 failed** (230 live-tmux ignored); clippy clean. Live-tmux legs green locally: reconcile (17), focus (11), autoclaim (2).
-- JB plugin builds + tests green; bumped to **0.2.147**.
-- Committed + pushed: `tmux-router@ae2817a` (main), `agent-doc@dbcd68f3` (branch `20260422/codex-agent-backend`), superproject pointer on `main`. Specs updated (`specs/07-session-tmux-commands.md`, tmux-router VERSIONS).
-
-#### Manual-testing gate
-
-Reinstall JB plugin **0.2.147** from `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.147-signed.zip` and reproduce the bugs2 → tsift navigation: the window should stay at 2 panes (or defer surfacing the incoming pane while the other is mid-turn), never 3. `idea.log` `[layout-sync] exec:` will now show `focus … --no-stash-promote`, and `/tmp/agent-doc-sync.log` will log `SWAP preserved layout` when the outgoing pane is busy.
-<!-- agent:boundary:4d35a4da -->
+<!-- agent:boundary:3b39bef7 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->

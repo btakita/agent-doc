@@ -80,6 +80,8 @@ Honest answer: **mostly no — not from a headless agent session.** Of the 51 ga
 - **~13 are already IMPLEMENTED + tested**, gated *only* on that same live-verify (`#4a6p`, `#free-text-queue-skip-diagnostic`, `#preset-item-id-collision-enforce`, `#do-id-partial-closeout-state`, `#weqq`, `#snrun`, `#codex-owned-pane-prompt-miss-followups`, …). The code + unit tests exist; the gate is live behavior, by design.
 - **The rest are the Path C no-live-pane implementable cluster** (`#qasm`: queue-provenance, Option-A fixes, closeout-guard hardening, the `#backlog-priority`/`#backlog-queue-sync` feature pair, hygiene/UX) — genuinely doable headlessly, though some may already be landed and several are multi-cycle.
 
+I have typed during finalize. Do you have any logs of me typing during finalize? Could you add logging so you can verify completion?
+
 #### What actually unblocks the bulk
 
 The document already tracks the two operator-driven consolidation sessions that clear the live-gated majority — these need *you* at a live IDE:
@@ -92,7 +94,34 @@ I'm not auto-marking 51 items done, and I've stopped the auto-loop here (the rem
 1. **Work the Path C implementable subset** — I'll audit each (most are likely already landed) and complete/mark-done what's genuinely done + headlessly verifiable.
 2. **Continue the loop to the `lazily-rs` queue items** — skip the live-gated review work for now.
 3. **Pause for you to run Path A + Path B** live-verify sessions, which is what actually clears the live-gated majority.
-<!-- agent:boundary:ad8db598 -->
+continue with the queue after you add logging.
+
+### Re: Logs of typing during finalize + added verification logging — opus-4-8
+
+> **Queue prompt:**
+>
+> lazily-rs is now multithreaded. Update tasks/agent-doc/plans/lazily-rs-integration.md with recent changes.
+
+
+**Yes — your typing during finalize is already logged.** This document has **16** `ipc_socket_already_applied_live_buffer_diverged … prompt_drift=true` events in `.agent-doc/logs/ops.log`, plus `visible_write_typing_apply` flow events. Each divergence line carries `current_len` (the live buffer = response + your keystrokes) vs `content_ours_len` (response only) — the delta is literally what you typed. Example from this doc: `current_len=40026 content_ours_len=38836 prompt_drift=true` ≈ 1,190 bytes you typed during that finalize.
+
+What was missing was a *clear* signal — those markers are named for IPC mechanics, not "typing during finalize." So I added one.
+
+#### Added: `finalize_typing_during_write`
+
+When the socket `already_applied` path detects the live buffer diverged with prompt drift, it now also logs:
+```
+finalize_typing_during_write file=… patch_id=… typed_delta_bytes=… response_present=true resolution=content_ours_adopted
+```
+- `typed_delta_bytes` — your keystrokes (live vs `content_ours`).
+- `response_present=true` — the assistant response is still materialized, i.e. typing did **not** corrupt/drop it.
+
+So to verify a typing-during-finalize run (the Path B / `#6cmx` / `#wy0y` repro): type during `finalize --stream`, then `grep finalize_typing_during_write .agent-doc/logs/ops.log` — one line proves it was exercised and the response survived. This works **without** the JB plugin debug `setText` logging (`#weqq`), which still needs a reinstall.
+
+Verified: full suite **3545 passed / 0 failed**, clippy clean, the marker is asserted live in the `already_applied` user-edit test (non-vacuous: `prompt_drift=true` + `response_present=true` confirmed). Built + installed. Pushed `agent-doc@91c9ccac` + superproject `c622be11d`. Spec: `specs/07-closeout-commands.md`.
+
+Continuing with the queue now (the `lazily-rs` plan update + `#lr-*` items), per your second note.
+<!-- agent:boundary:568d6e14 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -100,7 +129,7 @@ preset #spec-test-build-install-commit-push
 - ~[#kc5e]~
 - ~[#x8aw]~
 - ~I have been using agent-doc and have not seen any bugs. Can the gated review items be completed? If yes, complete them. I want to move on to performance improvements.~
-- lazily-rs is now multithreaded. Update tasks/agent-doc/plans/lazily-rs-integration.md with recent changes.
+- ~lazily-rs is now multithreaded. Update tasks/agent-doc/plans/lazily-rs-integration.md with recent changes.~
 - [#lr-content-6]
 - [#lr-cycle-7]
 - [#lr-head-8]

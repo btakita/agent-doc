@@ -59,7 +59,35 @@ Commands run for this answer: `tsift status`, `agent-doc preflight`, `agent-doc 
 Verification: no library code changed in this cycle; the required verification is the `agent-doc finalize` closeout plus post-commit `session-check`. The `tsift status` context was stale because one workspace scope is missing, so I used direct README/source inspection rather than relying on tsift search evidence.
 
 Changed paths: the session document exchange/backlog only. Confidence: high. Escalation: none.
-<!-- agent:boundary:1546039c -->
+
+### Re: #lazyperf1 — gpt-5
+
+Completed `#lazyperf1`.
+
+Implemented the same-slot contention prototype in `src/lazily-rs`: thread-safe slots now keep per-slot recompute/value-publish sidecar state for in-flight status, cache visibility, waiter parking, and stale revision checks. Dirty same-slot readers check that sidecar before entering the `get_refresh`/`publish` graph-lock path, so they park behind the owner without spinning on the graph mutex. Dependency graph mutation, invalidation frontiers, effects, and disposal remain under the context graph mutex.
+
+Updated `SPEC.md`, the instrumentation docs, the Loom waiter model, spec-compliance coverage, and refreshed the generated README benchmark profile. The refreshed profile shows `thread_safe_contention_same_slot_write_read_16` lock wait at `20.270 ms` with `in_flight_wait` wait/hold at `0`, down from the prior README row's `44.997 ms` total lock wait.
+
+Commits:
+- `src/lazily-rs`: `da9f723` (`perf: move thread-safe recompute waits per slot`) — pushed to `origin/main`.
+- parent repo: `2b477c3f5` (`chore: update lazily-rs pointer`) — will be pushed after this agent-doc finalize completes, so the session document stays on the binary-owned closeout path.
+
+Verification passed:
+- `cargo test`
+- `cargo test --features tokio`
+- `cargo test --features instrumentation`
+- `cargo test --features loom --test thread_safe_loom`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo build`
+- `cargo bench --features instrumentation --no-run`
+- `python3 scripts/update-benchmark-results.py --check`
+
+Install note: `cargo metadata --no-deps --format-version 1` shows this crate has a library target plus examples/benches/tests, but no installable package binary, so `cargo install --path .` is not applicable; `cargo build` is the local build/install-equivalent check for this library crate.
+
+CI note: `gh workflow list`, `gh run list --workflow CI --limit 1`, and `gh run list --limit 5` found no workflows or runs for this repo, so there was no GitHub/tmux CI result to inspect.
+
+Changed paths: `README.md`, `SPEC.md`, `src/instrumentation.rs`, `src/thread_safe.rs`, `tests/spec_compliance.rs`, `tests/thread_safe_loom.rs`, and the parent `src/lazily-rs` submodule pointer. Confidence: high. Escalation: none.
+<!-- agent:boundary:053137f6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -67,7 +95,12 @@ Changed paths: the session document exchange/backlog only. Confidence: high. Esc
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+preset #spec-test-build-install-commit-push
+- [#lazyperf1]
+- [#lazyperf2]
+- [#lazyperf3]
+- [#lazyperf4]
 <!-- /agent:queue -->
 
 ## Backlog

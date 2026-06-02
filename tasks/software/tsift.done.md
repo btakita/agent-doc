@@ -278,3 +278,4 @@
 - 2026-06-02 [#astverify] Add a semantic edit verification harness that can dry-run, apply in temp worktrees, reindex, run source-read or impact summaries, and optionally gate on a caller-provided test command before committing changes.
 - 2026-06-02 [#mdastcontract] Markdown semantic edit language contract: canonical language id, formatter policy, supported Markdown intent kinds, and fail-closed capability checks.
 - 2026-06-02 [#mdsectionspans] Markdown heading/section/list/code-fence stable spans: hierarchy metadata, section boundaries, and source-read/edit target refs.
+- 2026-06-02 [#mdsectionedits] Markdown section edit executor: rename_heading, replace_section_body, insert_section, and move_section with tree-sitter validation.

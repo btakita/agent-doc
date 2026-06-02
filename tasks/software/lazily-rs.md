@@ -136,7 +136,41 @@ Verification:
 Notes: `cargo build` and bench compile still emit existing workspace patch warnings for `agent-kit`, `tagpath`, and `tmux-router` not being used in this crate graph. `cargo install --path .` is not applicable because `lazily` is a library crate with no binary targets. `make check` is not applicable in `src/lazily-rs` because there is no `Makefile`. GitHub workflow inspection found no workflows listed for `btakita/lazily-rs`, so there was no CI/tmux workflow run to inspect.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:09a0e562 -->
+
+### Re: #tsc16-refresh-fastpath — gpt-5
+
+> **Queue prompt:**
+>
+> [#tsc16-refresh-fastpath]
+
+
+Implemented `#tsc16-refresh-fastpath`.
+
+The thread-safe getter now uses a locked value-or-dependencies helper: fresh cached slots clone and return under a single `get_refresh` lock, while dirty/forced/unset slots reuse the dependency list gathered under that same lock and continue through the existing refresh/recompute path with user callbacks outside the graph lock. That avoids the cached-read recursive refresh path without adding a cold first-get pre-check lock.
+
+I added instrumentation coverage proving a fresh cached thread-safe get performs zero recomputes and exactly one `GetRefresh` lock acquisition, and updated `SPEC.md` plus the README threading note. I also refreshed the README benchmark/profile tables; the cached `ThreadSafeContext` read row moved from about `443 ns` to about `108 ns`, and the read-mostly contention rows now show the reduced `get_refresh` lock volume.
+
+Committed and pushed:
+
+- `lazily-rs`: `1e6cb97 perf: fast-path fresh thread-safe gets`
+- `agent-loop`: `7a2f47609 chore: update lazily-rs submodule`
+
+Verification run:
+
+- `cargo fmt`
+- `cargo test`
+- `cargo test --features instrumentation`
+- `cargo test --features tokio`
+- `cargo test --features loom --test thread_safe_loom`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo build`
+- `cargo bench --features instrumentation --no-run`
+- `python3 scripts/update-benchmark-results.py`
+- `python3 scripts/update-benchmark-results.py --check`
+- `git diff --check`
+
+Applicability notes: `cargo install --path .` is not applicable because `lazily` is a library crate with no binaries; `make check` is not available because there is no `Makefile`; GitHub has no workflows listed for this submodule, so there was no CI/tmux run to inspect.
+<!-- agent:boundary:3345e72b -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -145,14 +179,13 @@ Confidence: high. Escalation: none.
 preset #spec-test-build-install-commit-push
 - ~[#tsc16-matrix]~
 - ~[#tsc16-wake-scope]~
-- [#tsc16-refresh-fastpath]
+- ~[#tsc16-refresh-fastpath]~
 - [#tsc16-optimistic-read]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#tsc16-refresh-fastpath] #performance #thread-safe Reduce remaining get_refresh/publish lock volume by merging cached freshness checks with value clone and using locked helper variants only where user callbacks still run outside the graph lock
 - [ ] [#tsc16-optimistic-read] #performance #thread-safe Explore a versioned optimistic read path only if the benchmark matrix shows read-mostly or independent-slot contention is still dominated by the global mutex; document visibility semantics before changing guarantees
 <!-- /agent:backlog -->
 

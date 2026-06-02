@@ -41,6 +41,11 @@ Compacted content:
 
 > **Queue prompt:**
 >
+> [#mdparsecache]
+
+
+> **Queue prompt:**
+>
 > [#mdastapi]
 
 
@@ -62,7 +67,7 @@ Verification:
 - `cargo install --path . --force` passed.
 - Installed smoke test passed: `tsift --envelope markdown-ast SPEC.md --path . --budget small --json`.
 - GitHub Actions CI run `26842414251` passed. The latest CI workflow has no tmux-named job to inspect, so there was no tmux leg to rerun.
-<!-- agent:boundary:1c0dceaa -->
+<!-- agent:boundary:e7266b54 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -74,7 +79,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~[#mdastapi]~
-- [#mdparsecache]
+- ~[#mdparsecache]~
 - [#mdtokens]
 <!-- /agent:queue -->
 

@@ -36,18 +36,48 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 2 response topic(s): #lr-content-6; JB File Cache Conflict accepted late left the response uncommitted
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:8fe21f1b -->
+
+### Re: #queue-head-struck-on-foreign-exchange-answer — free-text head no longer struck by a foreign answer — opus-4-8
+
+> **Queue prompt:**
+>
+> [#queue-head-struck-on-foreign-exchange-answer]
+
+
+Fixed (submodule `9c8b5577`).
+
+#### The bug
+
+A free-text `agent:queue auto` head (no `#id`) is meant to be consumed by being *answered*. But the consumption gate (`write.rs`, `#free-text-queue-head-consume`) struck it whenever **any** non-empty response committed this cycle — so a cycle that answered a NEW, unrelated `agent:exchange` prompt also struck the free-text head, consuming work that was never done (the live repro: a `lazily-rs plan-update` head struck in HEAD with the file never edited).
+
+#### The fix
+
+Gate free-text consumption on the bug's own discriminator — a **foreign exchange prompt**. `cycle_answered_foreign_exchange_prompt` scans this cycle's diff for an added canonical `❯` user-prompt line whose text isn't the queue head:
+
+- **Drain cycle** (only this turn's `### Re:` response added, no new prompt) → not foreign → the head drains as before.
+- **Foreign cycle** (a new unrelated `❯` exchange prompt was added and answered) → foreign → the free-text head stays queued for a later cycle.
+
+The bug shape is a foreign prompt that *was* answered this turn, and `classify_prompt_bearing_changes` suppresses already-answered prompts — so the raw added `❯` lines are scanned instead of the suppressed classifier. Id-bearing `do [#id]` / `#preset` heads are unaffected (they still require an explicit completion flag, preserving `#queue-strike-on-halt`).
+
+#### Verification
+
+- New unit regression (drain vs. foreign discriminator) + a `finalize` integration test reproducing the live shape (free-text head + foreign exchange prompt → head kept). The existing drain test (`finalize_echoes_consumed_free_text_queue_prompt_into_response`) stays green.
+- `make check` clean (clippy `-D warnings`, `agent-doc-orchestration` 2159, `test_cli` 69, `finalize_integration` 52); both binaries rebuilt (v0.34.0).
+
+Next auto-queue head is `#lr-cycle-7` (Phase 7). Note: you added a new tail item — "Add a preset attribute to `agent:queue` … free-text prompt that applies `prompt_presets`" — it's preserved in the queue and will surface after the lazily-rs phases.
+<!-- agent:boundary:b71b42d5 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#queue-head-struck-on-foreign-exchange-answer]~
 - ~[#lr-content-6]~
-- [#queue-head-struck-on-foreign-exchange-answer]
+- ~[#queue-head-struck-on-foreign-exchange-answer]~
 - [#lr-cycle-7]
 - [#lr-head-8]
 - [#lr-wire-9]
 - [#lr-actor-10]
+- Add a preset attribute to agent:queue, where the value can be a free-text prompt that correctly applies `prompt_presets`.
 <!-- /agent:queue -->
 ###
 <!--
@@ -60,7 +90,6 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Backlog
 
 <!-- agent:backlog priority queue=append -->
-- [ ] [#queue-head-struck-on-foreign-exchange-answer] #agent-doc-bug 2026-06-02 Free-text agent:queue auto head struck without its work: a cycle that answered NEW agent:exchange prompts also consumed an unrelated free-text queue head (lazily-rs plan-update; struck in HEAD, file never edited). Fix: free-text queue-head consumption must require the committed response to actually address that head, not strike it whenever any response commits. Sibling of #queue-clear-unrun-items. [kept open: queued at top of agent:queue auto for the next loop cycle to implement]
 - [ ] [#lr-cycle-7] Phase 7: Add CycleStateSlot + SnapshotContentSlot; consolidate snapshot path lookups. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-head-8] Phase 8: Add HeadContentSlot + SnapshotCommitStatusSlot for git show HEAD dedup. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-wire-9] Phase 9: Wire RunContext into ops_log, template_io, patch, harness detection. Plan: tasks/agent-doc/plans/lazily-rs-integration.md

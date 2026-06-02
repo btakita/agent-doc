@@ -66,13 +66,44 @@ Implemented Phase 6 of the lazily-rs integration (submodule `29febcf0`).
 - Both binaries rebuilt (`cargo build --release` + `cargo install --path .`, v0.34.0).
 
 Behavior is unchanged — pure per-cycle dedup. Next queue head is `#lr-cycle-7` (snapshot-path / cycle-state / snapshot-content slots).
-<!-- agent:boundary:084ab455 -->
+
+### Re: JB File Cache Conflict accepted late left the response uncommitted — opus-4-8
+
+Postponed the Phase 7 loop. Diagnosed and fixed the cache-conflict class (submodule `6c679dd8`, plan `tasks/agent-doc/plan-jb-cache-conflict-stale-accept-replay.md`).
+
+#### What actually happened
+
+The Phase 6 response **was** committed correctly to HEAD (`aecf69f0d`). But the commit step queued an IPC reposition patch carrying a **stale draft** of that response — the body from my first `finalize --stream` attempt that had timed out on IPC (it still had a "Note: …stuck_captured_cycle…" paragraph the successful `--force-disk` retry dropped). When you accepted the JB **File Cache Conflict** hours later, that stale patch replayed into the buffer, so disk became HEAD **plus a surplus `### Re:` duplicate** (same heading, `(HEAD)`-marked, drifted body) before the boundary. `git` showed the file modified → it looked uncommitted.
+
+`session-check` then **misclassified** it as a "direct response patchback" and told you to `write --commit` — which would have committed the duplicated/stale body.
+
+#### Why the existing guards missed it
+
+The late-replay recovery only recognized a **byte-identical** duplicate: `is_committed_response_overapplication` requires the response *sets* to match (`cur_set == head_set`), and `dedupe`/`first_duplicate_response_heading` only collapse consecutive identical blocks. A stale (edited) replay differs in body, so all three fell through to the generic patchback guard.
+
+#### The fix (general mechanism)
+
+- `dedupe::is_committed_response_replay_including_stale(current, head)` — a heading-**topic**-tolerant superset: scaffold must match HEAD, every committed response body must still be present unchanged, and every surplus block must duplicate an already-committed topic (the `(HEAD)` suffix is normalized away). A raw-line safety net fails closed if the working tree introduces any **new** user directive/prompt (`❯`, an id-bearing `do`/`re`, `preset`/`dispatch`, or a bare `[#id]`), so restoring HEAD can never silently drop a user prompt.
+- `detect_late_ipc_response_overapplication` falls back to it, so **both** `inspect_core` (→ INTERRUPTED pointing at `preflight`) and `preflight`'s auto-repair now restore the committed HEAD for the stale-replay class instead of accusing a patchback.
+
+#### Verification
+
+- 6 `dedupe` regressions (stale drifted-body match; reject new topic / lost-or-altered committed body / scaffold drift / identical doc; strict-is-a-subset) + 1 `preflight` integration test reproducing the exact live shape and asserting auto-repair to HEAD.
+- `make check` clean (clippy `-D warnings`, `agent-doc-orchestration` 2158, `test_cli` 69); both binaries rebuilt (v0.34.0).
+
+#### This instance
+
+The live duplicate self-resolved while I was building the fix (the IDE re-synced — disk is now HEAD modulo transient `(HEAD)` markers, `session-check` ok, response intact in HEAD `aecf69f0d`). Nothing further to recover here. From now on, a stale JB-accept replay auto-repairs on the next `preflight` rather than wedging as a phantom patchback.
+
+The Phase 7 (`#lr-cycle-7`) bounded-increment loop stays postponed; say the word and I'll resume it.
+<!-- agent:boundary:bb33a7d4 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#queue-head-struck-on-foreign-exchange-answer]~
 - ~[#lr-content-6]~
+- [#queue-head-struck-on-foreign-exchange-answer]
 - [#lr-cycle-7]
 - [#lr-head-8]
 - [#lr-wire-9]

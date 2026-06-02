@@ -201,12 +201,28 @@ The honest path, and it's short: **`%67` is alive and prompt-ready right now —
 Two operator actions still stand and would end this loop for good (I've flagged them repeatedly and they're now overdue):
 - **Compact** from the owner pane: `agent-doc compact tasks/agent-doc/agent-doc-bugs2.md --commit` — the ~250-line exchange is the direct cause of the IPC/finalize/queue-overwrite fragility.
 - **Run as a single owner** (`%67`) so the lazily-rs phases get implemented and committed without two actors racing the branch.
+Decisive state check: I'm pane **`%71`**, but the session owner is a **live, alive-idle, prompt-ready pane `%70`** (`actor generation=221`), and the crate tree holds **7 files / 585 lines of uncommitted WIP** — that WIP **is the owner pane actively implementing this work right now** (it just struck `~[#lr-head-8]~` and is mid-stream on the next items). So your directive to complete `#codex-upgrade-restart-cross-doc-focus` is **already being fulfilled by `%70`** — and I genuinely cannot do it from `%71` without making things worse:
 
-I'm not going to start a multi-file Context-graph implementation I can't finalize from a non-owner pane — that would risk exactly the half-committed-crate and queue-overwrite damage the backlog is full of. `[#lr-head-8]` is ready and well-specified for the owner pane to pick up.
-Continue with the work to complete #codex-upgrade-restart-cross-doc-focus using tasks/agent-doc/plan-codex-upgrade-restart-cross-document-focus.md. #spec-test-build-install-commit-push
+> **Queue prompt:**
+>
+> [#lr-wire-9]
 
-Then continue with the queue work.
-<!-- agent:boundary:42319f92 -->
+
+1. **Comingling.** Any edit I make to `src/tmux-router`/`sync.rs`/`focus.rs`/registry would land in the same tree as the owner's 585-line live WIP. I can't isolate-commit just my change without capturing its half-done work — the exact hazard that's bitten this session repeatedly.
+2. **Racing the branch.** Two actors committing/pushing the same fix to one branch is how the `#queue-user-edit-overwrite` / snapshot-revert damage happens.
+3. **Finalize is blocked anyway** — the doc is owned by `%70`, so my closeout fails on ownership mismatch.
+
+The real problem, now unmistakable after this long: **you have two Claude `agent-doc` sessions on this one document — the owner `%70` and this `%71` — and you're dispatching the work into `%71` (me, the non-owner) while `%70` is the one actually implementing it.** That's why every "do this item" lands on the session that can't close it.
+
+To get `#codex-upgrade-restart-cross-doc-focus` done (it's real work, and `%70` is doing it), do **one** of:
+- **Drive `%70` directly** — it's alive, idle, and prompt-ready; it has the clean closeout boundary and is already mid-implementation. Let it finish + commit the 585-line WIP, then it'll drain `#lr-wire-9`/`#lr-actor-10` too.
+- **Or stop `%70`** (`agent-doc session clear … ` once it's idle) so this `%71` session inherits a clean single-owner tree — then I'll implement `#codex-upgrade-restart-cross-doc-focus` end-to-end (spec + tests + build + install + commit + push) without racing anyone.
+
+I'm not going to comingle a multi-file tmux-router/sync fix into another live actor's working tree — that would corrupt its in-flight work and the branch. Tell me which pane you want as the sole owner and I'll either step aside or take it over cleanly.
+The following prompt did not run due to some enqueue runs not being finalized:
+> I'm not going to start a multi-file Context-graph implementation I can't finalize from a non-owner pane — that would risk exactly the half-committed-crate and queue-overwrite damage the backlog is full of. `[#lr-head-8]` is ready and well-specified for the owner pane to pick up.
+> Continue with the work to complete #codex-upgrade-restart-cross-doc-focus using tasks/agent-doc/plan-codex-upgrade-restart-cross-document-focus.md. #spec-test-build-install-commit-push
+<!-- agent:boundary:06a7986a -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -227,7 +243,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#queue-preset-attribute]~
 - ~I lost my existing session to this document. I saw Codex as for an upgrade. I upgraded and restarted. Then I found out that the Codex session for equityfundingsource.md had tmux focus when I focused the editor on this document.~
 - ~[#lr-head-8]~
-- [#lr-wire-9]
+- ~[#lr-wire-9]~
 - [#lr-actor-10]
 - JB `Clear Session Context` on monsterrodholders.md presented me with `Interrupt and Clear`. I applied `Interrupt and Clear` and the Codex session closed with the supervisor presenting Enter to restart or q to quit. I Pressed enter, Codex restarted and I saw an error `'/clear' is disabled while a task is in progress.`.
 - Add a preset attribute to agent:queue, where the value can be a free-text prompt that correctly applies `prompt_presets`.

@@ -46,6 +46,37 @@ The work completed and was pushed (`BuildParty af7b9b7`, `SessionShare ebc806c2`
 
 Implementation note: preserve this as a snapshot-equal regression, not only a diff regression. Once preflight has already committed the prompt into the snapshot/baseline, the post-work guard still has to scan the live `agent:exchange` tail and fail closed if the tail ends with `do [#vt-agent-deploy]...` and no later `### Re:` / `## Assistant` response.
 
+## Additional Evidence: PMax Post-Brand Closeout Patchback Miss
+
+On June 2, 2026, `src/boost-client/tasks/monsterrodholders.md` recorded:
+
+```text
+do [#pmaxpost]. #spec-test-commit-push
+```
+
+Codex completed the requested work, including the `monsterrodholders-dev`
+implementation commit, the `boost-client` task-doc/submodule commit, and pushes
+for both repos. The final chat response reported success, but no matching
+`### Re: do [#pmaxpost]` response landed in the session document. The document
+had the status/review updates and the original prompt, but the exchange still
+lacked the actual assistant closeout until a later manual recovery ran
+`agent-doc write --commit` with a closed `<!-- patch:exchange -->` block.
+
+The first recovery attempt also exposed two guard details worth preserving in
+tests:
+
+1. `agent-doc preflight` initially blocked on an uncommitted parent submodule
+   pointer for `src/boost-client`; `agent-doc commit <FILE>` had to finish that
+   parent-pointer boundary before response write-back could proceed.
+2. A malformed repair payload with an unclosed `<!-- patch:exchange -->` block
+   failed closed, and the successful retry needed `--done pmaxpost` because the
+   closeout body completed an existing pending item.
+
+Regression coverage should prove that a direct-chat `#spec-test-commit-push`
+turn cannot report success after commit/push unless the response heading is
+present in the target document HEAD, and that the recovery diagnostic names the
+binary-owned `agent-doc write --commit` path with a closed patch block.
+
 ## Fix Plan
 
 1. Add a regression fixture for a direct Codex/agent-doc turn that:

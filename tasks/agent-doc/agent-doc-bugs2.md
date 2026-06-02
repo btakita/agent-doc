@@ -201,7 +201,43 @@ So "something weird going on with lazily-rs.md" = its owner pane was stuck in th
 This is the existing `#stash-pane-promote-on-focus` backlog item (stash-window pane reparenting on focus), and the uncommitted `route.rs` change above is exactly the dispatch-ready hardening for this class. No new bug to file — the fail-closed behavior is correct; the open work is the reparent + dispatch-ready detection already tracked.
 
 **Preset `#spec-test-build-install-commit-push`:** N/A this cycle — I made no code changes of my own (rebase already resolved, concurrent route work left untouched, lazily-rs is a diagnostic with no code edit). Nothing of mine to test/build/install/commit/push.
-<!-- agent:boundary:2f4a9452 -->
+
+### Re: lazily-rs.md route log — wedged codex, not cross-contamination — opus-4-8
+
+The log is correct fail-closed behavior, not lazily-rs running against agent-doc:
+
+- **`rescuing to agent-doc window`** — `agent-doc` is the tmux *window name* the router parks all sessions in, not this document. It pulled lazily-rs's own pane %73 out of `stash` into that shared window via `join-pane`. Nothing targeted `agent-doc-bugs2.md`.
+- **`codex blocked … refused to inject … never reached a dispatch-ready prompt`** — the prompt-gated dispatch invariant working: the pane's codex was mid-boot, so the route **injected nothing and failed closed**. No cross-contamination.
+
+**What's actually wedged:** lazily-rs has a stuck `codex exec --json` (PID **2342009**) that never reaches a ready prompt, kept alive by its route-owned supervisor (PID **2341978**). You killed the pane; the supervisor survived and re-provisioned %73, which keeps bouncing between `stash` and the work window on each focus/sync — that's the loop. This is the `#stash-pane-promote-on-focus` reparent class plus the dispatch-ready hardening already sitting uncommitted in the concurrent `route.rs` work.
+
+**To actually stop it** (pane will keep coming back otherwise): kill the supervisor, not the pane. Cleanest is the binary-owned path from a toolchain pane — `agent-doc session clear tasks/software/lazily-rs.md` (reaps the supervisor + wedged codex + registry entry). Raw fallback: `kill 2341978`.
+
+I'm **not** killing it unilaterally — it's a different document's live session and a raw `kill` from this pane would leave registry drift (lazily-rs → dead %73) that then needs `agent-doc gc`/`resync --fix`. **Say "kill it" and I'll stop PID 2341978 now**; otherwise run `session clear` from a toolchain pane for the clean reap.
+Confirmed the mechanism with fresh evidence. The state is now clear and stable:
+
+> **Queue prompt:**
+>
+> preset #spec-test-build-install-commit-push
+> - ~The backlog has the priority attribute but the order of tasks shows [#lr-actor-10] then [#lr-wire-9] then [#lr-head-8]. Is this in priority order? If not, fix the backlog priority attribute.~
+> - ~do [#owned-pane-prompt-recur]~
+> - src/agent-doc is currently in rebase. Please resolve the rebase and get to a clean HEAD.
+> - Why is the lazily-rs.md session running against agent-doc (presumably this file)? It should be running solely on lazily-rs.md. I manually killed the tmux pane. Something weird is going on with lazily-rs.md.
+> ```
+> [route] target tmux session: 0
+> [route] Pane %73 is in stash window 'stash', rescuing to agent-doc window
+> [route] Rescued pane %73 via join-pane
+> [route] codex blocked after 0.2s in pane %73: active codex turn
+> Error: dispatch-only codex reopen refused to inject into pane %73 for tasks/software/lazily-rs.md because the latest run is still booting and never reached a dispatch-ready prompt (active codex turn); wait for the pane to become ready and reroute again
+> ```
+
+
+- **Pane %73 bounced back to the `stash` window** (it's there again now) — the route rescued it to the working window, codex refused (not ready), so it returned to stash. That rescue→refuse→return cycle is the "weird" behavior you're seeing.
+- **A wedged `codex exec --json` (PID 2342009)** for lazily-rs is stuck in a never-ready "active turn" state, and its supervisor **PID 2341978 survived your pane-kill** and keeps the pane alive. Killing the *pane* can't fix it — the supervisor + wedged codex outlive it.
+
+The route log is benign and was **not** touching this file. Here's the tight read:
+**Closeout:** uncommitted (`finalize` gated here). No code change — this was a live-process diagnostic; the fix is one stop-command, gated on your go or a toolchain pane.
+<!-- agent:boundary:082e5a58 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
@@ -211,7 +247,7 @@ There are too many items being accumulated into review. The tasks are not being 
 ~~~
 Please stop creating a build subagent and making the session open. Run the build in the session. It is confusing to see an open prompt and not know if the subagent is blocking the task or not. This is anti-visibility and can cause problems if I run the next task or clear the session while the subagent is still running. I'm not sure if the subagent is deadlocked or actively running as well. Stop doing this.
 #spec-test-build-install-commit-push
----
+~~~done
 preset #spec-test-build-install-commit-push
 - ~The backlog has the priority attribute but the order of tasks shows [#lr-actor-10] then [#lr-wire-9] then [#lr-head-8]. Is this in priority order? If not, fix the backlog priority attribute.~
 - ~do [#owned-pane-prompt-recur]~
@@ -224,7 +260,7 @@ preset #spec-test-build-install-commit-push
 [route] codex blocked after 0.2s in pane %73: active codex turn
 Error: dispatch-only codex reopen refused to inject into pane %73 for tasks/software/lazily-rs.md because the latest run is still booting and never reached a dispatch-ready prompt (active codex turn); wait for the pane to become ready and reroute again
 ```
----
+~~~
 preset #spec-test-build-install-commit-push
 - do [#manual-queue-head-loss]
 - do [#subagent-blocks-session]

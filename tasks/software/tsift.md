@@ -36,7 +36,24 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 4 response topic(s): tsift as Read/Write substrate; next steps for tsift Read/Write replacement; queued tsift read/write replacement work; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:de2fed26 -->
+❯ What are #next-steps for read/write ast support?
+
+### Re: next steps for read/write AST support — gpt-5
+
+Top backlog item: `#astspans`.
+
+The next useful layer is to make tsift's read/write surfaces share one AST span model instead of relying on symbol line ranges plus text operations. After that, the write executor can expand from the current Rust `rename_symbol`, `replace_function_body`, and `insert_import` support into true reference/call-site rewrites and larger structural edits.
+
+Priority order added to backlog:
+
+1. `#astspans` — AST-backed spans and stable span handles for `symbol-read` and `edit-intents`.
+2. `#writerefs` — Rust `rewrite_call_sites` and `update_call_signature` support with AST validation.
+3. `#writecompound` — Rust `add_method` and `move_declaration` structural edits.
+4. `#langexecutors` — TypeScript, JavaScript, and Python executor adapters under the same contract.
+5. `#astverify` — temp-worktree verification harness for dry-run/apply/reindex/read-impact/test gates.
+
+That order keeps the substrate honest: first improve the AST read/write address space, then add harder Rust mutations, then generalize across languages, then wrap the whole flow in stronger apply-time verification.
+<!-- agent:boundary:d43455b5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -51,6 +68,11 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#astspans] Replace line-range heuristics with AST-backed symbol spans: byte ranges, node kind, body range, parent/child refs, and stable span handles for symbol-read and edit-intents.
+- [ ] [#writerefs] Implement Rust reference and call-site rewrite support for rewrite_call_sites and update_call_signature using indexed refs plus AST validation, with conflict checks and conformance fixtures.
+- [ ] [#writecompound] Add Rust structural edit support for add_method and move_declaration, including module-aware placement, import normalization, formatter-before-write, and rollback tests.
+- [ ] [#langexecutors] Add TypeScript, JavaScript, and Python semantic edit executors behind the same edit-intents contract, each with parser-backed spans, formatter integration, and fail-closed unsupported cases.
+- [ ] [#astverify] Add a semantic edit verification harness that can dry-run, apply in temp worktrees, reindex, run source-read or impact summaries, and optionally gate on a caller-provided test command before committing changes.
 <!-- /agent:backlog -->
 
 ## Review

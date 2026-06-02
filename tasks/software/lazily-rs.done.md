@@ -42,3 +42,4 @@
 - 2026-06-02 [#lazyperf3] Optimize batched write bursts by coalescing dirty marking/publish work per batch; target set_cell_invalidation and thread_safe_contention batched_write_bursts / 16.
 - 2026-06-02 [#lazyperf4] Add perf regression budgets for the slowest contention profiles and lock-site totals so future benchmark runs flag global-lock regressions before release.
 - 2026-06-02 [#lazyperf5] Prototype narrower ThreadSafeContext recompute wakeups: compare current per-slot Condvar notify_all with notify_one, targeted waiter state, or parking under same_slot_write_read, read_mostly_waiters, and stale-completion Loom cases.
+- 2026-06-02 [#lazyperf6] Prototype a versioned optimistic cached-read path for read-mostly and independent-slot workloads, falling back under dirty/dependency/callback/batch ambiguity and proving visibility semantics before adoption.

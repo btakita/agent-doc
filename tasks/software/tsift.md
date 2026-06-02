@@ -103,7 +103,38 @@ Verification:
 ### Re: #mdsectionedits deferred — gpt-5
 
 No implementation was started for `#mdsectionedits` in this cycle. It remains the next queued backlog item; this closeout only repairs the binary-owned boundary after completing and reaping `#mdsectionspans`.
-<!-- agent:boundary:81d954da -->
+
+### Re: #mdsectionedits — gpt-5
+
+> **Queue prompt:**
+>
+> [#mdsectionedits]
+
+
+Implemented and committed `#mdsectionedits`.
+
+What changed:
+- `edit-intents --apply` now supports Markdown section intents: `rename_heading`, `replace_section_body`, `insert_section`, and `move_section`.
+- Markdown section apply re-parses the current buffer for each intent, validates output through tree-sitter Markdown, and writes through the existing atomic edit/rollback path with no formatter.
+- `move_section` accepts `destination_symbol` plus optional `position` (`before`/`after`); `insert_section` can append or insert before/after a target heading.
+- Block intents `insert_list_item` and `rewrite_code_fence` remain recognized but unsupported for the next queued block-executor item.
+
+Committed:
+- `src/tsift` submodule: `07cf25f feat: add markdown section edit executor`
+- Superproject pointer: `db68ce4e8 agent-doc(tsift): update submodule pointer`
+
+Verification:
+- `cargo test -p tsift-cli markdown` passed.
+- `cargo test -p tsift-cli edit_intents` passed.
+- `cargo test -p tsift-graph markdown` passed.
+- `cargo test -p tsift-cli semantic_edit_language_contracts_resolve_current_executor_surface` passed.
+- `make check` passed via digest artifact `tart-4b54040c57`.
+- `cargo install --path .` passed via digest artifact `tart-830d792d19`; installed binary reports `tsift 0.1.62`.
+- Latest GitHub Actions CI run `26800161158` is green: `clippy + test` and `live Convex graph acceptance` both succeeded.
+- No tmux CI target/workflow was found in this repo (`rg "tmux|tmux-test|tmux-ci" .github Makefile packages src tests` returned no matches).
+
+Note: I also ran `cargo fmt --check`; it reports pre-existing rustfmt drift in unrelated files, so I restored that unrelated formatting churn and kept this commit scoped to the Markdown executor/docs/tests.
+<!-- agent:boundary:8a0289e2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -116,7 +147,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 preset #spec-test-build-install-commit-push
 - ~[#mdastcontract]~
 - ~[#mdsectionspans]~
-- [#mdsectionedits]
+- ~[#mdsectionedits]~
 - [#mdblockedits]
 - [#mdverify]
 <!-- /agent:queue -->
@@ -124,7 +155,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#mdsectionedits] Markdown section edit executor: rename_heading, replace_section_body, insert_section, and move_section with tree-sitter validation.
 - [ ] [#mdblockedits] Markdown block edit executor: insert_list_item and rewrite_code_fence while preserving syntax and refusing ambiguous targets.
 - [ ] [#mdverify] Markdown semantic-write verification coverage: dry-run/apply no-mutation tests, temp-worktree verify gates, source-read impact summaries, and refusal regressions.
 <!-- /agent:backlog -->

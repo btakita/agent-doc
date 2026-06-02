@@ -141,7 +141,37 @@ Verification:
 - GitHub Actions CI `26797936405` passed: `clippy + test` and `live Convex graph acceptance`
 
 CI only reported the existing Node 20 actions deprecation and optional Convex deployment annotation. I did not find a tmux CI target/workflow in this repo; SimWorld coverage ran as part of `make check`. An extra package-wide `cargo fmt --check --package tsift-cli` still reports existing formatter drift in unrelated command modules, so I left that churn out of this patch.
-<!-- agent:boundary:37f2a54d -->
+
+### Re: #langexecutors — gpt-5
+
+Implemented `#langexecutors` in `src/tsift`.
+
+The semantic edit executor now routes `.ts`, `.tsx`, `.js`, `.jsx`, `.py`, and `.pyi` through language-specific script executors behind the same edit-intents contract as Rust. TypeScript/JavaScript/Python support `rename_symbol`, `replace_function_body`, and `insert_import` with parser-backed validation. Unsupported script-language intents such as call-site rewrites, signature updates, method insertion, and declaration moves fail closed without mutating files.
+
+Formatter handling is fail-closed for Rust and validation-first for the script executors: Rust still uses `rustfmt --edition 2024`, TypeScript/JavaScript optionally use local `prettier`, and Python optionally uses `ruff format` or `black` when available. If a script formatter is absent, the executor keeps the tree-sitter validated output and reports no formatter rather than inventing one.
+
+Added exit-code coverage for the new script executors: TypeScript body/import edits, JavaScript rename edits, Python body/import edits, and a TypeScript unsupported call rewrite refusal that verifies the source file is unchanged.
+
+Commits:
+
+- `eac47cf` in `src/tsift`: `feat: add script semantic edit executors` (pushed to `btakita/tsift main`)
+- `aab3223f9` in the parent repo: `chore: update tsift submodule` (local pointer commit; isolated root push follows this document closeout)
+
+Verification completed:
+
+- `cargo check -p tsift-cli`
+- `cargo clippy -p tsift-cli --all-targets -- -D warnings`
+- `cargo test -p tsift-cli --test exit_code edit_intents_apply_ -- --nocapture`
+- `make check`
+- `cargo build`
+- `cargo install --path . --force`
+- `tsift --version` -> `tsift 0.1.62`
+- `git diff --check`
+- `tsift status`
+- GitHub Actions CI `26798728907` passed. The only annotations were the existing Node 20 actions deprecation and the optional live Convex deployment configuration note.
+
+No tmux CI workflow/target was present for this repo; the SimWorld coverage ran through `make check`.
+<!-- agent:boundary:80b158ec -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -164,7 +194,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#langexecutors] Add TypeScript, JavaScript, and Python semantic edit executors behind the same edit-intents contract, each with parser-backed spans, formatter integration, and fail-closed unsupported cases.
 - [ ] [#astverify] Add a semantic edit verification harness that can dry-run, apply in temp worktrees, reindex, run source-read or impact summaries, and optionally gate on a caller-provided test command before committing changes.
 <!-- /agent:backlog -->
 

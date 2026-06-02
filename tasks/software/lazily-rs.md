@@ -236,7 +236,72 @@ Install/check notes:
 Benchmark note: the regenerated README shows `thread_safe_contention_16` at 23.379 ms in the Criterion sample table and profile counts of `dependency_edge=190`, `dependency_edges_added=1`, `dependency_edges_removed=0`, `lock_acquisitions=10055`. The full Criterion run after the optimized collector also showed the 16-worker contention mean around 22.320 ms, with the batch-storm thread-safe case showing a small regression.
 
 Escalation: none.
-<!-- agent:boundary:d8d534e7 -->
+
+### Re: tsc16-wait-park — gpt-5
+
+> **Queue prompt:**
+>
+> [#tsc16-wait-park]
+
+
+Done. I replaced the in-flight `ThreadSafeContext` spin/yield waiter loop with a sidecar `Condvar` paired to the existing graph mutex.
+
+What changed:
+
+- `ThreadSafeInner` now owns `recompute_waiters: Condvar` next to the graph-state mutex.
+- `wait_for_slot_recompute` parks waiters while the compute owner runs user code, then rechecks the slot under the reacquired mutex and returns the published cache or retries stale work.
+- Normal recompute publish and the panic/drop guard both notify waiters when a slot leaves `computing`.
+- The graph model stays mutex-first: the Condvar does not guard graph state independently, and user compute/effect/cleanup callbacks still run outside the graph lock.
+- The profiled mutex wrapper now accounts for the Condvar wait/reacquire boundary in the `in_flight_wait` bucket.
+- Added an instrumentation regression test that holds a first compute open and proves a waiter enters the in-flight path without spin-acquiring the graph lock while parked.
+- Updated `SPEC.md` and the README concurrency/benchmark sections.
+
+Changed paths in `lazily-rs`:
+
+- `src/thread_safe.rs`
+- `tests/spec_compliance.rs`
+- `SPEC.md`
+- `README.md`
+
+Commits:
+
+- lazily-rs: `c2d94f7 perf: park thread-safe recompute waiters`, pushed to `origin/main`.
+- superproject gitlink: `c95a572cc chore: update lazily-rs submodule`, committed locally; it will be pushed after this `finalize` completes.
+
+Verification:
+
+- `cargo fmt`
+- `cargo test`
+- `cargo test --features instrumentation`
+- `cargo test --features tokio`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo build --all-features`
+- `cargo bench --features instrumentation --no-run`
+- `python3 scripts/update-benchmark-results.py`
+- `python3 scripts/update-benchmark-results.py --no-run --check`
+- `git diff --check`
+
+Install/check notes:
+
+- `cargo install --path .` is not applicable because `lazily` has no binaries; Cargo returned that explicit library-crate error.
+- `make check` is not available in `src/lazily-rs`; `make` returned `No rule to make target 'check'`.
+- `gh run list --workflow CI --limit 1` in `src/lazily-rs` reports no workflow named `CI`.
+
+CI/tmux evidence:
+
+- Latest root `Agent Doc` run inspected before closeout was `26793134979`; `tmux-ci` completed successfully, and `check` was still in progress with no failure reported.
+
+Benchmark/profile notes:
+
+- README `thread_safe_contention | 16` is now `23.213 ms` mean (`22.041 ms - 24.098 ms` CI), statistically unchanged in the local Criterion comparison.
+- `thread_safe_contention_16` total lock acquisitions dropped from the prior README sample's `10055` to `4150`.
+- `thread_safe_contention_16` `in_flight_wait` acquisitions dropped from `7232` to `1469`; the wait bucket still records parked Condvar duration, so wait time is not directly comparable to the old spin-lock acquisition loop.
+- The same local Criterion run showed broad unrelated noise/regressions in several plain `Context` and non-waiter cases, so the useful signal for this item is the waiter acquisition collapse plus unchanged 16-worker contention wall time.
+
+Escalation: none.
+
+Confidence: high for the parking prototype and local regression coverage; the next queued safety-model item should add Loom or Shuttle coverage for the synchronization behavior.
+<!-- agent:boundary:08304e84 -->
 <!-- /agent:exchange -->7
 
 ## Queue
@@ -246,14 +311,13 @@ preset #spec-test-build-install-commit-push
 - ~[#tsc16-attrib]~
 - ~[#tsc16-coalesce-locks]~
 - ~[#tsc16-edge-diff]~
-- [#tsc16-wait-park]
+- ~[#tsc16-wait-park]~
 - [#tsc16-safety-model]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#tsc16-wait-park] #performance #thread-safe Prototype a Condvar or parking wait path for in-flight ThreadSafeContext recompute waiters only after attribution shows the spin-yield wait loop materially contributes to thread_safe_contention_16
 - [ ] [#tsc16-safety-model] #performance #thread-safe Add Loom or Shuttle coverage for any ThreadSafeContext synchronization change, covering stale in-flight completion, invalidation during compute, effect scheduling/disposal, and re-entrant callbacks
 <!-- /agent:backlog -->
 

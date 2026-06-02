@@ -213,7 +213,56 @@ CI/tmux closeout:
 - Parent `Agent Doc` run `26800732002` started for the parent push. Its `tmux-ci` job passed. Its `check` job failed on the existing unrelated parent clippy lint at `agent-doc-orchestration/src/gc.rs:275`: `consider using sort_by_key` for `series.sort_by(|a, b| b.0.cmp(&a.0));`.
 
 So `#lazybatch3` is complete: the read-mostly fast path is implemented, covered by spec/instrumentation/loom tests, benchmarked against the relevant contention cases, committed, and pushed.
-<!-- agent:boundary:93f6ffa5 -->
+
+### Re: Run performance benchmarks — gpt-5
+
+I ran the post-`#lazybatch3` performance benchmarks. No source changes were made in `src/lazily-rs`; the submodule remains clean at `origin/main`.
+
+Commands run:
+
+- `cargo bench --features instrumentation --bench context -- thread_safe_contention`
+- `cargo bench --features instrumentation --bench context -- set_cell_invalidation`
+- `cargo run --example instrumentation_profile --features instrumentation --quiet`
+- `cargo bench --bench profile` failed because the `profile` bench requires `instrumentation`.
+- `cargo bench --features instrumentation --bench profile` passed.
+
+The two main Criterion groups were started concurrently, so I treat the fine-grained Criterion change labels as noisy. The raw post-run estimates are still useful as a benchmark snapshot.
+
+Key `thread_safe_contention` Criterion estimates:
+
+| case | 8 workers | 16 workers |
+| --- | ---: | ---: |
+| `same_slot_write_read` | `5.4231 ms` | `19.317 ms` |
+| `independent_slots` | `2.8708 ms` | `6.3138 ms` |
+| `read_mostly_waiters` | `432.01 us` | `792.89 us` |
+| `batched_write_bursts` | `2.0208 ms` | `6.9445 ms` |
+
+Key `set_cell_invalidation` estimates:
+
+- `high_fan_out/512`: `202.96 us`
+- `batched_write_bursts/8`: `2.2606 ms`
+- `batched_write_bursts/16`: `6.9319 ms`
+
+`profile` bench estimates:
+
+- `profile_instrumentation/context_snapshot`: `417.03 ns`
+- `profile_instrumentation/thread_safe_snapshot`: `300.15 us`
+
+Instrumentation profile highlights:
+
+- `thread_safe_contention_batched_write_bursts_8`: `get_refresh=6:250:12430`, `dependency_edge=32:1140:36010`, `set_cell_invalidation=514:3284419:376781`.
+- `thread_safe_contention_batched_write_bursts_16`: `get_refresh=4:180:12161`, `dependency_edge=64:2290:69871`, `set_cell_invalidation=1025:14437688:758106`.
+- `thread_safe_set_cell_invalidation_batched_write_bursts_16`: `set_cell_invalidation=1026:15887156:755302`.
+
+CI / repo state:
+
+- `src/lazily-rs` is clean and has no GitHub workflows to inspect.
+- The parent repo still has no workflow named `CI`.
+- Latest parent `Agent Doc` run remains `26800732002`: `tmux-ci` passed and `check` failed on the unrelated existing `agent-doc-orchestration/src/gc.rs:275` clippy `sort_by_key` lint.
+- No commit or push was needed for `src/lazily-rs`; this was a benchmark-only queue item.
+
+The benchmark snapshot is consistent with the `#lazybatch3` outcome: the read-mostly sidecar keeps hot batched `get_refresh` acquisitions very low, and the important 8-/16-worker raw contention numbers remain below the older accepted README baselines.
+<!-- agent:boundary:3a50d80c -->
 <!-- /agent:exchange -->
 ###
 <!--

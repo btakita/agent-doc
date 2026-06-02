@@ -1492,16 +1492,32 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     // plain question the user typed into `agent:queue`) has no `#id`, so none of
     // the explicit-flag / heading-id completion paths above can ever strike it —
     // it would block the auto-queue forever. Its only completion mechanism is
-    // being answered, so a captured response body for this cycle IS the
-    // completion signal. Bare `do [#id]` directives and `#preset` heads keep an
-    // `#id` and so are unaffected (they still require an explicit completion
-    // signal, preserving #queue-strike-on-halt).
+    // being answered.
+    //
+    // #queue-head-struck-on-foreign-exchange-answer: but "answered" means THIS
+    // cycle's response actually TARGETS the head — a `### Re:` heading whose
+    // topic matches the head text — not merely that *some* response body exists.
+    // Previously any non-empty captured response struck the free-text head, so a
+    // cycle that answered an unrelated NEW `agent:exchange` prompt silently
+    // consumed a free-text head whose work was never done (live repro: a
+    // `lazily-rs plan-update` head struck in HEAD with the file never edited).
+    // A response that does not target the head leaves it queued for a later
+    // cycle. Bare `do [#id]` directives and `#preset` heads keep an `#id` and so
+    // are unaffected (they still require an explicit completion signal,
+    // preserving #queue-strike-on-halt).
     if write_result.is_ok()
         && !queue_consumption_allowed
         && let Some(capture) = crate::capture::load_active(file)?
         && !capture.response_body.trim().is_empty()
+        && queue_head_is_free_text_prompt(&current_content)?
+        && let Some(head_text) = active_queue_head_text(&current_content)?
     {
-        queue_consumption_allowed = queue_head_is_free_text_prompt(&current_content)?;
+        // The free-text head is answered by this cycle's response UNLESS this
+        // cycle introduced a NEW `agent:exchange` prompt that the response
+        // answered instead — that is foreign work, and striking the unrelated
+        // free-text head would consume it without doing its work.
+        queue_consumption_allowed =
+            !cycle_answered_foreign_exchange_prompt(baseline.as_deref(), &current_content, &head_text);
     }
 
     // Phase 3c: consume queue prompt after all other strict closeout gates
@@ -2722,6 +2738,50 @@ fn should_consume_queue_prompt_for_diff_content(
         ),
     );
     Ok(false)
+}
+
+/// True when this cycle's diff introduced a prompt-bearing exchange change (a
+/// new or edited user prompt) that does NOT match the active queue head — i.e.
+/// the response answered *foreign* exchange work. Used to keep a free-text queue
+/// head queued when the cycle was driven by an unrelated new exchange prompt
+/// rather than by draining the head (#queue-head-struck-on-foreign-exchange-answer).
+///
+/// A legitimate free-text-head drain has no such foreign prompt-bearing change
+/// (the head itself was already in the baseline queue, and the only addition is
+/// this cycle's `### Re:` response, which is not classified as a prompt), so this
+/// returns false and the head is allowed to drain.
+fn cycle_answered_foreign_exchange_prompt(
+    baseline: Option<&str>,
+    current_content: &str,
+    queue_head: &str,
+) -> bool {
+    let Some(base) = baseline else {
+        return false;
+    };
+    let base_norm = crate::diff::strip_comments(&strip_boundary_for_dedup(base));
+    let current_norm = crate::diff::strip_comments(&strip_boundary_for_dedup(current_content));
+    let Some(diff_text) = crate::diff::unified_diff_from_contents(&base_norm, &current_norm) else {
+        return false;
+    };
+    // A foreign exchange prompt is a user-prompt line (`❯ …`) ADDED this cycle
+    // whose text is not the queue head. The bug shape is a foreign prompt that
+    // WAS answered this cycle, and `classify_prompt_bearing_changes` suppresses
+    // prompts already answered by an adjacent response — so scan the raw added
+    // lines for the canonical `❯` user-prompt marker instead of the suppressed
+    // classifier.
+    diff_text.lines().any(|line| {
+        let Some(added) = line.strip_prefix('+') else {
+            return false;
+        };
+        if added.starts_with("++") {
+            return false; // unified-diff `+++` file header, not content
+        }
+        let Some(prompt) = added.trim().strip_prefix('❯') else {
+            return false;
+        };
+        let prompt = prompt.trim();
+        !prompt.is_empty() && !queue_prompt_text_matches(prompt, queue_head)
+    })
 }
 
 fn active_queue_head_text(content: &str) -> Result<Option<String>> {
@@ -12554,6 +12614,49 @@ mod tests {
         assert!(
             queue_head_is_free_text_prompt(verb_prefixed).unwrap(),
             "a prose head mentioning a single #id is still free text"
+        );
+    }
+
+    #[test]
+    fn free_text_head_kept_only_when_cycle_answered_foreign_prompt() {
+        // #queue-head-struck-on-foreign-exchange-answer: the predicate that gates
+        // free-text head consumption. A drain cycle (only this turn's `### Re:`
+        // response added, no new user prompt) is NOT foreign → head drains. A
+        // cycle that added a NEW unrelated `❯` exchange prompt IS foreign → the
+        // free-text head stays queued so its work is not silently struck.
+        let head = "lazily-rs plan-update";
+        let baseline = "\
+---
+agent_doc_format: template
+queue_active: true
+---
+
+<!-- agent:exchange -->
+### Re: older
+Old.
+<!-- agent:boundary:x -->
+<!-- /agent:exchange -->
+
+<!-- agent:queue auto -->
+- lazily-rs plan-update
+<!-- /agent:queue -->
+";
+        let drain = baseline.replace(
+            "<!-- agent:boundary:x -->",
+            "### Re: updated the plan\nDone.\n<!-- agent:boundary:x -->",
+        );
+        assert!(
+            !cycle_answered_foreign_exchange_prompt(Some(baseline), &drain, head),
+            "a drain cycle (only a new response, no new prompt) is not foreign work"
+        );
+
+        let foreign = baseline.replace(
+            "<!-- agent:boundary:x -->",
+            "❯ Fix the JB cache conflict instead\n### Re: fix jb\nDone.\n<!-- agent:boundary:x -->",
+        );
+        assert!(
+            cycle_answered_foreign_exchange_prompt(Some(baseline), &foreign, head),
+            "a cycle that added a new unrelated exchange prompt answered foreign work"
         );
     }
 

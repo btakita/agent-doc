@@ -2233,6 +2233,59 @@ fn finalize_skips_queue_consumption_when_user_prompt_diff_targets_other_work() {
 }
 
 #[test]
+fn finalize_keeps_free_text_queue_head_when_cycle_answers_foreign_exchange_prompt() {
+    // #queue-head-struck-on-foreign-exchange-answer: a cycle that answers a NEW
+    // unrelated `agent:exchange` prompt must NOT strike an unrelated FREE-TEXT
+    // queue head. Previously any non-empty response struck the free-text head,
+    // consuming work that was never done (live repro: a `lazily-rs plan-update`
+    // head struck in HEAD with the file never edited).
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let queue_head = "Make queue responses copy the originating prompt.";
+    let content = format!(
+        "---\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n### Re: older\nOld response.\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue auto -->\n- {queue_head}\n<!-- /agent:queue -->\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n"
+    );
+    fs::write(&doc, &content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    // The user adds a NEW unrelated prompt to the exchange this cycle (a
+    // question, so the imperative-directive guard does not require execution
+    // evidence — this test isolates the queue-consumption decision).
+    let current = content.replace(
+        "<!-- agent:boundary:1234abcd -->",
+        "❯ Which module owns queue consumption?\n<!-- agent:boundary:1234abcd -->",
+    );
+    fs::write(&doc, current).unwrap();
+    let baseline = write_baseline(tmp.path(), &content);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--baseline-file",
+            baseline.to_str().unwrap(),
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: which module owns queue consumption — gpt-5\nwrite.rs owns it.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success()
+        .stderr(predicates::str::contains("kept free-text head"));
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        content.contains("queue_active: true"),
+        "free-text head answering foreign work must keep the queue active:\n{content}"
+    );
+    assert!(
+        content.contains(queue_head) && !content.contains(&format!("~{queue_head}~")),
+        "the free-text head must remain queued, not struck:\n{content}"
+    );
+}
+
+#[test]
 fn finalize_consumes_queue_prompt_after_dispatch_directive() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();

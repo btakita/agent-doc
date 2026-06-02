@@ -44,6 +44,7 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::{component, component::is_backlog_component};
+use agent_doc_orchestration::graph::RunContext;
 use agent_doc_orchestration::{pending, pending_cmd, snapshot};
 
 /// Format an ISO-8601 timestamp using the system `date` command.
@@ -84,12 +85,6 @@ fn format_notification(message: &str, source: Option<&str>, affects: Option<&str
 
     lines.push(String::new());
     lines.join("\n")
-}
-
-/// Find the project root by walking up from a file path looking for `.agent-doc/`.
-/// Delegates to [`agent_doc_orchestration::fs_util::find_project_root_canonical`].
-fn find_project_root(file: &Path) -> Option<std::path::PathBuf> {
-    agent_doc_orchestration::fs_util::find_project_root_canonical(file)
 }
 
 /// Ensure the document has an `agent:pending` component; create one if absent.
@@ -154,6 +149,7 @@ pub fn run(
     if !file.exists() {
         bail!("file not found: {}", file.display());
     }
+    let rc = RunContext::new(file.to_path_buf());
 
     let has_pending_ops = !pending_add.is_empty() || !pending_add_gated.is_empty();
     let pending_only = has_pending_ops && message.is_none();
@@ -197,7 +193,7 @@ pub fn run(
         // Still update snapshot and commit
         let doc = std::fs::read_to_string(file)
             .with_context(|| format!("failed to read {}", file.display()))?;
-        save_snapshot(file, &doc)?;
+        save_snapshot(file, &doc, &rc)?;
 
         if commit {
             agent_doc_orchestration::git::commit(file)?;
@@ -261,7 +257,7 @@ pub fn run(
     tmp.persist(file)
         .with_context(|| format!("failed to rename temp file to {}", file.display()))?;
 
-    save_snapshot(file, &new_doc)?;
+    save_snapshot(file, &new_doc, &rc)?;
 
     eprintln!(
         "Notified exchange in {} (source: {})",
@@ -293,10 +289,8 @@ fn add_pending_item(file: &Path, item: &str, doc_id: &str, gated: bool) -> Resul
 }
 
 /// Save snapshot relative to project root for thread safety.
-fn save_snapshot(file: &Path, doc: &str) -> Result<()> {
-    let snap_rel = snapshot::path_for(file)?;
-    if let Some(root) = find_project_root(file) {
-        let snap_abs = root.join(&snap_rel);
+fn save_snapshot(file: &Path, doc: &str, rc: &RunContext) -> Result<()> {
+    if let Some(snap_abs) = rc.snapshot_path_for() {
         if let Some(snap_parent) = snap_abs.parent() {
             std::fs::create_dir_all(snap_parent)
                 .with_context(|| format!("failed to create snapshot dir for {}", file.display()))?;

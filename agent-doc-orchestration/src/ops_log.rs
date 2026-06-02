@@ -28,12 +28,22 @@ use sha2::{Digest, Sha256};
 use std::io::Write;
 use std::path::Path;
 
+use crate::graph::RunContext;
+
 /// Append a timestamped log line to `.agent-doc/logs/ops.log`.
 ///
 /// Finds the project root by walking up from `file` (`fs_util::find_project_root`).
 /// Best-effort: silently returns on any I/O error.
 pub fn log_op(file: &Path, message: &str) {
-    let _ = try_log_op(file, message);
+    log_op_with_context(file, message, None);
+}
+
+/// Append a timestamped log line using an optional cached [`RunContext`].
+///
+/// Callers that already have a context avoid re-canonicalizing the document and
+/// walking ancestors to find `.agent-doc/`.
+pub fn log_op_with_context(file: &Path, message: &str, rc: Option<&RunContext>) {
+    let _ = try_log_op(file, message, rc);
 }
 
 /// Structured cycle log entry for reproducible operation tracking.
@@ -136,9 +146,14 @@ fn try_log_cycle(
     writeln!(f, "{}", json).ok()
 }
 
-fn try_log_op(file: &Path, message: &str) -> Option<()> {
-    let canonical = file.canonicalize().ok()?;
-    let project_root = crate::fs_util::find_project_root(&canonical)?;
+fn try_log_op(file: &Path, message: &str, rc: Option<&RunContext>) -> Option<()> {
+    let project_root = match rc {
+        Some(rc) => rc.project_root()?,
+        None => {
+            let canonical = file.canonicalize().ok()?;
+            crate::fs_util::find_project_root(&canonical)?
+        }
+    };
     let logs_dir = project_root.join(".agent-doc/logs");
     std::fs::create_dir_all(&logs_dir).ok()?;
     let log_path = logs_dir.join("ops.log");
@@ -196,6 +211,24 @@ mod tests {
             lines[0].contains("] "),
             "should have ] separator after timestamp"
         );
+    }
+
+    #[test]
+    fn log_op_with_context_uses_cached_project_root() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let project_root = tmp.path();
+        fs::create_dir_all(project_root.join(".agent-doc")).unwrap();
+        let doc_path = project_root.join("test.md");
+        fs::write(&doc_path, "test").unwrap();
+        let rc = crate::graph::RunContext::new(doc_path.clone());
+
+        assert!(!rc.is_project_root_cached());
+        log_op_with_context(&doc_path, "context_event file=test.md", Some(&rc));
+        assert!(rc.is_project_root_cached());
+
+        let log_path = project_root.join(".agent-doc/logs/ops.log");
+        let content = fs::read_to_string(&log_path).unwrap();
+        assert!(content.contains("context_event file=test.md"));
     }
 
     #[test]

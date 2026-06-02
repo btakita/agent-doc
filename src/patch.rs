@@ -40,11 +40,21 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::{PatchMode, component, project_config};
+use agent_doc_orchestration::graph::RunContext;
 use agent_doc_orchestration::snapshot;
 
-/// Load component configs from `.agent-doc/config.toml` relative to the document.
-/// Walks up from the document's parent directory to find the project root.
-fn load_configs(file: &Path) -> Result<HashMap<String, project_config::ComponentConfig>> {
+fn load_configs_with_context(
+    file: &Path,
+    rc: Option<&RunContext>,
+) -> Result<HashMap<String, project_config::ComponentConfig>> {
+    if let Some(rc) = rc {
+        return Ok(rc
+            .project_config()
+            .components
+            .iter()
+            .map(|(name, cfg)| (name.clone(), cfg.clone()))
+            .collect());
+    }
     let start = file.parent().unwrap_or(file);
     let mut current = start;
     loop {
@@ -76,6 +86,7 @@ pub fn run(
     if !file.exists() {
         bail!("file not found: {}", file.display());
     }
+    let rc = RunContext::new(file.to_path_buf());
 
     let doc = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
@@ -94,7 +105,7 @@ pub fn run(
             )
         })?;
 
-    let configs = load_configs(file).unwrap_or_default();
+    let configs = load_configs_with_context(file, Some(&rc)).unwrap_or_default();
     let config = configs.get(component_name);
 
     let mut replacement = match content {
@@ -164,9 +175,7 @@ pub fn run(
         .with_context(|| format!("failed to write {}", file.display()))?;
 
     // Save snapshot relative to project root (not CWD) for thread safety
-    let snap_rel = snapshot::path_for(file)?;
-    if let Some(root) = snapshot::find_project_root(file) {
-        let snap_abs = root.join(&snap_rel);
+    if let Some(snap_abs) = rc.snapshot_path_for() {
         if let Some(parent) = snap_abs.parent() {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("failed to create snapshot dir for {}", file.display()))?;

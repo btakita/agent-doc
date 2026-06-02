@@ -60,6 +60,9 @@ pub type SnapshotContentSlot = SlotHandle<Option<Arc<String>>>;
 pub type HeadContentSlot = SlotHandle<Option<Arc<String>>>;
 /// Phase 8 (#lr-head-8): cached comparison of snapshot content against HEAD.
 pub type SnapshotCommitStatusSlot = SlotHandle<crate::git::SnapshotCommitStatus>;
+/// Phase 9 (#lr-wire-9): cached harness detection. Harness env vars are
+/// process-static for a CLI run, so compute once per [`RunContext`].
+pub type HarnessSlot = SlotHandle<String>;
 
 pub struct SshContextValue {
     pub config: Arc<ProjectConfig>,
@@ -84,6 +87,7 @@ pub struct RunContext {
     snapshot_content: SnapshotContentSlot,
     head_content: HeadContentSlot,
     snapshot_commit_status: SnapshotCommitStatusSlot,
+    harness: HarnessSlot,
 }
 
 impl RunContext {
@@ -292,6 +296,8 @@ impl RunContext {
             }
         });
 
+        let harness = ctx.slot(|_ctx: &Context| agent_doc_core::model_tier::detect_harness());
+
         Self {
             ctx,
             file_path: file_path_cell,
@@ -310,6 +316,7 @@ impl RunContext {
             snapshot_content,
             head_content,
             snapshot_commit_status,
+            harness,
         }
     }
 
@@ -389,6 +396,11 @@ impl RunContext {
         self.ctx.get(&self.snapshot_commit_status)
     }
 
+    /// Phase 9 (#lr-wire-9): cached harness detection for this CLI run.
+    pub fn harness(&self) -> String {
+        self.ctx.get(&self.harness)
+    }
+
     /// Invalidate the cached cycle state after a save/mutation so the next read
     /// reloads it (Phase 7).
     pub fn invalidate_cycle_state(&self) {
@@ -419,6 +431,10 @@ impl RunContext {
 
     pub fn is_snapshot_commit_status_cached(&self) -> bool {
         self.ctx.is_set(&self.snapshot_commit_status)
+    }
+
+    pub fn is_harness_cached(&self) -> bool {
+        self.ctx.is_set(&self.harness)
     }
 
     pub fn invalidate_project_root(&self) {
@@ -1179,5 +1195,43 @@ mod tests {
             }
             other => panic!("expected snapshot/head drift after invalidation, got {other:?}"),
         }
+    }
+
+    // ---- Phase 9 (#lr-wire-9) ----
+
+    #[test]
+    fn phase9_harness_slot_caches_detected_harness() {
+        let _env_guard = crate::test_support::env_lock();
+        for key in [
+            "CLAUDE_CODE_SESSION",
+            "CLAUDE_CODE",
+            "CLAUDECODE",
+            "CODEX_SESSION",
+            "CODEX_THREAD_ID",
+            "CODEX_CLI",
+            "CODEX",
+            "OPENCODE_CLIENT",
+            "OPENCODE",
+        ] {
+            unsafe { std::env::remove_var(key) };
+        }
+        unsafe { std::env::set_var("CODEX_THREAD_ID", "thread-1") };
+
+        let rc = RunContext::new(PathBuf::from("doc.md"));
+        assert!(!rc.is_harness_cached());
+        assert_eq!(rc.harness(), "codex");
+        assert!(rc.is_harness_cached());
+
+        unsafe {
+            std::env::remove_var("CODEX_THREAD_ID");
+            std::env::set_var("OPENCODE", "1");
+        }
+        assert_eq!(
+            rc.harness(),
+            "codex",
+            "cached harness should not change during one RunContext"
+        );
+
+        unsafe { std::env::remove_var("OPENCODE") };
     }
 }

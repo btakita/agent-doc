@@ -12,5 +12,6 @@
 
 pub use agent_doc_core::template::*;
 pub use agent_doc_orchestration::template_io::{
-    apply_patches, apply_patches_with_overrides, template_info,
+    apply_patches, apply_patches_with_context, apply_patches_with_overrides,
+    apply_patches_with_overrides_with_context, template_info, template_info_with_context,
 };

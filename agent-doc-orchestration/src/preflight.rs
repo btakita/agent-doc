@@ -1713,7 +1713,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         .with_context(|| format!("failed to read {}", file.display()))?;
     let rc = crate::graph::RunContext::new(file.to_path_buf());
     let (initial_frontmatter, _) = frontmatter::parse_for_file_with_context(&content, file, &rc)?;
-    let active_harness = agent_doc_core::model_tier::detect_harness();
+    let active_harness = rc.harness();
     let mut warnings = Vec::new();
     if let Some(warning) =
         harness_mismatch_warning(initial_frontmatter.agent.as_deref(), &active_harness)
@@ -2151,7 +2151,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // line(s) before downstream classification. The strip prevents `/model` from
     // double-emitting in `builtin_commands`.
     let global_config = config::load().unwrap_or_default();
-    let harness = agent_doc_core::model_tier::detect_harness();
+    let harness = rc.harness();
     let model_scan = initial_diff
         .as_ref()
         .map(|d| agent_doc_core::model_tier::scan_model_switch(d, &harness, &global_config.model));

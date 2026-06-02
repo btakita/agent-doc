@@ -6913,6 +6913,7 @@ pub fn run_template(
         anyhow::bail!("file not found: {}", file.display());
     }
     verify_pane_ownership(file)?;
+    let rc = crate::graph::RunContext::new(file.to_path_buf());
 
     // Read response from stdin
     let mut response = String::new();
@@ -7001,9 +7002,15 @@ pub fn run_template(
     let snapshot_doc = snapshot::load(file).ok().flatten();
 
     // Apply patches to baseline
-    let content_ours =
-        template::apply_patches_with_overrides(base, &patches, &unmatched, file, &mode_overrides)
-            .context("failed to apply template patches")?;
+    let content_ours = template::apply_patches_with_overrides_with_context(
+        base,
+        &patches,
+        &unmatched,
+        file,
+        &mode_overrides,
+        Some(&rc),
+    )
+    .context("failed to apply template patches")?;
     let content_ours =
         normalize_template_structure_or_fail_preserving(&content_ours, file, Some(base))?;
 
@@ -7160,6 +7167,7 @@ pub fn run_stream(
         anyhow::bail!("file not found: {}", file.display());
     }
     verify_pane_ownership(file)?;
+    let rc = crate::graph::RunContext::new(file.to_path_buf());
     // #jb-tsift-pane-sync diagnostic: capture a streamed write/commit to `file`
     // executing inside a tmux pane that owns a different document.
     crate::sync::log_cross_document_execution_context(file, "stream");
@@ -7293,12 +7301,13 @@ pub fn run_stream(
             let base = base_cow.as_ref();
             let ipc_baseline = baseline.map(|_| base);
             let t_apply = std::time::Instant::now();
-            let mut content_ours = template::apply_patches_with_overrides(
+            let mut content_ours = template::apply_patches_with_overrides_with_context(
                 base,
                 &patches,
                 &unmatched,
                 file,
                 &mode_overrides,
+                Some(&rc),
             )
             .context("failed to apply patches for snapshot")?;
             let elapsed_apply = t_apply.elapsed().as_millis();
@@ -7340,12 +7349,13 @@ pub fn run_stream(
                     ),
                 );
                 // Re-apply patches to the current file content instead of the stale baseline
-                content_ours = template::apply_patches_with_overrides(
+                content_ours = template::apply_patches_with_overrides_with_context(
                     &content_at_start,
                     &patches,
                     &unmatched,
                     file,
                     &mode_overrides,
+                    Some(&rc),
                 )
                 .context("failed to apply patches with fresh baseline")?;
             }
@@ -7692,9 +7702,15 @@ pub fn run_stream(
     // inline attr (patch=append on tag) > config.toml ([components] section) > built-in default.
     // The skill sends delta content for append-mode components.
     let t_apply2 = std::time::Instant::now();
-    let mut content_ours =
-        template::apply_patches_with_overrides(base, &patches, &unmatched, file, &mode_overrides)
-            .context("failed to apply template patches")?;
+    let mut content_ours = template::apply_patches_with_overrides_with_context(
+        base,
+        &patches,
+        &unmatched,
+        file,
+        &mode_overrides,
+        Some(&rc),
+    )
+    .context("failed to apply template patches")?;
     let elapsed_apply2 = t_apply2.elapsed().as_millis();
     if elapsed_apply2 > 0 {
         eprintln!(
@@ -7904,6 +7920,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
+    let rc = crate::graph::RunContext::new(file.to_path_buf());
 
     // Read response from stdin
     let mut response = String::new();
@@ -8154,9 +8171,15 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     }
 
     // Fall back to stream write logic
-    let mut content_ours =
-        template::apply_patches_with_overrides(base, &patches, &unmatched, file, &mode_overrides)
-            .context("failed to apply template patches")?;
+    let mut content_ours = template::apply_patches_with_overrides_with_context(
+        base,
+        &patches,
+        &unmatched,
+        file,
+        &mode_overrides,
+        Some(&rc),
+    )
+    .context("failed to apply template patches")?;
     content_ours =
         normalize_template_structure_or_fail_preserving(&content_ours, file, Some(base))?;
 
@@ -8280,6 +8303,7 @@ pub fn apply_append_from_string(file: &Path, response: &str) -> Result<()> {
 pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
+    let rc = crate::graph::RunContext::new(file.to_path_buf());
     let mut response = response.to_string();
     sanitize_template_patchback_response_for_write(&mut response)?;
 
@@ -8306,12 +8330,13 @@ pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
 
     let mode_overrides = template_mode_overrides_for_current_doc(file, None, &content);
     let snapshot_doc = snapshot::load(file).ok().flatten();
-    let content_ours = template::apply_patches_with_overrides(
+    let content_ours = template::apply_patches_with_overrides_with_context(
         &content,
         &patches,
         &unmatched,
         file,
         &mode_overrides,
+        Some(&rc),
     )
     .context("failed to apply template patches")?;
     let content_ours =

@@ -12,12 +12,14 @@
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 
 use agent_doc_core::component;
 use agent_doc_core::template::{
     ComponentInfo, PatchBlock, TemplateInfo, apply_patches_pure, apply_patches_with_overrides_pure,
 };
 
+use crate::graph::RunContext;
 use crate::project_config;
 
 /// File-based wrapper for the pure
@@ -30,9 +32,19 @@ pub fn apply_patches(
     unmatched: &str,
     file: &Path,
 ) -> Result<String> {
+    apply_patches_with_context(doc, patches, unmatched, file, None)
+}
+
+pub fn apply_patches_with_context(
+    doc: &str,
+    patches: &[PatchBlock],
+    unmatched: &str,
+    file: &Path,
+    rc: Option<&RunContext>,
+) -> Result<String> {
     let summary = file.file_stem().and_then(|s| s.to_str());
-    let component_configs = load_component_configs(file);
-    let max_lines_configs = load_max_lines_configs(file);
+    let component_configs = load_component_configs(file, rc);
+    let max_lines_configs = load_max_lines_configs(file, rc);
     apply_patches_pure(
         doc,
         patches,
@@ -52,9 +64,20 @@ pub fn apply_patches_with_overrides(
     file: &Path,
     mode_overrides: &HashMap<String, String>,
 ) -> Result<String> {
+    apply_patches_with_overrides_with_context(doc, patches, unmatched, file, mode_overrides, None)
+}
+
+pub fn apply_patches_with_overrides_with_context(
+    doc: &str,
+    patches: &[PatchBlock],
+    unmatched: &str,
+    file: &Path,
+    mode_overrides: &HashMap<String, String>,
+    rc: Option<&RunContext>,
+) -> Result<String> {
     let summary = file.file_stem().and_then(|s| s.to_str());
-    let component_configs = load_component_configs(file);
-    let max_lines_configs = load_max_lines_configs(file);
+    let component_configs = load_component_configs(file, rc);
+    let max_lines_configs = load_max_lines_configs(file, rc);
     apply_patches_with_overrides_pure(
         doc,
         patches,
@@ -68,6 +91,10 @@ pub fn apply_patches_with_overrides(
 
 /// Get template info for a document (for plugin rendering).
 pub fn template_info(file: &Path) -> Result<TemplateInfo> {
+    template_info_with_context(file, None)
+}
+
+pub fn template_info_with_context(file: &Path, rc: Option<&RunContext>) -> Result<TemplateInfo> {
     let doc = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
 
@@ -77,7 +104,7 @@ pub fn template_info(file: &Path) -> Result<TemplateInfo> {
     let components = component::parse(&doc)
         .with_context(|| format!("failed to parse components in {}", file.display()))?;
 
-    let configs = load_component_configs(file);
+    let configs = load_component_configs(file, rc);
 
     let component_infos: Vec<ComponentInfo> = components
         .iter()
@@ -106,8 +133,8 @@ pub fn template_info(file: &Path) -> Result<TemplateInfo> {
 }
 
 /// Load component mode configs from `.agent-doc/config.toml` (under [components] section).
-fn load_component_configs(file: &Path) -> HashMap<String, String> {
-    let proj_cfg = load_project_from_doc(file);
+fn load_component_configs(file: &Path, rc: Option<&RunContext>) -> HashMap<String, String> {
+    let proj_cfg = load_project_from_doc(file, rc);
     proj_cfg
         .components
         .iter()
@@ -118,8 +145,8 @@ fn load_component_configs(file: &Path) -> HashMap<String, String> {
 }
 
 /// Load max_lines settings from `.agent-doc/config.toml` (under [components] section).
-fn load_max_lines_configs(file: &Path) -> HashMap<String, usize> {
-    let proj_cfg = load_project_from_doc(file);
+fn load_max_lines_configs(file: &Path, rc: Option<&RunContext>) -> HashMap<String, usize> {
+    let proj_cfg = load_project_from_doc(file, rc);
     proj_cfg
         .components
         .iter()
@@ -131,20 +158,26 @@ fn load_max_lines_configs(file: &Path) -> HashMap<String, usize> {
 }
 
 /// Resolve project config by walking up from a document path to find `.agent-doc/config.toml`.
-fn load_project_from_doc(file: &Path) -> project_config::ProjectConfig {
+fn load_project_from_doc(
+    file: &Path,
+    rc: Option<&RunContext>,
+) -> Arc<project_config::ProjectConfig> {
+    if let Some(rc) = rc {
+        return rc.project_config();
+    }
     let start = file.parent().unwrap_or(file);
     let mut current = start;
     loop {
         let candidate = current.join(".agent-doc").join("config.toml");
         if candidate.exists() {
-            return project_config::load_project_from(&candidate);
+            return Arc::new(project_config::load_project_from(&candidate));
         }
         match current.parent() {
             Some(p) if p != current => current = p,
             _ => break,
         }
     }
-    project_config::load_project()
+    Arc::new(project_config::load_project())
 }
 
 /// Default mode for a component by name.
@@ -152,5 +185,40 @@ fn default_mode(name: &str) -> &'static str {
     match name {
         "exchange" | "findings" => "append",
         _ => "replace",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn apply_patches_with_context_uses_project_config_slot() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::write(
+            dir.path().join(".agent-doc/config.toml"),
+            "[components.exchange]\npatch = \"prepend\"\n",
+        )
+        .unwrap();
+        let doc_path = dir.path().join("doc.md");
+        let doc = "<!-- agent:exchange -->\nold\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc_path, doc).unwrap();
+        let rc = RunContext::new(doc_path.clone());
+
+        let (patches, unmatched) = agent_doc_core::template::parse_patches(
+            "<!-- patch:exchange -->\nnew\n<!-- /patch:exchange -->\n",
+        )
+        .unwrap();
+        assert!(!rc.is_project_config_cached());
+        let patched =
+            apply_patches_with_context(doc, &patches, &unmatched, &doc_path, Some(&rc)).unwrap();
+
+        assert!(rc.is_project_config_cached());
+        assert!(
+            patched.contains("new\nold"),
+            "component config should make exchange prepend, got:\n{patched}"
+        );
     }
 }

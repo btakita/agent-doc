@@ -284,6 +284,7 @@ fn stream_loop(
     baseline: &str,
     thinking_cfg: Option<&ThinkingConfig>,
 ) -> Result<StreamResult> {
+    let rc = crate::graph::RunContext::new(file.to_path_buf());
     let buffer = Arc::new(Mutex::new(String::new()));
     let thinking_buffer = Arc::new(Mutex::new(String::new()));
     let (done_tx, done_rx) = mpsc::channel::<()>();
@@ -456,12 +457,13 @@ fn stream_loop(
             let (patches, unmatched) = crate::template::parse_patches(&patch).unwrap_or_default();
             let mut mode_overrides = std::collections::HashMap::new();
             mode_overrides.insert(target.to_string(), "replace".to_string());
-            crate::template::apply_patches_with_overrides(
+            crate::template::apply_patches_with_overrides_with_context(
                 baseline,
                 &patches,
                 &unmatched,
                 file,
                 &mode_overrides,
+                Some(&rc),
             )
             .unwrap_or_else(|_| std::fs::read_to_string(file).unwrap_or_default())
         };
@@ -489,6 +491,7 @@ fn stream_loop(
 /// exists), attempts IPC first to avoid "externally modified" dialogs. Falls
 /// back to direct write on IPC timeout.
 pub fn flush_to_document(file: &Path, text: &str, target: &str, _baseline: &str) -> Result<()> {
+    let rc = crate::graph::RunContext::new(file.to_path_buf());
     // Build a patch block targeting the component
     let patch_response = format!(
         "<!-- patch:{} -->\n{}\n<!-- /patch:{} -->\n",
@@ -527,12 +530,13 @@ pub fn flush_to_document(file: &Path, text: &str, target: &str, _baseline: &str)
         .with_context(|| format!("failed to read {}", file.display()))?;
 
     // Apply patches with replace override for stream target
-    let content_patched = template::apply_patches_with_overrides(
+    let content_patched = template::apply_patches_with_overrides_with_context(
         &content_current,
         &patches,
         &unmatched,
         file,
         &mode_overrides,
+        Some(&rc),
     )
     .context("failed to apply template patches")?;
 

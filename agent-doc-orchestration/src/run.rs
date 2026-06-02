@@ -1267,6 +1267,7 @@ fn apply_template_response(
     response: &str,
     use_crdt: bool,
 ) -> Result<()> {
+    let rc = crate::graph::RunContext::new(file.to_path_buf());
     let current_content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     let (mut patches, unmatched) =
@@ -1286,8 +1287,9 @@ fn apply_template_response(
     let doc_lock = acquire_doc_lock(file)?;
     snapshot::save_pre_response(file, baseline)?;
 
-    let content_ours = template::apply_patches(baseline, &patches, &unmatched, file)
-        .context("failed to apply template patches")?;
+    let content_ours =
+        template::apply_patches_with_context(baseline, &patches, &unmatched, file, Some(&rc))
+            .context("failed to apply template patches")?;
     let snapshot_doc = snapshot::load(file).ok().flatten();
     let content_ours = normalize_direct_run_template_content(
         file,

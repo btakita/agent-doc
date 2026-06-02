@@ -87,7 +87,7 @@ Why per-document beats one file-keyed graph: invalidation stays trivial (a file/
 They compose because both reduce to `ProjectConfigSlot.clear()` → transitive clear — the watcher is just an earlier trigger for the clear the cycle-start mtime check would do anyway. Phase 5/10 implement the floor; the watcher is a Phase 5 opt-in extension.
 
 (`CellHandle::set` first → Yes was already resolved last cycle; also recorded in the plan.)
-<!-- agent:boundary:93acf8e0 -->
+<!-- agent:boundary:13959a34 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -128,6 +128,7 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Review
  
 <!-- agent:review -->
+- [/] [#jbstalldrain] [recommended] #agent-doc-bug 2026-06-02: JB `Run Agent Doc` appeared stalled across two observed route stages: `agent-doc-bugs2.md` failed before dispatch because closeout drain hit a session-check backlog-shadow blocker (`#queue-user-edit-overwrite` only outside live `agent:backlog`), while `monsterrodholders.md` waited the full 60s on busy authoritative actor generation 251 / pane `%61` before reporting no dispatch-ready prompt. Fix by making route emit typed in-progress and terminal results for closeout-drain blockers and busy-authoritative waits, and make the JetBrains action surface those states persistently instead of looking inert. Plan: tasks/agent-doc/plan-jb-run-agent-doc-stalled-closeout-drain.md.
 - [/] [#codex-direct-writeback-miss] [recommended] #agent-doc-bug 2026-06-02: Direct-chat Codex execution of src/boost-client/tasks/monsterrodholders.md prompt `do [#pmaxpost]. #spec-test-commit-push` completed site + parent commits/pushes but the final assistant response was not written into the session document until manual `agent-doc write --commit` repair; make the Codex/direct-chat closeout gate fail closed before final chat output when the response heading is absent from HEAD, and keep the recovery path binary-owned. Plan: tasks/agent-doc/plan-response-missing-after-manual-closeout.md
 - [/] [#weqq] [recommended] #jb-settext-payload-log IMPLEMENTED 2026-06-01 (submodule 12676120, JB plugin 0.2.145 built+signed): PatchWatcher.kt now logs the full result payload before document.setText on both applyPatch.component and repositionBoundary, behind LOG.isDebugEnabled, so enabling the com.github.btakita.agentdoc debug category captures the exact setText payload the IPC-duplication family needs (previously only hashes+lengths). GATED on operator: install build/distributions/agent-doc-jetbrains-0.2.145-signed.zip + restart, enable debug logging, then run the Path B capture (#wy0y/#6cmx). Plan: tasks/agent-doc/plan-full-document-ipc-corruption-typing-prompt.md.
 - [/] [#6qfn] [recommended] #optindocs-editor follow-up to #4a6p: wire the FFI agent_doc_is_session_document gate into JB SubmitAction.update (hide/disable Run Agent Doc for a non-opted-in .md) and the VS Code extension, then live-verify. Needs a JB pluginVersion bump + signed reinstall. Plan: tasks/agent-doc/plan-opt-in-agent-doc-documents.md.

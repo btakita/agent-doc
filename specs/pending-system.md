@@ -38,6 +38,15 @@ Every bullet in `agent:backlog` carries a 4-char base32 hash as a visible prefix
   `[#custom] ` is accepted as compatibility input and normalized to the same
   custom id. Custom ids are non-empty ASCII alphanumeric strings with optional
   hyphens. Lazy backfill still generates IDs.
+- **Mutation-time collision rejection (`#preset-item-id-collision-enforce`):** an
+  **explicit** custom id (`id=<id>` / `[#id]`) passed to `--pending-add` /
+  `--pending-add-after` / `--pending-add-before` / `--pending-add-back` /
+  `--pending-add-to` fails closed when it collides with a frontmatter
+  `prompt_presets` key or an existing active `agent:backlog` / `agent:review` /
+  `agent:icebox` item id, so a new ambiguous `#id` is never written. Auto-id adds
+  (no explicit prefix) are never blocked. Dispatch-time enforcement on a
+  *pre-existing* collision stays a preflight warning (`preset_item_id_collision`)
+  rather than a hard block, to avoid over-blocking live sessions.
 - Stable across reorders, text edits, and cycles.
 - Visible in rendered markdown (like a GitHub issue number) — no hidden state.
 - Opaque: the hash is not meaningful, just unique within the component.

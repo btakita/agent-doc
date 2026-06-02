@@ -180,8 +180,29 @@ fn canonicalize_component_content(file: &Path, content: &str) -> String {
 /// or `[/]`) at the beginning of the list. Supports canonical `id=<custom> `
 /// syntax and compatibility `[#custom] ` input to preserve a custom id. Prints
 /// the assigned hash id to stdout.
+/// `#preset-item-id-collision-enforce`: reject a `--pending-add` whose explicit
+/// custom id (`id=<id>` / `[#id]`) collides with a frontmatter `prompt_presets`
+/// key or an existing active `agent:backlog` / `agent:review` / `agent:icebox`
+/// item id, before the add is written. This fails closed at the mutation
+/// boundary so a new ambiguous identity is never created. Auto-id adds (no
+/// explicit prefix) are unaffected, so ordinary `--pending-add "text"` is never
+/// blocked.
+fn reject_colliding_explicit_id(full_content: &str, item: &str) -> Result<()> {
+    let Some(candidate) = pending::explicit_custom_id(item) else {
+        return Ok(());
+    };
+    if let Some(sources) = crate::preflight::identity_collision_for_new_id(full_content, &candidate) {
+        anyhow::bail!(
+            "pending add: refusing to add item with explicit id `#{candidate}` — that identity is already active under {sources}. Each #id must have exactly one active meaning per document so `do #id`, queue generation, and \"top backlog item\" stay unambiguous (#preset-item-id-collision-enforce). Choose a different id, or rename the existing {sources} entry first.",
+            sources = sources.join(" + ")
+        );
+    }
+    Ok(())
+}
+
 pub fn add(file: &Path, item: &str, gated: bool) -> Result<()> {
     let (full_content, comp) = find_pending_component(file)?;
+    reject_colliding_explicit_id(&full_content, item)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let doc_id = doc_id_for(file);
     let (new_content, id) = pending::op_add(existing, item, &doc_id, gated)?;
@@ -198,6 +219,7 @@ pub fn add_many(file: &Path, items: &[String], gated: bool) -> Result<Vec<String
     let mut ids = Vec::with_capacity(items.len());
     for item in items.iter().rev() {
         let (full_content, comp) = find_pending_component(file)?;
+        reject_colliding_explicit_id(&full_content, item)?;
         let existing = &full_content[comp.open_end..comp.close_start];
         let doc_id = doc_id_for(file);
         let (new_content, id) = pending::op_add(existing, item, &doc_id, gated)?;
@@ -215,6 +237,7 @@ pub fn add_many(file: &Path, items: &[String], gated: bool) -> Result<Vec<String
 /// default. Returns the assigned id.
 fn add_at(file: &Path, item: &str, position: pending::AddPosition<'_>) -> Result<String> {
     let (full_content, comp) = find_pending_component(file)?;
+    reject_colliding_explicit_id(&full_content, item)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let doc_id = doc_id_for(file);
     let (new_content, id) = pending::op_add_at(existing, item, &doc_id, false, position)?;
@@ -792,6 +815,58 @@ mod tests {
         let (tmp, doc) = setup_test_dir();
         fs::write(&doc, content).unwrap();
         (tmp, doc)
+    }
+
+    fn doc_with_preset_and_pending(preset_key: &str, items: &str) -> (TempDir, PathBuf) {
+        let content = format!(
+            "---\nagent_doc_session: test\nprompt_presets:\n  '#{preset_key}': do the thing\n---\n\n<!-- agent:pending -->\n{items}\n<!-- /agent:pending -->\n"
+        );
+        let (tmp, doc) = setup_test_dir();
+        fs::write(&doc, content).unwrap();
+        (tmp, doc)
+    }
+
+    #[test]
+    fn add_rejects_explicit_id_colliding_with_prompt_preset() {
+        // #preset-item-id-collision-enforce: an explicit id matching a
+        // prompt_presets key must fail closed at mutation time.
+        let (_tmp, doc) = doc_with_preset_and_pending("next-steps", "- [ ] [#abcd] existing");
+        let err = add(&doc, "id=next-steps add follow-up", false).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("#next-steps"), "{msg}");
+        assert!(msg.contains("prompt_presets"), "{msg}");
+        // Document is unchanged — the colliding id was never written.
+        let content = fs::read_to_string(&doc).unwrap();
+        assert_eq!(content.matches("next-steps").count(), 1, "{content}");
+    }
+
+    #[test]
+    fn add_rejects_explicit_id_colliding_with_active_item() {
+        // Bracketed `[#id]` form colliding with an existing active backlog id.
+        let (_tmp, doc) = doc_with_pending("- [ ] [#gscaccess] grant Google Ads access");
+        let err = add(&doc, "[#gscaccess] duplicate", false).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("#gscaccess"), "{msg}");
+        assert!(msg.contains("agent:") || msg.contains("active"), "{msg}");
+    }
+
+    #[test]
+    fn add_allows_explicit_noncolliding_id() {
+        let (_tmp, doc) = doc_with_preset_and_pending("next-steps", "- [ ] [#abcd] existing");
+        add(&doc, "id=fresh01 a new task", false).expect("non-colliding explicit id is allowed");
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(content.contains("[#fresh01]"), "{content}");
+    }
+
+    #[test]
+    fn add_allows_auto_id_even_when_text_mentions_preset() {
+        // An ordinary auto-id add (no explicit id prefix) is never blocked, even
+        // when the free text references the preset token.
+        let (_tmp, doc) = doc_with_preset_and_pending("next-steps", "- [ ] [#abcd] existing");
+        add(&doc, "plan the #next-steps rollout", false).expect("auto-id add must not be blocked");
+        let content = fs::read_to_string(&doc).unwrap();
+        // The new item got a generated hash id, not the preset id.
+        assert!(content.contains("rollout"), "{content}");
     }
 
     #[test]

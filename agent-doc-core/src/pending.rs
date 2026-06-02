@@ -828,6 +828,20 @@ fn parse_custom_id_prefix(text: &str) -> Result<(Option<String>, String)> {
     parse_bracketed_custom_id_prefix(trimmed)
 }
 
+/// Return the explicit, caller-provided custom id from a `--pending-add` item
+/// string (`id=<id> <text>` or `[#<id>] <text>`), normalized (lowercase, no
+/// `#`). Returns `None` for auto-id items (no explicit prefix) and for malformed
+/// prefixes — callers that need the strict parse error use the add path itself.
+/// Used by mutation-time collision enforcement (#preset-item-id-collision-enforce)
+/// so an explicit id that collides with a prompt preset or active item id is
+/// rejected before the add is written.
+pub fn explicit_custom_id(item: &str) -> Option<String> {
+    match parse_custom_id_prefix(item) {
+        Ok((id, _)) => id,
+        Err(_) => None,
+    }
+}
+
 #[test]
 fn existing_item_may_keep_leading_alias_tag() {
     let mut existing_ids = HashSet::new();
@@ -2372,7 +2386,10 @@ mod tests {
             "empty bullet must not get a phantom id: {new_body:?}"
         );
         let (_, items, _) = parse_items(&new_body);
-        assert!(items.is_empty(), "empty bullet should be dropped: {items:?}");
+        assert!(
+            items.is_empty(),
+            "empty bullet should be dropped: {items:?}"
+        );
     }
 
     #[test]

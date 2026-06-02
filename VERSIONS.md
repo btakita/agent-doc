@@ -6,6 +6,25 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Mutation-time identity-collision rejection (`#preset-item-id-collision-enforce`,
+  part 1).** `agent-doc write --pending-add` / `--pending-add-after` /
+  `--pending-add-before` / `--pending-add-back` / `--pending-add-to` now fail
+  closed when given an **explicit** custom id (`id=<id>` or `[#id]`) that collides
+  with a frontmatter `prompt_presets` key or an existing active
+  backlog/review/icebox item id, so a new ambiguous `#id` is never written. Auto-id
+  adds (no explicit prefix) are never blocked. Builds on the existing
+  `detect_identity_collisions` registry (now factored through
+  `document_active_identities` + `identity_collision_for_new_id`). The riskier
+  dispatch-time halves (hard preflight/session-check block on a pre-existing
+  collision; queue-generation refusal) remain intentionally deferred — the
+  existing `preset_item_id_collision` preflight *warning* stays the dispatch-time
+  signal — to avoid over-blocking live sessions with pre-existing collisions.
+  Tests: `add_rejects_explicit_id_colliding_with_prompt_preset`,
+  `add_rejects_explicit_id_colliding_with_active_item`,
+  `add_allows_explicit_noncolliding_id`,
+  `add_allows_auto_id_even_when_text_mentions_preset`,
+  `identity_collision_for_new_id_reports_existing_sources`.
+
 - **Empty pending/icebox bullets no longer get a phantom id
   (`#icebox-empty-item-phantom-id`).** A stray content-less bullet (`- [ ]`
   with no description and no continuation — e.g. an editor/IPC insertion before

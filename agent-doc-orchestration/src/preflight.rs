@@ -624,7 +624,15 @@ fn post_exchange_comment_prompt_preset_warning(
 /// execution. Ids are normalized by stripping a leading `#`; `agent:done` /
 /// archived ids are intentionally excluded (they are not active lookup targets).
 /// Returns one `#id (sourceA + sourceB)` diagnostic per colliding identity.
-pub fn detect_identity_collisions(content: &str) -> Vec<String> {
+/// Build the full active-identity registry for a document: every normalized
+/// `#id` (leading `#` stripped) mapped to the active sources that define it — a
+/// frontmatter `prompt_presets` key, or an active (not done) `agent:backlog` /
+/// `agent:review` / `agent:icebox` item id. `agent:done` / archived ids are
+/// intentionally excluded (not active lookup targets). Shared by collision
+/// detection and mutation-time collision enforcement.
+pub fn document_active_identities(
+    content: &str,
+) -> std::collections::BTreeMap<String, Vec<String>> {
     let mut sources: std::collections::BTreeMap<String, Vec<String>> =
         std::collections::BTreeMap::new();
     if let Ok((fm, _)) = crate::frontmatter::parse(content) {
@@ -661,10 +669,35 @@ pub fn detect_identity_collisions(content: &str) -> Vec<String> {
         }
     }
     sources
+}
+
+/// `#preset-item-id-collision`: collect identities that resolve under more than
+/// one active source. When the same `#id` exists in two sources, `do #id`, queue
+/// generation, and "top backlog item: #id" are ambiguous between preset
+/// expansion and item execution. Returns one `#id (sourceA + sourceB)`
+/// diagnostic per colliding identity.
+pub fn detect_identity_collisions(content: &str) -> Vec<String> {
+    document_active_identities(content)
         .into_iter()
         .filter(|(_, srcs)| srcs.len() > 1)
         .map(|(id, srcs)| format!("#{id} ({})", srcs.join(" + ")))
         .collect()
+}
+
+/// `#preset-item-id-collision-enforce`: return the existing active sources that
+/// an explicit new `candidate_id` would collide with, or `None` when the id is
+/// free. Normalizes the candidate the same way as the registry (lowercase,
+/// leading `#` stripped). Used to reject a colliding `--pending-add id=<id>` /
+/// `[#id]` at mutation time before a new ambiguous identity is written.
+pub fn identity_collision_for_new_id(content: &str, candidate_id: &str) -> Option<Vec<String>> {
+    let norm = candidate_id.trim().trim_start_matches('#').to_ascii_lowercase();
+    if norm.is_empty() {
+        return None;
+    }
+    document_active_identities(content)
+        .get(&norm)
+        .filter(|srcs| !srcs.is_empty())
+        .cloned()
 }
 
 fn preset_item_id_collision_warning(content: &str) -> Option<PreflightWarning> {
@@ -4563,6 +4596,27 @@ mod tests {
             detect_identity_collisions(content).is_empty(),
             "done ids and unique active ids must not collide"
         );
+    }
+
+    #[test]
+    fn identity_collision_for_new_id_reports_existing_sources() {
+        // #preset-item-id-collision-enforce: a candidate id matching a preset
+        // key or active item id reports the existing source(s); a free id is None.
+        let content = concat!(
+            "---\nprompt_presets:\n  '#next-steps': x\n---\n\n",
+            "<!-- agent:backlog -->\n- [ ] [#alpha] active\n<!-- /agent:backlog -->\n",
+        );
+        assert_eq!(
+            identity_collision_for_new_id(content, "next-steps"),
+            Some(vec!["prompt_presets".to_string()])
+        );
+        // Normalization: leading `#` and case are ignored.
+        assert_eq!(
+            identity_collision_for_new_id(content, "#ALPHA"),
+            Some(vec!["agent:backlog".to_string()])
+        );
+        assert_eq!(identity_collision_for_new_id(content, "fresh01"), None);
+        assert_eq!(identity_collision_for_new_id(content, ""), None);
     }
 
     #[test]

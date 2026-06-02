@@ -92,7 +92,61 @@ Commands and results:
 - `cargo run --example instrumentation_profile --features instrumentation --quiet`: `thread_safe_contention_batched_write_bursts_16` set-cell invalidation attribution is now `11.962 ms wait / 577.558 us hold`, down from the prior README baseline `13.802 ms wait / 781.677 us hold`.
 
 Verification context from the same run remains green: `cargo test`, `cargo test --features instrumentation`, `cargo test --features tokio`, `cargo test --features loom --test thread_safe_loom`, `cargo check`, `cargo build`, and `cargo clippy` all passed. No new repo changes were needed for this benchmark-only prompt.
-<!-- agent:boundary:78decb4c -->
+
+### Re: #lazybatch2 — gpt-5
+
+> **Queue prompt:**
+>
+> [#lazybatch2]
+
+
+Completed `#lazybatch2`.
+
+Changed paths:
+- `src/lazily-rs/src/thread_safe.rs`
+- `src/lazily-rs/tests/spec_compliance.rs`
+- `src/lazily-rs/SPEC.md`
+
+What changed:
+- `ThreadSafeTrackingFrame` now carries the prior dependency set for a recomputing slot.
+- `track_dependency` still records every read dependency for the new dependency set, but it skips graph-lock `DependencyEdge` registration when the dependency was already subscribed.
+- Newly discovered dependencies are still registered eagerly during recompute, preserving stale-in-flight correctness for dynamic dependency changes.
+- Read-side refresh traversal now filters to actual slot dependencies, so cell-only totals no longer probe every cell through `get_refresh`.
+- Spec and compliance coverage now assert unchanged dependency-edge preservation without redundant lock acquisitions, plus the dynamic-dependency add path.
+
+Commits and push:
+- `src/lazily-rs`: `44ff49d perf: reduce thread-safe get lock churn`, pushed to `origin/main`.
+- Parent `agent-loop` gitlink: `1f916fbfa chore: update lazily-rs submodule`, pushed to `origin/main`.
+
+Verification:
+- `cargo fmt`
+- `cargo test --features instrumentation thread_safe_recompute`
+- `cargo test`
+- `cargo test --features instrumentation`
+- `cargo test --features tokio`
+- `cargo test --features loom --test thread_safe_loom`
+- `cargo check`
+- `cargo build`
+- `cargo clippy`
+- `cargo check` / `cargo build` still print the existing unused workspace-patch warnings for unrelated workspace crates; lazily-rs checks pass.
+- No `cargo install --path .`: `lazily-rs` is a library crate with no binary target.
+
+Benchmark and instrumentation evidence:
+- `batched_write_bursts/8`: mean `2.2892 ms`, change `[-36.783% -29.803% -21.027%]`, significant improvement.
+- `batched_write_bursts/16`: mean `7.6168 ms`, change `[-0.4508% +6.8013% +15.224%]`, no statistically detected wall-clock change.
+- Final instrumentation profile reduced `get_refresh` acquisitions and wait:
+  - 8 workers: `199 -> 133` acquisitions, `358.093 us -> 155.432 us` wait.
+  - 16 workers: `391 -> 263` acquisitions, `1.902 ms -> 959.387 us` wait.
+- `DependencyEdge` acquisitions fell by two thirds:
+  - 8 workers: `96 -> 32`.
+  - 16 workers: `192 -> 64`.
+
+CI notes:
+- `src/lazily-rs` has no GitHub workflow entries.
+- Parent `Agent Doc` run `26799752916`: `tmux-ci` passed. The `check` job failed on the pre-existing unrelated `agent-doc-orchestration/src/gc.rs:275` clippy `sort_by_key` lint, outside this lazily-rs change.
+
+Confidence is high for the intended read-side lock-churn reduction and acquisition-count targets. The 16-worker wall-clock benchmark remains noisy/neutral, but the lock metrics moved in the requested direction.
+<!-- agent:boundary:694cdfc0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -103,7 +157,7 @@ Verification context from the same run remains green: `cargo test`, `cargo test 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~[#lazybatch1]~
-- [#lazybatch2]
+- ~[#lazybatch2]~
 - [#lazybatch3]
 - Run performance benchmarks
 <!-- /agent:queue -->
@@ -111,7 +165,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#lazybatch2] [recommended] Reduce read-side ThreadSafeContext::get lock churn for hot batched totals: profile and avoid redundant dependency-edge registration / HashSet work on cached reads, targeting get_refresh wait and acquisition counts for batched_write_bursts at 8 and 16 workers.
 - [ ] [#lazybatch3] [recommended] Re-evaluate thread-safe graph storage only after #lazybatch1/#lazybatch2: prototype partitioned locks or read-mostly storage with loom/spec coverage and compare same_slot_write_read, independent_slots, read_mostly_waiters, and batched_write_bursts so the fix does not trade one contention case for another.
 <!-- /agent:backlog -->
 

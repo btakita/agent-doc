@@ -22,12 +22,13 @@ queue_active: true
 # lazily-rs: Reactive Signals Library
 
 <!-- agent:status -->
+
 - [x] Phase 1: Research & design
 - [x] Phase 2: Core signal primitives
-- [ ] Phase 3: Derived/computed signals
-- [ ] Phase 4: Effect system
+- [x] Phase 3: Derived/computed signals
+- [x] Phase 4: Effect system
 - [x] Phase 5: Testing & benchmarks
-- [ ] Phase 6: Documentation & publish
+- [x] Phase 6: Documentation & publish
 <!-- /agent:status -->
 
 <!-- agent:exchange -->
@@ -91,7 +92,28 @@ Verification:
 `make check` is unavailable in `src/lazily-rs` because there is no `check` target. GitHub Actions CI is also unavailable for this repo: `gh run list --workflow CI --limit 1` could not find a `CI` workflow, and `gh workflow list` returned no workflows, so there was no tmux CI leg to inspect. Cargo build/bench/install emitted only the existing unused workspace patch warnings for `agent-kit`, `tagpath`, and `tmux-router`.
 
 Changed paths: `src/lazily-rs/SPEC.md`, `src/lazily-rs/src/thread_safe.rs`, `src/lazily-rs/tests/spec_compliance.rs`, and the superproject `src/lazily-rs` submodule pointer. Escalation: none.
-<!-- agent:boundary:fc4013cb -->
+
+### Re: Phase 3, 4, and 6 status — gpt-5
+
+> **Queue prompt:**
+>
+> Are Phase 3, 4, 6 implemented? If not, is now a good time to implement them?
+
+
+Yes: Phases 3, 4, and 6 are implemented now, so I marked them complete in the status block.
+
+Evidence:
+
+- Phase 3, derived/computed signals: `Context::computed`, `Context::memo`, `ThreadSafeContext::computed`, and `ThreadSafeContext::memo` are implemented and covered by spec tests.
+- Phase 4, effect system: `ctx.effect`, cleanup, disposal, dependency tracking, dirty-slot validation, coalesced reruns, and thread-safe effects are implemented and covered by spec/Loom-adjacent tests.
+- Phase 6, documentation & publish: README/SPEC/rustdoc-facing library docs are present, `cargo publish --dry-run` packages and verifies `lazily v0.4.0`, and registry metadata confirms `lazily 0.4.0` is published at <https://crates.io/crates/lazily/0.4.0> with docs at <https://docs.rs/lazily/0.4.0>.
+
+So this is not the right moment to implement Phases 3, 4, or 6 from scratch; they are done. The useful next work is the existing queue: `#pben`, then `#ploom`, then `#pshrd`, because those are follow-up performance and concurrency-hardening items rather than missing phase implementation.
+
+Commands used: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `tsift status`, targeted `rg`/`sed` inspection, web lookup for current docs/registry context, `cargo publish --dry-run`, and `cargo info lazily --registry crates-io`.
+
+Verification: publish dry run and crates.io registry metadata check only; no code changed. Changed paths: session document status/exchange only, via `agent-doc finalize`. Escalation: none.
+<!-- agent:boundary:17f2d720 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -99,7 +121,7 @@ Changed paths: `src/lazily-rs/SPEC.md`, `src/lazily-rs/src/thread_safe.rs`, `src
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~[#pinv]~
-- Are Phase 3, 4, 6 implemented? If not, is now a good time to implement them?
+- ~Are Phase 3, 4, 6 implemented? If not, is now a good time to implement them?~
 - [#pben]
 - [#ploom]
 - [#pshrd]

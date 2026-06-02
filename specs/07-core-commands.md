@@ -100,7 +100,18 @@ Two modes:
 - Garbage-collects orphaned snapshots, captures, locks, hooks, status files, repair diagnostics, Codex blocked-stop diagnostics, sockets, and dead registry entries under `.agent-doc/`.
 - The orphaned-socket cleanup keeps sockets whose supervisor PID is alive or whose socket still answers.
 - Stale `starting` actor records older than one hour are closed unless a live supervisor PID still has a fresh supervisor heartbeat proving the actor is booting; this updates the controller SQLite store and re-emits `session-actors.json` as a projection. A live PID with a stale heartbeat is treated as stuck startup state.
+- Prunes accumulated pre-mutation recovery tags (`#x8aw`): keeps the newest `KEEP_RECOVERY_TAGS` (20) `agent-doc/<doc>/pre-auto-run-N` and `pre-compact-N` tags **per `<doc>/<slug>` series**, deleting older ones. One tag is created per queue auto-run / compaction, so without pruning they grow unbounded over a document's life. Best-effort: a non-git root or git failure is a no-op. `--dry-run` reports the deletions without applying them.
 - `preflight` runs the full orphan-file GC automatically at most once per day via `.agent-doc/gc.stamp`; `preflight`, `start`, and `sync` still run the lightweight stale-`starting` actor cleanup every cycle.
+
+## checkpoint
+
+`agent-doc checkpoint <FILE> [--restore TAG] [--diff TAG]`
+
+- Guided recovery for the pre-mutation checkpoint tags created by `compact` (`pre-compact-N`) and the queue auto-run (`pre-auto-run-N`, `#misfire-recovery-snapshot`). Named `checkpoint` because `recover` is already a `repair` alias for orphaned-response recovery, a distinct concern (`#kc5e`).
+- Default (no flags): lists the document's checkpoint tags newest-first (commit date, then ordinal) with short SHA, date, and subject, plus the inspect/restore command hints.
+- `--diff TAG`: prints `git diff <TAG> -- <FILE>` so the operator can see what changed since the checkpoint.
+- `--restore TAG`: runs `git checkout <TAG> -- <FILE>`, restoring **only** that document from the checkpoint (other files untouched), then prompts the operator to review and commit. Surgical and non-destructive to unrelated files — it never resets the whole tree.
+- A document with no checkpoint tags prints guidance rather than erroring.
 
 ## preflight
 

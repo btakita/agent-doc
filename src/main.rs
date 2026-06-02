@@ -397,6 +397,19 @@ enum Commands {
         #[arg(long)]
         dry_run: bool,
     },
+    /// List or restore a document's pre-mutation recovery checkpoints
+    /// (pre-auto-run / pre-compact tags)
+    Checkpoint {
+        /// Path to the session document
+        file: PathBuf,
+        /// Restore only this document from the named checkpoint tag (other files
+        /// untouched); review and commit afterward
+        #[arg(long, value_name = "TAG")]
+        restore: Option<String>,
+        /// Show `git diff <TAG> -- <FILE>` for the named checkpoint tag
+        #[arg(long, value_name = "TAG", conflicts_with = "restore")]
+        diff: Option<String>,
+    },
     /// Start Claude in a tmux pane and register the session
     Start {
         /// Path to the session document
@@ -1670,6 +1683,11 @@ fn main() -> anyhow::Result<()> {
         } => reset::run(&file, from_current, preserve_session),
         Commands::Clean { file, archive } => clean::run(&file, archive),
         Commands::AuditDocs { root } => audit_docs::run(root.as_deref()),
+        Commands::Checkpoint {
+            file,
+            restore,
+            diff,
+        } => agent_doc_orchestration::checkpoint::run(&file, restore.as_deref(), diff.as_deref()),
         Commands::Gc { root, dry_run } => {
             let result = agent_doc_orchestration::gc::run(root.as_deref(), dry_run)?;
             if dry_run {

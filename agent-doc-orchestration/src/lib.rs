@@ -63,6 +63,7 @@ pub use agent_doc_sqlite::archive_index;
 pub mod boundary;
 pub mod callback;
 pub mod capture;
+pub mod checkpoint;
 pub mod claim;
 pub mod codex_hook;
 pub mod compact;

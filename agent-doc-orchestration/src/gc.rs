@@ -203,6 +203,17 @@ pub fn run(root: Option<&Path>, dry_run: bool) -> Result<GcResult> {
     total_deleted += sock_deleted;
     total_skipped += sock_kept;
 
+    // Prune accumulated recovery checkpoint tags (pre-auto-run / pre-compact)
+    let (tag_deleted, tag_kept) = clean_old_recovery_tags(&project_root, dry_run)?;
+    if tag_deleted > 0 {
+        eprintln!(
+            "[gc] recovery tags: {} old deleted, {} kept",
+            tag_deleted, tag_kept
+        );
+    }
+    total_deleted += tag_deleted;
+    total_skipped += tag_kept;
+
     eprintln!(
         "[gc] Total: {} deleted, {} kept",
         total_deleted, total_skipped
@@ -212,6 +223,77 @@ pub fn run(root: Option<&Path>, dry_run: bool) -> Result<GcResult> {
         deleted: total_deleted,
         skipped: total_skipped,
     })
+}
+
+/// Number of recovery checkpoint tags to retain per `<doc>/<slug>` series.
+const KEEP_RECOVERY_TAGS: usize = 20;
+
+/// Prune accumulated recovery checkpoint tags (`agent-doc/<doc>/pre-auto-run-N`
+/// and `agent-doc/<doc>/pre-compact-N`), keeping the newest `KEEP_RECOVERY_TAGS`
+/// per `<doc>/<slug>` series. One tag is created per queue auto-run / compact, so
+/// without pruning they grow unbounded over a document's life
+/// (`#x8aw` / `#misfire-recovery-snapshot`). Best-effort: a non-git root or git
+/// failure yields `(0, 0)` rather than erroring.
+fn clean_old_recovery_tags(project_root: &Path, dry_run: bool) -> Result<(usize, usize)> {
+    let output = std::process::Command::new("git")
+        .current_dir(project_root)
+        .args(["tag", "-l", "agent-doc/*"])
+        .output();
+    let output = match output {
+        Ok(o) if o.status.success() => o,
+        _ => return Ok((0, 0)),
+    };
+
+    // Group tags by series prefix (everything up to the trailing `-N`), retaining
+    // only `pre-auto-run` / `pre-compact` checkpoint series.
+    let mut groups: std::collections::HashMap<String, Vec<(u64, String)>> =
+        std::collections::HashMap::new();
+    for tag in String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+    {
+        let Some((prefix, ord)) = tag.rsplit_once('-') else {
+            continue;
+        };
+        if !(prefix.ends_with("pre-auto-run") || prefix.ends_with("pre-compact")) {
+            continue;
+        }
+        let Ok(n) = ord.parse::<u64>() else {
+            continue;
+        };
+        groups
+            .entry(prefix.to_string())
+            .or_default()
+            .push((n, tag.to_string()));
+    }
+
+    let mut deleted = 0usize;
+    let mut kept = 0usize;
+    for (_prefix, mut series) in groups {
+        // Newest (highest ordinal) first; keep the newest KEEP_RECOVERY_TAGS.
+        series.sort_by(|a, b| b.0.cmp(&a.0));
+        for (idx, (_n, tag)) in series.iter().enumerate() {
+            if idx < KEEP_RECOVERY_TAGS {
+                kept += 1;
+                continue;
+            }
+            if dry_run {
+                eprintln!("[gc] would delete old recovery tag: {}", tag);
+                deleted += 1;
+                continue;
+            }
+            match std::process::Command::new("git")
+                .current_dir(project_root)
+                .args(["tag", "-d", tag])
+                .output()
+            {
+                Ok(o) if o.status.success() => deleted += 1,
+                _ => kept += 1,
+            }
+        }
+    }
+    Ok((deleted, kept))
 }
 
 /// Walk the project to find all markdown documents and compute their hashes.
@@ -899,5 +981,86 @@ mod tests {
         let loaded = sessions::load_in(root).unwrap();
         assert!(loaded.values().any(|entry| entry.session_id == live_uuid));
         assert!(!loaded.values().any(|entry| entry.session_id == dead_uuid));
+    }
+
+    fn git_in(dir: &Path, args: &[&str]) {
+        let out = std::process::Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {:?} failed", args);
+    }
+
+    fn tag_count(dir: &Path, pattern: &str) -> usize {
+        let out = std::process::Command::new("git")
+            .current_dir(dir)
+            .args(["tag", "-l", pattern])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .count()
+    }
+
+    #[test]
+    fn clean_old_recovery_tags_keeps_newest_per_series() {
+        // #x8aw: recovery tags accumulate one-per-run; GC keeps the newest
+        // KEEP_RECOVERY_TAGS per <doc>/<slug> series, leaving other series and
+        // unrelated tags untouched.
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        git_in(root, &["init", "-q"]);
+        git_in(root, &["config", "user.email", "t@t.t"]);
+        git_in(root, &["config", "user.name", "t"]);
+        std::fs::write(root.join("f"), "x").unwrap();
+        git_in(root, &["add", "."]);
+        git_in(root, &["commit", "-q", "-m", "init"]);
+
+        // 22 pre-auto-run tags (2 over the cap), 3 pre-compact, 1 unrelated.
+        for n in 1..=22 {
+            git_in(root, &["tag", &format!("agent-doc/session/pre-auto-run-{n}")]);
+        }
+        for n in 1..=3 {
+            git_in(root, &["tag", &format!("agent-doc/session/pre-compact-{n}")]);
+        }
+        git_in(root, &["tag", "v1.0.0"]);
+
+        let (deleted, _kept) = clean_old_recovery_tags(root, false).unwrap();
+        assert_eq!(deleted, 2, "should delete 22-20 oldest pre-auto-run tags");
+        assert_eq!(
+            tag_count(root, "agent-doc/session/pre-auto-run-*"),
+            KEEP_RECOVERY_TAGS,
+            "newest {KEEP_RECOVERY_TAGS} pre-auto-run tags retained"
+        );
+        // The oldest two (ordinals 1, 2) are gone; the newest remain.
+        assert_eq!(tag_count(root, "agent-doc/session/pre-auto-run-1"), 0);
+        assert_eq!(tag_count(root, "agent-doc/session/pre-auto-run-22"), 1);
+        // Other series and unrelated tags untouched.
+        assert_eq!(tag_count(root, "agent-doc/session/pre-compact-*"), 3);
+        assert_eq!(tag_count(root, "v1.0.0"), 1);
+    }
+
+    #[test]
+    fn clean_old_recovery_tags_dry_run_deletes_nothing() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        git_in(root, &["init", "-q"]);
+        git_in(root, &["config", "user.email", "t@t.t"]);
+        git_in(root, &["config", "user.name", "t"]);
+        std::fs::write(root.join("f"), "x").unwrap();
+        git_in(root, &["add", "."]);
+        git_in(root, &["commit", "-q", "-m", "init"]);
+        for n in 1..=25 {
+            git_in(root, &["tag", &format!("agent-doc/d/pre-auto-run-{n}")]);
+        }
+        let (deleted, _kept) = clean_old_recovery_tags(root, true).unwrap();
+        assert_eq!(deleted, 5, "dry-run reports 25-20 deletions");
+        assert_eq!(
+            tag_count(root, "agent-doc/d/pre-auto-run-*"),
+            25,
+            "dry-run deletes nothing"
+        );
     }
 }

@@ -31,69 +31,18 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260602-034746.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260602-041249.md`*
 
 Compacted content:
-- Archived 4 response topic(s): Is there sufficient logging to understand the 3-pane navigation layout?; 3-pane layout navigating bugs2.md → tsift.md; do #ht5v; 1 more
+- Archived 3 response topic(s): do #misfire-recovery-snapshot; Is the #backlog-auto-marker-misfire implementation destructive?; Will the agent guide the decision/recovery process?
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#misfire-recovery-snapshot]. #spec-test-build-install-commit-push
-
-### Re: do #misfire-recovery-snapshot — pre-auto-run recovery tag — opus-4-8
-
-Implemented per your call to do the defensive tag (the item was parked because the destructive precondition is unmet, but the auto-run mutation surface is still worth a recovery checkpoint, exactly like compact's). Done.
-
-#### What it does
-
-Before a **queue-sourced** auto-run (`orchestrate --from-queue`, sequential or dag) executes its first task — after the empty-batch / `--dry-run` / `--no-git` / `--plan` guards, before any task mutates the document or backlog — it drops a lightweight git tag `agent-doc/<doc>/pre-auto-run-N` at HEAD. A misfiring multi-cycle auto-run is now recoverable (`git reset`/inspect the tagged HEAD) without git/sidecar archaeology — the exact pain from the original `#backlog-auto-marker-misfire` incident.
-
-#### Implementation
-
-- Generalized compact's tag logic into a shared `create_pre_mutation_tag(file, slug, override)` (`agent-doc-orchestration/src/compact.rs`); `create_pre_compact_tag` now delegates with slug `pre-compact`. `orchestrate.rs` calls it with slug `pre-auto-run`, gated on `from_queue` and skipped for `--dry-run` / `--plan` / `--no-git`. Best-effort and non-fatal — a tag failure logs a warning and the run proceeds.
-- Tests: `create_pre_mutation_tag_auto_increments_ordinal_per_slug` (per-slug ordinals), `create_pre_mutation_tag_honors_override_name`.
-
-#### Verification
-
-Full Rust suite **3541 passed / 0 failed** (230 live-tmux ignored), clippy clean. Built + installed both binaries. Spec updated (`specs/07-orchestration-commands.md` § Pre-auto-run recovery tag); plan `plan-backlog-auto-marker-misfire.md` marks fix #4 implemented. Pushed `agent-doc@8560b7af` (branch `20260422/codex-agent-backend`) + superproject `main`.
-
-#### Scope note
-
-This is binary-only (no JB plugin / tmux-router change). It guards the auto-run mutation surface defensively; the original destructive backlog rewrite remains queue-scoped/inert in current code (fixes #1–#3), so this completes the `#backlog-auto-marker-misfire` cluster.
-Is the #backlog-auto-marker-misfire implementation destructive?
-
-### Re: Is the #backlog-auto-marker-misfire implementation destructive? — opus-4-8
-
-No — it's non-destructive by construction. Nothing across the four fixes rewrites, moves, or deletes document/backlog/working-tree content:
-
-- **Fix #1 (preflight warning):** purely a non-blocking `misplaced_component_attr` warning for a misplaced `auto`/unknown attr on `agent:backlog`. It emits guidance text and mutates nothing.
-- **Fixes #2/#3:** no code change. The original destructive misfire (an auto-run rewriting the backlog with minted `do [#id]` stubs) is prevented by *queue-scoping* — the destructive path simply doesn't run. It wasn't replaced by something destructive; it was gated off.
-- **Fix #4 (the pre-auto-run tag I just shipped):** the only new side effect is `git tag agent-doc/<doc>/pre-auto-run-N` at HEAD — a lightweight ref pointing at an existing commit. It *creates* a recovery point; it doesn't rewrite, move, or delete anything. It's the opposite of destructive (its whole purpose is to make a hypothetical misfire recoverable). It's best-effort/non-fatal (a tag failure logs a warning and the run continues), and it never force-overwrites — `git tag` without `-f`, so a name collision fails closed and is warned rather than clobbering an existing tag.
-
-**One housekeeping caveat (not destructive):** the `pre-auto-run-N` tags accumulate, one per queue auto-run (same as compact's `pre-compact-N`). They're cheap refs but grow over time; prune with `git tag -d agent-doc/<doc>/pre-auto-run-*` if they ever clutter the tag namespace. I queued a `[recommended]` item to add automatic tag GC.
-
-So: fix #1 only warns, the destructive original path is gated off (not replaced), and fix #4 only adds a recovery tag. No part of it performs a destructive mutation.
-❯ Will the agent guide the decision/recovery process?
-
-### Re: Will the agent guide the decision/recovery process? — opus-4-8
-
-Honestly: **not automatically — today the tag is a passive checkpoint, not a guided flow.** Two layers to separate:
-
-#### What the binary does today
-
-- **At tag creation:** it logs `[agent-doc] Tagged pre-auto-run state as agent-doc/<doc>/pre-auto-run-N` to stderr, so the recovery point is visible in the run output. That's the *only* proactive surfacing.
-- **At misfire/recovery time:** nothing. There's no misfire detector that says "your backlog was rewritten — recover at this tag," and no command that lists the recovery tags or offers to reset. Recovery is currently manual: list the tags (`git tag -l 'agent-doc/<doc>/pre-auto-run-*'`), pick the latest, then `git reset`/`git checkout` it. `agent-doc undo` exists but only restores the pre-*response* snapshot, not these pre-auto-run tags.
-
-#### What the agent (me) does
-
-If you tell me a misfire happened in an agent-doc session, I'll guide it interactively — find the right `pre-auto-run-N`/`pre-compact-N` tag, show the diff, and walk through the reset. But that's me-in-the-loop, not a binary-owned, discoverable recovery path.
-
-#### Gap → queued
-
-So the answer to your question as it stands is "no, not by the tool itself." That's a real gap: a checkpoint with no guided exit isn't much better than git archaeology for someone who doesn't know the tag convention. I queued a `[recommended]` item to add a guided recovery command (list recovery tags newest-first, offer reset/inspect, optional misfire detection pointing at the latest tag) — it pairs with the tag-GC item. Worth doing together if you want the recovery story to actually be self-service.
-<!-- agent:boundary:d9829665 -->
+<!-- agent:boundary:f2ccafea -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
+- [#kc5e]
+- [#x8aw]
 - I have been using agent-doc and have not seen any bugs. Can the gated review items be completed? If yes, complete them. I want to move on to performance improvements.
 - lazily-rs is now multithreaded. Update tasks/agent-doc/plans/lazily-rs-integration.md with recent changes.
 - [#lr-content-6]

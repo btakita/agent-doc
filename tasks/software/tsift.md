@@ -96,7 +96,36 @@ Confidence: high.
 ### Re: #astspansearch closeout recovery — gpt-5
 
 Closeout recovery note: the `#astspansearch` implementation response was already committed and the item was marked done; this write reopens the binary-owned document closeout after the IPC boundary/session-check drift. No additional code changes were made in this repair write. The remaining active queue head is `#astqueryfacets`.
-<!-- agent:boundary:14468cbf -->
+
+### Re: #astqueryfacets — gpt-5
+
+> **Queue prompt:**
+>
+> [#astqueryfacets]
+
+
+Implemented `#astqueryfacets` and committed it in `btakita/tsift`.
+
+What changed:
+- Added repeatable `tsift search` facet flags: `--lang`, `--kind`, `--node-kind`, `--section`, `--parent`, `--child`, `--fence-language`, `--list-depth`, and `--heading-level`.
+- Wired filters into indexed symbol/AST preview search, including over-fetch before facet filtering so narrowed previews can still fill the requested limit. Preserved the existing zero-limit behavior.
+- Added AST context matching for parent/child handles and names, Markdown section paths/handles, fenced-code language, list depth, and heading level.
+- Echoed active filters in `report.filters` and human search-budget output; file-level lexical hits remain the fallback surface.
+- Updated `SPEC.md` and added CLI/report/filter tests.
+
+Commits:
+- `btakita/tsift@02b7d8e` — `feat: add ast search facet filters`
+- parent submodule pointer committed as `agent-loop@4cc3b9536` — `chore: update tsift submodule`; parent push follows this binary-owned document closeout.
+
+Verification:
+- `cargo test -p tsift-cli search_` passed.
+- Final-state `make check` passed: clippy, workspace tests, SimWorld, OpenCode npm tests, and npm publish dry run.
+- `cargo build --workspace` passed.
+- `cargo install --path . --force` passed and installed `tsift 0.1.62`.
+- Installed CLI smoke passed: `tsift --envelope search search_budget_report --path . --json --budget normal --lang rust --kind function --node-kind function_item` returned `report.filters` with `languages=[rust]`, `kinds=[function]`, and `node_kinds=[function_item]`.
+- GitHub Actions CI for `btakita/tsift@02b7d8e`, run `26846278352`, passed on rerun attempt 2: `clippy + test` and `live Convex graph acceptance` both succeeded. Attempt 1 had a transient live-acceptance job failure before the acceptance step while the cache/build step still had no failed-step log.
+- Tmux CI evidence: the workflow has no tmux job, `rg -n "tmux" .github Makefile packages src tests` returned no matches, and `make -n tmux-ci` reports no such target.
+<!-- agent:boundary:d75de561 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -108,7 +137,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~[#astspansearch]~
-- [#astqueryfacets]
+- ~[#astqueryfacets]~
 - [#astnavgraph]
 - [#mdembeddedcode]
 - [#astrankingmerge]
@@ -118,7 +147,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#astqueryfacets] Add cross-language AST query facets and filters: --lang, --kind, --node-kind, --section, --parent, --child, and Markdown-specific fence-language/list-depth/heading-level facets.
 - [ ] [#astnavgraph] Project AST navigation edges into graph-db: contains, parent/child, previous/next sibling, enclosing module/section, call/import/route, and Markdown section/block containment edges with stable handles.
 - [ ] [#mdembeddedcode] Treat Markdown fenced code blocks as embedded language islands: parse supported fence languages, link fence AST nodes to extracted symbols, and let search navigate from prose section to embedded code and back.
 - [ ] [#astrankingmerge] Merge symbol, span, lexical, summary, and graph-neighborhood evidence into one AST-aware ranking path so file-level lexical matches do not drown out precise span hits.

@@ -95,19 +95,33 @@ But there was a **genuine remaining gap in exactly the operator's repro**: the c
 - Committed + pushed: `9fac6238` on `20260422/codex-agent-backend`. CI run `26848443567` pending; prior two runs green; this change adds no new live-tmux CI behavior.
 
 Marking `#jb-tsift-pane-sync` **done** — all plan phases are implemented, code-complete, unit-tested, and shipped to both binaries. The residual is live-JB verification (navigate bugs2→tsift, run manual `Sync Tmux Layout`), which is the standing `make tmux-ci` / live-session modality for this class, not unfinished implementation.
-<!-- agent:boundary:ed7b5278 -->
+
+### Re: struck #subagent-blocks-session + #jb-busy-inactive-queue-dispatch — acknowledged, with one stale-text flag — opus-4-8
+
+Both queue heads struck — acknowledged. Their real state, so nothing reads as more-done than it is:
+
+- **`#subagent-blocks-session`** — now `[/]` in review. **Design decision delivered** (the item's actual blocker): two-layer = instruction-surface rule (run build/test synchronously in-foreground, no in-cycle subagent/`run_in_background`) + a `session_check` closeout guard. **Implementation not yet landed** (instruction-surface edit + guard + `audit-docs`/`make check`). ⚠️ Its review text still reads *"PRECONDITIONS (unmet)"* — that's now **stale**; the preconditions are met. Recommend a `--review-edit` to "design decided, ready to implement (instruction rule + closeout guard)" so it doesn't read as blocked. I can't do that edit from this gated pane.
+- **`#jb-busy-inactive-queue-dispatch`** — fully planned; the deterministic core (arm-or-fail-closed for the `queue_active:false` busy-head case, extending the shipped `idle_queue_drain_decision` watcher) is implementable now, only the live two-session Codex repro gated. Plan carries the deterministic-vs-gated split I added last turn.
+
+**Notable:** the concurrent actor shipped **`#jb-tsift-pane-sync`** (`9fac6238`, both binaries refreshed) — including the focus-path cross-document guard (`reject_cross_document_owner_pane` now also funnels `find_live_owner_pane*`, not just the normal-path resolver). That's the **execution-context contamination fix** — the root cause that's had *my* cycles running inside lazily-rs's / monsterrodholders' panes. Once this session re-routes onto a freshly-resolved owner pane, the gated-binary + wrong-pane condition that's blocked me from verifying/finalizing all session should clear. Worth a fresh `Run Agent Doc` to rebind this document to its own `%70` owner.
+
+No code or plan changes this turn — nothing was requested beyond reaping the two heads.
+The two changes are strikethroughs (content_edits) — you're reaping `do [#subagent-blocks-session]` and `do [#jb-busy-inactive-queue-dispatch]`, both of which I answered last turn. No new work requested; this is an acknowledgment turn. One important state change landed too: `#jb-tsift-pane-sync` shipped.
+**Closeout:** acknowledgment only; no deliverable to commit. Three uncommitted plan edits from prior turns still stand (`plan-jb-tsift-pane-sync-regression.md`, `plan-lazily-rs-queued-prompt-patchback-miss.md`, `plan-jb-run-agent-doc-busy-queue-dispatch-deadlock.md`) — say "commit it" to land all three as one non-session change. The one actionable follow-up is updating `#subagent-blocks-session`'s stale "preconditions unmet" review text. Session-doc response uncommitted (`finalize` gated; though `#jb-tsift-pane-sync` shipping should be what finally un-gates this pane).
+<!-- agent:boundary:198343be -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#manual-queue-head-loss]~
-- do [#subagent-blocks-session]
-- do [#jb-busy-inactive-queue-dispatch]
+- ~do [#subagent-blocks-session]~
+- ~do [#jb-busy-inactive-queue-dispatch]~
 - do [#lr-queue-patchback-miss]
 - do [#lr-head-8]
 - do [#lr-wire-9]
 - do [#lr-actor-10]
 - do [#run-gated-review-items]
+- I removed "Do not implement from" plan-jb-run-agent-doc-busy-queue-dispatch-deadlock.md
 ---
 JB `Compact Exchange` error the first attempt. The 2nd attempt worked.
 ```

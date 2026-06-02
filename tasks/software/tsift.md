@@ -1,5 +1,6 @@
 ---
 agent_doc_session: tsift-v0.1
+resume: 019e85d7-f9ee-79f3-b597-4ed352495bbd
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -136,7 +137,72 @@ Verification:
 - Latest GitHub Actions `CI` run checked: `26784235057` on `main`, conclusion `success`; jobs `clippy + test` and `live Convex graph acceptance` both succeeded. This repo lists `CI` and `Release` workflows; no separate tmux-test workflow is present.
 
 No escalation was used. Confidence: high for the adapter hot-read optimization and parity-preserving behavior covered by tests. I did not run repeated `backend-eval --full-projection` samples here because that is the queued `#surrealbench` item; the next queue item is `#surrealbulk`.
-<!-- agent:boundary:23123073 -->
+Implemented `#surrealbulk` in the working tree, but I could not complete the required commit/push or agent-doc committed closeout.
+
+> **Queue prompt:**
+>
+> [#surrealpush]
+
+
+What changed in `src/tsift`:
+- [SPEC.md](/home/brian/work/btakita/agent-loop/src/tsift/SPEC.md)
+- [lib.rs](/home/brian/work/btakita/agent-loop/src/tsift/packages/tsift-surrealdb/src/lib.rs)
+
+The SurrealDB adapter now bulk-replaces projection rows in one transaction, preserves deterministic record IDs, and rebuilds Rust-side node/edge indexes in one pass instead of replaying per-row `upsert_node` / `upsert_edge`.
+
+Verification passed:
+- `cargo test --manifest-path packages/tsift-surrealdb/Cargo.toml`
+- `cargo test -p tsift-cli --features backend-surrealdb graph_db_backend_eval_benchmarks_candidate_stores_against_sqlite -- --nocapture`
+- `git diff --check`
+- `make check`
+- `cargo build --locked`
+- `cargo install --path . --locked --force`
+- `tsift --version` -> `tsift 0.1.62`
+- feature-backed bounded `backend-eval --candidate surrealdb` passed parity on real/high-degree/deep-chain datasets
+
+Blocked:
+- `.git` is mounted read-only: `/home/brian/work/btakita/agent-loop/.git type ext4 (ro,...)`
+- `git add SPEC.md packages/tsift-surrealdb/src/lib.rs` fails creating `.git/modules/src/tsift/index.lock`
+- `agent-doc finalize` wrote the response into `tasks/software/tsift.md` and gated `#surrealbulk`, but failed at the Git commit boundary for the same read-only `.git` reason
+
+So the code is complete and locally verified, but the repo and session document are intentionally left uncommitted until writable Git metadata is restored.
+
+### Re: #surrealbulk — gpt-5
+
+> **Queue prompt:**
+>
+> [#surrealbulk]
+
+
+Implemented `#surrealbulk` in the working tree, but commit/push is blocked by the current filesystem mount: `/home/brian/work/btakita/agent-loop/.git` is mounted read-only, so Git cannot create `.git/modules/src/tsift/index.lock` and cannot stage the tsift submodule changes. I am leaving the backlog item gated rather than marking it done until the commit/push boundary can complete.
+
+Changed paths in `src/tsift` working tree:
+
+- `SPEC.md`
+- `packages/tsift-surrealdb/src/lib.rs`
+
+What changed: `SurrealdbGraphStore::replace_projection_rows()` no longer clears and replays public `upsert_node` / `upsert_edge` one row at a time. It now converts provider-neutral projection rows once, bulk-replaces SurrealDB node and edge records in one transaction with deterministic record ids, and rebuilds the Rust-side node/edge indexes in one pass from the same rows. The spec now documents the SurrealDB projection-load path and notes that backend-eval reports this load as the candidate `refresh` operation.
+
+Verification passed:
+
+- `cargo test --manifest-path packages/tsift-surrealdb/Cargo.toml`
+- `cargo test -p tsift-cli --features backend-surrealdb graph_db_backend_eval_benchmarks_candidate_stores_against_sqlite -- --nocapture`
+- `git diff --check`
+- `make check`
+- `cargo build --locked`
+- `cargo install --path . --locked --force`
+- `tsift --version` reports `tsift 0.1.62`
+- Feature-backed bounded backend-eval sample with `--candidate surrealdb` passed parity for `real`, `synthetic_high_degree`, and `synthetic_deep_chain`; SurrealDB refresh/load timings were `2,170,067us / 14,264 rows`, `150,745us / 1,089 rows`, and `183,178us / 1,280 rows` respectively.
+
+CI review: latest remote `tsift` CI run `26791613768` for the prior `#surrealidx` commit has `clippy + test` passing. Its `live Convex graph acceptance` job failed before the acceptance step started; the failing cache step has no error log, so I classified it as an external CI/cache-start failure rather than a code regression.
+
+Blocked commands:
+
+- `git add SPEC.md packages/tsift-surrealdb/src/lib.rs` failed with `fatal: Unable to create '/home/brian/work/btakita/agent-loop/.git/modules/src/tsift/index.lock': Read-only file system`.
+- A direct write probe under `.git/modules/src/tsift` also failed with `Read-only file system`.
+
+Escalation: none available in this harness because approval policy is `never`. Confidence is high for the code change and local verification, but `#surrealbulk` remains gated on restoring writable `.git` access so the intended tsift commit, superproject submodule commit, push, and post-push CI watch can run.
+<!-- agent:boundary:3d5b5b86 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -148,15 +214,14 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~[#surrealidx]~
-- [#surrealbulk]
-- [#surrealpush]
+- ~[#surrealbulk]~
+- ~[#surrealpush]~
 - [#surrealbench]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#surrealbulk] Batch SurrealDB projection load: replace per-row upsert loops with bulk/transactional row load plus one-pass secondary-index rebuild; measure refresh/load separately.
 - [ ] [#surrealpush] Compare SurrealDB query pushdown vs Rust-derived indexes behind backend-surrealdb and keep the faster design that preserves GraphStore parity.
 - [ ] [#surrealbench] Run repeated backend-eval --full-projection samples through metric-digest after SurrealDB optimizations and keep promotion on hold unless it beats SQLite across required workloads.
 <!-- /agent:backlog -->
@@ -164,6 +229,7 @@ preset #spec-test-build-install-commit-push
 ## Review
 
 <!-- agent:review -->
+- [/] [#surrealbulk] Batch SurrealDB projection load: replace per-row upsert loops with bulk/transactional row load plus one-pass secondary-index rebuild; measure refresh/load separately.
 - [/] [#full-e2e-verify] In fresh project: opencode plugin opencode-tsift && opencode then /tsift-status. On success mark #e2e-install done.
 - [/] [#npm-publish-verify] After auth configured, tag release and verify publish-opencode-plugin CI job succeeds and opencode-tsift appears on npmjs.org
 - [/] [#npm-auth-setup] Configure NPM_TOKEN secret + TSIFT_ENABLE_NPM_PUBLISH=true variable in GitHub repo settings

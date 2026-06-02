@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -67,7 +67,30 @@ Verification:
 - `cargo install --path . --force` passed.
 - Installed smoke test passed: `tsift --envelope markdown-ast SPEC.md --path . --budget small --json`.
 - GitHub Actions CI run `26842414251` passed. The latest CI workflow has no tmux-named job to inspect, so there was no tmux leg to rerun.
-<!-- agent:boundary:e7266b54 -->
+
+### Re: #mdtokens — gpt-5
+
+Completed `#mdparsecache` and `#mdtokens`.
+
+Implemented a reusable in-process Markdown projection cache keyed by file/content hash, then routed Markdown section/block edit lookups through it so repeated edit-intents planning/apply paths reuse one extracted tree. The Markdown projection now reports cache evidence, node counts, and phase timings for parse/extract and outline projection.
+
+Added token-budgeted Markdown projections: `markdown-ast` now exposes outline-first mode, selected-node mode via `--node <mdast-*|span-*>`, and selected-node expansion handles; `source-read` now includes a bounded Markdown window outline for visible nodes. The real-session token-savings fixture now measures raw session Markdown body replay against compact outline plus selected-node expansion handles.
+
+Commits pushed:
+- `btakita/tsift@ebf9395` `feat: cache markdown projections`
+- `btakita/agent-loop@5baf64498` `chore: update tsift submodule`
+
+Verification:
+- `cargo check -p tsift-cli` passed.
+- `cargo test -p tsift-cli markdown_ast` passed.
+- `cargo test -p tsift-cli token_savings` passed.
+- `cargo test -p tsift-cli markdown` passed.
+- `make check` passed after the final edit.
+- `cargo build --workspace` passed.
+- `cargo install --path . --force` passed.
+- Installed smoke checks passed for `markdown-ast` outline/phase fields and `source-read` Markdown window outlines.
+- GitHub Actions CI run `26843503622` passed. The tsift CI workflow has no tmux-named job to inspect, so there was no tmux leg to rerun.
+<!-- agent:boundary:06a24c84 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -86,8 +109,8 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#mdparsecache] Cache and reuse per-file Markdown parse/extract results across edit-intents planning/apply and source-read enrichment; add large-document benchmarks and phase timings for section/block lookup hot paths.
-- [ ] [#mdtokens] Add token-budgeted Markdown projections: outline-first section/block previews, selected-node expansion handles, and measured token-savings fixtures for session-review/context-pack instead of replaying raw markdown bodies.
+- [x] [#mdparsecache] Cache and reuse per-file Markdown parse/extract results across edit-intents planning/apply and source-read enrichment; add large-document benchmarks and phase timings for section/block lookup hot paths.
+- [x] [#mdtokens] Add token-budgeted Markdown projections: outline-first section/block previews, selected-node expansion handles, and measured token-savings fixtures for session-review/context-pack instead of replaying raw markdown bodies.
 <!-- /agent:backlog -->
 
 ## Review

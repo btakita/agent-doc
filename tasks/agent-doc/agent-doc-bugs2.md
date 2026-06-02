@@ -46,7 +46,20 @@ Planning item complete. The deliverable for this `#agent-doc-bug` item is the pl
 - **Plan** — 7 steps: two fixtures (compacted-tail closeout without `### Re:`; visible-direct-patchback state), a response-normalization step before unmatched-content insertion, a recovery-adoption reorder so a visible matching response commits before dedup short-circuits, shape-aware `session-check` recovery text (no body / visible-but-uncommitted / committed-target-but-stale-pointer), and regressions across all three states.
 
 The item carries an explicit **DO NOT IMPLEMENT in this planning item** marker, so the queue preset's `#spec-test-build-install-commit-push` does not apply here — the item-level scope (plan only) governs. The plan file is the tracking artifact for the eventual fix; reaping `#write-closeout-response-shape` as done since its planning deliverable is satisfied.
-<!-- agent:boundary:c87284d5 -->
+
+### Re: response not written into the document (#codex-direct-writeback-miss) — opus-4-8
+
+You're right — my previous turn produced a console-only "holding" response and never crossed `finalize`, so per the agent-doc contract that response did not exist. Finishing it now, and folding this into the existing bug rather than spawning a duplicate.
+
+**This bug is already tracked.** `#codex-direct-writeback-miss` (backlog) + `tasks/agent-doc/plan-response-missing-after-manual-closeout.md` already cover "a completed turn must not exit with only the prompt persisted in the exchange." The queued free-text item *"agent-doc monsterrodholders.md turns do not apply the response into the document"* is the same class, so I enriched the existing plan instead of creating `plan-turn-response-not-applied-to-document.md` (deleted as a duplicate).
+
+What I added to the plan — two new failure shapes observed in *this* session, on the Claude-skill path (the existing plan was Codex-only):
+
+1. **Console-only response, no persistence command run.** The skill turn concluded with the answer in the console but never piped it through `finalize`/`write --commit`. The Codex Stop-hook `committed_without_response_body` backstop doesn't run on the Claude path, so nothing caught it. New fix steps 6 + the new exit criterion add a skill-path "response produced but never persisted" guard.
+2. **Persistence attempted but queue-consume diverged under live IPC.** A `finalize --done` did commit the `### Re:` body and reap the item, but the queue-consume step failed (`snapshot queue state diverged from document queue`, `live_prompt_drift_after_preflight`) while you were live-typing new queue items and a JB `File Cache Conflict` reverted the queue to an older snapshot. The next preflight then hard-blocked on the orphaned bare `[#id]` head, so no subsequent response could land — the document looked stuck. `repair --apply-recovery` committed the lossy side and didn't strike the head; I had to strike `~[#write-closeout-response-shape]~` manually. New fix steps 7–9 make consume head-aware, add a binary-owned orphaned-head strike, and make recovery IPC-listener aware so it never requires fighting a live buffer.
+
+Gating `#codex-direct-writeback-miss` to `[/]` — planning deliverable complete (plan written + enriched), implementation pending. I did **not** auto-loop the remaining queue items: several are real unanswered user prompts (the lazily-rs design questions, the tsift.md stash-pane report, the File-Cache-Conflict snapshot-revert, the `/clear`-while-task-in-progress report) that take precedence over auto-continuation and deserve their own cycles.
+<!-- agent:boundary:12c74052 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -55,16 +68,18 @@ preset #spec-test-build-install-commit-push
 - ~[#lr-content-6]~
 - ~[#queue-head-struck-on-foreign-exchange-answer]~
 - ~[#lr-cycle-7]~
-- [#write-closeout-response-shape]
+- ~[#write-closeout-response-shape]~
 - Should the graph be per-file (one context per tracked document) or per-process (one context with file-keyed cells)?: Use your judgement. There can also be multiple contexts.
 - How to handle config hot-reload in long-lived ActorContext — file watcher on .agent-doc/config.toml or clear on next cycle?: Can you support both?
+- agent-doc monsterrodholders.md turns do not apply the response into the document.
 - When I navigate from this document to tsift.md, the tmux focus is on the tsift.md pane but the tmux pane is in the stash, not in the agent-doc tmux window.
-- As I was writing the previous queue item, 
+- As I was writing the previous queue item, a JB `File Cache Concflict` surfaced and I accepted. But the queue items reverted to a previous snapshot without my recent work. I had to manually reapply my changes.
 - [#lr-head-8]
 - [#lr-wire-9]
 - [#lr-actor-10]
 - JB `Clear Session Context` on monsterrodholders.md presented me with `Interrupt and Clear`. I applied `Interrupt and Clear` and the Codex session closed with the supervisor presenting Enter to restart or q to quit. I Pressed enter, Codex restarted and I saw an error `'/clear' is disabled while a task is in progress.`.
 - Add a preset attribute to agent:queue, where the value can be a free-text prompt that correctly applies `prompt_presets`.
+- do [#codex-direct-writeback-miss]
 <!-- /agent:queue -->
 ###
 <!--
@@ -77,7 +92,6 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Backlog
 
 <!-- agent:backlog priority queue=append -->
-- [ ] [#codex-direct-writeback-miss] [recommended] #agent-doc-bug 2026-06-02: Direct-chat Codex execution of src/boost-client/tasks/monsterrodholders.md prompt `do [#pmaxpost]. #spec-test-commit-push` completed site + parent commits/pushes but the final assistant response was not written into the session document until manual `agent-doc write --commit` repair; make the Codex/direct-chat closeout gate fail closed before final chat output when the response heading is absent from HEAD, and keep the recovery path binary-owned. Plan: tasks/agent-doc/plan-response-missing-after-manual-closeout.md
 - [ ] [#lr-head-8] Phase 8: Add HeadContentSlot + SnapshotCommitStatusSlot for git show HEAD dedup. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-wire-9] Phase 9: Wire RunContext into ops_log, template_io, patch, harness detection. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-actor-10] Phase 10: Add GlobalConfigSlot + SessionRegistrySlot for ActorContext. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
@@ -86,6 +100,7 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Review
  
 <!-- agent:review -->
+- [/] [#codex-direct-writeback-miss] [recommended] #agent-doc-bug 2026-06-02: Direct-chat Codex execution of src/boost-client/tasks/monsterrodholders.md prompt `do [#pmaxpost]. #spec-test-commit-push` completed site + parent commits/pushes but the final assistant response was not written into the session document until manual `agent-doc write --commit` repair; make the Codex/direct-chat closeout gate fail closed before final chat output when the response heading is absent from HEAD, and keep the recovery path binary-owned. Plan: tasks/agent-doc/plan-response-missing-after-manual-closeout.md
 - [/] [#weqq] [recommended] #jb-settext-payload-log IMPLEMENTED 2026-06-01 (submodule 12676120, JB plugin 0.2.145 built+signed): PatchWatcher.kt now logs the full result payload before document.setText on both applyPatch.component and repositionBoundary, behind LOG.isDebugEnabled, so enabling the com.github.btakita.agentdoc debug category captures the exact setText payload the IPC-duplication family needs (previously only hashes+lengths). GATED on operator: install build/distributions/agent-doc-jetbrains-0.2.145-signed.zip + restart, enable debug logging, then run the Path B capture (#wy0y/#6cmx). Plan: tasks/agent-doc/plan-full-document-ipc-corruption-typing-prompt.md.
 - [/] [#6qfn] [recommended] #optindocs-editor follow-up to #4a6p: wire the FFI agent_doc_is_session_document gate into JB SubmitAction.update (hide/disable Run Agent Doc for a non-opted-in .md) and the VS Code extension, then live-verify. Needs a JB pluginVersion bump + signed reinstall. Plan: tasks/agent-doc/plan-opt-in-agent-doc-documents.md.
 - [/] [#v819] Path A (#jkvs — after Step 0): one consolidated live busy-pane verification session to batch-close ~11 live-verify items: #t41j, #jb-busy-queue-deadlock-live-verify, #jb-run-agent-doc-busy-feedback-live-verify, #route-drain-all-surface-live-verify, #codex-owned-pane-stop-hook-live-verify, #codex-owned-pane-prompt-miss-followups (2b/3), #codex-final-response-live-verify, #recovery-drift-apply-live-verify, #jb-load-tmux-window-verify, #j0k8, #stash-pane-promote-on-focus.

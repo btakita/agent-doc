@@ -78,7 +78,7 @@ I have the full map now. The parent `#nochange-after-stall` (run.rs:220) **expli
 
 Same structural situation as the last two turns: this pane is binary-declined (`cargo`/`make`/`.bin/agent-doc` all "requires approval"), and a concurrent toolchain-enabled actor is landing the actual code on this same document (step 2 shipped `4d0184e3`/`cbeec61ce` while I was read-only). I can't `make check` or `finalize` here, so I won't force unverified edits into the hot path. What I can deliver is the precise implementation map.
 **Closeout:** uncommitted — `finalize` is declined in this pane, consistent with the last two turns. The map above is the deliverable; implementation/`make check`/finalize needs the toolchain pane.
-<!-- agent:boundary:721a6f43 -->
+<!-- agent:boundary:d028fcb8 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -86,7 +86,7 @@ Same structural situation as the last two turns: this pane is binary-declined (`
 - ~Gated items in review are not easily runnable. Please enable the user to run gated items by `do [item-id]` or plating the item in the queue. Please focus the runs to complete the gated item. If the gated item can only be partially completed, extract a new task to complete which contains the conditions to complete the item. If no work was done due to preconditions not being met, add a timestamp of the attempts to the item. Ensure the preconditions are present in the gated item description.~
 - ~do [#nochange-after-stall]~
 - ~do [#lr-queue-response-miss]~
-- ~do [#nochange-after-stall-breadth]~
+- do [#nochange-after-stall-breadth]
 - do [#owned-pane-prompt-recur]
 - do [#subagent-blocks-session]
 - do [#lr-queue-plan-deferral]

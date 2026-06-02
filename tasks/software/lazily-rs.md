@@ -54,14 +54,55 @@ I added these next items in priority order:
 4. #tsc16-optimistic-read: consider a versioned optimistic read path only if the matrix proves non-hot-slot workloads are still mutex-bound, because this may affect visibility semantics.
 
 Commands run: `tsift status`, `tsift status --fix`, `tsift index --workspace .`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, targeted `tsift` searches, and focused source/README inspections. Verification: no source changes or tests this cycle; this is backlog/analysis only. Confidence: medium-high. Escalation: none.
-<!-- agent:boundary:292e6c4f -->
+
+### Re: #tsc16-matrix — gpt-5
+
+> **Queue prompt:**
+>
+> [#tsc16-matrix]
+
+
+Completed #tsc16-matrix.
+
+Changed paths in `src/lazily-rs`: `benches/context.rs`, `examples/instrumentation_profile.rs`, `scripts/update-benchmark-results.py`, `tests/spec_compliance.rs`, `SPEC.md`, and `README.md`. I also committed the parent `agent-loop` submodule pointer update for `src/lazily-rs`.
+
+What changed:
+
+1. Added a `thread_safe_contention` Criterion matrix with `same_slot_write_read`, `independent_slots`, `read_mostly_waiters`, and `batched_write_bursts` cases at 1/2/4/8/16 workers.
+2. Added matching instrumentation profile rows and lock-attribution output for every matrix case/worker count.
+3. Updated the benchmark report script to ignore stale pre-matrix numeric-only contention rows, sort matrix rows in spec order, and make `--check` reuse existing estimates instead of resampling.
+4. Updated `SPEC.md`, README benchmark results, and spec-compliance tests to require the matrix timing and per-site lock wait/hold evidence.
+
+Commits pushed:
+
+- `src/lazily-rs`: `7b859f9 bench: add thread-safe contention matrix`
+- `agent-loop`: `87af43506 chore: update lazily-rs submodule`
+
+Verification:
+
+- `cargo fmt`
+- `cargo test`
+- `cargo test --features instrumentation`
+- `cargo test --features tokio`
+- `cargo test --features loom --test thread_safe_loom`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo build`
+- `cargo bench --features instrumentation --no-run`
+- `python3 scripts/update-benchmark-results.py` / `--no-run` for README refresh
+- `python3 scripts/update-benchmark-results.py --check`
+- Full Criterion run completed while refreshing the README; the final matrix includes wall-time rows plus lock-attribution rows.
+
+Notes: `cargo build` and bench compile still emit existing workspace patch warnings for `agent-kit`, `tagpath`, and `tmux-router` not being used in this crate graph. `cargo install --path .` is not applicable because `lazily` is a library crate with no binary targets. `make check` is not applicable in `src/lazily-rs` because there is no `Makefile`. GitHub workflow inspection found no workflows listed for `btakita/lazily-rs`, so there was no CI/tmux workflow run to inspect.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:e3052a3e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- [#tsc16-matrix]
+- ~[#tsc16-matrix]~
 - [#tsc16-wake-scope]
 - [#tsc16-refresh-fastpath]
 - [#tsc16-optimistic-read]
@@ -70,7 +111,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#tsc16-matrix] #performance #thread-safe Add a thread_safe_contention benchmark matrix that separates same-root/same-slot write+read contention from independent per-worker roots/slots, read-mostly waiters, and batched write bursts; record wall time plus per-site lock wait/hold at 1/2/4/8/16 workers before more synchronization changes
 - [ ] [#tsc16-wake-scope] #performance #thread-safe Prototype narrower recompute wakeups, such as per-slot waiter state or targeted notify_one, and compare with the current global Condvar notify_all under stale-completion, multi-slot, and 16-worker contention cases; keep Loom coverage
 - [ ] [#tsc16-refresh-fastpath] #performance #thread-safe Reduce remaining get_refresh/publish lock volume by merging cached freshness checks with value clone and using locked helper variants only where user callbacks still run outside the graph lock
 - [ ] [#tsc16-optimistic-read] #performance #thread-safe Explore a versioned optimistic read path only if the benchmark matrix shows read-mostly or independent-slot contention is still dominated by the global mutex; document visibility semantics before changing guarantees

@@ -926,6 +926,20 @@ fn build_compacted(
 /// Otherwise, derives the document name from the file stem and auto-generates
 /// `agent-doc/<doc-name>/pre-compact-N` where N is the next unused ordinal.
 fn create_pre_compact_tag(file: &Path, tag_override: Option<&str>) -> Result<()> {
+    create_pre_mutation_tag(file, "pre-compact", tag_override)
+}
+
+/// Create a lightweight git tag at the current HEAD to mark a pre-mutation
+/// recovery checkpoint before a destructive document/backlog rewrite.
+///
+/// `slug` names the checkpoint class (e.g. `pre-compact`, `pre-auto-run`).
+/// If `tag_override` is provided it is used as the tag name verbatim. Otherwise
+/// the document name is derived from the file stem and the tag auto-generates
+/// `agent-doc/<doc-name>/<slug>-N` where N is the next unused ordinal. This is
+/// the shared checkpoint primitive behind `compact`'s pre-compact tag and the
+/// queue auto-run's pre-auto-run tag (`#misfire-recovery-snapshot`), so a
+/// destructive auto-run misfire is recoverable without git/sidecar archaeology.
+pub fn create_pre_mutation_tag(file: &Path, slug: &str, tag_override: Option<&str>) -> Result<()> {
     // Resolve git root
     let canonical = file
         .canonicalize()
@@ -952,8 +966,8 @@ fn create_pre_compact_tag(file: &Path, tag_override: Option<&str>) -> Result<()>
                 .unwrap_or("doc")
                 .to_string();
 
-            // Count existing pre-compact tags to determine next N
-            let pattern = format!("agent-doc/{}/pre-compact-*", doc_name);
+            // Count existing tags for this slug to determine next N
+            let pattern = format!("agent-doc/{}/{}-*", doc_name, slug);
             let count = Command::new("git")
                 .current_dir(&git_root)
                 .args(["tag", "-l", &pattern])
@@ -969,7 +983,7 @@ fn create_pre_compact_tag(file: &Path, tag_override: Option<&str>) -> Result<()>
                     }
                 })
                 .unwrap_or(0);
-            format!("agent-doc/{}/pre-compact-{}", doc_name, count + 1)
+            format!("agent-doc/{}/{}-{}", doc_name, slug, count + 1)
         }
     };
 
@@ -984,7 +998,7 @@ fn create_pre_compact_tag(file: &Path, tag_override: Option<&str>) -> Result<()>
         anyhow::bail!("git tag {} failed: {}", tag_name, stderr.trim());
     }
 
-    eprintln!("[compact] Tagged pre-compact state as {}", tag_name);
+    eprintln!("[agent-doc] Tagged {} state as {}", slug, tag_name);
     Ok(())
 }
 
@@ -2277,5 +2291,81 @@ mod tests {
             ops_log.contains("compact_left_uncommitted"),
             "uncommitted compact must be recorded, got:\n{ops_log}"
         );
+    }
+
+    fn git(dir: &Path, args: &[&str]) {
+        let out = Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {:?} failed", args);
+    }
+
+    #[test]
+    fn create_pre_mutation_tag_auto_increments_ordinal_per_slug() {
+        // #misfire-recovery-snapshot: the shared pre-mutation checkpoint tag
+        // auto-generates `agent-doc/<doc>/<slug>-N`, incrementing N per slug.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        git(root, &["init", "-q"]);
+        git(root, &["config", "user.email", "t@t.t"]);
+        git(root, &["config", "user.name", "t"]);
+        let doc_path = root.join("session.md");
+        std::fs::write(&doc_path, "---\nsession: test\n---\n").unwrap();
+        git(root, &["add", "."]);
+        git(root, &["commit", "-q", "-m", "init"]);
+
+        create_pre_mutation_tag(&doc_path, "pre-auto-run", None).unwrap();
+        create_pre_mutation_tag(&doc_path, "pre-auto-run", None).unwrap();
+        // A different slug starts its own ordinal series.
+        create_pre_mutation_tag(&doc_path, "pre-compact", None).unwrap();
+
+        let tags = String::from_utf8(
+            Command::new("git")
+                .current_dir(root)
+                .args(["tag", "-l"])
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap();
+        assert!(
+            tags.contains("agent-doc/session/pre-auto-run-1"),
+            "tags: {tags}"
+        );
+        assert!(
+            tags.contains("agent-doc/session/pre-auto-run-2"),
+            "tags: {tags}"
+        );
+        assert!(
+            tags.contains("agent-doc/session/pre-compact-1"),
+            "tags: {tags}"
+        );
+    }
+
+    #[test]
+    fn create_pre_mutation_tag_honors_override_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        git(root, &["init", "-q"]);
+        git(root, &["config", "user.email", "t@t.t"]);
+        git(root, &["config", "user.name", "t"]);
+        let doc_path = root.join("session.md");
+        std::fs::write(&doc_path, "x").unwrap();
+        git(root, &["add", "."]);
+        git(root, &["commit", "-q", "-m", "init"]);
+
+        create_pre_mutation_tag(&doc_path, "pre-auto-run", Some("my-checkpoint")).unwrap();
+        let tags = String::from_utf8(
+            Command::new("git")
+                .current_dir(root)
+                .args(["tag", "-l"])
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap();
+        assert!(tags.contains("my-checkpoint"), "tags: {tags}");
     }
 }

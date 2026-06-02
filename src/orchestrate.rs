@@ -538,6 +538,23 @@ fn run_with_dependencies(
                 print_graph_plan(graph_evidence.as_ref(), &execution_tasks)?;
                 return Ok(());
             }
+            // #misfire-recovery-snapshot: before a queue-sourced auto-run mutates
+            // the document/backlog, drop a lightweight pre-auto-run recovery tag
+            // at HEAD (mirroring compact's pre-compact tag) so a misfiring
+            // auto-run is recoverable without git/sidecar archaeology. Best-effort
+            // and non-fatal — a tag failure must not block the run.
+            if config.from_queue
+                && let Err(e) = agent_doc_orchestration::compact::create_pre_mutation_tag(
+                    file,
+                    "pre-auto-run",
+                    None,
+                )
+            {
+                eprintln!(
+                    "[orchestrate] Warning: could not create pre-auto-run recovery tag: {}",
+                    e
+                );
+            }
             run_ordered_tasks_internal(
                 file,
                 &execution_tasks,
@@ -666,6 +683,23 @@ fn run_with_dependencies(
                 print_plan(&execution_tasks);
                 print_graph_plan(graph_evidence.as_ref(), &execution_tasks)?;
                 return Ok(());
+            }
+            // #misfire-recovery-snapshot: before a queue-sourced auto-run mutates
+            // the document/backlog, drop a lightweight pre-auto-run recovery tag
+            // at HEAD (mirroring compact's pre-compact tag) so a misfiring
+            // auto-run is recoverable without git/sidecar archaeology. Best-effort
+            // and non-fatal — a tag failure must not block the run.
+            if config.from_queue
+                && let Err(e) = agent_doc_orchestration::compact::create_pre_mutation_tag(
+                    file,
+                    "pre-auto-run",
+                    None,
+                )
+            {
+                eprintln!(
+                    "[orchestrate] Warning: could not create pre-auto-run recovery tag: {}",
+                    e
+                );
             }
             run_ordered_tasks_internal(
                 file,

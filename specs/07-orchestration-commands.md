@@ -79,6 +79,10 @@ This file covers binary-owned planning/orchestration and the queue surface that 
 - Streaming subprocess stderr is surfaced explicitly on failure instead of collapsing into an "empty response" error.
 - When the live session has warn/block accretion and the current diff still contains prompt targets, fresh orchestration agent requests use a bounded response-context pack instead of replaying the full exchange tail. The pack must include the active prompt targets, the current `### Session Summary` block when present, the head of `agent:backlog`, and the `### Re:` turns anchored to the prompt positions in `exchange` (enclosing response for inline edits, immediately previous response for tail prompts).
 
+### Pre-auto-run recovery tag (`#misfire-recovery-snapshot`)
+
+Before a **queue-sourced** auto-run (`--from-queue`, sequential or dag) executes its first task — i.e., after the empty-batch / `--dry-run` / `--no-git` / `--plan` guards but before any task mutates the document or backlog — `orchestrate` drops a lightweight git tag at HEAD: `agent-doc/<doc-name>/pre-auto-run-N` (next unused ordinal). This mirrors `compact`'s `pre-compact-N` checkpoint via the shared `create_pre_mutation_tag` helper, so a misfiring multi-cycle auto-run is recoverable (`git reset`/inspect the tagged HEAD) without git/sidecar archaeology. The tag is best-effort and non-fatal — a tag failure logs a warning and the run continues. It is skipped for non-queue runs (`--task`, `--from-file`, `--from-exchange`), `--dry-run`, `--plan`, and `--no-git`. Keep this aligned in `orchestrate.rs`, `compact.rs` (`create_pre_mutation_tag`), and this spec.
+
 ### Command classification
 
 - Queue/orchestration items starting with `/` are commands; everything else is a prompt.

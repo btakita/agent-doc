@@ -96,7 +96,36 @@ The one finding worth flagging clearly:
 I'm **not closing this out from here** — last turn's `finalize` fail-closed with `pane ownership mismatch: session owned by pane %50, current pane is %66`, and this document is actively owned/drained by that other pane (the struck items + enriched review entries above are its work, not mine). A competing `finalize`/`claim` from `%66` would race the owner and risk the very `#queue-user-edit-overwrite` / File-Cache-Conflict loss class you're reporting.
 
 So: your new reports are captured and in-flight under the owner pane. The actionable agent-doable item among them is the **`#queue-user-edit-overwrite` consume-boundary recheck** (reopen the `[/]`); the rest (`#jbstalldrain`, the `/clear`-while-task report, the tsift stash-pane focus, the Codex-log review for the monsterrodholders replay) are operator/live-IDE or owner-pane work. Run the queue from the owner pane (`%50`) — or stop one of the two sessions — and the owner will drain these cleanly; I'll stand down rather than double-drive this contended document.
-<!-- agent:boundary:91770b9b -->
+
+### Re: queue triage — config hot-reload answered + bug-report mapping — opus-4-8
+
+> **Queue prompt:**
+>
+> How to handle config hot-reload in long-lived ActorContext — file watcher on .agent-doc/config.toml or clear on next cycle?: Can you support both?
+
+
+Draining the unresolved queue tail in one pass instead of thrashing one item per cycle (`session_accretion` is at block level — 22 cycles / 15 no-op closeouts). Most of these map to already-tracked items; only one is new.
+
+#### Config hot-reload (queue head) — already answered
+
+Answered last cycle in the lazily-rs Context response: **support both** — clear-on-next-cycle as the always-on floor (preflight mtime check → `ProjectConfigSlot.clear()`), plus an opt-in `notify` watcher for ActorContext behind `[watch] config_hot_reload = true`. Recorded in `tasks/agent-doc/plans/lazily-rs-integration.md`. No new work.
+
+#### Bug reports → existing tracked items (new evidence noted)
+
+- **tsift.md focus leaves the pane in the stash window, not the agent-doc window** → `#stash-pane-promote-on-focus` (focus selects the live-owner pane but doesn't reparent it out of the stash) + `#jb-tsift-pane-sync`. Clean repro of the promote-on-focus gap; no new item needed.
+- **JB File Cache Conflict reverted the queue to an older snapshot; "review Codex logs for my bug report and session replay"** → `tasks/agent-doc/plan-jb-cache-conflict-stale-accept-replay.md` already exists. The "review Codex logs / session replay" step needs the live Codex session log, not accessible from this CLI turn — gated as a log-capture follow-up.
+- **JB Clear Session Context → `Interrupt and Clear` → Codex restart → `'/clear' is disabled while a task is in progress`** → `#clear-stops-running-process`. New evidence: the post-restart `/clear`-disabled-mid-task error folds into that item.
+
+#### New item
+
+- **agent:queue free-text `preset` attribute** → new `#queue-preset-attribute` (added to backlog), plan `tasks/agent-doc/plan-queue-preset-attribute.md`.
+
+#### Deferred
+
+- `#lr-head-8` / `#lr-wire-9` / `#lr-actor-10` stay backlog — real implementation phases of the lazily-rs plan.
+
+You're curating the queue directly, so I left the mapped bug-report lines for you to strike — each now points at its tracked item. **Strong recommendation: compact this session** — 59 exchange lines / 15 no-op closeouts is the real source of the IPC/finalize fragility. Say the word and I'll run `agent-doc compact`.
+<!-- agent:boundary:763fa85e -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -110,7 +139,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#codex-direct-writeback-miss]~
 - ~Should the graph be per-file (one context per tracked document) or per-process (one context with file-keyed cells)?: Use your judgement. There can also be multiple contexts.~
 - ~JB `Run Agent Doc` took a long time to dispatch in this document.~
-- How to handle config hot-reload in long-lived ActorContext — file watcher on .agent-doc/config.toml or clear on next cycle?: Can you support both?
+- ~How to handle config hot-reload in long-lived ActorContext — file watcher on .agent-doc/config.toml or clear on next cycle?: Can you support both?~
 - When I navigate from this document to tsift.md, the tmux focus is on the tsift.md pane but the tmux pane is in the stash, not in the agent-doc tmux window.
 - As I was writing the previous queue item, a JB `File Cache Concflict` surfaced and I accepted. But the queue items reverted to a previous snapshot without my recent work. I had to manually reapply my changes. Review Codex logs for my bug report and session replay.
 - ~#queue-user-edit-overwrite failed in monsterrodholders.md~
@@ -131,6 +160,7 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Backlog
 
 <!-- agent:backlog priority queue=append -->
+- [ ] [#queue-preset-attribute] [recommended] #agent-doc-bug 2026-06-02: Add a free-text preset attribute to agent:queue — value may carry inline prompt_presets #name references + literal text, resolved/expanded like named presets then applied per queue item. Plan: tasks/agent-doc/plan-queue-preset-attribute.md. DO NOT IMPLEMENT in this planning item.
 - [ ] [#lr-head-8] Phase 8: Add HeadContentSlot + SnapshotCommitStatusSlot for git show HEAD dedup. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-wire-9] Phase 9: Wire RunContext into ops_log, template_io, patch, harness detection. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-actor-10] Phase 10: Add GlobalConfigSlot + SessionRegistrySlot for ActorContext. Plan: tasks/agent-doc/plans/lazily-rs-integration.md

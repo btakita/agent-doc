@@ -34,39 +34,12 @@ queue_active: false
 <!-- agent:exchange -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260602-043228.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260602-044941.md`*
 
 Compacted content:
-- Archived 1 response topic(s): release + publish
+- Archived 2 response topic(s): batched write burst next steps; What are #next-steps to improve `thread_safe_contention_batched_write_bursts_16` and `thread_safe_contention_batched_...
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-
-### Re: batched write burst next steps — gpt-5
-
-I’m treating the repeated benchmark name as one target: `thread_safe_contention_batched_write_bursts_16`.
-
-The first follow-up should be `#lazybatch1`. The current README/profile data points at batch invalidation under the shared thread-safe lock: the 16-worker benchmark reports `7.920 ms` mean, and the lock attribution shows `set_cell_invalidation` at `1026` acquisitions with `13.802 ms` wait and `781.677 us` hold. `get_refresh` is the next visible contributor at `391` acquisitions and `1.902 ms` wait, while dependency-edge and publish work are much smaller for this case.
-
-Priority order added to the backlog:
-
-1. `#lazybatch1` — coalesce `flush_batched_invalidations` by affected dependent/frontier once per batch, then prove the 16-worker batch path improves.
-2. `#lazybatch2` — reduce hot read-side lock churn in `ThreadSafeContext::get` / dependency tracking once invalidation is no longer the dominant wait site.
-3. `#lazybatch3` — revisit partitioned/read-mostly thread-safe storage only after the targeted coalescing/read-path work has measurements, with loom/spec coverage and cross-case benchmarks.
-
-Verification: no source files were edited. I inspected `benches/context.rs`, `src/thread_safe.rs`, `examples/instrumentation_profile.rs`, and README benchmark/profile tables; commands included `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `tsift status`, `tsift index --workspace .`, and targeted `tsift`/`rg`/`sed` reads. No test suite was run because this cycle only adds prioritized recommendations to the session backlog. Escalation: none.
-
-### Re: What are #next-steps to improve `thread_safe_contention_batched_write_bursts_16` and `thread_safe_contention_batched_write_bursts_16` performance? — gpt-5
-
-> **Queue prompt:**
->
-> What are #next-steps to improve `thread_safe_contention_batched_write_bursts_16` and `thread_safe_contention_batched_write_bursts_16` performance?
-
-
-The duplicated benchmark name points to one target. Top backlog item: `#lazybatch1`.
-
-Backlog priority is `#lazybatch1`, then `#lazybatch2`, then `#lazybatch3`: first reduce batched invalidation lock contention, then reduce hot read-side `get_refresh` / dependency-tracking churn, then evaluate broader thread-safe storage changes only if targeted fixes still leave contention hot.
-
-Verification: no source edits. This response only confirms the already-added backlog ordering for the queued prompt. Escalation: none.
-<!-- agent:boundary:5f214cbc -->
+<!-- agent:boundary:badb8d6c -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 
@@ -80,7 +80,7 @@ Changed paths: session document/backlog only.
 Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `tsift index --workspace .`, targeted source/spec reads.
 Verification: `agent-doc finalize` will run commit/session guards; no Rust tests were run because no lazily-rs source changed.
 Escalation: none. Confidence: high.
-<!-- agent:boundary:418589dc -->
+<!-- agent:boundary:14af0c6d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -88,7 +88,12 @@ Escalation: none. Confidence: high.
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+preset #spec-test-build-install-commit-push
+- [#lazyperf9]
+- [#lazyperf12]
+- [#lazyperf10]
+- [#lazyperf11]
 <!-- /agent:queue -->
 
 ## Backlog

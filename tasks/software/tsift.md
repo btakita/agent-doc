@@ -194,7 +194,16 @@ Verification:
 Confidence: high.
 
 Escalation: none.
-<!-- agent:boundary:a4e48621 -->
+
+### Re: mdembeddedcode closeout repair — gpt-5
+
+> **Queue prompt:**
+>
+> [#mdembeddedcode]
+
+
+Closeout repair only: recorded the missing `--done mdembeddedcode` proof after the response commit landed, so the auto queue can advance. No code changes.
+<!-- agent:boundary:75efb740 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -208,7 +217,7 @@ preset #spec-test-build-install-commit-push
 - ~[#astspansearch]~
 - ~[#astqueryfacets]~
 - ~[#astnavgraph]~
-- [#mdembeddedcode]
+- ~[#mdembeddedcode]~
 - [#astrankingmerge]
 - [#astnavfixtures]
 <!-- /agent:queue -->

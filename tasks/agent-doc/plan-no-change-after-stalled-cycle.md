@@ -1,7 +1,8 @@
 # Plan: no-change direct run after stalled cycle history
 
 **Pending:** `#nochange-after-stall` in `tasks/agent-doc/agent-doc-bugs2.md`
-**Status:** Plan only. Do not implement in this item.
+**Status:** Base item planned/shipped separately; `#nochange-after-stall-breadth`
+implemented 2026-06-02 in the session-check closeout guards.
 
 ## Report
 
@@ -124,3 +125,19 @@ proof. It should surface the prior terminal state and the next recovery action.
   a snapshot-only "Nothing changed" result.
 - Operators get a typed explanation with the prior cycle id and recovery action.
 - Normal no-change behavior remains unchanged for healthy completed sessions.
+
+## 2026-06-02 Breadth Implementation
+
+`#nochange-after-stall-breadth` extends the follow-up surface that the base
+`run.rs` no-change classifier intentionally deferred to `session-check`:
+
+- non-terminal stale-open cycles still interrupt even when document and snapshot
+  bytes match;
+- committed no-response repair/reap-only cycles interrupt when a recorded active
+  `agent:queue` `do [#id]` head remains queued and open in `agent:backlog`
+  without done/gate/reap/kept-open proof;
+- healthy committed no-change states with no active queue head stay clean.
+
+Implemented in `src/agent-doc/agent-doc-orchestration/src/session_check.rs`
+with regression coverage, and documented in
+`src/agent-doc/specs/07-closeout-commands.md`.

@@ -36,7 +36,35 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 10 response topic(s): do [#sfmt]; do Path C queue-provenance cluster; implement the real remaining items; 7 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:45307bd5 -->
+❯ When I navigate to another agent doc, the tmux window layout goes into 3 panes with a 2 editor pane layout. Is there sufficient logging to understand why?
+❯ #spec-test-build-install-commit-push
+
+### Re: Is there sufficient logging to understand the 3-pane navigation layout? — opus-4-8
+
+Mostly yes — but the one part that actually decides "2 editor panes" was a silent black box. I closed that gap.
+
+#### What was already logged (the pane-survival side)
+
+The navigation → layout path is traceable across three sinks:
+
+- **`[layout-sync]`** (`EditorTabSyncListener`, `idea.log`) — `selectionChanged` (new file + visible `.md` set), immediate `focus-fast`, the full `exec:` command including the `--col` layout args, the `result:` line, and debounce/guard/deferred/timeout/generation diagnostics.
+- **`[sync:PHASE]`** (tmux-router reconciler, stderr, merged into the `result:` line because `runCommandWithTimeout` redirects stderr) — `GLOBAL` window+pane state at sync-start/sync-end and `SELECT`/`ATTACH`/`DETACH`/`REORDER`/`VERIFY`/`SWAP`. The `DETACH` phase already names *why each pane is kept or stashed* (last pane in window, protected busy pane, registered to another session, focus-steal). That is exactly what tells you why an unwanted pane survived into the visible window.
+- **`/tmp/agent-doc-sync.log`** + per-doc **`.agent-doc/logs/ops.log`** — `[sync] auto-started %XX for <file>`, batch summaries, per-phase latency.
+
+So "why did an extra pane survive the reconcile?" was already answerable.
+
+#### The gap (the editor-detection side)
+
+`LayoutDetector.detectEditorLayout` — the function that turns the IDE's editor splits into the column list that drives the whole sync — logged **nothing**, and swallowed exceptions silently (`catch (_: Exception)`). Since your symptom *is* "2 editor panes," the decisive question — *did IntelliJ really report 2 editor windows, or did grouping spuriously split one into two columns?* — could only be **inferred** from the downstream `--col` args, never observed at the source.
+
+#### Fix (committed + pushed, JB plugin `0.2.146`)
+
+`detectEditorLayout` now logs under **`[layout-detect]`**: the editor window count, each window's on-screen `x=… y=… file=…`, and the resulting grouping (e.g. `grouped into 2 column(s): [left.md] | [right.md]`), plus the early-return reasons. Detection failures now go through `LOG.warn` instead of vanishing. Added deterministic `buildColumnsFromSnapshots` tests for the 2-column and stacked-single-column cases, and documented the full `[layout-detect]` → `[layout-sync]` → `[sync:PHASE]` chain in the JetBrains SPEC.
+
+Verification: `./gradlew test` green (full JB suite); `buildPlugin signPlugin` succeeded. Change is Kotlin + editor SPEC only, so the Rust `make check` suite is unaffected. Pushed `agent-doc@1f7a8c4f` (branch `20260422/codex-agent-backend`) + superproject pointer on `main`. Left the unrelated concurrent `src/session_actor_cmd.rs` edit untouched.
+
+To test live, reinstall from disk: `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.146-signed.zip`, restart, reproduce the navigation, then read `idea.log` for `[layout-detect]` — it will state whether the 3-pane layout is a true 2-split editor or a detection artifact.
+<!-- agent:boundary:e762ce59 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
@@ -52,6 +80,7 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Backlog
 
 <!-- agent:backlog priority queue=prepend -->
+- [ ] [#ht5v] [recommended] Live-verify the 3-pane navigation repro with the new [layout-detect] logging (JB plugin 0.2.146): capture whether IntelliJ actually reports 2 editor windows (correct 2-col -> 2 editor + 1 agent-doc = 3 panes) or a spurious 2-column grouping; if spurious, decide whether detectEditorLayout should collapse near-zero-width / preview splits before emitting a 2-column layout. Requested 2026-06-01.
 <!-- /agent:backlog -->
 
 ## Review

@@ -87,7 +87,16 @@ Why per-document beats one file-keyed graph: invalidation stays trivial (a file/
 They compose because both reduce to `ProjectConfigSlot.clear()` → transitive clear — the watcher is just an earlier trigger for the clear the cycle-start mtime check would do anyway. Phase 5/10 implement the floor; the watcher is a Phase 5 opt-in extension.
 
 (`CellHandle::set` first → Yes was already resolved last cycle; also recorded in the plan.)
-<!-- agent:boundary:13959a34 -->
+The preflight shows the new bug reports are **already being absorbed** by the owner actor — `~#queue-user-edit-overwrite failed in monsterrodholders.md~` is struck, the File-Cache-Conflict line is enriched (`[user~]`), and `#jbstalldrain` plus the `#queue-user-edit-overwrite` "Fresh repro 2026-06-02" note are already in the review component. There's no `do [#id]` directive this turn — these are captures.
+
+The one finding worth flagging clearly:
+
+**`#queue-user-edit-overwrite` regressed** — it's marked `[/]` (implemented: provenance/epoch tracking + `check_dropped_queue_prompt_guard`), but it **failed live again** in `monsterrodholders.md` (2026-06-02). The review item is already enriched with the cause: *"operator wrote into `agent:queue` while the previous cycle was still running, and the closeout lost those queue changes without a fail-closed diagnostic."* The shipped guard tracks queue-edit provenance but doesn't **re-read the live queue at the final visible-write / consume boundary** — so a concurrent edit landing after the cycle's snapshot but before commit is silently overwritten. The enriched plan's new fix step (*"recheck the live queue at final visible-write/consume boundaries"*) is exactly right; this `[/]` item should be treated as **reopened**, not done, until that boundary-recheck lands. It's also the same root mechanism as the File-Cache-Conflict snapshot-revert report two lines above it.
+
+I'm **not closing this out from here** — last turn's `finalize` fail-closed with `pane ownership mismatch: session owned by pane %50, current pane is %66`, and this document is actively owned/drained by that other pane (the struck items + enriched review entries above are its work, not mine). A competing `finalize`/`claim` from `%66` would race the owner and risk the very `#queue-user-edit-overwrite` / File-Cache-Conflict loss class you're reporting.
+
+So: your new reports are captured and in-flight under the owner pane. The actionable agent-doable item among them is the **`#queue-user-edit-overwrite` consume-boundary recheck** (reopen the `[/]`); the rest (`#jbstalldrain`, the `/clear`-while-task report, the tsift stash-pane focus, the Codex-log review for the monsterrodholders replay) are operator/live-IDE or owner-pane work. Run the queue from the owner pane (`%50`) — or stop one of the two sessions — and the owner will drain these cleanly; I'll stand down rather than double-drive this contended document.
+<!-- agent:boundary:91770b9b -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -100,9 +109,11 @@ preset #spec-test-build-install-commit-push
 - ~agent-doc monsterrodholders.md turns do not apply the response into the document.~
 - ~do [#codex-direct-writeback-miss]~
 - ~Should the graph be per-file (one context per tracked document) or per-process (one context with file-keyed cells)?: Use your judgement. There can also be multiple contexts.~
+- ~JB `Run Agent Doc` took a long time to dispatch in this document.~
 - How to handle config hot-reload in long-lived ActorContext — file watcher on .agent-doc/config.toml or clear on next cycle?: Can you support both?
 - When I navigate from this document to tsift.md, the tmux focus is on the tsift.md pane but the tmux pane is in the stash, not in the agent-doc tmux window.
-- As I was writing the previous queue item, a JB `File Cache Concflict` surfaced and I accepted. But the queue items reverted to a previous snapshot without my recent work. I had to manually reapply my changes.
+- As I was writing the previous queue item, a JB `File Cache Concflict` surfaced and I accepted. But the queue items reverted to a previous snapshot without my recent work. I had to manually reapply my changes. Review Codex logs for my bug report and session replay.
+- ~#queue-user-edit-overwrite failed in monsterrodholders.md~
 - [#lr-head-8]
 - [#lr-wire-9]
 - [#lr-actor-10]

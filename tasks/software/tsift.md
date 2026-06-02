@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -100,7 +100,37 @@ Verification completed before closeout:
 - latest GitHub Actions `CI` run `26793122164` was `completed success` with `clippy + test` and live Convex graph acceptance jobs
 
 The superproject submodule pointer was committed separately as `c61977f82` (`chore: update tsift submodule`) so the root repo now points at the pushed tsift commit.
-<!-- agent:boundary:b60dfb8c -->
+
+### Re: write executor — gpt-5
+
+> **Queue prompt:**
+>
+> [#writeexecutor]
+
+
+Completed `#writeexecutor` in `src/tsift` and pushed the tsift submodule commit `a5cfabb` (`feat: apply semantic edit intents`) to `origin/main`.
+
+The semantic write surface now has an actual guarded executor:
+
+- `tsift edit-intents --apply` applies supported Rust intents for `rename_symbol`, `replace_function_body`, and `insert_import`.
+- Dry-run mode now emits bounded diff previews and reports `apply_supported`, `applied`, `applied_total`, and `formatted_total` fields.
+- Apply mode composes edits per file, runs `rustfmt --edition 2024` on staged content before any source file is swapped, then commits through the existing atomic backup/rollback edit path.
+- Stale `expected_content_hash` values, unsupported languages/kinds, and formatter failures fail closed before source mutation.
+- Docs and harness notes now describe the apply contract instead of the previous dry-run-only boundary.
+
+Verification completed:
+
+- `cargo check -p tsift-cli`
+- `cargo test -p tsift-cli --test exit_code edit_intents`
+- `make check` (workspace clippy/tests, opencode plugin tests, npm publish dry-run)
+- `cargo build`
+- `cargo install --path . --force`
+- `tsift --version` -> `tsift 0.1.62`
+
+GitHub evidence: `gh workflow list` shows `CI` and `Release` only, with no separate tmux workflow. The previous CI run for `01f2160` was green; the new CI run for `a5cfabb` is currently `in_progress` (`26794927451`).
+
+The superproject gitlink has been committed locally as `329b31102` (`chore: update tsift submodule`) so the root repo points at `a5cfabb`; root push follows this closeout.
+<!-- agent:boundary:c300e58e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -109,18 +139,12 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~[#readast]~
-- ~[#readrewrite]~
-- ~[#writeintents]~
-- [#writeexecutor]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#writeexecutor] Implement the AST-backed write executor with dry-run diffs, formatting, conflict detection against current file content, rollback, and per-language conformance tests.
 <!-- /agent:backlog -->
 
 ## Review

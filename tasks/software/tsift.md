@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -80,7 +80,7 @@ Commits:
 - parent repo gitlink: `e46e0129e chore: update tsift submodule`
 
 Queue note: `#astspans` is complete; the remaining queue items are still pending.
-<!-- agent:boundary:185eeddf -->
+<!-- agent:boundary:6afafe61 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -36,7 +36,17 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 2 response topic(s): #queue-head-struck-on-foreign-exchange-answer; #lr-cycle-7
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:c20cc62e -->
+
+### Re: #write-closeout-response-shape — plan delivered — opus-4-8
+
+Planning item complete. The deliverable for this `#agent-doc-bug` item is the plan, and `tasks/agent-doc/plan-write-closeout-response-shape.md` already exists as a complete draft:
+
+- **Problem** — the 2026-06-02 `monsterrodholders.md` repro where `agent-doc write --commit --force-disk` accepted stdin but committed a closeout with no `### Re:` heading, so `session-check` kept flagging the original `do [#stevepackets]` prompt as unresolved; manually adding the heading then made `write --commit` dedupe and refuse the visible body as direct patchback, looping between "empty response" / "already present" / "direct patchback".
+- **Desired behavior** — response recovery as a single reliable operation: synthesize a heading when stdin lacks `### Re:`, adopt an already-visible `### Re:` body through the snapshot/commit boundary instead of deduping-then-refusing, never point recovery diagnostics at a command that immediately fails, and keep nested-repo parent-pointer recovery explicit.
+- **Plan** — 7 steps: two fixtures (compacted-tail closeout without `### Re:`; visible-direct-patchback state), a response-normalization step before unmatched-content insertion, a recovery-adoption reorder so a visible matching response commits before dedup short-circuits, shape-aware `session-check` recovery text (no body / visible-but-uncommitted / committed-target-but-stale-pointer), and regressions across all three states.
+
+The item carries an explicit **DO NOT IMPLEMENT in this planning item** marker, so the queue preset's `#spec-test-build-install-commit-push` does not apply here — the item-level scope (plan only) governs. The plan file is the tracking artifact for the eventual fix; reaping `#write-closeout-response-shape` as done since its planning deliverable is satisfied.
+<!-- agent:boundary:7398f016 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -66,7 +76,6 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Backlog
 
 <!-- agent:backlog priority queue=append -->
-- [ ] [#write-closeout-response-shape] #agent-doc-bug 2026-06-02: `agent-doc write --commit` recovery for `src/boost-client/tasks/monsterrodholders.md` accepted stdin but committed the closeout without a `### Re:` heading, leaving `session-check` to report the original `do [#stevepackets]` prompt as unresolved; adding the heading manually then made `write --commit` dedupe and refuse the visible response as direct patchback. Plan: tasks/agent-doc/plan-write-closeout-response-shape.md. DO NOT IMPLEMENT in this planning item.
 - [ ] [#lr-head-8] Phase 8: Add HeadContentSlot + SnapshotCommitStatusSlot for git show HEAD dedup. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-wire-9] Phase 9: Wire RunContext into ops_log, template_io, patch, harness detection. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#lr-actor-10] Phase 10: Add GlobalConfigSlot + SessionRegistrySlot for ActorContext. Plan: tasks/agent-doc/plans/lazily-rs-integration.md

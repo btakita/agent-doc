@@ -1,4 +1,0 @@
-[patch.crates-io]
-tmux-router = { path = "src/tmux-router" }
-agent-kit = { path = "src/agent-kit" }
-tagpath = { path = "src/tagpath" }

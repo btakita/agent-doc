@@ -207,7 +207,35 @@ Verification passed:
 - GitHub Actions CI `26799671257` passed both live Convex acceptance and `clippy + test`
 
 No project `tmux-ci` target or tmux workflow exists in `src/tsift`; deterministic SimWorld coverage ran through `make check`. The remote CI annotations were existing workflow notes about Node 20 action deprecation and optional live Convex configuration, not test failures.
-<!-- agent:boundary:bc649ad0 -->
+
+### Re: create contract to support additional programming languages — gpt-5
+
+Created the semantic edit language-extension contract.
+
+`edit-intents` language support now flows through a `SemanticEditLanguageContract` table that declares each executor's canonical language id, display name, `graph::Lang` parser binding, formatter staging suffix, aliases, file extensions, supported intent kinds, script-family behavior, and formatter policy. The existing Rust, TypeScript/TSX, JavaScript/JSX, and Python behavior is preserved, but language/file resolution, supported-intent checks, and formatter selection now come from the contract instead of scattered matches.
+
+I also added a contract unit test that checks aliases, extensions, formatter policy, and the exact supported intent set for every current executor, plus spec/version documentation describing the contract future language additions must satisfy.
+
+Commits:
+- `src/tsift`: `30d1910 feat: add semantic edit language contract`
+- parent repo pointer: `c160d4232 chore: update tsift submodule`
+
+Verification passed:
+- `cargo test -p tsift-cli semantic_edit_language_contracts_resolve_current_executor_surface -- --nocapture`
+- `cargo check -p tsift-cli`
+- `cargo clippy -p tsift-cli --all-targets -- -D warnings`
+- `cargo test -p tsift-cli --test exit_code edit_intents_ -- --nocapture`
+- `git diff --check`
+- `tsift diff-digest`
+- `make check`
+- `cargo build`
+- `cargo install --path . --force`
+- `tsift --version` -> `tsift 0.1.62`
+- `tsift status` -> fresh index, instructions current
+- GitHub Actions CI `26800161158` passed both live Convex acceptance and `clippy + test`
+
+No project `tmux-ci` target or tmux workflow exists in `src/tsift`; deterministic SimWorld coverage ran through `make check`. Remote CI annotations were the existing Node 20 action deprecation and optional live Convex configuration notes, not failures.
+<!-- agent:boundary:4b5e30d9 -->
 <!-- /agent:exchange -->
 ###
 <!--

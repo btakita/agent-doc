@@ -31,12 +31,54 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
+❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260602-192708.md`*
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260602-195909.md`*
 
 Compacted content:
+❯ - Archived 4 response topic(s): do #nochange-after-stall; do #lr-queue-response-miss; commit + push; 1 more
 - Archived 4 response topic(s): do #subagent-blocks-session; do #lr-queue-response-miss; do #lr-queue-response-miss; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:2b060c0b -->
+❯ > **Queue prompt:**
+❯ >
+❯ > do [#subagent-blocks-session]
+❯ > **Queue prompt:**
+❯ >
+❯ > Gated items in review are not easily runnable. Please enable the user to run gated items by `do [item-id]` or plating the item in the queue. Please focus the runs to complete the gated item. If the gated item can only be partially completed, extract a new task to complete which contains the conditions to complete the item. If no work was done due to preconditions not being met, add a timestamp of the attempts to the item. Ensure the preconditions are present in the gated item description.
+❯ Not implementing this one blind — handled it per your run policy (precondition unmet → record preconditions + timestamp the attempt).
+❯ **Why preconditions are unmet.** This is "block the session so no other task runs while a turn waits on a subagent — mostly a Claude issue." agent-doc (the binary) has no control over the Claude Code harness's subagent scheduling, so this almost certainly needs a **harness/hook-level** mechanism — a `Stop`/`PreToolUse` hook gate or a supervisor lease — not an agent-doc source change. Before I implement, the design needs: which layer enforces the block, what exactly counts as "the subagent" being awaited, and how/when the block releases. I recorded those preconditions + a 2026-06-02 attempt timestamp on the `#subagent-blocks-session` item.
+❯ Also note this head was an **artifact**: my `--pending-add` last turn spawned a `do [#subagent-blocks-session]` queue head, and because that capture was still uncommitted, this preflight read it as the newest directive. This commit clears that drift.
+❯ **Real queue is next.** In queue order the next actionable head is `do [#lr-queue-response-miss]`, then the other ungated items. Since `session_check.rs` is now committed, I'll take that one next and — per your spec — **audit it first** against the just-committed concurrent session-check work (it may already cover the free-text-queue-head response-patchback guard, in which case I verify + mark done instead of re-implementing). Run again or say "go" and I'll do `#lr-queue-response-miss`.
+❯ > **Queue prompt:**
+❯ >
+❯ > do [#lr-queue-response-miss]
+❯ > **Queue prompt:**
+❯ >
+❯ > do [#lr-queue-response-miss]
+
+### Re: do #nochange-after-stall-breadth — implementation map (binary-declined in this pane; not committed here) — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#nochange-after-stall-breadth]
+
+
+`#nochange-after-stall` already shipped the narrow case (`run.rs:220` `classify_no_change_cycle_state` → `NoChangeVerdict`, handling only `CyclePhase::Abandoned`). The breadth follow-up is **named in the code itself** — run.rs:230-231: *"Broader stale-open / repair-only-reap detection (which needs consume-proof cross-checks) is left to the session-check path."* That comment is the spec for this item.
+
+**Where each shape goes (session-check, not the run no-change path):**
+
+1. **Stale-open preflight detection** — a prior `preflight_started`/`response_captured`/`write_applied` cycle that never reached `committed` and is now stale. session_check already loads `cycle_state`; add a guard (or extend the existing open-cycle inspection) that, on a no-diff/stale-open cycle, surfaces the open phase + age + recovery instead of silence. Note preflight already auto-closes *recoverable / stale-empty* `preflight_started` (per the preflight contract), so this guard must target the **non-empty** stale-open shapes that auto-close skips.
+2. **Repair-only / reap-only closeout with an unconsumed active queue head** — a cycle that committed only a repair or a `--done`/reap but left a runnable `agent:queue` head unconsumed. This is the "consume-proof cross-check" the run path couldn't do cheaply. It composes with the existing `check_queue_head_removal_guard` machinery (`state.active_queue_heads`, `resolved_pending_ids`, `committed_queue_head_ids`) — assert that a reap/repair-only closeout still proves head consumption or fails closed.
+3. **Fixtures** — deterministic session-check tests asserting each shape: (a) stale-open non-empty cycle → warn/interrupt with phase+recovery; (b) reap-only with unconsumed head → fail closed; (c) healthy committed no-change → stays clean (regression guard, mirrors `no_change_with_committed_cycle_stays_clean` in run.rs:1495).
+4. **Spec** — add a `07-commands.md` (closeout-commands) note documenting that no-change/closeout verdicts now classify stale-open and repair-only/reap-only-with-unconsumed-head shapes, not just terminally-abandoned cycles.
+
+Plan file `tasks/agent-doc/plan-no-change-after-stalled-cycle.md` already exists — extend it with these four sub-items rather than starting a new plan.
+
+**Not committed from this pane** (binary/`make` declined). Either approve the toolchain here and reply `go`, or let the toolchain-enabled actor pick this up from the map above — the change is contained to `session_check.rs` + fixtures + one spec note, no `run.rs` change needed.
+I have the full map now. The parent `#nochange-after-stall` (run.rs:220) **explicitly defers** exactly this follow-up — the comment at run.rs:230-231 says verbatim: *"Broader stale-open / repair-only-reap detection (which needs consume-proof cross-checks) is left to the session-check path."* So `#nochange-after-stall-breadth` is well-scoped: move those deferred shapes into `session_check.rs`.
+
+Same structural situation as the last two turns: this pane is binary-declined (`cargo`/`make`/`.bin/agent-doc` all "requires approval"), and a concurrent toolchain-enabled actor is landing the actual code on this same document (step 2 shipped `4d0184e3`/`cbeec61ce` while I was read-only). I can't `make check` or `finalize` here, so I won't force unverified edits into the hot path. What I can deliver is the precise implementation map.
+**Closeout:** uncommitted — `finalize` is declined in this pane, consistent with the last two turns. The map above is the deliverable; implementation/`make check`/finalize needs the toolchain pane.
+<!-- agent:boundary:721a6f43 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -44,7 +86,7 @@ Compacted content:
 - ~Gated items in review are not easily runnable. Please enable the user to run gated items by `do [item-id]` or plating the item in the queue. Please focus the runs to complete the gated item. If the gated item can only be partially completed, extract a new task to complete which contains the conditions to complete the item. If no work was done due to preconditions not being met, add a timestamp of the attempts to the item. Ensure the preconditions are present in the gated item description.~
 - ~do [#nochange-after-stall]~
 - ~do [#lr-queue-response-miss]~
-- do [#nochange-after-stall-breadth]
+- ~do [#nochange-after-stall-breadth]~
 - do [#owned-pane-prompt-recur]
 - do [#subagent-blocks-session]
 - do [#lr-queue-plan-deferral]

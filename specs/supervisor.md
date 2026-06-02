@@ -407,7 +407,12 @@ distinct from the one-shot restart auto-trigger:
 - The drainable head is the shared `queue_continuation::live_continuation_head`
   definition: frontmatter `queue_active: true`, an active `resolve_activation`,
   and a ready prompt head. Inactive-residue queues (`queue_active: false`) are
-  never drained.
+  never drained passively. An explicit dispatch-only `Run Agent Doc` against a
+  busy authoritative actor may promote an already-startable inactive queue
+  (`agent:queue auto` or a start fence with a ready prompt head) by setting
+  `queue_active: true`, syncing the snapshot, and returning the same deferred
+  busy-route feedback; the idle-queue watch then drains it when the pane becomes
+  idle. Plain inactive queues without a start trigger stay inert.
 - The drain decision is the pure, deterministically tested
   `idle_queue_drain_decision(prompt_visible, active_head, last_dispatched)`:
   - `Dispatch` only on a busy→idle transition (`prompt_visible`) with an active

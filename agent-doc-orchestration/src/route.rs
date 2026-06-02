@@ -1966,6 +1966,84 @@ fn enqueue_route_dispatch_prompt(
     })
 }
 
+fn inactive_route_queue_head(file: &Path) -> Result<Option<String>> {
+    let content = match std::fs::read_to_string(file) {
+        Ok(content) => content,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(err.into()),
+    };
+    inactive_route_queue_head_in_content(file, &content)
+}
+
+fn inactive_route_queue_head_in_content(file: &Path, content: &str) -> Result<Option<String>> {
+    let rc = crate::graph::RunContext::new(file.to_path_buf());
+    let (fm, _) = frontmatter::parse_for_file_with_context(content, file, &rc)?;
+    if fm.queue_active == Some(true) {
+        return Ok(None);
+    }
+    let components = crate::component::parse(content)?;
+    let Some(queue_component) = components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
+        return Ok(None);
+    };
+    let has_auto = crate::queue::has_auto_attr(&queue_component.attrs);
+    let body = &content[queue_component.open_end..queue_component.close_start];
+    let entries = crate::queue::parse(body)?;
+    let activation = crate::queue::resolve_activation(&entries, has_auto, false, false);
+    if !activation.active
+        || crate::queue::has_stop_fence_at_head(&activation.entries_after)
+        || crate::queue::time_gate_at_head(&activation.entries_after).is_some()
+    {
+        return Ok(None);
+    }
+    Ok(crate::queue::first_prompt(&activation.entries_after).map(|head| head.text.clone()))
+}
+
+fn activate_existing_route_queue_head(
+    file: &Path,
+    source: &str,
+) -> Result<Option<RouteQueueEnqueueOutcome>> {
+    let _lock = acquire_route_queue_lock(file)?;
+    let original = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {}", file.display()))?;
+    let Some(prompt_text) = inactive_route_queue_head_in_content(file, &original)? else {
+        return Ok(None);
+    };
+    let mut content = frontmatter::merge_fields(&original, "queue_active: true")?;
+    content = ensure_queue_component_auto_attr(&content)?;
+    let activated = content != original;
+    if activated {
+        crate::write::atomic_write_pub(file, &content)
+            .with_context(|| format!("failed to activate queue in {}", file.display()))?;
+        crate::snapshot::save(file, &content).with_context(|| {
+            format!(
+                "failed to sync snapshot after activating queue for {}",
+                file.display()
+            )
+        })?;
+    }
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "route_existing_queue_head_activated file={} source={} activated={} prompt={:?}",
+            file.display(),
+            source,
+            activated,
+            prompt_text
+        ),
+    );
+    Ok(Some(RouteQueueEnqueueOutcome {
+        prompt_text,
+        appended: false,
+        already_present: true,
+        superseded: false,
+        component_created: false,
+        activated,
+    }))
+}
+
 fn route_queue_lock_path(file: &Path) -> Result<PathBuf> {
     let canonical = std::fs::canonicalize(file)
         .with_context(|| format!("failed to canonicalize {}", file.display()))?;
@@ -3840,10 +3918,18 @@ fn route_via_authoritative_actor(
         dispatch_pane = actor.record.pane_id.clone();
         actor_state = actor.actor_state();
     }
+    let has_existing_inactive_queue_fallback = if dispatch_only
+        && actor_state == crate::session_actor::ActorState::Busy
+        && prompt_context.is_none()
+    {
+        inactive_route_queue_head(file)?.is_some()
+    } else {
+        false
+    };
     if busy_dispatch_only_should_wait_for_ready(
         dispatch_only,
         actor_state,
-        prompt_context.is_some(),
+        prompt_context.is_some() || has_existing_inactive_queue_fallback,
     ) && let Some(refreshed) =
         wait_for_authoritative_actor_ready(tmux, file, session_id, file_path, harness, &actor)?
     {
@@ -4062,6 +4148,30 @@ fn route_via_authoritative_actor(
             if dispatch_only_focus_only_should_fail_closed(reopen_mode, actor_dispatch_state) {
                 let reason = actor_dispatch_blocker_reason(actor_dispatch_state)
                     .unwrap_or("actor not ready");
+                if let Some(queued) = activate_existing_route_queue_head(file, reason)? {
+                    crate::ops_log::log_op(
+                        file,
+                        &format!(
+                            "route_dispatch_only_busy_existing_queue_deferred file={} pane={} harness={} generation={} actor_state={} prompt={:?}",
+                            file.display(),
+                            dispatch_pane,
+                            harness.binary,
+                            actor.record.generation,
+                            actor_state.as_str(),
+                            queued.prompt_text
+                        ),
+                    );
+                    eprintln!(
+                        "[route] authoritative actor generation {} for {} is busy on pane {}; activated existing agent:queue auto head {:?} (already_present={}, activated={}) for idle drain instead of injecting a duplicate trigger",
+                        actor.record.generation,
+                        file.display(),
+                        dispatch_pane,
+                        queued.prompt_text,
+                        queued.already_present,
+                        queued.activated
+                    );
+                    return Ok(dispatch_pane);
+                }
                 crate::ops_log::log_op(
                     file,
                     &format!(

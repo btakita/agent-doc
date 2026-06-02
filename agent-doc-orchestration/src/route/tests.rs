@@ -709,6 +709,95 @@ fn route_enqueue_dispatch_prompt_activates_existing_queue_without_duplicate() {
 }
 
 #[test]
+fn route_activates_existing_inactive_auto_queue_head_for_busy_deferral() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_format: template\n",
+        "queue_active: false\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue auto -->\n",
+        "- do [#shipstationaudit]. #spec-test-commit-push\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#shipstationaudit] Audit ShipStation settings.\n",
+        "<!-- /agent:backlog -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    crate::snapshot::save(&doc, content).unwrap();
+
+    assert_eq!(
+        inactive_route_queue_head(&doc).unwrap().as_deref(),
+        Some("do [#shipstationaudit]. #spec-test-commit-push")
+    );
+
+    let outcome = activate_existing_route_queue_head(&doc, "busy actor")
+        .unwrap()
+        .expect("startable inactive auto queue head should activate");
+
+    assert_eq!(
+        outcome.prompt_text,
+        "do [#shipstationaudit]. #spec-test-commit-push"
+    );
+    assert!(!outcome.appended);
+    assert!(outcome.already_present);
+    assert!(!outcome.superseded);
+    assert!(!outcome.component_created);
+    assert!(outcome.activated);
+
+    let updated = std::fs::read_to_string(&doc).unwrap();
+    assert!(updated.contains("queue_active: true"));
+    assert!(updated.contains("<!-- agent:queue auto -->"));
+    assert_eq!(
+        updated
+            .matches("- do [#shipstationaudit]. #spec-test-commit-push")
+            .count(),
+        1,
+        "route must activate the existing head without duplicating it:\n{updated}"
+    );
+    assert_eq!(
+        crate::queue_continuation::live_continuation_head(&doc, &updated).as_deref(),
+        Some("shipstationaudit"),
+        "activated queue should become drainable by the idle-queue watch"
+    );
+    let snapshot = crate::snapshot::load(&doc).unwrap().unwrap();
+    assert_eq!(snapshot, updated, "route activation must sync the snapshot");
+}
+
+#[test]
+fn route_does_not_activate_plain_inactive_queue_head() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_format: template\n",
+        "queue_active: false\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue -->\n",
+        "- do [#manual]\n",
+        "<!-- /agent:queue -->\n"
+    );
+    std::fs::write(&doc, content).unwrap();
+    crate::snapshot::save(&doc, content).unwrap();
+
+    assert_eq!(inactive_route_queue_head(&doc).unwrap(), None);
+    assert_eq!(
+        activate_existing_route_queue_head(&doc, "busy actor").unwrap(),
+        None,
+        "plain inactive queues should stay inert without auto/start activation"
+    );
+    assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
+    assert_eq!(crate::snapshot::load(&doc).unwrap().unwrap(), content);
+}
+
+#[test]
 fn route_enqueue_dispatch_prompt_no_dup_with_completed_residue_and_live_head() {
     // Repro for #adoc-queue-ipc-drift: a halted/inactive-then-reactivated queue
     // that still carries struck `Completed` residue plus a single live prompt.

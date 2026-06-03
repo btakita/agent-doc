@@ -31,37 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260603-160632.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260603-163327.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #libmod3 Phase 3
+- Archived 1 response topic(s): #libmod4 Phase 4: Extract Convex + GraphStore into tsift-core sub-modules
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
-### Re: #libmod4 Phase 4: Extract Convex + GraphStore into tsift-core sub-modules — glm-5.1
-
-> **Queue prompt:**
->
-> do [#libmod4]
-
-
-Completed. Split `tsift-core/src/lib.rs` (1999 lines monolith) into three focused sub-modules:
-
-**New files:**
-- `packages/tsift-core/src/types.rs` — All graph data types (GraphNode, GraphEdge, GraphProjection, etc.) + id helpers (`stable_graph_edge_id`, `graph_edge_id`)
-- `packages/tsift-core/src/store.rs` — GraphStore trait with full default implementations + query/paging helpers + `shortest_path_using_outgoing`
-- `packages/tsift-core/src/convex.rs` — Convex adapter (ConvexProjectionRows, ConvexNodeRow, ConvexEdgeRow, ConvexGraphClient trait, ConvexRowsGraphClient, ConvexGraphStore)
-
-**Updated:**
-- `packages/tsift-core/src/lib.rs` — Re-exports all public types at crate root via `pub use` for backward compatibility; retains all 15 tests
-- `SPEC.md` — Architecture section updated to show three sub-modules under tsift-core
-- Also included prior Phase 3 CLI extractions (`semantic_edit.rs` from cli/lib.rs, unused import cleanup)
-
-**Verification:**
-- All 637 workspace tests pass (`make check` green)
-- All 8 downstream crates compile cleanly with zero source changes
-- `cargo install --path .` succeeds
-- Pushed as `b4fc070` on main
-<!-- agent:boundary:205b225b -->
+<!-- agent:boundary:117693b1 -->
 <!-- /agent:exchange -->
 ###
 <!--

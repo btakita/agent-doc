@@ -2115,6 +2115,44 @@ Starting codex...
 }
 
 #[test]
+fn fresh_start_ack_outcome_keeps_idle_no_op_and_reaps_genuine_miss() {
+    // #route-reaps-idle-fresh-start: a fresh start whose trigger was dispatched
+    // but produced no document cycle is KEPT as a live idle session when the pane
+    // returned to a dispatch-ready prompt (a legitimate no-op first cycle —
+    // empty/halted queue, preflight no_changes), and REAPED only when the pane is
+    // not dispatch-ready (a genuine startup miss).
+    let harness = HarnessConfig::codex();
+
+    // A document cycle was acknowledged → normal start regardless of pane content.
+    assert_eq!(
+        fresh_start_ack_outcome(true, "", &harness),
+        FreshStartAckOutcome::CycleAcknowledged
+    );
+
+    // No cycle, but the pane is back at a Codex dispatch-ready prompt → KEEP.
+    let idle_ready = "\
+Starting codex...
+› Run /review on my current changes
+gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
+";
+    assert_eq!(
+        fresh_start_ack_outcome(false, idle_ready, &harness),
+        FreshStartAckOutcome::IdleNoOpKeep,
+        "a ready+dispatched fresh start with a no-op first cycle must be kept, not reaped"
+    );
+
+    // No cycle and only a status footer (no dispatch-ready prompt) → genuine miss.
+    let not_ready = "\
+gpt-5.5 high · ~/work/btakita/agent-loop · Context 70% used
+";
+    assert_eq!(
+        fresh_start_ack_outcome(false, not_ready, &harness),
+        FreshStartAckOutcome::GenuineMissReap,
+        "a fresh start with no cycle and no dispatch-ready prompt is a genuine miss to reap"
+    );
+}
+
+#[test]
 fn ready_prompt_candidate_accepts_claude_idle_footer_after_stale_busy_scrollback() {
     let harness = HarnessConfig::claude();
     let content = "\

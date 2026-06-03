@@ -8262,6 +8262,33 @@ fn auto_start_in_session(
                 );
                 let _ = crate::startup_miss::clear(file);
             }
+            None if fresh_start_pane_idle_ready(tmux, &dispatch_pane, harness) => {
+                // (#route-reaps-idle-fresh-start) The trigger was proven dispatched
+                // above, and the pane has returned to a dispatch-ready prompt: the
+                // first cycle was a legitimate no-op (empty/halted queue, preflight
+                // `no_changes`) — there was simply nothing to acknowledge. Keep the
+                // live idle session instead of reaping a healthy start (the "I
+                // cannot start lazily-rs.md, killed immediately" symptom). Genuine
+                // misses (pane never ready / hung) still fall through to the reap
+                // branch below.
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "fresh_route_start_idle_no_op file={} pane={} harness={} timeout_secs={} note=trigger dispatched, pane dispatch-ready, no-op first cycle kept as idle session",
+                        file.display(),
+                        dispatch_pane,
+                        harness.binary,
+                        ack_timeout.as_secs()
+                    ),
+                );
+                eprintln!(
+                    "[route] fresh {} start for {} produced a no-op first cycle (nothing queued); pane {} is idle and dispatch-ready — keeping the live idle session",
+                    harness.binary,
+                    file.display(),
+                    dispatch_pane
+                );
+                let _ = crate::startup_miss::clear(file);
+            }
             None => {
                 crate::ops_log::log_op(
                     file,
@@ -8453,6 +8480,52 @@ fn ready_prompt_candidate(content: &str, harness: &HarnessConfig) -> Option<Stri
         return Some("opencode idle status chrome".to_string());
     }
     latest_dispatch_ready_prompt
+}
+
+/// (`#route-reaps-idle-fresh-start`) How a fresh start's first cycle resolved.
+///
+/// A fresh start whose trigger was already proven dispatched can end three ways:
+/// it acknowledged a document cycle (normal); it produced **no** cycle but the
+/// pane returned to a dispatch-ready prompt — a legitimate **idle no-op** first
+/// cycle (empty/halted queue, `preflight` `no_changes`) which must be KEPT as a
+/// live idle session; or it produced no cycle and the pane is not dispatch-ready
+/// — a genuine startup miss that must be REAPED. Keying the idle decision on the
+/// already-tested [`ready_prompt_candidate`] discriminator avoids reaping a
+/// healthy session just because it had nothing to do ("I cannot start
+/// lazily-rs.md, killed immediately").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FreshStartAckOutcome {
+    CycleAcknowledged,
+    IdleNoOpKeep,
+    GenuineMissReap,
+}
+
+fn fresh_start_ack_outcome(
+    cycle_acknowledged: bool,
+    pane_capture: &str,
+    harness: &HarnessConfig,
+) -> FreshStartAckOutcome {
+    if cycle_acknowledged {
+        FreshStartAckOutcome::CycleAcknowledged
+    } else if ready_prompt_candidate(pane_capture, harness).is_some() {
+        FreshStartAckOutcome::IdleNoOpKeep
+    } else {
+        FreshStartAckOutcome::GenuineMissReap
+    }
+}
+
+/// Best-effort: capture `pane` and report whether a no-cycle fresh start should
+/// be kept as a live idle session (the pane is back at a dispatch-ready prompt).
+/// A capture failure returns `false` so the caller falls back to reaping a
+/// genuine miss. (`#route-reaps-idle-fresh-start`)
+fn fresh_start_pane_idle_ready(tmux: &Tmux, pane: &str, harness: &HarnessConfig) -> bool {
+    match sessions::capture_pane(tmux, pane) {
+        Ok(content) => matches!(
+            fresh_start_ack_outcome(false, &content, harness),
+            FreshStartAckOutcome::IdleNoOpKeep
+        ),
+        Err(_) => false,
+    }
 }
 
 fn truncate_log_line(text: &str, max_chars: usize) -> String {

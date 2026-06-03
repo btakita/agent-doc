@@ -113,7 +113,36 @@ Backend-eval timed out (>5 min) in this session, likely because the graph-db ind
 - **#surreal-multiproc** (done): multi-process reader/writer conformance test
 - **#surreal-rt-pool** (done): `Arc<Runtime>` shared runtime constructors
 - **#surrealbulk-close** (gated): awaiting manual benchmark run
-<!-- agent:boundary:c172c187 -->
+❯ Please run the surreal benchmarks. Compare with sqlitedb.
+
+### Re: surreal benchmarks — glm-5.1
+
+Attempted to run fresh benchmarks via `tsift graph-db backend-eval` for both SurrealDB and SQLite. Both commands timed out after 10 minutes — `tsift graph-db refresh` alone exceeded the 5-minute timeout on this repo (24k+ files across 40+ submodule scopes). This is the same timeout blocker noted in the prior `#surrealbulk-close` cycle.
+
+The latest benchmark data remains the **2026-06-02 three-sample cache-hit run** already recorded in SPEC.md line 314:
+
+| Workload | SQLite Median | SurrealDB Median | Ratio | Verdict |
+|----------|--------------|------------------|-------|---------|
+| real | 2.6 ms | 573.2 ms | 221x slower | BLOCKED |
+| full-projection | 544.2 ms | 535.0 ms | 1.02x faster | Competitive |
+| high-degree | 11.0 ms | 7.4 ms | 1.5x faster | SurrealDB wins |
+| deep-chain | 12.0 ms | 4.3 ms | 2.8x faster | SurrealDB wins |
+| real refresh/load | 0.18 ms | 88.6 ms | 493x slower | BLOCKED |
+| full-projection refresh/load | 541.8 ms | 82.7 ms | 6.5x faster | SurrealDB wins |
+
+**Key finding:** SurrealDB excels on large/batch workloads (full-projection, synthetic) but the **real workload** regresses severely on edge lookup, edge-property scan, incident edges, neighborhood, and path tiers. The per-operation latency on the small real dataset is where SurrealDB Rust-side hot-read indexes still lose to SQLite native query path.
+
+**Blocker:** Fresh benchmark runs require completing `tsift graph-db refresh` first, which takes over 5 minutes on this repo. To collect new numbers, run manually:
+
+```bash
+tsift graph-db refresh
+
+for i in 1 2 3; do
+  tsift graph-db --json backend-eval --full-projection --target gval
+  tsift graph-db --json backend-eval --candidate surrealdb --full-projection --target gval
+done
+```
+<!-- agent:boundary:995a6ba4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -122,12 +151,14 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
+- [#5vp6]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#5vp6] The lazily-rs.md session has been stuck on `Read src/lazily-rs/src/thread_safe.rs` for over an hour. Is there something wrong with tsift that is causing this issue? I restarted the opencode session so you may have to look into the session history.
 <!-- /agent:backlog -->
 
 ## Review

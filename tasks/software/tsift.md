@@ -127,7 +127,41 @@ No code changed; no build suite required. Committed as `174d101`.
 >
 > Code Navigation harness info should be in a Runbook referenced in AGENTS.md or a skill.
 Are the Runbook optimizations applied to all projects in agent-loop?
-<!-- agent:boundary:7e45e683 -->
+
+### Re: #rankdefault ranked_neighborhood promotion status — glm-5.1
+
+`ranked_neighborhood` is fully implemented but **held behind a quality gate**. The promotion state:
+
+- **Core BFS** (`tsift-core::GraphStore::ranked_neighborhood`, `lib.rs:887-982`): fully functional, 6 unit tests, three scoring strategies (BreadthFirst, EdgeKindWeighted, DegreeWeighted).
+- **Post-hoc scoring** (`tsift-resolution::ranked_neighbors`, `scoring.rs:42-173`): additive `ranked_neighbors[]` field in JSON output alongside default-ordered `nodes[]`.
+- **CLI gate** (`tsift-cli::graph_db_neighborhood_ranking_gate`, `lib.rs:12938-12965`): `status: "held_default_order_unchanged"`, `ranked_output_default: false`. The default node order remains `stable_node_id` until the `community_search_quality_metrics` gate passes.
+
+**What `#rankdefault` requires to promote:** three-sample quality comparison on real backlog/code queries measuring useful-hit density, duplicate-name precision, handle coverage, latency, and emitted tokens. The measurement surfaces (`ranked_neighbors_capped`, `NeighborhoodRankingGate`) already exist in the code. The gap is running the actual comparison workload and confirming ranked output meets or exceeds unranked on all six metrics.
+
+No code change needed yet — this is a **measurement and promotion** task, not an implementation task. Recommend scheduling a dedicated measurement cycle against real agent-loop session queries.
+
+### Re: #gfrontierhot SQLite frontier performance triage — glm-5.1
+
+Current SQLite frontier implementation status:
+
+- **Neighborhood** (`tsift-sqlite::paged_neighborhood`, `lib.rs:2290-2469`): single recursive CTE (`WITH RECURSIVE walk`) using `idx_graph_edges_from_kind`, shared node/edge query, cursor-based pagination.
+- **Shortest path** (`tsift-sqlite::shortest_path_with_max_hops`, `lib.rs:2481-2599`): iterative BFS with 256-node chunked frontier, prepared single-node statements. Max hops defaults to 64, backend-eval promotion gate measures 128/256/512 tiers.
+- **Hop-cap gate** (`tsift-cli::graph_db_backend_eval_hop_cap_promotion_gate`, `lib.rs:16200`): requires 3+ samples on real, full_projection, and synthetic_deep_chain workloads before promoting beyond 64 hops.
+
+**Triage not yet started** — `#gfrontierhot` requires running the three-sample backend-eval workload suite against real agent-loop data. The measurement infrastructure exists. Most agent-loop graphs are small enough that 64 hops never triggers. Recommend running `tsift backend-eval` on the three required workloads and recording results before optimizing anything.
+
+### Re: #greadiness graph-readiness at lookup boundary — glm-5.1
+
+Readiness is **partially implemented** across three boundaries:
+
+**Already gated:** status/doctor reports (`GraphEffectivenessReadiness`, `lib.rs:10235-10242`), related queries (`lib.rs:14276-14305`), context-pack orchestration (`lib.rs:28685-28725`).
+
+**Gap for `#greadiness`:** full suppression of broad low-signal graph expansion is **not wired into every lookup path**. Currently readiness warnings are emitted but graph expansion still proceeds in some paths (e.g., neighborhood queries don't check readiness before expansion). The fix is to thread `fail_closed` through to `GraphDbQuery::Neighborhood` and skip the recursive CTE when readiness is blocked, returning repair commands instead. Small, targeted implementation — recommend after `#gfrontierhot` measurement data is available.
+
+### Re: Runbook optimizations scope across agent-loop projects — glm-5.1
+
+**Not all projects have tsift code-navigation optimizations.** The `tsift:code-navigation` block is **per-project opt-in via `tsift init`**. 10 of ~30 projects have it: tsift, agent-doc, boost-client, corky, equityfundingsource-dev, lazily-rs, lazily-zig, session-share, tmux-router, monsterrodholders-dev. Missing: webmaster, presence, ctx-core-dev, tagpath, and others. The other 14 runbooks in `runbooks/` are repo-wide. To apply to all projects, run `tsift init` in each missing project directory.
+<!-- agent:boundary:a33c449d -->
 <!-- /agent:exchange -->
 ###
 <!--

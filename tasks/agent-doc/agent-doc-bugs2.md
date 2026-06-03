@@ -166,7 +166,16 @@ Already addressed in commit fc7c0b106. See previous response for root cause and 
 
 
 Addressed in fc7c0b106.
-<!-- agent:boundary:65e269e8 -->
+
+### Re: queue drain — glm-5.1
+
+> **Queue prompt:**
+>
+> In OpenCode the console stdout bleeds behind the TUI. The TUI is undersized. ![img_14.png](img_14.png)
+
+
+Addressed in fc7c0b106.
+<!-- agent:boundary:57b41fd1 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
@@ -176,7 +185,7 @@ Addressed in fc7c0b106.
 - ~The OpenCode Prompts still cannot be navigated with the arrow keys or Tab key. Enter does work. ![img_13.png](img_13.~
 .png)
 - ~The queue did not clear when all items were complete in an opencode session.~
-- In OpenCode the console stdout bleeds behind the TUI. The TUI is undersized. ![img_14.png](img_14.png)
+- ~In OpenCode the console stdout bleeds behind the TUI. The TUI is undersized. ![img_14.png](img_14.png)~
 - ~~[#n6az]~. Done — reaped in commit fc7c0b106.~
 ---
 monsterrodholders.md opencode session is spammed with console logs on repeat. The opencode tui is not visible ![img_15.png](img_15.png):

@@ -75,7 +75,7 @@ Implemented `#tokegate` in `tsift_quality::token_gate`.
 
 Commands/proof: ran `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `cargo check`, `cargo test`, `make check`, `cargo install --path .`, `git add` + `git commit` + `git push` in `src/tsift/`.
 
-### Re: #gpackreuse cycle-scoped packet reuse — glm-5.1
+### Re: #gpackreuse cycle-scoped packet reuse — glm-5.1 (HEAD)
 
 > **Queue prompt:**
 >
@@ -117,7 +117,11 @@ Implemented `#gpackreuse` as `tsift_quality::cycle_packet_cache`.
 - Committed and pushed: `39a4929`
 
 Commands/proof: ran `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `cargo check`, `cargo test`, `make check`, `cargo install --path .`, `git add` + `git commit` + `git push` in `src/tsift/`.
-test content without patch markers
+### Re: code navigation runbook extraction — glm-5.1
+
+Moved the full `<!-- tsift:code-navigation -->` section from inline in AGENTS.md into `runbooks/code-navigation.md`. The Runbooks catalog in AGENTS.md now links to it alongside the other key runbooks, and `code-navigation` appears in the full catalog list.
+
+No code changed; no build suite required. Committed as `174d101`.
 
 > **Queue prompt:**
 >

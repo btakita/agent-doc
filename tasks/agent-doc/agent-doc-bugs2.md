@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -47,10 +47,12 @@ Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc read --component r
 Verification: no code changed, so I did not run the project test suite. I will rerun `agent-doc session-check --codex-final-gate` after this write.
 Confidence: medium; the agent-doc logs are strong for route/closeout states, but JetBrains notification and editor-buffer claims still need plugin logs.
 Escalation: none.
-<!-- agent:boundary:e2700be3 -->
+Look at Codex-related review items. Mark as complete if logs confirm the review item is complete. If logs to confirm/deny review item are missing, add the logs.
+<!-- agent:boundary:ffe3a4f6 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
+- Look at Codex-related review items. Mark as complete if logs confirm the review item is complete. If logs to confirm/deny review item are missing, add the logs.
 <!-- /agent:queue -->
 ###
 <!--

@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -101,6 +101,7 @@ Done — scope per your call: **spec/PRD doc only, deduped, run once.**
 
 Queue kept active per your choice; both items are now drained, so the auto-loop terminates next cycle.
 ❯ What are #next-steps to implement the borrower portal? Also, did you see the TMO report when submitting the application?
+
 ### Re: did you see the TMO report on submit? — opus-4-8
 
 No — I didn't submit an application, so there was no TMO report to see. Last cycle I only rendered the two **public** BorrowerView forms read-only (a chromium markdown dump) to inventory their fields; I never filled or submitted them, and I didn't exercise the EFS portal's own submit flow.
@@ -173,21 +174,54 @@ Two options — your call:
 I held rather than auto-implementing a gated feature.
 
 *(Recovery note: the earlier e245 finalize hit a queue-consume divergence from a live edit; e245 is fully committed — code `e2abc2b`, response in HEAD — and I cleared the stuck queue line. Also: the exchange is getting large; say the word and I can `agent-doc compact` it.)*
-<!-- agent:boundary:bc6257f2 -->
+
+### Re: xcvg message email round-trip — scaffolded + gated — opus-4-8
+
+Built option (a) (inbound stubbed behind a flag) and shipped to `equityfundingsource-dev` (commit `e6d58e5`, pushed). `bun run check` green — 233 tests.
+
+Landed:
+
+- **Migration 0034**: `chat_sessions.admin_owner_user_id`. The first admin to reply claims the thread, so notifications route to that admin; unowned threads notify all active admins.
+- **Notification triggers** (`lib/borrower_messages/notify.ts`, wired into the message routes, fired post-response via `waitUntil`): borrower sends → owning admin (or all admins) gets an in-app notification; admin replies → the borrower gets one.
+- **Email send is fail-closed** behind `MESSAGE_EMAIL_NOTIFICATIONS_ENABLED` + `RESEND_API_KEY` — off until the EFS sending domain is verified (f4rq).
+- **Inbound `email → chat`**: `POST /api/email/inbound` scaffolded, gated by `MESSAGE_EMAIL_INBOUND_ENABLED`, returns `501` until enabled AND verified-sender auth is in place (so unauthenticated mail can't inject chat messages).
+- PRD + tests (fail-closed flag unit + route-wiring inspection).
+
+In-app notifications work today; the email round-trip is gated, so I've **pending-gated xcvg** (code-complete scaffold, awaiting external validation). To finish: verify the Resend EFS domain (f4rq), flip `MESSAGE_EMAIL_NOTIFICATIONS_ENABLED`, then configure inbound routing + sender auth and flip `MESSAGE_EMAIL_INBOUND_ENABLED`.
+
+### Re: cm3e (Stripe + TMO payments) re-queued — opus-4-8
+
+> **Queue prompt:**
+>
+> [#xcvg]
+
+
+You re-queued cm3e with the question linked. It's the deferred Stripe-collection path — same situation as xcvg: implementable as a scaffold, but gated on something I can't clear myself, namely whether ABS/TMO exposes a borrower-payment/receipt **write** endpoint (the documented TMO APIs don't include one), plus a Stripe account + ACH/KYC processing agreement.
+
+Same call as before:
+
+- **(a) Scaffold now:** Stripe checkout in `make-payment` + a signature-verified `payment_intent.succeeded` webhook that records the receipt in a new `loan_payment_transactions` table and reconciles the schedule row, with the TMO push behind a flag until the payment-write endpoint is confirmed. Spec + tests + commit.
+- **(b) Defer cm3e** until ABS/TMO confirms a payment-write API and the Stripe account / processing agreement is set up.
+
+I held rather than auto-implementing — it's large and gated. Your call.
+
+*(Both originally-queued items are resolved: e245 done, xcvg gated.)*
+<!-- agent:boundary:70c4b9a2 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" -->
+<!-- agent:queue preset="#spec-test-commit-push" auto -->
+- ~[#xcvg]~
+- re [#cm3e]: Can we support both Stripe and TMO payments? If a Stripe payment is made, can we update TMO?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
 - [ ] [#cm3e] [recommended] Borrower online payment collection (Stripe) + TMO sync: add ACH/card payment in the borrower portal make-payment section; on Stripe payment_intent.succeeded webhook, verify signature, record the receipt in a new EFS D1 loan_payment_transactions table, reconcile the matching loan_payments schedule row, and push the payment to TMO. GATE: confirm ABS/TMO exposes a borrower-payment/receipt WRITE endpoint (current docs/TMO cover loan/application writes, investor AddLoanFunding, and schedule/funding reads only) — ties into the TMO-writeback gate (dzmm/k2xg). Deferred non-MVP collection path from e245; handle KYC, partial payments, NSF reversals, fees.
-- [ ] [#xcvg] [recommended] Borrower message email round-trip: add an admin owner for borrower-portal secure messages, email notification when a borrower sends a message, inbound email reply that appends into the D1 chat, and borrower email when an admin replies. Builds on existing chat_sessions/chat_messages. Gated on Resend EFS sending domain (f4rq) + Google Workspace SMTP (m6ch/p40t).
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
 - [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document intelligence/search, borrower/broker/investor/admin portals, and tenant-ready resale packaging.
 - [ ] [#f4rq] Verify an EFS-owned sending domain in Resend, then switch APPLICATION_LEAD_NOTIFICATION_FROM and APPLICATION_LEAD_NOTIFICATION_TO from testing-mode values to EFS production addresses.
@@ -222,6 +256,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Review
 
 <!-- agent:review -->
+- [/] [#xcvg] [recommended] Borrower message email round-trip: add an admin owner for borrower-portal secure messages, email notification when a borrower sends a message, inbound email reply that appends into the D1 chat, and borrower email when an admin replies. Builds on existing chat_sessions/chat_messages. Gated on Resend EFS sending domain (f4rq) + Google Workspace SMTP (m6ch/p40t).
 - [/] [#next-steps] Remaining EFS workers.dev production state: D1 API token unblocked; migrations 0025/0026 are already applied; Cloudflare Access env vars are deployed for /login/access-callback on workers.dev using the one-time PIN IdP. Custom domain cutover remains intentionally deferred; true Google Workspace SSO remains gated on Google admin credentials.
 - [/] [#37ah] [recommended] Broker portal backend: replace static broker demo data with TMO-backed submit-deal, pipeline, commissions, documents, and notifications
 - [/] [#dzmm] TMO webhooks: confirm outbound webhook support (Robert to check with Mortgage Office)

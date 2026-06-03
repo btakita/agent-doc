@@ -65,7 +65,29 @@ Audited the full post-optimization codebase (context.rs, thread_safe.rs, instrum
 - `#lazyperf32` [recommended]: `Rc<dyn Any>` values in single-threaded `Context` — storing `Rc` instead of `Box` for `SlotNode.value` would make `get()` return an `Rc` clone (pointer increment) instead of a deep clone. This is an API change (`get` returns `Rc<T>` or a new `get_rc` method).
 
 Top of backlog: **`#lazyperf25`** (thread-safe fast-path Vec registries)
-<!-- agent:boundary:c509ecec -->
+❯ Run benchmarks and update tables in README.md.
+
+### Re: Run benchmarks and update tables in README.md — glm-5.1
+
+Ran `cargo bench --features instrumentation` and `python3 scripts/update-benchmark-results.py --no-run` to refresh all benchmark tables in `README.md`. Committed as `82f26bc` in the lazily-rs submodule.
+
+**Key results (compared to prior baseline):**
+
+| Benchmark | Change |
+|---|---|
+| cached_reads/context | **−31%** (8.1 ns from 11.7 ns) |
+| cold_first_get/context | **−41%** (78.7 ns from 124 ns) |
+| cold_first_get/thread_safe | **−10%** (1.0 µs from 1.08 µs) |
+| memo_equality_suppression/context | **−49%** (2.2 µs from 4.2 µs) |
+| effect_flushing/context | **−45%** (48 ns from 87 ns) |
+| batch_storms/context/64 | **−24%** (2.7 µs from 3.6 µs) |
+| dependency_fan_out/context/32 | **−28%** (3.8 µs from 4.8 µs) |
+| dependency_fan_out/thread_safe/256 | **−32%** (211 µs from 288 µs) |
+| set_cell_invalidation/high_fan_out/512 | **−34%** (232 µs from 289 µs) |
+| thread_safe_contention/read_mostly_16 | **−12%** (1.0 ms from 1.2 ms) |
+
+All 98 tests pass (including 12 Loom model-checking and 2 Tokio sync). Benchmark budget check passes.
+<!-- agent:boundary:e1f6d29d -->
 <!-- /agent:exchange -->
 ###
 <!--

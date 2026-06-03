@@ -117,7 +117,12 @@ Implemented `#gpackreuse` as `tsift_quality::cycle_packet_cache`.
 - Committed and pushed: `39a4929`
 
 Commands/proof: ran `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `cargo check`, `cargo test`, `make check`, `cargo install --path .`, `git add` + `git commit` + `git push` in `src/tsift/`.
-<!-- agent:boundary:0199a745 -->
+test content without patch markers
+
+> **Queue prompt:**
+>
+> Code Navigation harness info should be in a Runbook referenced in AGENTS.md or a skill.
+<!-- agent:boundary:5e95511f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -128,7 +133,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - ~[#gpackreuse]~
-- Code Navigation harness info should be in a Runbook referenced in AGENTS.md or a skill.
+- ~Code Navigation harness info should be in a Runbook referenced in AGENTS.md or a skill.~
 - [#rankdefault]
 - [#gfrontierhot]
 - [#greadiness]

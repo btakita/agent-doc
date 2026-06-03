@@ -77,7 +77,22 @@ Deployed P1–P3 live. Worker version `85fa9cfc` at https://equityfundingsource.
 - **Live smoke tests green:** `/apply` → 200; `/portal-borrower/full-application` (unauth) → 303 → `/login?role=borrower&next=…` (hybrid handoff + `next` live); `/api/borrower/payments/config` → `{stripe_enabled:false}`; `/api/stripe/webhook` (unsigned) → 501. All gated features fail-closed.
 
 Note: public `/apply` now routes prequal submits into the partial wizard (Personal → Addresses → Employment → e-sign; final submit is P5). Continuing the queue to P4 (`#1tk7`); prod stays at P1–P3 until a re-deploy (queued reminder added).
-<!-- agent:boundary:7c309070 -->
+
+### Re: apply4 P4 — assets, liabilities & REO — done — opus-4-8
+
+> **Queue prompt:**
+>
+> [#1tk7]
+
+
+P4 shipped (commit `678cd59`, pushed). `bun run check` green — 253 tests.
+
+- **Migration 0039**: `application_assets` (account number stored as a **masked token**), `application_liabilities`, `application_reo` + `application_reo_mortgages` child table (cascade; masked tokens).
+- **Repo + routes**: assets/liabilities replace+read; REO replace+read with **nested per-property mortgages**; `PUT …/assets`, `…/liabilities`, `…/reo`, all in `GET …/sections`.
+- **Wizard**: new "Assets & property" step (add-more assets, liabilities, and REO properties with creditor/balance) with save/resume.
+
+Continuing the queue to P5 (`#az2w` — subject property + Declarations A–M + submit). Prod stays at P1–P3 until the queued re-deploy.
+<!-- agent:boundary:ae3c78b3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -88,7 +103,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 - ~[#0ag4]~
 - ~[#f3b2]~
 - ~[#2eaf]. deploy to production~
-- [#1tk7]
+- ~[#1tk7]~
 - [#az2w]
 - [#k9p5]
 <!-- /agent:queue -->
@@ -97,7 +112,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 
 <!-- agent:backlog -->
 - [ ] [#zr5z] [recommended] Re-deploy equityfundingsource to production after P4–P6 land so the full apply4 wizard (incl. final submit) is live; prod is currently at P1–P3 (worker 85fa9cfc). Run cf:d1:migrate:remote then deploy:worker, smoke-test.
-- [ ] [#1tk7] apply4 full application P4 — assets/liabilities + Real Estate Owned schedule (with per-property mortgages). Plan: src/equityfundingsource-dev/prds/apply4-full-application-build-plan.md
 - [ ] [#az2w] apply4 full application P5 — subject property/loan + Declarations A–M + submit (draft → submitted). Plan: src/equityfundingsource-dev/prds/apply4-full-application-build-plan.md
 - [ ] [#k9p5] apply4 full application P6 — admin review of the full application + TMO writeback mapping (gated on TMO custom-field key map: dzmm/k2xg/7a4d). Plan: src/equityfundingsource-dev/prds/apply4-full-application-build-plan.md
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.

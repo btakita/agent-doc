@@ -528,7 +528,7 @@ pub fn clear(file: &Path) -> Result<()> {
         agent_doc_orchestration::codex_hook::record_external_prompt_for_file(
             &ctx.canonical_file,
             &ctx.session_id,
-            "/clear",
+            harness_clear_command(&ctx.harness),
         )?;
     }
     // Explicit clear aborts the current turn, so reclaim any orphaned open
@@ -593,7 +593,9 @@ fn send_clear_via_supervisor(ctx: &SessionContext) -> Result<SupervisorClearDeli
     let response = agent_doc_orchestration::supervisor::ipc::send_command(
         &ctx.supervisor_socket,
         &IpcMethod::Clear {
-            bytes: agent_doc_orchestration::supervisor::ipc::normalize_submit_text("/clear"),
+            bytes: agent_doc_orchestration::supervisor::ipc::normalize_submit_text(
+                harness_clear_command(&ctx.harness),
+            ),
         },
     )
     .with_context(|| {
@@ -1142,13 +1144,28 @@ fn terminal_editor_command(command: &str) -> bool {
     )
 }
 
+/// The harness-native command that clears session context (starts a fresh
+/// conversation). Claude Code and Codex use `/clear`; OpenCode has **no
+/// `/clear` command** — its equivalent is `/new` (`session_new`, "Create a new
+/// session"). Submitting `/clear` to an OpenCode pane is a no-op, which is why
+/// `Clear Session Context` did nothing for OpenCode-backed documents
+/// (#opencode-clear-uses-new). Keep this aligned with the harness slash-command
+/// surfaces in `harness.rs` and the session/tmux command spec.
+fn harness_clear_command(harness: &str) -> &'static str {
+    match harness {
+        "opencode" => "/new",
+        _ => "/clear",
+    }
+}
+
 fn send_clear_to_pane(tmux: &Tmux, pane: &str, file: &Path, harness: &str) -> Result<()> {
+    let command = harness_clear_command(harness);
     agent_doc_orchestration::sessions::send_submitted_text_for_harness(
-        tmux, pane, "/clear", harness,
+        tmux, pane, command, harness,
     )
     .with_context(|| {
         format!(
-            "failed to send `/clear` to authoritative pane {} for {}",
+            "failed to send `{command}` to authoritative pane {} for {}",
             pane,
             file.display()
         )
@@ -3319,6 +3336,16 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
                 .iter()
                 .any(|issue| issue.contains("supervisor socket"))
         );
+    }
+
+    #[test]
+    fn harness_clear_command_maps_opencode_to_new() {
+        // OpenCode has no `/clear` command; its clear-context equivalent is
+        // `/new` (#opencode-clear-uses-new). Claude/Codex keep `/clear`.
+        assert_eq!(harness_clear_command("opencode"), "/new");
+        assert_eq!(harness_clear_command("claude"), "/clear");
+        assert_eq!(harness_clear_command("codex"), "/clear");
+        assert_eq!(harness_clear_command("unknown"), "/clear");
     }
 
     #[test]

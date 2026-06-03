@@ -402,10 +402,13 @@ single-owner actor controls:
   that clean-exit restart prompt, and the document has not changed after the
   last committed response cycle. `--force` bypasses that starting guard and may
   interrupt a busy live pane before requesting the supervisor restart.
-- `agent-doc session clear <FILE>` injects the harness-native `/clear`
-  equivalent into the authoritative session through the same canonical
+- `agent-doc session clear <FILE>` injects the harness-native clear-context
+  command into the authoritative session through the same canonical
   single-line submit command used by routed reopen and queued slash-command
-  dispatch. When the authoritative pane is alive on the default tmux server,
+  dispatch. Claude Code and Codex use `/clear`; OpenCode has no `/clear`
+  command, so its clear-context equivalent is `/new` (`session_new`,
+  "Create a new session") — submitting `/clear` to OpenCode is a no-op
+  (#opencode-clear-uses-new). When the authoritative pane is alive on the default tmux server,
   the command must submit directly through that pane's tmux input path;
   otherwise it may fall back to supervisor IPC delivery. That supervisor
   fallback uses the gate-exempt `Clear` IPC control method rather than the gated

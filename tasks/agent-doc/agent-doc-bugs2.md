@@ -31,55 +31,19 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260603-025016.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260603-033404.md`*
 
 Compacted content:
-- Archived 1 response topic(s): do #route-reaps-idle-fresh-start
+- Archived 2 response topic(s): do [#admin-fleet-dashboard]; JB Clear Session Context does not work with OpenCode
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: do [#admin-fleet-dashboard] — opus-4-8
-
-> **Queue prompt:**
->
-> do [#admin-fleet-dashboard]
-
-
-Shipped Phase 1 of the actor runtime dashboard — `agent-doc admin dashboard`, a read-only live view over the `#ipc-admin-api` read surfaces (`admin list` / `admin detect`).
-
-**Implementation** (`agent-doc-orchestration::dashboard`, pure model/view split per the plan):
-- `build_dashboard_model(actors, findings)` — folds enumerated actors + derived findings into a deterministic, `document_id`-sorted row model; each row carries the `admin detect` finding kinds that name its document or pane, plus a `problem` highlight flag. No new detection/control logic — pure view over the existing data plane.
-- `render_dashboard(model, color)` — stable terminal frame, color gated for testability; flags cross-document / stale-dead-pane rows with a `!` marker + a findings footer.
-- `agent-doc admin dashboard` — polls every ~1s (`--interval`), with `--once` (single frame) and `--json` (model snapshot) for scripting/tests. Color auto-detected via `IsTerminal`.
-
-**Verification:** 7 new unit tests (model sort, clean fleet, cross-document flagging both rows, stale-dead-pane by pane match, deterministic plain render, findings footer + marker, empty fleet, unicode-safe truncate) — all green. Full `make check` passes (exit 0; the lone `unused import` warning is in a pre-existing test file). End-to-end smoke: `admin dashboard --json` and `--once` both render the live fleet correctly. Built `--release` + `cargo install`; both binaries current.
-
-**Deferred** (unchanged dependency boundary): mutating row keybinds (`admin stop` / `admin rebind`) depend on `#ipc-admin-api` Phase 2 gated verbs; the JetBrains/VS Code tool-window surface is also still deferred. Plan updated: `tasks/agent-doc/plan-actor-runtime-dashboard.md`.
-
-Submodule commit `2026042`; superproject pointer + plan bumped.
-
-### Re: JB Clear Session Context does not work with OpenCode — opus-4-8
-
-Root-caused and fixed. **OpenCode has no `/clear` command** — `agent-doc session clear` (what the JB action runs) hardcoded `/clear` for every harness, so it was a no-op against OpenCode.
-
-#### Evidence (tsift.md logs + OpenCode binary)
-- `ops.log` for `tsift.md` (OpenCode, pane `%62`): repeated `session_clear_sent … delivery=direct_pane_submit submit_mode=tmux_literal_enter_delayed fallback_reason=legacy_supervisor_clear_ipc_unsupported` — the binary *sent* `/clear` to the pane but nothing cleared. (Codex/Claude docs clear fine via `delivery=supervisor_ipc`.)
-- OpenCode `1.15.13` binary string analysis: command tokens are `session_new` / `session_compact` / `session_interrupt` / `session_child`; slash commands are `/new` and `/compact`. **`/clear` is absent entirely.** `session_new` = `"Create a new session"` (`<leader>n`, `/new`) — that is OpenCode's clear-context equivalent.
-
-So submitting `/clear` to OpenCode did nothing; the operation only ever "worked" for Claude/Codex.
-
-#### Fix (submodule `3746dedc`)
-New `harness_clear_command(harness)` in `session_actor_cmd.rs` → `/new` for `opencode`, `/clear` otherwise, applied to all three clear-submit sites: direct-pane submit, supervisor IPC `Clear` bytes, and the external-prompt record (so route doesn't false-restart on the tracked clear). The supervisor inject path already submits OpenCode via `KittyReturn`, so only the command string needed fixing. Unit test `harness_clear_command_maps_opencode_to_new`; spec `07-session-tmux-commands.md` updated to record the OpenCode `/new` rule (`#opencode-clear-uses-new`).
-
-#### Verification
-`make check` green (exit 0, 0 failed); release + `cargo install` both rebuilt, so the next live OpenCode clear submits `/new`. **Live-verify gate:** running `Clear Session Context` on a live OpenCode pane (e.g. tsift.md) and confirming the context actually resets is the remaining operator confirmation — the root cause and command mapping are proven statically, but a live OpenCode clear is destructive so I did not trigger one unilaterally.
-
-Note: the second queue item (`malformed template patchback … running tsift.md`) is a separate OpenCode patchback bug and is handled in its own cycle.
-<!-- agent:boundary:fd327fb9 -->
+<!-- agent:boundary:1a294f98 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
 - ~do [#admin-fleet-dashboard]~
+- do [#opencode-build-chrome-stall]
+- do [#opencode-preset-not-dispatched]
+- do [#jbrunstallreg]
 - JB `Clear Session Context` does not work with OpenCode. This is a long-standing issue. Look at attempt with tsift.md in the logs.
 - Error in OpenCode `  ┃  Error: malformed template patchback: found patch/replace markers but no closed patch blocks parsed; refusing to append unmatched content` when running tsift.md
 - Go through all review items. If logs are in place to confirm the completion, complete the review item. If logs are in place to deny the completion, keep the review item. If logs are missing to confirm or deny the completion, add logs to confirm/deny the review item.

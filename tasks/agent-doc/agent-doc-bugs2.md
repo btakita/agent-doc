@@ -126,7 +126,40 @@ So `#spec-test-build-install-commit-push` is satisfied: spec ✓ test ✓ build 
 The 58 gated items are **not 58 open bugs**. Breaking them down: ~35 are implemented/partially-implemented work **parked on live operator verification** (the `[/]` = "code-complete + tested, gated on live-verify" convention), and 44 carry `[recommended]` — i.e. feature ideas awaiting prioritization, not regressions. Only a handful describe genuinely unimplemented behavior. The length is because each one records *what shipped* + *what live-verify remains* so nothing silently regresses.
 
 If the volume is the problem rather than the content, I can (your call — I won't do this unilaterally): (1) **reap** the items whose live-verify you've since confirmed into `agent:done`; (2) **compact** the review section so each item is a one-line title + id with detail moved to its plan file; or (3) **split** the `[recommended]` feature ideas into `agent:icebox` so `agent:review` holds only gated-implemented work. Tell me which and I'll do it.
-<!-- agent:boundary:b4b225ed -->
+
+### Re: JB Run Agent Doc on monsterrodholders.md — blocking on the wrong Session state? — opus-4-8
+
+> **Queue prompt:**
+>
+> JB `Run Agent Doc` error. Given that monsterrodholders.md was running agent-doc-bugs2.md before, is it possible that it is blocking on the wrong Session state?
+> ```
+> [route] target tmux session: 0
+> Error: authoritative actor generation 255 for tasks/monsterrodholders.md owns pane %61 but dispatch-only route will not inject a new trigger because the authoritative actor is busy did not return to a dispatch-ready prompt in the current generation after waiting 60s. Wait for the active turn to finish before rerouting this document.
+> ```
+> #spec-test-build-install-commit-push
+
+
+**Yes, your hypothesis is plausible — and I can name the exact gap.** The error is route's dispatch-only *busy refusal*:
+
+```
+authoritative actor generation 255 for monsterrodholders.md owns pane %61 but
+dispatch-only route will not inject ... busy did not return to a dispatch-ready
+prompt ... after waiting 60s.
+```
+
+Route decides "busy" from two things: the **authoritative actor binding** (monsterrodholders.md gen 255 → pane `%61`) plus the **live pane's prompt-readiness** (`%61` wasn't showing a dispatch-ready prompt within 60s). What it does **not** do is verify that the live turn occupying `%61` actually *belongs to* monsterrodholders.md. So:
+
+- If `%61` had earlier been running `agent-doc-bugs2.md` cycles (the cross-document contamination class), the live pane shows a busy/non-ready prompt that belongs to a *foreign* document's turn.
+- Route correctly honors the no-inject-into-active-turn invariant and refuses — but for monsterrodholders.md that foreign turn reads as a **deadlock**, with a generic "busy" message that hides the real cause. That is exactly the "blocking on the wrong session state" you're seeing.
+
+**What already guards the upstream cause.** The contamination that lets a foreign doc execute in another's pane is `#xdoc-route-sweep-commits-sibling-docs`, fixed in submodule `281e4db8` (sibling-doc commit sweep is now gated on authoritative ownership), plus the `log_cross_document_execution_context` signal (`sync.rs:5915`) that records when a cycle runs in a pane owning a different document. Once contamination is prevented, `%61` shouldn't host a foreign turn.
+
+**How to confirm it live (using the tool from the earlier queue item).** `agent-doc admin detect` (`#ipc-admin-api`, just shipped) flags exactly this: a pane that is the live binding of more than one non-closed document. Run it against the `boost-client` project root that owns `monsterrodholders.md` while the symptom is live — a `cross_document_pane` finding on `%61` confirms the contamination; its absence means `%61` is a legitimate (if long) monsterrodholders turn and the 60s refusal is correct (wait for the turn, or `agent-doc session restart-supervisor --force`).
+
+**The actionable code gap** (captured as `#route-busy-wrong-owner-diagnostic`, recommended): route's busy refusal should cross-check pane-owns-routed-doc and emit a `wrong_owner` / cross-document diagnostic (`routed file=F busy pane=%N owns=G`) instead of the generic timeout, so a contaminated pane reads as contamination, not a deadlock. It's the dispatch-path sibling of `#jb-tsift-pane-sync` Phase 3b. I did **not** implement it speculatively: it changes the delicate route busy path and needs the live `monsterrodholders.md` state to verify against — which is gone for this historical incident.
+
+So `#spec-test-build-install-commit-push`: no new code this cycle (root cause is guarded upstream; the remaining gap is a diagnostic-quality improvement gated on live repro). The earlier commits this turn are pushed.
+<!-- agent:boundary:1adb6da3 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -143,14 +176,14 @@ preset #spec-test-build-install-commit-push
 - ~When I navigate to tsift.md, the focus goes into the stash. The tmux pane does not go into the agent-doc tmux window.~
 - ~do [#ipc-admin-api]~
 - ~I removed "Do not implement from" plan-jb-run-agent-doc-busy-queue-dispatch-deadlock.md. Go ahead and execute the plan if needed. Ensure any associated items are completed. I'm confused by the amount and length of the review items. #spec-test-build-install-commit-push~
----
+~~~done
 JB `Run Agent Doc` error. Given that monsterrodholders.md was running agent-doc-bugs2.md before, is it possible that it is blocking on the wrong Session state?
 ```
 [route] target tmux session: 0
 Error: authoritative actor generation 255 for tasks/monsterrodholders.md owns pane %61 but dispatch-only route will not inject a new trigger because the authoritative actor is busy did not return to a dispatch-ready prompt in the current generation after waiting 60s. Wait for the active turn to finish before rerouting this document.
 ```
 #spec-test-build-install-commit-push
----
+~~~
 JB `Compact Exchange` error the first attempt. The 2nd attempt worked.
 ```
 agent-doc command failed (exit 1): [agent-doc] Tagged pre-compact state as agent-doc/agent-doc-bugs2/pre-compact-24 [compact] CRDT state compacted: 91901 → 91901 bytes Error: visible editor buffer for tasks/agent-doc/agent-doc-bugs2.md differs from the expected disk state; save or discard the editor buffer, then retry
@@ -193,6 +226,7 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Review
  
 <!-- agent:review -->
+- [/] [#route-busy-wrong-owner-diagnostic] [recommended] #agent-doc-bug 2026-06-02: route dispatch-only busy refusal does not cross-check that the live busy pane's owned document matches the ROUTED document. When a pane was contaminated by a foreign doc's cycle (e.g. agent-doc-bugs2.md ran in monsterrodholders.md's pane %61), route still keys 'busy' off the authoritative binding + live prompt-readiness and emits a generic 60s busy-timeout instead of naming the contamination — the operator reads it as 'blocking on the wrong session state'. Fix: in the DispatchOnlyBusyQueue / busy-refusal path, validate pane-owns-routed-doc (reuse cmdline_owns_other_document / reject_cross_document_owner_pane from sync.rs) and emit a wrong_owner/cross-document diagnostic (routed file=F busy pane=%N owns=G) instead of the generic timeout. Sibling of #jb-tsift-pane-sync Phase 3b (display guard) + #xdoc-route-sweep-commits-sibling-docs (281e4db8, the upstream contamination gate). Confirm live with agent-doc admin detect (#ipc-admin-api), which flags a pane bound to >1 non-closed document. Gated on the live monsterrodholders.md repro.
 - [/] [#ipc-admin-api] [recommended] #agent-doc-bug feature 2026-06-02: admin control plane for agent-doc actors. PHASE 1 (read-only) IMPLEMENTED+tested+shipped (submodule 31efa50c, superproject 8a3179604, both binaries rebuilt+installed, live-verified): agent-doc admin list [--json] enumerates the project actor fleet from the sqlite store (session/pane/window/supervisor-pid/harness/generation/state/liveness); agent-doc admin detect [--json] flags cross_document_pane (a LIVE pane bound to >1 non-closed document — the contamination) + stale_dead_pane (non-closed actor on a dead pane). Pure logic + 6 unit tests in agent-doc-orchestration/src/admin.rs; live run surfaced a real cross-binding + 19 orphaned bindings. GATED pending Phase 2 (mutating verbs rebind + stop --halt-queue --terminate — need supervisor quiesce + durable queue_active:false + live verification so the stop sticks without respawn) and Phase 3 (FFI + thin editor menu). Plan: tasks/agent-doc/plan-ipc-admin-api-actor-control.md.
 - [/] [#jb-tsift-pane-sync] #agent-doc-bug 2026-06-02: tsift focus-into-stash IMPLEMENTED+tested (submodule a162e15d, superproject 1ec602676, both binaries rebuilt+installed). focus::run_no_promote no longer selects a stashed target pane in place (which surfaced editor focus inside the stash); the reconciler atomic SWAP owns surfacing+selection (swap stashed pane into agent-doc, stash displaced pane, select focus pane in one op). Added pub sync::pane_in_stash_window + 3 live-tmux regressions (helper, stashed-target deferred, visible-target selected). GATED on live editor->tmux verify: navigate to tsift.md from a sibling pane and confirm it surfaces in agent-doc, not the stash. Plan: tasks/agent-doc/plan-jb-tsift-pane-sync-regression.md
 - [/] [#lr-actor-10-wire-callers] #agent-doc-bug 2026-06-02: complete the deferred Phase 10 caller-wiring — route.rs/sync.rs/resync.rs/gc.rs still call sessions::load()/config::load() directly (~49 sites) instead of the cached GlobalConfigSlot/SessionRegistrySlot now on RunContext (#lr-actor-10 core landed ec81d850, green). No behavior change; perf-only. Lower priority + risky (sensitive route/sync files), so plumb a RunContext/ActorContext through each caller carefully. Plan: tasks/agent-doc/plans/lazily-rs-integration.md (Phase 10, last bullet).

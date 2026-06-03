@@ -165,7 +165,24 @@ Readiness is **partially implemented** across three boundaries:
 ### Re: Runbook optimizations — already answered — glm-5.1
 
 The answer was committed in the previous cycle (see "### Re: Runbook optimizations scope across agent-loop projects" above). Striking through the consumed queue items. Backlog items for `#rankdefault`, `#gfrontierhot`, `#greadiness` remain open pending measurement/implementation work.
-<!-- agent:boundary:a85a774a -->
+
+### Re: tsift init across all agent-doc projects — glm-5.1
+
+> **Queue prompt:**
+>
+> Run `tsift init` in all projects using tsift in agent-doc
+
+
+Ran `tsift init` in all 16 projects that have `tsift:code-navigation` in their AGENTS.md. All 16 reported "already present (no changes needed)" — the code-navigation block was already injected in prior cycles.
+
+7 projects had the AGENTS.md block but no `.tsift` directory (agent-doc-js, agent-resume, chromium-bridge, ctx-core-dev, presence, tagpath, webmaster). `tsift init` only manages the AGENTS.md/CLAUDE.md blocks; the `.tsift` index directory is created by `tsift status --fix` or `tsift index` on first use, which happens when those projects are actively indexed.
+
+19 projects (agent-kit, agent-memories, agent-rules, agent-runbooks, briantakita.me-dev, brookebrodack-dev, censible-core, cloudflare, cogov-dev, drmanny-dev, eval-runner, existence-lang, herbaliciousbliss-dev, instruction-files, lazily-py, module-harness, prescience-notes-dev, python-intentions, rappstack-dev, skill-harness) have no AGENTS.md and no CLAUDE.md — they are not currently using agent-doc with tsift. Running `tsift init` there would create new AGENTS.md/CLAUDE.md files with only the code-navigation block, which is outside the scope of this task ("projects using tsift in agent-doc").
+
+No code changes; no build/install/commit needed.
+
+Commands/proof: `tsift init` x16 projects, `tsift init --help`, directory scans for `.tsift`, `AGENTS.md`, `CLAUDE.md`.
+<!-- agent:boundary:4d7753d5 -->
 <!-- /agent:exchange -->
 ###
 <!--

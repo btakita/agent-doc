@@ -233,7 +233,28 @@ cargo bench --bench context --features vec_edges -- dependency_fan_out,set_cell_
 ```
 
 Committed and pushed to lazily-rs (`ba537b2`).
-<!-- agent:boundary:6db20cf5 -->
+
+### Re: Queue cleanup and JB bug triage — glm-5.1
+
+> **Queue prompt:**
+>
+> JB `Clear Session Context` successfully ran `/new` but the restarted session should not run agent-doc. #agent-doc-bug
+
+
+Cleared 5 completed queue items (~#zfam, ~#f5jz, ~#rvjd, ~#xsp1, ~#r54f~).
+
+**JB `Clear Session Context` + `/new` restart** — Already fixed by #7az7 (implemented this session): `prompt_requests_clear()` recognizes `/new`, 60s clear-cooldown marker prevents idle-queue-watch re-injection. No further action needed.
+
+**JB `Run Agent Doc` stalls in this OpenCode session** — Triaged against existing bugs:
+
+| Existing bug | Status | Relevance |
+|---|---|---|
+| `#opencode-post-turn-false-active` | IMPLEMENTED, needs live-verify | Bottom-12-lines busy-cue check replaces all-lines scan — likely root cause of "stalls" |
+| `#jbrunstallreg` | IMPLEMENTED, needs live-verify | Plugin-side stage ledger bounds all pre-route stages |
+| `#opencode-preset-not-dispatched` | In review | Dependent on the above fixes |
+
+Added as `#opencode-jb-stall` to agent-doc-bugs2.md review backlog.
+<!-- agent:boundary:60ef402a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -242,12 +263,7 @@ Committed and pushed to lazily-rs (`ba537b2`).
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- ~[#zfam]~
-- ~[#f5jz]~
-- ~[#rvjd]~
-- ~[#xsp1]~
-- ~[#r54f]~
-- JB `Clear Session Context` successfully ran `/new` but the restarted session should not run agent-doc. #agent-doc-bug
+- ~JB `Clear Session Context` successfully ran `/new` but the restarted session should not run agent-doc. #agent-doc-bug~
 - JB `Run Agent Doc` stalls in this OpenCode session. #agent-doc-bug
 <!-- /agent:queue -->
 

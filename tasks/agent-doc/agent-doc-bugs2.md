@@ -164,7 +164,7 @@ Option 1 (native `agent-doc describe-image`) is the tightest fit for the existin
 > JB `Run Agent Doc` on this document stalls...does not dispatch to the opencode session.
 
 This is **#opencode-jb-stall** (already in review). The stall when JB routes to an OpenCode-owned pane is the known symptom — related to #opencode-post-turn-false-active (implemented, needs live-verify) and #jbrunstallreg (plugin-side stage ledger). No new information in this report beyond confirming the issue reproduces with this document.
-<!-- agent:boundary:54a96a4f -->
+<!-- agent:boundary:ae4eb567 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
@@ -184,6 +184,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#img-describe-toolcall] #img-describe-toolcall #agent-doc-bug feature 2026-06-03: add agent-doc describe-image subcommand or MCP tool that shells out to a vision API and returns text description to stdout. Enables non-vision models to analyze images via toolcall. Needs plan for provider config, API key handling, output format.
 - [/] [#4h81] #opencode-codex-capacity-proof #agent-doc-bug 2026-06-03: Codex Capacity Proof incorrectly runs in OpenCode harness. See monsterrodholders.md session + agent-doc logs.
 - [/] [#t9xf] #opencode-log-bleed #agent-doc-bug 2026-06-03: agent-doc stderr logs bleed over the OpenCode UI. Needs reproduction to confirm source.
 - [/] [#7fmb] #opencode-prompt-navigation #agent-doc-bug 2026-06-03: OpenCode TUI prompt list cannot be navigated with arrow keys or Tab key. Enter works. Likely OpenCode TUI issue.

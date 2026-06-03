@@ -52,7 +52,22 @@ P2 shipped (commit `a2b68f8`, pushed). `bun run check` green — 246 tests.
 - **Wizard UI**: 3 steps (Personal → Addresses → Review & e-sign) with save-per-step and resume from saved sections.
 
 Continuing the queue to P3 (`#2eaf` — employment & income).
-<!-- agent:boundary:e883f93d -->
+
+### Re: apply4 P3 — employment & income — done — opus-4-8
+
+> **Queue prompt:**
+>
+> [#2eaf]. deploy to production
+
+
+P3 shipped (commit `379ac66`, pushed). `bun run check` green — 249 tests.
+
+- **Migration 0038**: `application_employment` (current/additional/former with the apply4 gross monthly income breakdown — base/overtime/bonus/commission/military/other), `application_income` (other-source income).
+- **Repo + routes**: employment/income replace+read; `PUT …/employment`, `PUT …/income`, both folded into `GET …/sections` for resume.
+- **Wizard**: new Employment step (current employer + self-employed, gross-income breakdown, add-more other-income rows) with save/resume.
+
+Continuing the queue to P4 (`#1tk7` — assets/liabilities + Real Estate Owned).
+<!-- agent:boundary:49782fd6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -62,7 +77,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 <!-- agent:queue preset="#spec-test-commit-push" auto -->
 - ~[#0ag4]~
 - ~[#f3b2]~
-- [#2eaf]
+- ~[#2eaf]. deploy to production~
 - [#1tk7]
 - [#az2w]
 - [#k9p5]
@@ -71,7 +86,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#2eaf] apply4 full application P3 — employment & income (current/additional/former + gross monthly income breakdown + other-source income). Plan: src/equityfundingsource-dev/prds/apply4-full-application-build-plan.md
 - [ ] [#1tk7] apply4 full application P4 — assets/liabilities + Real Estate Owned schedule (with per-property mortgages). Plan: src/equityfundingsource-dev/prds/apply4-full-application-build-plan.md
 - [ ] [#az2w] apply4 full application P5 — subject property/loan + Declarations A–M + submit (draft → submitted). Plan: src/equityfundingsource-dev/prds/apply4-full-application-build-plan.md
 - [ ] [#k9p5] apply4 full application P6 — admin review of the full application + TMO writeback mapping (gated on TMO custom-field key map: dzmm/k2xg/7a4d). Plan: src/equityfundingsource-dev/prds/apply4-full-application-build-plan.md

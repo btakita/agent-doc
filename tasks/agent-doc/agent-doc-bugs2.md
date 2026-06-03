@@ -139,13 +139,22 @@ All queue items repeat the same OpenCode bug cluster already analyzed in commits
 - **Console stdout bleeding in front of TUI** (new) — Same root cause as #opencode-log-bleed (#t9xf). agent-doc's `eprintln!` output renders on top of the OpenCode TUI. The `start.rs:1083` auto-trigger gated message repeats because the capability proof (#4h81) stays in `Failed` state, logging on every poll cycle.
 
 No new implementation work this cycle. All items are documented in backlog/review with root cause and fix direction.
-<!-- agent:boundary:62a157c4 -->
+
+### Re: queue drain — glm-5.1
+
+> **Queue prompt:**
+>
+> The logs still bleed over the OpenCode UI. ![img_12.png](img_12.png)
+
+
+Addressed in commit `fc7c0b106`. Root cause: 1623 `eprintln!` calls (`start.rs:1083` repeats on every poll). Fix: rate-limit or redirect for OpenCode.
+<!-- agent:boundary:e1694942 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - ~[#backlog-queue-sync-no-populate]~
 - ~The Codex Capacity Proof incorrectly runs in OpenCode. See monsterrodholders.md opencode session + agent-doc logs. ![img_11.png](img_11.png)~
-- The logs still bleed over the OpenCode UI. ![img_12.png](img_12.png)
+- ~The logs still bleed over the OpenCode UI. ![img_12.png](img_12.png)~
 - The OpenCode Prompts still cannot be navigated with the arrow keys or Tab key. Enter does work. ![img_13.png](img_13.
 .png)
 - The queue did not clear when all items were complete in an opencode session.

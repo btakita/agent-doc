@@ -36,7 +36,26 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 6 response topic(s): do #manual-queue-head-loss (re-queued); struck #manual-queue-head-loss; JB `Run Agent Doc` blocking on the wrong Session state; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:6692e08a -->
+
+### Re: do #lr-actor-10 — final lazily-rs phase; added the contamination-safety constraint it needs — opus-4-8
+
+`#lr-actor-10` is the **last** lazily-rs phase (8 and 9 are struck/reaped — the toolchain actor drained them). It adds `GlobalConfigSlot` + `SessionRegistrySlot` to the long-lived `ActorContext`. The plan already specifies the right backing (`ThreadSafeContext`), invalidation-on-watcher-event, and per-document graphs (Q2) — but there's a sharp edge given what *just* happened.
+
+**Why this phase needs care now:** `SessionRegistrySlot` caches the **fleet-wide** `sessions.json` — every document's pane↔owner binding — unlike the per-document slots in phases 6–9. And `#xdoc-route-sweep-commits-sibling-docs` just proved that acting on a stale/owner-agnostic binding is precisely what made the lazily-rs Codex pane commit *this* document's cycles. Shipping a registry cache that an actor reads for ownership/route/sweep decisions, without strict freshness, would **bake that contamination class into a cache**.
+
+**What I added to `plans/lazily-rs-integration.md` Phase 10:** ownership/route/closeout-sweep decisions must read a registry fresh-as-of `sessions.json` mtime/epoch (clear-on-mtime, not just a debounced watcher event), the `#xdoc` owner gate and this slot must share one fresh read, and a regression that an ownership decision through the slot returns fresh bindings after an mtime bump. Pairs it with `#ipc-admin-api`'s DETECT surface.
+
+**Can't implement the Rust here** (binary gated — `cargo`/`make`/`.bin/agent-doc` still declined this pane). This is the toolchain actor's to land (it did 8/9); the safety constraint is now in the plan so it doesn't get missed.
+
+**On "I'm confused by the amount and length of the review items":** fair — it's 55 items, all `[/]`. The breakdown: ~50 are **code-complete + shipped, gated only on live operator verification** (install signed JB plugin, drive a busy tmux pane, capture IPC payloads) — those are batched under `#jkvs` (Path A live busy-pane), `#6cmx` (Path B IPC capture), `#qasm` (Path C no-live-pane). Only a handful (`#lr-queue-patchback-miss`, `#subagent-blocks-session`) are genuinely implementation/spec-pending. The review list is long because automated CLI cycles *can't* satisfy live-verify gates, not because work is unfinished. Collapsing it is exactly `#run-gated-review-items` (queued next) — best run from a binary-enabled pane that can actually drive the live verifications.
+Plan updated. The response:
+
+> **Queue prompt:**
+>
+> do [#lr-actor-10]
+
+**Closeout:** durable deliverable = the cross-document-safety constraint now in `plans/lazily-rs-integration.md` Phase 10 (uncommitted, with the prior plan edits — say "commit it" to land them as one non-session change). `#lr-actor-10` implementation is the toolchain actor's (final lr phase); I can't build/finalize from this gated pane. Session-doc response uncommitted.
+<!-- agent:boundary:9ef4aee4 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -44,7 +63,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#lr-queue-patchback-miss]~
 - ~do [#lr-head-8]~
 - ~do [#lr-wire-9]~
-- do [#lr-actor-10]
+- ~do [#lr-actor-10]~
 - do [#xdoc-route-sweep-commits-sibling-docs]
 - do [#ipc-admin-api]
 - do [#run-gated-review-items]

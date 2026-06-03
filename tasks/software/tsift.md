@@ -74,7 +74,50 @@ Implemented `#tokegate` in `tsift_quality::token_gate`.
 - Committed and pushed to tsift main: `42738de`
 
 Commands/proof: ran `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `cargo check`, `cargo test`, `make check`, `cargo install --path .`, `git add` + `git commit` + `git push` in `src/tsift/`.
-<!-- agent:boundary:b24f25d5 -->
+
+### Re: #gpackreuse cycle-scoped packet reuse — glm-5.1
+
+> **Queue prompt:**
+>
+> [#gpackreuse]
+
+
+Implemented `#gpackreuse` as `tsift_quality::cycle_packet_cache`.
+
+**What was added:**
+
+- `packages/tsift-quality/src/cycle_packet_cache.rs` — new module with disk-backed packet cache:
+  - Cache entries under `.tsift/cycle-packet-cache/{evidence,context-pack,impact,conflict-matrix}/`
+  - Keys derived from `blake3(version + watermarks + packet-specific params)`
+  - `cycle_packet_evidence_key` — deterministic key from `packet_id`
+  - `cycle_packet_watermark_key` — triple watermark + extras key
+  - Read/write helpers: `cycle_packet_read_cache`, `cycle_packet_write_cache`
+  - `CyclePacketCacheEntry` and `CyclePacketCacheHitReport` report types
+- `packages/tsift-cli/src/lib.rs` — two integration points:
+  - `collect_conflict_matrix_evidence_packets` — checks disk cache before calling `graph_db_evidence_report_from_store`; on hit, returns cached `ConflictMatrixPreparedEvidence` without re-traversing the graph store
+  - `build_dispatch_trace_report` — checks disk cache after preparing conflict-matrix inputs; on hit, returns cached `DispatchTraceReport` without rebuilding the conflict-matrix pipeline
+  - Added `Clone, Serialize, Deserialize` derives to 15 conflict-matrix types and changed 3 `&'static str` fields to `String` to enable serialization
+- `packages/tsift-cli/tests/cycle_packet_cache.rs` — 9 integration tests:
+  - Evidence cache key stability and differentiation
+  - Watermark key includes all components
+  - Disk cache roundtrip for evidence and dispatch-trace
+  - Cache miss returns None
+  - Packet ID survives roundtrip unchanged
+  - Cache directory structure matches spec
+  - Cache overwrite replaces stale entry
+- 10 unit tests in `cycle_packet_cache.rs`
+- `SPEC.md` — new section "Cycle Packet Cache" documenting cache locations, evidence reuse, dispatch-trace reuse, skipped phase proof, and stable packet ID proof
+
+**Verification:**
+
+- `cargo test -p tsift-quality` — 98/98 pass (10 new)
+- `cargo test -p tsift-cli` — all pass (9 new integration tests)
+- `make check` — clean (clippy + build + npm pack dry-run)
+- `cargo install --path .` — installed tsift v0.1.62
+- Committed and pushed: `39a4929`
+
+Commands/proof: ran `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `cargo check`, `cargo test`, `make check`, `cargo install --path .`, `git add` + `git commit` + `git push` in `src/tsift/`.
+<!-- agent:boundary:0199a745 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -84,7 +127,8 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- [#gpackreuse]
+- ~[#gpackreuse]~
+- Code Navigation harness info should be in a Runbook referenced in AGENTS.md or a skill.
 - [#rankdefault]
 - [#gfrontierhot]
 - [#greadiness]
@@ -93,7 +137,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gpackreuse] Reuse graph/context packets across a single agent-doc cycle: share graph-db status/refresh, evidence, conflict-matrix preparation, context-pack diff, and impact packets by source/document/staged-diff watermark; prove repeated calls report skipped phases and stable packet ids.
 - [ ] [#rankdefault] Promote ranked_neighborhood into default graph lookup/context-pack/evidence output only after quality gates pass; compare ranked vs unranked output on real backlog/code queries for useful-hit density, duplicate-name precision, handle coverage, latency, and emitted tokens.
 - [ ] [#gfrontierhot] Run three-sample performance triage for SQLite neighborhood/path/evidence/related lookups on real, full-projection, high-degree, and deep-chain workloads; optimize recursive frontier expansion or hop caps only where metrics show a hotspot.
 - [ ] [#greadiness] Make graph-readiness states actionable at the lookup boundary: if summaries, tagpath handles, graph freshness, or scoped indexes are missing, emit exact repair commands and suppress broad low-signal graph expansion.

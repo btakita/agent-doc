@@ -30,91 +30,19 @@ Queue contamination cleaned. Session committed.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260603-172507.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260603-180615.md`*
 
 Compacted content:
-- Archived 4 response topic(s): Codex owned-pane recursive deadlock recovery; Documentation for agent-doc config and env variables; do #9117 config-env-vars-doc; 1 more
+- Archived 9 response topic(s): OpenCode GLM-5.1 Vision; JB Run Agent Doc Stall; monsterrodholders.md Recursion Recovery; 6 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: OpenCode GLM-5.1 Vision — glm-5.1
-
-Vision support depends on the model provider endpoint, not the OpenCode harness. OpenCode passes image attachments through to the model API; whether GLM-5.1 accepts multimodal inputs is a provider/API capability question. This session (running as GLM-5.1) has no image-vision tools available — the `Read` tool can decode images, but that is tool-mediated, not native model vision. The queue item text is truncated in the document (cuts off mid-sentence at "OpenCode G"), so I cannot see the full configuration request. Please re-enter the complete queue item if further action is needed.
-
-### Re: JB Run Agent Doc Stall — glm-5.1
-
-Ops log confirms the stall: multiple `route_dispatch_only_busy_actor_not_ready` and `route_dispatch_only_busy_existing_queue_deferred` events for agent-doc-bugs2.md pane %70 (generation 224, harness=opencode, actor_state=busy). The JB Run Agent Doc click routed as `dispatch_only`, hit a busy authoritative actor, and deferred. The queue accumulated items that only drained when you manually invoked in the OpenCode session. This is the same class as review item #opencode-jb-stall — the false-active-turn / bottom-12-lines busy-cue fix needs live-verification. The route path correctly deferred rather than injecting into an active turn, but the operator experience (stall with no feedback) matches the open bug.
-
-No new code change this cycle — the fix is already implemented, awaiting live verification per Path A (#jkvs).
-
-#### Re: monsterrodholders.md Recursion Recovery — glm-5.1
-
-The monsterrodholders.md file currently shows no recursion error text — it appears the Codex session already processed and cleared that state. The file's frontmatter has `agent: codex` with `queue_active: true`. Recovery from the owned-pane self-invocation state has three options:
-
-1. **Self-heal (existing):** The owned-pane preflight emits `owned_pane_self_invocation` structured result (landed submodule 407b0825) which guides an in-pane response cycle. This is the designed self-heal path.
-2. **Manual recovery:** `agent-doc session-clear <FILE>` then `agent-doc route <FILE>` to provision a fresh pane.
-3. **Planned:** Review item #ec9k proposes a single `agent-doc recover-ownership <FILE>` command that atomically does the clear+repair+route flow.
-
-The monsterrodholders doc's current session state should be checked with `agent-doc session-check src/boost-client/tasks/monsterrodholders.md` to confirm the Codex pane is clean.
-
-#### Re: GLM-5.1 Vision — glm-5.1
-
-Addressed in the prior cycle: vision depends on the model provider endpoint. This session (GLM-5.1) has no native image vision. The `Read` tool can decode images at file paths, but that is tool-mediated, not model-native multimodal. No agent-loop configuration change can enable native vision — that requires a vision-capable model endpoint.
-
-#### Re: Screenshots — glm-5.1
-
-Cannot evaluate screenshots without native image vision. Review item #img-review covers this exact gap. Recommended path: run this queue item in a Claude or GPT session with vision enabled to diagnose #t9xf stdout bleed and TUI corruption from img_16/17/18.png.
-
-### Re: JB Stall — Sync Recovery Detail — glm-5.1
-
-The full sync output you pasted confirms the architecture is working as designed:
-
-- **4 panes recovered** (%76 lazily-rs, %70 agent-doc-bugs2, %80 agent-doc-bugs, %83 tsift) — supervisors restarted cleanly
-- **2 stash panes skipped** (%66, %79) — unregistered but hosting live supervisors, correctly not killed
-- **60s timeout on %70** — `authoritative actor generation 224 ... busy did not return to dispatch-ready prompt` — this is the expected fail-closed behavior when the actor is mid-turn
-- The **JB stall root cause** is the same: JB Run Agent Doc routes as `dispatch_only`, hits busy actor, defers, but gives no operator feedback
-
-The sync recovery confirms no pane was lost or corrupted — only the operator experience gap (no JB notification) remains. This is exactly review item #opencode-jb-stall / #jb-run-agent-doc-busy-feedback-live-verify.
-
-The remaining queue items (vision config, monsterrodholders recursion, screenshots) were addressed in the prior response and require either a vision-capable model or manual `agent-doc session-check` on the monsterrodholders file — no further code action from this session.
-
-### Re: Codex Recursion Self-Heal — glm-5.1
-
-Owned-pane self-invocation recovery already implemented (submodule 407b0825). Manual fallback: agent-doc session-clear then route. Planned: recover-ownership (#ec9k). Monsterrodholders.md no longer has the recursion error.
-
-#### Re: OpenCode Vision via Toolcall — glm-5.1
-
-Requires GLM-5.1 API multimodal support + OpenCode image attachment wiring + agent-doc image toolcall. Check provider endpoint capabilities.
-
-### Re: Lint Gate False Positive — FIXED — glm-5.1
-
-> **Queue prompt:**
->
-> JB `Run Agent Doc` on this file stalled...no dispatch. I had to manually run in the opencode session. `[sync] recovered live pane %76 for session 3d9ff8e4 via supervisor pid 3366387
-
-
-Root cause: backticks in queue content created multi-line code spans in tagpath scan_comments, covering agent:review and /agent:exchange tags. Fix: only suppress comments in same-line inline code spans or fenced code blocks, not multi-line inline spans. agent-doc component parser uses pulldown-cmark which correctly handles backtick pairing and was not affected. Test added. Binary rebuilt.
-<!-- agent:boundary:56a22cfa -->
+<!-- agent:boundary:c7411c47 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- ~JB `Run Agent Doc` on this file stalled...no dispatch. I had to manually run in the opencode session. `[sync] recovered live pane %76 for session 3d9ff8e4 via supervisor pid 3366387~
-  [sync] recovered live pane %70 for session b26b9957 via supervisor pid 882213
-  [sync] recovered live pane %80 for session 3f069c68 via supervisor pid 3883956
-  [sync] recovered live pane %83 for session tsift-v0 via supervisor pid 1086207
-  resync: stash pane %66 is unregistered but still hosts live supervisor 4602f467-ef2a-4094-a750-5eb533368988 — skipping kill
-  [sync] recovered live pane %76 for session 3d9ff8e4 via supervisor pid 3366387
-  [sync] recovered live pane %70 for session b26b9957 via supervisor pid 882213
-  [sync] recovered live pane %80 for session 3f069c68 via supervisor pid 3883956
-  [sync] recovered live pane %83 for session tsift-v0 via supervisor pid 1086207
-  resync: stash pane %79 is unregistered but still hosts live supervisor 1ef5f0e7-0687-4f35-b9bc-2b9c330d5688 — skipping kill
-  [route] target tmux session: 0
-  Error: authoritative actor generation 224 for tasks/agent-doc/agent-doc-bugs2.md owns pane %70 but dispatch-only route will not inject a new trigger because the authoritative actor is busy did not return to a dispatch-ready prompt in the current generation after waiting 60s. Wait for the active turn to finish before rerouting this document.
-`. How can agent-doc "self-heal"?
 - Is vision currently working with OpenCode using GLM-5.1? If no, please configure agent-loop vision to work with OpenCode GLM-5.1.
 - monsterrodholders.md agent-doc codex session still has `• agent-doc could not be invoked directly from this pane because it would recurse into the already-owned session, so I
   handled the task doc manually.` error. How can we recover from this state? Can agent-doc "self-heal"?
 - Please evaluate recent screenshots and add #next-steps for the related tasks.
-- ~re #img-review: Why doesn't the agent-doc image vision work with opencode?~
 - do [#gf85]
 - do [#0wan]
 <!-- /agent:queue -->

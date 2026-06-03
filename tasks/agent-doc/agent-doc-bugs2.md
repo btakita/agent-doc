@@ -191,7 +191,7 @@ Added #img-describe-toolcall to backlog. Three viable approaches: native agent-d
 
 
 Already addressed in the exchange above. Queue items consumed and cleaned.
-<!-- agent:boundary:68aca909 -->
+<!-- agent:boundary:bbf9ffd2 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->
@@ -209,6 +209,8 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#codex-owned-pane-prompt-miss] #codex-owned-pane-prompt-miss #agent-doc-bug 2026-06-03: Codex-owned pane direct invocation abandons recursive dispatch without processing unresolved exchange prompts. See review item for details. Plan: tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md
+- [ ] [#codex-owned-pane-prompt-miss-followups] #codex-owned-pane-prompt-miss-followups #agent-doc-bug 2026-06-03: Follow-up items for codex-owned pane prompt miss fix. Stop-hook failure on missing assistant body and same-pane unresolved-prompt response proof. Plan: tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md
 - [ ] [#img-describe-toolcall] #img-describe-toolcall #agent-doc-bug feature 2026-06-03: add agent-doc describe-image subcommand or MCP tool that shells out to a vision API and returns text description to stdout. Enables non-vision models to analyze images via toolcall. Needs plan for provider config, API key handling, output format.
 - [/] [#4h81] #opencode-codex-capacity-proof #agent-doc-bug 2026-06-03: Codex Capacity Proof incorrectly runs in OpenCode harness. See monsterrodholders.md session + agent-doc logs.
 - [/] [#t9xf] #opencode-log-bleed #agent-doc-bug 2026-06-03: agent-doc stderr logs bleed over the OpenCode UI. Needs reproduction to confirm source.

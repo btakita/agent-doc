@@ -1323,6 +1323,9 @@ dependencies = [
 [[package]]
 name = "lazily"
 version = "0.5.1"
+dependencies = [
+ "smallvec",
+]
 
 [[package]]
 name = "lazy_static"

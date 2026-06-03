@@ -47,6 +47,7 @@ mod clean;
 mod cleanup_cmd;
 mod commands;
 mod convert;
+mod describe_image;
 mod extract;
 mod history;
 mod hook_cmd;
@@ -727,6 +728,23 @@ enum Commands {
         /// TLS private key PEM path. Requires --tls-cert.
         #[arg(long, value_name = "PEM")]
         tls_key: Option<PathBuf>,
+    },
+    /// Describe an image file using a vision-capable AI model
+    DescribeImage {
+        /// Path to the image file
+        image: PathBuf,
+        /// Vision provider (openai, anthropic)
+        #[arg(long)]
+        provider: Option<String>,
+        /// Model override
+        #[arg(long)]
+        model: Option<String>,
+        /// API key (defaults to AGENT_DOC_VISION_API_KEY or provider-specific env var)
+        #[arg(long)]
+        api_key: Option<String>,
+        /// Custom prompt for the vision model
+        #[arg(long)]
+        prompt: Option<String>,
     },
     /// Print document content to stdout (full file or a single named component).
     Read {
@@ -2195,6 +2213,19 @@ fn main() -> anyhow::Result<()> {
             tls_key,
         )),
         Commands::Read { file, component } => read::run(&file, component.as_deref()),
+        Commands::DescribeImage {
+            image,
+            provider,
+            model,
+            api_key,
+            prompt,
+        } => describe_image::run(
+            &image,
+            provider.as_deref(),
+            model.as_deref(),
+            api_key.as_deref(),
+            prompt.as_deref(),
+        ),
         Commands::ResponseToc {
             file,
             backlog_id,

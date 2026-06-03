@@ -254,7 +254,11 @@ Cleared 5 completed queue items (~#zfam, ~#f5jz, ~#rvjd, ~#xsp1, ~#r54f~).
 | `#opencode-preset-not-dispatched` | In review | Dependent on the above fixes |
 
 Added as `#opencode-jb-stall` to agent-doc-bugs2.md review backlog.
-<!-- agent:boundary:60ef402a -->
+
+### Re: Queue item reformat — glm-5.1
+
+Reformatted the JB stall queue entry as a `do` directive referencing the new review item `#opencode-jb-stall`. Added the bug to `tasks/agent-doc/agent-doc-bugs2.md` review backlog.
+<!-- agent:boundary:3719a8a7 -->
 <!-- /agent:exchange -->
 ###
 <!--

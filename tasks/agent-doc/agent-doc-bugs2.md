@@ -36,28 +36,31 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 7 response topic(s): Run the lazily-rs Codex Close-hook scope-spillage plan; tsift focus goes into the stash; do #ipc-admin-api; 4 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:91e442aa -->
+
+### Re: do #route-reaps-idle-fresh-start — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#route-reaps-idle-fresh-start]
+
+
+**Implemented the deterministic fix.** The bug: route's fresh-start success criterion was "the agent acknowledged a *document cycle* after consuming the trigger" — which conflates a genuine failed start with a healthy start whose first cycle is a legitimate **no-op** (empty/halted queue, `preflight` `no_changes`). A no-op acknowledges nothing, so route reaped the pane → "I cannot start lazily-rs.md, killed immediately."
+
+**Fix** (`route.rs`, at the no-ack branch — the trigger is already proven dispatched there): re-check the pane. If it has returned to a harness **dispatch-ready prompt**, the agent is alive and idle, so keep the live idle session and clear the startup-miss. Only reap when the pane is **not** dispatch-ready (never-ready / hung — a real miss). The decision is a new pure classifier `FreshStartAckOutcome { CycleAcknowledged, IdleNoOpKeep, GenuineMissReap }` that reuses the already-tested `ready_prompt_candidate` discriminator, so genuine-miss reaping is unchanged.
+
+- **Test:** `fresh_start_ack_outcome_keeps_idle_no_op_and_reaps_genuine_miss` — cycle-acked → normal; no cycle + codex idle-ready capture → **keep**; no cycle + status-footer-only capture → **reap**.
+- `route::` suite **141 passed**; `make check` green; both binaries rebuilt + installed. Submodule `8451143a`, superproject `5b10b7ffd`.
+
+**Gated** (`#route-reaps-idle-fresh-start`) on the live end-to-end repro — start a real idle `lazily-rs.md` codex session (empty queue, the slow gpt-5.5 xhigh cold start that originally pushed trigger-consumption past the wait window) and confirm the pane now **stays alive** instead of being reaped. I marked it gated rather than done because that live path is exactly the aggravator I can't reproduce deterministically here. `#spec-test-build-install-commit-push` from this turn's batch is otherwise satisfied (spec/plan ✓ test ✓ build ✓ install ✓ commit ✓ push pending below).
+<!-- agent:boundary:104ed7a5 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- ~do [#lr-queue-patchback-miss]~
-- ~do [#lr-head-8]~
-- ~do [#lr-wire-9]~
-- ~do [#lr-actor-10]~
-- ~do [#xdoc-route-sweep-commits-sibling-docs]~
-- ~do [#run-gated-review-items]~
-- ~do [#lr-actor-10-wire-callers]~
-- ~do #stash-pane-promote-on-focus~
-- ~The lazily-rs.md session created a plan to fix the bug. It had to with the Codex Close hook having scope spillage. Please review the Codex session history to see where the plan file is. Run the plan file.~
-- ~When I navigate to tsift.md, the focus goes into the stash. The tmux pane does not go into the agent-doc tmux window.~
-- ~do [#ipc-admin-api]~
-- ~I removed "Do not implement from" plan-jb-run-agent-doc-busy-queue-dispatch-deadlock.md. Go ahead and execute the plan if needed. Ensure any associated items are completed. I'm confused by the amount and length of the review items. #spec-test-build-install-commit-push~
-- ~do [#manual-queue-head-loss]~
-- ~Add #next-steps to create a dashboard that uses the actor admin apis to see the current runtime instances. See [#ipc-admin-api].~
-- do [#route-reaps-idle-fresh-start]
+- ~do [#route-reaps-idle-fresh-start]~
 - do [#admin-fleet-dashboard]
-- ~do [#actor-runtime-dashboard]~
+- JB `Clear Session Context` does not work with OpenCode. This is a long-standing issue. Look at attempt with tsift.md in the logs.
+- Error in OpenCode `  ┃  Error: malformed template patchback: found patch/replace markers but no closed patch blocks parsed; refusing to append unmatched content` when running tsift.md
 <!-- /agent:queue -->
 ###
 <!--
@@ -70,13 +73,13 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Backlog
 
 <!-- agent:backlog priority queue=append -->
-- [ ] [#route-reaps-idle-fresh-start] #agent-doc-bug 2026-06-02: route reaps a fresh codex start whose first dispatched cycle is a no-op (empty/halted queue, no_changes), so a document with no pending work can't be started — user symptom 'I cannot start lazily-rs.md, killed immediately'. The codex starts + consumes the trigger, preflight returns no_changes (valid idle), but route treats 'no document cycle acknowledged' as a failed start and reaps the pane. Fix: a ready+trigger-consumed fresh start is successful even with a no-op first cycle; only reap genuine never-ready/never-consumed misses. Aggravated by gpt-5.5 xhigh slow cold start. Plan: tasks/agent-doc/plan-route-reaps-idle-fresh-start.md.
 - [ ] [#admin-fleet-dashboard] [recommended] #agent-doc-bug feature 2026-06-02: runtime dashboard consuming the #ipc-admin-api READ surfaces (agent-doc admin list --json + admin detect --json) to show the live actor fleet — document ownership, competing/cross-document + orphaned-dead-pane actors, generation/state, supervisor pid — with problematic rows highlighted from detect. Read-surface dependency SHIPPED 2026-06-02 (admin list/detect Phase 1, submodule 31efa50c) so this is now ACTIONABLE via the JSON feeds. Optional stop/rebind row keybinds depend on #ipc-admin-api Phase 2 (mutating verbs, still gated). Same feature as plan id #actor-runtime-dashboard (canonical queue id is #admin-fleet-dashboard). Plan: tasks/agent-doc/plan-actor-runtime-dashboard.md.
 <!-- /agent:backlog -->
 
 ## Review
  
 <!-- agent:review -->
+- [/] [#route-reaps-idle-fresh-start] #agent-doc-bug 2026-06-02: route reaped a fresh codex start whose first dispatched cycle was a legitimate no-op (empty/halted queue, preflight no_changes), so a document with no pending work couldn't be opened ('I cannot start lazily-rs.md, killed immediately'). IMPLEMENTED+unit-tested+shipped (submodule 8451143a, superproject 5b10b7ffd, both binaries rebuilt+installed): at the fresh-start no-ack branch route now re-checks the pane and KEEPS it as a live idle session when it has returned to a harness dispatch-ready prompt (trigger was already proven dispatched), clearing the startup-miss; it only reaps when the pane is not dispatch-ready (a genuine miss). New pure FreshStartAckOutcome classifier (CycleAcknowledged/IdleNoOpKeep/GenuineMissReap) reuses the tested ready_prompt_candidate discriminator. route:: 141 passed, make check green. GATED on live verify: start a real idle lazily-rs.md codex session (slow gpt-5.5 xhigh cold start) and confirm the pane stays alive instead of being reaped. Plan: tasks/agent-doc/plan-route-reaps-idle-fresh-start.md.
 - [/] [#route-busy-wrong-owner-diagnostic] [recommended] #agent-doc-bug 2026-06-02: route dispatch-only busy refusal does not cross-check that the live busy pane's owned document matches the ROUTED document. When a pane was contaminated by a foreign doc's cycle (e.g. agent-doc-bugs2.md ran in monsterrodholders.md's pane %61), route still keys 'busy' off the authoritative binding + live prompt-readiness and emits a generic 60s busy-timeout instead of naming the contamination — the operator reads it as 'blocking on the wrong session state'. Fix: in the DispatchOnlyBusyQueue / busy-refusal path, validate pane-owns-routed-doc (reuse cmdline_owns_other_document / reject_cross_document_owner_pane from sync.rs) and emit a wrong_owner/cross-document diagnostic (routed file=F busy pane=%N owns=G) instead of the generic timeout. Sibling of #jb-tsift-pane-sync Phase 3b (display guard) + #xdoc-route-sweep-commits-sibling-docs (281e4db8, the upstream contamination gate). Confirm live with agent-doc admin detect (#ipc-admin-api), which flags a pane bound to >1 non-closed document. Gated on the live monsterrodholders.md repro.
 - [/] [#ipc-admin-api] [recommended] #agent-doc-bug feature 2026-06-02: admin control plane for agent-doc actors. PHASE 1 (read-only) IMPLEMENTED+tested+shipped (submodule 31efa50c, superproject 8a3179604, both binaries rebuilt+installed, live-verified): agent-doc admin list [--json] enumerates the project actor fleet from the sqlite store (session/pane/window/supervisor-pid/harness/generation/state/liveness); agent-doc admin detect [--json] flags cross_document_pane (a LIVE pane bound to >1 non-closed document — the contamination) + stale_dead_pane (non-closed actor on a dead pane). Pure logic + 6 unit tests in agent-doc-orchestration/src/admin.rs; live run surfaced a real cross-binding + 19 orphaned bindings. GATED pending Phase 2 (mutating verbs rebind + stop --halt-queue --terminate — need supervisor quiesce + durable queue_active:false + live verification so the stop sticks without respawn) and Phase 3 (FFI + thin editor menu). Plan: tasks/agent-doc/plan-ipc-admin-api-actor-control.md.
 - [/] [#jb-tsift-pane-sync] #agent-doc-bug 2026-06-02: tsift focus-into-stash IMPLEMENTED+tested (submodule a162e15d, superproject 1ec602676, both binaries rebuilt+installed). focus::run_no_promote no longer selects a stashed target pane in place (which surfaced editor focus inside the stash); the reconciler atomic SWAP owns surfacing+selection (swap stashed pane into agent-doc, stash displaced pane, select focus pane in one op). Added pub sync::pane_in_stash_window + 3 live-tmux regressions (helper, stashed-target deferred, visible-target selected). GATED on live editor->tmux verify: navigate to tsift.md from a sibling pane and confirm it surfaces in agent-doc, not the stash. Plan: tasks/agent-doc/plan-jb-tsift-pane-sync-regression.md

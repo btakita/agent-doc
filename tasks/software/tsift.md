@@ -95,7 +95,7 @@ Added `surrealdb_store_multi_process_reader_writer_lock` conformance test that s
 - `SPEC.md`: documented shared runtime constructors.
 
 **Verification:** 14/14 tests pass, `make check` passes, commit `c088055` pushed.
-<!-- agent:boundary:de8508a4 -->
+<!-- agent:boundary:d1ab3f4f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -116,7 +116,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#surreal-rt-pool-warm] Accept external tokio Runtime in open_or_refresh so backend-eval can reuse one Runtime across candidate stores
 - [ ] [#surrealbulk-close] Close #surrealbulk review item: re-run benchmarks, update SPEC.md benchmark table, mark done
 <!-- /agent:backlog -->
 

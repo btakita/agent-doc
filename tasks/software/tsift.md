@@ -36,7 +36,32 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): #libmod3 Phase 3
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:1799ba1b -->
+
+### Re: #libmod4 Phase 4: Extract Convex + GraphStore into tsift-core sub-modules — glm-5.1
+
+> **Queue prompt:**
+>
+> do [#libmod4]
+
+
+Completed. Split `tsift-core/src/lib.rs` (1999 lines monolith) into three focused sub-modules:
+
+**New files:**
+- `packages/tsift-core/src/types.rs` — All graph data types (GraphNode, GraphEdge, GraphProjection, etc.) + id helpers (`stable_graph_edge_id`, `graph_edge_id`)
+- `packages/tsift-core/src/store.rs` — GraphStore trait with full default implementations + query/paging helpers + `shortest_path_using_outgoing`
+- `packages/tsift-core/src/convex.rs` — Convex adapter (ConvexProjectionRows, ConvexNodeRow, ConvexEdgeRow, ConvexGraphClient trait, ConvexRowsGraphClient, ConvexGraphStore)
+
+**Updated:**
+- `packages/tsift-core/src/lib.rs` — Re-exports all public types at crate root via `pub use` for backward compatibility; retains all 15 tests
+- `SPEC.md` — Architecture section updated to show three sub-modules under tsift-core
+- Also included prior Phase 3 CLI extractions (`semantic_edit.rs` from cli/lib.rs, unused import cleanup)
+
+**Verification:**
+- All 637 workspace tests pass (`make check` green)
+- All 8 downstream crates compile cleanly with zero source changes
+- `cargo install --path .` succeeds
+- Pushed as `b4fc070` on main
+<!-- agent:boundary:205b225b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -47,7 +72,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - ~do [#libmod3]~
-- do [#libmod4]
+- ~do [#libmod4]~
 - do [#libmod5]
 - do [#opencode-read]
 - do [#opencode-grep]
@@ -62,7 +87,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - [ ] [#surreal-multiproc] Multi-process lock behavior: write conformance test with N concurrent reader processes + 1 writer against same SurrealKV path; document lock contention, stale-read behavior, and crash recovery (SPEC.md:304 promotion gate)
 - [ ] [#surreal-rt-pool] Shared tokio runtime: accept external Runtime reference or use lazy static instead of per-store Runtime::new()
 - [ ] [#surrealbulk-close] Close #surrealbulk review item: re-run benchmarks, update SPEC.md benchmark table, mark done
-- [ ] [#libmod4] Phase 4: Extract Convex (~3,000 lines), Graph DB core (~5,000+) from lib.rs
 - [ ] [#libmod5] Phase 5: Extract Context Pack (~1,700), Conflict Matrix (~2,500), Search Budget (~800), Session Review (~500) from lib.rs
 - [ ] [#opencode-read] OpenCode: replace Read tool with tsift AST API (tsift --envelope source-read) for source code reading
 - [ ] [#opencode-grep] OpenCode: replace grep/rg with tsift search for content search

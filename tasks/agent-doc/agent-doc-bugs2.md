@@ -77,7 +77,30 @@ Added `pub sync::pane_in_stash_window` plus 3 live-tmux regressions: helper dete
 **Verification.** `make check` green; the 3 new + 7 existing focus/promote/swap-defer live-tmux tests pass (`cargo test -- --ignored`). Both binaries rebuilt + installed.
 
 **Commits:** submodule `a162e15d`, superproject `1ec602676`. `#jb-tsift-pane-sync` is gated pending your live editor→tmux verification (navigate to `tsift.md` from a sibling pane and confirm the pane surfaces in `agent-doc`, not the stash).
-<!-- agent:boundary:e3c102d6 -->
+
+### Re: do #ipc-admin-api — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#ipc-admin-api]
+
+
+Implemented **Phase 1** of the actor admin control plane — the read-only verbs that replace the manual `ps`/`pstree`/`pgrep` forensics from the `#xdoc-route-sweep-commits-sibling-docs` contamination incident.
+
+**`agent-doc admin list [--json]`** — enumerates every actor in the project fleet from the sqlite actor store: one row per document with `session`, `pane`, `window`, `supervisor_pid`, `harness`, `generation`, `state`, and pane liveness (registry-enriched by session id).
+
+**`agent-doc admin detect [--json]`** — derived diagnostics, pure over the actor store with injected liveness:
+- `cross_document_pane` — a **live** pane that is the authoritative binding of more than one non-closed document (the "two documents executing in the same pane" contamination). Liveness-gated so a dead shared pane (just stale bindings) doesn't false-positive as live contention.
+- `stale_dead_pane` — a non-closed actor whose pane is dead (orphaned binding route/sync should reap).
+
+New module `agent-doc-orchestration/src/admin.rs` (logic pure + **6 unit tests**), wired through `main.rs` as the `admin` subcommand. `make check` green; both binaries rebuilt + installed.
+
+**Live verification (this fleet):** `admin detect` surfaced a real cross-document binding and **19 orphaned dead-pane bindings** — exactly the situation that previously needed manual `ps`/`pstree`. This satisfies the plan's primary acceptance criterion.
+
+**Commits:** submodule `31efa50c`, superproject `8a3179604`.
+
+**Phase boundary (gated `#ipc-admin-api`):** Phase 2 (mutating verbs `rebind`, `stop --halt-queue --terminate`) and Phase 3 (FFI + editor menu) remain — the stop verb must compose with the queue loop (durable `queue_active:false` + supervisor quiesce so the stop sticks without respawn) and needs live process/tmux verification, so I've gated rather than queued them autonomously. Say the word to take Phase 2 next.
+<!-- agent:boundary:b4299b67 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -92,7 +115,7 @@ preset #spec-test-build-install-commit-push
 - ~do #stash-pane-promote-on-focus~
 - ~The lazily-rs.md session created a plan to fix the bug. It had to with the Codex Close hook having scope spillage. Please review the Codex session history to see where the plan file is. Run the plan file.~
 - ~When I navigate to tsift.md, the focus goes into the stash. The tmux pane does not go into the agent-doc tmux window.~
-- do [#ipc-admin-api]
+- ~do [#ipc-admin-api]~
 - I removed "Do not implement from" plan-jb-run-agent-doc-busy-queue-dispatch-deadlock.md. Go ahead and execute the plan if needed. Ensure any associated items are completed. I'm confused by the amount and length of the review items. #spec-test-build-install-commit-push
 ---
 JB `Run Agent Doc` error. Given that monsterrodholders.md was running agent-doc-bugs2.md before, is it possible that it is blocking on the wrong Session state?
@@ -137,7 +160,6 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Backlog
 
 <!-- agent:backlog priority queue=append -->
-- [ ] [#ipc-admin-api] [recommended] #agent-doc-bug feature 2026-06-02: add an admin API to all agent-doc IPC processes (per-project supervisor sockets + route/registry layer) exposing (1) DETECT — enumerate live actors fleet-wide and flag competing/cross-document ones; (2) REBIND — reassign a document to its authoritative pane/actor without manual claim+reroute; (3) STOP/TERMINATE — durably stop a runaway actor by halting its queue_active loop + quiescing the supervisor so route/sync does not respawn it, optionally killing the child+supervisor tree. Motivated by the manual ps/pstree/kill whack-a-mole required to resolve the lazily-rs cross-document actor (#xdoc-route-sweep-commits-sibling-docs) — a raw kill respawned via the queue loop. Surface: CLI agent-doc admin list/detect/rebind/stop, FFI-owned logic, thin editor menu actions (pairs with #plugin-cleanup-menu-command). Plan: tasks/agent-doc/plan-ipc-admin-api-actor-control.md. Attempted 2026-06-02: queue run audited the plan and pinned implementation hooks (new src/admin.rs wired through main.rs; reuse sessions.rs, session_actor_cmd.rs session status, cross-document execution diagnostics, and project_controller.rs). Kept open because implementation did not run in that Claude-owned cycle; dependency order says land #xdoc-route-sweep-commits-sibling-docs first for detect signal quality.
 - [ ] [#route-reaps-idle-fresh-start] #agent-doc-bug 2026-06-02: route reaps a fresh codex start whose first dispatched cycle is a no-op (empty/halted queue, no_changes), so a document with no pending work can't be started — user symptom 'I cannot start lazily-rs.md, killed immediately'. The codex starts + consumes the trigger, preflight returns no_changes (valid idle), but route treats 'no document cycle acknowledged' as a failed start and reaps the pane. Fix: a ready+trigger-consumed fresh start is successful even with a no-op first cycle; only reap genuine never-ready/never-consumed misses. Aggravated by gpt-5.5 xhigh slow cold start. Plan: tasks/agent-doc/plan-route-reaps-idle-fresh-start.md.
 - [ ] [#admin-fleet-dashboard] [recommended] #agent-doc-bug feature 2026-06-02: create a runtime dashboard that consumes the #ipc-admin-api surfaces (agent-doc admin list --json and agent-doc admin detect --json) to show current agent-doc runtime instances, document ownership, competing/cross-document actors, queue/supervisor state, and operator actions. Depends on #ipc-admin-api.
 <!-- /agent:backlog -->
@@ -145,6 +167,7 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Review
  
 <!-- agent:review -->
+- [/] [#ipc-admin-api] [recommended] #agent-doc-bug feature 2026-06-02: admin control plane for agent-doc actors. PHASE 1 (read-only) IMPLEMENTED+tested+shipped (submodule 31efa50c, superproject 8a3179604, both binaries rebuilt+installed, live-verified): agent-doc admin list [--json] enumerates the project actor fleet from the sqlite store (session/pane/window/supervisor-pid/harness/generation/state/liveness); agent-doc admin detect [--json] flags cross_document_pane (a LIVE pane bound to >1 non-closed document — the contamination) + stale_dead_pane (non-closed actor on a dead pane). Pure logic + 6 unit tests in agent-doc-orchestration/src/admin.rs; live run surfaced a real cross-binding + 19 orphaned bindings. GATED pending Phase 2 (mutating verbs rebind + stop --halt-queue --terminate — need supervisor quiesce + durable queue_active:false + live verification so the stop sticks without respawn) and Phase 3 (FFI + thin editor menu). Plan: tasks/agent-doc/plan-ipc-admin-api-actor-control.md.
 - [/] [#jb-tsift-pane-sync] #agent-doc-bug 2026-06-02: tsift focus-into-stash IMPLEMENTED+tested (submodule a162e15d, superproject 1ec602676, both binaries rebuilt+installed). focus::run_no_promote no longer selects a stashed target pane in place (which surfaced editor focus inside the stash); the reconciler atomic SWAP owns surfacing+selection (swap stashed pane into agent-doc, stash displaced pane, select focus pane in one op). Added pub sync::pane_in_stash_window + 3 live-tmux regressions (helper, stashed-target deferred, visible-target selected). GATED on live editor->tmux verify: navigate to tsift.md from a sibling pane and confirm it surfaces in agent-doc, not the stash. Plan: tasks/agent-doc/plan-jb-tsift-pane-sync-regression.md
 - [/] [#lr-actor-10-wire-callers] #agent-doc-bug 2026-06-02: complete the deferred Phase 10 caller-wiring — route.rs/sync.rs/resync.rs/gc.rs still call sessions::load()/config::load() directly (~49 sites) instead of the cached GlobalConfigSlot/SessionRegistrySlot now on RunContext (#lr-actor-10 core landed ec81d850, green). No behavior change; perf-only. Lower priority + risky (sensitive route/sync files), so plumb a RunContext/ActorContext through each caller carefully. Plan: tasks/agent-doc/plans/lazily-rs-integration.md (Phase 10, last bullet).
 - [/] [#actor-runtime-dashboard] [recommended] #agent-doc-bug feature 2026-06-02: live dashboard over the #ipc-admin-api list/detect feed showing the current runtime actor fleet (document, pane, harness, generation, state, queue_active, supervisor/child pid, health) and highlighting competing / cross-document / respawn-looping actors. CLI agent-doc admin dashboard (TUI, auto-refresh + IPC-event redraw, read-only by default with fail-closed stop/rebind keybinds) + editor tool-window panel via shared FFI. Pure view over #ipc-admin-api (hard dependency). Motivated by lazily-rs respawning via the project controller despite queue halt — replaces manual ps/pstree forensics. Plan: tasks/agent-doc/plan-actor-runtime-dashboard.md.

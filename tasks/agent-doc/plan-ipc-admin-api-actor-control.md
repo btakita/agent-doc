@@ -1,8 +1,14 @@
 # Plan: IPC admin API for actor detection / rebind / termination
 
 **Pending:** `#ipc-admin-api`
-**Status:** Planned 2026-06-02. Not implemented.
+**Status:** Phase 1 (read-only `admin list` + `admin detect`) IMPLEMENTED + tested + shipped 2026-06-02 (submodule `31efa50c`, both binaries rebuilt + installed). Phase 2 (mutating verbs `rebind` / `stop`) and Phase 3 (FFI + editor menu surface) remain.
 **Class:** `#agent-doc-bug` feature — operational control plane.
+
+## Phase status
+
+- [x] **Phase 1 — read-only control plane** (`31efa50c`): `agent-doc admin list [--json]` enumerates the fleet from the sqlite actor store (session/pane/window/supervisor-pid/harness/generation/state/liveness); `agent-doc admin detect [--json]` derives `cross_document_pane` (a *live* pane bound to >1 non-closed document) and `stale_dead_pane` (non-closed actor on a dead pane). Logic is pure + unit-tested in `agent-doc-orchestration/src/admin.rs` (6 tests); verified live (surfaced a real cross-binding + 19 orphaned bindings in the agent-loop fleet). This delivers the "detect competing actors without manual ps/pstree" acceptance criterion.
+- [ ] **Phase 2 — mutating verbs** (`rebind`, `stop --halt-queue --terminate`): need supervisor-IPC quiesce + durable `queue_active:false` + live tmux/process verification; the stop verb must compose with the queue loop so the stop sticks (no respawn). Fail-closed on the caller's own session.
+- [ ] **Phase 3 — FFI + editor surface**: thin JetBrains/VS Code menu actions shelling the CLI/FFI (pairs with `#plugin-cleanup-menu-command`).
 
 ## Motivation
 

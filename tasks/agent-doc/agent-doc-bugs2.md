@@ -55,7 +55,7 @@ Plan updated. The response:
 > do [#lr-actor-10]
 
 **Closeout:** durable deliverable = the cross-document-safety constraint now in `plans/lazily-rs-integration.md` Phase 10 (uncommitted, with the prior plan edits — say "commit it" to land them as one non-session change). `#lr-actor-10` implementation is the toolchain actor's (final lr phase); I can't build/finalize from this gated pane. Session-doc response uncommitted.
-<!-- agent:boundary:9ef4aee4 -->
+<!-- agent:boundary:1f0ee28f -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -110,7 +110,7 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 <!-- agent:backlog priority queue=append -->
 - [ ] [#xdoc-route-sweep-commits-sibling-docs] [recommended] #agent-doc-bug 2026-06-02: preflight/route-owned closeout sweep commits session documents the running actor does NOT own. Live repro: lazily-rs.md Codex (pane %70's sibling %73, gpt-5.5 xhigh) committed 6+ agent-doc-bugs2.md cycles (owned by pane %70) + struck/reaped #manual-queue-head-loss + bundled shared src/agent-doc edits, producing competing authorship, stale baseline, and the concurrent-owner stall. Root cause: sibling-doc commit sweep is owner-agnostic (commit_staging runs against every open doc, not just the actor's own). Fix: gate the sweep on authoritative-owner; skip+warn foreign-owned drift; keep submodule commit ownership with the owning turn. Plan: tasks/agent-doc/plan-xdoc-route-sweep-commits-sibling-docs.md.
 - [ ] [#ipc-admin-api] [recommended] #agent-doc-bug feature 2026-06-02: add an admin API to all agent-doc IPC processes (per-project supervisor sockets + route/registry layer) exposing (1) DETECT — enumerate live actors fleet-wide and flag competing/cross-document ones; (2) REBIND — reassign a document to its authoritative pane/actor without manual claim+reroute; (3) STOP/TERMINATE — durably stop a runaway actor by halting its queue_active loop + quiescing the supervisor so route/sync does not respawn it, optionally killing the child+supervisor tree. Motivated by the manual ps/pstree/kill whack-a-mole required to resolve the lazily-rs cross-document actor (#xdoc-route-sweep-commits-sibling-docs) — a raw kill respawned via the queue loop. Surface: CLI agent-doc admin list/detect/rebind/stop, FFI-owned logic, thin editor menu actions (pairs with #plugin-cleanup-menu-command). Plan: tasks/agent-doc/plan-ipc-admin-api-actor-control.md.
-- [ ] [#lr-actor-10] Phase 10: Add GlobalConfigSlot + SessionRegistrySlot for ActorContext. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
+- [x] [#lr-actor-10] Phase 10: Add GlobalConfigSlot + SessionRegistrySlot for ActorContext. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
 - [ ] [#run-gated-review-items] [recommended] #agent-doc-bug feature 2026-06-02: gated/review items are not easily runnable. Enable running a gated item directly via `do [#id]` or by placing it in agent:queue, and focus the run to complete that gated item. If it can only be partially completed, extract a new follow-up task containing the conditions to complete it. If no work was done because preconditions were unmet, append a timestamp of the attempt to the item and ensure the item's preconditions are present in its description.
 <!-- /agent:backlog -->
 

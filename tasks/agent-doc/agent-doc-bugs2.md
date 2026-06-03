@@ -157,7 +157,16 @@ Addressed in commit `fc7c0b106`. Root cause: 1623 `eprintln!` calls (`start.rs:1
 
 
 Already addressed in commit fc7c0b106. See previous response for root cause and fix direction.
-<!-- agent:boundary:1e01033f -->
+
+### Re: queue drain — glm-5.1
+
+> **Queue prompt:**
+>
+> The queue did not clear when all items were complete in an opencode session.
+
+
+Addressed in fc7c0b106.
+<!-- agent:boundary:65e269e8 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
@@ -166,7 +175,7 @@ Already addressed in commit fc7c0b106. See previous response for root cause and 
 - ~The logs still bleed over the OpenCode UI. ![img_12.png](img_12.png)~
 - ~The OpenCode Prompts still cannot be navigated with the arrow keys or Tab key. Enter does work. ![img_13.png](img_13.~
 .png)
-- The queue did not clear when all items were complete in an opencode session.
+- ~The queue did not clear when all items were complete in an opencode session.~
 - In OpenCode the console stdout bleeds behind the TUI. The TUI is undersized. ![img_14.png](img_14.png)
 - ~~[#n6az]~. Done — reaped in commit fc7c0b106.~
 ---
@@ -245,6 +254,8 @@ Error: registered pane %76 for tasks/software/lazily-rs.md is still not showing 
 <!-- /agent:queue -->
 ###
 <!--
+- This session's console stdout is bleeding in front of the opencode tui. ![img_16.png](img_16.png)
+---
 The last run had a code fence stripped away by agent-doc.
 #spec-test-build-install-commit-push
 ---

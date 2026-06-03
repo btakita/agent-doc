@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 
@@ -92,7 +92,29 @@ Verification:
 - `make check` passed locally in `src/lazily-rs`.
 - GitHub Actions `btakita/lazily-rs` CI run `26859494917` passed, including fmt, clippy, build, default tests, Tokio tests, and Loom tests.
 - Root `gh run list --workflow CI --limit 1` still reports no workflow named `CI`.
-<!-- agent:boundary:25ed0e25 -->
+
+### Re: Update benchmarks — gpt-5
+
+> **Queue prompt:**
+>
+> Update benchmarks
+
+
+The benchmark update is already complete from the earlier lazily-rs performance cycle, so no additional repo edits were needed for this queue prompt.
+
+Benchmark evidence already pushed in `src/lazily-rs` commit `2642d81`:
+- Ran `python3 scripts/update-benchmark-results.py` to refresh Criterion and instrumentation output.
+- Regenerated the README benchmark section with the new `thread_safe_graph_propagation` cases and expanded instrumentation profile fields.
+- Ran `python3 scripts/update-benchmark-results.py --check` after regeneration.
+- Adjusted only the two observed instrumentation budget ceilings needed for the completed full benchmark run.
+
+The lazy-invalidation backlog item `#lazyperf12` is also complete in that same implementation: `ThreadSafeContext` now has sidecar dirty publication / cache-revision dirty epoch instrumentation for slot-only invalidation frontiers, while effect-bearing or callback-active paths still fall back to the graph-locked invalidation plan to preserve effect scheduling, cleanup, disposal, and dynamic dependency correctness.
+
+Final verification remains:
+- `make check` passed locally in `src/lazily-rs` after the Makefile was added.
+- GitHub Actions `btakita/lazily-rs` CI runs `26859281017` and `26859494917` both passed, including Loom.
+- Pushed commits: `2642d81`, `c917401`, parent pointers `9e0fce300`, `2b90a832d`.
+<!-- agent:boundary:4536d258 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -100,20 +122,12 @@ Verification:
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- ~[#lazyperf12]~
-- ~[#lazyperf13]~
-- ~[#lazyperf14]~
-- ~[#lazyperf15]~
-- ~Add Makefile~
-- do [#lazyperf12]
-- Update benchmarks
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#lazyperf12] Implement lazy invalidation for ThreadSafeContext propagation under parallel load: mark downstream nodes dirty/versioned during writes, defer derived recompute/effect scheduling until observed or batch flush, and preserve cleanup/disposal ordering.
 <!-- /agent:backlog -->
 
 ## Review

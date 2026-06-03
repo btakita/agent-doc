@@ -30,78 +30,16 @@ Queue contamination cleaned. Session committed.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260603-192335.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260603-195829.md`*
 
 Compacted content:
-- Archived 7 response topic(s): #4h81 opencode-codex-capacity-proof; #t9xf opencode-log-bleed; #0ada queue-not-clearing-opencode; 4 more
+- Archived 3 response topic(s): do [#8ker] #opencode-idle-detection-post-turn; do [#1t6w] #opencode-skill-auto-loop; do [#tbhv] #harness-resolution-source-logging
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: do [#8ker] #opencode-idle-detection-post-turn — glm-5.1
-
-> **Queue prompt:**
->
-> do [#8ker]
-
-
-**Implemented.** Two changes:
-
-1. **`harness.rs`** — Added `is_bottom_idle_chrome` to `HarnessConfig`. Unlike `is_idle_chrome_only_output` which requires ALL lines to be ignorable chrome, this method checks only the bottom N lines for a contiguous idle chrome suffix of at least 4 lines containing at least one status/footer line. Busy cues are still checked via `has_busy_cue()`. Mirrors `dispatch_blocker_reason`'s bottom-N strategy.
-
-2. **`start.rs`** — Updated `child_output_prompt_visible()` to use `is_bottom_idle_chrome(output, 12)` for the OpenCode path instead of `is_idle_chrome_only_output(output)`. The old all-lines scan returned false for any post-turn OpenCode pane because scrollback contains non-ignorable response text, preventing idle-queue-watch from draining.
-
-**Verification:**
-- `cargo test -p agent-doc-orchestration` — 2224 passed, 0 failed
-- `cargo check --bin agent-doc` — clean
-- `cargo install --path .` — installed `agent-doc 0.34.0`
-
-**Tests added (5):** `is_bottom_idle_chrome_accepts_opencode_post_turn_with_scrollback`, `is_bottom_idle_chrome_rejects_opencode_active_turn_bottom`, `is_bottom_idle_chrome_rejects_non_opencode`, `is_bottom_idle_chrome_rejects_empty_output`, `current_child_prompt_visible_detects_opencode_post_turn_idle`
-
-**Files changed:** `agent-doc-orchestration/src/harness.rs`, `agent-doc-orchestration/src/start.rs`
-
-### Re: do [#1t6w] #opencode-skill-auto-loop — glm-5.1
-
-> **Queue prompt:**
->
-> do [#1t6w]
-
-
-**Implemented.** Added OpenCode-specific auto-loop section to the generated SKILL.md.
-
-1. **`skill.rs`** — Added `OPENCODE_QUEUE_AUTO_LOOP_SECTION` constant with OpenCode-specific auto-loop instruction. Added `is_opencode_environment()` helper. Updated `render_skill()` to append the section for OpenCode.
-
-2. **`skill.rs` tests** — Replaced omission test with positive assertion test. Updated shared-hot-path test to strip OpenCode auto-loop. Updated generic test to also reject OpenCode section.
-
-3. **`describe_image.rs`** — Fixed pre-existing test compilation errors.
-
-4. **Installed** `agent-doc skill install --harness opencode`.
-
-**Verification:** cargo test 68+2224 passed, 0 failed. cargo check clean. cargo install agent-doc 0.34.0.
-
-**Files changed:** `src/skill.rs`, `src/describe_image.rs`
-
-### Re: do [#tbhv] #harness-resolution-source-logging — glm-5.1
-
-> **Queue prompt:**
->
-> do [#tbhv]
-
-
-**Implemented.** Added harness resolution source logging in `start.rs`.
-
-After `from_context()` resolves the harness at start.rs:2762, the guard:
-1. Determines the resolution source (frontmatter, config, or fallback)
-2. Logs `[start] harness resolved: binary=X source=Y env=Z` via eprintln
-3. If `detect_harness()` env result differs from `from_context()` result (and env is not `"default"`), logs a `[start] WARNING: harness mismatch` diagnostic
-
-This makes the #4h81 harness mismatch (opencode env overriding codex frontmatter) immediately visible in supervisor stderr logs.
-
-**Verification:** `cargo test -p agent-doc-orchestration` — 2224 passed, 0 failed. `cargo check --bin agent-doc` — clean. `cargo install --path .` — installed `agent-doc 0.34.0`.
-
-**Files changed:** `agent-doc-orchestration/src/start.rs`
-<!-- agent:boundary:e4ca2e5e -->
+<!-- agent:boundary:5f90adf4 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
+- JB `Run Agent Doc` stalled with `Ran agent-doc again for tasks/monsterrodholders.md. No changes were detected since the last run.` message in the console.
 <!-- /agent:queue -->
 ###
 <!--

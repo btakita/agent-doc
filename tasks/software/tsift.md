@@ -261,7 +261,46 @@ Commands checked: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `ts
 Verification: confirmed the code path in `packages/tsift-digest/src/diff_digest.rs` and the formatter in `packages/tsift-cli/src/commands/digests.rs`; confirmed parent summary DBs exist but currently have zero rows, while `src/lazily-rs/.tsift/summaries.db` is absent.
 Confidence: high.
 Escalation: none.
-<!-- agent:boundary:85144391 -->
+
+### Re: astnavfixtures — gpt-5
+
+> **Queue prompt:**
+>
+> [#astnavfixtures]
+
+
+Done `#astnavfixtures`.
+
+This queue item was already implemented in the current `src/tsift` submodule head when the stop hook resumed the queue: `ccb243a test: add multilingual ast navigation fixture`, with the parent repo already pointing at that commit via `728e776ac chore: update tsift ast fixture coverage`. I verified the implementation instead of adding duplicate fixture code.
+
+What is covered:
+- `SPEC.md` documents the regression fixture requirement for Rust, Python, TypeScript, JavaScript, Kotlin, Zig, Bash, and Markdown headings/lists/fenced-code blocks.
+- `packages/tsift-cli/src/lib.rs` includes `multilingual_ast_navigation_fixture_locks_recall_handles_expands_and_budget`.
+- The fixture indexes all supported navigation languages, asserts AST byte spans, stable repeated `span-*` handles, Markdown section/list/code-block nodes, embedded fenced-code symbol linkage, bounded graph node/edge counts, AST-aware ranked recall, and parseable `search`, `source-read`, `symbol-read`, and `markdown-ast` expansion commands.
+
+Changed paths:
+- `src/tsift/SPEC.md`
+- `src/tsift/packages/tsift-cli/src/lib.rs`
+- parent submodule pointer `src/tsift`
+
+Commits:
+- `src/tsift`: `ccb243a test: add multilingual ast navigation fixture` on `origin/main`
+- parent repo: `728e776ac chore: update tsift ast fixture coverage`; parent branch push follows this binary-owned session-document closeout
+
+Verification:
+- `cargo test -p tsift-cli multilingual_ast_navigation_fixture_locks_recall_handles_expands_and_budget` passed.
+- `make check` passed: clippy, full workspace tests, doc tests, SimWorld, OpenCode npm tests, and npm publish dry run.
+- `cargo build --workspace` passed.
+- `cargo install --path . --force` passed; installed CLI reports `tsift 0.1.62`.
+- `gh run list --workflow CI --limit 1` in `src/tsift` shows `26853723725` completed successfully for `ccb243a` on `main`.
+- Tmux CI evidence: `rg -n "tmux" .github Makefile packages src tests` returned no matches, and `make -n tmux-ci` reports no such target.
+- Final cleanliness: `git status --short` in `src/tsift` is clean, and parent status for `src/tsift` plus `tasks/software/tsift.md` is clean before finalize.
+
+Queued diff-digest note: the later free-text queue question about `cached summaries: unavailable` was already answered in the prior `### Re: diff-digest cached summaries — gpt-5` response. The short version is that `unavailable` means the resolved project root had no `.tsift/summaries.db`; `missing` means the DB exists but has no rows for the file.
+
+Confidence: high.
+Escalation: none.
+<!-- agent:boundary:fbe063a3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -277,7 +316,7 @@ preset #spec-test-build-install-commit-push
 - ~[#astnavgraph]~
 - ~[#mdembeddedcode]~
 - ~[#astrankingmerge]~
-- [#astnavfixtures]
+- ~[#astnavfixtures]~
 ---
 Why did the tsift diff-digest on lazily-rs.md have `cached summaries: unavailable`?
 ```
@@ -294,7 +333,6 @@ Why did the tsift diff-digest on lazily-rs.md have `cached summaries: unavailabl
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#astnavfixtures] Add multilingual AST navigation fixtures and perf gates covering Rust/Python/TS/JS/Kotlin/Zig/Bash plus Markdown headings, lists, fenced code, stable handles, ranking recall, and expand-command validity.
 <!-- /agent:backlog -->
 
 ## Review

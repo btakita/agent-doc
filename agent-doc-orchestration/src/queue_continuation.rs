@@ -623,6 +623,62 @@ mod tests {
         );
     }
 
+    // `#codex-stop-cross-doc-queue-continuation` (scan ordering): a foreign-owned
+    // marker scanned BEFORE a valid same-pane marker must be skipped while the
+    // scan continues to return the later valid marker — never the foreign one.
+    #[test]
+    fn pending_marker_scan_continues_past_foreign_to_valid() {
+        let foreign_dir = tempfile::tempdir().unwrap();
+        let valid_dir = tempfile::tempdir().unwrap();
+        let foreign_root = foreign_dir.path().to_path_buf();
+        let valid_root = valid_dir.path().to_path_buf();
+
+        // Foreign doc (scanned first): owned by a live actor on pane %70.
+        let foreign = write_doc(&foreign_root, &["do [#foreign]"], true, true);
+        reconcile_marker(&foreign, "commit").expect("foreign marker written");
+        crate::session_actor::project_binding_in(
+            &foreign_root,
+            &foreign.to_string_lossy(),
+            "foreign-session",
+            "%70",
+            "@1",
+            "test",
+            "foreign_owner",
+        )
+        .unwrap();
+
+        // Valid doc (scanned second): owned by the current pane %74.
+        let valid = write_doc(&valid_root, &["do [#valid]"], true, true);
+        reconcile_marker(&valid, "commit").expect("valid marker written");
+        crate::session_actor::project_binding_in(
+            &valid_root,
+            &valid.to_string_lossy(),
+            "current-session",
+            "%74",
+            "@1",
+            "test",
+            "current_owner",
+        )
+        .unwrap();
+
+        // From pane %74, the foreign root is scanned first; its %70-owned marker
+        // is skipped and the scan continues to the %74-owned valid marker.
+        let found = pending_marker_continuation_for_roots(
+            &[foreign_root.clone(), valid_root.clone()],
+            Some("%74"),
+        )
+        .unwrap()
+        .expect("scan must continue past foreign marker to the valid one");
+        assert_eq!(found.0, valid, "must return the same-pane valid doc, not foreign");
+        assert_eq!(found.1.head_prompt, "do [#valid]");
+
+        // The skipped foreign marker must survive for its own owner.
+        assert!(
+            marker_path(&foreign).unwrap().unwrap().exists(),
+            "foreign marker must survive the skip (belongs to its own owner)"
+        );
+    }
+
     #[test]
     fn record_requested_head_persists_for_nonadvancing_guard() {
         let dir = tempfile::tempdir().unwrap();

@@ -121,12 +121,12 @@ Once on `glm-5v-turbo`, invoke `agent-doc claim tasks/agent-doc/agent-doc-bugs2.
 > do [#img-review]
 
 Blocked — this model (`glm-5.1`) cannot view images. Gated #img-review pending vision-capable model switch.
-<!-- agent:boundary:99dcae97 -->
+Can we have opencode use a `glm-5v-turbo` subagent to read the images?
+<!-- agent:boundary:221bcbe4 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
-- ~I ran `npm i -g @ai-sdk/openai-compatible`. How can we ensure the GLM model supports vision?~
-- do [#img-review]
+- Can we have opencode use a `glm-5v-turbo` subagent to read the images?
 <!-- /agent:queue -->
 ###
 <!--

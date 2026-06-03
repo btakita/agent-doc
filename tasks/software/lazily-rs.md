@@ -131,7 +131,7 @@ The real performance impact came from the prior lazy-invalidation / benchmark qu
 - Broader contention was mixed but mostly favorable: same-slot 16-worker contention improved `7.023 ms -> 6.373 ms`, batched-write 16-worker contention improved `2.730 ms -> 2.480 ms`, queue coalescing at 16 workers improved `3.007 ms -> 2.083 ms`; cleanup execution at 16 workers regressed `1.793 ms -> 2.434 ms`.
 
 So the net result is: the lazy-invalidation queue run bought large wins on the targeted concurrent graph-propagation/write paths, introduced useful lock-attribution proof, but left two watch items: cached `ThreadSafeContext` read latency and effect cleanup contention. Confidence is medium-high because this is based on the regenerated README benchmark data, not a freshly rerun controlled A/B baseline in this response.
-<!-- agent:boundary:1669d6ee -->
+<!-- agent:boundary:0e8f675b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -145,6 +145,7 @@ So the net result is: the lazy-invalidation queue run bought large wins on the t
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#lazyperf16] [recommended] Investigate the benchmark watch items from the lazy-invalidation run: cached ThreadSafeContext read latency regression and effect cleanup contention regression; rerun controlled A/B baselines before tuning.
 <!-- /agent:backlog -->
 
 ## Review

@@ -38,7 +38,7 @@ Compacted content:
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
 ❯ What are #next-steps to save tokens, improve performance, and improve graph lookups?
 
-### Re: next steps for token, performance, and graph lookup work — gpt-5 (HEAD)
+### Re: next steps for token, performance, and graph lookup work — gpt-5
 
 Top backlog item: `#tokegate`.
 
@@ -47,7 +47,6 @@ I added five active backlog items in priority order. The sequence is: instrument
 The highest leverage work is not swapping databases yet. `src/tsift/SPEC.md` already requires backend-eval and hop-cap promotion gates, and the code already has `next_token_actions`, `GraphEffectivenessReadiness`, `GraphStore::ranked_neighborhood`, and conflict-matrix preparation caching. The gap is turning those surfaces into a visible release gate that proves lower token output and better lookup quality across real sessions.
 
 Commands/proof: ran `agent-doc preflight`, `agent-doc read`, `agent-doc orchestrate --from-exchange --plan`, `agent-doc plan`, `tsift status --fix`, `tsift index --workspace .`, targeted `tsift --envelope search`, and source/spec reads. No code changed, so no build suite was required.
-<!-- agent:boundary:e6647987 -->
 
 ### Re: #tokegate cross-surface token/performance gate — glm-5.1
 
@@ -75,6 +74,7 @@ Implemented `#tokegate` in `tsift_quality::token_gate`.
 - Committed and pushed to tsift main: `42738de`
 
 Commands/proof: ran `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `cargo check`, `cargo test`, `make check`, `cargo install --path .`, `git add` + `git commit` + `git push` in `src/tsift/`.
+<!-- agent:boundary:54b570c6 -->
 <!-- /agent:exchange -->
 ###
 <!--

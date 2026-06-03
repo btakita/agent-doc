@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-agent: codex
+agent: opencode
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -30,36 +30,12 @@ Codex review log pass completed; no reviewed item met the complete threshold.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260603-043538.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260603-050106.md`*
 
 Compacted content:
-- Archived 8 response topic(s): do [#opencode-build-chrome-stall]; do [#jbrunstallreg]; do [#opencode-preset-not-dispatched]; 5 more
+- Archived 2 response topic(s): log-backed review audit; Codex review log pass
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-Please review the agent-doc, claude, codex logs. If the review item requires a live verify, replace the requirement with logs to confirm or deny whether the review item is complete or not.
-
-### Re: log-backed review audit — gpt-5
-I reviewed the agent-doc ops/pane logs, the active Claude transcript path, and recent Codex session logs against the gated review items. The useful signal is uneven: route-side behavior is now log-backed for several items, but most UI/plugin live checks still need plugin or idea.log evidence rather than agent-doc/Codex/Claude transcripts.
-
-I updated the review text for 20 items so the gate is no longer phrased as generic live verify where logs already confirm or deny it. The strongest denials are `#snrun`, `#clear-stops-running-process`, `#jb-stale-busy-idle-footer`, `#adoc-queue-ipc-buffer-divergence`, `#route-busy-wrong-owner-diagnostic`, and `#opencode-preset-not-dispatched`. The strongest partial confirmations are `#jb-busy-queue-deadlock-live-verify`, `#t41j`, `#route-starting-timeout-poll-recovery`, `#jb-tsift-pane-sync`, and the Codex final-gate checks.
-
-Changed paths: `tasks/agent-doc/agent-doc-bugs2.md` only. Review edits landed in recovery commit `ecc287aa5`; this writeback records the missing exchange response.
-Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc read --component review`, `agent-doc ops summary`, `agent-doc ops diagnose`, targeted `rg` across agent-doc/Claude/Codex logs, `agent-doc reset --from-current` for stale CRDT sidecars, and `agent-doc write --commit` recovery.
-Verification: no code changed, so I did not run the project test suite. I will rerun `agent-doc session-check --codex-final-gate` after this write.
-Confidence: medium; the agent-doc logs are strong for route/closeout states, but JetBrains notification and editor-buffer claims still need plugin logs.
-Escalation: none.
-Look at Codex-related review items. Mark as complete if logs confirm the review item is complete. If logs to confirm/deny review item are missing, add the logs.
-
-### Re: Codex review log pass — gpt-5
-I reviewed the Codex-related review items against the latest agent-doc ops log, the active `b26b9957` session log, `debug.log.2026-06-03`, and recent Codex artifacts. I did not mark any review item complete: the available logs either confirm the item is still open or show only partial positive evidence.
-
-I updated 10 review entries with the fresh evidence. The strongest new signals are the consumed direct-pane Codex dispatch at `1780461425`, the busy queued dispatch at `1780461889`, the 60s focus-only not-dispatched timeout at `1780461957`, and the latest `queue_continuation_required` event at `1780462610`. The missing evidence is also now explicit: no `FreshStartAckOutcome=IdleNoOpKeep`, no Stop-hook missing-response failure, no JetBrains notification proof, and no negative-case final-response closeout log.
-
-Changed paths: `tasks/agent-doc/agent-doc-bugs2.md` via review/status edits. Existing `src/agent-doc` working-tree changes for `#jbrunstallreg` remain separate source edits.
-Commands: `agent-doc --version`, `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, targeted `rg` over `.agent-doc/logs`, `agent-doc ops summary`, `gh run list --workflow CI --limit 1`, focused JetBrains `./gradlew test`, and full `make check`.
-Verification: JetBrains plugin tests passed; `make check` passed; latest GitHub Actions CI run for `CI` is green. No new follow-up item is introduced; existing open review items already track the remaining evidence.
-Confidence: medium-high for the log classifications; low for closing any live-gated item without idea.log or a negative-case Codex failure trace.
-Escalation: none.
-<!-- agent:boundary:c8f4aede -->
+<!-- agent:boundary:181db5ca -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->

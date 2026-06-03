@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -70,11 +70,42 @@ This may be a compound trigger: the IPC/write activity from `Clear Session Conte
 
 Updated #t9xf scope: the bleed is not limited to `Clear Session Context` — JB `Compact Exchange` also triggers it, and the accumulated corruption affects subsequent `Run Agent Doc` dispatches.
 Can GLM sessions create a GPT subagent to view images? What are #next-steps?
-<!-- agent:boundary:a6e4ec63 -->
+
+### Re: GLM subagent for images / next-steps — opus-4-6
+
+> Can GLM sessions create a GPT subagent to view images?
+
+No. OpenCode's Task tool launches subagents but they run the same model (GLM). There is no cross-model subagent bridge. To view img_17/img_18, use `agent-doc claim` from a Claude Code or Codex session with a vision-capable model.
+
+> What are #next-steps?
+
+**Backlog priority order** (top items first):
+
+1. **#t9xf** `#opencode-log-bleed` — two new evidence items (img_17, img_18). Needs vision-capable session to view screenshots, then root-cause the stdout bleed source. Highest-value diagnostic item.
+
+2. **#queue-not-clearing-opencode** — if the OpenCode auto-loop gap is the root cause of #t9xf accumulation, closing this closes a class of drain bugs.
+
+3. **#4h81** `#opencode-codex-capacity-proof` — capacity proof ran in wrong harness.
+
+4. **#7fmb** `#opencode-prompt-navigation` — OpenCode TUI navigation issue; may be upstream.
+
+5. **#opencode-jb-stall** — depends on live-verify of installed binary + JB plugin.
+
+6. **#codex-upgrade-restart-cross-doc-focus** — implemented + shipped, remaining restart-rebind facet gated on live repro.
+
+7. **#route-busy-wrong-owner-diagnostic** — recommended; logs confirm cross-document execution but missing diagnostic naming.
+
+8. **#lr-queue-patchback-miss** — recommended; queue-head provenance consolidation.
+
+9. **#submodule-response-commit-proof** — recommended; nested-repo commit ownership.
+
+10. **#finalize-retry-ipc-response-duplication** — recommended; multi-retry + IPC duplication.
+
+Top of backlog: **#t9xf**.
+<!-- agent:boundary:fdf641ac -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
-- Can GLM sessions create a GPT subagent to view images? What are #next-steps?
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 ###
 <!--
@@ -89,6 +120,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#img-review] #img-17-18-review #agent-doc-bug 2026-06-03: review img_17.png and img_18.png from a vision-capable session to diagnose #t9xf stdout bleed and TUI corruption. Blocked on GLM model (no image support).
 - [/] [#4h81] #opencode-codex-capacity-proof #agent-doc-bug 2026-06-03: Codex Capacity Proof incorrectly runs in OpenCode harness. See monsterrodholders.md session + agent-doc logs.
 - [/] [#t9xf] #opencode-log-bleed #agent-doc-bug 2026-06-03: agent-doc stderr logs bleed over the OpenCode UI. Needs reproduction to confirm source.
 - [/] [#7fmb] #opencode-prompt-navigation #agent-doc-bug 2026-06-03: OpenCode TUI prompt list cannot be navigated with arrow keys or Tab key. Enter works. Likely OpenCode TUI issue.

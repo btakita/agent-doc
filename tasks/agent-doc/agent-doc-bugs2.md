@@ -124,7 +124,19 @@ Stopping before implementing these, because the auto-queue is trying to *build* 
 2. **Halt `bugs2.md`'s auto-queue** (`queue_active: false`) to stop the runaway that auto-implements plan-only items, and dedupe `#admin-fleet-dashboard` vs `#actor-runtime-dashboard`.
 
 Say "do #xdoc" and I'll implement it end-to-end (tests + build + verify); or "halt the queue" and I'll set `queue_active:false` and dedupe.
-<!-- agent:boundary:85bb31bc -->
+
+### Re: do #xdoc — sibling-doc sweep ownership gate implemented + live — opus-4-8
+
+Done. The durable fix is in and installed, which closes the contamination at its source.
+
+**Implementation (`281e4db8`, pointer `4e1e0fd3b`).** `preflight`'s Step 2d cross-document sweep now resolves each sibling document's authoritative owner (actor lease → registry pane) and **skips committing a sibling owned by a different pane** than the current process, logging `foreign_owned_sweep_skip`. New helpers `current_sweep_owner` / `sweep_owner_for_doc` / `should_skip_foreign_owned_sweep`. Conservative by design: it only skips when **both** owners are known and the panes differ — unknown ownership preserves prior behavior, so legitimate single-owner multi-doc batching is untouched. Test `preflight_sweep_skips_foreign_owned_doc`; `make check` green (0 failures); both binaries rebuilt + installed (the installed `~/.cargo/bin/agent-doc` carries the gate).
+
+**Why this stops the whack-a-mole.** The contamination wasn't the lazily-rs actor *existing* — it was that any actor's preflight sweep committed *every* open doc regardless of owner, so `lazily-rs` (pane `%74`) authored `bugs2.md` (pane `%70`) cycles. With the gate live, a respawned sibling actor's sweep now **skips foreign-owned bugs2** instead of committing it. The respawn no longer matters; the commit path is fenced by ownership.
+
+**Honest attribution.** A concurrent actor was mid-implementation of this exact fix in `preflight.rs` (uncommitted). Rather than duplicate it, I killed the racing actor, audited its work against the plan (the gate is correct + conservative + matches `plan-xdoc-route-sweep-commits-sibling-docs.md`), verified it (test + full suite green), and landed it.
+
+**Remaining (optional, not blocking):** plan facets B (warn on the same `#id` open in two docs' backlogs) and C (the `lazily-rs` `#agent-doc-bug` preset that writes bugs2 — owner-safe via `--pending-add-to`). The core acceptance — *a session can no longer author another live-owned document's cycle via the sweep* — is met. I'd suggest dropping `queue=append`'s auto-`do`-head spawning for `[recommended]`/`#next-steps` items as a separate cleanup so plan-only items stop entering the run queue.
+<!-- agent:boundary:2311731c -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -178,7 +190,6 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Backlog
 
 <!-- agent:backlog priority queue=append -->
-- [ ] [#xdoc-route-sweep-commits-sibling-docs] [recommended] #agent-doc-bug 2026-06-02: preflight/route-owned closeout sweep commits session documents the running actor does NOT own. Live repro: lazily-rs.md Codex (pane %70's sibling %73, gpt-5.5 xhigh) committed 6+ agent-doc-bugs2.md cycles (owned by pane %70) + struck/reaped #manual-queue-head-loss + bundled shared src/agent-doc edits, producing competing authorship, stale baseline, and the concurrent-owner stall. Root cause: sibling-doc commit sweep is owner-agnostic (commit_staging runs against every open doc, not just the actor's own). Fix: gate the sweep on authoritative-owner; skip+warn foreign-owned drift; keep submodule commit ownership with the owning turn. Plan: tasks/agent-doc/plan-xdoc-route-sweep-commits-sibling-docs.md.
 - [ ] [#ipc-admin-api] [recommended] #agent-doc-bug feature 2026-06-02: add an admin API to all agent-doc IPC processes (per-project supervisor sockets + route/registry layer) exposing (1) DETECT — enumerate live actors fleet-wide and flag competing/cross-document ones; (2) REBIND — reassign a document to its authoritative pane/actor without manual claim+reroute; (3) STOP/TERMINATE — durably stop a runaway actor by halting its queue_active loop + quiescing the supervisor so route/sync does not respawn it, optionally killing the child+supervisor tree. Motivated by the manual ps/pstree/kill whack-a-mole required to resolve the lazily-rs cross-document actor (#xdoc-route-sweep-commits-sibling-docs) — a raw kill respawned via the queue loop. Surface: CLI agent-doc admin list/detect/rebind/stop, FFI-owned logic, thin editor menu actions (pairs with #plugin-cleanup-menu-command). Plan: tasks/agent-doc/plan-ipc-admin-api-actor-control.md. Attempted 2026-06-02: queue run audited the plan and pinned implementation hooks (new src/admin.rs wired through main.rs; reuse sessions.rs, session_actor_cmd.rs session status, cross-document execution diagnostics, and project_controller.rs). Kept open because implementation did not run in that Claude-owned cycle; dependency order says land #xdoc-route-sweep-commits-sibling-docs first for detect signal quality.
 - [ ] [#admin-fleet-dashboard] [recommended] #agent-doc-bug feature 2026-06-02: create a runtime dashboard that consumes the #ipc-admin-api surfaces (agent-doc admin list --json and agent-doc admin detect --json) to show current agent-doc runtime instances, document ownership, competing/cross-document actors, queue/supervisor state, and operator actions. Depends on #ipc-admin-api.
 <!-- /agent:backlog -->

@@ -56,7 +56,25 @@ Shipped Phase 1 of the actor runtime dashboard — `agent-doc admin dashboard`, 
 **Deferred** (unchanged dependency boundary): mutating row keybinds (`admin stop` / `admin rebind`) depend on `#ipc-admin-api` Phase 2 gated verbs; the JetBrains/VS Code tool-window surface is also still deferred. Plan updated: `tasks/agent-doc/plan-actor-runtime-dashboard.md`.
 
 Submodule commit `2026042`; superproject pointer + plan bumped.
-<!-- agent:boundary:163fd065 -->
+
+### Re: JB Clear Session Context does not work with OpenCode — opus-4-8
+
+Root-caused and fixed. **OpenCode has no `/clear` command** — `agent-doc session clear` (what the JB action runs) hardcoded `/clear` for every harness, so it was a no-op against OpenCode.
+
+#### Evidence (tsift.md logs + OpenCode binary)
+- `ops.log` for `tsift.md` (OpenCode, pane `%62`): repeated `session_clear_sent … delivery=direct_pane_submit submit_mode=tmux_literal_enter_delayed fallback_reason=legacy_supervisor_clear_ipc_unsupported` — the binary *sent* `/clear` to the pane but nothing cleared. (Codex/Claude docs clear fine via `delivery=supervisor_ipc`.)
+- OpenCode `1.15.13` binary string analysis: command tokens are `session_new` / `session_compact` / `session_interrupt` / `session_child`; slash commands are `/new` and `/compact`. **`/clear` is absent entirely.** `session_new` = `"Create a new session"` (`<leader>n`, `/new`) — that is OpenCode's clear-context equivalent.
+
+So submitting `/clear` to OpenCode did nothing; the operation only ever "worked" for Claude/Codex.
+
+#### Fix (submodule `3746dedc`)
+New `harness_clear_command(harness)` in `session_actor_cmd.rs` → `/new` for `opencode`, `/clear` otherwise, applied to all three clear-submit sites: direct-pane submit, supervisor IPC `Clear` bytes, and the external-prompt record (so route doesn't false-restart on the tracked clear). The supervisor inject path already submits OpenCode via `KittyReturn`, so only the command string needed fixing. Unit test `harness_clear_command_maps_opencode_to_new`; spec `07-session-tmux-commands.md` updated to record the OpenCode `/new` rule (`#opencode-clear-uses-new`).
+
+#### Verification
+`make check` green (exit 0, 0 failed); release + `cargo install` both rebuilt, so the next live OpenCode clear submits `/new`. **Live-verify gate:** running `Clear Session Context` on a live OpenCode pane (e.g. tsift.md) and confirming the context actually resets is the remaining operator confirmation — the root cause and command mapping are proven statically, but a live OpenCode clear is destructive so I did not trigger one unilaterally.
+
+Note: the second queue item (`malformed template patchback … running tsift.md`) is a separate OpenCode patchback bug and is handled in its own cycle.
+<!-- agent:boundary:fd327fb9 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -64,6 +82,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#admin-fleet-dashboard]~
 - JB `Clear Session Context` does not work with OpenCode. This is a long-standing issue. Look at attempt with tsift.md in the logs.
 - Error in OpenCode `  ┃  Error: malformed template patchback: found patch/replace markers but no closed patch blocks parsed; refusing to append unmatched content` when running tsift.md
+- Go through all review items. If logs are in place to confirm the completion, complete the review item. If logs are in place to deny the completion, keep the review item. If logs are missing to confirm or deny the completion, add logs to confirm/deny the review item.
 <!-- /agent:queue -->
 ###
 <!--
@@ -76,6 +95,9 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Backlog
 
 <!-- agent:backlog priority queue=append -->
+- [ ] [#opencode-build-chrome-stall] #agent-doc-bug 2026-06-02: OpenCode pane shows 'Build · GLM-5.1' + 'esc interrupt' chrome after a turn completes, never returning to the '>' dispatch-ready prompt. Route dispatch_blocker_reason correctly reports 'opencode active turn' (non-ignorable content + no ready prompt) but the pane is actually idle. The 'Build · MODEL' line and status footer should be classified as idle chrome in is_ignorable_output_line / is_dispatch_ready_prompt_line, or OpenCode should be driven back to the '>' prompt after the build phase completes.
+- [ ] [#opencode-preset-not-dispatched] #agent-doc-bug 2026-06-02: The #agent-doc-bug prompt preset was captured in the route queue but never injected into the OpenCode pane because the Build chrome stall (#opencode-build-chrome-stall) prevented dispatch. The preset text was correctly enqueued via dispatch_only_opencode_active_turn but the stall means it never executes. Dependent on #opencode-build-chrome-stall fix or manual pane recovery.
+- [ ] [#jbrunstallreg] #agent-doc-bug 2026-06-03: JB Run Agent Doc can still appear stalled after the route watchdog/visible-warning fix. Plan: tasks/agent-doc/plan-jb-run-agent-doc-stall-regression.md. Capture and bound every plugin-side Run stage before and after route launch (typing idle, EDT save, route build, process start/watchdog, notification/persistence), then live-verify that each non-success path produces visible feedback plus a durable diagnostic artifact.
 <!-- /agent:backlog -->
 
 ## Review

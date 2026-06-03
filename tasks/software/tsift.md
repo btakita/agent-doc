@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -165,7 +165,7 @@ Readiness is **partially implemented** across three boundaries:
 ### Re: Runbook optimizations — already answered — glm-5.1
 
 The answer was committed in the previous cycle (see "### Re: Runbook optimizations scope across agent-loop projects" above). Striking through the consumed queue items. Backlog items for `#rankdefault`, `#gfrontierhot`, `#greadiness` remain open pending measurement/implementation work.
-<!-- agent:boundary:3e5051c6 -->
+<!-- agent:boundary:a85a774a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -174,13 +174,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- ~[#gpackreuse]~
-- ~Code Navigation harness info should be in a Runbook referenced in AGENTS.md or a skill.~
-- ~Are the Runbook optimizations applied to all projects in agent-loop?~
-- ~[#rankdefault]~
-- ~[#gfrontierhot]~
-- ~[#greadiness]~
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog

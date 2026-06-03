@@ -724,7 +724,7 @@ fn preset_item_id_collision_warning(content: &str) -> Option<PreflightWarning> {
 
 /// Attributes that are only meaningful on the `agent:queue` component. Seeing
 /// one of these on any other component is a misplaced-attribute mistake.
-const QUEUE_ONLY_COMPONENT_ATTRS: &[&str] = &["auto"];
+const QUEUE_ONLY_COMPONENT_ATTRS: &[&str] = &["auto", "preset"];
 
 /// Component attribute keys recognized anywhere in the document (excluding the
 /// queue-only set above). A key outside both sets is almost certainly a typo
@@ -831,6 +831,7 @@ fn post_exchange_ordinary_html_comments(content: &str) -> Vec<String> {
             && !components.iter().any(|component| {
                 absolute_open >= component.open_start && absolute_open < component.close_end
             })
+            && !comment_is_user_note(inner)
         {
             comments.push(inner.to_string());
         }
@@ -839,6 +840,24 @@ fn post_exchange_ordinary_html_comments(content: &str) -> Vec<String> {
         tail = &content[tail_start..];
     }
     comments
+}
+
+fn comment_is_user_note(inner: &str) -> bool {
+    let lines: Vec<&str> = inner.lines().collect();
+    if lines.len() < 2 {
+        return false;
+    }
+    let has_horizontal_rule = lines.iter().any(|l| l.trim() == "---");
+    let has_prose = lines.iter().any(|l| {
+        let t = l.trim();
+        !t.is_empty()
+            && t != "---"
+            && !t.starts_with('#')
+            && !t.starts_with('/')
+            && !t.starts_with("dispatch ")
+            && !t.starts_with("preset ")
+    });
+    has_horizontal_rule && has_prose
 }
 
 fn post_exchange_comment_directive_signals(comment: &str) -> Vec<String> {
@@ -1830,6 +1849,24 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     {
         eprintln!("[preflight] warning: {}", warning.message);
         warnings.push(warning);
+    }
+
+    if initial_frontmatter.codex_network_access.is_some()
+        && canonical_harness_name(&active_harness).as_deref() != Some("codex")
+    {
+        let msg = format!(
+            "{}: `codex_network_access` is Codex-specific and has no effect when the active harness is {}. \
+             Either remove it from the document frontmatter or switch the agent to codex.",
+            file.display(),
+            active_harness
+        );
+        eprintln!("[preflight] warning: {msg}");
+        warnings.push(PreflightWarning {
+            code: "codex_network_access_non_codex_harness".to_string(),
+            message: msg,
+            document_agent: initial_frontmatter.agent.as_deref().map(|s| s.to_string()),
+            active_harness: Some(active_harness.to_string()),
+        });
     }
 
     // Step 0a: Auto-GC (at most once per day).
@@ -3711,13 +3748,12 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
     let need_set_active = activation.active && !persisted_active;
     let need_clear_active = !activation.active && persisted_active && !activation.deferred;
     let need_strip_auto = has_auto && !queue_has_prompts;
-    let need_clear_proven_non_auto_residue = !has_auto
+    let need_clear_non_auto_residue = !has_auto
         && !activation.active
         && !activation.deferred
-        && drained_residue
-        && snapshot_proves_queue_was_active(file);
+        && drained_residue;
     let need_clear_drained_body =
-        (need_strip_auto || need_clear_proven_non_auto_residue) && !activation.deferred;
+        (need_strip_auto || need_clear_non_auto_residue) && !activation.deferred;
 
     if need_clear_drained_body {
         let comps = crate::component::parse(&current_content)?;
@@ -6224,6 +6260,75 @@ mod tests {
     }
 
     #[test]
+    fn preflight_clears_completed_non_auto_queue_without_snapshot_proof() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: false\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- ~do [#item-a]~\n",
+            "- ~do [#item-b]~\n",
+            "<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        run(&doc).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            updated.contains("<!-- agent:queue -->\n<!-- /agent:queue -->"),
+            "completed non-auto queue should be cleared without snapshot proof:\n{updated}"
+        );
+        assert!(!updated.contains("[#item-a]"));
+        assert!(!updated.contains("[#item-b]"));
+        assert!(updated.contains("queue_active: false"));
+    }
+
+    #[test]
+    fn preflight_does_not_clear_live_inactive_queue_without_snapshot_proof() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: false\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- ~do [#done-item]~\n",
+            "- do [#still-live]\n",
+            "<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        run(&doc).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            updated.contains("- do [#still-live]"),
+            "queue with live prompts must not be cleared:\n{updated}"
+        );
+    }
+
+    #[test]
     fn preflight_clears_completed_non_auto_queue_when_snapshot_was_active() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");
@@ -8690,6 +8795,38 @@ mod tests {
     }
 
     #[test]
+    fn misplaced_component_attr_warning_allows_preset_on_queue() {
+        let content = concat!(
+            "<!-- agent:queue preset=\"#spec-test-build-install-commit-push\" -->\n",
+            "- do #fix1\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert!(
+            misplaced_component_attr_warning(Path::new("session.md"), content).is_none(),
+            "`preset` on queue is a recognized queue-only attribute"
+        );
+    }
+
+    #[test]
+    fn misplaced_component_attr_warning_flags_preset_on_non_queue() {
+        let content = concat!(
+            "<!-- agent:backlog preset=\"#spec-test-build-install-commit-push\" -->\n",
+            "- [ ] [#x1] keep this\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let warning =
+            misplaced_component_attr_warning(Path::new("session.md"), content).expect(
+                "`preset` on backlog should warn as a queue-only attribute on wrong component",
+            );
+        assert_eq!(warning.code, "misplaced_component_attr");
+        assert!(
+            warning.message.contains("queue-only"),
+            "warning should mention queue-only: {}",
+            warning.message
+        );
+    }
+
+    #[test]
     fn auto_on_backlog_does_not_activate_queue() {
         // #backlog-auto-marker-misfire regression: the auto-loop reads `auto`
         // only from the queue component, never from the backlog.
@@ -8749,6 +8886,43 @@ mod tests {
         assert_eq!(warning.code, "post_exchange_comment_prompt_preset");
         assert!(warning.message.contains("dispatch #manual-review"));
         assert!(warning.message.contains("/clear"));
+    }
+
+    #[test]
+    fn post_exchange_comment_with_horizontal_rule_and_prose_is_user_note() {
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "prompt_presets:\n",
+            "  '#spec-test-build-install-commit-push': update spec + tests\n",
+            "  '#next-steps': Any follow-up items?\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "###\n\n",
+            "<!--\n",
+            "The last run had a code fence stripped away by agent-doc.\n",
+            "#spec-test-build-install-commit-push\n",
+            "---\n",
+            "What are #next-steps to fix bugs?\n",
+            "-->\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let (fm, _) = crate::frontmatter::parse(content).unwrap();
+        let warning = post_exchange_comment_prompt_preset_warning(
+            Path::new("session.md"),
+            content,
+            &fm.prompt_presets,
+        );
+        assert!(
+            warning.is_none(),
+            "post-exchange comment with horizontal rule and prose is a user note, not a directive: {:?}",
+            warning
+        );
     }
 
     #[test]
@@ -9579,6 +9753,33 @@ mod tests {
     fn harness_mismatch_warning_skips_unknown_active_harness() {
         assert!(harness_mismatch_warning(Some("codex"), "default").is_none());
         assert!(harness_mismatch_warning(None, "claude-code").is_none());
+    }
+
+    #[test]
+    fn codex_network_access_warning_for_non_codex_harness() {
+        let content = "---\nagent_doc_session: test\nagent: opencode\ncodex_network_access: enabled\n---\n\ntest\n";
+        let (fm, _) = crate::frontmatter::parse(content).unwrap();
+        assert!(
+            fm.codex_network_access.is_some(),
+            "frontmatter should have codex_network_access"
+        );
+        let active = "opencode";
+        assert_ne!(
+            canonical_harness_name(active).as_deref(),
+            Some("codex"),
+            "opencode should not be canonical codex"
+        );
+        assert!(
+            canonical_harness_name(&active).is_some(),
+            "opencode is a known harness"
+        );
+        let has_guard = canonical_harness_name("codex").as_deref() == Some("codex")
+            && canonical_harness_name(active).as_deref() != Some("codex")
+            && fm.codex_network_access.is_some();
+        assert!(
+            has_guard,
+            "guard condition should fire for opencode + codex_network_access: enabled"
+        );
     }
 
     #[test]

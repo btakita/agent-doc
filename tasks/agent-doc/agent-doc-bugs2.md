@@ -150,7 +150,27 @@ I cleaned the stale state along the way: deregistered the stashed `%74`, removed
 **To start lazily-rs right now (workaround):** give it a pending prompt first — type a line into its `agent:exchange` (or re-enable an `agent:queue auto` item) so the fresh start's first cycle is a *real* cycle; route then keeps the pane instead of reaping it.
 
 **Want me to implement `#route-reaps-idle-fresh-start` next?** It's the durable fix (let a ready, trigger-consuming fresh start succeed on a no-op first cycle), but it's a careful change in the sensitive route startup-miss path — I'd do it deliberately with the two regression tests in the plan rather than rush it. Say "do #route-reaps-idle-fresh-start" and I'll take it.
-<!-- agent:boundary:9a2896c3 -->
+
+### Re: "Run the plan file" (Codex Close hook scope spillage) — done — opus-4-8
+
+Found it and ran it. The plan lazily-rs.md created is **`plan-codex-stop-cross-doc-queue-continuation.md`** — the Codex *Stop* hook scope spillage. Implemented + committed + installed (`991feda5`, pointer `8dc626975`, `make check` green).
+
+**The bug:** the Stop-hook durable-marker fallback (`marker_fallback_continuation_response` → `pending_marker_continuation_for_roots`) scanned *all* `.agent-doc/queue-continuations/*.json` markers and returned the first valid one — with no ownership check. So a Codex Stop hook in `lazily-rs.md` (pane `%74`) got told to run `agent-doc agent-doc-bugs2.md` while bugs2 is owned by the Claude actor in pane `%70`. That is the **dispatch-level** half of the contamination you've been hitting.
+
+**The fix:** `pending_marker_continuation_for_roots` now takes the current Codex pane (`TMUX_PANE`) and **skips a marker whose document has a live authoritative actor on a different pane** (logs `codex_stop_foreign_queue_marker_skip`, keeps scanning, does not prune the foreign marker). Unknown/closed/unowned ownership and absent tmux context preserve prior behavior, so same-owner continuation and the safe-claim path still work. Test `pending_marker_skips_foreign_owned_then_finds_same_pane`.
+
+**Both contamination vectors are now closed:**
+- **Commit-level** (`#xdoc-route-sweep-commits-sibling-docs`, `281e4db8`) — the preflight sweep skips foreign-owned docs.
+- **Dispatch-level** (`#codex-stop-cross-doc-queue-continuation`, `991feda5`) — the Stop hook won't tell a pane to run a foreign-owned doc.
+
+Together they fix the lazily-rs → bugs2 spillage from both ends. (Note: a running Codex picks this up on its next restart, since the hook uses the installed binary.)
+
+#### Re: "navigating to tsift.md, focus goes into the stash; the pane doesn't move into the window"
+
+That's the existing **`#stash-pane-promote-on-focus`** (already in review): a live-owner pane sitting in the `1:stash` window gets *selected* on focus but not **reparented** into `0:agent-doc`, so the editor tab switches but the pane stays stashed. It's a known gap, not a new regression. Want me to implement it next? It pairs naturally with the focus/sync work — `sync.rs`/`focus.rs` need to `move-pane` the focused live owner out of stash into the agent-doc window, not just `select-pane`.
+
+I'm not auto-looping — the contamination is now fixed at both layers, so the remaining queue can drain cleanly, but the next move (stash-promote, or `#route-reaps-idle-fresh-start` so lazily-rs can restart) is your call.
+<!-- agent:boundary:c85846e9 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->

@@ -33,75 +33,12 @@ queue_active: false
 <!-- agent:exchange -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260603-004657.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260603-012347.md`*
 
 Compacted content:
-- Archived 6 response topic(s): lock contention next steps; shadow invalidation graph; #lazyperf9; 3 more
+- Archived 3 response topic(s): #lazyperf11; Can we implement lazy-invalidation for more concurrent performance?; #next-steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-❯ do [#lazyperf11]. #spec-test-build-install-commit-push
-
-### Re: #lazyperf11 — gpt-5
-
-Implemented `#lazyperf11`.
-
-Changed paths:
-- `src/lazily-rs/src/thread_safe.rs`
-- `src/lazily-rs/tests/spec_compliance.rs`
-- `src/lazily-rs/SPEC.md`
-
-What changed:
-- `ThreadSafeContext` effect reruns now seed dependency tracking with the effect's existing dependencies, preserve unchanged edges through the rerun, and remove stale edges in one post-callback graph mutation before storing the next cleanup.
-- Duplicate pending-effect cleanup is folded into the same state lock that prepares the effect run, avoiding the extra queue lock on the hot path.
-- Added an instrumentation regression asserting a stable-dependency effect rerun performs zero dependency-edge adds/removes and zero `DependencyEdge` lock acquisitions while still coalescing the batched queue push.
-- Updated the spec with the stable-edge effect rerun rule.
-
-Verification:
-- `cargo fmt`
-- `cargo test`
-- `cargo test --features tokio`
-- `cargo test --features instrumentation`
-- `cargo test --features loom --test thread_safe_loom`
-- `cargo build`
-- `cargo clippy --all-targets --all-features -- -D warnings`
-- `cargo install --path . --examples --features instrumentation,tokio --force`
-- root `make check`
-
-CI evidence:
-- `btakita/lazily-rs` latest `CI` run `26852196453` was `success`; its `Rust` job completed all steps successfully and has no tmux job.
-- `btakita/agent-loop` latest `Agent Doc` run `26855610347` was `success`; both `check` and `tmux-ci` jobs completed successfully.
-
-Commits and push:
-- `src/lazily-rs`: `a8b6fc3 perf: preserve thread-safe effect dependencies`, pushed to `origin/main`.
-- superproject: `976b0c0da chore: update lazily-rs submodule`, included in the completed `origin/main` push.
-
-Escalation: none.
-Confidence: high.
-
-### Re: Can we implement lazy-invalidation for more concurrent performance? — gpt-5
-
-> **Queue prompt:**
->
-> Can we implement lazy-invalidation for more concurrent performance?
-
-
-Yes. This cycle completed the effect-heavy contention slice of that direction: stable effect dependencies now stay subscribed across reruns, so repeated effect flushes avoid redundant dependency-edge lock churn while preserving cleanup and disposal ordering. The broader lazy-invalidation work can continue from the active queue after this closeout.
-❯ Add #next-steps for lazy-invalidation and other lazy strategies for high performance graph propagation under a parallel load.
-
-### Re: #next-steps — gpt-5
-
-Added four prioritized backlog items for lazy invalidation and related parallel graph-propagation strategies.
-
-Top of backlog: `#lazyperf12`.
-
-Changed paths:
-- `tasks/software/lazily-rs.md`
-
-Verification:
-- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md`
-- `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md`
-
-No source changes were needed. Escalation: none. Confidence: high.
-<!-- agent:boundary:fb6e7c52 -->
+<!-- agent:boundary:10210732 -->
 <!-- /agent:exchange -->
 ###
 <!--

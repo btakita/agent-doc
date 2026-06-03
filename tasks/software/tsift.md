@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -108,7 +108,7 @@ Backlog items added for:
 - OpenCode: replace grep with tsift search for content search
 - Codex: adopt tsift AST API for source reading
 - Remaining lib.rs modularization phases
-<!-- agent:boundary:4e74e0b6 -->
+<!-- agent:boundary:5fcc7acd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -117,7 +117,13 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
+- ~do [#rankdefault]~
+- ~do [#gfrontierhot]~
+- ~do [#greadiness]~
+- OpenCode + Codex should use tsift AST api instead of the Read tool. #next-steps
+- OpenCode should use tsift instead of grep. #next-steps
+- Please extract modules from tsift-cli/lib.rs
 <!-- /agent:queue -->
 
 ## Backlog

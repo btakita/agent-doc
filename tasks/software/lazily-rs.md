@@ -71,7 +71,23 @@ Converted `ThreadSafeSlotFastPath.dependents` and `ThreadSafeCellFastPath.depend
 - Updated both struct fields, constructors, `insert_dependent`, `remove_dependent`, `dependents_snapshot` methods
 
 **Verification:** `make check` passes (fmt, clippy, 92 default tests, 2 tokio tests, 12 loom tests, benchmark check). Pushed as `5f4c76e`.
-<!-- agent:boundary:e02f9e99 -->
+
+### Re: #xdq8 lazyperf27 — glm-5.1
+
+> **Queue prompt:**
+>
+> [#xdq8]
+
+
+Replaced `ThreadSafeState::scheduled_effects` from `HashSet<SlotId>` to `Vec<bool>` indexed by `SlotId.0 as usize`. Zero-hash O(1) schedule/deschedule/contains.
+
+**Changes:**
+- Field type: `HashSet<SlotId>` → `Vec<bool>`
+- Added `deschedule_effect()` and `is_effect_scheduled()` helper methods on `ThreadSafeState`
+- Updated `schedule_effect_locked`, `dispose_effect`, `flush_effects`, and test helper
+
+**Verification:** `make check` passes (fmt, clippy, 92 default tests, 2 tokio, 12 loom). Pushed as `042246a`.
+<!-- agent:boundary:7d76c8fc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -82,7 +98,7 @@ Converted `ThreadSafeSlotFastPath.dependents` and `ThreadSafeCellFastPath.depend
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - ~[#71yq]~
 - ~[#hqmh]~
-- [#xdq8]
+- ~[#xdq8]~
 - [#vk55]
 - [#cffp]
 - [#vbcq]
@@ -93,7 +109,6 @@ Converted `ThreadSafeSlotFastPath.dependents` and `ThreadSafeCellFastPath.depend
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#xdq8] #lazyperf27 #lazyperf27 Replace scheduled_effects HashSet with Vec<bool> indexed by SlotId — zero-hash O(1) schedule/contains check
 - [ ] [#vk55] #lazyperf28 #lazyperf28 Replace batched_cells/cell_clears/slots HashSet with SmallVec — linear dedup faster for typical small batches
 - [ ] [#cffp] #lazyperf29 #lazyperf29 Replace ThreadSafeInvalidationPlan HashMaps with Vec<(SlotId, bool)> — transient plan structure, one-pass build/apply
 - [ ] [#vbcq] #lazyperf30 #lazyperf30 Dependent clone scratch buffer on ContextInner/ThreadSafeState — avoid SmallVec heap alloc on >4 fan-out in refresh/clear paths

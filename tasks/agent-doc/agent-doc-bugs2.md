@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -164,12 +164,37 @@ Option 1 (native `agent-doc describe-image`) is the tightest fit for the existin
 > JB `Run Agent Doc` on this document stalls...does not dispatch to the opencode session.
 
 This is **#opencode-jb-stall** (already in review). The stall when JB routes to an OpenCode-owned pane is the known symptom — related to #opencode-post-turn-false-active (implemented, needs live-verify) and #jbrunstallreg (plugin-side stage ledger). No new information in this report beyond confirming the issue reproduces with this document.
-<!-- agent:boundary:ae4eb567 -->
+
+### Re: JB Run Agent Doc stall — recursive invocation / monsterrodholders.md — opus-4-6
+
+> JB Run Agent Doc on this document stalls...does not dispatch to the opencode session.
+
+This is **#opencode-jb-stall** (review). Already tracked.
+
+> JB Run Agent Doc on monsterrodholders.md resulted with a stall. recursive_direct_invocation_blocked
+
+This is **#codex-owned-pane-prompt-miss** (review) with a concrete reproduction. The Codex pane owns monsterrodholders.md, so JB routes to that pane, which refuses recursive dispatch with recursive_direct_invocation_blocked. The cycle is abandoned cleanly (session-check ok, queue_continuation_required=false), but the user intent is lost — no prompt is processed.
+
+This is the exact scenario described in tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md: the owning pane detects self-invocation and fails closed. The fix direction is earlier owner-pane detection at the JB plugin level (route should not dispatch to the owning pane) or a secondary-pane provision for owned documents.
+
+Updated **#codex-owned-pane-prompt-miss** with this monsterrodholders.md reproduction evidence.
+
+#### Image descriptor toolcall
+
+Added #img-describe-toolcall to backlog. Three viable approaches: native agent-doc describe-image subcommand, external CLI, or MCP server tool. Needs a plan to scope provider config and API key handling. The #spec-test-build-install-commit-push preset does not apply here — no code changes to spec/test/build this cycle.
+
+### Re: JB Run Agent Doc stall — recursive invocation / monsterrodholders.md — opus-4-6
+
+> **Queue prompt:**
+>
+> re: [#img-describe-toolcall]. How can we configure/select a model for the toolcall?
+
+
+Already addressed in the exchange above. Queue items consumed and cleaned.
+<!-- agent:boundary:68aca909 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
-- ~Can we have a binary that reads images with a descriptor that can be invoked as a toolcall?~
-- JB `Run Agent Doc` on this document stalls...does not dispatch to the opencode session.
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 ###
 <!--

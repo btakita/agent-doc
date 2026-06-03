@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -78,7 +78,33 @@ Implemented `tsift-search` as a new OpenCode command shortcut that provides AST-
 - `make check` passes
 - `tsift init --opencode` installs `tsift-search.md` into `.opencode/commands/`
 - `tsift --envelope search` returns ranked hits with symbol families, file previews, AST-aware scoring, and scale guards
-<!-- agent:boundary:212d9390 -->
+
+### Re: #codex-read — opencode
+
+> **Queue prompt:**
+>
+> do [#codex-read]
+
+
+Added `source-read` and `symbol-read` as first-class commands in the tsift code-navigation instructions that all harnesses (Codex, OpenCode, Claude Code) consume via AGENTS.md/CLAUDE.md.
+
+**Changes:**
+- `src/tsift/packages/tsift-index/src/init.rs`: Updated `versioned_section()` to list `tsift --envelope source-read` and `tsift --envelope symbol-read` as preferred alternatives to cat/head for source code reading, before the existing search and explain entries
+- Ran `tsift init` to update AGENTS.md in the agent-loop project with the new instructions
+
+**How Codex adopts the AST API:**
+- The `tsift init --codex` hook already rewrites shell-based file reads (cat/head/tail/sed) to `tsift --envelope source-read` automatically via `tsift rewrite --run`
+- The updated code-navigation instructions now explicitly tell Codex agents to prefer `tsift --envelope source-read` over raw file reads for source code
+- Combined with the rewrite hook, Codex agents get AST-aware reading both implicitly (via hook rewrites) and explicitly (via instruction guidance)
+
+**Verification:**
+- `cargo build` succeeds
+- All 41 `tsift-index` tests pass
+- `make check` passes
+- `tsift init` updates AGENTS.md with the new `source-read` and `symbol-read` entries
+
+**Queue drained.** All three queue items completed: `#opencode-read`, `#opencode-grep`, `#codex-read`.
+<!-- agent:boundary:3569c4d2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -87,14 +113,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- ~do [#libmod3]~
-- ~do [#libmod4]~
-- ~do [#libmod5]~
-- ~do [#libmod5b]~
-- ~do [#opencode-read]~
-- ~do [#opencode-grep]~
-- do [#codex-read]
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog
@@ -105,7 +124,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - [ ] [#surreal-multiproc] Multi-process lock behavior: write conformance test with N concurrent reader processes + 1 writer against same SurrealKV path; document lock contention, stale-read behavior, and crash recovery (SPEC.md:304 promotion gate)
 - [ ] [#surreal-rt-pool] Shared tokio runtime: accept external Runtime reference or use lazy static instead of per-store Runtime::new()
 - [ ] [#surrealbulk-close] Close #surrealbulk review item: re-run benchmarks, update SPEC.md benchmark table, mark done
-- [ ] [#codex-read] Codex: adopt tsift AST API for source reading instead of raw file reads
 <!-- /agent:backlog -->
 
 ## Review

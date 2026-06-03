@@ -218,7 +218,37 @@ Ran `cargo bench --bench context` after all 8 optimization commits. Summary of k
 | batched_write_bursts/16 | +56.5% |
 
 Regressions are in extreme contention scenarios (8+ threads competing for the same slot). parking_lot's adaptive spinning can increase latency under heavy lock contention. The vast majority of real-world workloads show significant improvements.
-<!-- agent:boundary:fd0f82b9 -->
+❯ Update the agent-loop/src/lazily-rs/README.md with performance benchmark results. Can we mitigate the regressions?
+
+### Re: README Benchmark Update and Regression Mitigation — glm-5.1
+
+Ran `python3 scripts/update-benchmark-results.py` to refresh README.md with fresh Criterion data. Committed as `172d5b1`.
+
+#### Regression Analysis
+
+The lazyperf25-32 optimizations introduced several regressions beyond the originally-reported extreme-contention cases:
+
+| Benchmark | Change | Root Cause |
+|-----------|--------|-----------|
+| effect_flushing/thread_safe_context | +311% | Scratch buffer collect heap alloc plus parking_lot call overhead on every set_cell |
+| batched_write_bursts/1-8 | +41% to +109% | edge_insert O(n2) dedup in finish_batch replacing O(n) HashSet extend |
+| cold_first_get/thread_safe_context | +88% | Vec resize on node creation vs HashMap incremental bucket alloc |
+| dependency_fan_out/256 | +16% | O(n2) BFS linear scans in InvalidationPlan replacing HashMap O(1) lookups |
+| memo_equality/thread_safe_context | +45% | Same plan BFS quadratic scan for 32-slot chain |
+| independent_slot_contention/2-16 | +11-19% | Vec linear scan overhead plus parking_lot spinning under moderate contention |
+| batch_storms/64 | +15% | Same edge_insert O(n2) pattern in batch merge |
+| same_slot_write_read/1-2 | +16-24% | parking_lot adaptive spinning plus plan linear scan overhead |
+
+#### Recommended Mitigations (Priority Order)
+
+1. Hybrid InvalidationPlan: Use Vec for graphs with 16 or fewer nodes, switch to HashMap above threshold. Fixes fan_out/256, memo_equality, and chain-pattern regressions.
+
+2. Replace edge_insert in finish_batch: Use extend with a post-merge dedup sort, or keep a small HashSet for batched cells/slots. Fixes batched_write_bursts and batch_storms.
+
+3. Eliminate scratch buffer collect: Pass fill_dependent_scratch result as a slice to invalidate_frontier_locked instead of materializing a Vec. Fixes effect_flushing.
+
+4. Benchmark parking_lot vs std::sync in isolation: If spinning regresses moderate-contention cases, consider parking_lot fair_mutex or reverting the main state mutex to std::sync.
+<!-- agent:boundary:05c217ca -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -227,6 +257,8 @@ Regressions are in extreme contention scenarios (8+ threads competing for the sa
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+- In the README, we have `let val = ctx.get_cell(&counter);`. Please make the canonical usage `counter.get(&ctx)` instead of `ctx.get_cell(&counter)`. Is a Cell a Slot? If so, how can we differentiate from `Slot::get` behavior?
+- Can we mitigate the parking_lot heavy contention regressions? Perhaps we can have a "last wins" strategy if there are multiple concurrent writers to the same slot...and skip the intermediate invalidations?
 <!-- /agent:queue -->
 
 ## Backlog

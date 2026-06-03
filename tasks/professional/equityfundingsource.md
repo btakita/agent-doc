@@ -126,7 +126,24 @@ Remaining work, prioritized:
 5. **Production hardening (existing, gated):** custom-domain cutover (icebox e1kb) and true Google Workspace SSO (m6ch).
 
 Want me to pick one and queue it with spec-test-commit-push? Highest demo value is #1 (payments read-only-from-TMO) or #3 (message email round-trip).
-<!-- agent:boundary:b8885d45 -->
+
+### Re: e245 borrower payments — done — opus-4-8
+
+Implemented read-only-from-TMO (the MVP from the item) and shipped to `equityfundingsource-dev` (commit `e2abc2b`, pushed to `main`).
+
+**What was wrong:** both borrower sections rendered static mock — `payment-history` had a hardcoded `MOCK` array (fake ACH refs, `$2,621.75` rows) with a footer *falsely* claiming it was TMO-sourced; `make-payment` was an entirely fake form (hardcoded balances + a submit that just flips to "Payment submitted" and does nothing). Meanwhile the backend already had it all: `loan_payments` table, TMO `PaymentSchedule` sync (`tmo-sync.ts`), and a loan-detail endpoint returning real payment rows.
+
+**What I changed** (`lib/ui--browser--efs/portal/borrower/`):
+
+- `payment_history.tsx` — fetches `/api/borrower/loans` + `/:id` and renders the real `loan_payments` schedule via the shared `PaymentScheduleTable`, with loading/empty/error states and a real paid-count/total. Mirrors the existing `loan_summary` pattern. `MOCK` removed.
+- `make_payment.tsx` — **product decision under the MVP:** EFS does not collect payments (TMO/the trust account services the loan), so I replaced the fake form with the real next-due amount/date from the schedule plus remittance instructions, and removed the fake submit / "Payment submitted" flow. ACH/Stripe collection stays the deferred non-MVP path.
+- PRD: documented the read-only-from-TMO borrower-payments requirement.
+- Tests: `tests/borrower-payments-ui.test.ts` asserts real-data fetch and absence of mock.
+
+**Verified:** `bun run check` green — 229 tests pass, app + worker build clean.
+
+Next in queue: **xcvg** (borrower message email round-trip). Heads-up that it's gated on the Resend EFS sending domain (f4rq) and Google Workspace SMTP (m6ch) — actual email send/receive can't fully ship until those creds exist, so I'll build what's possible and gate the rest.
+<!-- agent:boundary:73bbd357 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -139,7 +156,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#e245] [recommended] Borrower portal payments: make-payment and payment-history are registered borrower sections with no backend. Decide read-only payment schedule+history from TMO (docs/TMO/payment-schedule-field.md + GetLoanFundings) vs ACH/Stripe collection; MVP likely read-only-from-TMO since TMO/trust handles servicing. Wire loan-summary/payment-history to TMO data.
 - [ ] [#xcvg] [recommended] Borrower message email round-trip: add an admin owner for borrower-portal secure messages, email notification when a borrower sends a message, inbound email reply that appends into the D1 chat, and borrower email when an admin replies. Builds on existing chat_sessions/chat_messages. Gated on Resend EFS sending domain (f4rq) + Google Workspace SMTP (m6ch/p40t).
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
 - [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document intelligence/search, borrower/broker/investor/admin portals, and tenant-ready resale packaging.

@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 
@@ -38,7 +38,7 @@ queue_active: false
 Compacted content:
 - Archived 11 response topic(s): #71yq lazyperf25; #hqmh lazyperf26; #xdq8 lazyperf27; 8 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:9f1d74a0 -->
+<!-- agent:boundary:b7b3b7d2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +46,7 @@ Compacted content:
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - In the README, we have `let val = ctx.get_cell(&counter);`. Please make the canonical usage `counter.get(&ctx)` instead of `ctx.get_cell(&counter)`. Is a Cell a Slot? If so, how can we differentiate from `Slot::get` behavior?
 - Extract a BENCHMARKS.md from the README.md. All benchmarks, including explinations, should go into BENCHMARKS.md. README.md should link to BENCHMARKS.md.
 - [#lazyperf33]

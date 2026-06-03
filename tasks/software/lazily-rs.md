@@ -104,7 +104,27 @@ Replaced `batched_cells`, `batched_cell_clears`, `batched_slots` in `ThreadSafeS
 - Drain in `flush_batched_invalidations`: `.drain().collect()` → `std::mem::take(..).into_iter().collect()`
 
 **Verification:** `make check` passes (fmt, clippy, 92 tests, 2 tokio, 12 loom). Pushed as `d2282f6`.
-<!-- agent:boundary:500eea2d -->
+
+### Re: #cffp lazyperf29 — glm-5.1
+
+> **Queue prompt:**
+>
+> [#cffp]
+
+
+Replaced `ThreadSafeInvalidationPlan` HashMaps/HashSets with `Vec<(SlotId, bool)>` / `Vec<SlotId>`. Transient plan uses linear scan — faster for typical small node counts.
+
+**Struct changes:** 6 fields → 3 (`slot_marks: Vec<(SlotId, bool)>`, `slot_clears: Vec<SlotId>`, `effect_schedules: Vec<(SlotId, bool)>`)
+
+**Method changes:**
+- `from_roots_locked`: local `requested_force` and `simulated_slots` converted from HashMap to Vec with linear find/set helpers
+- `apply_locked`: iterates plan Vecs directly
+- `add_slot_mark`/`add_effect_schedule`: linear find-or-push
+- `add_slot_clear`: linear contains check
+- Added `enqueue_root`, `find_force`, `find_simulated`, `set_simulated` helper methods
+
+**Verification:** `make check` passes (fmt, clippy, 92 tests, 2 tokio, 12 loom). Pushed as `9907f6f`.
+<!-- agent:boundary:6d4d2f9f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -117,7 +137,7 @@ Replaced `batched_cells`, `batched_cell_clears`, `batched_slots` in `ThreadSafeS
 - ~[#hqmh]~
 - ~[#xdq8]~
 - ~[#vk55]~
-- [#cffp]
+- ~[#cffp]~
 - [#vbcq]
 - [#vfr1]
 - [#94gg]
@@ -126,7 +146,6 @@ Replaced `batched_cells`, `batched_cell_clears`, `batched_slots` in `ThreadSafeS
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#cffp] #lazyperf29 #lazyperf29 Replace ThreadSafeInvalidationPlan HashMaps with Vec<(SlotId, bool)> — transient plan structure, one-pass build/apply
 - [ ] [#vbcq] #lazyperf30 #lazyperf30 Dependent clone scratch buffer on ContextInner/ThreadSafeState — avoid SmallVec heap alloc on >4 fan-out in refresh/clear paths
 - [ ] [#vfr1] #lazyperf31 #lazyperf31 [recommended] parking_lot replacement for std::sync Mutex/RwLock — smaller locks, no poisoning, adaptive spinning
 - [ ] [#94gg] #lazyperf32 #lazyperf32 [recommended] Rc<dyn Any> values in single-threaded Context — get() returns pointer increment instead of deep clone

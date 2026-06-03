@@ -60,7 +60,48 @@ When you write `counter.get(ctx)`, Rust auto-refs to `counter.get(&ctx)` — pur
 ### Re: test — glm-5.1
 
 Test content.
-<!-- agent:boundary:63b908da -->
+
+### Re: Mermaid of performance improvements — glm-5.1
+
+```mermaid
+graph TD
+    subgraph Adopted
+        A[narrower_condvar_wakeups<br/>per-slot recompute waiters] -->|adopted| OK1[same-slot + read-mostly waiters]
+    end
+
+    subgraph Planned Optimizations
+        B["#lazyperf33<br/>Hybrid InvalidationPlan<br/>Vec<=16 then HashMap"] -->|fixes| F1[fan_out/256 + memo_equality + chain-pattern]
+        C["#lazyperf34<br/>finish_batch O(n^2) dedup<br/>extend+sort+dedup or HashSet"] -->|fixes| F2[batched_write_bursts + batch_storms]
+        D["#lazyperf35<br/>Eliminate scratch buffer<br/>collect to slice passthrough"] -->|fixes| F3[effect_flushing]
+        E["#lazyperf36<br/>A/B parking_lot vs std::sync<br/>fair_mutex or revert"] -->|fixes| F4[same_slot_write_read + independent_slots]
+    end
+
+    subgraph Hotspots at 16 workers
+        H1[batch_flush 3.6ms 1239 acqs] -.->|dominated by| C
+        H2[fan_out_eager 5.9ms 1318 acqs] -.->|dominated by| B
+        H3[same_slot_write_read 6.7ms 552 acqs] -.->|dominated by| E
+        H4[batched_write_bursts 2.7ms 723 acqs] -.->|dominated by| C
+    end
+```
+
+### Re: O(n) algorithm for finish_batch dedup — glm-5.1
+
+**Yes.** Three approaches, from simplest to most invasive:
+
+**Option A — extend + sort_unstable + dedup (O(n log n), minimal diff):**
+
+Replace the three `edge_insert` loops in `thread_safe.rs` `finish_batch` with bulk `extend`, then sort+dedup once at batch depth 0. Cache-friendly. For typical batch sizes (4-64 items) effectively free vs current O(n^2). No type changes needed.
+
+**Option B — Switch to HashSet like context.rs (O(n) amortized):**
+
+Single-threaded `Context` already uses `HashSet<SlotId>` for `batched_cells`/`batched_cell_clears`/`batched_slots` (context.rs:126-128). Porting same types to `ThreadSafeContextInner` gives O(1) per insert. Tradeoff: higher constant factor for small N (heap alloc + hashing), loses insertion order (not meaningful for invalidation).
+
+**Option C — Hybrid SmallVec + bloom filter (O(n) expected):**
+
+Stack-allocated bloom filter (64-128 bits) before linear scan. False positives fall back to `contains`. Keeps `SmallVec<[SlotId; 4]>` for common case. Complex; only worthwhile if HashSet shows overhead at small batch sizes.
+
+**Recommendation:** Option A is the pragmatic choice — two-line change per vector, no type changes, measurable improvement. Promote to B only if profiling shows sort_unstable overhead at large batch sizes.
+<!-- agent:boundary:f6062c6d -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -1437,6 +1437,33 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     }
 
     #[test]
+    fn dispatch_blocker_reason_allows_opencode_idle_build_chrome() {
+        // #opencode-build-chrome-stall: the post-turn OpenCode TUI keeps a
+        // `Build · MODEL` status line (and box/footer chrome) without redrawing
+        // the `>` prompt glyph. That static chrome must NOT be read as an active
+        // turn — only the live `Working (Ns - esc to interrupt)` cue blocks
+        // dispatch. Without this, route reported "opencode active turn" forever
+        // and the queued preset (#opencode-preset-not-dispatched) never injected.
+        let h = HarnessConfig::opencode();
+        let output = "\
+                                                                                   ┃
+                                                                                   ┃  Ask anything... \"What is the tech stack of this project?\"
+                                                                                   ┃
+                                                                                   ┃  Build · GLM-5.1 Z.AI Coding Plan
+                                                                                   ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                                                                                                   tab agents  ctrl+p commands
+                                                                                        ● Tip Toggle username display in chat via command palette (Ctrl+P)
+  ~/work/btakita/agent-loop:main                                                                                                                                                                                                       1.14.48
+";
+
+        assert_eq!(
+            h.dispatch_blocker_reason(output),
+            None,
+            "idle Build chrome must not be classified as an active turn"
+        );
+    }
+
+    #[test]
     fn idle_chrome_only_output_rejects_codex_status_with_busy_output() {
         let h = HarnessConfig::codex();
         let output = "\

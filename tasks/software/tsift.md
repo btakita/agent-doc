@@ -36,7 +36,11 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): #libmod4 Phase 4: Extract Convex + GraphStore into tsift-core sub-modules
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:d15b0ced -->
+
+### Re: #libmod5 SearchBudget extraction — glm-5.1
+
+Extracted search_budget.rs (~1,118 lines) from tsift-cli/src/lib.rs (37,704 to 36,582 lines). All 335 tests pass, make check clean, build + install successful.
+<!-- agent:boundary:68f79bdb -->
 <!-- /agent:exchange -->
 ###
 <!--

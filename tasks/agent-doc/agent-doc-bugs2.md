@@ -35,7 +35,36 @@ Codex review log pass completed; no reviewed item met the complete threshold.
 Compacted content:
 - Archived 3 response topic(s): backlog attribute edit + next steps; queue items codex-403-429-fallback, codex-network-access-opencode-guard, 7az7; fix three preflight warnings
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:fce75c67 -->
+
+### Re: queue — glm-5.1
+
+#### #backlog-queue-sync-no-populate — IMPLEMENTED
+
+Option C from `tasks/agent-doc/plan-backlog-queue-sync-no-populate.md`:
+
+1. **Preflight warning `backlog_queue_sync_pending`** — fires when `agent:backlog` has `queue` attribute but the queue had 0 live `Prompt` entries before the binary sync fires.
+   - `preflight.rs:3422-3432` — inside `run_queue_maintenance`
+   - Warning code: `backlog_queue_sync_pending`
+   - Propagated through `QueueState.warnings` → `PreflightOutput.warnings`
+
+2. **CLI command `agent-doc queue sync <FILE>`** — one-shot manual sync from backlog items with `queue` attribute into `agent:queue`.
+   - New module: `agent-doc-orchestration/src/queue_cmd.rs`
+   - New subcommand: `Queue { action: QueueAction }` in `main.rs`
+   - Idempotent: no-op when queue already matches
+
+3. **Tests** — 2 new/extended tests in `preflight.rs`:
+   - Warning fires on empty queue before sync
+   - No warning when queue already synced
+
+Committed in agent-doc submodule as `68f0cba8`. Installed locally. 259 backlog+queue tests green.
+
+#### Remaining queue items — triaged to review
+
+- **#opencode-codex-capacity-proof** — Codex Capacity Proof runs in OpenCode. Needs log evidence from monsterrodholders.md.
+- **#opencode-log-bleed** — agent-doc stderr bleeds into OpenCode UI. Needs reproduction.
+- **#opencode-prompt-navigation** — OpenCode TUI arrow/Tab navigation broken (OpenCode issue, not agent-doc).
+- **#queue-not-clearing-opencode** — Queue not cleared on completion in opencode (no auto-loop). May need manual drain trigger.
+<!-- agent:boundary:5c5f3287 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
@@ -45,6 +74,15 @@ Compacted content:
 - The OpenCode Prompts still cannot be navigated with the arrow keys or Tab key. Enter does work. ![img_13.png](img_13.
 .png)
 - The queue did not clear when all items were complete in an opencode session.
+- In OpenCode the console stdout bleeds behind the TUI. The TUI is undersized. ![img_14.png](img_14.png)
+- [#n6az]. If this is done why was this item not marked as done?
+---
+monsterrodholders.md opencode session is spammed with console logs on repeat. The opencode tui is not visible ![img_15.png](img_15.png):
+```
+[agent-doc] auto-trigger gated: managed Codex capability proof failed; prompt dispatch is disabled: opencode child network probe failed: opencode child probe command exited nonzero: stdout={"type":"error","timestamp":1780498090465,"sessionID":"ses_1720b36b8ffey3uGrItjo5MT6z","error":{"name":"UnknownError","data":{"message":"Model not found: GLM-5.1/."}}}
+{"type":"error","timestamp":1780498090465,"sessionID":"ses_1720b36b8ffey3uGrItjo5MT6z","error":{"name":"UnknownError","data":{"message":"Unexpected server error. Check server logs for details.","ref":"err_02fac054"}}} stderr=
+```
+---
 <!-- /agent:queue -->
 ###
 <!--
@@ -57,7 +95,12 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#backlog-queue-sync-no-populate] #agent-doc-bug 2026-06-03: `<!-- agent:backlog queue -->` with 2 active items (`#pp-images`, `#pp-monitor`) and `queue_active: true` did not populate `agent:queue` in `src/boost-client/tasks/monsterrodholders.md` (opencode session). Root cause: the backlog→queue sync only fires during binary preflight (`run_queue_maintenance` in `preflight.rs:3313`), not during LLM read/dispatch. The `queue` attribute is a declarative instruction requiring the binary to act on it. Additionally, `do [#pp-images]. #spec-test-commit-push-deploy` appeared in an HTML comment outside the queue component markers, suggesting a misplaced manual edit. Recommended fix (Option C): emit a `backlog_queue_sync_pending` preflight warning when backlog has `queue` attr and queue is empty/undersynced, plus provide a manual `agent-doc queue sync` CLI trigger. Plan: tasks/agent-doc/plan-backlog-queue-sync-no-populate.md
+- [/] [#4h81] #opencode-codex-capacity-proof #agent-doc-bug 2026-06-03: Codex Capacity Proof incorrectly runs in OpenCode harness. See monsterrodholders.md session + agent-doc logs.
+- [/] [#t9xf] #opencode-log-bleed #agent-doc-bug 2026-06-03: agent-doc stderr logs bleed over the OpenCode UI. Needs reproduction to confirm source.
+- [/] [#7fmb] #opencode-prompt-navigation #agent-doc-bug 2026-06-03: OpenCode TUI prompt list cannot be navigated with arrow keys or Tab key. Enter works. Likely OpenCode TUI issue.
+- [/] [#0ada] #queue-not-clearing-opencode #agent-doc-bug 2026-06-03: Queue did not clear when all items complete in an opencode session. OpenCode has no auto-loop; binary drain path may not fire.
+- [ ] [#n6az] #backlog-queue-sync-no-populate IMPLEMENTED 2026-06-03: Option C — backlog_queue_sync_pending preflight warning (preflight.rs:3422) + agent-doc queue sync CLI (queue_cmd.rs) + 2 tests. Committed 68f0cba8, installed, 259 tests green.
+- [ ] [#backlog-queue-sync-no-populate] #agent-doc-bug 2026-06-03: `agent:backlog queue` with 2 active items (`#pp-images`, `#pp-monitor`) and `queue_active: true` did not populate `agent:queue` in `src/boost-client/tasks/monsterrodholders.md` (opencode session). Root cause: the backlog→queue sync only fires during binary preflight (`run_queue_maintenance` in `preflight.rs:3313`), not during LLM read/dispatch. The `queue` attribute is a declarative instruction requiring the binary to act on it. Additionally, `do [#pp-images]. #spec-test-commit-push-deploy` appeared in an HTML comment outside the queue component markers, suggesting a misplaced manual edit. Recommended fix (Option C): emit a `backlog_queue_sync_pending` preflight warning when backlog has `queue` attr and queue is empty/undersynced, plus provide a manual `agent-doc queue sync` CLI trigger. Plan: tasks/agent-doc/plan-backlog-queue-sync-no-populate.md
 <!-- /agent:backlog -->
 
 ## Review

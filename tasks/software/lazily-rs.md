@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 
@@ -38,7 +38,41 @@ queue_active: false
 Compacted content:
 - Archived 3 response topic(s): #lazyperf11; Can we implement lazy-invalidation for more concurrent performance?; #next-steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:10210732 -->
+
+### Re: lazily-rs queued performance work — gpt-5
+
+> **Queue prompt:**
+>
+> [#lazyperf13]
+>
+> [#lazyperf14]
+>
+> [#lazyperf15]
+
+
+Completed `#lazyperf13`, `#lazyperf14`, `#lazyperf15`, and the benchmark update request.
+
+Implemented in `src/lazily-rs` commit `2642d81` and pushed to `btakita/lazily-rs` `main`; updated the parent submodule pointer in `agent-loop` commit `9e0fce300` and pushed to `btakita/agent-loop` `main`.
+
+What changed:
+- Added optional instrumentation counters for sidecar invalidation frontiers, sidecar dirty marks, sidecar fallbacks, and dirty epoch advances, wired through `ThreadSafeContext`.
+- Added high-parallel graph propagation benchmark/profile cases for eager fan-out validation, lazy fan-out/fan-in dirty epochs, and batched fan-in flush.
+- Regenerated README benchmark tables and extended `SPEC.md` with the cache-revision dirty epoch / sidecar benchmark gate.
+- Added spec and Loom coverage for dynamic effect dependency switching, cleanup, disposal, and stale edge cleanup under races.
+
+Verification:
+- `cargo fmt --all --check`
+- `cargo clippy --locked --all-targets --all-features -- -D warnings`
+- `cargo build --locked --all-targets --all-features`
+- `cargo test --locked`
+- `cargo test --locked --features tokio`
+- `cargo test --locked --features loom --test thread_safe_loom`
+- `python3 scripts/update-benchmark-results.py` and `python3 scripts/update-benchmark-results.py --check`
+- `cargo run --example instrumentation_profile --features instrumentation --quiet`
+- GitHub Actions `btakita/lazily-rs` CI run `26859281017` passed, including the Loom leg.
+
+`cargo install --path .` is not applicable because `lazily-rs` is a library crate with no binaries. There is no `Makefile` in `src/lazily-rs`; the root `make check` target does not cover this submodule. Root `gh run list --workflow CI --limit 1` reported no workflow named `CI`.
+<!-- agent:boundary:9ab5326c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,16 +80,19 @@ Compacted content:
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
+- ~[#lazyperf12]~
+- ~[#lazyperf13]~
+- ~[#lazyperf14]~
+- ~[#lazyperf15]~
+- Add Makefile
+- Update benchmarks
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
 - [ ] [#lazyperf12] Implement lazy invalidation for ThreadSafeContext propagation under parallel load: mark downstream nodes dirty/versioned during writes, defer derived recompute/effect scheduling until observed or batch flush, and preserve cleanup/disposal ordering.
-- [ ] [#lazyperf13] Add high-parallel-load instrumentation benchmarks for fan-out/fan-in graph propagation: compare eager invalidation, lazy dirty epochs, and batched flush behavior for lock acquisitions, queue pushes, and dependency-edge waits.
-- [ ] [#lazyperf14] Prototype per-node invalidation sidecars or epoch counters so parallel writers avoid holding the global graph lock while publishing dirty/version state.
-- [ ] [#lazyperf15] Add loom/spec coverage for lazy invalidation cleanup, disposal, and dynamic dependency changes so stale edges cannot leak or rerun after disposal under races.
 <!-- /agent:backlog -->
 
 ## Review

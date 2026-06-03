@@ -52,8 +52,7 @@ Acknowledged the `queue=append` → `queue` attribute change. Preflight surfaced
 |---|-----------|------|
 |#codex-403-429-fallback|Codex WS 403 → HTTPS 429 fallback detection + diagnostic|Create plan: detect 403-on-WS → 429-on-HTTPS pattern in codex transport, surface transport-rejection vs routing-failure diagnostic, add retry/backoff guidance|
 |#codex-network-access-opencode-guard|Guard codex_network_access for non-Codex agents|Create plan: warn or ignore `codex_network_access` when agent ≠ codex; prevent false network-access assumption in opencode sessions|
-
-<!-- agent:boundary:93f784ab -->
+<!-- agent:boundary:220222a6 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->
@@ -71,6 +70,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#7az7] #clear-auto-queue-stall #agent-doc-bug 2026-06-03: JB 'Clear Session Context' runs agent-doc session clear → /new (OpenCode) or /clear (Claude/Codex) resets the harness conversation. After the clear completes, idle-queue-watch/auto-trigger fires on the still-active agent:queue auto component (queue_active: true persists in the document), injecting agent-doc <FILE> into the cleared session that has no agent-doc context → stall. Root causes: (1) no post-clear auto-queue suppression — idle-queue-watch and auto-trigger have no cooldown mechanism after session clear; (2) prompt_requests_clear() (codex_hook.rs:819-821) only matches /clear, not /new, so the route-level fresh-restart path does not apply to OpenCode sessions; (3) session clear (session_actor_cmd.rs:472-544) does not pause or mark the auto-queue. Fix: add a durable clear-cooldown marker (.agent-doc/queue-continuations/<doc-hash>.clear-cooldown) written by session clear, checked by idle-queue-watch and auto-trigger, cleared on explicit Run Agent Doc invoke. Also fix prompt_requests_clear() to recognize /new. Plan: tasks/agent-doc/plan-post-clear-auto-queue-suppress.md
 - [ ] [#codex-403-429-fallback] #agent-doc-bug 2026-06-03: agent-doc in a Codex session received 403 Forbidden on WebSocket handshake to `wss://chatgpt.com/backend-api/codex/responses` (cf-ray: a05c18067af0dce4-IAD), then HTTPS fallback hit 429 Too Many Requests (request id: 3e924ff6-fde4-4fb2-8b00-08dfdd74e1a3). Other concurrent Codex sessions (e.g. agent-doc-bugs2.md pane) continued working. Possible causes: per-session rate limit, Cloudflare edge block on the specific connection, or session-specific token/auth state. Agent-doc should detect this pattern (403 on WS → 429 on HTTPS fallback) and (a) surface a clear diagnostic distinguishing transport rejection from agent-doc routing failure, (b) optionally retry with backoff or suggest restarting the codex session, and (c) not treat the 429 as a permanent failure that exhausts the retry budget without operator visibility.
 - [ ] [#codex-network-access-opencode-guard] #agent-doc-bug 2026-06-03: frontmatter field `codex_network_access: enabled` is Codex-specific but agent-doc does not guard it when the session runs under opencode. When `agent: opencode` (or no Codex agent), `codex_network_access` has no effect — opencode does not have an equivalent network sandbox flag. Agent-doc should either (a) warn/ignore `codex_network_access` when the agent is not codex, or (b) not emit it into the dispatched prompt/session config for opencode sessions, to avoid confusion and prevent operators from assuming network access is controlled when it is not.
 <!-- /agent:backlog -->

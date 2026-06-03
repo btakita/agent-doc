@@ -128,7 +128,41 @@ Processed 2 of 4 queue items (2 deferred). All 98 tests pass (including 12 loom 
 Removed stale `[#ktrs]` from queue (completed and reaped from backlog but queue entry remained).
 
 Remaining queue: #r0jv (deferred — sync primitive consolidation is high risk), #r54f (deferred — needs benchmark runs).
-<!-- agent:boundary:bb77ae77 -->
+
+### Re: Queue #r0jv #r54f — glm-5.1
+
+Both items remain deferred after thorough analysis. Here's the evidence:
+
+**#r0jv #lazyperf21 — Sync primitive consolidation (deferred):**
+
+Audited all 4 locks on `ThreadSafeSlotFastPath` (thread_safe.rs:233-244):
+
+| Lock | Purpose | Contention domain |
+|------|---------|-------------------|
+| `value: RwLock` | Concurrent cached reads via `read_fresh()` | Read-mostly |
+| `recompute: Mutex + Condvar` | Exclusive recomputation + waiter notification | Write-only |
+| `dependencies: Mutex` | Dependency snapshot (called outside state lock in `recompute_slot_now:1572`) | Read-during-compute |
+| `dependents: Mutex` | Dependent frontier for sidecar invalidation | Write-during-edge-reg |
+
+Merging `dependencies` into `recompute` creates a **lock ordering hazard**: `dependencies_snapshot()` is called *before* taking the state lock (line 1572), while the recompute mutex is held during `wait_for_recompute` with Condvar parking. A thread holding the merged lock for snapshot would block Condvar waiters. Merging `dependents` similarly risks blocking invalidation-sidecar reads during recompute waits.
+
+SPEC line 298: *"Keep one context-level graph synchronization primitive until benchmark instrumentation shows a finer-grained design improves the relevant workload."* Line 310: *"must not mutate dependency graph state independently of the context mutex."*
+
+**Recommendation:** Keep deferred. If benchmark evidence shows per-slot sync overhead dominates, consider a single `parking_lot::Mutex` for the merged state instead of `std::sync` — same lock ordering but lighterweight. This would require Loom proof and the SPEC's benchmark matrix.
+
+**#r54f #lazyperf24 — SmallVec vs Vec benchmarking (deferred):**
+
+The existing benchmark suite already covers the relevant patterns:
+- `dependency_fan_out` at width 32/256 — exercises edge iteration in recompute
+- `set_cell_invalidation/high_fan_out` at width 512 — exercises dependent iteration during invalidation
+- `thread_safe_contention` 1-16 workers — exercises edge mutex contention
+
+SPEC lines 342-348 require a *"controlled A/B rerun"* with *"same host/toolchain"* and Criterion baselines, checking whether confidence intervals overlap before committing to either choice.
+
+**Recommendation:** Keep deferred. To benchmark, temporarily swap `type EdgeVec = SmallVec<[SlotId; 4]>` to `type EdgeVec = Vec<SlotId>` in both `context.rs` and `thread_safe.rs`, run `cargo bench --bench context -- dependency_fan_out,set_cell_invalidation/high_fan_out` with Criterion `--save-baseline smallvec` / `--baseline smallvec` for comparison. This requires local execution on the target host.
+
+Both items are documented with clear preconditions for reactivation.
+<!-- agent:boundary:2a11e993 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -60,7 +60,24 @@ Compacted content:
 **Commits:**
 - submodule `src/agent-doc`: `d6e83147` (regression test)
 - superproject: `067b675c0` (submodule pointer `991feda5`→`d6e83147` + plan file)
-<!-- agent:boundary:d816b105 -->
+
+### Re: tsift focus goes into the stash — opus-4-8
+
+> **Queue prompt:**
+>
+> When I navigate to tsift.md, the focus goes into the stash. The tmux pane does not go into the agent-doc tmux window.
+
+
+**Root cause (confirmed, matches `plan-jb-tsift-pane-sync-regression.md`).** Editor-navigation focus (`focus::run_no_promote`, `no_stash_promote=true`) deferred stash *reparenting* to the sync reconciler to avoid the additive 3-pane race (`#jb-nav-3pane-promote-swap`) — but it still **selected the target pane in place**. When `tsift.md`'s live-owner pane was parked in a stash window, `tmux select-pane` surfaced editor focus *inside* the stash. That is exactly the report: "focus goes into the stash; the pane does not go into the agent-doc window."
+
+**Fix (single-owner transition).** In `promote_and_select`, when `no_stash_promote` is set and the target pane currently lives in a stash window, do **not** select it in place. Selection is now deferred together with the reparenting: the reconciler's atomic SWAP swaps the stashed pane into the `agent-doc` window, stashes the displaced pane in the *same* operation, and selects the focus pane (`reconcile()` already calls `select_pane(focus_pane)` after the swap). Exactly one path owns the in/out transition — no 3-pane growth, no focus-into-stash. The protected/busy-outgoing case still preserves layout and leaves focus on the current agent-doc pane (never the stash).
+
+Added `pub sync::pane_in_stash_window` plus 3 live-tmux regressions: helper detection, `no_stash_promote` focus deferring a stashed target, and selecting a visible non-stashed target in place.
+
+**Verification.** `make check` green; the 3 new + 7 existing focus/promote/swap-defer live-tmux tests pass (`cargo test -- --ignored`). Both binaries rebuilt + installed.
+
+**Commits:** submodule `a162e15d`, superproject `1ec602676`. `#jb-tsift-pane-sync` is gated pending your live editor→tmux verification (navigate to `tsift.md` from a sibling pane and confirm the pane surfaces in `agent-doc`, not the stash).
+<!-- agent:boundary:e3c102d6 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -74,7 +91,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#lr-actor-10-wire-callers]~
 - ~do #stash-pane-promote-on-focus~
 - ~The lazily-rs.md session created a plan to fix the bug. It had to with the Codex Close hook having scope spillage. Please review the Codex session history to see where the plan file is. Run the plan file.~
-- When I navigate to tsift.md, the focus goes into the stash. The tmux pane does not go into the agent-doc tmux window.
+- ~When I navigate to tsift.md, the focus goes into the stash. The tmux pane does not go into the agent-doc tmux window.~
 - do [#ipc-admin-api]
 - I removed "Do not implement from" plan-jb-run-agent-doc-busy-queue-dispatch-deadlock.md. Go ahead and execute the plan if needed. Ensure any associated items are completed. I'm confused by the amount and length of the review items. #spec-test-build-install-commit-push
 ---
@@ -105,9 +122,9 @@ Error: authoritative actor generation 221 for tasks/agent-doc/agent-doc-bugs2.md
 ---
 - ~do [#manual-queue-head-loss]~
 - Add #next-steps to create a dashboard that uses the actor admin apis to see the current runtime instances. See [#ipc-admin-api].
+- do [#route-reaps-idle-fresh-start]
 - do [#admin-fleet-dashboard]
 - ~do [#actor-runtime-dashboard]~
-- do [#route-reaps-idle-fresh-start]
 <!-- /agent:queue -->
 ###
 <!--
@@ -128,6 +145,7 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Review
  
 <!-- agent:review -->
+- [/] [#jb-tsift-pane-sync] #agent-doc-bug 2026-06-02: tsift focus-into-stash IMPLEMENTED+tested (submodule a162e15d, superproject 1ec602676, both binaries rebuilt+installed). focus::run_no_promote no longer selects a stashed target pane in place (which surfaced editor focus inside the stash); the reconciler atomic SWAP owns surfacing+selection (swap stashed pane into agent-doc, stash displaced pane, select focus pane in one op). Added pub sync::pane_in_stash_window + 3 live-tmux regressions (helper, stashed-target deferred, visible-target selected). GATED on live editor->tmux verify: navigate to tsift.md from a sibling pane and confirm it surfaces in agent-doc, not the stash. Plan: tasks/agent-doc/plan-jb-tsift-pane-sync-regression.md
 - [/] [#lr-actor-10-wire-callers] #agent-doc-bug 2026-06-02: complete the deferred Phase 10 caller-wiring — route.rs/sync.rs/resync.rs/gc.rs still call sessions::load()/config::load() directly (~49 sites) instead of the cached GlobalConfigSlot/SessionRegistrySlot now on RunContext (#lr-actor-10 core landed ec81d850, green). No behavior change; perf-only. Lower priority + risky (sensitive route/sync files), so plumb a RunContext/ActorContext through each caller carefully. Plan: tasks/agent-doc/plans/lazily-rs-integration.md (Phase 10, last bullet).
 - [/] [#actor-runtime-dashboard] [recommended] #agent-doc-bug feature 2026-06-02: live dashboard over the #ipc-admin-api list/detect feed showing the current runtime actor fleet (document, pane, harness, generation, state, queue_active, supervisor/child pid, health) and highlighting competing / cross-document / respawn-looping actors. CLI agent-doc admin dashboard (TUI, auto-refresh + IPC-event redraw, read-only by default with fail-closed stop/rebind keybinds) + editor tool-window panel via shared FFI. Pure view over #ipc-admin-api (hard dependency). Motivated by lazily-rs respawning via the project controller despite queue halt — replaces manual ps/pstree forensics. Plan: tasks/agent-doc/plan-actor-runtime-dashboard.md.
 - [/] [#lr-queue-patchback-miss] [recommended] #agent-doc-bug 2026-06-02: duplicate of the lazily-rs free-text queue-head provenance primitive now consolidated in tasks/agent-doc/plan-lazily-rs-queued-prompt-patchback-miss.md. Remaining focused implementation: record seen free-text queue heads and require committed response, binary consume, or explicit deferral proof; mixed #agent-doc-bug capture must not bury the runnable head.

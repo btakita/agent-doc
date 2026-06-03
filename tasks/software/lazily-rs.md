@@ -87,7 +87,24 @@ Replaced `ThreadSafeState::scheduled_effects` from `HashSet<SlotId>` to `Vec<boo
 - Updated `schedule_effect_locked`, `dispose_effect`, `flush_effects`, and test helper
 
 **Verification:** `make check` passes (fmt, clippy, 92 default tests, 2 tokio, 12 loom). Pushed as `042246a`.
-<!-- agent:boundary:7d76c8fc -->
+
+### Re: #vk55 lazyperf28 — glm-5.1
+
+> **Queue prompt:**
+>
+> [#vk55]
+
+
+Replaced `batched_cells`, `batched_cell_clears`, `batched_slots` in `ThreadSafeState` and `ThreadSafeBatchChanges` from `HashSet<SlotId>` to `EdgeVec` (SmallVec with 4-inline capacity).
+
+**Changes:**
+- Field types: `HashSet<SlotId>` → `EdgeVec` in both `ThreadSafeState` and `ThreadSafeBatchChanges`
+- Insert operations: `.insert(id)` → `edge_insert(&mut vec, id)` (linear dedup)
+- Merge in `finish_batch`: `.extend()` → per-element `edge_insert`
+- Drain in `flush_batched_invalidations`: `.drain().collect()` → `std::mem::take(..).into_iter().collect()`
+
+**Verification:** `make check` passes (fmt, clippy, 92 tests, 2 tokio, 12 loom). Pushed as `d2282f6`.
+<!-- agent:boundary:500eea2d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -99,7 +116,7 @@ Replaced `ThreadSafeState::scheduled_effects` from `HashSet<SlotId>` to `Vec<boo
 - ~[#71yq]~
 - ~[#hqmh]~
 - ~[#xdq8]~
-- [#vk55]
+- ~[#vk55]~
 - [#cffp]
 - [#vbcq]
 - [#vfr1]
@@ -109,7 +126,6 @@ Replaced `ThreadSafeState::scheduled_effects` from `HashSet<SlotId>` to `Vec<boo
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#vk55] #lazyperf28 #lazyperf28 Replace batched_cells/cell_clears/slots HashSet with SmallVec — linear dedup faster for typical small batches
 - [ ] [#cffp] #lazyperf29 #lazyperf29 Replace ThreadSafeInvalidationPlan HashMaps with Vec<(SlotId, bool)> — transient plan structure, one-pass build/apply
 - [ ] [#vbcq] #lazyperf30 #lazyperf30 Dependent clone scratch buffer on ContextInner/ThreadSafeState — avoid SmallVec heap alloc on >4 fan-out in refresh/clear paths
 - [ ] [#vfr1] #lazyperf31 #lazyperf31 [recommended] parking_lot replacement for std::sync Mutex/RwLock — smaller locks, no poisoning, adaptive spinning
@@ -132,4 +148,3 @@ Replaced `ThreadSafeState::scheduled_effects` from `HashSet<SlotId>` to `Vec<boo
 
 <!-- completed work archived in tasks/software/lazily-rs.done.md -->
 <!-- /agent:done -->
-

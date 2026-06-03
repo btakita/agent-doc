@@ -22,7 +22,7 @@ queue_active: false
 
 <!-- agent:status patch=replace -->
 
-Queue contamination cleaned. Session committed.
+Codex review log pass completed; no reviewed item met the complete threshold.
 <!-- /agent:status -->
 
 ## Exchange
@@ -137,10 +137,11 @@ No. OpenCode subagents (explore, general) inherit the session's model. There is 
 The `@ai-sdk/openai-compatible` package you installed is an SDK for building AI apps — it doesn't affect OpenCode's model routing or enable cross-model subagents.
 
 #img-review remains gated on a vision-capable model.
-<!-- agent:boundary:b55f6ecd -->
+<!-- agent:boundary:5ec69884 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+- Can we have opencode use a `glm-5v-turbo` subagent from the `glm-5.1` main session to read the images?
 <!-- /agent:queue -->
 ###
 <!--

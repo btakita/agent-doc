@@ -247,7 +247,21 @@ Verification:
 Confidence: high. The ranking behavior is covered by focused tests, the full local suite, installed-binary smoke, and green remote CI.
 
 Escalation: none.
-<!-- agent:boundary:3cbd7dee -->
+
+### Re: diff-digest cached summaries — gpt-5
+
+`cached summaries: unavailable` means `diff-digest` did not have a summary database available for the project root it resolved for that command. In the implementation, `diff_digest::compute` opens `<resolved-root>/.tsift/summaries.db`; if that file is absent, `summary_db` is `None`, and every parsed file reports `DiffDigestSummaryState::Unavailable`.
+
+That is different from `missing`: `missing` means the summary DB exists and opened, but it has no cached rows for the changed file. In the current parent workspace, `.tsift/summaries.db` exists but contains `0` summary rows, so a current `tsift diff-digest --json .` reports `tasks/software/lazily-rs.md` as `summary_state:"missing"`. In `src/lazily-rs`, there is no `src/lazily-rs/.tsift/summaries.db`; if the earlier digest was run from that submodule while it had dirty Rust files, symbols such as `value_cached_after_first_access` would show `cached summaries: unavailable` for that reason.
+
+The fix is to generate summaries from the same root as the digest, for example `tsift summarize --extract .` in `src/lazily-rs` for submodule-local digests, or in the parent repo for `tasks/software/lazily-rs.md` session-document digests. After that, `diff-digest` can report `current` when the file content hash still matches the cached summary rows, or `stale` when the cache exists but the file has changed since extraction.
+
+Changed paths: none.
+Commands checked: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `tsift --envelope search`, `tsift source-read`, `tsift diff-digest --json .`, `ls -l .tsift/summaries.db src/tsift/.tsift/summaries.db`, `ls -l src/lazily-rs/.tsift/summaries.db`, and `sqlite3 ... 'select count(*) from summaries;'`.
+Verification: confirmed the code path in `packages/tsift-digest/src/diff_digest.rs` and the formatter in `packages/tsift-cli/src/commands/digests.rs`; confirmed parent summary DBs exist but currently have zero rows, while `src/lazily-rs/.tsift/summaries.db` is absent.
+Confidence: high.
+Escalation: none.
+<!-- agent:boundary:85144391 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -264,6 +278,17 @@ preset #spec-test-build-install-commit-push
 - ~[#mdembeddedcode]~
 - ~[#astrankingmerge]~
 - [#astnavfixtures]
+---
+Why did the tsift diff-digest on lazily-rs.md have `cached summaries: unavailable`?
+```
+• Ran tsift diff-digest .
+  └ Diff digest (working tree)
+      files changed:                 4
+    … +176 lines (ctrl + t to view transcript)
+    value_cached_after_first_access
+      cached summaries: unavailable
+```
+---
 <!-- /agent:queue -->
 
 ## Backlog

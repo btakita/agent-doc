@@ -51,13 +51,32 @@ Already implemented — verified and completed (audit-before-implement per the "
 **Added the missing dispatch-path proof.** The stall surfaced as `dispatch_blocker_reason` wrongly returning `"opencode active turn"` for the idle Build state, but no test asserted the *dispatch* path stays clear. New `dispatch_blocker_reason_allows_opencode_idle_build_chrome` asserts the idle Build splash returns `None` (dispatchable). `make check` green (exit 0); test-only change, so the already-shipped behavior binary is unchanged. Submodule commit for the test added.
 
 **Downstream:** `#opencode-preset-not-dispatched` (next queue item) names this stall as its root cause — with the stall classified idle, a queued preset dispatches once the pane reaches idle. That item is now a live-verify (confirm the preset actually injects after a real OpenCode turn completes), not a separate code fix.
-<!-- agent:boundary:ab8d0b0f -->
+
+### Re: do [#jbrunstallreg] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#jbrunstallreg]
+
+
+Gated, not completed — the implementation exists but as **orphaned uncommitted WIP** I won't claim or clobber.
+
+**State of the work.** A prior concurrent actor implemented this and stopped without committing. The uncommitted working tree carries exactly the `#jbrunstallreg` surfaces from `plan-jb-run-agent-doc-stall-regression.md`:
+- `SubmitAction.kt` — `buildTypingDebounceTimeoutMessage` + `notifyWarning` (visible pre-route typing-debounce feedback instead of silent return).
+- `TerminalUtil.kt` (+83) — route-subprocess watchdog / stale-process termination / failure-diagnostic persistence.
+- `SubmitActionTest.kt` / `TerminalUtilTest.kt` — coverage for the above.
+- `VERSIONS.md` / `editors/PLUGIN-SPEC.md` / `editors/jetbrains/SPEC.md` — the "Run Agent Doc no longer stalls without feedback" entry + spec.
+
+**Why gated, not done.** No live actor owns it now (no `admin detect` finding, no opencode/codex process), so it's stale-uncommitted, not in-flight. But it is (a) uncommitted, (b) unbuilt/unverified, and (c) a JetBrains plugin change, which requires the operator-gated ritual — `pluginVersion` bump, `./gradlew buildPlugin signPlugin`, install-from-disk + restart, then live-verify each Run stage surfaces feedback. I will not auto-commit another actor's editor WIP or fake-complete an unverified item (item-3 rule: evidence doesn't confirm completion → keep open).
+
+**To close it:** review the orphaned diff, bump `pluginVersion`, build+sign+install the plugin, live-verify the stall surfaces (typing-debounce warning, route watchdog timeout notification), then mark `--done`. The diff is intact in the working tree.
+<!-- agent:boundary:3792513b -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
 - ~do [#admin-fleet-dashboard]~
 - ~do [#opencode-build-chrome-stall]~
-- do [#jbrunstallreg]
+- ~do [#jbrunstallreg]~
 - do [#opencode-preset-not-dispatched]
 - JB `Clear Session Context` does not work with OpenCode. This is a long-standing issue. Look at attempt with tsift.md in the logs.
 - Error in OpenCode `  ┃  Error: malformed template patchback: found patch/replace markers but no closed patch blocks parsed; refusing to append unmatched content` when running tsift.md
@@ -75,12 +94,12 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 
 <!-- agent:backlog priority queue=append -->
 - [ ] [#opencode-preset-not-dispatched] #agent-doc-bug 2026-06-02: The #agent-doc-bug prompt preset was captured in the route queue but never injected into the OpenCode pane because the Build chrome stall (#opencode-build-chrome-stall) prevented dispatch. The preset text was correctly enqueued via dispatch_only_opencode_active_turn but the stall means it never executes. Dependent on #opencode-build-chrome-stall fix or manual pane recovery.
-- [ ] [#jbrunstallreg] #agent-doc-bug 2026-06-03: JB Run Agent Doc can still appear stalled after the route watchdog/visible-warning fix. Plan: tasks/agent-doc/plan-jb-run-agent-doc-stall-regression.md. Capture and bound every plugin-side Run stage before and after route launch (typing idle, EDT save, route build, process start/watchdog, notification/persistence), then live-verify that each non-success path produces visible feedback plus a durable diagnostic artifact.
 <!-- /agent:backlog -->
 
 ## Review
  
 <!-- agent:review -->
+- [/] [#jbrunstallreg] #agent-doc-bug 2026-06-03: JB Run Agent Doc can still appear stalled after the route watchdog/visible-warning fix. Plan: tasks/agent-doc/plan-jb-run-agent-doc-stall-regression.md. Capture and bound every plugin-side Run stage before and after route launch (typing idle, EDT save, route build, process start/watchdog, notification/persistence), then live-verify that each non-success path produces visible feedback plus a durable diagnostic artifact.
 - [/] [#route-reaps-idle-fresh-start] #agent-doc-bug 2026-06-02: route reaped a fresh codex start whose first dispatched cycle was a legitimate no-op (empty/halted queue, preflight no_changes), so a document with no pending work couldn't be opened ('I cannot start lazily-rs.md, killed immediately'). IMPLEMENTED+unit-tested+shipped (submodule 8451143a, superproject 5b10b7ffd, both binaries rebuilt+installed): at the fresh-start no-ack branch route now re-checks the pane and KEEPS it as a live idle session when it has returned to a harness dispatch-ready prompt (trigger was already proven dispatched), clearing the startup-miss; it only reaps when the pane is not dispatch-ready (a genuine miss). New pure FreshStartAckOutcome classifier (CycleAcknowledged/IdleNoOpKeep/GenuineMissReap) reuses the tested ready_prompt_candidate discriminator. route:: 141 passed, make check green. GATED on live verify: start a real idle lazily-rs.md codex session (slow gpt-5.5 xhigh cold start) and confirm the pane stays alive instead of being reaped. Plan: tasks/agent-doc/plan-route-reaps-idle-fresh-start.md.
 - [/] [#route-busy-wrong-owner-diagnostic] [recommended] #agent-doc-bug 2026-06-02: route dispatch-only busy refusal does not cross-check that the live busy pane's owned document matches the ROUTED document. When a pane was contaminated by a foreign doc's cycle (e.g. agent-doc-bugs2.md ran in monsterrodholders.md's pane %61), route still keys 'busy' off the authoritative binding + live prompt-readiness and emits a generic 60s busy-timeout instead of naming the contamination — the operator reads it as 'blocking on the wrong session state'. Fix: in the DispatchOnlyBusyQueue / busy-refusal path, validate pane-owns-routed-doc (reuse cmdline_owns_other_document / reject_cross_document_owner_pane from sync.rs) and emit a wrong_owner/cross-document diagnostic (routed file=F busy pane=%N owns=G) instead of the generic timeout. Sibling of #jb-tsift-pane-sync Phase 3b (display guard) + #xdoc-route-sweep-commits-sibling-docs (281e4db8, the upstream contamination gate). Confirm live with agent-doc admin detect (#ipc-admin-api), which flags a pane bound to >1 non-closed document. Gated on the live monsterrodholders.md repro.
 - [/] [#ipc-admin-api] [recommended] #agent-doc-bug feature 2026-06-02: admin control plane for agent-doc actors. PHASE 1 (read-only) IMPLEMENTED+tested+shipped (submodule 31efa50c, superproject 8a3179604, both binaries rebuilt+installed, live-verified): agent-doc admin list [--json] enumerates the project actor fleet from the sqlite store (session/pane/window/supervisor-pid/harness/generation/state/liveness); agent-doc admin detect [--json] flags cross_document_pane (a LIVE pane bound to >1 non-closed document — the contamination) + stale_dead_pane (non-closed actor on a dead pane). Pure logic + 6 unit tests in agent-doc-orchestration/src/admin.rs; live run surfaced a real cross-binding + 19 orphaned bindings. GATED pending Phase 2 (mutating verbs rebind + stop --halt-queue --terminate — need supervisor quiesce + durable queue_active:false + live verification so the stop sticks without respawn) and Phase 3 (FFI + thin editor menu). Plan: tasks/agent-doc/plan-ipc-admin-api-actor-control.md.

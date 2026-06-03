@@ -76,11 +76,28 @@ The full sync output you pasted confirms the architecture is working as designed
 The sync recovery confirms no pane was lost or corrupted — only the operator experience gap (no JB notification) remains. This is exactly review item #opencode-jb-stall / #jb-run-agent-doc-busy-feedback-live-verify.
 
 The remaining queue items (vision config, monsterrodholders recursion, screenshots) were addressed in the prior response and require either a vision-capable model or manual `agent-doc session-check` on the monsterrodholders file — no further code action from this session.
-<!-- agent:boundary:a6e97f6d -->
+
+### Re: Codex Recursion Self-Heal — glm-5.1
+
+Owned-pane self-invocation recovery already implemented (submodule 407b0825). Manual fallback: agent-doc session-clear then route. Planned: recover-ownership (#ec9k). Monsterrodholders.md no longer has the recursion error.
+
+#### Re: OpenCode Vision via Toolcall — glm-5.1
+
+Requires GLM-5.1 API multimodal support + OpenCode image attachment wiring + agent-doc image toolcall. Check provider endpoint capabilities.
+
+### Re: Lint Gate False Positive — FIXED — glm-5.1
+
+> **Queue prompt:**
+>
+> JB `Run Agent Doc` on this file stalled...no dispatch. I had to manually run in the opencode session. `[sync] recovered live pane %76 for session 3d9ff8e4 via supervisor pid 3366387
+
+
+Root cause: backticks in queue content created multi-line code spans in tagpath scan_comments, covering agent:review and /agent:exchange tags. Fix: only suppress comments in same-line inline code spans or fenced code blocks, not multi-line inline spans. agent-doc component parser uses pulldown-cmark which correctly handles backtick pairing and was not affected. Test added. Binary rebuilt.
+<!-- agent:boundary:56a22cfa -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- JB `Run Agent Doc` on this file stalled...no dispatch. I had to manually run in the opencode session. `[sync] recovered live pane %76 for session 3d9ff8e4 via supervisor pid 3366387
+- ~JB `Run Agent Doc` on this file stalled...no dispatch. I had to manually run in the opencode session. `[sync] recovered live pane %76 for session 3d9ff8e4 via supervisor pid 3366387~
   [sync] recovered live pane %70 for session b26b9957 via supervisor pid 882213
   [sync] recovered live pane %80 for session 3f069c68 via supervisor pid 3883956
   [sync] recovered live pane %83 for session tsift-v0 via supervisor pid 1086207
@@ -97,7 +114,9 @@ The remaining queue items (vision config, monsterrodholders recursion, screensho
 - monsterrodholders.md agent-doc codex session still has `• agent-doc could not be invoked directly from this pane because it would recurse into the already-owned session, so I
   handled the task doc manually.` error. How can we recover from this state? Can agent-doc "self-heal"?
 - Please evaluate recent screenshots and add #next-steps for the related tasks.
-- re #img-review: Why doesn't the agent-doc image vision work with opencode?
+- ~re #img-review: Why doesn't the agent-doc image vision work with opencode?~
+- do [#gf85]
+- do [#0wan]
 <!-- /agent:queue -->
 ###
 <!--
@@ -112,6 +131,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#rbwg] #lint-gate-backtick-queue-content #agent-doc-bug FIXED 2026-06-03: tagpath lint parser false positive from unpaired backticks in queue/review content creating multi-line inline code spans covering structural component tags. Fix: only suppress comments in same-line inline code or fenced blocks.
 - [ ] [#gf85] #lint-gate-false-positive #agent-doc-bug 2026-06-03: lint parser reports orphan-close on /agent:review and unclosed agent:exchange despite matching open/close tags. Reproduces every cycle on agent-doc-bugs2.md. Blocks finalize and write --commit. Likely triggered by boundary tag placement or comment block between exchange close and backlog.
 - [ ] [#0wan] #lint-gate-false-positive #agent-doc-bug 2026-06-03: lint parser reports orphan-close on /agent:review and unclosed agent:exchange despite matching open/close tags. Reproduces every cycle on agent-doc-bugs2.md. Blocks finalize and write --commit.
 - [/] [#4h81] #opencode-codex-capacity-proof #agent-doc-bug 2026-06-03: Codex Capacity Proof incorrectly runs in OpenCode harness. See monsterrodholders.md session + agent-doc logs.

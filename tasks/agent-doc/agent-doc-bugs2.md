@@ -30,29 +30,12 @@ Queue contamination cleaned. Session committed.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260603-195829.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260603-202625.md`*
 
 Compacted content:
-- Archived 3 response topic(s): do [#8ker] #opencode-idle-detection-post-turn; do [#1t6w] #opencode-skill-auto-loop; do [#tbhv] #harness-resolution-source-logging
+- Archived 2 response topic(s): Codex stall clarification; JB Run Agent Doc Codex stall
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: Codex stall clarification — opencode
-
-Acknowledged — updated the queue item to specify that the JB `Run Agent Doc` stall is a **Codex** session symptom, consistent with the existing backlog cluster around Codex-owned pane behavior (#opencode-jb-stall, #codex-owned-pane-prompt-miss, #codex-owned-pane-auto-queue-stuck).
-
-The queue remains inactive (`queue_active: false`). The `inactive_queue_residue` warning is expected — the item is parked for a future active-queue cycle. No action needed this turn.
-
-### Re: JB Run Agent Doc Codex stall — opencode
-
-> **Queue prompt:**
->
-> JB `Run Agent Doc` Codex stalled with `Ran agent-doc again for tasks/monsterrodholders.md. No changes were detected since the last run.` message in the console.
-
-
-Fix shipped: extended classify_no_change_cycle_state in run.rs to detect committed no-response bookkeeping-only cycles. The operator now sees a typed diagnostic instead of Nothing changed. Commit 41f11a4c, binary installed. 3 regression tests, make check green.
-
-Route 60s busy timeout is a separate surface: the Codex pane is idle but supervisor/lease projects busy. The route should reconcile stale busy projection before timing out. This needs its own plan and spec cycle.
-<!-- agent:boundary:c9e993d6 -->
+<!-- agent:boundary:80d2b0e5 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" auto -->

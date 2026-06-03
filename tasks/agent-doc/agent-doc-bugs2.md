@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -242,13 +242,53 @@ The full build is blocked by pre-existing `lazily-rs` compilation errors (`Threa
 
 
 Code-complete. Full build blocked by pre-existing lazily-rs errors. See exchange body above for details.
-<!-- agent:boundary:78d49b84 -->
+❯ Please help me setup the toolcall configs. I want to use openai. Is there a agent-doc config parameter for this or do I have to use env variables? Can we have passage integration into the config?
+
+### Re: describe-image config.toml + passage integration — glm-5.1
+
+Previously, `describe-image` only supported CLI flags and env vars. Now it also reads from `.agent-doc/config.toml` with full `$(passage ...)` shell expression support.
+
+#### Implementation
+
+**Files changed:**
+
+| File | Change |
+|------|--------|
+| `agent-doc-core/src/project_config.rs` | Added `VisionConfig` struct (provider, api_key, model, endpoint) to `ProjectConfig` |
+| `src/describe_image.rs` | Added config-aware resolution: CLI > config.toml > env vars. `api_key` expands `$(passage ...)` expressions via `sh -c` |
+| `src/main.rs` | `DescribeImage` command loads project config and passes `vision` section |
+| `.agent-doc/config.toml` | Added `[vision]` section with OpenAI + passage |
+
+#### Config precedence
+
+| Source | Provider | API key | Model | Endpoint |
+|--------|----------|---------|-------|----------|
+| CLI flag | `--provider` | `--api-key` | `--model` | — |
+| config.toml `[vision]` | `provider` | `api_key` | `model` | `endpoint` |
+| Env var | `AGENT_DOC_VISION_PROVIDER` | `AGENT_DOC_VISION_API_KEY` / `OPENAI_API_KEY` | `AGENT_DOC_VISION_MODEL` | `AGENT_DOC_VISION_ENDPOINT` |
+| Default | `openai` | required | `gpt-4o` | provider default |
+
+#### Your .agent-doc/config.toml
+
+The `[vision]` section is configured with OpenAI provider and passage for the API key. The `$(passage ...)` expression is expanded at runtime via `sh -c`, so secrets never touch the config file.
+
+#### Usage (no env vars needed now)
+
+    agent-doc describe-image screenshot.png
+    agent-doc describe-image img.png --prompt "What text is visible?"
+
+#### Tests
+
+Added 5 new unit tests: `resolve_api_key_config`, `resolve_model_config_override`, `resolve_provider_config`, `expand_shell_passthrough`, `resolve_endpoint_config_override`. Cannot execute until pre-existing lazily-rs compilation errors are resolved.
+
+Binary installed: `cargo install --path .` succeeded.
+<!-- agent:boundary:25b4d5c2 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- ~[#img-describe-toolcall]~
-- complete [#codex-owned-pane-prompt-miss]
-- complete [#codex-owned-pane-prompt-miss-followups]
+- re tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md: What is the recovery mechanism for "still blocked from
+  inside this owned Codex pane because it would recursively invoke itself"? I tried `kill-pane` and auto-starting a new tmux pane + supervisor. But the same issue persists. Can we have a more robust solution?
+- Please create documentation for the agent-doc config file and the env variables.
 <!-- /agent:queue -->
 ###
 <!--

@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -107,27 +107,38 @@ P5 shipped (commit `a91d791`, pushed). `bun run check` green — 256 tests. **Th
 - **Wizard**: Property & declarations step (loan/property fields + A–M yes/no) and a Submit action after e-sign, with a submitted-state confirmation.
 
 The borrower can now complete and submit the full URLA end-to-end. Continuing to the final phase P6 (`#k9p5` — admin review of the full application + gated TMO writeback). Prod stays at P1–P3 until the queued re-deploy.
-<!-- agent:boundary:cdd71071 -->
+
+### Re: apply4 P6 — admin review + gated TMO writeback — done — opus-4-8
+
+> **Queue prompt:**
+>
+> [#k9p5]
+
+
+P6 shipped (commit `31a0381`, pushed). `bun run check` green — 261 tests. **This completes the full apply4 build (P1–P6).**
+
+- **Repo**: admin list (submitted+), read-by-id, set-status (in_review/accepted/declined).
+- **`tmo_writeback.ts`**: maps an application onto a TMO `NewLoanApplication` body; `Fields[]` is empty without a custom-field key map, so the writeback **fails closed**. Flag+token gate via `tmo_application_write_enabled_`.
+- **Admin API** (admin-guarded): `GET /api/admin/full-applications`, `GET …/:id` (all sections), `POST …/:id/status`, `POST …/:id/tmo-writeback` (**501 gated** until a key map is configured).
+- **Admin UI**: "Full Applications" section — list submitted, review detail across all sections, approve/decline, and a Push-to-TMO button (gated).
+
+The apply4 full URLA is now end-to-end: public prequal → auth → wizard (personal → addresses → employment → assets/property → property/declarations → e-sign → submit) → admin review → gated TMO writeback. Queue drained.
+
+**Reminder still open:** prod is at P1–P3 (worker `85fa9cfc`). To take P4–P6 live, run the queued re-deploy (`cf:d1:migrate:remote` for 0039–0040, then `deploy:worker`).
+<!-- agent:boundary:f50ab007 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" auto -->
-- ~[#0ag4]~
-- ~[#f3b2]~
-- ~[#2eaf]. deploy to production~
-- ~[#1tk7]~
-- ~[#az2w]~
-- [#k9p5]
+<!-- agent:queue preset="#spec-test-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
 - [ ] [#zr5z] [recommended] Re-deploy equityfundingsource to production after P4–P6 land so the full apply4 wizard (incl. final submit) is live; prod is currently at P1–P3 (worker 85fa9cfc). Run cf:d1:migrate:remote then deploy:worker, smoke-test.
-- [ ] [#k9p5] apply4 full application P6 — admin review of the full application + TMO writeback mapping (gated on TMO custom-field key map: dzmm/k2xg/7a4d). Plan: src/equityfundingsource-dev/prds/apply4-full-application-build-plan.md
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
 - [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document intelligence/search, borrower/broker/investor/admin portals, and tenant-ready resale packaging.
 - [ ] [#f4rq] Verify an EFS-owned sending domain in Resend, then switch APPLICATION_LEAD_NOTIFICATION_FROM and APPLICATION_LEAD_NOTIFICATION_TO from testing-mode values to EFS production addresses.

@@ -36,7 +36,18 @@ Compacted content:
 - Archived 8 response topic(s): do [#opencode-build-chrome-stall]; do [#jbrunstallreg]; do [#opencode-preset-not-dispatched]; 5 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
 Please review the agent-doc, claude, codex logs. If the review item requires a live verify, replace the requirement with logs to confirm or deny whether the review item is complete or not.
-<!-- agent:boundary:33b00e04 -->
+
+### Re: log-backed review audit — gpt-5
+I reviewed the agent-doc ops/pane logs, the active Claude transcript path, and recent Codex session logs against the gated review items. The useful signal is uneven: route-side behavior is now log-backed for several items, but most UI/plugin live checks still need plugin or idea.log evidence rather than agent-doc/Codex/Claude transcripts.
+
+I updated the review text for 20 items so the gate is no longer phrased as generic live verify where logs already confirm or deny it. The strongest denials are `#snrun`, `#clear-stops-running-process`, `#jb-stale-busy-idle-footer`, `#adoc-queue-ipc-buffer-divergence`, `#route-busy-wrong-owner-diagnostic`, and `#opencode-preset-not-dispatched`. The strongest partial confirmations are `#jb-busy-queue-deadlock-live-verify`, `#t41j`, `#route-starting-timeout-poll-recovery`, `#jb-tsift-pane-sync`, and the Codex final-gate checks.
+
+Changed paths: `tasks/agent-doc/agent-doc-bugs2.md` only. Review edits landed in recovery commit `ecc287aa5`; this writeback records the missing exchange response.
+Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc read --component review`, `agent-doc ops summary`, `agent-doc ops diagnose`, targeted `rg` across agent-doc/Claude/Codex logs, `agent-doc reset --from-current` for stale CRDT sidecars, and `agent-doc write --commit` recovery.
+Verification: no code changed, so I did not run the project test suite. I will rerun `agent-doc session-check --codex-final-gate` after this write.
+Confidence: medium; the agent-doc logs are strong for route/closeout states, but JetBrains notification and editor-buffer claims still need plugin logs.
+Escalation: none.
+<!-- agent:boundary:e2700be3 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->

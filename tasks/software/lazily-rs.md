@@ -33,51 +33,12 @@ queue_active: true
 <!-- agent:exchange -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260603-172441.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260603-175054.md`*
 
 Compacted content:
-- Archived 11 response topic(s): #71yq lazyperf25; #hqmh lazyperf26; #xdq8 lazyperf27; 8 more
+- Archived 2 response topic(s): handle-centric get API; extract BENCHMARKS.md
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-
-### Re: handle-centric get API — glm-5.1
-
-> **Queue prompt:**
->
-> In the README, we have `let val = ctx.get_cell(&counter);`. Please make the canonical usage `counter.get(&ctx)` instead of `ctx.get_cell(&counter)`. Is a Cell a Slot? If so, how can we differentiate from `Slot::get` behavior?
-
-
-**Cell is NOT a Slot.** They're distinct node types (`CellNode` vs `SlotNode`) sharing only a `SlotId` and `dependents` edge structure. Since `CellHandle<T>` and `SlotHandle<T>` are different Rust types, each can have its own `get(&self, ctx)` method with no collision.
-
-**Changes made** (commit `5817e61`, pushed):
-
-- Added `CellHandle::get(&self, ctx) -> T` — ergonomic alias for `ctx.get_cell(self)` with full dependency tracking
-- Added `SlotHandle::get(&self, ctx) -> T` — ergonomic alias for `ctx.get(self)` for API consistency
-- Updated README examples to use `counter.get(&ctx)` and `doubled.get(&ctx)` as canonical
-- Updated README and SPEC.md API tables with both handle-centric and context-centric entries
-- Added 8 new tests in `handle_get_methods` module
-
-**Note:** The handle-centric `get`/`set` methods are on `Context` only. `ThreadSafeContext` continues to use `ctx.get_cell()` / `ctx.get()` — the same split as the existing `cell.set()` which only takes `&Context`.
-
-All 83 spec compliance tests pass, including loom and tokio. `make check` clean.
-
-### Re: extract BENCHMARKS.md — glm-5.1
-
-> **Queue prompt:**
->
-> Extract a BENCHMARKS.md from the README.md. All benchmarks, including explanations, should go into BENCHMARKS.md. README.md should link to BENCHMARKS.md.
-
-
-Extracted all benchmark data from README.md into [BENCHMARKS.md](src/lazily-rs/BENCHMARKS.md).
-
-**Changes** (commit `567b86f`, pushed):
-
-- Created `BENCHMARKS.md` with all benchmark results, regression budgets, lock attribution, instrumentation profiles, and the Multi-Language/Related/License sections
-- README.md now has a concise "## Benchmarks" section linking to BENCHMARKS.md
-- Updated `scripts/update-benchmark-results.py` to write to `BENCHMARKS.md` via `--benchmarks-file` flag (default: `BENCHMARKS.md`)
-- Updated spec compliance tests to read BENCHMARKS.md for benchmark assertions
-
-`make check` clean.
-<!-- agent:boundary:5f750485 -->
+<!-- agent:boundary:e6802e64 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -86,8 +47,7 @@ Extracted all benchmark data from README.md into [BENCHMARKS.md](src/lazily-rs/B
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- ~In the README, we have `let val = ctx.get_cell(&counter);`. Please make the canonical usage `counter.get(&ctx)` instead of `ctx.get_cell(&counter)`. Is a Cell a Slot? If so, how can we differentiate from `Slot::get` behavior?~
-- ~Extract a BENCHMARKS.md from the README.md. All benchmarks, including explanations, should go into BENCHMARKS.md. README.md should link to BENCHMARKS.md.~
+- Does `let val = counter.get(ctx);` clone `ctx`?
 - [#lazyperf33]
 - [#lazyperf34]
 - [#lazyperf35]

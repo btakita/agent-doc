@@ -83,7 +83,18 @@ Gated — root cause fixed, no separate code, now a pure live-verify.
 This item has **no independent implementation**: per its own description the preset "was correctly enqueued via `dispatch_only_opencode_active_turn`" — the enqueue path worked — and the only reason it never executed was the Build chrome stall (`#opencode-build-chrome-stall`). That stall is now fixed and tested this session: OpenCode's idle `Build · MODEL` chrome is classified as dispatch-ready (`harness.rs::is_opencode_idle_chrome_line`, committed `cc6be806`) and `dispatch_blocker_reason` returns `None` for it (new test `dispatch_blocker_reason_allows_opencode_idle_build_chrome`).
 
 With the pane no longer stuck in a false "opencode active turn", the already-enqueued preset dispatches once the pane reaches the idle Build state. The unit-level pieces are both covered (enqueue path + idle-chrome classification); what remains is end-to-end **live verification**: run an OpenCode-backed doc with a `#agent-doc-bug` preset, let a turn complete into the Build chrome, and confirm the queued preset injects without manual pane recovery. Gated (not done) until that live confirmation, since no log yet proves the post-fix dispatch end-to-end.
-<!-- agent:boundary:7e0e33a3 -->
+
+### Re: JB Clear Session Context / OpenCode (already fixed — consuming stale queue head) — opus-4-8
+
+> **Queue prompt:**
+>
+> JB `Clear Session Context` does not work with OpenCode. This is a long-standing issue. Look at attempt with tsift.md in the logs.
+
+
+This prompt was already root-caused and fixed earlier this session; the full answer is committed above (the `### Re: JB Clear Session Context does not work with OpenCode` block, commit `1813ffdd6`). Its queue entry was left unstruck only because that finalize hit a concurrent-actor queue-consume divergence. This cycle just consumes the stale head.
+
+Recap: OpenCode has no `/clear` command (binary analysis: `/new` + `/compact` only). `agent-doc session clear` now resolves the harness-native command via `harness_clear_command` → `/new` for opencode, `/clear` otherwise (submodule `3746dedc`, unit-tested, spec `07-session-tmux-commands.md` updated, both binaries rebuilt). Remaining: live-verify a real OpenCode `Clear Session Context` resets context (destructive — operator-gated).
+<!-- agent:boundary:8cbf1d89 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
@@ -91,7 +102,7 @@ With the pane no longer stuck in a false "opencode active turn", the already-enq
 - ~do [#opencode-build-chrome-stall]~
 - ~do [#jbrunstallreg]~
 - ~do [#opencode-preset-not-dispatched]~
-- JB `Clear Session Context` does not work with OpenCode. This is a long-standing issue. Look at attempt with tsift.md in the logs.
+- ~JB `Clear Session Context` does not work with OpenCode. This is a long-standing issue. Look at attempt with tsift.md in the logs.~
 - Error in OpenCode `  ┃  Error: malformed template patchback: found patch/replace markers but no closed patch blocks parsed; refusing to append unmatched content` when running tsift.md
 - Go through all review items. If logs are in place to confirm the completion, complete the review item. If logs are in place to deny the completion, keep the review item. If logs are missing to confirm or deny the completion, add logs to confirm/deny the review item.
 <!-- /agent:queue -->

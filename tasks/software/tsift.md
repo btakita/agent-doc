@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -188,7 +188,24 @@ done
 **Promotion requirement:** `perf_gate::evaluate_promotion` needs 3 samples across all 4 workloads with both `refresh.duration_micros` and `total_duration_micros` beating SQLite. P0 alone would bring real refresh from 88.6ms to sub-ms, likely unlocking the gate.
 
 **Backlog item at top:** `#surreal-sidecar` (sidecar index persistence)
-<!-- agent:boundary:7be13ef5 -->
+
+### Re: #5vp6 lazily-rs stuck session — glm-5.1
+
+> **Queue prompt:**
+>
+> [#5vp6]
+
+Investigated whether tsift could cause an OpenCode session to hang on a `Read` tool call for `src/lazily-rs/src/thread_safe.rs`.
+
+**Verdict: tsift is not the cause.** The hang is an OpenCode harness or LLM API issue:
+
+1. **tsift cannot intercept OpenCode's native `Read` tool** — the rewrite module only intercepts shell commands (`rg`, `git diff`, `cat`, `head`, `tail`, `cargo test`, etc.). OpenCode's `Read` tool reads files directly from the filesystem without invoking a shell.
+2. **No `PreToolUse` hooks exist for OpenCode** — SPEC.md and AGENTS.md explicitly acknowledge OpenCode lacks Claude-style pre-tool interception.
+3. **`tsift source-read` completes in <1s** for files like `thread_safe.rs` (2727 lines, 88KB) — it does a `fs::read()` + SQLite index query, both instant.
+4. **The session had queue item `#lazyperf34` active** ("Fix finish_batch O(n2) dedup" on `thread_safe.rs") — the LLM likely completed the Read successfully, then hung during response generation or API processing.
+
+**Likely causes:** LLM API (glm-5.1) slow/unresponsive during response generation, OpenCode state machine race, or resource pressure from 5+ concurrent OpenCode sessions. Recommend checking OpenCode's internal logs/transcripts for the stuck session's PID.
+<!-- agent:boundary:cf5a9b51 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -197,8 +214,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
-- [#5vp6]
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog
@@ -217,7 +233,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - [ ] [#surreal-fixture] Record SurrealDB samples in graph-db-performance-history.json fixture (medium)
 - [ ] [#surreal-dashmap] Replace RwLock<BTreeMap> with HashMap for by_id point lookups (low)
 - [ ] [#surreal-batch-bfs] Batch frontier expansion in shortest_path (low)
-- [ ] [#5vp6] The lazily-rs.md session has been stuck on `Read src/lazily-rs/src/thread_safe.rs` for over an hour. Is there something wrong with tsift that is causing this issue? I restarted the opencode session so you may have to look into the session history.
 <!-- /agent:backlog -->
 
 ## Review

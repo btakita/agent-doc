@@ -40,7 +40,17 @@ Compacted content:
 ### Re: #libmod5 SearchBudget extraction — glm-5.1
 
 Extracted search_budget.rs (~1,118 lines) from tsift-cli/src/lib.rs (37,704 to 36,582 lines). All 335 tests pass, make check clean, build + install successful.
-<!-- agent:boundary:07944b29 -->
+
+### Re: #libmod5b Phase 5b: Extract ConflictMatrix + ContextPack + SessionReviewBudget — glm-5.1
+
+Extracted three modules from tsift-cli/src/lib.rs (36,594 to 31,809 lines, 4,785 line reduction):
+
+- conflict_matrix.rs (~2,695 lines)
+- context_pack.rs (~1,678 lines)
+- session_review_budget.rs (~543 lines)
+
+All 335 tests pass. make check clean. Build + install successful. Pushed to main.
+<!-- agent:boundary:08178f43 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -53,6 +63,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - ~do [#libmod3]~
 - ~do [#libmod4]~
 - ~do [#libmod5]~
+- do [#libmod5b]
 - do [#opencode-read]
 - do [#opencode-grep]
 - do [#codex-read]

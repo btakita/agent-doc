@@ -38,7 +38,38 @@ queue_active: false
 Compacted content:
 - Archived 4 response topic(s): lazily-rs queued performance work; Add Makefile; Update benchmarks; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:81a643f2 -->
+
+### Re: #lazyperf16 — gpt-5
+
+> **Queue prompt:**
+>
+> [#lazyperf16]
+
+
+Completed `#lazyperf16`.
+
+I reran the two archived benchmark watch items as controlled A/B checks before tuning, using a separate clean worktree for baseline commit `a8b6fc3` and the current pre-doc-change implementation `c917401`.
+
+Results:
+- `cached_reads/thread_safe_context`: baseline `73.48 ns`, current `73.20 ns` on the warm-cache repeat. The archived `56.5 ns -> 73.1 ns` regression did not reproduce under controlled A/B.
+- `thread_safe_effect_contention/cleanup_execution/16`: baseline `2.31 ms`, current `2.43 ms` on the warm-cache repeat, with overlapping confidence intervals; Criterion reported no statistically significant change.
+- No synchronization tuning was applied because the controlled data did not justify a code change.
+
+Repo changes in `src/lazily-rs`:
+- Added a SPEC rule requiring benchmark watch items from generated README deltas to be confirmed with controlled A/B reruns before tuning.
+- Added a generated README “Watch-item A/B follow-up” table for this check through `scripts/update-benchmark-results.py`.
+- Extended `tests/spec_compliance.rs` so the A/B policy and README evidence remain covered.
+
+Verification:
+- `make check` passed: fmt, clippy, build, default tests, Tokio tests, Loom tests, and benchmark-check.
+- Targeted Criterion A/B commands were run for both watch items against baseline and current.
+- GitHub Actions CI run `26860570355` passed for pushed commit `fcbd5db`.
+- The crate has no binary install target; local build/install-equivalent proof is the successful all-targets/all-features build in `make check`.
+
+Commit/push:
+- Pushed `src/lazily-rs` commit `fcbd5db` (`docs: record benchmark watch A/B check`) to `origin/main`.
+- I left the `agent-loop` superproject unpushed because it already had unrelated local commits ahead of `origin/main`; this session document is being persisted by `agent-doc finalize`.
+<!-- agent:boundary:acfb99dd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -47,13 +78,11 @@ Compacted content:
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->
-- [#lazyperf16]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#lazyperf16] [recommended] Investigate the benchmark watch items from the lazy-invalidation run: cached ThreadSafeContext read latency regression and effect cleanup contention regression; rerun controlled A/B baselines before tuning.
 <!-- /agent:backlog -->
 
 ## Review

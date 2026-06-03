@@ -70,14 +70,27 @@ Gated, not completed — the implementation exists but as **orphaned uncommitted
 **Why gated, not done.** No live actor owns it now (no `admin detect` finding, no opencode/codex process), so it's stale-uncommitted, not in-flight. But it is (a) uncommitted, (b) unbuilt/unverified, and (c) a JetBrains plugin change, which requires the operator-gated ritual — `pluginVersion` bump, `./gradlew buildPlugin signPlugin`, install-from-disk + restart, then live-verify each Run stage surfaces feedback. I will not auto-commit another actor's editor WIP or fake-complete an unverified item (item-3 rule: evidence doesn't confirm completion → keep open).
 
 **To close it:** review the orphaned diff, bump `pluginVersion`, build+sign+install the plugin, live-verify the stall surfaces (typing-debounce warning, route watchdog timeout notification), then mark `--done`. The diff is intact in the working tree.
-<!-- agent:boundary:3792513b -->
+
+### Re: do [#opencode-preset-not-dispatched] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#opencode-preset-not-dispatched]
+
+
+Gated — root cause fixed, no separate code, now a pure live-verify.
+
+This item has **no independent implementation**: per its own description the preset "was correctly enqueued via `dispatch_only_opencode_active_turn`" — the enqueue path worked — and the only reason it never executed was the Build chrome stall (`#opencode-build-chrome-stall`). That stall is now fixed and tested this session: OpenCode's idle `Build · MODEL` chrome is classified as dispatch-ready (`harness.rs::is_opencode_idle_chrome_line`, committed `cc6be806`) and `dispatch_blocker_reason` returns `None` for it (new test `dispatch_blocker_reason_allows_opencode_idle_build_chrome`).
+
+With the pane no longer stuck in a false "opencode active turn", the already-enqueued preset dispatches once the pane reaches the idle Build state. The unit-level pieces are both covered (enqueue path + idle-chrome classification); what remains is end-to-end **live verification**: run an OpenCode-backed doc with a `#agent-doc-bug` preset, let a turn complete into the Build chrome, and confirm the queued preset injects without manual pane recovery. Gated (not done) until that live confirmation, since no log yet proves the post-fix dispatch end-to-end.
+<!-- agent:boundary:7e0e33a3 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
 - ~do [#admin-fleet-dashboard]~
 - ~do [#opencode-build-chrome-stall]~
 - ~do [#jbrunstallreg]~
-- do [#opencode-preset-not-dispatched]
+- ~do [#opencode-preset-not-dispatched]~
 - JB `Clear Session Context` does not work with OpenCode. This is a long-standing issue. Look at attempt with tsift.md in the logs.
 - Error in OpenCode `  ┃  Error: malformed template patchback: found patch/replace markers but no closed patch blocks parsed; refusing to append unmatched content` when running tsift.md
 - Go through all review items. If logs are in place to confirm the completion, complete the review item. If logs are in place to deny the completion, keep the review item. If logs are missing to confirm or deny the completion, add logs to confirm/deny the review item.
@@ -93,12 +106,12 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Backlog
 
 <!-- agent:backlog priority queue=append -->
-- [ ] [#opencode-preset-not-dispatched] #agent-doc-bug 2026-06-02: The #agent-doc-bug prompt preset was captured in the route queue but never injected into the OpenCode pane because the Build chrome stall (#opencode-build-chrome-stall) prevented dispatch. The preset text was correctly enqueued via dispatch_only_opencode_active_turn but the stall means it never executes. Dependent on #opencode-build-chrome-stall fix or manual pane recovery.
 <!-- /agent:backlog -->
 
 ## Review
  
 <!-- agent:review -->
+- [/] [#opencode-preset-not-dispatched] #agent-doc-bug 2026-06-02: The #agent-doc-bug prompt preset was captured in the route queue but never injected into the OpenCode pane because the Build chrome stall (#opencode-build-chrome-stall) prevented dispatch. The preset text was correctly enqueued via dispatch_only_opencode_active_turn but the stall means it never executes. Dependent on #opencode-build-chrome-stall fix or manual pane recovery.
 - [/] [#jbrunstallreg] #agent-doc-bug 2026-06-03: JB Run Agent Doc can still appear stalled after the route watchdog/visible-warning fix. Plan: tasks/agent-doc/plan-jb-run-agent-doc-stall-regression.md. Capture and bound every plugin-side Run stage before and after route launch (typing idle, EDT save, route build, process start/watchdog, notification/persistence), then live-verify that each non-success path produces visible feedback plus a durable diagnostic artifact.
 - [/] [#route-reaps-idle-fresh-start] #agent-doc-bug 2026-06-02: route reaped a fresh codex start whose first dispatched cycle was a legitimate no-op (empty/halted queue, preflight no_changes), so a document with no pending work couldn't be opened ('I cannot start lazily-rs.md, killed immediately'). IMPLEMENTED+unit-tested+shipped (submodule 8451143a, superproject 5b10b7ffd, both binaries rebuilt+installed): at the fresh-start no-ack branch route now re-checks the pane and KEEPS it as a live idle session when it has returned to a harness dispatch-ready prompt (trigger was already proven dispatched), clearing the startup-miss; it only reaps when the pane is not dispatch-ready (a genuine miss). New pure FreshStartAckOutcome classifier (CycleAcknowledged/IdleNoOpKeep/GenuineMissReap) reuses the tested ready_prompt_candidate discriminator. route:: 141 passed, make check green. GATED on live verify: start a real idle lazily-rs.md codex session (slow gpt-5.5 xhigh cold start) and confirm the pane stays alive instead of being reaped. Plan: tasks/agent-doc/plan-route-reaps-idle-fresh-start.md.
 - [/] [#route-busy-wrong-owner-diagnostic] [recommended] #agent-doc-bug 2026-06-02: route dispatch-only busy refusal does not cross-check that the live busy pane's owned document matches the ROUTED document. When a pane was contaminated by a foreign doc's cycle (e.g. agent-doc-bugs2.md ran in monsterrodholders.md's pane %61), route still keys 'busy' off the authoritative binding + live prompt-readiness and emits a generic 60s busy-timeout instead of naming the contamination — the operator reads it as 'blocking on the wrong session state'. Fix: in the DispatchOnlyBusyQueue / busy-refusal path, validate pane-owns-routed-doc (reuse cmdline_owns_other_document / reject_cross_document_owner_pane from sync.rs) and emit a wrong_owner/cross-document diagnostic (routed file=F busy pane=%N owns=G) instead of the generic timeout. Sibling of #jb-tsift-pane-sync Phase 3b (display guard) + #xdoc-route-sweep-commits-sibling-docs (281e4db8, the upstream contamination gate). Confirm live with agent-doc admin detect (#ipc-admin-api), which flags a pane bound to >1 non-closed document. Gated on the live monsterrodholders.md repro.

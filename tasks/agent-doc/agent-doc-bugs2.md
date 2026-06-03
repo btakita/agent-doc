@@ -78,7 +78,28 @@ This is **the** root cause of the whole contamination saga — and the plan (`pl
 **Can't implement here** (binary gated). Toolchain actor's job; the entry point above is exact.
 Pinned it. This is the root-cause item and its plan is already complete and implementation-ready — no plan edit needed. The exact code is located.
 **Closeout:** audit + exact-location pin (no plan edit — the plan was already complete). The fix is a focused authoritative-owner gate at `preflight.rs:1965` Step 2d + the route-owned reap path + one new test. This is the highest-priority queued item — it's the root cause of the operational instability. Can't build/finalize from this gated pane; prior plan edits still uncommitted and offered.
-<!-- agent:boundary:85917c50 -->
+
+### Re: do #ipc-admin-api — plan is implementation-ready; validated by this session's own kill-whack-a-mole — opus-4-8
+
+The plan is complete: `admin list / detect / rebind / stop` with `--json`, FFI+supervisor-socket-owned logic, thin editor shells, fail-closed semantics, and a tests section. It needs no edit. Two things worth adding from this seat:
+
+**Real-world validation (not hypothetical):** the `admin stop --halt-queue --terminate` primitive is exactly the gap I hit this session. When the lazily-rs `%73` actor was contaminating this document, a raw `kill 2341978` could **not** stop it — `queue_active:true` + the supervisor re-provisioned a fresh pane (the plan's respawn note, observed live as `%73` gen 15 → `%74` gen 17). The plan's stop sequence — (a) flip `queue_active:false` durably, (b) quiesce the supervisor, (c) terminate, (d) leave the pane idle — is the correct and *only* durable shape. This item is well-motivated, not speculative.
+
+**Implementation hooks (concrete entry points):** per the module-layout convention, add `src/admin.rs` (CLI subcommand wired through `main.rs`). It reuses existing primitives rather than new infrastructure — `sessions.rs` registry (`pane`/`window`/`supervisor_pid`), `session_actor_cmd.rs` `session status` (`controller_lease`, `supervisor_process`, idle/busy state), `log_cross_document_execution_context` + `cmdline_owns_other_document` for `detect`, and `project_controller.rs` for the supervisor quiesce in `stop`. So `list`/`detect` are read-only aggregations of data that already exists; only `rebind`/`stop` mutate, and both are fail-closed on the caller's own session.
+
+**Dependency ordering:** `detect` leans on `#xdoc-route-sweep-commits-sibling-docs`'s cross-document signal (do that root-cause fix first — it's the prevention; this is the operator control plane / cure). But `list`/`stop` are independently implementable now.
+
+**On the dashboard follow-up note** ("create a dashboard that uses the actor admin apis to see runtime instances"): `admin list --json` + `admin detect --json` are exactly its data source — the dashboard is a thin consumer. That should be captured as its own backlog item (e.g. `#admin-fleet-dashboard`, depends on `#ipc-admin-api`). I can't `--pending-add` it from this gated pane — flag for a binary-enabled pane to capture.
+
+**Can't implement here** (binary gated). Toolchain actor's job; the entry points above are concrete.
+The plan (`plan-ipc-admin-api-actor-control.md`) is complete and implementation-ready — full CLI surface, FFI-owned design, fail-closed stop, tests, acceptance. No edit needed. And I can validate it from lived experience this session.
+
+> **Queue prompt:**
+>
+> do [#ipc-admin-api]
+
+**Closeout:** audit + implementation-hook pin (plan already complete, no edit). `#ipc-admin-api` is well-motivated (validated by this session's failed kill), implementation-ready via a new `src/admin.rs` reusing existing registry/status/cross-doc primitives, ordered after `#xdoc-route-sweep-commits-sibling-docs`. Dashboard follow-up should be captured as a dependent backlog item (needs a binary-enabled pane). Can't build/finalize from this gated pane; prior plan edits still uncommitted and offered.
+<!-- agent:boundary:7a22194c -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -88,7 +109,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#lr-wire-9]~
 - ~do [#lr-actor-10]~
 - ~do [#xdoc-route-sweep-commits-sibling-docs]~
-- do [#ipc-admin-api]
+- ~do [#ipc-admin-api]~
 - do [#run-gated-review-items]
 - I removed "Do not implement from" plan-jb-run-agent-doc-busy-queue-dispatch-deadlock.md. Go ahead and execute the plan if needed. Ensure any associated items are completed. I'm confused by the amount and length of the review items. #spec-test-build-install-commit-push
 ---

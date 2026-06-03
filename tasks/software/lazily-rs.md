@@ -143,7 +143,24 @@ Added `dependent_scratch: Vec<SlotId>` to `ThreadSafeState` and `fill_dependent_
 Scratch retains heap capacity across calls, avoiding repeated SmallVec heap alloc on >4 fan-out.
 
 **Verification:** `make check` passes (fmt, clippy, 92 tests, 2 tokio, 12 loom). Pushed as `6bc2c2b`.
-<!-- agent:boundary:38ca7988 -->
+
+### Re: #vfr1 lazyperf31 [recommended] — glm-5.1
+
+> **Queue prompt:**
+>
+> [#vfr1]
+
+
+Replaced all `std::sync::{Mutex, RwLock, Condvar}` with `parking_lot` equivalents in `thread_safe.rs`.
+
+**Changes:**
+- Added `parking_lot = "0.12"` dependency to `Cargo.toml`
+- Replaced imports: `std::sync::{Condvar, Mutex, MutexGuard, RwLock}` → `parking_lot::{Condvar, Mutex, MutexGuard, RwLock}`
+- Removed 25 `.expect("... poisoned")` calls (parking_lot doesn't poison)
+- Simplified `Condvar::wait` from `guard = condvar.wait(guard).expect(...)` to `condvar.wait(&mut guard)`
+
+**Verification:** `make check` passes (fmt, clippy, 92 tests, 2 tokio, 12 loom). Pushed as `d83340e`.
+<!-- agent:boundary:c68e92a6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -158,7 +175,7 @@ Scratch retains heap capacity across calls, avoiding repeated SmallVec heap allo
 - ~[#vk55]~
 - ~[#cffp]~
 - ~[#vbcq]~
-- [#vfr1]
+- ~[#vfr1]~
 - [#94gg]
 - Please do a performance benchmark to see the results of the queue run.
 <!-- /agent:queue -->
@@ -166,7 +183,6 @@ Scratch retains heap capacity across calls, avoiding repeated SmallVec heap allo
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#vfr1] #lazyperf31 #lazyperf31 [recommended] parking_lot replacement for std::sync Mutex/RwLock — smaller locks, no poisoning, adaptive spinning
 - [ ] [#94gg] #lazyperf32 #lazyperf32 [recommended] Rc<dyn Any> values in single-threaded Context — get() returns pointer increment instead of deep clone
 <!-- /agent:backlog -->
 

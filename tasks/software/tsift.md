@@ -75,7 +75,7 @@ Implemented `#tokegate` in `tsift_quality::token_gate`.
 
 Commands/proof: ran `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `cargo check`, `cargo test`, `make check`, `cargo install --path .`, `git add` + `git commit` + `git push` in `src/tsift/`.
 
-### Re: #gpackreuse cycle-scoped packet reuse — glm-5.1 (HEAD)
+### Re: #gpackreuse cycle-scoped packet reuse — glm-5.1
 
 > **Queue prompt:**
 >
@@ -126,7 +126,8 @@ No code changed; no build suite required. Committed as `174d101`.
 > **Queue prompt:**
 >
 > Code Navigation harness info should be in a Runbook referenced in AGENTS.md or a skill.
-<!-- agent:boundary:5e95511f -->
+Are the Runbook optimizations applied to all projects in agent-loop?
+<!-- agent:boundary:7e45e683 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -141,6 +142,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - [#rankdefault]
 - [#gfrontierhot]
 - [#greadiness]
+- Are the Runbook optimizations applied to all projects in agent-loop?
 <!-- /agent:queue -->
 
 ## Backlog

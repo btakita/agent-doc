@@ -228,7 +228,23 @@ Landed (`lib/payments/` + `worker.ts` mount):
 The EFS-side core (signature verify, idempotent receipt, schedule reconciliation) is built and tested; the externally-dependent parts fail closed. I've **pending-gated cm3e**. To go live: confirm a TMO payment-write endpoint, set up a Stripe account + ACH/KYC processing agreement, then set `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_PAYMENTS_ENABLED` (and `TMO_PAYMENT_WRITE_ENABLED` once the TMO API exists).
 
 Queue is now drained — e245 (done), xcvg (gated), cm3e (gated).
-<!-- agent:boundary:5e941c5f -->
+❯ Please include all fields in https://www.borrowersviewcentral.com/portal/apply4?id=EFSI on the Apply for Loan page.
+
+### Re: all apply4 fields on the Apply for a Loan page — opus-4-8
+
+Per your call: **hybrid placement, plan first.** Public `/apply` stays the lightweight prequal; the full `apply4` URLA goes in an authenticated "complete your application" wizard reached by a handoff from the prequal — so SSN/DOB/financials stay post-login (security-tier-0). Why hybrid over an all-public form: `apply4` collects heavy PII (SSN, full financials, declarations), and the EFS design keeps sensitive fields behind auth; the hybrid satisfies "all apply4 fields" without exposing PII on the public page.
+
+**Plan shipped:** `prds/apply4-full-application-build-plan.md` (commit `bd2b380`, pushed). It covers:
+
+- The hybrid flow (public prequal → log in / create account → gated wizard with `lead_id` linkage + resumable draft).
+- All 9 `apply4` sections mapped to wizard steps (personal / citizenship / credit type, 2-yr address history, employment + gross-income breakdown, other-source income, assets/liabilities, subject property + occupancy, REO schedule, declarations A–M, acknowledgement + ESIGN/UETA e-sign).
+- Phase-2 D1 schema (applications + personal/addresses/employment/income/assets/liabilities/reo/declarations/signatures), with SSN/account tokenization per security-tier-0.
+- Six implementation phases (P1–P6) — one backlog item each (just queued), with TMO writeback gated on the custom-field key map.
+
+Say "do" / queue the phases when you want me to start building (P1 first).
+
+*(Heads-up: the exchange is at block-level accretion — 200 lines / 12 sections. I'd recommend compacting before the build cycles: `agent-doc compact tasks/professional/equityfundingsource.md --commit`.)*
+<!-- agent:boundary:204c070e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -241,6 +257,12 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#0ag4] apply4 full application P1 — hybrid handoff + applications shell: public prequal submit → auth → resumable draft wizard; applications table + lead_id linkage. Plan: src/equityfundingsource-dev/prds/apply4-full-application-build-plan.md
+- [ ] [#f3b2] apply4 full application P2 — personal info + 2yr address history + ESIGN/UETA e-sign + audit trail. Plan: src/equityfundingsource-dev/prds/apply4-full-application-build-plan.md
+- [ ] [#2eaf] apply4 full application P3 — employment & income (current/additional/former + gross monthly income breakdown + other-source income). Plan: src/equityfundingsource-dev/prds/apply4-full-application-build-plan.md
+- [ ] [#1tk7] apply4 full application P4 — assets/liabilities + Real Estate Owned schedule (with per-property mortgages). Plan: src/equityfundingsource-dev/prds/apply4-full-application-build-plan.md
+- [ ] [#az2w] apply4 full application P5 — subject property/loan + Declarations A–M + submit (draft → submitted). Plan: src/equityfundingsource-dev/prds/apply4-full-application-build-plan.md
+- [ ] [#k9p5] apply4 full application P6 — admin review of the full application + TMO writeback mapping (gated on TMO custom-field key map: dzmm/k2xg/7a4d). Plan: src/equityfundingsource-dev/prds/apply4-full-application-build-plan.md
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
 - [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document intelligence/search, borrower/broker/investor/admin portals, and tenant-ready resale packaging.
 - [ ] [#f4rq] Verify an EFS-owned sending domain in Resend, then switch APPLICATION_LEAD_NOTIFICATION_FROM and APPLICATION_LEAD_NOTIFICATION_TO from testing-mode values to EFS production addresses.

@@ -65,11 +65,17 @@ All three queue items **implemented + tested + installed**.
 
 All tests green. `cargo clippy -- -D warnings` clean. Binary installed.
 <!-- agent:boundary:b8dda823 -->
+Fix these issues that occurred after an OpenCode queue run:
+```
+Warnings:
+1. inactive_queue_residue — agent:queue is inactive but contains leftover items; only active queue state is               executable.
+2. post_exchange_comment_prompt_preset — A post-exchange HTML comment references #spec-test-build-install-                commit-push and #next-steps as non-executable notes. Move into agent:exchange or agent:queue if they should            run.
+3. misplaced_component_attr — preset on agent:queue is not a recognized attribute (possible typo).                                                                                                                                            Make edits to the document and re-invoke /agent-doc to start a new cycle.
+```
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
-- do [#codex-403-429-fallback]
-- do [#codex-network-access-opencode-guard]
+<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
+- [#backlog-queue-sync-no-populate]
 <!-- /agent:queue -->
 ###
 <!--
@@ -82,11 +88,13 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#backlog-queue-sync-no-populate] #agent-doc-bug 2026-06-03: `<!-- agent:backlog queue -->` with 2 active items (`#pp-images`, `#pp-monitor`) and `queue_active: true` did not populate `agent:queue` in `src/boost-client/tasks/monsterrodholders.md` (opencode session). Root cause: the backlog→queue sync only fires during binary preflight (`run_queue_maintenance` in `preflight.rs:3313`), not during LLM read/dispatch. The `queue` attribute is a declarative instruction requiring the binary to act on it. Additionally, `do [#pp-images]. #spec-test-commit-push-deploy` appeared in an HTML comment outside the queue component markers, suggesting a misplaced manual edit. Recommended fix (Option C): emit a `backlog_queue_sync_pending` preflight warning when backlog has `queue` attr and queue is empty/undersynced, plus provide a manual `agent-doc queue sync` CLI trigger. Plan: tasks/agent-doc/plan-backlog-queue-sync-no-populate.md
 <!-- /agent:backlog -->
 
 ## Review
  
 <!-- agent:review -->
+- [/] [#opencode-jb-stall] #agent-doc-bug 2026-06-03: JB `Run Agent Doc` stalls in an OpenCode session. Related to #opencode-post-turn-false-active (implemented, needs live-verify — bottom-12-lines busy-cue fix), #jbrunstallreg (plugin-side stage ledger, needs live-verify), and #opencode-preset-not-dispatched (in review). Plan: live-verify the installed binary + JB plugin to confirm the stall is resolved by the false-active-turn fix.
 - [/] [#codex-final-response-repeat] #agent-doc-bug 2026-06-03: LOG REVIEW 2026-06-03 second pass: searched ops.log, the active b26b9957 session log, debug.log.2026-06-03, and recent Codex artifacts for the monsterrodholders PDP missing-response case. No log shows that missing assistant response failing closed before final chat output. Keep open as recurrence evidence for the owned-pane/direct-chat final-response patchback guard. Existing plan: tasks/agent-doc/plan-codex-final-response-not-written.md. Do not implement in this cycle.
 - [/] [#opencode-preset-not-dispatched] #agent-doc-bug 2026-06-02: LOG REVIEW 2026-06-03 confirms still incomplete: ops.log has accepted-only route proof for agent-doc-bugs2.md at 1780457647, not dispatch-start/consumed proof. The preset may have reached pane input acceptance, but logs do not show OpenCode consumed it. Keep dependent on #opencode-build-chrome-stall fix or manual pane recovery.
 - [/] [#jbrunstallreg] #agent-doc-bug 2026-06-03: IMPLEMENTATION UPDATE 2026-06-03: JetBrains plugin-side Run Agent Doc stage ledger, pre-route exception handling, supersession guard, and route stage recording landed in the working tree with focused JB tests and make check passing. LOG REVIEW: there is still no live .agent-doc/state/editor-route-attempts artifact or idea.log stage timing from an installed plugin run, so live plugin verification remains open. Required live evidence: typing idle, EDT save, route build, process start/watchdog, notification, persistence, and supersession stages from the installed plugin.

@@ -35,7 +35,29 @@ Queue contamination cleaned. Session committed.
 Compacted content:
 - Archived 7 response topic(s): #4h81 opencode-codex-capacity-proof; #t9xf opencode-log-bleed; #0ada queue-not-clearing-opencode; 4 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:7e04fdb0 -->
+
+### Re: do [#8ker] #opencode-idle-detection-post-turn — glm-5.1
+
+> **Queue prompt:**
+>
+> do [#8ker]
+
+
+**Implemented.** Two changes:
+
+1. **`harness.rs`** — Added `is_bottom_idle_chrome` to `HarnessConfig`. Unlike `is_idle_chrome_only_output` which requires ALL lines to be ignorable chrome, this method checks only the bottom N lines for a contiguous idle chrome suffix of at least 4 lines containing at least one status/footer line. Busy cues are still checked via `has_busy_cue()`. Mirrors `dispatch_blocker_reason`'s bottom-N strategy.
+
+2. **`start.rs`** — Updated `child_output_prompt_visible()` to use `is_bottom_idle_chrome(output, 12)` for the OpenCode path instead of `is_idle_chrome_only_output(output)`. The old all-lines scan returned false for any post-turn OpenCode pane because scrollback contains non-ignorable response text, preventing idle-queue-watch from draining.
+
+**Verification:**
+- `cargo test -p agent-doc-orchestration` — 2224 passed, 0 failed
+- `cargo check --bin agent-doc` — clean
+- `cargo install --path .` — installed `agent-doc 0.34.0`
+
+**Tests added (5):** `is_bottom_idle_chrome_accepts_opencode_post_turn_with_scrollback`, `is_bottom_idle_chrome_rejects_opencode_active_turn_bottom`, `is_bottom_idle_chrome_rejects_non_opencode`, `is_bottom_idle_chrome_rejects_empty_output`, `current_child_prompt_visible_detects_opencode_post_turn_idle`
+
+**Files changed:** `agent-doc-orchestration/src/harness.rs`, `agent-doc-orchestration/src/start.rs`
+<!-- agent:boundary:70917faa -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" -->
@@ -45,7 +67,7 @@ Compacted content:
 - ~#7fmb~
 - ~do [#9j4v]~
 - ~do [#sw78]~
-- do [#8ker]
+- ~do [#8ker]~
 - do [#1t6w]
 - do [#tbhv]
 <!-- /agent:queue -->
@@ -62,7 +84,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#8ker] #opencode-idle-detection-post-turn #agent-doc-bug 2026-06-03: fix child_output_prompt_visible() in start.rs:1248-1256 to check only bottom N lines for OpenCode post-turn idle detection instead of requiring all scrollback to be ignorable chrome. Mirror dispatch_blocker_reason approach from harness.rs:324-345. Spun off from #0ada investigation.
 - [ ] [#1t6w] #opencode-skill-auto-loop #agent-doc-bug 2026-06-03: add OpenCode-specific auto-loop section to skill.rs SKILL.md generation (currently omitted per test skill.rs:921). Instruct OpenCode to re-invoke agent-doc <FILE> after successful finalize when queue_active==true and queue_prompts.len()>=1. Spun off from #0ada investigation.
 - [ ] [#tbhv] #harness-resolution-source-logging #agent-doc-bug 2026-06-03: add guard in start.rs after from_context() that logs resolved harness name + source (frontmatter vs config vs fallback) and warns when detect_harness() env result differs from from_context() result. Spun off from #4h81 investigation.
 <!-- /agent:backlog -->

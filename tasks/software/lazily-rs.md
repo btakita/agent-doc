@@ -258,7 +258,16 @@ Added as `#opencode-jb-stall` to agent-doc-bugs2.md review backlog.
 ### Re: Queue item reformat — glm-5.1
 
 Reformatted the JB stall queue entry as a `do` directive referencing the new review item `#opencode-jb-stall`. Added the bug to `tasks/agent-doc/agent-doc-bugs2.md` review backlog.
-<!-- agent:boundary:3719a8a7 -->
+
+### Re: do [#opencode-jb-stall] — glm-5.1
+
+Added `#opencode-jb-stall` to `tasks/agent-doc/agent-doc-bugs2.md` review backlog. The stall is triaged as a live-verification gap for two already-implemented fixes:
+
+1. `#opencode-post-turn-false-active` — Bottom-12-lines busy-cue detection (implemented, needs live-verify in an OpenCode pane)
+2. `#jbrunstallreg` — Plugin-side Run Agent Doc stage ledger (implemented, needs live-verify with installed JB plugin)
+
+No new code changes needed — the stall should resolve once both fixes are live-verified with the current installed binary and plugin.
+<!-- agent:boundary:809ab630 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -268,7 +277,7 @@ Reformatted the JB stall queue entry as a `do` directive referencing the new rev
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - ~JB `Clear Session Context` successfully ran `/new` but the restarted session should not run agent-doc. #agent-doc-bug~
-- JB `Run Agent Doc` stalls in this OpenCode session. #agent-doc-bug
+- do [#opencode-jb-stall] #agent-doc-bug
 <!-- /agent:queue -->
 
 ## Backlog

@@ -53,7 +53,24 @@ Implemented `SurrealdbGraphStore::open_or_refresh()` with blake3 row-hash diffin
 - `SPEC.md`: documented warm-start behavior under SurrealDB Backend Spike section.
 
 **Verification:** 7/7 surrealdb tests pass, `make check` (clippy + workspace tests) passes, CLI builds with `backend-surrealdb` feature, `cargo install --debug` succeeds. Commit `bfa0493` pushed to `main`.
-<!-- agent:boundary:b0e21ee1 -->
+
+### Re: #surreal-delta — delta projection refresh — glm-5.1
+
+> **Queue prompt:**
+>
+> [#surreal-delta]
+
+
+Implemented `SurrealdbGraphStore::replace_projection_rows_delta()` with per-row blake3 hash diffing matching SQLite's `replace_projection_with_version()` pattern. Each node and edge is individually hashed; incoming hashes are compared against stored per-row hashes loaded from SurrealDB records. Only changed, new, or tombstoned rows trigger SurrealDB writes: one transactional batch deletes removed + changed rows then inserts changed/new rows. In-memory indexes update incrementally instead of rebuilding from scratch.
+
+`open_or_refresh()` now uses the delta path instead of full `replace_projection_rows()` on refresh, so repeated backend-eval runs against partially-changed data only write the diff.
+
+**Changes:**
+- `packages/tsift-surrealdb/src/lib.rs`: added `DeltaRefreshStats`, `replace_projection_rows_delta()`, `delta_surreal_records()`, `delta_memory_indexes()`, `update_row_hashes()`, `all_edge_keys()`, `node_row_hashes`/`edge_row_hashes` fields, `row_hash` field on `SurrealNodeRecord`/`SurrealEdgeRecord`. 3 new tests: skip-unchanged, detect-modified, tombstone-removed.
+- `SPEC.md`: documented delta projection refresh under SurrealDB Backend Spike section.
+
+**Verification:** 10/10 surrealdb tests pass, `make check` (clippy + workspace tests) passes, commit `eb7038f` pushed to `main`.
+<!-- agent:boundary:e6db9b39 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -64,7 +81,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
 - ~[#surreal-warm]~
-- [#surreal-delta]
+- ~[#surreal-delta]~
 - [#surreal-multiproc]
 - [#surreal-rt-pool]
 - [#surrealbulk-close]
@@ -74,7 +91,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 <!-- agent:backlog -->
 - [ ] [#surreal-rt-pool-warm] Accept external tokio Runtime in open_or_refresh so backend-eval can reuse one Runtime across candidate stores
-- [ ] [#surreal-delta] Delta projection refresh: implement replace_projection_rows_delta() with row-hash diffing matching SQLite's replace_projection_with_version() pattern
 - [ ] [#surreal-multiproc] Multi-process lock behavior: write conformance test with N concurrent reader processes + 1 writer against same SurrealKV path; document lock contention, stale-read behavior, and crash recovery (SPEC.md:304 promotion gate)
 - [ ] [#surreal-rt-pool] Shared tokio runtime: accept external Runtime reference or use lazy static instead of per-store Runtime::new()
 - [ ] [#surrealbulk-close] Close #surrealbulk review item: re-run benchmarks, update SPEC.md benchmark table, mark done

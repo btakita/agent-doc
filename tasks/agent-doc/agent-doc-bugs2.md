@@ -63,7 +63,24 @@ Top backlog priority after this cycle:
 2. **#t9xf** — stdout bleed over OpenCode UI (needs reproduction)
 3. **#0ada** — queue not clearing in OpenCode sessions
 4. **#7fmb** — OpenCode TUI prompt navigation broken
-<!-- agent:boundary:ceb8af0e -->
+
+### Re: screenshots + next-steps — glm-5.1
+
+**Screenshots:** Cannot evaluate `img_16.png`–`img_18.png` — GLM-5.1 has no vision capability. These require a vision-capable session (OpenAI/Anthropic API provider) or manual review. The screenshots relate to #t9xf (stdout bleed) and #7fmb (TUI navigation). Item #img-review in review tracks this block.
+
+**Backlog priority order (top first):**
+
+| # | ID | Description |
+|---|------|-------------|
+| 1 | **#4h81** | Codex Capacity Proof incorrectly runs in OpenCode harness |
+| 2 | **#t9xf** | stderr logs bleed over OpenCode UI |
+| 3 | **#0ada** | Queue not clearing when all items complete in OpenCode |
+| 4 | **#7fmb** | OpenCode TUI prompt list navigation broken (arrow/Tab) |
+
+Top of backlog: **#4h81**
+
+These four are the highest-priority actionable items — all OpenCode-specific live bugs with no external blockers. The remaining 50 review items are gated on live-verify sessions (Paths A/B/C) or external dependencies.
+<!-- agent:boundary:4a177420 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
@@ -87,6 +104,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#9j4v] #screenshot-review-blocked #next-steps 2026-06-03: screenshots img_16-img_18 require vision-capable session for #t9xf/#7fmb diagnosis. Blocked on GLM-5.1 (no vision). Defer to API-based vision provider session.
 - [/] [#4h81] #opencode-codex-capacity-proof #agent-doc-bug 2026-06-03: Codex Capacity Proof incorrectly runs in OpenCode harness. See monsterrodholders.md session + agent-doc logs.
 - [/] [#t9xf] #opencode-log-bleed #agent-doc-bug 2026-06-03: agent-doc stderr logs bleed over the OpenCode UI. Needs reproduction to confirm source.
 - [/] [#7fmb] #opencode-prompt-navigation #agent-doc-bug 2026-06-03: OpenCode TUI prompt list cannot be navigated with arrow keys or Tab key. Enter works. Likely OpenCode TUI issue.

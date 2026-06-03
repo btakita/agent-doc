@@ -31,27 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260603-041101.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260603-041745.md`*
 
 Compacted content:
-- Archived 11 response topic(s): next steps for token, performance, and graph lookup work; #tokegate cross-surface token/performance gate; #gpackreuse cycle-scoped packet reuse; 8 more
+- Archived 1 response topic(s): reduce Code Navigation token usage
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
-### Re: reduce Code Navigation token usage — glm-5.1
-
-> **Queue prompt:**
->
-> /home/brian/work/btakita/agent-loop/src/boost-client/AGENTS.md & /home/brian/work/btakita/agent-loop/src/boost-client/src/monsterrodholders-dev/AGENTS.md has too much in the Code Navigation block. Use the runbooks and optimized session harness to reduce token usage.
-
-
-Trimmed the Code Navigation blocks in both files from ~24 lines to 7 lines each, replacing the full inline command reference with a link to the canonical `runbooks/code-navigation.md`.
-
-**Changes:**
-- `src/boost-client/AGENTS.md` — 77→59 lines (~350 tokens saved)
-- `src/boost-client/src/monsterrodholders-dev/AGENTS.md` — 148→130 lines (~350 tokens saved)
-
-Both files now carry the `tsift:code-navigation` markers and a single `tsift status` call plus a relative link to the canonical runbook, following the Library Context Policy principle of no duplication.
-<!-- agent:boundary:90bc191a -->
+<!-- agent:boundary:dd28618c -->
 <!-- /agent:exchange -->
 ###
 <!--

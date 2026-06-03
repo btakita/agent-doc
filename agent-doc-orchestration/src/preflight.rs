@@ -1689,6 +1689,116 @@ fn wait_for_typing_idle_before_mutation(file: &Path, debounce_ms: u64) -> Result
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SweepOwner {
+    pane: String,
+    source: String,
+}
+
+enum ActorSweepOwner {
+    Active(SweepOwner),
+    Inactive,
+    Unknown,
+}
+
+fn actor_sweep_owner(audit_file: &Path, root: &Path, doc_path: &Path) -> ActorSweepOwner {
+    match crate::project_controller::authoritative_actor_binding(root, doc_path) {
+        Ok(Some(record)) if record.state != crate::session_actor::ActorState::Closed => {
+            ActorSweepOwner::Active(SweepOwner {
+                pane: record.pane_id,
+                source: format!("actor:{}", record.state.as_str()),
+            })
+        }
+        Ok(Some(_)) => ActorSweepOwner::Inactive,
+        Ok(None) => ActorSweepOwner::Unknown,
+        Err(err) => {
+            eprintln!(
+                "[preflight] sweep: owner warning for {}: {}",
+                doc_path.display(),
+                err
+            );
+            crate::ops_log::log_op(
+                audit_file,
+                &format!(
+                    "foreign_owned_sweep_owner_warning file={} error={}",
+                    doc_path.display(),
+                    err.to_string().replace('\n', " ")
+                ),
+            );
+            ActorSweepOwner::Unknown
+        }
+    }
+}
+
+fn registry_sweep_owner(
+    root: &Path,
+    registry: &sessions::SessionRegistry,
+    doc_path: &Path,
+) -> Option<SweepOwner> {
+    let key = sessions::canonical_registry_key_in(root, &doc_path.to_string_lossy());
+    registry.get(&key).and_then(|entry| {
+        (!entry.pane.trim().is_empty()).then(|| SweepOwner {
+            pane: entry.pane.clone(),
+            source: "sessions.json".to_string(),
+        })
+    })
+}
+
+fn sweep_owner_for_doc(
+    audit_file: &Path,
+    root: &Path,
+    registry: &sessions::SessionRegistry,
+    doc_path: &Path,
+) -> Option<SweepOwner> {
+    match actor_sweep_owner(audit_file, root, doc_path) {
+        ActorSweepOwner::Active(owner) => Some(owner),
+        ActorSweepOwner::Inactive => None,
+        ActorSweepOwner::Unknown => registry_sweep_owner(root, registry, doc_path),
+    }
+}
+
+fn current_sweep_owner(
+    audit_file: &Path,
+    root: &Path,
+    registry: &sessions::SessionRegistry,
+    current_doc: &Path,
+) -> Option<SweepOwner> {
+    sweep_owner_for_doc(audit_file, root, registry, current_doc)
+}
+
+fn should_skip_foreign_owned_sweep(
+    audit_file: &Path,
+    doc_path: &Path,
+    current_owner: Option<&SweepOwner>,
+    sibling_owner: Option<&SweepOwner>,
+) -> bool {
+    let (Some(current_owner), Some(sibling_owner)) = (current_owner, sibling_owner) else {
+        return false;
+    };
+    if current_owner.pane == sibling_owner.pane {
+        return false;
+    }
+
+    eprintln!(
+        "[preflight] sweep: skipping {} (foreign-owned by pane {}; current owner pane {})",
+        doc_path.display(),
+        sibling_owner.pane,
+        current_owner.pane
+    );
+    crate::ops_log::log_op(
+        audit_file,
+        &format!(
+            "foreign_owned_sweep_skip file={} owner_pane={} owner_source={} current_pane={} current_source={}",
+            doc_path.display(),
+            sibling_owner.pane,
+            sibling_owner.source,
+            current_owner.pane,
+            current_owner.source
+        ),
+    );
+    true
+}
+
 /// Options controlling a `preflight` invocation.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PreflightOptions {
@@ -1968,91 +2078,108 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // from any document in the project will pick it up.
     {
         let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
-        if let Some(root) = snapshot::find_project_root(&canonical) {
-            let sessions_path = root.join(".agent-doc/sessions.json");
-            if let Ok(content) = std::fs::read_to_string(&sessions_path)
-                && let Ok(registry) = serde_json::from_str::<
-                    std::collections::HashMap<String, serde_json::Value>,
-                >(&content)
-            {
-                for entry in registry.values() {
-                    let tracked_file = entry.get("file").and_then(|v| v.as_str()).unwrap_or("");
-                    if tracked_file.is_empty() {
-                        continue;
-                    }
-                    let doc_path = root.join(tracked_file);
-                    if doc_path == canonical {
-                        continue;
-                    } // already committed in step 2
-                    if !doc_path.exists() {
-                        continue;
-                    }
-                    // snapshot mtime > last commit? Call commit (idempotent — git skips if clean).
-                    let snap_rel = match snapshot::path_for(&doc_path) {
-                        Ok(rel) => rel,
-                        Err(_) => continue,
+        if let Some(root) = snapshot::find_project_root(&canonical)
+            && let Ok(registry) = sessions::load_in(&root)
+        {
+            let current_owner = current_sweep_owner(file, &root, &registry, &canonical);
+            for (registry_key, entry) in &registry {
+                let tracked_file = if entry.file.trim().is_empty() {
+                    registry_key.as_str()
+                } else {
+                    entry.file.as_str()
+                };
+                if tracked_file.trim().is_empty() {
+                    continue;
+                }
+                let doc_path = {
+                    let path = Path::new(tracked_file);
+                    let joined = if path.is_absolute() {
+                        path.to_path_buf()
+                    } else {
+                        root.join(path)
                     };
-                    let snap_abs = root.join(&snap_rel);
-                    let snap_is_newer = (|| {
-                        let snap_mtime = std::fs::metadata(&snap_abs).ok()?.modified().ok()?;
-                        let doc_mtime = std::fs::metadata(&doc_path).ok()?.modified().ok()?;
-                        // Proxy: snap newer than doc means an agent write landed without commit
-                        Some(snap_mtime > doc_mtime)
-                    })()
-                    .unwrap_or(true); // if uncertain, try commit anyway
-                    if snap_is_newer {
-                        // Guard: don't sweep-commit if the document has user additions
-                        // that the agent hasn't responded to yet. For inline mode this
-                        // checks ## User / ## Assistant blocks; for template mode it
-                        // falls through to a content-equality check.
-                        if let (Ok(snap_content), Ok(doc_content)) = (
-                            std::fs::read_to_string(&snap_abs),
-                            std::fs::read_to_string(&doc_path),
-                        ) && !crate::diff::is_stale_snapshot(&snap_content, &doc_content)
-                        {
-                            // Not a stale inline snapshot — check content equality
-                            // (covers template mode where is_stale_snapshot always returns false)
-                            let snap_stripped = crate::diff::strip_comments(&snap_content);
-                            let doc_stripped = crate::diff::strip_comments(&doc_content);
-                            if snap_stripped.trim() != doc_stripped.trim() {
-                                eprintln!(
-                                    "[preflight] sweep: skipping {} (unresponded user content)",
-                                    doc_path.display()
-                                );
-                                continue;
-                            }
-                        }
-                        // Freshness gate: skip if another session committed this doc
-                        // within the last 5s. Inside the CommitLock critical section
-                        // this is a valid fast-path — a concurrent commit that just
-                        // ran will have advanced HEAD's commit time, so we avoid
-                        // re-spawning git (~10ms) for nothing. The gate only closes
-                        // races when paired with the per-file commit flock in git::commit.
-                        let fresh = git::last_commit_mtime(&doc_path)
-                            .ok()
-                            .flatten()
-                            .and_then(|t| t.elapsed().ok())
-                            .is_some_and(|e| e.as_secs() < 5);
-                        if fresh {
+                    std::fs::canonicalize(&joined).unwrap_or(joined)
+                };
+                if doc_path == canonical {
+                    continue;
+                } // already committed in step 2
+                if !doc_path.exists() {
+                    continue;
+                }
+                // snapshot mtime > last commit? Call commit (idempotent — git skips if clean).
+                let snap_rel = match snapshot::path_for(&doc_path) {
+                    Ok(rel) => rel,
+                    Err(_) => continue,
+                };
+                let snap_abs = root.join(&snap_rel);
+                let snap_is_newer = (|| {
+                    let snap_mtime = std::fs::metadata(&snap_abs).ok()?.modified().ok()?;
+                    let doc_mtime = std::fs::metadata(&doc_path).ok()?.modified().ok()?;
+                    // Proxy: snap newer than doc means an agent write landed without commit
+                    Some(snap_mtime > doc_mtime)
+                })()
+                .unwrap_or(true); // if uncertain, try commit anyway
+                if snap_is_newer {
+                    let sibling_owner = sweep_owner_for_doc(file, &root, &registry, &doc_path);
+                    if should_skip_foreign_owned_sweep(
+                        file,
+                        &doc_path,
+                        current_owner.as_ref(),
+                        sibling_owner.as_ref(),
+                    ) {
+                        continue;
+                    }
+                    // Guard: don't sweep-commit if the document has user additions
+                    // that the agent hasn't responded to yet. For inline mode this
+                    // checks ## User / ## Assistant blocks; for template mode it
+                    // falls through to a content-equality check.
+                    if let (Ok(snap_content), Ok(doc_content)) = (
+                        std::fs::read_to_string(&snap_abs),
+                        std::fs::read_to_string(&doc_path),
+                    ) && !crate::diff::is_stale_snapshot(&snap_content, &doc_content)
+                    {
+                        // Not a stale inline snapshot — check content equality
+                        // (covers template mode where is_stale_snapshot always returns false)
+                        let snap_stripped = crate::diff::strip_comments(&snap_content);
+                        let doc_stripped = crate::diff::strip_comments(&doc_content);
+                        if snap_stripped.trim() != doc_stripped.trim() {
                             eprintln!(
-                                "[preflight] sweep: skipping {} (committed <5s ago)",
+                                "[preflight] sweep: skipping {} (unresponded user content)",
                                 doc_path.display()
                             );
                             continue;
                         }
-                        match git::commit(&doc_path) {
-                            Ok(true) => {
-                                eprintln!("[preflight] sweep: committed {}", doc_path.display())
-                            }
-                            Ok(false) => {
-                                eprintln!("[preflight] sweep: clean {}", doc_path.display())
-                            }
-                            Err(e) => eprintln!(
-                                "[preflight] sweep: warning for {}: {}",
-                                doc_path.display(),
-                                e
-                            ),
+                    }
+                    // Freshness gate: skip if another session committed this doc
+                    // within the last 5s. Inside the CommitLock critical section
+                    // this is a valid fast-path — a concurrent commit that just
+                    // ran will have advanced HEAD's commit time, so we avoid
+                    // re-spawning git (~10ms) for nothing. The gate only closes
+                    // races when paired with the per-file commit flock in git::commit.
+                    let fresh = git::last_commit_mtime(&doc_path)
+                        .ok()
+                        .flatten()
+                        .and_then(|t| t.elapsed().ok())
+                        .is_some_and(|e| e.as_secs() < 5);
+                    if fresh {
+                        eprintln!(
+                            "[preflight] sweep: skipping {} (committed <5s ago)",
+                            doc_path.display()
+                        );
+                        continue;
+                    }
+                    match git::commit(&doc_path) {
+                        Ok(true) => {
+                            eprintln!("[preflight] sweep: committed {}", doc_path.display())
                         }
+                        Ok(false) => {
+                            eprintln!("[preflight] sweep: clean {}", doc_path.display())
+                        }
+                        Err(e) => eprintln!(
+                            "[preflight] sweep: warning for {}: {}",
+                            doc_path.display(),
+                            e
+                        ),
                     }
                 }
             }
@@ -4937,6 +5064,71 @@ mod tests {
             .ok();
 
         dir
+    }
+
+    fn commit_all(root: &Path, message: &str, commit_date: Option<&str>) {
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "."])
+            .output()
+            .unwrap();
+        let mut commit = Command::new("git");
+        commit
+            .current_dir(root)
+            .args(["commit", "-m", message, "--no-verify"]);
+        if let Some(date) = commit_date {
+            commit
+                .env("GIT_COMMITTER_DATE", date)
+                .env("GIT_AUTHOR_DATE", date);
+        }
+        let output = commit.output().unwrap();
+        assert!(
+            output.status.success(),
+            "git commit {message:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn initialize_git_head(root: &Path) {
+        let readme = root.join("README.md");
+        std::fs::write(&readme, "# project\n").unwrap();
+        commit_all(root, "initial", None);
+    }
+
+    fn write_committed_doc(
+        root: &Path,
+        rel: &str,
+        content: &str,
+        message: &str,
+        commit_date: Option<&str>,
+    ) -> PathBuf {
+        let doc = root.join(rel);
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+        commit_all(root, message, commit_date);
+        doc
+    }
+
+    fn write_sessions_json(root: &Path, entries: &[(&str, &str, &Path, &str, &str)]) {
+        let mut sessions = serde_json::Map::new();
+        for (session_id, pane, file, window, started) in entries {
+            sessions.insert(
+                (*session_id).to_string(),
+                serde_json::json!({
+                    "pane": pane,
+                    "pid": 9999,
+                    "cwd": root.to_string_lossy(),
+                    "started": started,
+                    "file": file.strip_prefix(root).unwrap().to_string_lossy(),
+                    "window": window
+                }),
+            );
+        }
+        std::fs::write(
+            root.join(".agent-doc/sessions.json"),
+            serde_json::to_string_pretty(&serde_json::Value::Object(sessions)).unwrap(),
+        )
+        .unwrap();
     }
 
     fn age_cycle_state(file: &Path, age_secs: u64) {
@@ -10284,6 +10476,176 @@ mod tests {
             count_after <= count_before + 1,
             "expected at most one new commit (primary), got {} new commits",
             count_after - count_before
+        );
+    }
+
+    #[test]
+    fn preflight_sweep_skips_foreign_owned_doc() {
+        use std::fs;
+        let dir = setup_project();
+        let root = dir.path();
+        initialize_git_head(root);
+
+        let primary_content = "---\nagent_doc_session: primary\n---\n\n## User\n\nHello\n\n## Assistant\n\nReply\n\n## User\n\n";
+        let primary = write_committed_doc(root, "primary.md", primary_content, "add primary", None);
+
+        let secondary_content = "---\nagent_doc_session: secondary\n---\n\n## User\n\nHi\n\n## Assistant\n\nResponse\n\n## User\n\n";
+        let secondary = write_committed_doc(
+            root,
+            "secondary.md",
+            secondary_content,
+            "add secondary",
+            Some("2026-01-01T00:00:00Z"),
+        );
+
+        let snap_rel = snapshot::path_for(&secondary).unwrap();
+        let snap_abs = root.join(&snap_rel);
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        fs::write(
+            &snap_abs,
+            format!("{}\n<!-- agent updated -->", secondary_content),
+        )
+        .unwrap();
+
+        write_sessions_json(
+            root,
+            &[
+                ("primary-session", "%70", &primary, "@1", "2026-01-01"),
+                ("secondary-session", "%73", &secondary, "@2", "2026-01-01"),
+            ],
+        );
+        crate::session_actor::project_binding_in(
+            root,
+            &primary.to_string_lossy(),
+            "primary-session",
+            "%70",
+            "@1",
+            "test",
+            "primary_owner",
+        )
+        .unwrap();
+        crate::session_actor::project_binding_in(
+            root,
+            &secondary.to_string_lossy(),
+            "secondary-session",
+            "%73",
+            "@2",
+            "test",
+            "secondary_owner",
+        )
+        .unwrap();
+
+        run(&primary).unwrap();
+
+        let log = Command::new("git")
+            .current_dir(root)
+            .args(["log", "--oneline", "-4"])
+            .output()
+            .unwrap();
+        let log_str = String::from_utf8_lossy(&log.stdout);
+        assert!(
+            !log_str.contains("agent-doc(secondary):"),
+            "foreign-owned secondary.md must not be sweep-committed, got:\n{log_str}"
+        );
+
+        let head_secondary = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:secondary.md"])
+            .output()
+            .unwrap();
+        let head_secondary = String::from_utf8_lossy(&head_secondary.stdout);
+        assert!(
+            !head_secondary.contains("agent updated"),
+            "foreign-owned snapshot drift must stay out of HEAD:\n{head_secondary}"
+        );
+
+        let ops_log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("foreign_owned_sweep_skip")
+                && ops_log.contains("owner_pane=%73")
+                && ops_log.contains("current_pane=%70"),
+            "foreign-owned skip should be logged for audit:\n{ops_log}"
+        );
+    }
+
+    #[test]
+    fn preflight_sweep_commits_same_owner_doc() {
+        use std::fs;
+        let dir = setup_project();
+        let root = dir.path();
+        initialize_git_head(root);
+
+        let primary_content = "---\nagent_doc_session: primary\n---\n\n## User\n\nHello\n\n## Assistant\n\nReply\n\n## User\n\n";
+        let primary = write_committed_doc(root, "primary.md", primary_content, "add primary", None);
+
+        let secondary_content = "---\nagent_doc_session: secondary\n---\n\n## User\n\nHi\n\n## Assistant\n\nResponse\n\n## User\n\n";
+        let secondary = write_committed_doc(
+            root,
+            "secondary.md",
+            secondary_content,
+            "add secondary",
+            Some("2026-01-01T00:00:00Z"),
+        );
+
+        let snap_rel = snapshot::path_for(&secondary).unwrap();
+        let snap_abs = root.join(&snap_rel);
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        fs::write(
+            &snap_abs,
+            format!("{}\n<!-- agent updated -->", secondary_content),
+        )
+        .unwrap();
+
+        write_sessions_json(
+            root,
+            &[
+                ("primary-session", "%70", &primary, "@1", "2026-01-01"),
+                ("secondary-session", "%70", &secondary, "@1", "2026-01-01"),
+            ],
+        );
+        crate::session_actor::project_binding_in(
+            root,
+            &primary.to_string_lossy(),
+            "primary-session",
+            "%70",
+            "@1",
+            "test",
+            "primary_owner",
+        )
+        .unwrap();
+        crate::session_actor::project_binding_in(
+            root,
+            &secondary.to_string_lossy(),
+            "secondary-session",
+            "%70",
+            "@1",
+            "test",
+            "secondary_owner",
+        )
+        .unwrap();
+
+        run(&primary).unwrap();
+
+        let log = Command::new("git")
+            .current_dir(root)
+            .args(["log", "--oneline", "-4"])
+            .output()
+            .unwrap();
+        let log_str = String::from_utf8_lossy(&log.stdout);
+        assert!(
+            log_str.contains("agent-doc(secondary):"),
+            "same-owner secondary.md should still be sweep-committed, got:\n{log_str}"
+        );
+
+        let head_secondary = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:secondary.md"])
+            .output()
+            .unwrap();
+        let head_secondary = String::from_utf8_lossy(&head_secondary.stdout);
+        assert!(
+            head_secondary.contains("agent updated"),
+            "same-owner snapshot drift should land in HEAD:\n{head_secondary}"
         );
     }
 

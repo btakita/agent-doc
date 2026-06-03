@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -35,16 +35,50 @@ Queue contamination cleaned. Session committed.
 Compacted content:
 - Archived 4 response topic(s): lint-gate fixes #rbwg #gf85 #0wan; vision + screenshots; next-steps; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:13d03286 -->
+
+> **[NOTIFY from codex-direct-chat]** (2026-06-03T18:31:41Z)
+> Implemented and installed the binary-side fix for the JetBrains Run Agent Doc no-dispatch stall class.
+>
+> What changed:
+> - session clear now writes a short-lived clear-cooldown marker after clear delivery.
+> - passive supervisor auto-trigger and idle-queue watch skip auto-dispatch while that marker is active, preventing an old queue_active head from firing into a freshly cleared harness context.
+> - explicit route clears the marker before dispatch, so the next operator-initiated Run Agent Doc still works normally.
+> - OpenCode /new is treated as a clear-context prompt alongside Codex /clear.
+> - route diagnostics now report the actual tracked clear prompt instead of hardcoding /clear.
+> - README/spec/editor docs were aligned with the cooldown and OpenCode /new behavior.
+>
+> Touched files:
+> - agent-doc-orchestration/src/queue_continuation.rs
+> - agent-doc-orchestration/src/start.rs
+> - agent-doc-orchestration/src/route.rs
+> - agent-doc-orchestration/src/codex_hook.rs
+> - src/session_actor_cmd.rs
+> - README.md, SPEC.md, specs/07-session-tmux-commands.md, specs/supervisor.md, editors/SPEC.md, editors/PLUGIN-SPEC.md, editors/jetbrains/SPEC.md
+>
+> Verification:
+> - cargo test -p agent-doc-orchestration clear_cooldown
+> - cargo test -p agent-doc-orchestration prompt_requests_clear
+> - cargo test -p agent-doc-orchestration idle_queue_drain
+> - cargo test -p agent-doc-orchestration auto_trigger
+> - cargo test -p agent-doc-orchestration resume_handoff_failed
+> - cargo check -p agent-doc --bin agent-doc
+> - cargo install --path .
+> - agent-doc --version -> agent-doc 0.34.0
+>
+> Installed CLI: /home/brian/.cargo/bin/agent-doc is rebuilt from this checkout.
+>
+> Remaining note: src/agent-doc already had unrelated dirty vision-config/describe-image edits and untracked JetBrains attempt-ledger files before this fix; I left those in place.
+>
+> **Re-evaluate:** #agent-doc-bug JB Run Agent Doc no-dispatch stall
+<!-- agent:boundary:6e801aa1 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- ~Is vision currently working with OpenCode using GLM-5.1? If no, please configure agent-loop vision to work with OpenCode GLM-5.1.~
-- ~complete #ec9k~
-- Please evaluate recent screenshots and add #next-steps for the related tasks.
-- ~do [#gf85]~
-- ~do [#0wan]~
-- ~do [#rbwg]~
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+- #4h81
+- #t9xf
+- #0ada
+- #7fmb
+- do [#9j4v]
 <!-- /agent:queue -->
 ###
 <!--

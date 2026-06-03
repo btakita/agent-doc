@@ -36,7 +36,17 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 11 response topic(s): next steps; #astspansearch; #astspansearch closeout recovery; 8 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:2b4d2114 -->
+❯ What are #next-steps to save tokens, improve performance, and improve graph lookups?
+### Re: next steps for token, performance, and graph lookup work — gpt-5
+
+Top backlog item: `#tokegate`.
+
+I added five active backlog items in priority order. The sequence is: instrument token/perf first, reuse packets inside one agent-doc cycle, promote ranked neighborhoods only after quality gates, then tune SQLite frontier/hop behavior based on measured hotspots, with readiness checks preventing stale or low-signal graph expansion.
+
+The highest leverage work is not swapping databases yet. `src/tsift/SPEC.md` already requires backend-eval and hop-cap promotion gates, and the code already has `next_token_actions`, `GraphEffectivenessReadiness`, `GraphStore::ranked_neighborhood`, and conflict-matrix preparation caching. The gap is turning those surfaces into a visible release gate that proves lower token output and better lookup quality across real sessions.
+
+Commands/proof: ran `agent-doc preflight`, `agent-doc read`, `agent-doc orchestrate --from-exchange --plan`, `agent-doc plan`, `tsift status --fix`, `tsift index --workspace .`, targeted `tsift --envelope search`, and source/spec reads. No code changed, so no build suite was required.
+<!-- agent:boundary:e6647987 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -51,6 +61,11 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#tokegate] Add a cross-surface token/performance gate for context-pack, session-review --next-context, graph-db evidence, conflict-matrix, and dispatch-trace: benchmark representative agent-doc sessions and graph queries; record prompt tokens, envelope bytes, runtime, cache-hit rate, raw-read avoidance, and useful-hit density; fail CI on regressions.
+- [ ] [#gpackreuse] Reuse graph/context packets across a single agent-doc cycle: share graph-db status/refresh, evidence, conflict-matrix preparation, context-pack diff, and impact packets by source/document/staged-diff watermark; prove repeated calls report skipped phases and stable packet ids.
+- [ ] [#rankdefault] Promote ranked_neighborhood into default graph lookup/context-pack/evidence output only after quality gates pass; compare ranked vs unranked output on real backlog/code queries for useful-hit density, duplicate-name precision, handle coverage, latency, and emitted tokens.
+- [ ] [#gfrontierhot] Run three-sample performance triage for SQLite neighborhood/path/evidence/related lookups on real, full-projection, high-degree, and deep-chain workloads; optimize recursive frontier expansion or hop caps only where metrics show a hotspot.
+- [ ] [#greadiness] Make graph-readiness states actionable at the lookup boundary: if summaries, tagpath handles, graph freshness, or scoped indexes are missing, emit exact repair commands and suppress broad low-signal graph expansion.
 <!-- /agent:backlog -->
 
 ## Review

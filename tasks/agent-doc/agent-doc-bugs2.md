@@ -135,7 +135,24 @@ Ran a 62-agent parallel audit (workflow `wf_cd16dc68-3ed`, ~12 min, one agent pe
 - `queue-auto-no-continue` — needs a decision: is shadow-item queue-block by-design (warning-only) or a bug? Add a deterministic test once decided.
 
 Full per-item verdicts: workflow result `wf_cd16dc68-3ed`. The 44 live-verify items are best batched in a dedicated live tmux session (several already clustered under `#v819`/`#jkvs`).
-<!-- agent:boundary:b4a984c7 -->
+
+### Re: do [#opencode-post-turn-false-active] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#opencode-post-turn-false-active]
+
+
+Implemented (Option A from the plan) and verified.
+
+**Root cause:** `dispatch_blocker_reason`'s OpenCode branch scanned **all** captured lines for non-idle content. After the first turn, the pane keeps completed-turn output in scrollback (bash commands, `Thought:`, `Click to expand`) which is non-chrome → `has_non_idle_content=true`; OpenCode's idle state renders no standalone `>` prompt → `has_ready_prompt=false`; result: a false `"opencode active turn"` that stalled dispatch-only reopen. (Distinct from `#opencode-build-chrome-stall`, which was the `Build · MODEL` chrome line.)
+
+**Fix** (submodule `c49a7bba`): mirror the Claude branch — check only the bottom 12 lines for a genuine busy cue via new `opencode_active_turn_busy`, keyed on `esc to interrupt` (the `Working (Ns - esc to interrupt)` banner). This deliberately excludes the idle `esc interrupt` hint (no "to") and completed-turn scrollback. Dropped the all-lines `has_non_idle_content && !has_ready_prompt` heuristic entirely.
+
+**Tests:** 2 new regression tests — `dispatch_blocker_reason_post_turn_output_with_idle_bottom` (scrollback above idle bottom → `None`/dispatchable) and `dispatch_blocker_reason_post_turn_with_active_working_bottom` (live `Working (…)` at bottom → blocks). Existing `dispatch_blocker_reason_detects_opencode_active_turn` and `…_allows_opencode_idle_build_chrome` stay green. `make check` green; both binaries rebuilt + installed. Plan updated: `tasks/agent-doc/plan-opencode-post-turn-false-active.md`.
+
+**Remaining:** live-verify a real OpenCode pane re-dispatches after a completed turn (the risk is low — the `Working` banner always renders at the bottom of an active pane).
+<!-- agent:boundary:e93a6abb -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
@@ -146,7 +163,8 @@ Full per-item verdicts: workflow result `wf_cd16dc68-3ed`. The 44 live-verify it
 - ~JB `Clear Session Context` does not work with OpenCode. This is a long-standing issue. Look at attempt with tsift.md in the logs.~
 - ~Error in OpenCode `  ┃  Error: malformed template patchback: found patch/replace markers but no closed patch blocks parsed; refusing to append unmatched content` when running tsift.md~
 - ~Go through all review items. If logs are in place to confirm the completion, complete the review item. If logs are in place to deny the completion, keep the review item. If logs are missing to confirm or deny the completion, add logs to confirm/deny the review item.~
-- do [#opencode-post-turn-false-active]
+- ~do [#opencode-post-turn-false-active]~
+- do [#codex-final-response-repeat]
 <!-- /agent:queue -->
 ###
 <!--
@@ -159,7 +177,6 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Backlog
 
 <!-- agent:backlog priority queue=append -->
-- [ ] [#opencode-post-turn-false-active] #agent-doc-bug 2026-06-03: JB Run Agent Doc stalls after first turn — dispatch-only reopen refuses because OpenCode pane shows completed turn output in scrollback, triggering false 'opencode active turn'. dispatch_blocker_reason scans ALL lines for non-idle content; completed turn output (bash commands, Thought:, Click to expand) is non-chrome, so has_non_idle_content=true while has_ready_prompt stays false (OpenCode idle state has no standalone > prompt). Fix: mirror Claude's bottom-N-lines busy-cue check instead of all-lines non-idle scan. Plan: tasks/agent-doc/plan-opencode-post-turn-false-active.md
 - [ ] [#codex-final-response-repeat] #agent-doc-bug 2026-06-03: `src/boost-client/tasks/monsterrodholders.md` had a completed/deployed Codex closeout for the PDP fit-guide spacing task, but the final chat response was not appended to the document's `agent:exchange`; the user had to request manual writeback. Treat as new evidence for the owned-pane/direct-chat final-response patchback guard. Existing plan updated: tasks/agent-doc/plan-codex-final-response-not-written.md. Do not implement in this cycle.
 <!-- /agent:backlog -->
 

@@ -116,7 +116,6 @@ Queue items & backlog items were nat marked done when the task completed during 
 - [#xsp1]
 - [#r0jv]
 - [#ktrs]
-- [#vftn]
 - [#r54f]
 <!-- /agent:queue -->
 

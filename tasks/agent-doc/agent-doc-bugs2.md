@@ -31,33 +31,16 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260603-023151.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260603-025016.md`*
 
 Compacted content:
-- Archived 7 response topic(s): Run the lazily-rs Codex Close-hook scope-spillage plan; tsift focus goes into the stash; do #ipc-admin-api; 4 more
+- Archived 1 response topic(s): do #route-reaps-idle-fresh-start
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: do #route-reaps-idle-fresh-start — opus-4-8
-
-> **Queue prompt:**
->
-> do [#route-reaps-idle-fresh-start]
-
-
-**Implemented the deterministic fix.** The bug: route's fresh-start success criterion was "the agent acknowledged a *document cycle* after consuming the trigger" — which conflates a genuine failed start with a healthy start whose first cycle is a legitimate **no-op** (empty/halted queue, `preflight` `no_changes`). A no-op acknowledges nothing, so route reaped the pane → "I cannot start lazily-rs.md, killed immediately."
-
-**Fix** (`route.rs`, at the no-ack branch — the trigger is already proven dispatched there): re-check the pane. If it has returned to a harness **dispatch-ready prompt**, the agent is alive and idle, so keep the live idle session and clear the startup-miss. Only reap when the pane is **not** dispatch-ready (never-ready / hung — a real miss). The decision is a new pure classifier `FreshStartAckOutcome { CycleAcknowledged, IdleNoOpKeep, GenuineMissReap }` that reuses the already-tested `ready_prompt_candidate` discriminator, so genuine-miss reaping is unchanged.
-
-- **Test:** `fresh_start_ack_outcome_keeps_idle_no_op_and_reaps_genuine_miss` — cycle-acked → normal; no cycle + codex idle-ready capture → **keep**; no cycle + status-footer-only capture → **reap**.
-- `route::` suite **141 passed**; `make check` green; both binaries rebuilt + installed. Submodule `8451143a`, superproject `5b10b7ffd`.
-
-**Gated** (`#route-reaps-idle-fresh-start`) on the live end-to-end repro — start a real idle `lazily-rs.md` codex session (empty queue, the slow gpt-5.5 xhigh cold start that originally pushed trigger-consumption past the wait window) and confirm the pane now **stays alive** instead of being reaped. I marked it gated rather than done because that live path is exactly the aggravator I can't reproduce deterministically here. `#spec-test-build-install-commit-push` from this turn's batch is otherwise satisfied (spec/plan ✓ test ✓ build ✓ install ✓ commit ✓ push pending below).
-<!-- agent:boundary:104ed7a5 -->
+<!-- agent:boundary:69c9a014 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- ~do [#route-reaps-idle-fresh-start]~
 - do [#admin-fleet-dashboard]
 - JB `Clear Session Context` does not work with OpenCode. This is a long-standing issue. Look at attempt with tsift.md in the logs.
 - Error in OpenCode `  ┃  Error: malformed template patchback: found patch/replace markers but no closed patch blocks parsed; refusing to append unmatched content` when running tsift.md

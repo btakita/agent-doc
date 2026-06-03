@@ -30,115 +30,15 @@ Queue contamination cleaned. Session committed.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260603-165945.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260603-172507.md`*
 
 Compacted content:
-- Archived 12 response topic(s): stdout bleed behind OpenCode TUI; stdout bleed; JB Run Agent Doc / Compact Exchange malforms OpenCode TUI; 9 more
+- Archived 4 response topic(s): Codex owned-pane recursive deadlock recovery; Documentation for agent-doc config and env variables; do #9117 config-env-vars-doc; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: Codex owned-pane recursive deadlock recovery — opencode
-
-The kill-pane + auto-start approach fails because the new pane inherits the same document ownership via the session registry. The registry entry maps the document to the old Codex pane, so even after kill-pane, the next agent-doc start or route sees the stale registry entry and either re-assigns to the same slot or the auto-started pane re-registers under the same document.
-
-**Current recovery options (manual):**
-
-1. `agent-doc session clear <FILE>` — clears the busy guard and actor state for the document, then route can dispatch to a fresh pane. This is the correct first step after kill-pane before starting a new supervisor.
-2. `agent-doc session interrupt-clear <FILE>` — sends interrupt sequences to the stuck pane then clears state. Stronger than plain clear for a pane with an active turn.
-3. `agent-doc route <FILE>` — after clearing, this dispatches to whatever pane is now available (fresh or existing).
-4. `agent-doc transfer <SOURCE> <TARGET> --bypass-claim` — if the issue is cross-document, transfer all content/state to a new document and abandon the stuck source.
-
-**Why kill-pane alone is insufficient:** The session registry (sessions.json) and the project controller actor state persist beyond the pane. kill-pane removes the tmux pane but leaves the registry pointing to a dead pane. The next route or start sees a dead registered pane, reaps it, then cold-starts a new one — but if the document's cycle_state still shows an open cycle (preflight_started / response_captured), the new pane inherits the abandoned state and the same issue recurs.
-
-**Recommended robust recovery flow:**
-
-    agent-doc session clear <FILE>
-    agent-doc repair <FILE>
-    agent-doc route <FILE>
-
-Or the single-command repair:
-
-    agent-doc repair --apply-recovery <FILE>
-    agent-doc route <FILE>
-
-**What we should implement for a more robust solution (plan addition):**
-
-A dedicated `agent-doc recover-ownership <FILE>` command that atomically: (1) clears session actor state + cycle state, (2) reaps the dead/stuck pane from the registry, (3) classifies and applies any closeout recovery (from CloseoutRecoveryState), (4) starts a fresh supervisor in a new pane, (5) routes the document to the new pane. This would replace the 3-step manual flow with one command. It is a natural composition of existing primitives (session clear + repair + route). Adding this to backlog.
-
-### Re: Documentation for agent-doc config and env variables — opencode
-
-**Existing documentation:**
-
-- `src/agent-doc/specs/06-config.md` — comprehensive spec covering global config, project config, agent args resolution chains, IPC, and the opt-in document gate
-- `src/agent-doc/docs/getting-started/configuration.md` — quick-start guide (basic fields table + resolution order + per-document overrides)
-
-The existing docs cover the config file well but omit environment variables entirely. Here is the complete env var reference:
-
-#### Runtime Tuning
-
-- `AGENT_DOC_LOG` — structured log filter (e.g. `debug`, `agent_doc::preflight=debug`)
-- `AGENT_DOC_RUN_AGENT_TIMEOUT_SECS` — max agent run time before timeout (default 1800, 30 min)
-- `AGENT_DOC_RUN_HEARTBEAT_SECS` — run heartbeat interval (default 30)
-- `AGENT_DOC_QUEUE_MAX_ITERATIONS_HARD_CAP` — hard cap on auto-loop queue iterations (default 50)
-- `AGENT_DOC_TSIFT_BIN` — override tsift binary path
-- `AGENT_DOC_TSIFT_GRAPH_TIMEOUT_SECS` — tsift graph query timeout
-
-#### Harness Detection (read by detect_harness)
-
-- `CLAUDE_CODE_SESSION` / `CLAUDE_CODE` / `CLAUDECODE` — Claude Code
-- `CODEX_SESSION` / `CODEX_THREAD_ID` / `CODEX_CLI` / `CODEX` — Codex
-- `OPENCODE_CLIENT` / `OPENCODE` — OpenCode
-
-#### Harness Arg Overrides (lowest precedence in resolution chain)
-
-- `AGENT_DOC_CLAUDE_ARGS` — Claude CLI args (below frontmatter + config)
-
-#### Testing / Debug
-
-- `AGENT_DOC_NO_AUTOSTART` — prevent auto-start of new agent panes
-- `AGENT_DOC_ROUTE_BIN` — override agent-doc binary for route dispatch
-- `AGENT_DOC_DEBUG_FILTER` — debug filter for supervisor start
-- `AGENT_DOC_DEBUG_STDIN` — debug stdin for supervisor start
-- `AGENT_DOC_ALLOW_REPLACE_PENDING` — allow replacing pending items
-- `AGENT_DOC_ALLOW_PATCH_PENDING` — legacy alias for above (deprecated)
-- `AGENT_DOC_HARNESS_PROMPT` — override harness prompt detection
-- `AGENT_DOC_TEST_ABORT_AFTER_RUN_WRITE_APPLIED` — test-only abort after write phase
-- `AGENT_DOC_BUILD_TIMESTAMP` — compile-time build timestamp (set by build.rs)
-- `AGENT_DOC_PTY_PARENT_LEAK` — PTY parent leak detection marker
-
-#### Vision
-
-- `AGENT_DOC_VISION_PROVIDER` — vision provider override (e.g. openai)
-- `AGENT_DOC_VISION_API_KEY` — vision API key
-- `AGENT_DOC_VISION_MODEL` — vision model override
-- `AGENT_DOC_VISION_ENDPOINT` — vision endpoint override
-
-#### Probe Markers (set by child processes)
-
-- `AGENT_DOC_NETWORK_PROBE_OK` — Codex child network probe success
-- `AGENT_DOC_WRITABLE_ROOT_PROBE_OK` — Codex child writable root probe
-- `AGENT_DOC_OPENCODE_SSH_PROBE_OK` — OpenCode child SSH probe
-
-#### Config File Locations
-
-- Global config: `XDG_CONFIG_HOME/agent-doc/config.toml` (falls back to `HOME/.config/agent-doc/config.toml`)
-- Project config: `.agent-doc/config.toml` relative to project root
-
-I recommend updating `docs/getting-started/configuration.md` with this env var reference. Adding to backlog.
-
-### Re: do #9117 config-env-vars-doc — opencode
-
-Updated `src/agent-doc/docs/getting-started/configuration.md` with complete environment variable reference covering runtime tuning, harness detection, vision, testing/debug, and probe markers. Also added project config section with SSH config and component config examples.
-
-### Re: do #ec9k recover-ownership-command — opencode
-
-#ec9k remains gated pending planning. The manual session clear + repair + route recovery flow documented in the previous response is the current workaround.
-<!-- agent:boundary:cac5fba3 -->
+<!-- agent:boundary:be597f37 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- re tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md: What is the recovery mechanism for "still blocked from
-  inside this owned Codex pane because it would recursively invoke itself"? I tried `kill-pane` and auto-starting a new tmux pane + supervisor. But the same issue persists. Can we have a more robust solution?
-- Please create documentation for the agent-doc config file and the env variables.
 <!-- /agent:queue -->
 ###
 <!--

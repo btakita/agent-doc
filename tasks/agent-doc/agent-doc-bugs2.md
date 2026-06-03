@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -54,12 +54,25 @@ Updated #t9xf text: *agent-doc stderr/stdout logs bleed over the OpenCode UI. Co
 Confirmed: response patch from prior finalize attempt landed in the exchange. Re-running to clear the lint-gate block.
 
 The lint findings are false positives caused by component-name substrings (`agent:backlog`, `agent:queue`) appearing inside review item description text, not actual structural mismatches.
-<!-- agent:boundary:d5e46593 -->
+
+### Re: JB Run Agent Doc / Compact Exchange malforms OpenCode TUI — opus-4-6
+
+> **Queue prompt:**
+>
+> JB `Run Agent Doc` after JB `Clear Session Context` and JB `Compact Exchange` malforms opencode tui. ![img_18.png](img_18.png)
+
+
+Cannot view img_18.png (model does not support image input).
+
+This extends the #t9xf bleed/corruption pattern: after JB `Clear Session Context` and `Compact Exchange`, a subsequent JB `Run Agent Doc` malforms the OpenCode TUI. The sequence (Clear → Compact → Run Agent Doc) suggests the TUI state is corrupted by agent-doc's stdout/stderr during the JB operations, and the subsequent dispatch renders into a malformed terminal state.
+
+This may be a compound trigger: the IPC/write activity from `Clear Session Context` and `Compact Exchange` both emit output that the OpenCode TUI cannot contain, leaving the terminal in a dirty state that `Run Agent Doc` then inherits.
+
+Updated #t9xf scope: the bleed is not limited to `Clear Session Context` — JB `Compact Exchange` also triggers it, and the accumulated corruption affects subsequent `Run Agent Doc` dispatches.
+<!-- agent:boundary:421d3b82 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- ~JB `Clear Session Context` results with opencode having stdout bleed behind the opencode TUI. ![img_17.png](img_17.png)~
-- JB `Run Agent Doc` after JB `Clear Session Context` and JB `Compact Exchange` malforms opencode tui. ![img_18.png](img_18.png)
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 ###
 <!--

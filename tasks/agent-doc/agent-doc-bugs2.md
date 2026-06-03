@@ -103,11 +103,30 @@ No. OpenCode's Task tool launches subagents but they run the same model (GLM). T
 
 Top of backlog: **#t9xf**.
 I ran `npm i -g @ai-sdk/openai-compatible`. How can we ensure the GLM model supports vision?
-<!-- agent:boundary:5d53d7bd -->
+
+### Re: GLM vision support — opus-4-6
+
+> I ran `npm i -g @ai-sdk/openai-compatible`. How can we ensure the GLM model supports vision?
+
+The `@ai-sdk/openai-compatible` SDK package does not control vision capability — that depends on the model. The current model (`glm-5.1`) does not support images.
+
+The vision-capable GLM model is **`zai-coding-plan/glm-5v-turbo`** (the `v` = vision). Available in your OpenCode provider. To switch:
+
+1. Open OpenCode TUI → settings/model selector, or
+2. Update `opencode.jsonc` to set the model to `zai-coding-plan/glm-5v-turbo`, or
+3. In a new OpenCode session, select `glm-5v-turbo` as the model.
+
+Once on `glm-5v-turbo`, invoke `agent-doc claim tasks/agent-doc/agent-doc-bugs2.md` and view img_17/img_18 to diagnose #t9xf.
+
+> do [#img-review]
+
+Blocked — this model (`glm-5.1`) cannot view images. Gated #img-review pending vision-capable model switch.
+<!-- agent:boundary:99dcae97 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
-- I ran `npm i -g @ai-sdk/openai-compatible`. How can we ensure the GLM model supports vision?
+- ~I ran `npm i -g @ai-sdk/openai-compatible`. How can we ensure the GLM model supports vision?~
+- do [#img-review]
 <!-- /agent:queue -->
 ###
 <!--
@@ -122,7 +141,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#img-review] #img-17-18-review #agent-doc-bug 2026-06-03: review img_17.png and img_18.png from a vision-capable session to diagnose #t9xf stdout bleed and TUI corruption. Blocked on GLM model (no image support).
 - [/] [#4h81] #opencode-codex-capacity-proof #agent-doc-bug 2026-06-03: Codex Capacity Proof incorrectly runs in OpenCode harness. See monsterrodholders.md session + agent-doc logs.
 - [/] [#t9xf] #opencode-log-bleed #agent-doc-bug 2026-06-03: agent-doc stderr logs bleed over the OpenCode UI. Needs reproduction to confirm source.
 - [/] [#7fmb] #opencode-prompt-navigation #agent-doc-bug 2026-06-03: OpenCode TUI prompt list cannot be navigated with arrow keys or Tab key. Enter works. Likely OpenCode TUI issue.
@@ -132,6 +150,7 @@ What are #next-steps to fix bugs?
 ## Review
  
 <!-- agent:review -->
+- [/] [#img-review] #img-17-18-review #agent-doc-bug 2026-06-03: review img_17.png and img_18.png from a vision-capable session to diagnose #t9xf stdout bleed and TUI corruption. Blocked on GLM model (no image support).
 - [/] [#opencode-jb-stall] #agent-doc-bug 2026-06-03: JB `Run Agent Doc` stalls in an OpenCode session. Related to #opencode-post-turn-false-active (implemented, needs live-verify — bottom-12-lines busy-cue fix), #jbrunstallreg (plugin-side stage ledger, needs live-verify), and #opencode-preset-not-dispatched (in review). Plan: live-verify the installed binary + JB plugin to confirm the stall is resolved by the false-active-turn fix.
 - [/] [#codex-final-response-repeat] #agent-doc-bug 2026-06-03: LOG REVIEW 2026-06-03 second pass: searched ops.log, the active b26b9957 session log, debug.log.2026-06-03, and recent Codex artifacts for the monsterrodholders PDP missing-response case. No log shows that missing assistant response failing closed before final chat output. Keep open as recurrence evidence for the owned-pane/direct-chat final-response patchback guard. Existing plan: tasks/agent-doc/plan-codex-final-response-not-written.md. Do not implement in this cycle.
 - [/] [#opencode-preset-not-dispatched] #agent-doc-bug 2026-06-02: LOG REVIEW 2026-06-03 confirms still incomplete: ops.log has accepted-only route proof for agent-doc-bugs2.md at 1780457647, not dispatch-start/consumed proof. The preset may have reached pane input acceptance, but logs do not show OpenCode consumed it. Keep dependent on #opencode-build-chrome-stall fix or manual pane recovery.

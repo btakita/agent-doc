@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 
@@ -204,7 +204,11 @@ Yes — consolidation would likely **hurt** performance under contention. The cu
 4. **SPEC confirms** (line 298): *"Keep one context-level graph synchronization primitive until benchmark instrumentation shows a finer-grained design improves the relevant workload."* The per-slot granularity is the *finer-grained* design; the SPEC wants evidence before committing to it, not removing it.
 
 **Recommendation:** Keep #r0jv deferred or close it. The ~400 bytes per-slot sync overhead is negligible at realistic scale (<400KB for 1000 slots). If profiling ever shows per-slot lock contention dominating, the safer path is switching `std::sync` → `parking_lot` (same structure, lower overhead) rather than merging locks.
-<!-- agent:boundary:860134a5 -->
+
+### Re: Queue update — glm-5.1
+
+Closed `#r0jv` from queue and backlog (accepted recommendation to keep deferred — sync primitive consolidation would hurt performance under contention). Auto queue re-enabled with `#spec-test-build-install-commit-push` preset. Next in queue: `#r54f` (SmallVec vs Vec benchmarking).
+<!-- agent:boundary:b0e5a37f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -217,7 +221,6 @@ Yes — consolidation would likely **hurt** performance under contention. The cu
 - ~[#f5jz]~
 - ~[#rvjd]~
 - ~[#xsp1]~
-- [#r0jv]
 - [#r54f]
 - JB `Clear Session Context` successfully ran `/new` but the restarted session should not run agent-doc. #agent-doc-bug
 <!-- /agent:queue -->
@@ -236,7 +239,6 @@ Yes — consolidation would likely **hurt** performance under contention. The cu
 ## Icebox
 
 <!-- agent:icebox -->
-- [ ] [#r0jv] #lazyperf21 Consolidate ThreadSafeSlotFastPath synchronization primitives — currently 4 mutexes + 2 Condvars + 3 atomics per slot (~400+ bytes overhead); restructure to 1-2 locks + atomics
 <!-- /agent:icebox -->
 
 ## Completed / Reaped

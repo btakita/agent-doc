@@ -30,61 +30,12 @@ Codex review log pass completed; no reviewed item met the complete threshold.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260603-050106.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260603-144303.md`*
 
 Compacted content:
-- Archived 2 response topic(s): log-backed review audit; Codex review log pass
+- Archived 3 response topic(s): backlog attribute edit + next steps; queue items codex-403-429-fallback, codex-network-access-opencode-guard, 7az7; fix three preflight warnings
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: backlog attribute edit + next steps — opencode
-
-Acknowledged the `queue=append` → `queue` attribute change. Preflight surfaced three warnings:
-
-1. **inactive_queue_residue** — `agent:queue` is inactive but still contains the two `do` directives. These are not executable until the queue is reactivated.
-2. **post_exchange_comment_prompt_preset** — the HTML comment below `###` references `#spec-test-build-install-commit-push` and `#next-steps` but sits outside `agent:exchange`, so agent-doc treats it as a non-executable note. Move it into `agent:exchange` or `agent:queue` if you want it to run.
-3. **misplaced_component_attr** — `preset="#spec-test-build-install-commit-push"` on `&lt;!-- agent:queue --&gt;` is not a recognized attribute. The auto-loop only triggers from `&lt;!-- agent:queue auto --&gt;`.
-
-**Stripped code fence** — the code fence in the post-exchange comment was likely removed during a prior compact or stream-merge cycle. If you need the fenced content preserved, place it inside `agent:exchange` or a plan file.
-
-**Next steps (top of backlog):**
-
-|#id|Description|Action|
-|---|-----------|------|
-|#codex-403-429-fallback|Codex WS 403 → HTTPS 429 fallback detection + diagnostic|Create plan: detect 403-on-WS → 429-on-HTTPS pattern in codex transport, surface transport-rejection vs routing-failure diagnostic, add retry/backoff guidance|
-|#codex-network-access-opencode-guard|Guard codex_network_access for non-Codex agents|Create plan: warn or ignore `codex_network_access` when agent ≠ codex; prevent false network-access assumption in opencode sessions|
-
-### Re: queue items codex-403-429-fallback, codex-network-access-opencode-guard, 7az7 — opencode
-
-All three queue items **implemented + tested + installed**.
-
-**#codex-403-429-fallback** — Transport rejection detection in `agent/codex.rs`: `looks_like_codex_transport_403_429()` detects 403 Forbidden on WebSocket handshake and/or 429 Too Many Requests on HTTPS fallback in subprocess stderr. `format_transport_403_429_diagnostic()` emits a clear diagnostic distinguishing transport rejection from agent-doc routing failure, with recovery guidance. Hooked into both non-streaming `send_once()` and streaming `StreamIterator::next()` error paths. 5 unit tests. Spec updated. Plan: `tasks/agent-doc/plan-codex-403-429-fallback.md`.
-
-**#codex-network-access-opencode-guard** — Preflight warning `codex_network_access_non_codex_harness` in `preflight.rs` fires when `codex_network_access` is set but the active harness is not codex. Runtime paths already guarded. Unit test. Plan: `tasks/agent-doc/plan-codex-network-access-opencode-guard.md`.
-
-**#7az7** — Post-clear auto-queue stall suppression. `prompt_requests_clear()` now recognizes `/new` (OpenCode). Clear-cooldown marker infrastructure in `queue_continuation.rs`: `write_clear_cooldown()`, `is_in_clear_cooldown()`, `clear_cooldown_on_explicit_invoke()`. Session clear writes the 60s cooldown marker. Idle-queue-watch and auto-trigger skip injection during cooldown. Route clears cooldown on explicit invoke. Step 7 (preflight diagnostic) deferred. Plan: `tasks/agent-doc/plan-post-clear-auto-queue-suppress.md`.
-
-All tests green. `cargo clippy -- -D warnings` clean. Binary installed.
-❯ Fix these issues that occurred after an OpenCode queue run:
-```
-Warnings:
-1. inactive_queue_residue — agent:queue is inactive but contains leftover items; only active queue state is               executable.
-2. post_exchange_comment_prompt_preset — A post-exchange HTML comment references #spec-test-build-install-                commit-push and #next-steps as non-executable notes. Move into agent:exchange or agent:queue if they should            run.
-3. misplaced_component_attr — preset on agent:queue is not a recognized attribute (possible typo).                                                                                                                                            Make edits to the document and re-invoke /agent-doc to start a new cycle
-```
-### Re: fix three preflight warnings — opencode
-
-All three warnings fixed in `preflight.rs`, `tagpath/src/lint/agent_doc.rs`, and spec files.
-
-**1. `inactive_queue_residue`** — Removed the `snapshot_proves_queue_was_active(file)` gate from the drained-residue cleanup path (`preflight.rs:3732`). When all queue entries are Completed/Preset/Dispatch (no live prompts), the queue body is now always cleared regardless of whether the snapshot proves prior activation. Completed items are never re-executable, so retaining them is always noise. Test: `preflight_clears_completed_non_auto_queue_without_snapshot_proof`.
-
-**2. `misplaced_component_attr`** — Added `preset` to `QUEUE_ONLY_COMPONENT_ATTRS` (`preflight.rs:727`) so `<!-- agent:queue preset="..." -->` is recognized as a valid queue-only attribute. Also added `auto` and `preset` to the tagpath lint `allowed_attrs` for `agent:queue` (`tagpath/src/lint/agent_doc.rs:540`). Tests: `misplaced_component_attr_warning_allows_preset_on_queue`, `misplaced_component_attr_warning_flags_preset_on_non_queue`.
-
-**3. `post_exchange_comment_prompt_preset`** — Added `comment_is_user_note()` heuristic (`preflight.rs:844`) that recognizes post-exchange HTML comments containing both a markdown horizontal rule (`---` on its own line) and prose text as user notes, suppressing the warning. This handles the case where a code fence was stripped and the content became a plain comment with `---` separator and preset references mixed with prose. Test: `post_exchange_comment_with_horizontal_rule_and_prose_is_user_note`.
-
-**Bonus: tagpath lint code-span fix** — `scan_comments()` in `tagpath/src/lint/agent_doc.rs` now skips HTML comments inside inline code spans (backtick-delimited) and fenced code blocks (```-delimited). Previously, `` `<!-- agent:backlog queue -->` `` inside a backlog item's text was parsed as a real component opener, causing spurious `duplicate-component` and `unclosed-component` lint findings. Tests: `html_comment_inside_inline_code_not_parsed`, `html_comment_inside_code_fence_not_parsed`.
-
-All tests green. `make check` clean. Binary installed.
-<!-- agent:boundary:16dd8d7d -->
+<!-- agent:boundary:70e4ad29 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->

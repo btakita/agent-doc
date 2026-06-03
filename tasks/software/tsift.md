@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -142,7 +142,53 @@ for i in 1 2 3; do
   tsift graph-db --json backend-eval --candidate surrealdb --full-projection --target gval
 done
 ```
-<!-- agent:boundary:995a6ba4 -->
+- What are #next-steps to improve AST navigation for Claude Code, Codex, OpenCode
+❯ - What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status and performance?
+
+### Re: #next-steps for AST navigation + SurrealDB promotion — glm-5.1
+
+#### AST Navigation Improvements for Claude Code, Codex, OpenCode
+
+**Current state by harness:**
+
+| Capability | Claude Code | Codex | OpenCode |
+|-----------|-------------|-------|----------|
+| Init command | `tsift init` (default) | `tsift init --codex` | `tsift init --opencode` |
+| Auto-reindex | `UserPromptSubmit` hook | `UserPromptSubmit` hook | Manual `/tsift-status --fix` |
+| Search/diff rewrite | `PreToolUse` hook (automatic) | Manual `tsift rewrite --run` | Manual `/tsift-rewrite-run` |
+| Command shortcuts | N/A (hooks handle it) | N/A | 12 `/tsift-*` commands |
+| npm plugin | N/A | N/A | `opencode-tsift` (unpublished) |
+
+**Priority next-steps (AST nav):**
+
+1. **Ship `tsift-rewrite.sh` in-tree** (`examples/hooks/`) — currently only exists at `~/.claude/hooks/`, not versioned or available for Codex/OpenCode users. Expand Codex/OpenCode to gain a `PreToolUse`-equivalent mechanism.
+2. **Publish `opencode-tsift` to npm** — code-complete and CI-verified, just needs `NPM_TOKEN` + `TSIFT_ENABLE_NPM_PUBLISH` repo secrets configured. Unblocks `opencode plugin opencode-tsift`.
+3. **Expand OpenCode command set** — add `/tsift-explain`, `/tsift-symbol-read`, `/tsift-graph` shortcuts for the newer envelope surfaces.
+4. **Add `tsift init --claude` flag** — no-op but provides symmetric documentation across all three harnesses.
+5. **Auto-reindex for OpenCode** — plugin checks index freshness on load and emits recommendation.
+6. **Consolidated harness integration guide** — single comparative doc showing all three setups side-by-side.
+
+#### SurrealDB Promotion to SQLite-Equivalent Substrate
+
+**Root cause:** The real-workload 221x regression is a **tsift adapter issue**, not a SurrealKV engine issue. SurrealDB already wins on 3/4 workloads. The bottleneck is `load_indexes()` eagerly deserializing all 955K rows on every `open()` — even cache-hit warm starts. SQLite pays zero on cache-hit opens (mmap + OS page cache).
+
+**Secondary gaps:** Missing `nodes_by_kind` BTreeMap index (O(N) full scan vs SQLite O(K) indexed scan), clone-heavy `GraphEdge` returns, `RwLock` serialization on reads.
+
+**Priority next-steps (SurrealDB):**
+
+| Priority | Action | Est. Impact |
+|----------|--------|-------------|
+| P0 | **Sidecar index persistence** — serialize BTreeMap indexes to `.tsift/backend-eval-cache/surrealdb/*/index.bincode`; skip `load_indexes()` on cache-hit | 492x on refresh |
+| P1 | **`nodes_by_kind` index** — add `SurrealNodeIndexes` struct with `by_kind` BTreeMap | 10-50x on kind queries |
+| P2 | **Skip redundant load** — when `replace_projection_rows()` called right after open, skip the SurrealDB round-trip | Eliminates load for benchmarks |
+| P3 | **Arc in indexes** — `Arc<GraphEdge>`/`Arc<GraphNode>` instead of cloning | 2-3x on reads |
+| P4 | **Record fixture data** — add SurrealDB samples to `graph-db-performance-history.json` | Required for gate evaluation |
+| P5 | **HashMap for by_id** — replace `RwLock<BTreeMap>` with `HashMap` for point lookups | 1.5-2x on lookups |
+
+**Promotion requirement:** `perf_gate::evaluate_promotion` needs 3 samples across all 4 workloads with both `refresh.duration_micros` and `total_duration_micros` beating SQLite. P0 alone would bring real refresh from 88.6ms to sub-ms, likely unlocking the gate.
+
+**Backlog item at top:** `#surreal-sidecar` (sidecar index persistence)
+<!-- agent:boundary:7be13ef5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -158,6 +204,19 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#astnav-hooks] Ship tsift-rewrite.sh in-tree + expand PreToolUse equivalent for Codex/OpenCode (medium)
+- [ ] [#astnav-npm] Configure NPM_TOKEN + TSIFT_ENABLE_NPM_PUBLISH secrets, publish opencode-tsift to npm (medium)
+- [ ] [#astnav-commands] Expand OpenCode command set: /tsift-explain, /tsift-symbol-read, /tsift-graph (low)
+- [ ] [#astnav-init-claude] Add tsift init --claude flag for symmetric documentation (low)
+- [ ] [#astnav-autoindex-oc] Auto-reindex for OpenCode via plugin freshness check on load (low)
+- [ ] [#astnav-harness-docs] Consolidated harness integration guide in README or docs/harness-setup.md (low)
+- [ ] [#surreal-sidecar] Persist BTreeMap indexes to sidecar file; skip load_indexes() on cache-hit opens (high)
+- [ ] [#surreal-nodes-by-kind] Add by_kind index to SurrealNodeIndexes (10-50x on nodes_by_kind) (high)
+- [ ] [#surreal-skip-load] Skip load_indexes() when replace_projection_rows() called immediately after (medium)
+- [ ] [#surreal-arc] Switch indexes to Arc<GraphEdge>/Arc<GraphNode> to eliminate clone overhead (medium)
+- [ ] [#surreal-fixture] Record SurrealDB samples in graph-db-performance-history.json fixture (medium)
+- [ ] [#surreal-dashmap] Replace RwLock<BTreeMap> with HashMap for by_id point lookups (low)
+- [ ] [#surreal-batch-bfs] Batch frontier expansion in shortest_path (low)
 - [ ] [#5vp6] The lazily-rs.md session has been stuck on `Read src/lazily-rs/src/thread_safe.rs` for over an hour. Is there something wrong with tsift that is causing this issue? I restarted the opencode session so you may have to look into the session history.
 <!-- /agent:backlog -->
 

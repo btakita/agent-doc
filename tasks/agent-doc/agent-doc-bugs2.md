@@ -94,7 +94,28 @@ With the pane no longer stuck in a false "opencode active turn", the already-enq
 This prompt was already root-caused and fixed earlier this session; the full answer is committed above (the `### Re: JB Clear Session Context does not work with OpenCode` block, commit `1813ffdd6`). Its queue entry was left unstruck only because that finalize hit a concurrent-actor queue-consume divergence. This cycle just consumes the stale head.
 
 Recap: OpenCode has no `/clear` command (binary analysis: `/new` + `/compact` only). `agent-doc session clear` now resolves the harness-native command via `harness_clear_command` → `/new` for opencode, `/clear` otherwise (submodule `3746dedc`, unit-tested, spec `07-session-tmux-commands.md` updated, both binaries rebuilt). Remaining: live-verify a real OpenCode `Clear Session Context` resets context (destructive — operator-gated).
-<!-- agent:boundary:8cbf1d89 -->
+
+### Re: OpenCode malformed template patchback when running tsift.md — opus-4-8
+
+> **Queue prompt:**
+>
+> Error in OpenCode `  ┃  Error: malformed template patchback: found patch/replace markers but no closed patch blocks parsed; refusing to append unmatched content` when running tsift.md
+
+
+Root-caused and fixed (instruction gap, not a binary bug).
+
+**The error is the guard working correctly.** `flow/document_mutation.rs::parse_template_patchback` fails closed when a response carries patch markers but no *closed* patch block (`has_malformed_orphan_markers`) — "refusing to append unmatched content" so a half-written block isn't committed as literal exchange text. That guard is right.
+
+**The actual bug was upstream in the instructions.** Across every rendered SKILL surface the `patch:exchange` examples only ever showed the **opening** `<!-- patch:exchange -->` marker — `grep` of the closing `<!-- /patch:exchange -->` returned **0** in `SKILL.md`, `.claude`, `.opencode`, and `.codex`. The finalize heredoc placeholder said only "patch blocks for template mode." So an agent (OpenCode here, running tsift.md) naturally emitted an unclosed block → the guard rejected it.
+
+**Fix** (submodule `9f44a49b`, surfaces regenerated):
+- `SKILL.md` heredoc placeholder now names **both** markers: `<!-- patch:exchange -->` … `<!-- /patch:exchange -->` (BOTH markers).
+- The IMPORTANT note now requires the closing marker and quotes the exact rejection message.
+- Net-zero lines (stays under the hot-path budget tests `bundled_skill_hot_path_stays_compact` / `rendered_harness_content_stays_compact`).
+- Rebuilt binary + reinstalled Claude/Codex/OpenCode/root surfaces; `<!-- /patch:exchange -->` now present (close-count 0 → 2) in all of them. `make check` green.
+
+This is the same close-marker hazard noted before (`#patch-exchange-requires-close-marker`); the SKILL examples were the remaining place that still taught the unclosed form.
+<!-- agent:boundary:569e769f -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
@@ -103,7 +124,7 @@ Recap: OpenCode has no `/clear` command (binary analysis: `/new` + `/compact` on
 - ~do [#jbrunstallreg]~
 - ~do [#opencode-preset-not-dispatched]~
 - ~JB `Clear Session Context` does not work with OpenCode. This is a long-standing issue. Look at attempt with tsift.md in the logs.~
-- Error in OpenCode `  ┃  Error: malformed template patchback: found patch/replace markers but no closed patch blocks parsed; refusing to append unmatched content` when running tsift.md
+- ~Error in OpenCode `  ┃  Error: malformed template patchback: found patch/replace markers but no closed patch blocks parsed; refusing to append unmatched content` when running tsift.md~
 - Go through all review items. If logs are in place to confirm the completion, complete the review item. If logs are in place to deny the completion, keep the review item. If logs are missing to confirm or deny the completion, add logs to confirm/deny the review item.
 <!-- /agent:queue -->
 ###

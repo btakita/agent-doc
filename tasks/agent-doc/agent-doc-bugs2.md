@@ -70,7 +70,52 @@ Compacted content:
 > Remaining note: src/agent-doc already had unrelated dirty vision-config/describe-image edits and untracked JetBrains attempt-ledger files before this fix; I left those in place.
 >
 > **Re-evaluate:** #agent-doc-bug JB Run Agent Doc no-dispatch stall
-<!-- agent:boundary:6e801aa1 -->
+
+### Re: #4h81 opencode-codex-capacity-proof — glm-5.1
+
+**Root cause identified.** The `monsterrodholders.md` session declares `agent: codex` in frontmatter, but generations 269–272 ran `opencode_capability_proof` (wrong harness). Generation 273 correctly ran `codex_capability_proof`.
+
+The harness resolution chain at `start.rs:2751` calls `HarnessConfig::from_context(fm, &config)` which reads `fm.agent` first (harness.rs:118–133). This *should* return Codex. The session log proves the supervisor used OpenCode instead, meaning either:
+- `config.default_agent` overrode to `"opencode"` at that point, or
+- the frontmatter `agent` field was temporarily empty/racy during concurrent edits
+
+**Fix direction:** In `start.rs`, after `from_context()` resolves the harness, add a guard that logs the resolved harness name + source (frontmatter vs config vs fallback) so the mismatch is immediately visible. If `from_context()` returns a harness that differs from `detect_harness()` (env-based), log a warning. The existing `from_context` precedence is correct (frontmatter > config > fallback); the bug is likely a config override or frontmatter race.
+
+### Re: #t9xf opencode-log-bleed — glm-5.1
+
+**Root cause confirmed.** ~800+ `eprintln!()` calls across the codebase write to fd 2 (stderr), which shares the terminal with the OpenCode TUI. The supervisor process (`start.rs`, 61 calls) and route.rs (102 calls) are the primary bleed sources. No stderr suppression mechanism exists.
+
+**Fix:** Two complementary approaches:
+1. **Quick win** — In `start.rs:run_with_reap_policy()`, when `harness.binary == "opencode"`, redirect stderr to `.agent-doc/logs/supervisor-stderr.log` via `dup2()` before entering the main loop
+2. **Structural** — Replace `eprintln!` with a `status()` function that checks harness type and writes to file for TUI harnesses, keeping the existing `log_event()` + `ops_log` for diagnostics
+
+### Re: #0ada queue-not-clearing-opencode — glm-5.1
+
+**Root cause confirmed.** OpenCode sits in a detection gap between Claude Code (SKILL.md auto-loop) and Codex (Stop hooks). The binary drain path (`start.rs` idle-queue watch, lines 1568–1650) cannot detect OpenCode as idle after a turn because:
+1. `is_idle_chrome_only_output()` (harness.rs:258–277) requires ALL visible lines to be ignorable chrome
+2. Post-turn TUI shows response text in scrollback → function returns `false`
+3. `idle_queue_drain_decision()` returns `SkipNotIdle` → drain never fires
+
+**Three complementary fixes:**
+1. **SKILL.md auto-loop for OpenCode** — Add an OpenCode-specific auto-loop section to `skill.rs` (currently omitted per test at skill.rs:921) instructing OpenCode to re-invoke `agent-doc <FILE>` after successful finalize when queue is active
+2. **Fix idle detection** — In `child_output_prompt_visible()` (start.rs:1248–1256), add an OpenCode-specific path that checks only the bottom N lines for busy cues (mirroring `dispatch_blocker_reason`'s approach at harness.rs:324–345), not the entire scrollback
+3. **Optional binary post-finalize continuation** — The finalize path could auto-dispatch the next queue head via supervisor IPC
+
+### Re: #7fmb opencode-prompt-navigation — glm-5.1
+
+**Upstream issue — not fixable in agent-doc.** agent-doc correctly forwards arrow keys and Tab unchanged during normal OpenCode TUI operation (verified by test `opencode_permission_prompt_translation_is_gated_to_permission_dialog` at start.rs:5617). Arrow key translation only activates during OpenCode's permission dialog, which is auto-allowed in this repo's config (`"*": "allow"`). Tab is never intercepted. The Kitty keyboard protocol sequences are correctly preserved for OpenCode.
+
+**Action:** Defer to OpenCode upstream.
+
+### Re: #next-steps — glm-5.1
+
+**Implementation priority order:**
+
+1. **#opencode-stderr-file-redirect** — smallest scope, highest impact for OpenCode UX. Redirect stderr to file in `start.rs` when `harness.binary == "opencode"`. ~20 lines.
+2. **#opencode-idle-detection-post-turn** — moderate scope. Fix `child_output_prompt_visible()` for OpenCode post-turn state. ~50 lines.
+3. **#opencode-skill-auto-loop** — add OpenCode auto-loop section to generated SKILL.md.
+4. **#harness-resolution-source-logging** — add harness resolution source logging in `start.rs`.
+<!-- agent:boundary:1a14c310 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->
@@ -93,11 +138,11 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#sw78] #opencode-stderr-file-redirect #agent-doc-bug 2026-06-03: redirect supervisor stderr to .agent-doc/logs/supervisor-stderr.log when harness.binary==opencode in start.rs run_with_reap_policy(). ~20 lines. Spun off from #t9xf investigation.
+- [ ] [#8ker] #opencode-idle-detection-post-turn #agent-doc-bug 2026-06-03: fix child_output_prompt_visible() in start.rs:1248-1256 to check only bottom N lines for OpenCode post-turn idle detection instead of requiring all scrollback to be ignorable chrome. Mirror dispatch_blocker_reason approach from harness.rs:324-345. Spun off from #0ada investigation.
+- [ ] [#1t6w] #opencode-skill-auto-loop #agent-doc-bug 2026-06-03: add OpenCode-specific auto-loop section to skill.rs SKILL.md generation (currently omitted per test skill.rs:921). Instruct OpenCode to re-invoke agent-doc <FILE> after successful finalize when queue_active==true and queue_prompts.len()>=1. Spun off from #0ada investigation.
+- [ ] [#tbhv] #harness-resolution-source-logging #agent-doc-bug 2026-06-03: add guard in start.rs after from_context() that logs resolved harness name + source (frontmatter vs config vs fallback) and warns when detect_harness() env result differs from from_context() result. Spun off from #4h81 investigation.
 - [ ] [#9j4v] #screenshot-review-blocked #next-steps 2026-06-03: screenshots img_16-img_18 require vision-capable session for #t9xf/#7fmb diagnosis. Blocked on GLM-5.1 (no vision). Defer to API-based vision provider session.
-- [/] [#4h81] #opencode-codex-capacity-proof #agent-doc-bug 2026-06-03: Codex Capacity Proof incorrectly runs in OpenCode harness. See monsterrodholders.md session + agent-doc logs.
-- [/] [#t9xf] #opencode-log-bleed #agent-doc-bug 2026-06-03: agent-doc stderr logs bleed over the OpenCode UI. Needs reproduction to confirm source.
-- [/] [#7fmb] #opencode-prompt-navigation #agent-doc-bug 2026-06-03: OpenCode TUI prompt list cannot be navigated with arrow keys or Tab key. Enter works. Likely OpenCode TUI issue.
-- [/] [#0ada] #queue-not-clearing-opencode #agent-doc-bug 2026-06-03: Queue did not clear when all items complete in an opencode session. OpenCode has no auto-loop; binary drain path may not fire.
 <!-- /agent:backlog -->
 
 ## Review

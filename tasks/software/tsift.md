@@ -31,37 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260603-150545.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260603-151820.md`*
 
 Compacted content:
-- Archived 7 response topic(s): #gfrontierhot Performance Triage; #greadiness Actionable Readiness at Lookup Boundary; #rankdefault Ranked Neighborhood Comparison; 4 more
+- Archived 1 response topic(s): SurrealDB Substrate Promotion
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
-### Re: SurrealDB Substrate Promotion — opencode
-
-**Current state:** SurrealDB is a feature-gated spike (`backend-surrealdb`) using embedded SurrealKV with Rust-side BTreeMap indexes. The 2026-06-02 benchmark shows `promotion=hold` — real-workload total is **220x slower** (573 ms vs 2.6 ms) and refresh/load is **492x slower** (88.6 ms vs 0.18 ms). SurrealDB wins on full-projection refresh (82.7 ms vs 541.8 ms) and synthetic workloads (high-degree, deep-chain), but the real-workload penalty blocks promotion.
-
-**Root causes for the real-workload gap:**
-
-1. **Cold-start tax:** Every `SurrealdbGraphStore::from_rows_file_backed()` creates a fresh tokio runtime + opens SurrealKV. The 88.6 ms refresh is dominated by initialization, not queries. SQLite opens a file handle instantly.
-2. **No delta refresh:** `replace_projection_rows()` does `DELETE ALL + INSERT ALL` even when 1 row changed. SQLite does row-hash diffing and writes only deltas.
-3. **Per-store tokio runtime:** Each `SurrealdbGraphStore` owns its own `Runtime`. No pooling or reuse across backend-eval runs.
-4. **Missing multi-process evidence:** The promotion gate (SPEC.md:304) explicitly requires "multi-process/read-only lock behavior evidence." No tests exist for concurrent SurrealKV access.
-
-**Promotion path (prioritized backlog below):**
-
-The critical unlock is **Priority 1: warm-start / store reuse**. If the 88.6 ms cold-start drops to near-zero on reuse, the real-workload total should collapse to the Rust-side BTreeMap index cost (microseconds), making SurrealDB competitive or faster than SQLite across all four required workloads. That single change likely resolves 4 of 5 failing gates simultaneously.
-
-**Backlog items (priority order):**
-
-1. `#surreal-warm` — Warm-start SurrealDB store: reuse `SurrealdbGraphStore` across backend-eval runs instead of recreating; measure real-workload median with persistent store. If cold-start was the bottleneck, this alone should move real total from ~573 ms to ~3-5 ms.
-2. `#surreal-delta` — Delta projection refresh: implement `replace_projection_rows_delta()` with row-hash diffing, matching SQLite's `replace_projection_with_version()` pattern. Only upsert changed rows and delete removed rows instead of full `DELETE + INSERT`.
-3. `#surreal-multiproc` — Multi-process lock behavior: write a conformance test that opens N concurrent reader processes + 1 writer against the same SurrealKV path; document lock contention, stale-read behavior, and crash recovery. Required by the SPEC.md:304 promotion gate.
-4. `#surreal-rt-pool` — Shared tokio runtime: accept an external `Runtime` reference or use a lazy static instead of per-store `Runtime::new()`. Reduces memory and init cost for multi-store scenarios.
-5. `#surrealbulk-close` — Close `#surrealbulk` review item: the bulk transaction path is implemented (`replace_projection_rows`), but the review item is still `[/]`. Re-run benchmarks, update SPEC.md benchmark table, mark done.
-
-**Top of backlog:** `#surreal-warm`
-<!-- agent:boundary:138e974f -->
+<!-- agent:boundary:884c666f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -71,17 +46,17 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
+- do [#libmod3]
 - do [#libmod4]
 - do [#libmod5]
 - do [#opencode-read]
 - do [#opencode-grep]
 - do [#codex-read]
-- do [#libmod3]
 <!-- /agent:queue -->
 
 ## Backlog
 
-<!-- agent:backlog queue -->
+<!-- agent:backlog -->
 - [ ] [#surreal-warm] Warm-start SurrealDB store: reuse SurrealdbGraphStore across backend-eval runs instead of recreating; measure real-workload median with persistent store
 - [ ] [#surreal-delta] Delta projection refresh: implement replace_projection_rows_delta() with row-hash diffing matching SQLite's replace_projection_with_version() pattern
 - [ ] [#surreal-multiproc] Multi-process lock behavior: write conformance test with N concurrent reader processes + 1 writer against same SurrealKV path; document lock contention, stale-read behavior, and crash recovery (SPEC.md:304 promotion gate)

@@ -124,7 +124,26 @@ Replaced `ThreadSafeInvalidationPlan` HashMaps/HashSets with `Vec<(SlotId, bool)
 - Added `enqueue_root`, `find_force`, `find_simulated`, `set_simulated` helper methods
 
 **Verification:** `make check` passes (fmt, clippy, 92 tests, 2 tokio, 12 loom). Pushed as `9907f6f`.
-<!-- agent:boundary:6d4d2f9f -->
+
+### Re: #vbcq lazyperf30 — glm-5.1
+
+> **Queue prompt:**
+>
+> [#vbcq]
+
+
+Added `dependent_scratch: Vec<SlotId>` to `ThreadSafeState` and `fill_dependent_scratch` method. Hot-path callers in refresh/clear invalidation now populate the scratch buffer via `extend_from_slice` instead of cloning EdgeVecs.
+
+**Changes:**
+- New field: `dependent_scratch: Vec<SlotId>` in `ThreadSafeState`
+- New method: `fill_dependent_scratch(&mut self, id: SlotId)` — direct field access for borrow checker
+- Updated callers: `flush_batched_invalidations`, `invalidate_cell_dependents_locked`, `clear_cell_dependents_locked`, `notify_slot_value_changed_locked`
+- `dependents_locked` retained as `#[cfg(test)]` for test assertions
+
+Scratch retains heap capacity across calls, avoiding repeated SmallVec heap alloc on >4 fan-out.
+
+**Verification:** `make check` passes (fmt, clippy, 92 tests, 2 tokio, 12 loom). Pushed as `6bc2c2b`.
+<!-- agent:boundary:38ca7988 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -138,15 +157,15 @@ Replaced `ThreadSafeInvalidationPlan` HashMaps/HashSets with `Vec<(SlotId, bool)
 - ~[#xdq8]~
 - ~[#vk55]~
 - ~[#cffp]~
-- [#vbcq]
+- ~[#vbcq]~
 - [#vfr1]
 - [#94gg]
+- Please do a performance benchmark to see the results of the queue run.
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#vbcq] #lazyperf30 #lazyperf30 Dependent clone scratch buffer on ContextInner/ThreadSafeState — avoid SmallVec heap alloc on >4 fan-out in refresh/clear paths
 - [ ] [#vfr1] #lazyperf31 #lazyperf31 [recommended] parking_lot replacement for std::sync Mutex/RwLock — smaller locks, no poisoning, adaptive spinning
 - [ ] [#94gg] #lazyperf32 #lazyperf32 [recommended] Rc<dyn Any> values in single-threaded Context — get() returns pointer increment instead of deep clone
 <!-- /agent:backlog -->

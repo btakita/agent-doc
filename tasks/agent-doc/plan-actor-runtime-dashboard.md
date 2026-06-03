@@ -1,7 +1,11 @@
 # Plan: actor runtime dashboard (live view over the IPC admin API)
 
-**Pending:** `#actor-runtime-dashboard`
-**Status:** Planned 2026-06-02. Not implemented. Depends on `#ipc-admin-api`.
+**Pending:** `#actor-runtime-dashboard` (queue id `#admin-fleet-dashboard`)
+**Status:** Phase 1 (read-only view) IMPLEMENTED 2026-06-02 — `agent-doc admin dashboard`
+in `agent-doc-orchestration::dashboard`. Model/view split, highlight flags, and
+render are unit-tested. Mutation keybinds (stop/rebind rows) remain deferred to
+`#ipc-admin-api` Phase 2 (gated mutating verbs); the editor tool-window surface
+is also still deferred.
 **Class:** `#agent-doc-bug` feature — operator observability.
 
 ## Motivation

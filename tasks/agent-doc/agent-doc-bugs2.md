@@ -35,10 +35,30 @@ Codex review log pass completed; no reviewed item met the complete threshold.
 Compacted content:
 - Archived 2 response topic(s): log-backed review audit; Codex review log pass
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:181db5ca -->
+
+### Re: backlog attribute edit + next steps — opencode
+
+Acknowledged the `queue=append` → `queue` attribute change. Preflight surfaced three warnings:
+
+1. **inactive_queue_residue** — `agent:queue` is inactive but still contains the two `do` directives. These are not executable until the queue is reactivated.
+2. **post_exchange_comment_prompt_preset** — the HTML comment below `###` references `#spec-test-build-install-commit-push` and `#next-steps` but sits outside `agent:exchange`, so agent-doc treats it as a non-executable note. Move it into `agent:exchange` or `agent:queue` if you want it to run.
+3. **misplaced_component_attr** — `preset="#spec-test-build-install-commit-push"` on `&lt;!-- agent:queue --&gt;` is not a recognized attribute. The auto-loop only triggers from `&lt;!-- agent:queue auto --&gt;`.
+
+**Stripped code fence** — the code fence in the post-exchange comment was likely removed during a prior compact or stream-merge cycle. If you need the fenced content preserved, place it inside `agent:exchange` or a plan file.
+
+**Next steps (top of backlog):**
+
+|#id|Description|Action|
+|---|-----------|------|
+|#codex-403-429-fallback|Codex WS 403 → HTTPS 429 fallback detection + diagnostic|Create plan: detect 403-on-WS → 429-on-HTTPS pattern in codex transport, surface transport-rejection vs routing-failure diagnostic, add retry/backoff guidance|
+|#codex-network-access-opencode-guard|Guard codex_network_access for non-Codex agents|Create plan: warn or ignore `codex_network_access` when agent ≠ codex; prevent false network-access assumption in opencode sessions|
+
+<!-- agent:boundary:93f784ab -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+- do [#codex-403-429-fallback]
+- do [#codex-network-access-opencode-guard]
 <!-- /agent:queue -->
 ###
 <!--
@@ -50,7 +70,7 @@ What are #next-steps to fix bugs?
 
 ## Backlog
 
-<!-- agent:backlog priority queue=append -->
+<!-- agent:backlog priority queue -->
 - [ ] [#codex-403-429-fallback] #agent-doc-bug 2026-06-03: agent-doc in a Codex session received 403 Forbidden on WebSocket handshake to `wss://chatgpt.com/backend-api/codex/responses` (cf-ray: a05c18067af0dce4-IAD), then HTTPS fallback hit 429 Too Many Requests (request id: 3e924ff6-fde4-4fb2-8b00-08dfdd74e1a3). Other concurrent Codex sessions (e.g. agent-doc-bugs2.md pane) continued working. Possible causes: per-session rate limit, Cloudflare edge block on the specific connection, or session-specific token/auth state. Agent-doc should detect this pattern (403 on WS → 429 on HTTPS fallback) and (a) surface a clear diagnostic distinguishing transport rejection from agent-doc routing failure, (b) optionally retry with backoff or suggest restarting the codex session, and (c) not treat the 429 as a permanent failure that exhausts the retry budget without operator visibility.
 - [ ] [#codex-network-access-opencode-guard] #agent-doc-bug 2026-06-03: frontmatter field `codex_network_access: enabled` is Codex-specific but agent-doc does not guard it when the session runs under opencode. When `agent: opencode` (or no Codex agent), `codex_network_access` has no effect — opencode does not have an equivalent network sandbox flag. Agent-doc should either (a) warn/ignore `codex_network_access` when the agent is not codex, or (b) not emit it into the dispatched prompt/session config for opencode sessions, to avoid confusion and prevent operators from assuming network access is controlled when it is not.
 <!-- /agent:backlog -->

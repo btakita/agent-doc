@@ -57,7 +57,28 @@ Implemented `tsift-source-read` as a new OpenCode command shortcut that provides
 - `make check` passes (build, test, lint, opencode-plugin-test)
 - `tsift init --opencode` installs `tsift-source-read.md` into `.opencode/commands/`
 - `tsift --envelope source-read` returns bounded source window with AST symbol metadata, line previews, and expansion commands
-<!-- agent:boundary:f9611903 -->
+
+### Re: #opencode-grep — opencode
+
+> **Queue prompt:**
+>
+> do [#opencode-grep]
+
+
+Implemented `tsift-search` as a new OpenCode command shortcut that provides AST-aware content search via `tsift --envelope search`.
+
+**Changes:**
+- `src/tsift/packages/tsift-index/src/init.rs`: Added `tsift-search` to `OPENCODE_COMMANDS` array, directing agents to prefer `tsift --envelope search` over grep/rg for content search in indexed projects
+- `src/tsift/packages/opencode-tsift/commands/tsift-search.md`: Created matching npm package command file
+- `src/tsift/packages/opencode-tsift/test/install.test.js`: Updated expected command count from 11 to 12
+
+**Verification:**
+- `cargo build` succeeds
+- All 4 `opencode` tests pass including npm parity test
+- `make check` passes
+- `tsift init --opencode` installs `tsift-search.md` into `.opencode/commands/`
+- `tsift --envelope search` returns ranked hits with symbol families, file previews, AST-aware scoring, and scale guards
+<!-- agent:boundary:212d9390 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -72,7 +93,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - ~do [#libmod5]~
 - ~do [#libmod5b]~
 - ~do [#opencode-read]~
-- do [#opencode-grep]
+- ~do [#opencode-grep]~
 - do [#codex-read]
 <!-- /agent:queue -->
 
@@ -84,7 +105,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - [ ] [#surreal-multiproc] Multi-process lock behavior: write conformance test with N concurrent reader processes + 1 writer against same SurrealKV path; document lock contention, stale-read behavior, and crash recovery (SPEC.md:304 promotion gate)
 - [ ] [#surreal-rt-pool] Shared tokio runtime: accept external Runtime reference or use lazy static instead of per-store Runtime::new()
 - [ ] [#surrealbulk-close] Close #surrealbulk review item: re-run benchmarks, update SPEC.md benchmark table, mark done
-- [ ] [#opencode-grep] OpenCode: replace grep/rg with tsift search for content search
 - [ ] [#codex-read] Codex: adopt tsift AST API for source reading instead of raw file reads
 <!-- /agent:backlog -->
 

@@ -1,5 +1,5 @@
 ---
-agent_doc_session: 1ef5f0e7-0687-4f35-b9bc-2b9c330d5688
+agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 agent: opencode
 claude_model: opus
 agent_doc_format: template
@@ -28,7 +28,22 @@ Prior frontmatter bug fix remains complete. New work this cycle is planning only
 Compacted content:
 - Archived 6 response topic(s): Where else can lazily-rs be used; Where else can lazily-rs be used; Would agent-doc benefit from using herdr; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/9b6e92d2...
-<!-- agent:boundary:ec85aa0e -->
+❯ Should I remove all instructions from AGENTS.md? Would the harness be more effective? Do I have context debt?
+### Re: Removing AGENTS.md instructions — glm-5.1
+
+**Should you remove all instructions from AGENTS.md?** No. The current AGENTS.md is 160 lines (~20KB) and carries three distinct payloads: agent-doc workflow, tsift code navigation, and project-specific runbook references. These are actively used by the harness every cycle.
+
+**Do you have context debt?** Mild, not critical:
+- The agent-doc skill section is the heaviest piece (~12KB of workflow + runbook refs). Since it's already installed as a skill, there's redundancy between AGENTS.md and the skill file. The harness loads both on every turn.
+- The tsift code-nav block (~3KB) is useful but duplicates what `tsift status` prints.
+- The philosophy block from `~/.claude/CLAUDE.md` is loaded at the user level, not project-level — that's orthogonal.
+
+**What would actually help:**
+1. The agent-doc section in AGENTS.md exists because Claude Code reads `AGENTS.md` as a project instruction file. OpenCode does the same. If agent-doc's skill files are already installed and loaded, the AGENTS.md copy is confirmatory rather than load-bearing — but removing it risks a harness that only reads AGENTS.md (not skill files) missing the workflow entirely.
+2. The real context debt is the compaction history in this session document. Each compact cycle carries a summary of prior summaries, creating a telescoping reference chain that the model must parse every turn.
+
+**Recommendation:** Keep AGENTS.md as-is. The instructions are load-bearing for harnesses that read AGENTS.md but not skill files. If you want to trim, the tsift block is the safest to remove (it's self-service via `tsift status`).
+<!-- agent:boundary:2d4b08a2 -->
 <!-- /agent:exchange -->
 
 <!--

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -102,10 +102,12 @@ No. OpenCode's Task tool launches subagents but they run the same model (GLM). T
 10. **#finalize-retry-ipc-response-duplication** — recommended; multi-retry + IPC duplication.
 
 Top of backlog: **#t9xf**.
-<!-- agent:boundary:fdf641ac -->
+I ran `npm i -g @ai-sdk/openai-compatible`. How can we ensure the GLM model supports vision?
+<!-- agent:boundary:5d53d7bd -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
+- I ran `npm i -g @ai-sdk/openai-compatible`. How can we ensure the GLM model supports vision?
 <!-- /agent:queue -->
 ###
 <!--

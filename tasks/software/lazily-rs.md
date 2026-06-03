@@ -154,7 +154,25 @@ graph TD
         E["#lazyperf36<br/>parking_lot A/B benchmark"] -->|fixes| F4[same_slot_write_read]
     end
 ```
-<!-- agent:boundary:08b4f3bf -->
+
+### Re: #lazyperf34 finish_batch O(n²) dedup — glm-5.1
+
+> **Queue prompt:**
+>
+> [#lazyperf34]
+
+
+Implemented, tested, committed, pushed (`e7d677c`).
+
+**Changes** (`src/thread_safe.rs`, `src/context.rs`):
+
+- Replaced three `edge_insert` loops in `finish_batch` with bulk `extend` (O(n) append, no per-item dedup)
+- Added `sort_unstable` + `dedup` at batch depth 0, right before flush — O(n log n) amortized instead of O(n²)
+- Added `PartialOrd, Ord` derives to `SlotId` (required for `sort_unstable`)
+
+**Benchmark**: batch_storms/64: 7.28µs → 5.94µs (**-18.4%**, p=0.00)
+All 102 tests pass.
+<!-- agent:boundary:95876d4d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -166,7 +184,7 @@ graph TD
 - ~Does `let val = counter.get(ctx);` clone `ctx`?~
 - ~[#lazyperf33]~
 - ~Please create a mermaid of the performance improvements.~
-- [#lazyperf34]
+- ~[#lazyperf34]~
 - [#lazyperf35]
 - [#lazyperf36]
 - Is there a way to make "Fix finish_batch O(n2) dedup" an O(n) or O(1) algorithm?
@@ -176,7 +194,6 @@ graph TD
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#lazyperf34] [recommended] Fix finish_batch O(n2) dedup: replace edge_insert loop with extend+sort-dedup or small HashSet — fixes batched_write_bursts, batch_storms
 - [ ] [#lazyperf35] [recommended] Eliminate scratch buffer collect allocation on effect path: pass fill_dependent_scratch result as slice to invalidate_frontier_locked — fixes effect_flushing
 - [ ] [#lazyperf36] [recommended] A/B benchmark parking_lot vs std::sync for moderate contention: evaluate fair_mutex or revert main state mutex — fixes same_slot_write_read, independent_slots
 <!-- /agent:backlog -->

@@ -115,7 +115,7 @@ For the normal cycle, pipe the response through `agent-doc finalize --stream` so
 
 ```bash
 cat <<'RESPONSE' | agent-doc finalize <FILE> --baseline-file <preflight.baseline_file> --stream --origin skill
-<your response — patch blocks for template mode, or plain text for inline mode>
+<template mode: wrap response in `<!-- patch:exchange -->` … `<!-- /patch:exchange -->` (BOTH markers); inline mode: plain text, no markers>
 RESPONSE
 ```
 
@@ -125,7 +125,7 @@ After `finalize` / `write --commit`, do not start more long-running task work fo
 
 **IMPORTANT: Do NOT use the Edit tool for write-back.** It is prone to "file modified since read" errors when the user edits concurrently.
 
-**IMPORTANT: The response content MUST include `<!-- patch:exchange -->` blocks for template-mode documents.** If the heredoc is empty or contains only raw text without patch markers, the binary will warn (`0 template patches found`) and the response can be lost.
+**IMPORTANT: The response content MUST include `<!-- patch:exchange -->` … `<!-- /patch:exchange -->` blocks for template-mode documents — both the opening AND the closing marker.** An opening marker with no matching close is rejected as `malformed template patchback: found patch/replace markers but no closed patch blocks parsed`. If the heredoc is empty or contains only raw text without patch markers, the binary will warn (`0 template patches found`) and the response can be lost.
 
 **Manual repair / missed patchback rule (all harnesses):** if the user's prompt is already present in the document, do **not** patch the assistant response directly into the file. Use `agent-doc write --commit <FILE>` so repair crosses the normal snapshot/commit boundary in one path. Do not document or follow a manual-repair flow that stops after bare `agent-doc write`. Direct file patching is only acceptable for inserting a missing user prompt into `exchange` before the response exists.
 

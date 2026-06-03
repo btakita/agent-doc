@@ -53,3 +53,4 @@
 - 2026-06-02 [#lazyperf14] Prototype per-node invalidation sidecars or epoch counters so parallel writers avoid holding the global graph lock while publishing dirty/version state.
 - 2026-06-02 [#lazyperf15] Add loom/spec coverage for lazy invalidation cleanup, disposal, and dynamic dependency changes so stale edges cannot leak or rerun after disposal under races.
 - 2026-06-02 [#lazyperf12] Implement lazy invalidation for ThreadSafeContext propagation under parallel load: mark downstream nodes dirty/versioned during writes, defer derived recompute/effect scheduling until observed or batch flush, and preserve cleanup/disposal ordering.
+- 2026-06-02 [#lazyperf16] [recommended] Investigate the benchmark watch items from the lazy-invalidation run: cached ThreadSafeContext read latency regression and effect cleanup contention regression; rerun controlled A/B baselines before tuning.

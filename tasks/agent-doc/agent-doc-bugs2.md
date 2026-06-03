@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -34,12 +34,32 @@ Codex review log pass completed; no reviewed item met the complete threshold.
 
 Compacted content:
 - Archived 8 response topic(s): queue; queue; queue drain; 5 more
-- Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:0648f7d3 -->
+-  Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
+
+### Re: stdout bleed behind OpenCode TUI — opus-4-6
+
+Queue item reports that JB `Clear Session Context` causes agent-doc stdout to bleed behind the OpenCode TUI. This provides additional reproduction evidence for **#t9xf** (`#opencode-log-bleed`).
+
+The `--review-edit` binary flag failed to locate item `#t9xf`, suggesting the review-edit path may not resolve custom-bracketed IDs (e.g., `[#t9xf]`). Filed as a secondary observation.
+
+Updated #t9xf text: *agent-doc stderr/stdout logs bleed over the OpenCode UI. Confirmed via JB `Clear Session Context` trigger — agent-doc output renders behind the opencode TUI (see img_17.png). Needs reproduction to confirm source and fix.*
+
+### Re: stdout bleed — secondary: review-edit ID resolution — opus-4-6
+
+> **Queue prompt:**
+>
+> JB `Clear Session Context` results with opencode having stdout bleed behind the opencode TUI. ![img_17.png](img_17.png)
+
+
+Confirmed: response patch from prior finalize attempt landed in the exchange. Re-running to clear the lint-gate block.
+
+The lint findings are false positives caused by component-name substrings (`agent:backlog`, `agent:queue`) appearing inside review item description text, not actual structural mismatches.
+<!-- agent:boundary:d5e46593 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- JB `Clear Session Context` results with opencode having stdout bleed behind the opencode TUI. ![img_17.png](img_17.png)
+- ~JB `Clear Session Context` results with opencode having stdout bleed behind the opencode TUI. ![img_17.png](img_17.png)~
+- JB `Run Agent Doc` after JB `Clear Session Context` and JB `Compact Exchange` malforms opencode tui. ![img_18.png](img_18.png)
 <!-- /agent:queue -->
 ###
 <!--

@@ -100,7 +100,7 @@ Processed 4 of 8 queue items. All 106 tests pass (including loom model-checking)
 **#vftn #lazyperf23 — Replace unsafe with Rc:** Changed `SlotNode.compute` and `EffectNode.run` from `Box<dyn Fn>` to `Rc<dyn Fn>`. Eliminated both `unsafe` blocks in `context.rs` — `recompute_slot_now` and `run_effect` now use `Rc::clone` + `(closure.as_ref())(self)` instead of raw pointer copies.
 
 **Deferred items:** #xsp1 (#lazyperf20 HashMap→Vec for ThreadSafeState), #r0jv (#lazyperf21 sync primitive consolidation), #ktrs (#lazyperf22 slot ID reuse), #r54f (#lazyperf24 benchmarks) remain in backlog for a follow-up pass.
-<!-- agent:boundary:652bd9ca -->
+<!-- agent:boundary:5d2dd268 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -116,6 +116,7 @@ Queue items & backlog items were nat marked done when the task completed during 
 - [#xsp1]
 - [#r0jv]
 - [#ktrs]
+- [#vftn]
 - [#r54f]
 <!-- /agent:queue -->
 

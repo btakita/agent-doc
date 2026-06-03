@@ -36,7 +36,31 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 9 response topic(s): do #lr-actor-10; do #xdoc-route-sweep-commits-sibling-docs; do #ipc-admin-api; 6 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:a7f163b4 -->
+
+### Re: Run the lazily-rs Codex Close-hook scope-spillage plan — opus-4-8
+
+> **Queue prompt:**
+>
+> The lazily-rs.md session created a plan to fix the bug. It had to with the Codex Close hook having scope spillage. Please review the Codex session history to see where the plan file is. Run the plan file.
+
+
+**Plan found:** `tasks/agent-doc/plan-codex-stop-cross-doc-queue-continuation.md` (the lazily-rs.md Codex session's repro: pane `%74` owning `lazily-rs.md` was told by its Stop hook to run `agent-doc-bugs2.md`, which a live Claude actor owned in `%70` — cross-document scope spillage).
+
+**Status: the fix was already implemented and committed.** `src/agent-doc` commit `991feda5` ("fix(codex-hook): gate Stop-hook marker fallback on document ownership") implements the plan's Fix exactly:
+
+- `marker_fallback_continuation_response` now reads `TMUX_PANE` and passes the current pane into `pending_marker_continuation_for_roots`.
+- `pending_marker_continuation_for_roots(roots, current_pane)` skips a marker whose document is owned by a *different* live actor's pane (`is_foreign_owned_marker` → `authoritative_actor_binding`), logs `codex_stop_foreign_queue_marker_skip`, and **continues scanning** instead of driving the first foreign marker. It does not prune the skipped foreign marker (it belongs to that doc's own owner). `current_pane == None` preserves prior behavior.
+
+**Gap I closed:** the plan's Tests section item 2 (scan ordering) was only partially covered — the existing test proved a single foreign doc resolves to `None`, but not that the scan *continues past* a foreign marker to return a later valid same-pane marker. Added `pending_marker_scan_continues_past_foreign_to_valid`: two roots, foreign(`%70`) scanned first, valid(`%74`) second, asserts the result is the valid doc and the foreign marker survives the skip.
+
+**Verification:**
+- `cargo test -p agent-doc-orchestration queue_continuation::` → 12 passed.
+- `make check` → green (exit 0). One transient parallel-test flake appeared in the first run (`codex_hook::...stop_blocks_when_parent_submodule_pointer_closeout_fails`); it passes in isolation and on rerun — a pre-existing race on the global `CODEX_THREAD_ID` env var across `codex_hook` tests, unrelated to this test-only addition.
+
+**Commits:**
+- submodule `src/agent-doc`: `d6e83147` (regression test)
+- superproject: `067b675c0` (submodule pointer `991feda5`→`d6e83147` + plan file)
+<!-- agent:boundary:d816b105 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -48,11 +72,10 @@ preset #spec-test-build-install-commit-push
 - ~do [#xdoc-route-sweep-commits-sibling-docs]~
 - ~do [#run-gated-review-items]~
 - ~do [#lr-actor-10-wire-callers]~
-- do #stash-pane-promote-on-focus
-- The lazily-rs.md session created a plan to fix the bug. It had to with the Codex Close hook having scope spillage. Please review the Codex session history to see where the plan file is. Run the plan file.
+- ~do #stash-pane-promote-on-focus~
+- ~The lazily-rs.md session created a plan to fix the bug. It had to with the Codex Close hook having scope spillage. Please review the Codex session history to see where the plan file is. Run the plan file.~
 - When I navigate to tsift.md, the focus goes into the stash. The tmux pane does not go into the agent-doc tmux window.
 - do [#ipc-admin-api]
-- I cannot start the lazily-rs.md session. It is killed immediately.
 - I removed "Do not implement from" plan-jb-run-agent-doc-busy-queue-dispatch-deadlock.md. Go ahead and execute the plan if needed. Ensure any associated items are completed. I'm confused by the amount and length of the review items. #spec-test-build-install-commit-push
 ---
 JB `Run Agent Doc` error. Given that monsterrodholders.md was running agent-doc-bugs2.md before, is it possible that it is blocking on the wrong Session state?

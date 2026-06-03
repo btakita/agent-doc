@@ -137,11 +137,39 @@ No. OpenCode subagents (explore, general) inherit the session's model. There is 
 The `@ai-sdk/openai-compatible` package you installed is an SDK for building AI apps — it doesn't affect OpenCode's model routing or enable cross-model subagents.
 
 #img-review remains gated on a vision-capable model.
-<!-- agent:boundary:a6057086 -->
+
+### Re: image descriptor binary / JB Run Agent Doc stall — opus-4-6
+
+> **Queue prompt:**
+>
+> Can we have a binary that reads images with a descriptor that can be invoked as a toolcall?
+
+
+#### Image descriptor toolcall binary
+
+> Can we have a binary that reads images with a descriptor that can be invoked as a toolcall?
+
+Possible approaches:
+
+1. **`agent-doc describe-image <PATH>`** — new subcommand that shells out to a vision API (GLM-5v-turbo, GPT-4o, Gemini) and returns a text description to stdout. The harness (OpenCode, Claude Code) invokes it as a bash toolcall. No model change needed for the main session.
+
+2. **External CLI** — tools like `llava-cli`, `moondream`, or a thin wrapper around `@ai-sdk/openai-compatible` + a vision model endpoint. Installable via npm/cargo and callable from any harness.
+
+3. **MCP server** — an MCP tool that accepts an image path and returns a description. OpenCode supports MCP servers natively. This is the most portable option across harnesses.
+
+Option 1 (native `agent-doc describe-image`) is the tightest fit for the existing workflow. Would need a new plan to scope the vision provider config, API key handling, and the output format. Added to backlog as `#img-describe-toolcall`.
+
+#### JB Run Agent Doc stall
+
+> JB `Run Agent Doc` on this document stalls...does not dispatch to the opencode session.
+
+This is **#opencode-jb-stall** (already in review). The stall when JB routes to an OpenCode-owned pane is the known symptom — related to #opencode-post-turn-false-active (implemented, needs live-verify) and #jbrunstallreg (plugin-side stage ledger). No new information in this report beyond confirming the issue reproduces with this document.
+<!-- agent:boundary:54a96a4f -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue auto -->
-- Can we have a binary that reads images with a descriptor that can be invoked as a toolcall?
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
+- ~Can we have a binary that reads images with a descriptor that can be invoked as a toolcall?~
+- JB `Run Agent Doc` on this document stalls...does not dispatch to the opencode session.
 <!-- /agent:queue -->
 ###
 <!--

@@ -1112,6 +1112,33 @@ enum Commands {
         #[command(subcommand)]
         action: ControllerAction,
     },
+    /// Fleet-wide actor admin control plane (`#ipc-admin-api`)
+    Admin {
+        #[command(subcommand)]
+        action: AdminAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum AdminAction {
+    /// Enumerate every actor in the project fleet (one row per document)
+    List {
+        /// Project root to inspect (defaults to the nearest project from CWD)
+        #[arg(long)]
+        project_root: Option<PathBuf>,
+        /// Emit JSON instead of a human-readable table
+        #[arg(long)]
+        json: bool,
+    },
+    /// Derived diagnostics: cross-document pane contention + orphaned bindings
+    Detect {
+        /// Project root to inspect (defaults to the nearest project from CWD)
+        #[arg(long)]
+        project_root: Option<PathBuf>,
+        /// Emit JSON instead of a human-readable report
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -2418,6 +2445,14 @@ fn main() -> anyhow::Result<()> {
             ),
             ControllerAction::Shutdown { project_root } => {
                 agent_doc_orchestration::project_controller::run_shutdown(project_root.as_deref())
+            }
+        },
+        Commands::Admin { action } => match action {
+            AdminAction::List { project_root, json } => {
+                agent_doc_orchestration::admin::list(project_root.as_deref(), json)
+            }
+            AdminAction::Detect { project_root, json } => {
+                agent_doc_orchestration::admin::detect(project_root.as_deref(), json)
             }
         },
         Commands::Hook { action } => match action {

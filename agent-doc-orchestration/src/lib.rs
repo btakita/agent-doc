@@ -60,6 +60,7 @@ pub mod agent;
 /// `crate::archive_index::*` and `agent_doc_orchestration::archive_index::*`
 /// call sites keep working after the SQLite-layer extraction.
 pub use agent_doc_sqlite::archive_index;
+pub mod admin;
 pub mod boundary;
 pub mod callback;
 pub mod capture;

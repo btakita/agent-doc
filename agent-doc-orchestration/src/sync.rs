@@ -2805,6 +2805,27 @@ fn is_stash_window_name(window_name: &str) -> bool {
     window_name == "stash" || window_name.starts_with("stash-")
 }
 
+/// Returns `true` when `pane_id` currently lives in a `stash` window.
+///
+/// Editor-navigation focus (`focus::run_no_promote`, `no_stash_promote`) uses
+/// this to avoid selecting a stashed pane in place: selecting a pane that lives
+/// in the stash window surfaces editor focus *inside* the stash instead of in
+/// the working `agent-doc` window (`#jb-tsift-pane-sync`). When the target pane
+/// is stashed, the deferred sync reconciler's atomic SWAP owns surfacing and
+/// selecting it (it swaps the stashed pane into `agent-doc` and stashes the
+/// displaced pane in one operation, then selects the focus pane), so exactly one
+/// path performs the in/out transition. Best-effort: an unresolved window
+/// returns `false` so the caller falls back to selecting in place.
+pub fn pane_in_stash_window(tmux: &Tmux, pane_id: &str) -> bool {
+    let Ok(window_id) = tmux.pane_window(pane_id) else {
+        return false;
+    };
+    match window_name_for_window_id(tmux, &window_id) {
+        Some(name) => is_stash_window_name(&name),
+        None => false,
+    }
+}
+
 /// Promote a live-owner pane out of a `stash` window into its session's
 /// `agent-doc` window so editor focus surfaces it in the working layout instead
 /// of selecting it in place inside the stash (`#stash-pane-promote-on-focus`).
@@ -8021,6 +8042,31 @@ mod tests {
         assert!(
             !promoted,
             "a pane already outside the stash should not be promoted"
+        );
+    }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn pane_in_stash_window_detects_stash_membership() {
+        // `#jb-tsift-pane-sync`: editor-navigation focus uses this gate to avoid
+        // selecting a stashed pane in place (which would surface focus inside the
+        // stash). A pane in the agent-doc window is not stashed; a pane parked in
+        // the stash window is.
+        let iso = IsolatedTmux::new("sync-pane-in-stash");
+        let tmp = tempfile::TempDir::new().unwrap();
+
+        let pane0 = iso.new_session("test", tmp.path()).unwrap();
+        let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
+        assert!(
+            !pane_in_stash_window(&iso, &pane0),
+            "pane in the agent-doc window must not be reported as stashed"
+        );
+
+        let pane2 = iso.split_window(&pane0, tmp.path(), "-dh").unwrap();
+        iso.stash_pane(&pane2, "test").unwrap();
+        assert!(
+            pane_in_stash_window(&iso, &pane2),
+            "pane parked in the stash window must be reported as stashed"
         );
     }
 

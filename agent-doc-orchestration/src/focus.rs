@@ -157,7 +157,25 @@ pub fn run_no_promote(file: &Path, pane: Option<&str>) -> Result<()> {
 /// select the pane, leaving any stash reparenting to the sync reconciler
 /// (`#jb-nav-3pane-promote-swap`).
 fn promote_and_select(tmux: &Tmux, pane: &str, no_stash_promote: bool) -> Result<()> {
-    if !no_stash_promote && let Err(e) = crate::sync::promote_pane_to_agent_doc_window(tmux, pane) {
+    if no_stash_promote {
+        // Editor-navigation focus defers stash reparenting to the sync
+        // reconciler (`#jb-nav-3pane-promote-swap`) so the additive promote does
+        // not race the reconcile and grow the window to an extra pane. The
+        // selection must be deferred together with the reparenting: selecting a
+        // pane that still lives in the stash window surfaces editor focus
+        // *inside* the stash (`#jb-tsift-pane-sync`). Leave surfacing + selection
+        // to the reconciler's atomic SWAP, which swaps the stashed pane into the
+        // agent-doc window and selects the focus pane in one operation.
+        if crate::sync::pane_in_stash_window(tmux, pane) {
+            eprintln!(
+                "[focus] pane {} is stashed; deferring surface+select to the sync reconciler (not selecting in place)",
+                pane
+            );
+            return Ok(());
+        }
+        return tmux.select_pane(pane);
+    }
+    if let Err(e) = crate::sync::promote_pane_to_agent_doc_window(tmux, pane) {
         eprintln!("[focus] stash promotion check failed for {}: {}", pane, e);
     }
     tmux.select_pane(pane)
@@ -460,6 +478,90 @@ mod tests {
         assert_eq!(
             selected, registry_pane,
             "focus should fall back to sessions.json when the local actor projection is closed"
+        );
+    }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn no_promote_focus_does_not_select_a_stashed_pane() {
+        // `#jb-tsift-pane-sync`: editor-navigation focus (`no_stash_promote`)
+        // must not select a pane that lives in the stash window — doing so
+        // surfaces editor focus inside the stash ("focus goes into the stash").
+        // Selection is deferred to the reconciler's atomic SWAP, so focus stays
+        // on the current agent-doc pane until the reconciler swaps the target in.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let _cwd = ScopedCurrentDir::set(root);
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        let doc = root.join("tasks/focus-stash.md");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: focus-stash\nagent_doc_format: template\nagent_doc_write: crdt\n---\n",
+        )
+        .unwrap();
+
+        let iso = IsolatedTmux::new("focus-no-promote-stash");
+        let pane0 = iso.new_session("test", root).unwrap();
+        let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
+        let stashed = iso.split_window(&pane0, root, "-dh").unwrap();
+        iso.stash_pane(&stashed, "test").unwrap();
+
+        // The agent-doc pane is the active selection before navigation.
+        iso.select_pane(&pane0).unwrap();
+
+        // Editor-navigation focus targets the stashed pane. With the fix it must
+        // NOT pull focus into the stash window.
+        run_with_tmux_opts(&doc, Some(&stashed), &iso, true).unwrap();
+
+        let selected = iso
+            .raw_cmd(&["display-message", "-p", "#{pane_id}"])
+            .unwrap()
+            .trim()
+            .to_string();
+        assert_eq!(
+            selected, pane0,
+            "no_stash_promote focus must stay on the agent-doc pane, not move into the stash"
+        );
+        assert_ne!(
+            selected, stashed,
+            "no_stash_promote focus must not select the stashed pane in place"
+        );
+    }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn no_promote_focus_selects_a_visible_non_stashed_pane() {
+        // Contrast to the stash case: a target pane already in the agent-doc
+        // window is selected in place (the deferral only applies to stashed
+        // panes).
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let _cwd = ScopedCurrentDir::set(root);
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        let doc = root.join("tasks/focus-visible.md");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: focus-visible\nagent_doc_format: template\nagent_doc_write: crdt\n---\n",
+        )
+        .unwrap();
+
+        let iso = IsolatedTmux::new("focus-no-promote-visible");
+        let pane0 = iso.new_session("test", root).unwrap();
+        let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
+        let sibling = iso.split_window(&pane0, root, "-dh").unwrap();
+        iso.select_pane(&pane0).unwrap();
+
+        // Both panes are in the agent-doc window; focusing the sibling selects it.
+        run_with_tmux_opts(&doc, Some(&sibling), &iso, true).unwrap();
+
+        let selected = iso
+            .raw_cmd(&["display-message", "-p", "#{pane_id}"])
+            .unwrap()
+            .trim()
+            .to_string();
+        assert_eq!(
+            selected, sibling,
+            "no_stash_promote focus must select a visible non-stashed target pane in place"
         );
     }
 }

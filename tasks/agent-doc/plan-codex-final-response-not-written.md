@@ -17,6 +17,25 @@ The visible failure chain was:
   `session-check` still treated the response as a direct historical patchback
   rather than a binary-owned closeout.
 
+## Additional Repro - 2026-06-03
+
+The same failure recurred after the PDP fit-guide spacing task in
+`src/boost-client/tasks/monsterrodholders.md`:
+
+- Codex completed the repo change, pushed `monsterrodholders-dev` commit
+  `152fbce8`, deployed with `./scripts/git-to-wp.sh`, verified the origin page,
+  and pushed `boost-client` commit `b2b7953`.
+- The chat final response summarized the commits and verification, but no
+  matching `### Re:` response was appended to `agent:exchange`.
+- The user had to issue: "response was not written into the document.
+  #agent-doc-bug. Write response into the document".
+- Manual repair appended the missing closeout response into the document. This
+  is new evidence for backlog item `#codex-final-response-repeat` and the
+  existing `#codex-final-response-live-verify` guard.
+
+This cycle only records the repro and manual document repair. Do not implement
+the agent-doc fix here.
+
 ## Goals
 
 - A Codex final answer for an owned-pane/manual fallback path must either be

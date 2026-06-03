@@ -160,6 +160,7 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 
 <!-- agent:backlog priority queue=append -->
 - [ ] [#opencode-post-turn-false-active] #agent-doc-bug 2026-06-03: JB Run Agent Doc stalls after first turn — dispatch-only reopen refuses because OpenCode pane shows completed turn output in scrollback, triggering false 'opencode active turn'. dispatch_blocker_reason scans ALL lines for non-idle content; completed turn output (bash commands, Thought:, Click to expand) is non-chrome, so has_non_idle_content=true while has_ready_prompt stays false (OpenCode idle state has no standalone > prompt). Fix: mirror Claude's bottom-N-lines busy-cue check instead of all-lines non-idle scan. Plan: tasks/agent-doc/plan-opencode-post-turn-false-active.md
+- [ ] [#codex-final-response-repeat] #agent-doc-bug 2026-06-03: `src/boost-client/tasks/monsterrodholders.md` had a completed/deployed Codex closeout for the PDP fit-guide spacing task, but the final chat response was not appended to the document's `agent:exchange`; the user had to request manual writeback. Treat as new evidence for the owned-pane/direct-chat final-response patchback guard. Existing plan updated: tasks/agent-doc/plan-codex-final-response-not-written.md. Do not implement in this cycle.
 <!-- /agent:backlog -->
 
 ## Review

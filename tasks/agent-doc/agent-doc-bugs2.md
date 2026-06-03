@@ -148,14 +148,23 @@ No new implementation work this cycle. All items are documented in backlog/revie
 
 
 Addressed in commit `fc7c0b106`. Root cause: 1623 `eprintln!` calls (`start.rs:1083` repeats on every poll). Fix: rate-limit or redirect for OpenCode.
-<!-- agent:boundary:e1694942 -->
+
+### Re: queue drain — glm-5.1
+
+> **Queue prompt:**
+>
+> The OpenCode Prompts still cannot be navigated with the arrow keys or Tab key. Enter does work. ![img_13.png](img_13.
+
+
+Already addressed in commit fc7c0b106. See previous response for root cause and fix direction.
+<!-- agent:boundary:1e01033f -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - ~[#backlog-queue-sync-no-populate]~
 - ~The Codex Capacity Proof incorrectly runs in OpenCode. See monsterrodholders.md opencode session + agent-doc logs. ![img_11.png](img_11.png)~
 - ~The logs still bleed over the OpenCode UI. ![img_12.png](img_12.png)~
-- The OpenCode Prompts still cannot be navigated with the arrow keys or Tab key. Enter does work. ![img_13.png](img_13.
+- ~The OpenCode Prompts still cannot be navigated with the arrow keys or Tab key. Enter does work. ![img_13.png](img_13.~
 .png)
 - The queue did not clear when all items were complete in an opencode session.
 - In OpenCode the console stdout bleeds behind the TUI. The TUI is undersized. ![img_14.png](img_14.png)
@@ -167,7 +176,72 @@ monsterrodholders.md opencode session is spammed with console logs on repeat. Th
 {"type":"error","timestamp":1780498090465,"sessionID":"ses_1720b36b8ffey3uGrItjo5MT6z","error":{"name":"UnknownError","data":{"message":"Unexpected server error. Check server logs for details.","ref":"err_02fac054"}}} stderr=
 ```
 ---
-- This session's console stdout is bleeding in front of the opencode tui. ![img_16.png](img_16.png)
+JB `Run Agent Doc` did not dispatch
+```
+[sync] recovered live pane %83 for session tsift-v0 via supervisor pid 1086207
+[sync] recovered live pane %70 for session b26b9957 via supervisor pid 882213
+[sync] recovered live pane %80 for session 3f069c68 via supervisor pid 3883956
+[sync] found alive agent-doc child (pid 1205587) in pane %76 for tasks/software/lazily-rs.md
+resync: stash pane %66 is unregistered but still hosts live supervisor 4602f467-ef2a-4094-a750-5eb533368988 — skipping kill
+[sync] recovered live pane %83 for session tsift-v0 via supervisor pid 1086207
+[sync] recovered live pane %70 for session b26b9957 via supervisor pid 882213
+[sync] recovered live pane %80 for session 3f069c68 via supervisor pid 3883956
+[sync] found alive agent-doc child (pid 1205587) in pane %76 for tasks/software/lazily-rs.md
+resync: stash pane %79 is unregistered but still hosts live supervisor 1ef5f0e7-0687-4f35-b9bc-2b9c330d5688 — skipping kill
+[route] target tmux session: 0
+[route] Still waiting for opencode (1s)... last line:                                                             
+[route] Still waiting for opencode (3s)... last line:                                                             
+[route] Still waiting for opencode (4s)... last line:                                                             
+[route] Still waiting for opencode (6s)... last line:                                                             
+[route] Still waiting for opencode (7s)... last line:                                                             
+[route] Still waiting for opencode (9s)... last line:                                                             
+[route] Still waiting for opencode (10s)... last line:                                                             
+[route] Still waiting for opencode (12s)... last line:                                                             
+[route] Still waiting for opencode (14s)... last line:                                                             
+[route] registered pane %76 for /home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md is busy with pending document drift — applying scoped `agent-doc fix tasks/software/lazily-rs.md` once before failing closed
+[sync] found alive agent-doc child (pid 1205587) in pane %76 for tasks/software/lazily-rs.md
+[route] live opencode pane %76 for tasks/software/lazily-rs.md is still busy after the scoped recovery path — sending Escape to interrupt before the final reroute attempt
+[route] Still waiting for opencode (1s)... last line:                                                             
+[route] Still waiting for opencode (3s)... last line:                                                             
+[route] Still waiting for opencode (4s)... last line:                                                             
+[route] Still waiting for opencode (6s)... last line:                                                             
+[route] Still waiting for opencode (7s)... last line:                                                             
+[route] Still waiting for opencode (9s)... last line:                                                             
+[route] Still waiting for opencode (10s)... last line:    ⬝■■■■■■⬝  esc interrupt                                  
+[route] Still waiting for opencode (12s)... last line:    ⬝⬝⬝⬝⬝⬝⬝⬝  esc interrupt                                  
+[route] Still waiting for opencode (14s)... last line:    ■■■■■■⬝⬝  esc interrupt                                  
+[route] Still waiting for opencode (15s)... last line:    ⬝■■■■■■⬝  esc interrupt                                  
+[route] Still waiting for opencode (17s)... last line:    ⬝⬝⬝⬝⬝⬝⬝⬝  esc interrupt                                  
+[route] Still waiting for opencode (18s)... last line:    ■■■■■■⬝⬝  esc interrupt                                  
+[route] Still waiting for opencode (20s)... last line:    ⬝■■■■■■⬝  esc interrupt                                  
+[route] Still waiting for opencode (21s)... last line:    ⬝⬝⬝⬝⬝⬝⬝⬝  esc interrupt                                  
+[route] Still waiting for opencode (23s)... last line:    ■■■■■⬝⬝⬝  esc interrupt                                  
+[route] Still waiting for opencode (24s)... last line:    ⬝⬝■■■■■■  esc interrupt                                  
+[route] Still waiting for opencode (26s)... last line:    ⬝⬝⬝⬝⬝⬝⬝⬝  esc interrupt                                  
+[route] Still waiting for opencode (27s)... last line:    ■■■■■⬝⬝⬝  esc interrupt                                  
+[route] Still waiting for opencode (29s)... last line:    ⬝⬝■■■■■■  esc interrupt                                  
+[route] Still waiting for opencode (1s)... last line:    ⬝⬝⬝⬝■■■■  esc again to interrupt                         
+[route] Still waiting for opencode (3s)... last line:    ■■⬝⬝⬝⬝⬝⬝  esc again to interrupt                         
+[route] Still waiting for opencode (4s)... last line:    ⬝⬝⬝⬝⬝⬝⬝⬝  esc again to interrupt                         
+[route] Still waiting for opencode (6s)... last line:    ⬝⬝⬝⬝■■■■  esc interrupt                                  
+[route] Still waiting for opencode (7s)... last line:    ■■⬝⬝⬝⬝⬝⬝  esc interrupt                                  
+[route] Still waiting for opencode (9s)... last line:    ⬝⬝⬝⬝⬝⬝⬝⬝  esc interrupt                                  
+[route] Still waiting for opencode (11s)... last line:    ⬝⬝⬝⬝■■■■  esc interrupt                                  
+[route] Still waiting for opencode (12s)... last line:    ■■⬝⬝⬝⬝⬝⬝  esc interrupt                                  
+[route] Still waiting for opencode (14s)... last line:    ⬝⬝⬝⬝⬝⬝⬝⬝  esc interrupt                                  
+[route] Still waiting for opencode (15s)... last line:    ⬝⬝⬝⬝■■■■  esc interrupt                                  
+[route] Still waiting for opencode (17s)... last line:    ■■⬝⬝⬝⬝⬝⬝  esc interrupt                                  
+[route] Still waiting for opencode (18s)... last line:    ⬝⬝⬝⬝⬝⬝⬝⬝  esc interrupt                                  
+[route] Still waiting for opencode (20s)... last line:    ⬝⬝⬝⬝■■■■  esc interrupt                                  
+[route] Still waiting for opencode (21s)... last line:    ■■⬝⬝⬝⬝⬝⬝  esc interrupt                                  
+[route] Still waiting for opencode (23s)... last line:    ⬝⬝⬝⬝⬝⬝⬝⬝  esc interrupt                                  
+[route] Still waiting for opencode (24s)... last line:    ⬝⬝⬝⬝⬝■■■  esc interrupt                                  
+[route] Still waiting for opencode (26s)... last line:    ⬝⬝⬝⬝⬝⬝⬝⬝  esc interrupt                                  
+[route] Still waiting for opencode (27s)... last line:    ⬝⬝⬝⬝⬝⬝⬝⬝  esc interrupt                                  
+[route] Still waiting for opencode (29s)... last line:    ⬝⬝⬝⬝⬝⬝■■  esc interrupt                                  
+Error: registered pane %76 for tasks/software/lazily-rs.md is still not showing an idle opencode prompt (bounded interrupt recovery never restored a dispatch-ready prompt) after automatically applying `agent-doc fix tasks/software/lazily-rs.md` once; refusing to inject a routed trigger into a busy session (pane=%76 pane_pid=3800819 pane_session=0 current_command=agent-doc)
+```
+---
 <!-- /agent:queue -->
 ###
 <!--

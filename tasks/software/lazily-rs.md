@@ -55,7 +55,23 @@ Converted `ThreadSafeInner::slot_fast_paths` and `cell_fast_paths` from `RwLock<
 - Write in `slot_with_equals` / `cell`: `.insert(id, fast_path)` → resize-with-None + direct index set
 
 **Verification:** `make check` passes (fmt, clippy, build, 92 default tests, 2 tokio tests, 12 loom concurrency tests, benchmark check). Release build clean. Pushed as `ac0eb4b`.
-<!-- agent:boundary:a9a83cf5 -->
+
+### Re: #hqmh lazyperf26 — glm-5.1
+
+> **Queue prompt:**
+>
+> [#hqmh]
+
+
+Converted `ThreadSafeSlotFastPath.dependents` and `ThreadSafeCellFastPath.dependents` from `Mutex<HashMap<SlotId, ThreadSafeDependentKind>>` to `Mutex<DependentEdgeVec>` (SmallVec for typical 1-5 node fan-out).
+
+**Changes in `src/thread_safe.rs`:**
+- Added `DependentEdgeVec` type alias: `SmallVec<[(SlotId, ThreadSafeDependentKind); 4]>` / `Vec<(…)>`
+- Added `dependent_edge_insert` / `dependent_edge_remove` helper functions
+- Updated both struct fields, constructors, `insert_dependent`, `remove_dependent`, `dependents_snapshot` methods
+
+**Verification:** `make check` passes (fmt, clippy, 92 default tests, 2 tokio tests, 12 loom tests, benchmark check). Pushed as `5f4c76e`.
+<!-- agent:boundary:e02f9e99 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -65,7 +81,7 @@ Converted `ThreadSafeInner::slot_fast_paths` and `cell_fast_paths` from `RwLock<
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - ~[#71yq]~
-- [#hqmh]
+- ~[#hqmh]~
 - [#xdq8]
 - [#vk55]
 - [#cffp]
@@ -77,7 +93,6 @@ Converted `ThreadSafeInner::slot_fast_paths` and `cell_fast_paths` from `RwLock<
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#hqmh] #lazyperf26 #lazyperf26 Convert ThreadSafeSlotFastPath.dependents and ThreadSafeCellFastPath.dependents from Mutex<HashMap> to Mutex<EdgeVec> — sidecar dependents are typically 1-5 nodes
 - [ ] [#xdq8] #lazyperf27 #lazyperf27 Replace scheduled_effects HashSet with Vec<bool> indexed by SlotId — zero-hash O(1) schedule/contains check
 - [ ] [#vk55] #lazyperf28 #lazyperf28 Replace batched_cells/cell_clears/slots HashSet with SmallVec — linear dedup faster for typical small batches
 - [ ] [#cffp] #lazyperf29 #lazyperf29 Replace ThreadSafeInvalidationPlan HashMaps with Vec<(SlotId, bool)> — transient plan structure, one-pass build/apply

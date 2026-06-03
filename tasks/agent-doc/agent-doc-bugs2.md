@@ -36,12 +36,32 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 1 response topic(s): do #route-reaps-idle-fresh-start
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:69c9a014 -->
+
+### Re: do [#admin-fleet-dashboard] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#admin-fleet-dashboard]
+
+
+Shipped Phase 1 of the actor runtime dashboard — `agent-doc admin dashboard`, a read-only live view over the `#ipc-admin-api` read surfaces (`admin list` / `admin detect`).
+
+**Implementation** (`agent-doc-orchestration::dashboard`, pure model/view split per the plan):
+- `build_dashboard_model(actors, findings)` — folds enumerated actors + derived findings into a deterministic, `document_id`-sorted row model; each row carries the `admin detect` finding kinds that name its document or pane, plus a `problem` highlight flag. No new detection/control logic — pure view over the existing data plane.
+- `render_dashboard(model, color)` — stable terminal frame, color gated for testability; flags cross-document / stale-dead-pane rows with a `!` marker + a findings footer.
+- `agent-doc admin dashboard` — polls every ~1s (`--interval`), with `--once` (single frame) and `--json` (model snapshot) for scripting/tests. Color auto-detected via `IsTerminal`.
+
+**Verification:** 7 new unit tests (model sort, clean fleet, cross-document flagging both rows, stale-dead-pane by pane match, deterministic plain render, findings footer + marker, empty fleet, unicode-safe truncate) — all green. Full `make check` passes (exit 0; the lone `unused import` warning is in a pre-existing test file). End-to-end smoke: `admin dashboard --json` and `--once` both render the live fleet correctly. Built `--release` + `cargo install`; both binaries current.
+
+**Deferred** (unchanged dependency boundary): mutating row keybinds (`admin stop` / `admin rebind`) depend on `#ipc-admin-api` Phase 2 gated verbs; the JetBrains/VS Code tool-window surface is also still deferred. Plan updated: `tasks/agent-doc/plan-actor-runtime-dashboard.md`.
+
+Submodule commit `2026042`; superproject pointer + plan bumped.
+<!-- agent:boundary:9a5239cb -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#admin-fleet-dashboard]
+- ~do [#admin-fleet-dashboard]~
 - JB `Clear Session Context` does not work with OpenCode. This is a long-standing issue. Look at attempt with tsift.md in the logs.
 - Error in OpenCode `  ┃  Error: malformed template patchback: found patch/replace markers but no closed patch blocks parsed; refusing to append unmatched content` when running tsift.md
 <!-- /agent:queue -->
@@ -56,7 +76,6 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Backlog
 
 <!-- agent:backlog priority queue=append -->
-- [ ] [#admin-fleet-dashboard] [recommended] #agent-doc-bug feature 2026-06-02: runtime dashboard consuming the #ipc-admin-api READ surfaces (agent-doc admin list --json + admin detect --json) to show the live actor fleet — document ownership, competing/cross-document + orphaned-dead-pane actors, generation/state, supervisor pid — with problematic rows highlighted from detect. Read-surface dependency SHIPPED 2026-06-02 (admin list/detect Phase 1, submodule 31efa50c) so this is now ACTIONABLE via the JSON feeds. Optional stop/rebind row keybinds depend on #ipc-admin-api Phase 2 (mutating verbs, still gated). Same feature as plan id #actor-runtime-dashboard (canonical queue id is #admin-fleet-dashboard). Plan: tasks/agent-doc/plan-actor-runtime-dashboard.md.
 <!-- /agent:backlog -->
 
 ## Review

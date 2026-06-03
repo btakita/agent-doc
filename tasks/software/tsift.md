@@ -31,38 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260603-151820.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260603-160632.md`*
 
 Compacted content:
-- Archived 1 response topic(s): SurrealDB Substrate Promotion
+- Archived 1 response topic(s): #libmod3 Phase 3
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
-### Re: #libmod3 Phase 3 — Semantic Edit Extraction — glm-5.1
-
-> **Queue prompt:**
->
-> do [#libmod3]
-
-
-Extracted the **Semantic Edit** module (~4,000 lines) from `tsift-cli/src/lib.rs` into `tsift-cli/src/semantic_edit.rs`:
-
-**New file:** `packages/tsift-cli/src/semantic_edit.rs` (4,052 lines)
-**lib.rs reduction:** 41,723 → 37,704 lines (-4,019)
-
-**What was extracted:**
-- All semantic edit types: `EditBatch`, `EditOp`, `SemanticEditIntent`, `AstSpanPreview`, `MarkdownSpanMetadata`, `PlannedEdit`, `StagedEdit`, `AppliedEdit`, `EditResult`, verification types, language contracts, etc.
-- All semantic edit functions: validation, Rust/Script/Markdown edit primitives, preview/diff/apply/verify logic, atomic staging, `cmd_edit_intents`, `apply_edit_plan_atomically`
-
-**Approach:**
-- Created `mod semantic_edit` with proper `use crate::` imports for shared helpers
-- Made shared helper functions `pub(crate)`: `resolve_source_file`, `resolve_query_db_path`, `truncate_for_budget`, `symbol_hit_line/end_line/ast_span`, `source_read_command`, `markdown_ast_projection`, `relativize_pathbuf`, `stable_handle`, etc.
-- Re-exported public API from lib.rs: `EditBatch`, `EditResult`, `EditStatus`, `cmd_edit_intents`, `apply_edit_plan_atomically`, `build_edit_plan`, etc.
-- Test-only imports moved to `mod tests` block with direct `super::semantic_edit::` paths
-
-**Verification:** `make check` passes clean, all 335 tests pass.
-
-**Deferred:** Traversal/Exploration extraction (~1,300 lines) is deeply interleaved with Convex/GraphDb/SourceRead code and requires a follow-up phase. Added as gated follow-up.
-<!-- agent:boundary:6a09f966 -->
+<!-- agent:boundary:1799ba1b -->
 <!-- /agent:exchange -->
 ###
 <!--

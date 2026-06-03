@@ -21,8 +21,7 @@ queue_active: true
 ## Status
 
 <!-- agent:status patch=replace -->
-
-Queue contamination cleaned. Session committed.
+Queue contamination cleaned. Session committed. Codex stale-busy bottom-idle fix shipped.
 <!-- /agent:status -->
 
 ## Exchange
@@ -35,7 +34,27 @@ Queue contamination cleaned. Session committed.
 Compacted content:
 - Archived 2 response topic(s): Codex stall clarification; JB Run Agent Doc Codex stall
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:80d2b0e5 -->
+
+### Re: Codex stale-busy idle pane not detected — opencode
+
+**Root cause identified and fixed.** The `ready_prompt_candidate` function in `route.rs` (`route.rs:8492`) had no Codex bottom-N idle chrome detection. OpenCode has `is_bottom_idle_chrome` (bottom-12-lines contiguous chrome check), but for Codex this function was gated at `harness.rs:294` to OpenCode-only. When a Codex pane completed a turn and sat idle with context status footer + scrollback, the all-lines `is_idle_chrome_only_output` returned `false` (scrollback lines aren't ignorable), and the `ready_prompt_candidate` fell through to the dispatch-ready prompt check — which also failed if the pane showed a status line rather than a bare `>`/`›` glyph. The 60s wait loop polled `current_generation_ready_prompt_proven` each 100ms, always got `false`, timed out, and the stale-busy repair at `route.rs:4110` never fired because `prompt_ready` was `false`.
+
+**Fix (2 files, 3 regression tests):**
+
+1. **`harness.rs` — extended `is_bottom_idle_chrome` to Codex:** The function now accepts `codex | opencode` (was OpenCode-only). For Codex, `min_chrome=1` (a single context status footer line is sufficient idle proof); for OpenCode, unchanged at 4. Also accepts a dispatch-ready prompt line (`>`, `›`, `❯`, or idle placeholder) as a non-chrome idle proof.
+
+2. **`route.rs` — added bottom-idle-chrome path in `ready_prompt_candidate`:** After the existing `has_busy_cue` check (line 8499), a new branch calls `is_bottom_idle_chrome(content, 12)` for both Codex and OpenCode. This means a post-turn Codex pane with context status footer + scrollback now returns `Some("bottom idle chrome")` instead of `None`, enabling the stale-busy repair at `route.rs:4110` to fire and promote the actor to Ready.
+
+3. **Tests updated:**
+   - `is_bottom_idle_chrome_accepts_codex_post_turn_with_scrollback` — Codex scrollback + status + prompt
+   - `is_bottom_idle_chrome_accepts_codex_context_status_only` — single footer line accepted
+   - `is_bottom_idle_chrome_rejects_codex_active_turn` — active turn still blocked
+   - `ready_prompt_candidate_accepts_codex_post_turn_idle_with_scrollback` — route-level regression
+   - `ready_prompt_candidate_accepts_codex_footer_as_bottom_idle_chrome` — replaces old rejection test
+   - `fresh_start_ack_outcome_keeps_idle_no_op_and_reaps_genuine_miss` — updated: footer-only Codex is now IdleNoOpKeep (not GenuineMissReap)
+
+All 2231 + 69 tests pass, clippy clean, binary installed.
+<!-- agent:boundary:a5ed3e17 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" auto -->

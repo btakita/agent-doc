@@ -61,12 +61,11 @@ prompt_presets:
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/98e0966f0f923652f73812054e6cd6c829ccef13e7b897464d74658860d0278e-20260529-213150.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/98e0966f0f923652f73812054e6cd6c829ccef13e7b897464d74658860d0278e-20260603-202232.md`*
 
 Compacted content:
-- Archived 24 response topic(s): Skills to show; Leave company blank for Dreamable?; LiveKit and Dreamable; 21 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/98e0966f...
-<!-- agent:boundary:be7cbb92 -->
+<!-- agent:boundary:b57ed547 -->
 <!-- /agent:exchange -->
 ###
 <!--

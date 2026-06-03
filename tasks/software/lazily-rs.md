@@ -38,7 +38,7 @@ queue_active: false
 Compacted content:
 - Archived 6 response topic(s): lock contention next steps; shadow invalidation graph; #lazyperf9; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:76e097a4 -->
+<!-- agent:boundary:02b826a4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -52,7 +52,6 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#lazyperf11] Reduce effect-heavy ThreadSafeContext lock contention after #lazyperf8: target thread_safe_effect_contention_batch_flush_16 and queue_coalescing_16, especially the high other/dependency_edge waits, by coalescing effect drain/schedule mutations or adding effect-sidecar state without weakening cleanup/disposal ordering.
 <!-- /agent:backlog -->
 
 ## Review

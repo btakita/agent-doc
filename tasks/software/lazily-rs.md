@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 
@@ -77,27 +77,55 @@ No — Vec index lookups are faster than HashMap lookups for dense integer keys 
 For lazily-rs specifically, `SlotId` values are dense sequential integers, so `Vec<Option<Node>>` indexed by `SlotId` avoids all hash overhead with zero wasted slots. The single-threaded `Context` already uses this pattern — `#lazyperf20` proposes aligning the thread-safe `ThreadSafeState` to match.
 
 The only case where HashMap wins is with sparse keys (lots of gaps in the ID space), which `#lazyperf22` (slot ID reuse/compaction) would address.
-<!-- agent:boundary:67dec853 -->
+
+### Re: Queue #zfam #fftjz #rvjd #vftn — gpt-5
+
+> **Queue prompt:**
+>
+> [#zfam]
+>
+> [#f5jz]
+>
+> [#rvjd]
+
+
+Processed 4 of 8 queue items. All 106 tests pass (including loom model-checking).
+
+**#zfam #lazyperf17 — SmallVec for edges:** Replaced `HashSet<SlotId>` on `SlotNode.dependencies`, `SlotNode.dependents`, `CellNode.dependents`, `EffectNode.dependencies` with `SmallVec<[SlotId; 4]>` in both `context.rs` and `thread_safe.rs`. Added `smallvec = "1"` dependency. Inline storage for ≤4 edges eliminates per-node heap allocation and hash computation for typical 1-3 fan-out.
+
+**#f5jz #lazyperf18 — Eliminate temp allocations:** All `.iter().copied().collect::<Vec<_>>()` patterns on edge fields replaced with `.clone()` (inline SmallVec copy) or `std::mem::take` (for drain patterns). Hot paths affected: `refresh_slot`, `recompute_slot_now`, `clear_slot_now`, `invalidate_cell_dependents_now`, `mark_slot_dirty`, `notify_slot_value_changed`, `run_effect`, `effect_should_run`, `dependents_locked`, `read_slot_or_dependencies`.
+
+**#rvjd #lazyperf19 — RefCell consolidation:** Merged 10 `RefCell` fields on `Context` into single `RefCell<ContextInner>`. Methods that previously borrowed 3-4 separate RefCells (e.g. `schedule_effect`, `flush_effects`) now borrow once. Instrumentation recording merged into the same borrow scope as node mutations.
+
+**#vftn #lazyperf23 — Replace unsafe with Rc:** Changed `SlotNode.compute` and `EffectNode.run` from `Box<dyn Fn>` to `Rc<dyn Fn>`. Eliminated both `unsafe` blocks in `context.rs` — `recompute_slot_now` and `run_effect` now use `Rc::clone` + `(closure.as_ref())(self)` instead of raw pointer copies.
+
+**Deferred items:** #xsp1 (#lazyperf20 HashMap→Vec for ThreadSafeState), #r0jv (#lazyperf21 sync primitive consolidation), #ktrs (#lazyperf22 slot ID reuse), #r54f (#lazyperf24 benchmarks) remain in backlog for a follow-up pass.
+<!-- agent:boundary:652bd9ca -->
 <!-- /agent:exchange -->
 ###
 <!--
+Queue items & backlog items were nat marked done when the task completed during the last queue run in OpenCode. #agent-doc-bug
 -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
+- ~[#zfam]~
+- ~[#f5jz]~
+- ~[#rvjd]~
+- [#xsp1]
+- [#r0jv]
+- [#ktrs]
+- [#vftn]
+- [#r54f]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#zfam] #lazyperf17 Replace HashSet<SlotId> dependency/dependent edges with SmallVec<[SlotId;4]> — high impact: reduces per-node memory, eliminates hash overhead for typical small fan-out (1-3 deps), avoids HashSet→Vec temporary allocations in every refresh/clear/dirty hot path
-- [ ] [#f5jz] #lazyperf18 Pre-allocate or eliminate temporary Vec<SlotId> allocations in invalidation hot paths — refresh_slot, clear_slot_now, mark_slot_dirty, invalidate_cell_dependents_now all .iter().copied().collect() into temp Vecs; use SmallVec or pass iterator slices instead
-- [ ] [#rvjd] #lazyperf19 Consolidate Context RefCell fields into single RefCell<ContextInner> — reduces borrow-check overhead from 4-6 flag checks per get() to 1; single borrow scope eliminates re-entrant borrow risk
 - [ ] [#xsp1] #lazyperf20 Switch ThreadSafeState node storage from HashMap<SlotId, Node> to slot-id-indexed Vec<Option<Node>> matching single-threaded Context — eliminates hash lookup on every node access in thread-safe path
 - [ ] [#r0jv] #lazyperf21 Consolidate ThreadSafeSlotFastPath synchronization primitives — currently 4 mutexes + 2 Condvars + 3 atomics per slot (~400+ bytes overhead); restructure to 1-2 locks + atomics
 - [ ] [#ktrs] #lazyperf22 Add slot ID reuse or vacant-entry compaction for long-lived contexts — SlotId is monotonically increasing, disposed effects leave None entries that grow Vec without bound
-- [ ] [#vftn] #lazyperf23 [recommended] Replace unsafe pointer-to-Box copies in recompute_slot_now/run_effect with Arc<ComputeFn> or safe restructuring
 - [ ] [#r54f] #lazyperf24 [recommended] Benchmark SmallVec vs Vec for dependency edges — measure cache-line impact on fan-out benchmarks before committing to SmallVec
 <!-- /agent:backlog -->
 

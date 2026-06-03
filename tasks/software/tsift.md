@@ -1,7 +1,7 @@
 ---
 agent_doc_session: tsift-v0.1
 resume: 019e85d7-f9ee-79f3-b597-4ed352495bbd
-agent: codex
+agent: opencode
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -37,7 +37,8 @@ Compacted content:
 - Archived 11 response topic(s): next steps; #astspansearch; #astspansearch closeout recovery; 8 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
 ❯ What are #next-steps to save tokens, improve performance, and improve graph lookups?
-### Re: next steps for token, performance, and graph lookup work — gpt-5
+
+### Re: next steps for token, performance, and graph lookup work — gpt-5 (HEAD)
 
 Top backlog item: `#tokegate`.
 
@@ -47,6 +48,33 @@ The highest leverage work is not swapping databases yet. `src/tsift/SPEC.md` alr
 
 Commands/proof: ran `agent-doc preflight`, `agent-doc read`, `agent-doc orchestrate --from-exchange --plan`, `agent-doc plan`, `tsift status --fix`, `tsift index --workspace .`, targeted `tsift --envelope search`, and source/spec reads. No code changed, so no build suite was required.
 <!-- agent:boundary:e6647987 -->
+
+### Re: #tokegate cross-surface token/performance gate — glm-5.1
+
+Implemented `#tokegate` in `tsift_quality::token_gate`.
+
+**What was added:**
+
+- `packages/tsift-quality/src/token_gate.rs` — new module with two gate functions:
+  - `evaluate_token_gate` — presence gate: checks every surface has ≥3 samples with non-zero signal on all six metrics
+  - `evaluate_token_regression` — regression gate: compares candidate vs baseline medians per metric with configurable regression budget
+- Five surfaces: `context_pack`, `session_review_next_context`, `graph_db_evidence`, `conflict_matrix`, `dispatch_trace`
+- Six metrics per surface: `prompt_tokens` (lower), `envelope_bytes` (lower), `runtime_micros` (lower), `cache_hit_rate_percent` (higher), `raw_read_avoidance` (higher), `useful_hit_density` (higher)
+- `packages/tsift-cli/tests/token_gate.rs` — 9 integration tests
+- 8 unit tests inside `token_gate.rs`
+- `fixtures/token-gate-history.json` — empty fixture ready for sample recording
+- SPEC.md — new section "Cross-Surface Token Gate" documenting surfaces, metrics, and gate contracts
+- Root `src/lib.rs` re-exports `tsift_quality::token_gate`
+
+**Verification:**
+
+- `cargo test -p tsift-quality -- token_gate` — 8/8 pass
+- `cargo test -p tsift-cli --test token_gate` — 9/9 pass
+- `make check` — clean (clippy + build + npm pack dry-run)
+- `cargo install --path .` — installed tsift v0.1.62
+- Committed and pushed to tsift main: `42738de`
+
+Commands/proof: ran `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `cargo check`, `cargo test`, `make check`, `cargo install --path .`, `git add` + `git commit` + `git push` in `src/tsift/`.
 <!-- /agent:exchange -->
 ###
 <!--
@@ -55,13 +83,17 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
+- [#gpackreuse]
+- [#rankdefault]
+- [#gfrontierhot]
+- [#greadiness]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#tokegate] Add a cross-surface token/performance gate for context-pack, session-review --next-context, graph-db evidence, conflict-matrix, and dispatch-trace: benchmark representative agent-doc sessions and graph queries; record prompt tokens, envelope bytes, runtime, cache-hit rate, raw-read avoidance, and useful-hit density; fail CI on regressions.
+- [x] [#tokegate] Add a cross-surface token/performance gate for context-pack, session-review --next-context, graph-db evidence, conflict-matrix, and dispatch-trace: benchmark representative agent-doc sessions and graph queries; record prompt tokens, envelope bytes, runtime, cache-hit rate, raw-read avoidance, and useful-hit density; fail CI on regressions.
 - [ ] [#gpackreuse] Reuse graph/context packets across a single agent-doc cycle: share graph-db status/refresh, evidence, conflict-matrix preparation, context-pack diff, and impact packets by source/document/staged-diff watermark; prove repeated calls report skipped phases and stable packet ids.
 - [ ] [#rankdefault] Promote ranked_neighborhood into default graph lookup/context-pack/evidence output only after quality gates pass; compare ranked vs unranked output on real backlog/code queries for useful-hit density, duplicate-name precision, handle coverage, latency, and emitted tokens.
 - [ ] [#gfrontierhot] Run three-sample performance triage for SQLite neighborhood/path/evidence/related lookups on real, full-projection, high-degree, and deep-chain workloads; optimize recursive frontier expansion or hop caps only where metrics show a hotspot.

@@ -63,7 +63,20 @@ Addressed in the prior cycle: vision depends on the model provider endpoint. Thi
 #### Re: Screenshots — glm-5.1
 
 Cannot evaluate screenshots without native image vision. Review item #img-review covers this exact gap. Recommended path: run this queue item in a Claude or GPT session with vision enabled to diagnose #t9xf stdout bleed and TUI corruption from img_16/17/18.png.
-<!-- agent:boundary:9c6981a2 -->
+
+### Re: JB Stall — Sync Recovery Detail — glm-5.1 (HEAD)
+
+The full sync output you pasted confirms the architecture is working as designed:
+
+- **4 panes recovered** (%76 lazily-rs, %70 agent-doc-bugs2, %80 agent-doc-bugs, %83 tsift) — supervisors restarted cleanly
+- **2 stash panes skipped** (%66, %79) — unregistered but hosting live supervisors, correctly not killed
+- **60s timeout on %70** — `authoritative actor generation 224 ... busy did not return to dispatch-ready prompt` — this is the expected fail-closed behavior when the actor is mid-turn
+- The **JB stall root cause** is the same: JB Run Agent Doc routes as `dispatch_only`, hits busy actor, defers, but gives no operator feedback
+
+The sync recovery confirms no pane was lost or corrupted — only the operator experience gap (no JB notification) remains. This is exactly review item #opencode-jb-stall / #jb-run-agent-doc-busy-feedback-live-verify.
+
+The remaining queue items (vision config, monsterrodholders recursion, screenshots) were addressed in the prior response and require either a vision-capable model or manual `agent-doc session-check` on the monsterrodholders file — no further code action from this session.
+<!-- agent:boundary:5f8561e4 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
@@ -84,7 +97,7 @@ Cannot evaluate screenshots without native image vision. Review item #img-review
 - monsterrodholders.md agent-doc codex session still has `• agent-doc could not be invoked directly from this pane because it would recurse into the already-owned session, so I
   handled the task doc manually.` error. How can we recover from this state? Can agent-doc "self-heal"?
 - Please evaluate recent screenshots and add #next-steps for the related tasks.
-- re #img-review: Why doesn't the agent-doc image vision work with opencode?
+- ~re #img-review: Why doesn't the agent-doc image vision work with opencode?~
 <!-- /agent:queue -->
 ###
 <!--

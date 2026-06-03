@@ -59,7 +59,25 @@ Compacted content:
 **Note:** The handle-centric `get`/`set` methods are on `Context` only. `ThreadSafeContext` continues to use `ctx.get_cell()` / `ctx.get()` — the same split as the existing `cell.set()` which only takes `&Context`.
 
 All 83 spec compliance tests pass, including loom and tokio. `make check` clean.
-<!-- agent:boundary:5bd199e3 -->
+
+### Re: extract BENCHMARKS.md — glm-5.1
+
+> **Queue prompt:**
+>
+> Extract a BENCHMARKS.md from the README.md. All benchmarks, including explanations, should go into BENCHMARKS.md. README.md should link to BENCHMARKS.md.
+
+
+Extracted all benchmark data from README.md into [BENCHMARKS.md](src/lazily-rs/BENCHMARKS.md).
+
+**Changes** (commit `567b86f`, pushed):
+
+- Created `BENCHMARKS.md` with all benchmark results, regression budgets, lock attribution, instrumentation profiles, and the Multi-Language/Related/License sections
+- README.md now has a concise "## Benchmarks" section linking to BENCHMARKS.md
+- Updated `scripts/update-benchmark-results.py` to write to `BENCHMARKS.md` via `--benchmarks-file` flag (default: `BENCHMARKS.md`)
+- Updated spec compliance tests to read BENCHMARKS.md for benchmark assertions
+
+`make check` clean.
+<!-- agent:boundary:5f750485 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -69,7 +87,7 @@ All 83 spec compliance tests pass, including loom and tokio. `make check` clean.
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - ~In the README, we have `let val = ctx.get_cell(&counter);`. Please make the canonical usage `counter.get(&ctx)` instead of `ctx.get_cell(&counter)`. Is a Cell a Slot? If so, how can we differentiate from `Slot::get` behavior?~
-- Extract a BENCHMARKS.md from the README.md. All benchmarks, including explanations, should go into BENCHMARKS.md. README.md should link to BENCHMARKS.md.
+- ~Extract a BENCHMARKS.md from the README.md. All benchmarks, including explanations, should go into BENCHMARKS.md. README.md should link to BENCHMARKS.md.~
 - [#lazyperf33]
 - [#lazyperf34]
 - [#lazyperf35]

@@ -321,8 +321,33 @@ pub fn record_requested_head(file: &Path, head_prompt: &str) -> Result<()> {
 /// still requires continuation. Used by the Codex Stop hook when no tracked
 /// in-memory session state is available. Returns the first still-valid
 /// `(file, continuation, marker)`.
+/// `#codex-stop-cross-doc-queue-continuation`: a durable Stop-hook marker is
+/// owned by *some* document; the fallback must not instruct the current Codex
+/// pane to run a document owned by ANOTHER live actor. A marker doc is foreign
+/// when it has a live (non-Closed) authoritative actor bound to a pane other
+/// than `current_pane`. Unknown / closed / unowned ownership is NOT foreign
+/// (allowed — covers the safe-claim and same-session cases). `current_pane` of
+/// `None` (no tmux context) disables the gate and preserves prior behavior.
+fn is_foreign_owned_marker(root: &Path, doc: &Path, current_pane: &str) -> bool {
+    match crate::project_controller::authoritative_actor_binding(root, doc) {
+        Ok(Some(record))
+            if record.state != crate::session_actor::ActorState::Closed
+                && !record.pane_id.trim().is_empty() =>
+        {
+            record.pane_id != current_pane
+        }
+        _ => false,
+    }
+}
+
+/// Find the first still-valid durable `agent:queue auto` continuation marker
+/// across `roots`. `current_pane` is the tmux pane of the Codex session whose
+/// Stop hook is asking; markers owned by a different live pane are skipped (the
+/// scan continues) so the hook never tells pane A to run document B while B has
+/// its own live owner (`#codex-stop-cross-doc-queue-continuation`).
 pub fn pending_marker_continuation_for_roots(
     roots: &[PathBuf],
+    current_pane: Option<&str>,
 ) -> Result<Option<(PathBuf, QueueContinuation, ContinuationMarker)>> {
     let mut seen = std::collections::HashSet::new();
     for root in roots {
@@ -345,6 +370,23 @@ pub fn pending_marker_continuation_for_roots(
             };
             let doc = PathBuf::from(&marker.file);
             if !seen.insert(doc.clone()) {
+                continue;
+            }
+            // `#codex-stop-cross-doc-queue-continuation`: skip a marker owned by
+            // another live actor (different pane) and keep scanning, so this
+            // Codex pane is never told to run a foreign-owned document. Does NOT
+            // remove the marker — it stays for that document's own owner.
+            if let Some(current) = current_pane
+                && is_foreign_owned_marker(root, &doc, current)
+            {
+                crate::ops_log::log_op(
+                    &doc,
+                    &format!(
+                        "codex_stop_foreign_queue_marker_skip file={} current_pane={}",
+                        doc.display(),
+                        current
+                    ),
+                );
                 continue;
             }
             // The marker is durable but advisory — re-confirm against the live
@@ -511,7 +553,7 @@ mod tests {
         reconcile_marker(&doc, "commit").expect("marker written");
 
         // The marker is found and re-confirmed against the live document.
-        let found = pending_marker_continuation_for_roots(&[root.clone()])
+        let found = pending_marker_continuation_for_roots(&[root.clone()], None)
             .unwrap()
             .expect("durable continuation found");
         assert_eq!(found.0, doc);
@@ -524,11 +566,61 @@ mod tests {
         // Scan re-confirms against the document, finds it no longer owes
         // continuation, returns None, and prunes the stale marker.
         assert!(
-            pending_marker_continuation_for_roots(&[root.clone()])
+            pending_marker_continuation_for_roots(&[root.clone()], None)
                 .unwrap()
                 .is_none()
         );
         assert!(!path.exists(), "stale marker pruned during scan");
+    }
+
+    // `#codex-stop-cross-doc-queue-continuation`: a marker for a document owned
+    // by another live actor's pane must be skipped (not driven) when the current
+    // Codex pane differs; a same-pane / unowned marker is still returned.
+    #[test]
+    fn pending_marker_skips_foreign_owned_then_finds_same_pane() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+
+        // Foreign doc: owned by a live actor on pane %70.
+        let foreign = write_doc(&root, &["do [#foreign]"], true, true);
+        reconcile_marker(&foreign, "commit").expect("foreign marker written");
+        crate::session_actor::project_binding_in(
+            &root,
+            &foreign.to_string_lossy(),
+            "foreign-session",
+            "%70",
+            "@1",
+            "test",
+            "foreign_owner",
+        )
+        .unwrap();
+
+        // From pane %74, the foreign-owned marker must be skipped → None.
+        assert!(
+            pending_marker_continuation_for_roots(&[root.clone()], Some("%74"))
+                .unwrap()
+                .is_none(),
+            "foreign-owned marker (pane %70) must be skipped from pane %74"
+        );
+        // The foreign marker must NOT be pruned — it belongs to its own owner.
+        assert!(
+            marker_path(&foreign).unwrap().unwrap().exists(),
+            "foreign marker must survive the skip (not stale)"
+        );
+
+        // The foreign doc's OWN pane (%70) still drives its marker.
+        let owned = pending_marker_continuation_for_roots(&[root.clone()], Some("%70"))
+            .unwrap()
+            .expect("same-pane owner drives its own marker");
+        assert_eq!(owned.0, foreign);
+
+        // Unknown pane context (None) preserves prior behavior — returns it.
+        assert!(
+            pending_marker_continuation_for_roots(&[root.clone()], None)
+                .unwrap()
+                .is_some(),
+            "None current_pane disables the gate (prior behavior)"
+        );
     }
 
     #[test]

@@ -329,8 +329,17 @@ fn marker_fallback_continuation_response(
     roots: &[PathBuf],
     input: &StopInput,
 ) -> Result<Option<StopResponse>> {
+    // `#codex-stop-cross-doc-queue-continuation`: this fallback has no tracked
+    // in-memory session state, so it must not blindly drive the first durable
+    // marker — pass the current Codex pane (inherited via TMUX_PANE) so a marker
+    // owned by another live actor's pane is skipped instead of forcing this pane
+    // to run a foreign-owned document.
+    let current_pane = std::env::var("TMUX_PANE").ok();
     let Some((file, continuation, marker)) =
-        crate::queue_continuation::pending_marker_continuation_for_roots(roots)?
+        crate::queue_continuation::pending_marker_continuation_for_roots(
+            roots,
+            current_pane.as_deref(),
+        )?
     else {
         return Ok(None);
     };

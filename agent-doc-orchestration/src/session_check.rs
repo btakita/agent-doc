@@ -8865,7 +8865,6 @@ Body\n\
                 );
             }
             SessionCheckStatus::Ok(_) => {}
-            other => panic!("unexpected status: {other:?}"),
         }
     }
 

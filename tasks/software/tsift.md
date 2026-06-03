@@ -36,7 +36,7 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): #libmod4 Phase 4: Extract Convex + GraphStore into tsift-core sub-modules
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:117693b1 -->
+<!-- agent:boundary:d15b0ced -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -48,7 +48,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - ~do [#libmod3]~
 - ~do [#libmod4]~
-- do [#libmod5]
+- ~do [#libmod5]~
 - do [#opencode-read]
 - do [#opencode-grep]
 - do [#codex-read]
@@ -62,7 +62,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - [ ] [#surreal-multiproc] Multi-process lock behavior: write conformance test with N concurrent reader processes + 1 writer against same SurrealKV path; document lock contention, stale-read behavior, and crash recovery (SPEC.md:304 promotion gate)
 - [ ] [#surreal-rt-pool] Shared tokio runtime: accept external Runtime reference or use lazy static instead of per-store Runtime::new()
 - [ ] [#surrealbulk-close] Close #surrealbulk review item: re-run benchmarks, update SPEC.md benchmark table, mark done
-- [ ] [#libmod5] Phase 5: Extract Context Pack (~1,700), Conflict Matrix (~2,500), Search Budget (~800), Session Review (~500) from lib.rs
 - [ ] [#opencode-read] OpenCode: replace Read tool with tsift AST API (tsift --envelope source-read) for source code reading
 - [ ] [#opencode-grep] OpenCode: replace grep/rg with tsift search for content search
 - [ ] [#codex-read] Codex: adopt tsift AST API for source reading instead of raw file reads

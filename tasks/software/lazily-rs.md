@@ -162,7 +162,25 @@ SPEC lines 342-348 require a *"controlled A/B rerun"* with *"same host/toolchain
 **Recommendation:** Keep deferred. To benchmark, temporarily swap `type EdgeVec = SmallVec<[SlotId; 4]>` to `type EdgeVec = Vec<SlotId>` in both `context.rs` and `thread_safe.rs`, run `cargo bench --bench context -- dependency_fan_out,set_cell_invalidation/high_fan_out` with Criterion `--save-baseline smallvec` / `--baseline smallvec` for comparison. This requires local execution on the target host.
 
 Both items are documented with clear preconditions for reactivation.
-<!-- agent:boundary:2a11e993 -->
+
+### Re: JB Clear Session Context auto-queue stall — glm-5.1
+
+Audited the auto-queue trigger chain (idle-queue-watch `start.rs:1476-1565`, auto-trigger `start.rs:1344-1463`, queue continuation `queue_continuation.rs:39-128`) and session clear flow (`session_actor_cmd.rs:472-544`).
+
+**Three root causes identified:**
+
+1. **No post-clear auto-queue suppression** — `session clear` sends `/new` but does not write any cooldown marker. The idle-queue-watch thread sees `queue_active: true` with remaining prompts (#r0jv, #r54f) and immediately re-injects `agent-doc <FILE>` into the cleared session.
+
+2. **`prompt_requests_clear()` ignores `/new`** (`codex_hook.rs:819-821`) — only matches exact `/clear`, so OpenCode's `/new` is invisible to `tracked_harness_clear_requires_fresh_restart()` in `route.rs:978-997`. The route-level fresh-restart guard never triggers for OpenCode sessions.
+
+3. **Session clear does not pause auto-queue** — `session_actor_cmd.rs:472-544` reclaims orphaned preflight cycles but leaves `&lt;!-- agent:queue auto --&gt;` with `queue_active: true` untouched. The queue state survives the clear unchanged.
+
+**Plan created:** `tasks/agent-doc/plan-post-clear-auto-queue-suppress.md` — 7-step fix: (1) fix `prompt_requests_clear()` to recognize `/new`, (2) add durable clear-cooldown marker, (3) `session clear` writes marker, (4-5) idle-queue-watch and auto-trigger respect cooldown, (6) explicit `Run Agent Doc` clears cooldown, (7) preflight surfaces cooldown diagnostic.
+
+**Bug transferred to `tasks/agent-doc/agent-doc-bugs2.md` as [#7az7]:**
+
+- [ ] [#7az7] #clear-auto-queue-stall #agent-doc-bug 2026-06-03: JB "Clear Session Context" → session clear sends `/new` → idle-queue-watch/auto-trigger re-injects `agent-doc <FILE>` into cleared session that has no agent-doc context → stall. Plan: `tasks/agent-doc/plan-post-clear-auto-queue-suppress.md`
+<!-- agent:boundary:47045601 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -177,6 +195,7 @@ Both items are documented with clear preconditions for reactivation.
 - ~[#xsp1]~
 - [#r0jv]
 - [#r54f]
+- JB `Clear Session Context` successfully ran `/new` but the restarted session should not run agent-doc. #agent-doc-bug
 <!-- /agent:queue -->
 
 ## Backlog

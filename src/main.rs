@@ -1086,6 +1086,11 @@ enum Commands {
         #[command(subcommand)]
         action: ReviewAction,
     },
+    /// Manage the agent:queue component
+    Queue {
+        #[command(subcommand)]
+        action: QueueAction,
+    },
     /// Resolve typed gates across tracked documents.
     /// Scans documents under the project root for [/<type>] items and flips to [x].
     /// Designed for hook integration: `agent-doc resolve-gate release`
@@ -1392,6 +1397,15 @@ enum PendingAction {
         id: String,
         /// Gate type (e.g., "release", "deploy")
         gate_type: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum QueueAction {
+    /// One-shot sync from backlog items with `queue` attribute into agent:queue
+    Sync {
+        /// Path to the session document
+        file: PathBuf,
     },
 }
 
@@ -2556,6 +2570,9 @@ fn main() -> anyhow::Result<()> {
                 println!("  (skipped {} already-tracked)", report.skipped.len());
                 Ok(())
             }
+        },
+        Commands::Queue { action } => match action {
+            QueueAction::Sync { file } => agent_doc_orchestration::queue_cmd::sync(&file),
         },
         Commands::ResolveGateCmd { gate_type, scope } => {
             // Determine scan root: explicit --scope, or cwd, or project root

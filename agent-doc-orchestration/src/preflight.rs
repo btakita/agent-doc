@@ -3409,11 +3409,29 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
                 let q = comps.iter().find(|c| c.name == "queue").unwrap();
                 q.replace_content(&current_content, &new_body)
             };
+            let pre_sync_prompt_count = entries
+                .iter()
+                .filter(|e| matches!(e, crate::queue::QueueEntry::Prompt(_)))
+                .count();
             eprintln!(
                 "[preflight] queue: synced backlog → queue ({:?}, {} active id(s))",
                 mode,
                 backlog_ids.len()
             );
+            if pre_sync_prompt_count == 0 {
+                queue_warnings.push(PreflightWarning {
+                    code: "backlog_queue_sync_pending".to_string(),
+                    message: format!(
+                        "{}: agent:backlog carries `queue` attribute but the queue had 0 live prompts before this sync. \
+                         The binary synced {} item(s) this cycle. \
+                         For manual one-shot sync outside binary preflight: `agent-doc queue sync <FILE>`.",
+                        file.display(),
+                        synced_queue_ids.len()
+                    ),
+                    document_agent: None,
+                    active_harness: None,
+                });
+            }
             entries = synced;
             mutated = true;
         }
@@ -5557,6 +5575,51 @@ mod tests {
         assert!(
             !updated.contains("- do [#gated]"),
             "gated item must not be queued:\n{updated}"
+        );
+        assert!(
+            state
+                .warnings
+                .iter()
+                .any(|w| w.code == "backlog_queue_sync_pending"),
+            "empty-queue-before-sync must emit backlog_queue_sync_pending warning, got {:?}",
+            state.warnings
+        );
+    }
+
+    #[test]
+    fn run_queue_maintenance_no_warning_when_queue_already_synced() {
+        // When the queue already matches the backlog, no backlog_queue_sync_pending
+        // warning should fire (sync_backlog_into_queue returns None → no warning path).
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#alpha]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog queue=sync -->\n",
+            "- [ ] [#alpha] first\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+
+        assert!(
+            !state
+                .warnings
+                .iter()
+                .any(|w| w.code == "backlog_queue_sync_pending"),
+            "already-synced queue must NOT emit backlog_queue_sync_pending warning, got {:?}",
+            state.warnings
         );
     }
 

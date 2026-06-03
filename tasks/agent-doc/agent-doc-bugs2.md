@@ -16,7 +16,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -152,19 +152,25 @@ Implemented (Option A from the plan) and verified.
 **Tests:** 2 new regression tests — `dispatch_blocker_reason_post_turn_output_with_idle_bottom` (scrollback above idle bottom → `None`/dispatchable) and `dispatch_blocker_reason_post_turn_with_active_working_bottom` (live `Working (…)` at bottom → blocks). Existing `dispatch_blocker_reason_detects_opencode_active_turn` and `…_allows_opencode_idle_build_chrome` stay green. `make check` green; both binaries rebuilt + installed. Plan updated: `tasks/agent-doc/plan-opencode-post-turn-false-active.md`.
 
 **Remaining:** live-verify a real OpenCode pane re-dispatches after a completed turn (the risk is low — the `Working` banner always renders at the bottom of an active pane).
-<!-- agent:boundary:e93a6abb -->
+
+### Re: do [#codex-final-response-repeat] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#codex-final-response-repeat]
+
+
+Gated — the item is an evidence-capture that explicitly says "Do not implement in this cycle," and the evidence is already captured.
+
+`tasks/agent-doc/plan-codex-final-response-not-written.md` already records this recurrence: section **`## Additional Repro - 2026-06-03`** (line 20) documents the same final-response-not-written failure recurring after the PDP fit-guide spacing task on `src/boost-client/tasks/monsterrodholders.md`, and line 33 explicitly ties it to backlog id `#codex-final-response-repeat`. The plan closes with "this is a plan only. Do not implement the fix in this cycle."
+
+So the capture work this item asked for is complete; the underlying owned-pane/direct-chat final-response patchback guard remains **plan-deferred** (not a one-cycle fix — it needs the owned-pane fallback to write the Codex response into `agent:exchange` before final chat output, with replay-safe recovery, per the plan's acceptance criteria). Gated rather than done because the fix itself is unimplemented by design.
+
+No code change this cycle (per the item's own instruction).
+<!-- agent:boundary:b8ebbae8 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
-- ~do [#admin-fleet-dashboard]~
-- ~do [#opencode-build-chrome-stall]~
-- ~do [#jbrunstallreg]~
-- ~do [#opencode-preset-not-dispatched]~
-- ~JB `Clear Session Context` does not work with OpenCode. This is a long-standing issue. Look at attempt with tsift.md in the logs.~
-- ~Error in OpenCode `  ┃  Error: malformed template patchback: found patch/replace markers but no closed patch blocks parsed; refusing to append unmatched content` when running tsift.md~
-- ~Go through all review items. If logs are in place to confirm the completion, complete the review item. If logs are in place to deny the completion, keep the review item. If logs are missing to confirm or deny the completion, add logs to confirm/deny the review item.~
-- ~do [#opencode-post-turn-false-active]~
-- do [#codex-final-response-repeat]
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 ###
 <!--
@@ -177,12 +183,12 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Backlog
 
 <!-- agent:backlog priority queue=append -->
-- [ ] [#codex-final-response-repeat] #agent-doc-bug 2026-06-03: `src/boost-client/tasks/monsterrodholders.md` had a completed/deployed Codex closeout for the PDP fit-guide spacing task, but the final chat response was not appended to the document's `agent:exchange`; the user had to request manual writeback. Treat as new evidence for the owned-pane/direct-chat final-response patchback guard. Existing plan updated: tasks/agent-doc/plan-codex-final-response-not-written.md. Do not implement in this cycle.
 <!-- /agent:backlog -->
 
 ## Review
  
 <!-- agent:review -->
+- [/] [#codex-final-response-repeat] #agent-doc-bug 2026-06-03: `src/boost-client/tasks/monsterrodholders.md` had a completed/deployed Codex closeout for the PDP fit-guide spacing task, but the final chat response was not appended to the document's `agent:exchange`; the user had to request manual writeback. Treat as new evidence for the owned-pane/direct-chat final-response patchback guard. Existing plan updated: tasks/agent-doc/plan-codex-final-response-not-written.md. Do not implement in this cycle.
 - [/] [#opencode-preset-not-dispatched] #agent-doc-bug 2026-06-02: The #agent-doc-bug prompt preset was captured in the route queue but never injected into the OpenCode pane because the Build chrome stall (#opencode-build-chrome-stall) prevented dispatch. The preset text was correctly enqueued via dispatch_only_opencode_active_turn but the stall means it never executes. Dependent on #opencode-build-chrome-stall fix or manual pane recovery.
 - [/] [#jbrunstallreg] #agent-doc-bug 2026-06-03: JB Run Agent Doc can still appear stalled after the route watchdog/visible-warning fix. Plan: tasks/agent-doc/plan-jb-run-agent-doc-stall-regression.md. Capture and bound every plugin-side Run stage before and after route launch (typing idle, EDT save, route build, process start/watchdog, notification/persistence), then live-verify that each non-success path produces visible feedback plus a durable diagnostic artifact.
 - [/] [#route-reaps-idle-fresh-start] #agent-doc-bug 2026-06-02: route reaped a fresh codex start whose first dispatched cycle was a legitimate no-op (empty/halted queue, preflight no_changes), so a document with no pending work couldn't be opened ('I cannot start lazily-rs.md, killed immediately'). IMPLEMENTED+unit-tested+shipped (submodule 8451143a, superproject 5b10b7ffd, both binaries rebuilt+installed): at the fresh-start no-ack branch route now re-checks the pane and KEEPS it as a live idle session when it has returned to a harness dispatch-ready prompt (trigger was already proven dispatched), clearing the startup-miss; it only reaps when the pane is not dispatch-ready (a genuine miss). New pure FreshStartAckOutcome classifier (CycleAcknowledged/IdleNoOpKeep/GenuineMissReap) reuses the tested ready_prompt_candidate discriminator. route:: 141 passed, make check green. GATED on live verify: start a real idle lazily-rs.md codex session (slow gpt-5.5 xhigh cold start) and confirm the pane stays alive instead of being reaped. Plan: tasks/agent-doc/plan-route-reaps-idle-fresh-start.md.

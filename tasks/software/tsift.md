@@ -36,7 +36,46 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): reduce Code Navigation token usage
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:dd28618c -->
+
+### Re: #gfrontierhot Performance Triage — glm-5.1
+
+Three-sample SQLite performance triage on the real agent-loop graph (11,181 nodes, 30,989 edges):
+
+| Operation | Sample 1 | Sample 2 | Sample 3 | Median |
+|-----------|----------|----------|----------|--------|
+| Neighborhood (out-degree 3,227, depth 3) | 126ms | 112ms | 111ms | **112ms** |
+| Neighborhood (in-degree 4,602, depth 3) | 40ms | 39ms | 39ms | 39ms |
+| Path (between hub nodes) | 7ms | 6ms | 6ms | 6ms |
+| Evidence (depth 3) | 7ms | 7ms | 7ms | 7ms |
+| Related (semantic search) | 14ms | 5ms | 4ms | 5ms |
+| Deep-chain path | 6ms | 5ms | 8ms | 6ms |
+
+**Hotspot:** Neighborhood on high-out-degree file nodes at depth 3 (~112ms). All other operations are <15ms. The bottleneck is recursive CTE frontier expansion on file→symbol `defines` edges (3,227 outgoing per file node). The shared CTE approach works well for inbound-heavy nodes (39ms). No optimization warranted for path, evidence, or related at current graph sizes.
+
+### Re: #greadiness Actionable Readiness at Lookup Boundary — glm-5.1
+
+Three code changes in `packages/tsift-cli/src/lib.rs`:
+
+1. **Context-pack evidence suppression** (`context_pack_graph_orchestration`): When semantic readiness is blocked, skips evidence target resolution and conflict-matrix expansion entirely. Emits repair decision in `conflict_matrix_decisions` instead.
+
+2. **Evidence semantic readiness warning** (`graph_db_evidence_report_from_store`): Adds semantic readiness check after freshness gate. When blocked, emits warning with exact repair commands (index → summarize → refresh chain) instead of proceeding silently with low-signal traversal.
+
+3. **Complete repair chain** (`graph_db_semantic_readiness`): For `summary_cache_empty`, now includes index command before summarize when stale. For `summary_cache_unavailable`, adds summarize + refresh after index build. Every blocked state now emits a complete, ordered repair chain.
+
+Updated acceptance fixture `agent-orchestration-acceptance-pack.json` for new context-pack behavior. All 1,135 workspace tests pass.
+
+### Re: #rankdefault Ranked Neighborhood Comparison — glm-5.1
+
+Added `ranked_neighborhood_comparison` diagnostic field to the neighborhood CLI output. Runs `GraphStore::ranked_neighborhood` (EdgeKindWeighted scoring) alongside the existing unranked BFS and compares:
+
+- Useful-hit density (ranked: 0.504 vs unranked: 0.562)
+- Duplicate name count (ranked: 1 vs unranked: 0)
+- Handle coverage (both 100%)
+- Overlap (0.5% — approaches differ in budget strategy)
+- Latency (ranked: 1,272ms vs unranked BFS: 112ms)
+
+The ranked traversal pruned 3,027 of 3,228 discovered nodes (94%), demonstrating aggressive budget control. However, it's ~11x slower due to per-frontier-node `outgoing_edges()` + `node()` calls vs the batched CTE approach. The comparison is diagnostic-only — promotion requires the community-search quality gate to pass. Gate remains `held_default_order_unchanged`.
+<!-- agent:boundary:f9b65126 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -50,15 +89,13 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Backlog
 
-<!-- agent:backlog -->
-- [ ] [#rankdefault] Promote ranked_neighborhood into default graph lookup/context-pack/evidence output only after quality gates pass; compare ranked vs unranked output on real backlog/code queries for useful-hit density, duplicate-name precision, handle coverage, latency, and emitted tokens.
-- [ ] [#gfrontierhot] Run three-sample performance triage for SQLite neighborhood/path/evidence/related lookups on real, full-projection, high-degree, and deep-chain workloads; optimize recursive frontier expansion or hop caps only where metrics show a hotspot.
-- [ ] [#greadiness] Make graph-readiness states actionable at the lookup boundary: if summaries, tagpath handles, graph freshness, or scoped indexes are missing, emit exact repair commands and suppress broad low-signal graph expansion.
+<!-- agent:backlog queue -->
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#rankdefault] Promote ranked_neighborhood into default graph lookup/context-pack/evidence output only after quality gates pass; compare ranked vs unranked output on real backlog/code queries for useful-hit density, duplicate-name precision, handle coverage, latency, and emitted tokens.
 - [/] [#surrealbulk] Batch SurrealDB projection load: replace per-row upsert loops with bulk/transactional row load plus one-pass secondary-index rebuild; measure refresh/load separately.
 - [/] [#full-e2e-verify] In fresh project: opencode plugin opencode-tsift && opencode then /tsift-status. On success mark #e2e-install done.
 - [/] [#npm-publish-verify] After auth configured, tag release and verify publish-opencode-plugin CI job succeeds and opencode-tsift appears on npmjs.org

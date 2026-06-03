@@ -100,7 +100,33 @@ Done — scope per your call: **spec/PRD doc only, deduped, run once.**
 **Verification:** additive docs-only change — no code, build logic, or instruction surface touched — so the worker build/test gate (`make check` = `bun test` + worker build, which needs Cloudflare bindings) wasn't run; it wouldn't exercise a standalone markdown file. The spec is committed and pushed; remote `main` is `ed124f8`.
 
 Queue kept active per your choice; both items are now drained, so the auto-loop terminates next cycle.
-<!-- agent:boundary:331ea8df -->
+❯ What are #next-steps to implement the borrower portal? Also, did you see the TMO report when submitting the application?
+### Re: did you see the TMO report on submit? — opus-4-8
+
+No — I didn't submit an application, so there was no TMO report to see. Last cycle I only rendered the two **public** BorrowerView forms read-only (a chromium markdown dump) to inventory their fields; I never filled or submitted them, and I didn't exercise the EFS portal's own submit flow.
+
+I have since read the submit path, so here's what the "TMO report" actually is in our code (`lib/loan_applications/routes.ts`). On a borrower new-application submit we POST to TMO `NewLoanApplication` via `tmo_post_`, then:
+
+- parse the response object (`Data`, `Status`, `ErrorMessage`, `ErrorNumber`);
+- **reject** if `Status !== 0` or `ErrorNumber` is set (surfaced as "TMO rejected the loan application");
+- otherwise extract the **Loan Application Reference Number** (from `LoanApplicationReferenceNumber`, or a `Loan Application Reference Number: <x>` text match) and store it on the loan.
+
+That reference-number response is the submission "report." If you want a real sample, I can run a test submission through the dev portal against the TMO simulator (`lib/tmo-sim`) — or the TMO API sandbox — and capture the response. I held off because that's a state-changing call I shouldn't make unprompted.
+
+### Re: next-steps to implement the borrower portal — opus-4-8
+
+Per `docs/current_progress.md` and the code, the borrower portal is **mostly built** — dashboard, new-application (live TMO `NewLoanApplication` submit + Dropbox doc upload), application-status tracking, documents, settings/profile, notifications, and D1-backed secure messages all exist. Production infra is largely done too (review item next-steps: D1 token, migrations 0025/0026, Cloudflare Access).
+
+Remaining work, prioritized:
+
+1. **Payments sections are UI-only.** `make-payment` and `payment-history` are registered borrower sections with no backend — no schedule/history wiring, no payment processing. Decide: read-only payment **schedule + history from TMO** (`docs/TMO/payment-schedule-field.md` + `GetLoanFundings`) vs. actual collection (ACH/Stripe). For a hard-money lender where TMO/trust does servicing, read-only-from-TMO is the likely MVP. *(added to backlog)*
+2. **Richer full-application intake.** The current new-application is the short onboarding flow. Build it out to the EFS-owned full application per the spec just shipped (`prds/efs-full-application-intake-spec.md`): Phase 1 = `applynew` business-purpose fields + ESIGN/UETA e-sign + audit, then `apply4` (1003). Form capture is low-risk; the TMO field-key writeback map is the gate (dzmm / k2xg / 7a4d).
+3. **Borrower message email round-trip.** Your earlier (commented) note asked for an admin owner for borrower-portal messages, an email notification when a borrower sends a message, email replies routed back into the chat, and borrower emails when an admin replies — a concrete enhancement on top of the existing D1 chat. *(added to backlog)* Gated on the Resend EFS sending domain (f4rq) and ideally Google Workspace SMTP (m6ch / p40t).
+4. **Notifications delivery.** Switch `APPLICATION_LEAD_NOTIFICATION_*` off Resend testing-mode to an EFS-verified domain (existing f4rq).
+5. **Production hardening (existing, gated):** custom-domain cutover (icebox e1kb) and true Google Workspace SSO (m6ch).
+
+Want me to pick one and queue it with spec-test-commit-push? Highest demo value is #1 (payments read-only-from-TMO) or #3 (message email round-trip).
+<!-- agent:boundary:b8885d45 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -113,6 +139,8 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#e245] [recommended] Borrower portal payments: make-payment and payment-history are registered borrower sections with no backend. Decide read-only payment schedule+history from TMO (docs/TMO/payment-schedule-field.md + GetLoanFundings) vs ACH/Stripe collection; MVP likely read-only-from-TMO since TMO/trust handles servicing. Wire loan-summary/payment-history to TMO data.
+- [ ] [#xcvg] [recommended] Borrower message email round-trip: add an admin owner for borrower-portal secure messages, email notification when a borrower sends a message, inbound email reply that appends into the D1 chat, and borrower email when an admin replies. Builds on existing chat_sessions/chat_messages. Gated on Resend EFS sending domain (f4rq) + Google Workspace SMTP (m6ch/p40t).
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
 - [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document intelligence/search, borrower/broker/investor/admin portals, and tenant-ready resale packaging.
 - [ ] [#f4rq] Verify an EFS-owned sending domain in Resend, then switch APPLICATION_LEAD_NOTIFICATION_FROM and APPLICATION_LEAD_NOTIFICATION_TO from testing-mode values to EFS production addresses.

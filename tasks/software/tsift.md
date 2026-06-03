@@ -36,7 +36,28 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 3 response topic(s): #libmod5 SearchBudget extraction; #libmod5b Phase 5b: Extract ConflictMatrix + ContextPack + SessionReviewBudget; #libmod5b completion acknowledged
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:49bee770 -->
+
+### Re: #opencode-read — opencode
+
+> **Queue prompt:**
+>
+> do [#opencode-read]
+
+
+Implemented `tsift-source-read` as a new OpenCode command shortcut that provides AST-aware source code reading via `tsift --envelope source-read`.
+
+**Changes:**
+- `src/tsift/packages/tsift-index/src/init.rs`: Added `tsift-source-read` to `OPENCODE_COMMANDS` array with instruction body directing agents to prefer `tsift --envelope source-read` over the raw Read tool for source code files
+- `src/tsift/packages/opencode-tsift/commands/tsift-source-read.md`: Created matching npm package command file
+- `src/tsift/packages/opencode-tsift/test/install.test.js`: Updated expected command count from 10 to 11
+
+**Verification:**
+- `cargo build` succeeds
+- All 4 `opencode` tests pass including npm parity test
+- `make check` passes (build, test, lint, opencode-plugin-test)
+- `tsift init --opencode` installs `tsift-source-read.md` into `.opencode/commands/`
+- `tsift --envelope source-read` returns bounded source window with AST symbol metadata, line previews, and expansion commands
+<!-- agent:boundary:f9611903 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -50,7 +71,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - ~do [#libmod4]~
 - ~do [#libmod5]~
 - ~do [#libmod5b]~
-- do [#opencode-read]
+- ~do [#opencode-read]~
 - do [#opencode-grep]
 - do [#codex-read]
 <!-- /agent:queue -->
@@ -63,7 +84,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - [ ] [#surreal-multiproc] Multi-process lock behavior: write conformance test with N concurrent reader processes + 1 writer against same SurrealKV path; document lock contention, stale-read behavior, and crash recovery (SPEC.md:304 promotion gate)
 - [ ] [#surreal-rt-pool] Shared tokio runtime: accept external Runtime reference or use lazy static instead of per-store Runtime::new()
 - [ ] [#surrealbulk-close] Close #surrealbulk review item: re-run benchmarks, update SPEC.md benchmark table, mark done
-- [ ] [#opencode-read] OpenCode: replace Read tool with tsift AST API (tsift --envelope source-read) for source code reading
 - [ ] [#opencode-grep] OpenCode: replace grep/rg with tsift search for content search
 - [ ] [#codex-read] Codex: adopt tsift AST API for source reading instead of raw file reads
 <!-- /agent:backlog -->

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -191,10 +191,64 @@ Added #img-describe-toolcall to backlog. Three viable approaches: native agent-d
 
 
 Already addressed in the exchange above. Queue items consumed and cleaned.
-<!-- agent:boundary:bbf9ffd2 -->
+
+### Re: #img-describe-toolcall — describe-image subcommand implementation — glm-5.1
+
+Implemented `agent-doc describe-image <IMAGE_PATH>` subcommand.
+
+#### Files changed
+
+| File | Change |
+|------|--------|
+| `src/agent-doc/Cargo.toml` | Added `base64 = "0.22"` dependency |
+| `src/agent-doc/src/describe_image.rs` | New module: vision API client with OpenAI and Anthropic provider support |
+| `src/agent-doc/src/main.rs` | Added `mod describe_image`, `Commands::DescribeImage` variant, dispatch match arm |
+| `tasks/agent-doc/plan-img-describe-toolcall.md` | Plan document |
+
+#### Usage
+
+```bash
+agent-doc describe-image screenshot.png
+agent-doc describe-image photo.jpg --provider anthropic --model claude-sonnet-4-20250514
+agent-doc describe-image img.png --prompt "What text is visible in this image?"
+```
+
+#### Configuration
+
+| Source | Env var | CLI flag | Default |
+|--------|---------|----------|---------|
+| Provider | `AGENT_DOC_VISION_PROVIDER` | `--provider` | `openai` |
+| API key | `AGENT_DOC_VISION_API_KEY` or `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | `--api-key` | required |
+| Model | `AGENT_DOC_VISION_MODEL` | `--model` | `gpt-4o` (openai), `claude-sonnet-4-20250514` (anthropic) |
+| Endpoint | `AGENT_DOC_VISION_ENDPOINT` | — | provider default |
+
+#### Build blocker
+
+The full build is blocked by pre-existing `lazily-rs` compilation errors (`ThreadSafeInvalidationPlan` field/method mismatches, 19 errors). These existed before this change. The `describe_image` module itself has zero type errors — confirmed via `cargo check -p agent-doc` filtering. The installed binary cannot be updated until the `lazily-rs` crate is fixed.
+
+#### Tests
+
+14 unit tests in `describe_image::tests` covering MIME detection, provider parsing, config resolution, and API key handling. Cannot execute until `lazily-rs` is fixed.
+
+#### Plan
+
+`tasks/agent-doc/plan-img-describe-toolcall.md`
+
+### Re: #img-describe-toolcall — describe-image subcommand — glm-5.1
+
+> **Queue prompt:**
+>
+> [#img-describe-toolcall]
+
+
+Code-complete. Full build blocked by pre-existing lazily-rs errors. See exchange body above for details.
+<!-- agent:boundary:78d49b84 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
+- ~[#img-describe-toolcall]~
+- complete [#codex-owned-pane-prompt-miss]
+- complete [#codex-owned-pane-prompt-miss-followups]
 <!-- /agent:queue -->
 ###
 <!--
@@ -209,9 +263,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#codex-owned-pane-prompt-miss] #codex-owned-pane-prompt-miss #agent-doc-bug 2026-06-03: Codex-owned pane direct invocation abandons recursive dispatch without processing unresolved exchange prompts. See review item for details. Plan: tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md
-- [ ] [#codex-owned-pane-prompt-miss-followups] #codex-owned-pane-prompt-miss-followups #agent-doc-bug 2026-06-03: Follow-up items for codex-owned pane prompt miss fix. Stop-hook failure on missing assistant body and same-pane unresolved-prompt response proof. Plan: tasks/agent-doc/plan-codex-owned-pane-prompt-miss.md
-- [ ] [#img-describe-toolcall] #img-describe-toolcall #agent-doc-bug feature 2026-06-03: add agent-doc describe-image subcommand or MCP tool that shells out to a vision API and returns text description to stdout. Enables non-vision models to analyze images via toolcall. Needs plan for provider config, API key handling, output format.
 - [/] [#4h81] #opencode-codex-capacity-proof #agent-doc-bug 2026-06-03: Codex Capacity Proof incorrectly runs in OpenCode harness. See monsterrodholders.md session + agent-doc logs.
 - [/] [#t9xf] #opencode-log-bleed #agent-doc-bug 2026-06-03: agent-doc stderr logs bleed over the OpenCode UI. Needs reproduction to confirm source.
 - [/] [#7fmb] #opencode-prompt-navigation #agent-doc-bug 2026-06-03: OpenCode TUI prompt list cannot be navigated with arrow keys or Tab key. Enter works. Likely OpenCode TUI issue.

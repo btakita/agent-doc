@@ -50,7 +50,13 @@ Extracted three modules from tsift-cli/src/lib.rs (36,594 to 31,809 lines, 4,785
 - session_review_budget.rs (~543 lines)
 
 All 335 tests pass. make check clean. Build + install successful. Pushed to main.
-<!-- agent:boundary:08178f43 -->
+
+### Re: #libmod5b completion acknowledged — glm-5.1
+
+#libmod5b marked done. lib.rs reduced from 36,594 to 31,809 lines across three extracted modules (conflict_matrix.rs, context_pack.rs, session_review_budget.rs). All 335 tests green, make check clean, pushed to main.
+
+Queue continues with `do [#opencode-read]`.
+<!-- agent:boundary:f78e63c9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -63,7 +69,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - ~do [#libmod3]~
 - ~do [#libmod4]~
 - ~do [#libmod5]~
-- do [#libmod5b]
+- ~do [#libmod5b]~
 - do [#opencode-read]
 - do [#opencode-grep]
 - do [#codex-read]

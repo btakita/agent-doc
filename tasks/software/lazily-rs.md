@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 
@@ -38,7 +38,24 @@ queue_active: false
 Compacted content:
 - Archived 2 response topic(s): #next-steps to improve performance and reduce memory usage; Run benchmarks and update tables in README.md
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:6bf43afd -->
+
+### Re: #71yq lazyperf25 — glm-5.1
+
+> **Queue prompt:**
+>
+> [#71yq]
+
+
+Converted `ThreadSafeInner::slot_fast_paths` and `cell_fast_paths` from `RwLock<HashMap<SlotId, Arc<…>>>` to `RwLock<Vec<Option<Arc<…>>>>` in `src/thread_safe.rs`.
+
+**Changes:**
+- Type declarations (lines 839-840): `HashMap` → `Vec<Option>`
+- Init (lines 853-854): `HashMap::new()` → `Vec::new()`
+- Read methods `slot_fast_path` / `cell_fast_path`: `.get(&id).cloned()` → `.get(id.0 as usize).and_then(|opt| opt.as_ref().cloned())`
+- Write in `slot_with_equals` / `cell`: `.insert(id, fast_path)` → resize-with-None + direct index set
+
+**Verification:** `make check` passes (fmt, clippy, build, 92 default tests, 2 tokio tests, 12 loom concurrency tests, benchmark check). Release build clean. Pushed as `ac0eb4b`.
+<!-- agent:boundary:a9a83cf5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,13 +63,20 @@ Compacted content:
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
+- ~[#71yq]~
+- [#hqmh]
+- [#xdq8]
+- [#vk55]
+- [#cffp]
+- [#vbcq]
+- [#vfr1]
+- [#94gg]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#71yq] #lazyperf25 #lazyperf25 Convert ThreadSafeInner slot_fast_paths and cell_fast_paths from RwLock<HashMap> to RwLock<Vec<Option>> — eliminates hash on every thread-safe get/get_cell
 - [ ] [#hqmh] #lazyperf26 #lazyperf26 Convert ThreadSafeSlotFastPath.dependents and ThreadSafeCellFastPath.dependents from Mutex<HashMap> to Mutex<EdgeVec> — sidecar dependents are typically 1-5 nodes
 - [ ] [#xdq8] #lazyperf27 #lazyperf27 Replace scheduled_effects HashSet with Vec<bool> indexed by SlotId — zero-hash O(1) schedule/contains check
 - [ ] [#vk55] #lazyperf28 #lazyperf28 Replace batched_cells/cell_clears/slots HashSet with SmallVec — linear dedup faster for typical small batches

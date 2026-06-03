@@ -108,7 +108,7 @@ Backlog items added for:
 - OpenCode: replace grep with tsift search for content search
 - Codex: adopt tsift AST API for source reading
 - Remaining lib.rs modularization phases
-<!-- agent:boundary:256c84fc -->
+<!-- agent:boundary:16501a77 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -123,6 +123,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog queue -->
+- [ ] [#libmod3] Phase 3: Extract Semantic Edit (~4,000 lines), Traversal/Exploration (~1,300) from lib.rs
 - [ ] [#libmod2] Phase 2: Extract Rewrite (~1,400 lines), Community Detection (~450), Dependency DAG (~700), Dispatch Trace (~350) from lib.rs
 <!-- /agent:backlog -->
 

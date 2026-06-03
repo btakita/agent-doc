@@ -43,7 +43,24 @@ Compacted content:
 2. The real context debt is the compaction history in this session document. Each compact cycle carries a summary of prior summaries, creating a telescoping reference chain that the model must parse every turn.
 
 **Recommendation:** Keep AGENTS.md as-is. The instructions are load-bearing for harnesses that read AGENTS.md but not skill files. If you want to trim, the tsift block is the safest to remove (it's self-service via `tsift status`).
-<!-- agent:boundary:2d4b08a2 -->
+### Re: Extract AGENTS.md into skills & runbooks — glm-5.1
+
+Done. AGENTS.md reduced from **20,740 bytes (160 lines)** to **1,445 bytes (24 lines)** — a **93% reduction**.
+
+**What changed:**
+- Removed the full agent-doc workflow (hot path digest, workflow steps 0–2, pending ops, persist rules) — all of this lives verbatim in `.claude/skills/agent-doc/SKILL.md` (which is actually more complete, including the auto-loop section)
+- Removed the tsift code-navigation block (24 lines) — already in `.claude/skills/tsift/SKILL.md` and `runbooks/code-navigation.md`
+- Removed the runbooks catalog paragraph — replaced with a one-line pointer to `runbooks/`
+- Kept: frontmatter, one-line description, harness-specific invocation list, and 3 pointer lines to skill files + runbooks
+
+**What's preserved:**
+- Harnesses that only read AGENTS.md still see the `/agent-doc` trigger and know what subcommands exist
+- Full workflow is one click away in `.claude/skills/agent-doc/SKILL.md`
+- Code nav is one click away in `.claude/skills/tsift/SKILL.md`
+- All runbooks untouched
+
+**Context savings:** ~19KB less instruction text loaded every turn for harnesses that read both AGENTS.md and skill files. The redundancy is eliminated; the authoritative source is now the skill file.
+<!-- agent:boundary:1b85b380 -->
 <!-- /agent:exchange -->
 
 <!--

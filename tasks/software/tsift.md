@@ -182,7 +182,21 @@ Ran `tsift init` in all 16 projects that have `tsift:code-navigation` in their A
 No code changes; no build/install/commit needed.
 
 Commands/proof: `tsift init` x16 projects, `tsift init --help`, directory scans for `.tsift`, `AGENTS.md`, `CLAUDE.md`.
-<!-- agent:boundary:4d7753d5 -->
+
+### Re: #agent-doc-bug JB Run Agent Doc post-turn stall — glm-5.1
+
+**Root cause identified.** The `dispatch_blocker_reason` function for OpenCode (`harness.rs:324-346`) scans ALL lines of the captured pane output. After a turn completes, the turn's output (bash commands, results, "Thought: 7.6s", "Click to expand") remains visible in the scrollback. These lines are NOT classified as idle chrome, so `has_non_idle_content = true`. The OpenCode idle state has no standalone `>` prompt line, so `has_ready_prompt = false`. Result: false `"opencode active turn"`.
+
+**Contrast with Claude** (`harness.rs:348-364`): the Claude branch checks only the **last 8 lines** for `claude_active_turn_busy()`. Completed turn output in scrollback doesn't cause false positives because it only inspects the bottom of the pane.
+
+**Plan created:** `tasks/agent-doc/plan-opencode-post-turn-false-active.md`
+
+**Recommended fix (Option A):** Replace the OpenCode all-lines scan with a bottom-N-lines busy-cue check (N≈12). A genuine active turn always shows `Working (Ns - esc to interrupt)` at the bottom — the scrollback content is irrelevant. This aligns with the Claude strategy and eliminates the false positive class entirely.
+
+**Bug added** to `agent-doc-bugs2.md` backlog as `#opencode-post-turn-false-active`.
+
+Commands/proof: tmux capture-pane %62, harness.rs source reads (lines 315-346, 258-277, 540-572), route.rs source reads (lines 2499-2551, 8374-8483), plan file created at `tasks/agent-doc/plan-opencode-post-turn-false-active.md`.
+<!-- agent:boundary:0ea3b023 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -191,7 +205,8 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
+- /home/brian/work/btakita/agent-loop/src/boost-client/AGENTS.md & /home/brian/work/btakita/agent-loop/src/boost-client/src/monsterrodholders-dev/AGENTS.md has too much in the Code Navigation block. Use the runbooks and optimized session harness to reduce token usage.
 <!-- /agent:queue -->
 
 ## Backlog

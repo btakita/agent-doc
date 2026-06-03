@@ -64,7 +64,7 @@ Addressed in the prior cycle: vision depends on the model provider endpoint. Thi
 
 Cannot evaluate screenshots without native image vision. Review item #img-review covers this exact gap. Recommended path: run this queue item in a Claude or GPT session with vision enabled to diagnose #t9xf stdout bleed and TUI corruption from img_16/17/18.png.
 
-### Re: JB Stall — Sync Recovery Detail — glm-5.1 (HEAD)
+### Re: JB Stall — Sync Recovery Detail — glm-5.1
 
 The full sync output you pasted confirms the architecture is working as designed:
 
@@ -76,7 +76,7 @@ The full sync output you pasted confirms the architecture is working as designed
 The sync recovery confirms no pane was lost or corrupted — only the operator experience gap (no JB notification) remains. This is exactly review item #opencode-jb-stall / #jb-run-agent-doc-busy-feedback-live-verify.
 
 The remaining queue items (vision config, monsterrodholders recursion, screenshots) were addressed in the prior response and require either a vision-capable model or manual `agent-doc session-check` on the monsterrodholders file — no further code action from this session.
-<!-- agent:boundary:5f8561e4 -->
+<!-- agent:boundary:de903daa -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
@@ -97,7 +97,7 @@ The remaining queue items (vision config, monsterrodholders recursion, screensho
 - monsterrodholders.md agent-doc codex session still has `• agent-doc could not be invoked directly from this pane because it would recurse into the already-owned session, so I
   handled the task doc manually.` error. How can we recover from this state? Can agent-doc "self-heal"?
 - Please evaluate recent screenshots and add #next-steps for the related tasks.
-- ~re #img-review: Why doesn't the agent-doc image vision work with opencode?~
+- re #img-review: Why doesn't the agent-doc image vision work with opencode?
 <!-- /agent:queue -->
 ###
 <!--

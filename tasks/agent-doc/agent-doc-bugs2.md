@@ -35,11 +35,17 @@ Queue contamination cleaned. Session committed.
 Compacted content:
 - Archived 3 response topic(s): do [#8ker] #opencode-idle-detection-post-turn; do [#1t6w] #opencode-skill-auto-loop; do [#tbhv] #harness-resolution-source-logging
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:5f90adf4 -->
+
+### Re: Codex stall clarification — opencode
+
+Acknowledged — updated the queue item to specify that the JB `Run Agent Doc` stall is a **Codex** session symptom, consistent with the existing backlog cluster around Codex-owned pane behavior (#opencode-jb-stall, #codex-owned-pane-prompt-miss, #codex-owned-pane-auto-queue-stuck).
+
+The queue remains inactive (`queue_active: false`). The `inactive_queue_residue` warning is expected — the item is parked for a future active-queue cycle. No action needed this turn.
+<!-- agent:boundary:76ae7a0a -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
-- JB `Run Agent Doc` stalled with `Ran agent-doc again for tasks/monsterrodholders.md. No changes were detected since the last run.` message in the console.
+- JB `Run Agent Doc` Codex stalled with `Ran agent-doc again for tasks/monsterrodholders.md. No changes were detected since the last run.` message in the console.
 <!-- /agent:queue -->
 ###
 <!--

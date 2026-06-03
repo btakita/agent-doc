@@ -159,7 +159,37 @@ Route decides "busy" from two things: the **authoritative actor binding** (monst
 **The actionable code gap** (captured as `#route-busy-wrong-owner-diagnostic`, recommended): route's busy refusal should cross-check pane-owns-routed-doc and emit a `wrong_owner` / cross-document diagnostic (`routed file=F busy pane=%N owns=G`) instead of the generic timeout, so a contaminated pane reads as contamination, not a deadlock. It's the dispatch-path sibling of `#jb-tsift-pane-sync` Phase 3b. I did **not** implement it speculatively: it changes the delicate route busy path and needs the live `monsterrodholders.md` state to verify against — which is gone for this historical incident.
 
 So `#spec-test-build-install-commit-push`: no new code this cycle (root cause is guarded upstream; the remaining gap is a diagnostic-quality improvement gated on live repro). The earlier commits this turn are pushed.
-<!-- agent:boundary:1adb6da3 -->
+
+### Re: JB queue-contamination error (response prose in agent:queue) — opus-4-8
+
+> **Queue prompt:**
+>
+> JB error
+> ```
+> [route] target tmux session: 0
+> [preflight] review: 55 item(s), 55 gated
+> [repair] closed stale empty preflight_started cycle cycle-1780431002764 for tasks/agent-doc/agent-doc-bugs2.md after 96s without a capture
+> [commit] detected post-commit local drift for tasks/agent-doc/agent-doc-bugs2.md — HEAD already contains the committed response; leaving later local working-tree edits uncommitted
+> [commit] staged snapshot already matches HEAD for tasks/agent-doc/agent-doc-bugs2.md — closing cycle as already committed
+> [perf] commit total: 23ms
+> Error: authoritative actor generation 221 for tasks/agent-doc/agent-doc-bugs2.md owns pane %70 but route could not drain the active closeout before dispatch: [session-check] INTERRUPTED: agent:queue contains assistant response prose copied from a `### Re:` body, not a user prompt or `do [#id]` directive: "There are too many items being accumulated into review. The tasks are not being ". Remove the contaminating line(s) from `agent:queue` (only user prompts, `do [#id]`, `preset`/`dispatch`, or backlog-derived entries are valid queue sources) and re-run finalize (see #jb-run-agent-doc-response-queue-contamination).
+> ```
+> #spec-test-build-install-commit-push
+
+
+**That error is the guard working as designed — not a new regression.** The `[session-check] INTERRUPTED: agent:queue contains assistant response prose copied from a `### Re:` body ...` line is the contamination *detector* firing: it caught a `### Re:` response sentence ("There are too many items being accumulated into review...") sitting in `agent:queue`, **refused to dispatch** the contaminated queue, and gave the exact remediation. The fail-closed behavior is the protection — the alternative (silently dispatching response prose as a prompt) is the bug it prevents.
+
+**Deterministic scope is implemented + tested** (`#jb-run-agent-doc-response-queue-contamination`), across three layers:
+- **Detection / fail-closed** — `session_check.rs:490-549` collects `### Re:` response prose and INTERRUPTs if any of it appears in `agent:queue` that wasn't an explicit user-authored line (test at `session_check.rs:8929`; `session_check::` suite 151 passed).
+- **Route never enqueues prose** — route's pending-dispatch enqueue uses provenance-bearing `prompt_context` text (a user/route prompt, never a response body), and when it meets an already-polluted queue body it *preserves it verbatim and appends a well-formed entry beneath* rather than propagating or amplifying the corruption (`route.rs:1887-1917`, logs `route_queue_dispatch_unparseable_preserved`).
+- **Queue parser tolerance** — `queue.rs` treats stray prose lines as non-directive so they don't masquerade as runnable heads.
+
+**Root cause of the original 2026-05-30 repro:** malformed compact output + an uncommitted repair merged a `### Re: #gads106demote` line into the `agent:queue auto` component on `monsterrodholders.md`. The contamination entered via **compact/repair drift**, not via a normal route enqueue — and the session-check guard now catches exactly that class before it can dispatch.
+
+**To clear a stuck doc when you hit this:** do what the error says — delete the contaminating line from `agent:queue` (keep only user prompts, `do [#id]`, `preset`/`dispatch`, or backlog-derived entries) and re-run `finalize`. This document's queue is currently clean (the paste was a historical log, not live state).
+
+**`#spec-test-build-install-commit-push`:** no new code this cycle — the detection + prevention is already shipped, tested, committed, and pushed. The remaining facet is the **live JetBrains replay** on a fresh malformed-compact/repair state (gated in `#jb-run-agent-doc-response-queue-contamination`); I didn't add a source-prevention compact/repair guard speculatively because the original malformed-compact state is gone and I can't build a faithful regression fixture without it. The session-check backstop covers the class regardless.
+<!-- agent:boundary:51a78932 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -189,7 +219,7 @@ JB `Compact Exchange` error the first attempt. The 2nd attempt worked.
 agent-doc command failed (exit 1): [agent-doc] Tagged pre-compact state as agent-doc/agent-doc-bugs2/pre-compact-24 [compact] CRDT state compacted: 91901 → 91901 bytes Error: visible editor buffer for tasks/agent-doc/agent-doc-bugs2.md differs from the expected disk state; save or discard the editor buffer, then retry
 ```
 #spec-test-build-install-commit-push
----
+~~~done
 JB error
 ```
 [route] target tmux session: 0
@@ -201,7 +231,7 @@ JB error
 Error: authoritative actor generation 221 for tasks/agent-doc/agent-doc-bugs2.md owns pane %70 but route could not drain the active closeout before dispatch: [session-check] INTERRUPTED: agent:queue contains assistant response prose copied from a `### Re:` body, not a user prompt or `do [#id]` directive: "There are too many items being accumulated into review. The tasks are not being ". Remove the contaminating line(s) from `agent:queue` (only user prompts, `do [#id]`, `preset`/`dispatch`, or backlog-derived entries are valid queue sources) and re-run finalize (see #jb-run-agent-doc-response-queue-contamination).
 ```
 #spec-test-build-install-commit-push
----
+~~~
 - ~do [#manual-queue-head-loss]~
 - Add #next-steps to create a dashboard that uses the actor admin apis to see the current runtime instances. See [#ipc-admin-api].
 - do [#route-reaps-idle-fresh-start]

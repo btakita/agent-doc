@@ -56,7 +56,11 @@ pub fn get(&self, ctx: &Context) -> T
 `Context` doesn't even implement `Clone` (it contains `RefCell<ContextInner>` with `Rc<ComputeFn>` closures). The only clone in `get` is the return value `T`, not the context itself.
 
 When you write `counter.get(ctx)`, Rust auto-refs to `counter.get(&ctx)` — pure borrow, zero cost on the context side.
-<!-- agent:boundary:2d7657af -->
+
+### Re: test — glm-5.1
+
+Test content.
+<!-- agent:boundary:63b908da -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -67,9 +71,11 @@ When you write `counter.get(ctx)`, Rust auto-refs to `counter.get(&ctx)` — pur
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - ~Does `let val = counter.get(ctx);` clone `ctx`?~
 - [#lazyperf33]
+- Please create a mermaid of the performance improvements.
 - [#lazyperf34]
 - [#lazyperf35]
 - [#lazyperf36]
+- Is there a way to make "Fix finish_batch O(n2) dedup" an O(n) or O(1) algorithm?
 - Update BENCHMARKS.md. What are the #next-steps to mitigate the parking_lot regressions?
 <!-- /agent:queue -->
 

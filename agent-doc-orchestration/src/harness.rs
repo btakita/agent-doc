@@ -322,24 +322,24 @@ impl HarnessConfig {
         }
 
         if self.binary == "opencode" {
-            let mut has_ready_prompt = false;
-            let mut has_non_idle_content = false;
-
-            for line in output.lines().map(crate::prompt::strip_ansi) {
-                let trimmed = line.trim();
-                if trimmed.is_empty() {
-                    continue;
-                }
-                if self.is_dispatch_ready_prompt_line(trimmed) {
-                    has_ready_prompt = true;
-                    continue;
-                }
-                if !self.is_ignorable_output_line(trimmed) {
-                    has_non_idle_content = true;
-                }
-            }
-
-            if has_non_idle_content && !has_ready_prompt {
+            // #opencode-post-turn-false-active: check only the recent bottom
+            // lines for a genuine busy cue instead of scanning the whole
+            // capture for any non-idle line. After the first turn the pane
+            // keeps completed-turn output in scrollback (bash commands,
+            // "Thought:", "Click to expand") which is non-chrome but NOT an
+            // active turn, and OpenCode's idle state renders no standalone `>`
+            // prompt — so the old all-lines `has_non_idle_content &&
+            // !has_ready_prompt` heuristic produced false "opencode active
+            // turn" stalls on dispatch-only reopen. Mirror the Claude branch's
+            // bottom-N busy-cue strategy.
+            let recent = output
+                .lines()
+                .rev()
+                .take(12)
+                .map(crate::prompt::strip_ansi)
+                .map(|line| line.trim().to_ascii_lowercase())
+                .collect::<Vec<_>>();
+            if opencode_active_turn_busy(&recent) {
                 return Some("opencode active turn".to_string());
             }
             return None;
@@ -508,6 +508,18 @@ fn is_claude_status_chrome_line(trimmed: &str) -> bool {
         j += 1;
     }
     j > 0 && j < rest.len() && rest[j] == b'%'
+}
+
+/// True when any of the recent (already lower-cased, trimmed) OpenCode pane
+/// lines shows a genuine active turn. The active-turn cue is the working banner
+/// `Working (Ns - esc to interrupt)`; keying on `esc to interrupt` (with the
+/// "to") deliberately excludes the idle keybinding hint `esc interrupt` (no
+/// "to") and never matches completed-turn scrollback like `Thought:` or
+/// `Click to expand` (#opencode-post-turn-false-active).
+fn opencode_active_turn_busy(recent_lower: &[String]) -> bool {
+    recent_lower
+        .iter()
+        .any(|line| line.contains("esc to interrupt"))
 }
 
 /// True when any of the recent (already lower-cased, trimmed) Claude pane lines
@@ -1428,6 +1440,52 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let output = "\
 Working (21s - esc to interrupt)
 zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
+";
+
+        assert_eq!(
+            h.dispatch_blocker_reason(output).as_deref(),
+            Some("opencode active turn")
+        );
+    }
+
+    #[test]
+    fn dispatch_blocker_reason_post_turn_output_with_idle_bottom() {
+        // #opencode-post-turn-false-active: after a turn completes the pane
+        // keeps completed-turn output in scrollback (bash commands, "Thought:",
+        // "Click to expand") ABOVE the idle bottom chrome. None of that is an
+        // active turn, so dispatch must be allowed (None). The old all-lines
+        // scan flagged the scrollback as "opencode active turn".
+        let h = HarnessConfig::opencode();
+        let output = "\
+$ cargo test -p agent-doc-orchestration
+   Compiling agent-doc-orchestration
+    Finished test profile
+Thought: 7.6s
+Click to expand
+The change is complete and all tests pass.
+                                                                                   ┃  Build · GLM-5.1 Z.AI Coding Plan
+                                                                                   ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  ~/work/btakita/agent-loop:main                                              esc interrupt                          26.6K (13%)  ctrl+p commands  OpenCode 1.15.13
+";
+
+        assert_eq!(
+            h.dispatch_blocker_reason(output),
+            None,
+            "completed-turn scrollback above idle bottom chrome must not read as an active turn"
+        );
+    }
+
+    #[test]
+    fn dispatch_blocker_reason_post_turn_with_active_working_bottom() {
+        // The complement: completed-turn scrollback but the BOTTOM shows the
+        // live `Working (Ns - esc to interrupt)` banner — still a real active
+        // turn, must block dispatch.
+        let h = HarnessConfig::opencode();
+        let output = "\
+$ cargo test
+Thought: 3.1s
+Click to expand
+Working (30s - esc to interrupt)
 ";
 
         assert_eq!(

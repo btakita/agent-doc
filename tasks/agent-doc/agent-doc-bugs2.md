@@ -115,7 +115,7 @@ The harness resolution chain at `start.rs:2751` calls `HarnessConfig::from_conte
 2. **#opencode-idle-detection-post-turn** — moderate scope. Fix `child_output_prompt_visible()` for OpenCode post-turn state. ~50 lines.
 3. **#opencode-skill-auto-loop** — add OpenCode auto-loop section to generated SKILL.md.
 4. **#harness-resolution-source-logging** — add harness resolution source logging in `start.rs`.
-<!-- agent:boundary:1a14c310 -->
+<!-- agent:boundary:859e8531 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->
@@ -142,7 +142,6 @@ What are #next-steps to fix bugs?
 - [ ] [#8ker] #opencode-idle-detection-post-turn #agent-doc-bug 2026-06-03: fix child_output_prompt_visible() in start.rs:1248-1256 to check only bottom N lines for OpenCode post-turn idle detection instead of requiring all scrollback to be ignorable chrome. Mirror dispatch_blocker_reason approach from harness.rs:324-345. Spun off from #0ada investigation.
 - [ ] [#1t6w] #opencode-skill-auto-loop #agent-doc-bug 2026-06-03: add OpenCode-specific auto-loop section to skill.rs SKILL.md generation (currently omitted per test skill.rs:921). Instruct OpenCode to re-invoke agent-doc <FILE> after successful finalize when queue_active==true and queue_prompts.len()>=1. Spun off from #0ada investigation.
 - [ ] [#tbhv] #harness-resolution-source-logging #agent-doc-bug 2026-06-03: add guard in start.rs after from_context() that logs resolved harness name + source (frontmatter vs config vs fallback) and warns when detect_harness() env result differs from from_context() result. Spun off from #4h81 investigation.
-- [ ] [#9j4v] #screenshot-review-blocked #next-steps 2026-06-03: screenshots img_16-img_18 require vision-capable session for #t9xf/#7fmb diagnosis. Blocked on GLM-5.1 (no vision). Defer to API-based vision provider session.
 <!-- /agent:backlog -->
 
 ## Review

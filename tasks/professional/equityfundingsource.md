@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -244,20 +244,46 @@ Per your call: **hybrid placement, plan first.** Public `/apply` stays the light
 Say "do" / queue the phases when you want me to start building (P1 first).
 
 *(Heads-up: the exchange is at block-level accretion — 200 lines / 12 sections. I'd recommend compacting before the build cycles: `agent-doc compact tasks/professional/equityfundingsource.md --commit`.)*
-<!-- agent:boundary:204c070e -->
+
+### Re: apply4 P1 — hybrid handoff + applications shell — done — opus-4-8
+
+> **Queue prompt:**
+>
+> [#0ag4]
+
+
+P1 shipped to `equityfundingsource-dev` (commit `17bfb6b`, pushed). `bun run check` green — 242 tests.
+
+Landed:
+
+- **Migration 0036**: `applications` table — `lead_id` links the originating prequal lead; one resumable draft per borrower (partial unique index).
+- **lib/applications**: `application_draft_R_or_create_` + `POST /api/borrower/applications/draft` (creates/resumes, links the lead) + `GET /api/borrower/applications/:id`; mounted in `worker.ts`.
+- **Hybrid handoff**: `/apply` submit saves the lead, then redirects to `/portal-borrower/full-application?lead_id=…` — non-lossy (the lead persists even if the applicant stops at login).
+- **Auth**: `require_auth_` now preserves the original path as `next` so post-login returns to the wizard (`safe_next_` already sanitizes to a local path).
+- **Portal**: new `full-application` borrower section + `FullApplication` wizard shell (creates/resumes the draft from `lead_id`, shows status + the 8-step roadmap). Field steps are P2–P5.
+
+Continuing the queue to P2 (`#f3b2` — personal info + 2-yr address history + ESIGN/UETA e-sign).
+
+*(The exchange is at block-level accretion; if the auto-loop starts diverging I'll halt and recommend compacting.)*
+<!-- agent:boundary:49075485 -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue preset="#spec-test-commit-push" -->
+<!-- agent:queue preset="#spec-test-commit-push" auto -->
+- ~[#0ag4]~
+- [#f3b2]
+- [#2eaf]
+- [#1tk7]
+- [#az2w]
+- [#k9p5]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#0ag4] apply4 full application P1 — hybrid handoff + applications shell: public prequal submit → auth → resumable draft wizard; applications table + lead_id linkage. Plan: src/equityfundingsource-dev/prds/apply4-full-application-build-plan.md
 - [ ] [#f3b2] apply4 full application P2 — personal info + 2yr address history + ESIGN/UETA e-sign + audit trail. Plan: src/equityfundingsource-dev/prds/apply4-full-application-build-plan.md
 - [ ] [#2eaf] apply4 full application P3 — employment & income (current/additional/former + gross monthly income breakdown + other-source income). Plan: src/equityfundingsource-dev/prds/apply4-full-application-build-plan.md
 - [ ] [#1tk7] apply4 full application P4 — assets/liabilities + Real Estate Owned schedule (with per-property mortgages). Plan: src/equityfundingsource-dev/prds/apply4-full-application-build-plan.md

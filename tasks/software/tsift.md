@@ -85,7 +85,17 @@ Added `surrealdb_store_multi_process_reader_writer_lock` conformance test that s
 - `SPEC.md`: documented multi-process lock behavior findings under promotion boundary.
 
 **Verification:** 13/13 tests pass, `make check` passes, commit `3f661d6` pushed.
-<!-- agent:boundary:91603692 -->
+
+### Re: #surreal-rt-pool — shared tokio runtime — glm-5.1
+
+`SurrealdbGraphStore` now stores its tokio runtime as `Arc<Runtime>` and exposes `open_with_runtime(path, rt)` and `in_memory_with_runtime(rt)` constructors that accept a shared runtime. This allows backend-eval or other callers to reuse one runtime across multiple store instances instead of paying the per-store `Runtime::new()` cost. Default `open()` and `in_memory()` continue to create a fresh runtime for backward compatibility.
+
+**Changes:**
+- `packages/tsift-surrealdb/src/lib.rs`: changed `rt` field to `Arc<Runtime>`, added `open_with_runtime`, `in_memory_with_runtime`, `create_runtime` helper, and shared-runtime test.
+- `SPEC.md`: documented shared runtime constructors.
+
+**Verification:** 14/14 tests pass, `make check` passes, commit `c088055` pushed.
+<!-- agent:boundary:de8508a4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -98,6 +108,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - ~[#surreal-warm]~
 - ~[#surreal-delta]~
 - ~[#surreal-multiproc]~
+- [#surreal-rt-pool-warm]
 - [#surreal-rt-pool]
 - [#surrealbulk-close]
 <!-- /agent:queue -->
@@ -106,7 +117,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 <!-- agent:backlog -->
 - [ ] [#surreal-rt-pool-warm] Accept external tokio Runtime in open_or_refresh so backend-eval can reuse one Runtime across candidate stores
-- [ ] [#surreal-rt-pool] Shared tokio runtime: accept external Runtime reference or use lazy static instead of per-store Runtime::new()
 - [ ] [#surrealbulk-close] Close #surrealbulk review item: re-run benchmarks, update SPEC.md benchmark table, mark done
 <!-- /agent:backlog -->
 

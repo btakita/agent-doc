@@ -40,7 +40,7 @@ Compacted content:
 ### Re: #libmod5 SearchBudget extraction — glm-5.1
 
 Extracted search_budget.rs (~1,118 lines) from tsift-cli/src/lib.rs (37,704 to 36,582 lines). All 335 tests pass, make check clean, build + install successful.
-<!-- agent:boundary:4ff7adbc -->
+<!-- agent:boundary:07944b29 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -61,7 +61,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#libmod5b] Phase 5b: Extract ConflictMatrix (~2,657 lines), ContextPack (~1,633 lines), SessionReviewBudget (~530 lines) from tsift-cli/src/lib.rs into separate modules
 - [ ] [#surreal-warm] Warm-start SurrealDB store: reuse SurrealdbGraphStore across backend-eval runs instead of recreating; measure real-workload median with persistent store
 - [ ] [#surreal-delta] Delta projection refresh: implement replace_projection_rows_delta() with row-hash diffing matching SQLite's replace_projection_with_version() pattern
 - [ ] [#surreal-multiproc] Multi-process lock behavior: write conformance test with N concurrent reader processes + 1 writer against same SurrealKV path; document lock contention, stale-read behavior, and crash recovery (SPEC.md:304 promotion gate)

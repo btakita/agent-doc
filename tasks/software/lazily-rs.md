@@ -85,7 +85,23 @@ Confidence: high.
 
 
 Yes. This cycle completed the effect-heavy contention slice of that direction: stable effect dependencies now stay subscribed across reruns, so repeated effect flushes avoid redundant dependency-edge lock churn while preserving cleanup and disposal ordering. The broader lazy-invalidation work can continue from the active queue after this closeout.
-<!-- agent:boundary:d856679f -->
+❯ Add #next-steps for lazy-invalidation and other lazy strategies for high performance graph propagation under a parallel load.
+
+### Re: #next-steps — gpt-5
+
+Added four prioritized backlog items for lazy invalidation and related parallel graph-propagation strategies.
+
+Top of backlog: `#lazyperf12`.
+
+Changed paths:
+- `tasks/software/lazily-rs.md`
+
+Verification:
+- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md`
+- `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/software/lazily-rs.md`
+
+No source changes were needed. Escalation: none. Confidence: high.
+<!-- agent:boundary:fb6e7c52 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -99,6 +115,10 @@ Yes. This cycle completed the effect-heavy contention slice of that direction: s
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#lazyperf12] Implement lazy invalidation for ThreadSafeContext propagation under parallel load: mark downstream nodes dirty/versioned during writes, defer derived recompute/effect scheduling until observed or batch flush, and preserve cleanup/disposal ordering.
+- [ ] [#lazyperf13] Add high-parallel-load instrumentation benchmarks for fan-out/fan-in graph propagation: compare eager invalidation, lazy dirty epochs, and batched flush behavior for lock acquisitions, queue pushes, and dependency-edge waits.
+- [ ] [#lazyperf14] Prototype per-node invalidation sidecars or epoch counters so parallel writers avoid holding the global graph lock while publishing dirty/version state.
+- [ ] [#lazyperf15] Add loom/spec coverage for lazy invalidation cleanup, disposal, and dynamic dependency changes so stale edges cannot leak or rerun after disposal under races.
 <!-- /agent:backlog -->
 
 ## Review

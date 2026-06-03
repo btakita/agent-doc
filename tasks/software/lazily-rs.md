@@ -38,7 +38,28 @@ queue_active: true
 Compacted content:
 - Archived 11 response topic(s): #71yq lazyperf25; #hqmh lazyperf26; #xdq8 lazyperf27; 8 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:b7b3b7d2 -->
+
+### Re: handle-centric get API — glm-5.1
+
+> **Queue prompt:**
+>
+> In the README, we have `let val = ctx.get_cell(&counter);`. Please make the canonical usage `counter.get(&ctx)` instead of `ctx.get_cell(&counter)`. Is a Cell a Slot? If so, how can we differentiate from `Slot::get` behavior?
+
+
+**Cell is NOT a Slot.** They're distinct node types (`CellNode` vs `SlotNode`) sharing only a `SlotId` and `dependents` edge structure. Since `CellHandle<T>` and `SlotHandle<T>` are different Rust types, each can have its own `get(&self, ctx)` method with no collision.
+
+**Changes made** (commit `5817e61`, pushed):
+
+- Added `CellHandle::get(&self, ctx) -> T` — ergonomic alias for `ctx.get_cell(self)` with full dependency tracking
+- Added `SlotHandle::get(&self, ctx) -> T` — ergonomic alias for `ctx.get(self)` for API consistency
+- Updated README examples to use `counter.get(&ctx)` and `doubled.get(&ctx)` as canonical
+- Updated README and SPEC.md API tables with both handle-centric and context-centric entries
+- Added 8 new tests in `handle_get_methods` module
+
+**Note:** The handle-centric `get`/`set` methods are on `Context` only. `ThreadSafeContext` continues to use `ctx.get_cell()` / `ctx.get()` — the same split as the existing `cell.set()` which only takes `&Context`.
+
+All 83 spec compliance tests pass, including loom and tokio. `make check` clean.
+<!-- agent:boundary:5bd199e3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -47,8 +68,8 @@ Compacted content:
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- In the README, we have `let val = ctx.get_cell(&counter);`. Please make the canonical usage `counter.get(&ctx)` instead of `ctx.get_cell(&counter)`. Is a Cell a Slot? If so, how can we differentiate from `Slot::get` behavior?
-- Extract a BENCHMARKS.md from the README.md. All benchmarks, including explinations, should go into BENCHMARKS.md. README.md should link to BENCHMARKS.md.
+- ~In the README, we have `let val = ctx.get_cell(&counter);`. Please make the canonical usage `counter.get(&ctx)` instead of `ctx.get_cell(&counter)`. Is a Cell a Slot? If so, how can we differentiate from `Slot::get` behavior?~
+- Extract a BENCHMARKS.md from the README.md. All benchmarks, including explanations, should go into BENCHMARKS.md. README.md should link to BENCHMARKS.md.
 - [#lazyperf33]
 - [#lazyperf34]
 - [#lazyperf35]

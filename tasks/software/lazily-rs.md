@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 
@@ -66,7 +66,18 @@ Audited the full codebase (context.rs, thread_safe.rs, instrumentation.rs, SPEC.
 
 Top of backlog: **`#lazyperf17`**
 Are Vec lookups slower than HashMap lookups?
-<!-- agent:boundary:bb72ef1b -->
+
+### Re: Vec vs HashMap lookups — gpt-5
+
+No — Vec index lookups are faster than HashMap lookups for dense integer keys like `SlotId`.
+
+- **Vec index**: O(1), single pointer arithmetic + memory dereference, no hash computation, perfect cache locality.
+- **HashMap lookup**: O(1) amortized but requires hashing the key, probing the bucket array, and handling collisions. Per-lookup overhead is significantly higher.
+
+For lazily-rs specifically, `SlotId` values are dense sequential integers, so `Vec<Option<Node>>` indexed by `SlotId` avoids all hash overhead with zero wasted slots. The single-threaded `Context` already uses this pattern — `#lazyperf20` proposes aligning the thread-safe `ThreadSafeState` to match.
+
+The only case where HashMap wins is with sparse keys (lots of gaps in the ID space), which `#lazyperf22` (slot ID reuse/compaction) would address.
+<!-- agent:boundary:67dec853 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -74,8 +85,7 @@ Are Vec lookups slower than HashMap lookups?
 
 ## Queue
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
-- Are Vec lookups slower than HashMap lookups?
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog

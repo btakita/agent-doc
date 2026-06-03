@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -125,15 +125,40 @@ Investigation complete for all 4 queue items. Root causes identified:
 - #7fmb: upstream OpenCode TUI issue, not fixable in agent-doc
 
 New implementation items added to backlog: #opencode-stderr-file-redirect, #opencode-idle-detection-post-turn, #opencode-skill-auto-loop, #harness-resolution-source-logging. Queue items drained.
-<!-- agent:boundary:fd97d5f2 -->
+
+### Re: do [#sw78] #opencode-stderr-file-redirect — glm-5.1
+
+> **Queue prompt:**
+>
+> do [#sw78]
+
+
+**Implemented.** Two changes:
+
+1. **`harness.rs:148`** — Added `is_tui_harness()` method to `HarnessConfig`. Returns `true` for `opencode`, `false` for `claude` and `codex`. Test added (`is_tui_harness`).
+
+2. **`start.rs:3169`** — Before the supervisor restart loop, when `harness.is_tui_harness()`, redirects fd 2 (stderr) to `.agent-doc/logs/supervisor-stderr.log` via `dup2()`. The file is opened in append mode. Falls back gracefully if the file cannot be opened (TUI bleed is cosmetic, not fatal). The first `eprintln!` after redirect logs the redirect path for diagnostics.
+
+**Verification:**
+- `cargo test -p agent-doc-orchestration` — 2219 passed, 0 failed
+- `cargo check --bin agent-doc` — clean
+- `cargo install --path .` — installed `agent-doc 0.34.0`
+- Pre-existing `make check` failures in `describe_image.rs` (unrelated unsafe `remove_var`) — not introduced by this change
+
+**Files changed:** `src/agent-doc/agent-doc-orchestration/src/harness.rs`, `src/agent-doc/agent-doc-orchestration/src/start.rs`
+<!-- agent:boundary:7e7311a6 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
-- #4h81
-- #t9xf
-- #0ada
-- #7fmb
-- do [#9j4v]
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
+- ~#4h81~
+- ~#t9xf~
+- ~#0ada~
+- ~#7fmb~
+- ~do [#9j4v]~
+- ~do [#sw78]~
+- do [#8ker]
+- do [#1t6w]
+- do [#tbhv]
 <!-- /agent:queue -->
 ###
 <!--
@@ -148,7 +173,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#sw78] #opencode-stderr-file-redirect #agent-doc-bug 2026-06-03: redirect supervisor stderr to .agent-doc/logs/supervisor-stderr.log when harness.binary==opencode in start.rs run_with_reap_policy(). ~20 lines. Spun off from #t9xf investigation.
 - [ ] [#8ker] #opencode-idle-detection-post-turn #agent-doc-bug 2026-06-03: fix child_output_prompt_visible() in start.rs:1248-1256 to check only bottom N lines for OpenCode post-turn idle detection instead of requiring all scrollback to be ignorable chrome. Mirror dispatch_blocker_reason approach from harness.rs:324-345. Spun off from #0ada investigation.
 - [ ] [#1t6w] #opencode-skill-auto-loop #agent-doc-bug 2026-06-03: add OpenCode-specific auto-loop section to skill.rs SKILL.md generation (currently omitted per test skill.rs:921). Instruct OpenCode to re-invoke agent-doc <FILE> after successful finalize when queue_active==true and queue_prompts.len()>=1. Spun off from #0ada investigation.
 - [ ] [#tbhv] #harness-resolution-source-logging #agent-doc-bug 2026-06-03: add guard in start.rs after from_context() that logs resolved harness name + source (frontmatter vs config vs fallback) and warns when detect_harness() env result differs from from_context() result. Spun off from #4h81 investigation.

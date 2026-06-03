@@ -38,7 +38,25 @@ queue_active: true
 Compacted content:
 - Archived 2 response topic(s): handle-centric get API; extract BENCHMARKS.md
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-<!-- agent:boundary:e6802e64 -->
+
+### Re: Does get(ctx) clone ctx? — glm-5.1
+
+> **Queue prompt:**
+>
+> Does `let val = counter.get(ctx);` clone `ctx`?
+
+
+**No.** `SlotHandle::get` takes `ctx: &Context` — an immutable borrow. The signature is:
+
+```rust
+// src/lazily-rs/src/slot.rs:26
+pub fn get(&self, ctx: &Context) -> T
+```
+
+`Context` doesn't even implement `Clone` (it contains `RefCell<ContextInner>` with `Rc<ComputeFn>` closures). The only clone in `get` is the return value `T`, not the context itself.
+
+When you write `counter.get(ctx)`, Rust auto-refs to `counter.get(&ctx)` — pure borrow, zero cost on the context side.
+<!-- agent:boundary:2d7657af -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -47,7 +65,7 @@ Compacted content:
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- Does `let val = counter.get(ctx);` clone `ctx`?
+- ~Does `let val = counter.get(ctx);` clone `ctx`?~
 - [#lazyperf33]
 - [#lazyperf34]
 - [#lazyperf35]

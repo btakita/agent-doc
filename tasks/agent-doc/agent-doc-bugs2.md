@@ -36,14 +36,29 @@ Live IntelliJ File Cache Conflict Cancel proof captured; JB Cancel residual revi
 Compacted content:
 - Archived 2 response topic(s): do [#admin-fleet-dashboard]; JB Clear Session Context does not work with OpenCode
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:1a294f98 -->
+
+### Re: do [#opencode-build-chrome-stall] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#opencode-build-chrome-stall]
+
+
+Already implemented — verified and completed (audit-before-implement per the "review items are mostly already shipped" pattern).
+
+**The fix is live and committed.** `harness.rs::is_opencode_idle_chrome_line` classifies `Build ·` status lines as OpenCode idle chrome (committed in `cc6be806`), so `dispatch_blocker_reason` no longer treats the post-turn `Build · MODEL` chrome as a turn. Real turns still block — the busy cue is keyed specifically on `Working (Ns - esc to interrupt)` (tests `idle_chrome_only_output_rejects_opencode_working_text`, `dispatch_blocker_reason_detects_opencode_active_turn`). The idle `Build · GLM-5.1 Z.AI Coding Plan` splash already had `is_idle_chrome_only_output` coverage.
+
+**Added the missing dispatch-path proof.** The stall surfaced as `dispatch_blocker_reason` wrongly returning `"opencode active turn"` for the idle Build state, but no test asserted the *dispatch* path stays clear. New `dispatch_blocker_reason_allows_opencode_idle_build_chrome` asserts the idle Build splash returns `None` (dispatchable). `make check` green (exit 0); test-only change, so the already-shipped behavior binary is unchanged. Submodule commit for the test added.
+
+**Downstream:** `#opencode-preset-not-dispatched` (next queue item) names this stall as its root cause — with the stall classified idle, a queued preset dispatches once the pane reaches idle. That item is now a live-verify (confirm the preset actually injects after a real OpenCode turn completes), not a separate code fix.
+<!-- agent:boundary:ab8d0b0f -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
 - ~do [#admin-fleet-dashboard]~
-- do [#opencode-build-chrome-stall]
-- do [#opencode-preset-not-dispatched]
+- ~do [#opencode-build-chrome-stall]~
 - do [#jbrunstallreg]
+- do [#opencode-preset-not-dispatched]
 - JB `Clear Session Context` does not work with OpenCode. This is a long-standing issue. Look at attempt with tsift.md in the logs.
 - Error in OpenCode `  ┃  Error: malformed template patchback: found patch/replace markers but no closed patch blocks parsed; refusing to append unmatched content` when running tsift.md
 - Go through all review items. If logs are in place to confirm the completion, complete the review item. If logs are in place to deny the completion, keep the review item. If logs are missing to confirm or deny the completion, add logs to confirm/deny the review item.
@@ -59,7 +74,6 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Backlog
 
 <!-- agent:backlog priority queue=append -->
-- [ ] [#opencode-build-chrome-stall] #agent-doc-bug 2026-06-02: OpenCode pane shows 'Build · GLM-5.1' + 'esc interrupt' chrome after a turn completes, never returning to the '>' dispatch-ready prompt. Route dispatch_blocker_reason correctly reports 'opencode active turn' (non-ignorable content + no ready prompt) but the pane is actually idle. The 'Build · MODEL' line and status footer should be classified as idle chrome in is_ignorable_output_line / is_dispatch_ready_prompt_line, or OpenCode should be driven back to the '>' prompt after the build phase completes.
 - [ ] [#opencode-preset-not-dispatched] #agent-doc-bug 2026-06-02: The #agent-doc-bug prompt preset was captured in the route queue but never injected into the OpenCode pane because the Build chrome stall (#opencode-build-chrome-stall) prevented dispatch. The preset text was correctly enqueued via dispatch_only_opencode_active_turn but the stall means it never executes. Dependent on #opencode-build-chrome-stall fix or manual pane recovery.
 - [ ] [#jbrunstallreg] #agent-doc-bug 2026-06-03: JB Run Agent Doc can still appear stalled after the route watchdog/visible-warning fix. Plan: tasks/agent-doc/plan-jb-run-agent-doc-stall-regression.md. Capture and bound every plugin-side Run stage before and after route launch (typing idle, EDT save, route build, process start/watchdog, notification/persistence), then live-verify that each non-success path produces visible feedback plus a durable diagnostic artifact.
 <!-- /agent:backlog -->

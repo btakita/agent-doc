@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 
@@ -65,7 +65,8 @@ Audited the full codebase (context.rs, thread_safe.rs, instrumentation.rs, SPEC.
 - `#lazyperf24` [recommended]: Benchmark `SmallVec` vs plain `Vec` for dependency edges before committing — measure cache-line impact on fan-out benchmarks.
 
 Top of backlog: **`#lazyperf17`**
-<!-- agent:boundary:9349001c -->
+Are Vec lookups slower than HashMap lookups?
+<!-- agent:boundary:bb72ef1b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -73,7 +74,8 @@ Top of backlog: **`#lazyperf17`**
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
+- Are Vec lookups slower than HashMap lookups?
 <!-- /agent:queue -->
 
 ## Backlog

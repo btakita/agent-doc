@@ -74,7 +74,7 @@ Implemented `#tokegate` in `tsift_quality::token_gate`.
 - Committed and pushed to tsift main: `42738de`
 
 Commands/proof: ran `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `cargo check`, `cargo test`, `make check`, `cargo install --path .`, `git add` + `git commit` + `git push` in `src/tsift/`.
-<!-- agent:boundary:54b570c6 -->
+<!-- agent:boundary:b24f25d5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -93,7 +93,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog -->
-- [x] [#tokegate] Add a cross-surface token/performance gate for context-pack, session-review --next-context, graph-db evidence, conflict-matrix, and dispatch-trace: benchmark representative agent-doc sessions and graph queries; record prompt tokens, envelope bytes, runtime, cache-hit rate, raw-read avoidance, and useful-hit density; fail CI on regressions.
 - [ ] [#gpackreuse] Reuse graph/context packets across a single agent-doc cycle: share graph-db status/refresh, evidence, conflict-matrix preparation, context-pack diff, and impact packets by source/document/staged-diff watermark; prove repeated calls report skipped phases and stable packet ids.
 - [ ] [#rankdefault] Promote ranked_neighborhood into default graph lookup/context-pack/evidence output only after quality gates pass; compare ranked vs unranked output on real backlog/code queries for useful-hit density, duplicate-name precision, handle coverage, latency, and emitted tokens.
 - [ ] [#gfrontierhot] Run three-sample performance triage for SQLite neighborhood/path/evidence/related lookups on real, full-projection, high-degree, and deep-chain workloads; optimize recursive frontier expansion or hop caps only where metrics show a hotspot.

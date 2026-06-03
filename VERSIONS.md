@@ -6,6 +6,18 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **No-change short-circuit detects committed no-response repair cycles
+  (`#jb-codex-nochange-after-repair`).** When `agent-doc run` finds no
+  document/snapshot diff but the latest cycle was a `Committed` no-response
+  bookkeeping-only closeout (repair/reap following an abandoned recursive
+  invocation or failed run), the classifier now returns an `Abnormal` verdict
+  with a typed diagnostic naming the cycle id, last event, and recovery command,
+  instead of plain "Nothing changed since last run". This prevents JB `Run Agent
+  Doc` from showing a misleading "No changes were detected since the last run"
+  after a repair cycle that followed a Codex recursive self-invocation
+  abandonment. A committed cycle with a response body remains `Clean` regardless
+  of bookkeeping. Spec: `specs/07-closeout-commands.md` (#jb-codex-nochange-after-repair).
+
 - **Dedicated `blocked_in_interactive_substate` route guard reason (`#snrun`).**
   When a dispatch-only `Run Agent Doc` reopen is refused because the live pane is
   stuck in an interactive shell substate (`reverse-i-search` / history search)

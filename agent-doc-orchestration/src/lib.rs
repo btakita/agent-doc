@@ -69,6 +69,7 @@ pub mod claim;
 pub mod codex_hook;
 pub mod compact;
 pub mod cycle_state;
+pub mod dashboard;
 pub mod debounce;
 pub mod dedupe;
 pub mod diff;

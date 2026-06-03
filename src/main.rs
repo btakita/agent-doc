@@ -1139,6 +1139,21 @@ enum AdminAction {
         #[arg(long)]
         json: bool,
     },
+    /// Live read-only fleet dashboard over `admin list` / `admin detect`
+    Dashboard {
+        /// Project root to inspect (defaults to the nearest project from CWD)
+        #[arg(long)]
+        project_root: Option<PathBuf>,
+        /// Emit a single model snapshot as JSON and exit
+        #[arg(long)]
+        json: bool,
+        /// Render one frame and exit instead of polling
+        #[arg(long)]
+        once: bool,
+        /// Poll interval in milliseconds (default ~1s)
+        #[arg(long, default_value_t = agent_doc_orchestration::dashboard::DEFAULT_INTERVAL_MS)]
+        interval: u64,
+    },
 }
 
 #[derive(Subcommand)]
@@ -2454,6 +2469,17 @@ fn main() -> anyhow::Result<()> {
             AdminAction::Detect { project_root, json } => {
                 agent_doc_orchestration::admin::detect(project_root.as_deref(), json)
             }
+            AdminAction::Dashboard {
+                project_root,
+                json,
+                once,
+                interval,
+            } => agent_doc_orchestration::dashboard::dashboard(
+                project_root.as_deref(),
+                json,
+                once,
+                interval,
+            ),
         },
         Commands::Hook { action } => match action {
             HookAction::Fire {

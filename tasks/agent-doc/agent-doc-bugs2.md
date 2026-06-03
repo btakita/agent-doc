@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -69,10 +69,12 @@ This extends the #t9xf bleed/corruption pattern: after JB `Clear Session Context
 This may be a compound trigger: the IPC/write activity from `Clear Session Context` and `Compact Exchange` both emit output that the OpenCode TUI cannot contain, leaving the terminal in a dirty state that `Run Agent Doc` then inherits.
 
 Updated #t9xf scope: the bleed is not limited to `Clear Session Context` — JB `Compact Exchange` also triggers it, and the accumulated corruption affects subsequent `Run Agent Doc` dispatches.
-<!-- agent:boundary:421d3b82 -->
+Can GLM sessions create a GPT subagent to view images? What are #next-steps?
+<!-- agent:boundary:a6e4ec63 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
+- Can GLM sessions create a GPT subagent to view images? What are #next-steps?
 <!-- /agent:queue -->
 ###
 <!--

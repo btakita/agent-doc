@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -36,14 +36,16 @@ Compacted content:
 - Archived 4 response topic(s): Codex owned-pane recursive deadlock recovery; Documentation for agent-doc config and env variables; do #9117 config-env-vars-doc; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
 
-### Re: OpenCode GLM-5.1 Vision — glm-5.1 (HEAD)
+### Re: OpenCode GLM-5.1 Vision — glm-5.1
 
 Vision support depends on the model provider endpoint, not the OpenCode harness. OpenCode passes image attachments through to the model API; whether GLM-5.1 accepts multimodal inputs is a provider/API capability question. This session (running as GLM-5.1) has no image-vision tools available — the `Read` tool can decode images, but that is tool-mediated, not native model vision. The queue item text is truncated in the document (cuts off mid-sentence at "OpenCode G"), so I cannot see the full configuration request. Please re-enter the complete queue item if further action is needed.
-<!-- agent:boundary:48a8b974 -->
+<!-- agent:boundary:8c519168 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - Is vision currently working with OpenCode using GLM-5.1? If no, please configure agent-loop vision to work with OpenCode GLM-5.1.
+- monsterrodholders.md agent-doc codex session still has `• agent-doc could not be invoked directly from this pane because it would recurse into the already-owned session, so I
+  handled the task doc manually.` error. How can we recover from this state? Can agent-doc "self-heal"?
 - Please evaluate recent screenshots and add #next-steps for the related tasks.
 <!-- /agent:queue -->
 ###

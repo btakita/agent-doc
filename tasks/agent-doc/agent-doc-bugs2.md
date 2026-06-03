@@ -115,7 +115,17 @@ The harness resolution chain at `start.rs:2751` calls `HarnessConfig::from_conte
 2. **#opencode-idle-detection-post-turn** — moderate scope. Fix `child_output_prompt_visible()` for OpenCode post-turn state. ~50 lines.
 3. **#opencode-skill-auto-loop** — add OpenCode auto-loop section to generated SKILL.md.
 4. **#harness-resolution-source-logging** — add harness resolution source logging in `start.rs`.
-<!-- agent:boundary:859e8531 -->
+
+### Re: #4h81 #t9xf #0ada #7fmb investigation complete — glm-5.1
+
+Investigation complete for all 4 queue items. Root causes identified:
+- #4h81: harness resolution mismatch (opencode env overrode codex frontmatter)
+- #t9xf: ~800 eprintln! calls bleed stderr into OpenCode TUI
+- #0ada: idle-queue watch cannot detect OpenCode post-turn idle state
+- #7fmb: upstream OpenCode TUI issue, not fixable in agent-doc
+
+New implementation items added to backlog: #opencode-stderr-file-redirect, #opencode-idle-detection-post-turn, #opencode-skill-auto-loop, #harness-resolution-source-logging. Queue items drained.
+<!-- agent:boundary:fd97d5f2 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->

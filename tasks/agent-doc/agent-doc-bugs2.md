@@ -115,7 +115,7 @@ Root-caused and fixed (instruction gap, not a binary bug).
 - Rebuilt binary + reinstalled Claude/Codex/OpenCode/root surfaces; `<!-- /patch:exchange -->` now present (close-count 0 → 2) in all of them. `make check` green.
 
 This is the same close-marker hazard noted before (`#patch-exchange-requires-close-marker`); the SKILL examples were the remaining place that still taught the unclosed form.
-<!-- agent:boundary:569e769f -->
+<!-- agent:boundary:f08e8582 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
@@ -138,6 +138,7 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 ## Backlog
 
 <!-- agent:backlog priority queue=append -->
+- [ ] [#opencode-post-turn-false-active] #agent-doc-bug 2026-06-03: JB Run Agent Doc stalls after first turn — dispatch-only reopen refuses because OpenCode pane shows completed turn output in scrollback, triggering false 'opencode active turn'. dispatch_blocker_reason scans ALL lines for non-idle content; completed turn output (bash commands, Thought:, Click to expand) is non-chrome, so has_non_idle_content=true while has_ready_prompt stays false (OpenCode idle state has no standalone > prompt). Fix: mirror Claude's bottom-N-lines busy-cue check instead of all-lines non-idle scan. Plan: tasks/agent-doc/plan-opencode-post-turn-false-active.md
 <!-- /agent:backlog -->
 
 ## Review

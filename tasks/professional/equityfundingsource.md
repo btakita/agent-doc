@@ -75,21 +75,44 @@ Nuance: if the demo must show a *full* application (beyond prequal) before our o
 - **The real constraint is the integration, not the UI.** BorrowerView writes straight into TMO's LOS. If our form captures into D1, we still need the writeback/sync into The Mortgage Office — exactly what's pending on TMO's webhook/API answer (backlog dzmm, k2xg) and the field-extraction to TMO create/update flow (7a4d). Replicating the *form* is easy; replicating the *integration* depends on TMO's outbound support, still unconfirmed.
 
 **Bottom line for the demo:** mirror **`applynew`** (matches EFS's hard-money business and our current schema), keep `/apply` prequal as the front door, and treat the consumer `apply4` 1003 as a later phase gated on the TMO writeback decision.
-<!-- agent:boundary:1c1cf9de -->
+
+### Re: spec-test-commit-push queue (7tan / 88qv) — opus-4-8
+
+> **Queue prompt:**
+>
+> [#7tan]
+>
+> [#88qv]
+
+
+Done — scope per your call: **spec/PRD doc only, deduped, run once.**
+
+**Duplicate resolved.** 88qv was an accidental dup of 7tan (my earlier failed finalize's `--pending-add` landed anyway). Both queue items are now closed — 7tan as the real deliverable, 88qv as the duplicate. No work ran twice.
+
+**Spec delivered:** `prds/efs-full-application-intake-spec.md` in `equityfundingsource-dev` (commit `ed124f8`, pushed to `main`). Design-only contract (no app code), companion to the portal PRD, covering:
+
+- The two variants — `applynew` (business-purpose, **Phase 1**) and `apply4` (consumer URLA/1003, Phase 2) — with section/field breakdowns taken from the live forms.
+- Proposed D1 data model: `applications` + borrowers / properties / liens / signatures tables; Phase-2 employment / income / assets / REO / declarations.
+- TMO writeback mapping to `NewLoanApplication` / `UpdateLoanApplication` (`Fields[]` key-value, `OnlineStatus` enum) — staff-reviewed and gated, never automatic.
+- ESIGN/UETA e-signature + audit trail (timestamp, IP, declaration version) improving on TMO's typed-initials-only capture.
+- Status tracking via the authenticated Borrower Login; phasing; non-goals; open gating items (TMO outbound support + EFS custom-field key map — dzmm / k2xg / 7a4d).
+
+**Verification:** additive docs-only change — no code, build logic, or instruction surface touched — so the worker build/test gate (`make check` = `bun test` + worker build, which needs Cloudflare bindings) wasn't run; it wouldn't exercise a standalone markdown file. The spec is committed and pushed; remote `main` is `ed124f8`.
+
+Queue kept active per your choice; both items are now drained, so the auto-loop terminates next cycle.
+<!-- agent:boundary:331ea8df -->
 <!-- /agent:exchange -->
 ###
 <!--
 Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email respons back into the chat? Can the borrower receive emails whenever an admin responds with a message?
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue preset="#spec-test-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#7tan] [recommended] Model the two TMO BorrowerView forms as the spec for an EFS-owned full application: extend /apply + application_leads to mirror applynew (business-purpose: borrowers+type, loan use, properties+liens, business-use declaration, typed-initials e-sign + ESIGN/UETA consent & audit trail) for the demo; treat apply4 (consumer URLA/1003: employment/income, assets/liabilities, REO, declarations A-M) as a later phase. Form capture is low-risk; gated on TMO writeback (dzmm / k2xg / 7a4d).
-- [ ] [#88qv] [recommended] Model the two TMO BorrowerView forms as the spec for an EFS-owned full application: extend /apply + application_leads to mirror applynew (business-purpose: borrowers+type, loan use, properties+liens, business-use declaration, typed-initials e-sign + ESIGN/UETA consent & audit trail) for the demo; treat apply4 (consumer URLA/1003: employment/income, assets/liabilities, REO, declarations A-M) as a later phase. Form capture is low-risk; gated on TMO writeback (#dzmm / #k2xg / #7a4d).
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
 - [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document intelligence/search, borrower/broker/investor/admin portals, and tenant-ready resale packaging.
 - [ ] [#f4rq] Verify an EFS-owned sending domain in Resend, then switch APPLICATION_LEAD_NOTIFICATION_FROM and APPLICATION_LEAD_NOTIFICATION_TO from testing-mode values to EFS production addresses.

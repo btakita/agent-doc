@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -78,19 +78,30 @@ Compacted content:
 **Verification:** cargo test 68+2224 passed, 0 failed. cargo check clean. cargo install agent-doc 0.34.0.
 
 **Files changed:** `src/skill.rs`, `src/describe_image.rs`
-<!-- agent:boundary:864c2fed -->
+
+### Re: do [#tbhv] #harness-resolution-source-logging — glm-5.1
+
+> **Queue prompt:**
+>
+> do [#tbhv]
+
+
+**Implemented.** Added harness resolution source logging in `start.rs`.
+
+After `from_context()` resolves the harness at start.rs:2762, the guard:
+1. Determines the resolution source (frontmatter, config, or fallback)
+2. Logs `[start] harness resolved: binary=X source=Y env=Z` via eprintln
+3. If `detect_harness()` env result differs from `from_context()` result (and env is not `"default"`), logs a `[start] WARNING: harness mismatch` diagnostic
+
+This makes the #4h81 harness mismatch (opencode env overriding codex frontmatter) immediately visible in supervisor stderr logs.
+
+**Verification:** `cargo test -p agent-doc-orchestration` — 2224 passed, 0 failed. `cargo check --bin agent-doc` — clean. `cargo install --path .` — installed `agent-doc 0.34.0`.
+
+**Files changed:** `agent-doc-orchestration/src/start.rs`
+<!-- agent:boundary:e4ca2e5e -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" -->
-- ~#4h81~
-- ~#t9xf~
-- ~#0ada~
-- ~#7fmb~
-- ~do [#9j4v]~
-- ~do [#sw78]~
-- ~do [#8ker]~
-- ~do [#1t6w]~
-- do [#tbhv]
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 ###
 <!--
@@ -105,7 +116,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#tbhv] #harness-resolution-source-logging #agent-doc-bug 2026-06-03: add guard in start.rs after from_context() that logs resolved harness name + source (frontmatter vs config vs fallback) and warns when detect_harness() env result differs from from_context() result. Spun off from #4h81 investigation.
 <!-- /agent:backlog -->
 
 ## Review

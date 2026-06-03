@@ -33,61 +33,12 @@ queue_active: false
 <!-- agent:exchange -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260603-152451.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57a5d8366a1fa779d4afde380ce07377133e6daf1d8810384e1383c400-20260603-155704.md`*
 
 Compacted content:
-- Archived 13 response topic(s): #next-steps to improve performance and reduce memory usage; Vec vs HashMap lookups; Queue #zfam #fftjz #rvjd #vftn; 10 more
+- Archived 2 response topic(s): #next-steps to improve performance and reduce memory usage; Run benchmarks and update tables in README.md
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
-❯ What are #next-steps to improve performance and reduce memory usage?
-
-### Re: #next-steps to improve performance and reduce memory usage — glm-5.1
-
-Audited the full post-optimization codebase (context.rs, thread_safe.rs, instrumentation.rs). All prior improvements (#lazyperf17–24) are landed and effective. Here are the remaining opportunities:
-
-**High priority — thread-safe fast-path registries:**
-- `#lazyperf25`: Convert `ThreadSafeInner.slot_fast_paths` and `cell_fast_paths` from `RwLock<HashMap<SlotId, Arc<...>>>` to `RwLock<Vec<Option<Arc<...>>>>`. Every `get()` / `get_cell()` call does a RwLock read + HashMap lookup. SlotIds are dense integers — the same Vec-indexed approach from #lazyperf20 eliminates hash computation on every thread-safe value access. Two HashMaps → two Vecs, same helper pattern as `ThreadSafeState.get_node`.
-
-**High priority — sidecar dependents as EdgeVec:**
-- `#lazyperf26`: Convert `ThreadSafeSlotFastPath.dependents` (thread_safe.rs:247) and `ThreadSafeCellFastPath.dependents` (thread_safe.rs:512) from `Mutex<HashMap<SlotId, ThreadSafeDependentKind>>` to `Mutex<EdgeVec>` with a parallel `Mutex<EdgeVec>` for kinds (or `Mutex<Vec<(SlotId, ThreadSafeDependentKind)>>`). Dependents per node are typically 1-5, so HashMap overhead (hash + bucket) dominates. `dependents_snapshot()` returns `Vec<(SlotId, ThreadSafeDependentKind)>` — the conversion becomes a simple clone instead of HashMap → Vec iteration.
-
-**Medium priority — scheduled_effects as Vec<bool>:**
-- `#lazyperf27`: Replace `scheduled_effects: HashSet<SlotId>` in both `ContextInner` and `ThreadSafeState` with `Vec<bool>` indexed by SlotId. `scheduled_effects.insert(id)` → `vec[id] = true`, `.remove()` → `vec[id] = false`, `.contains()` → `vec[id]`. O(1) with zero hash computation. The Vec grows with `nodes` so resize is already bounded. Trade-off: ~1 byte per slot vs ~50 bytes per HashSet entry, but eliminates all hash overhead from the hot `schedule_effect` path.
-
-**Medium priority — batch sets as SmallVec:**
-- `#lazyperf28`: Replace `batched_cells: HashSet<SlotId>`, `batched_cell_clears: HashSet<SlotId>`, `batched_slots: HashSet<SlotId>` with `SmallVec<[SlotId; 8]>`. Typical batches touch few nodes. Linear dedup (`push` + `contains` check) is faster than hash for ≤8 items. `drain()` on SmallVec is zero-copy iteration.
-
-**Medium priority — ThreadSafeInvalidationPlan Vecs:**
-- `#lazyperf29`: Replace `slots_to_mark: HashMap<SlotId, bool>` and `effects_to_schedule: HashMap<SlotId, bool>` in `ThreadSafeInvalidationPlan` with `Vec<(SlotId, bool)>` + sorted insert. The plan is built in one pass and applied in one pass — HashMap overhead per frontier node is unnecessary for a transient structure.
-
-**Lower priority:**
-- `#lazyperf30`: Dependent clone scratch buffer — pre-allocate a `Vec<SlotId>` on `ContextInner` / `ThreadSafeState` for the clone-and-iterate pattern in `clear_slot_now`, `invalidate_cell_dependents_now`, `notify_slot_value_changed`, avoiding SmallVec heap allocation on >4 fan-out.
-- `#lazyperf31` [recommended]: `parking_lot` replacement — swap `std::sync::Mutex/RwLock` in thread_safe.rs for `parking_lot` equivalents (smaller lock size, no poisoning overhead, adaptive spinning). Requires benchmark validation per SPEC line 298.
-- `#lazyperf32` [recommended]: `Rc<dyn Any>` values in single-threaded `Context` — storing `Rc` instead of `Box` for `SlotNode.value` would make `get()` return an `Rc` clone (pointer increment) instead of a deep clone. This is an API change (`get` returns `Rc<T>` or a new `get_rc` method).
-
-Top of backlog: **`#lazyperf25`** (thread-safe fast-path Vec registries)
-❯ Run benchmarks and update tables in README.md.
-
-### Re: Run benchmarks and update tables in README.md — glm-5.1
-
-Ran `cargo bench --features instrumentation` and `python3 scripts/update-benchmark-results.py --no-run` to refresh all benchmark tables in `README.md`. Committed as `82f26bc` in the lazily-rs submodule.
-
-**Key results (compared to prior baseline):**
-
-| Benchmark | Change |
-|---|---|
-| cached_reads/context | **−31%** (8.1 ns from 11.7 ns) |
-| cold_first_get/context | **−41%** (78.7 ns from 124 ns) |
-| cold_first_get/thread_safe | **−10%** (1.0 µs from 1.08 µs) |
-| memo_equality_suppression/context | **−49%** (2.2 µs from 4.2 µs) |
-| effect_flushing/context | **−45%** (48 ns from 87 ns) |
-| batch_storms/context/64 | **−24%** (2.7 µs from 3.6 µs) |
-| dependency_fan_out/context/32 | **−28%** (3.8 µs from 4.8 µs) |
-| dependency_fan_out/thread_safe/256 | **−32%** (211 µs from 288 µs) |
-| set_cell_invalidation/high_fan_out/512 | **−34%** (232 µs from 289 µs) |
-| thread_safe_contention/read_mostly_16 | **−12%** (1.0 ms from 1.2 ms) |
-
-All 98 tests pass (including 12 Loom model-checking and 2 Tokio sync). Benchmark budget check passes.
-<!-- agent:boundary:e1f6d29d -->
+<!-- agent:boundary:6bf43afd -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -1,8 +1,23 @@
 # Plan: route reaps a fresh start whose first cycle is a no-op (can't start an idle session)
 
 **Pending:** `#route-reaps-idle-fresh-start`
-**Status:** Planned + root-caused 2026-06-02. Not implemented.
+**Status:** Deterministic fix IMPLEMENTED + unit-tested + shipped 2026-06-02 (submodule `8451143a`, both binaries rebuilt + installed). Live-gated facet (gpt-5.5 xhigh slow-cold-start end-to-end repro) remains.
 **Class:** `#agent-doc-bug` — startup/route.
+
+## Implemented (8451143a)
+
+At the fresh-start no-ack branch (`route.rs`, after the trigger is proven
+dispatched), route now re-checks the pane: if it has returned to a harness
+dispatch-ready prompt the agent is alive and idle, so the first cycle was a
+legitimate no-op (empty/halted queue, preflight `no_changes`) — keep the live
+idle session and clear the startup-miss. Only reap when the pane is not
+dispatch-ready (a genuine miss). New pure `FreshStartAckOutcome` classifier
+(`CycleAcknowledged` / `IdleNoOpKeep` / `GenuineMissReap`) reuses the
+already-tested `ready_prompt_candidate` discriminator; unit-tested with codex
+idle-ready vs status-footer fixtures. `route::` suite 141 passed; `make check`
+green. **Live-gated:** start a real idle `lazily-rs.md` codex session (empty
+queue, slow gpt-5.5 xhigh cold start) and confirm the pane stays alive instead
+of being reaped.
 
 ## Repro / observed (2026-06-02)
 

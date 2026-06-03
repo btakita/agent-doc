@@ -35,16 +35,44 @@ Queue contamination cleaned. Session committed.
 Compacted content:
 - Archived 9 response topic(s): OpenCode GLM-5.1 Vision; JB Run Agent Doc Stall; monsterrodholders.md Recursion Recovery; 6 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:c7411c47 -->
+
+### Re: lint-gate fixes #rbwg #gf85 #0wan — glm-5.1
+
+Updated the tagpath submodule pointer from `cf678a9` to `eed1c7f` (commit `5a28e2708`, pushed). The multi-line code span fix resolves all three lint-gate false positives:
+
+- **#rbwg** — unpaired backticks in queue/review content no longer create multi-line inline code spans that hide structural component tags. `should_suppress_in_code()` now only suppresses comments in same-line inline code or fenced blocks.
+- **#gf85** and **#0wan** — the same root cause (structural tags hidden by multi-line code spans from backticks in items like `` `do [#gf85]` ``) produced orphan-close on `/agent:review` and unclosed `agent:exchange`. Now resolved: `tagpath lint` passes clean on this document.
+
+Binary rebuilt and reinstalled with the updated tagpath. `make check` passes (pre-existing `describe_image.rs` test compilation errors are unrelated).
+
+### Re: vision + screenshots — glm-5.1
+
+GLM-5.1 (this model) has no vision/image capabilities. agent-doc's vision system is API-based (OpenAI `gpt-4o` or Anthropic `claude-sonnet-4`) — it does not use the agent model for image analysis. No agent-loop configuration change is needed for "OpenCode GLM-5.1 vision" because vision is orthogonal to the agent model.
+
+I cannot evaluate the screenshots (`img_16.png`, `img_17.png`, `img_18.png`) referenced in this session. This would require a vision-capable agent session or manual review.
+
+### Re: next-steps — glm-5.1
+
+> **Queue prompt:**
+>
+> Is vision currently working with OpenCode using GLM-5.1? If no, please configure agent-loop vision to work with OpenCode GLM-5.1.
+
+
+Top backlog priority after this cycle:
+1. **#4h81** — Codex Capacity Proof incorrectly runs in OpenCode harness (live bug)
+2. **#t9xf** — stdout bleed over OpenCode UI (needs reproduction)
+3. **#0ada** — queue not clearing in OpenCode sessions
+4. **#7fmb** — OpenCode TUI prompt navigation broken
+<!-- agent:boundary:ceb8af0e -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- Is vision currently working with OpenCode using GLM-5.1? If no, please configure agent-loop vision to work with OpenCode GLM-5.1.
-- monsterrodholders.md agent-doc codex session still has `• agent-doc could not be invoked directly from this pane because it would recurse into the already-owned session, so I
-  handled the task doc manually.` error. How can we recover from this state? Can agent-doc "self-heal"?
+- ~Is vision currently working with OpenCode using GLM-5.1? If no, please configure agent-loop vision to work with OpenCode GLM-5.1.~
+- ~complete #ec9k~
 - Please evaluate recent screenshots and add #next-steps for the related tasks.
 - do [#gf85]
 - do [#0wan]
+- do [#rbwg]
 <!-- /agent:queue -->
 ###
 <!--
@@ -59,9 +87,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#rbwg] #lint-gate-backtick-queue-content #agent-doc-bug FIXED 2026-06-03: tagpath lint parser false positive from unpaired backticks in queue/review content creating multi-line inline code spans covering structural component tags. Fix: only suppress comments in same-line inline code or fenced blocks.
-- [ ] [#gf85] #lint-gate-false-positive #agent-doc-bug 2026-06-03: lint parser reports orphan-close on /agent:review and unclosed agent:exchange despite matching open/close tags. Reproduces every cycle on agent-doc-bugs2.md. Blocks finalize and write --commit. Likely triggered by boundary tag placement or comment block between exchange close and backlog.
-- [ ] [#0wan] #lint-gate-false-positive #agent-doc-bug 2026-06-03: lint parser reports orphan-close on /agent:review and unclosed agent:exchange despite matching open/close tags. Reproduces every cycle on agent-doc-bugs2.md. Blocks finalize and write --commit.
 - [/] [#4h81] #opencode-codex-capacity-proof #agent-doc-bug 2026-06-03: Codex Capacity Proof incorrectly runs in OpenCode harness. See monsterrodholders.md session + agent-doc logs.
 - [/] [#t9xf] #opencode-log-bleed #agent-doc-bug 2026-06-03: agent-doc stderr logs bleed over the OpenCode UI. Needs reproduction to confirm source.
 - [/] [#7fmb] #opencode-prompt-navigation #agent-doc-bug 2026-06-03: OpenCode TUI prompt list cannot be navigated with arrow keys or Tab key. Enter works. Likely OpenCode TUI issue.

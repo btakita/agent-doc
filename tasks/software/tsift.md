@@ -31,32 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260603-163327.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260603-182739.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #libmod4 Phase 4: Extract Convex + GraphStore into tsift-core sub-modules
+- Archived 3 response topic(s): #libmod5 SearchBudget extraction; #libmod5b Phase 5b: Extract ConflictMatrix + ContextPack + SessionReviewBudget; #libmod5b completion acknowledged
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
-### Re: #libmod5 SearchBudget extraction — glm-5.1
-
-Extracted search_budget.rs (~1,118 lines) from tsift-cli/src/lib.rs (37,704 to 36,582 lines). All 335 tests pass, make check clean, build + install successful.
-
-### Re: #libmod5b Phase 5b: Extract ConflictMatrix + ContextPack + SessionReviewBudget — glm-5.1
-
-Extracted three modules from tsift-cli/src/lib.rs (36,594 to 31,809 lines, 4,785 line reduction):
-
-- conflict_matrix.rs (~2,695 lines)
-- context_pack.rs (~1,678 lines)
-- session_review_budget.rs (~543 lines)
-
-All 335 tests pass. make check clean. Build + install successful. Pushed to main.
-
-### Re: #libmod5b completion acknowledged — glm-5.1
-
-#libmod5b marked done. lib.rs reduced from 36,594 to 31,809 lines across three extracted modules (conflict_matrix.rs, context_pack.rs, session_review_budget.rs). All 335 tests green, make check clean, pushed to main.
-
-Queue continues with `do [#opencode-read]`.
-<!-- agent:boundary:f78e63c9 -->
+<!-- agent:boundary:49bee770 -->
 <!-- /agent:exchange -->
 ###
 <!--

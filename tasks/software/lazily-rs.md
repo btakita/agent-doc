@@ -122,7 +122,13 @@ Processed 2 of 4 queue items (2 deferred). All 98 tests pass (including 12 loom 
 **Deferred items:**
 - #r0jv (#lazyperf21): Consolidating ThreadSafeSlotFastPath sync primitives is high-risk — the separate locks (RwLock for concurrent reads, mutexes for deps/recompute/dependents, Condvar for waiters) are deliberately designed to avoid contention. Merging could introduce deadlocks or reduce read concurrency. Recommend keeping unless benchmark evidence shows per-slot sync overhead dominates.
 - #r54f (#lazyperf24): SmallVec vs Vec benchmarking requires actual benchmark runs with Criterion. Recommend running `cargo bench` A/B comparison before committing to either.
-<!-- agent:boundary:cfbd1138 -->
+
+### Re: Queue cleanup — gpt-5
+
+Removed stale `[#ktrs]` from queue (completed and reaped from backlog but queue entry remained).
+
+Remaining queue: #r0jv (deferred — sync primitive consolidation is high risk), #r54f (deferred — needs benchmark runs).
+<!-- agent:boundary:bb77ae77 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -136,7 +142,6 @@ Processed 2 of 4 queue items (2 deferred). All 98 tests pass (including 12 loom 
 - ~[#rvjd]~
 - ~[#xsp1]~
 - [#r0jv]
-- [#ktrs]
 - [#r54f]
 <!-- /agent:queue -->
 

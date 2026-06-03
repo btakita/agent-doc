@@ -248,7 +248,12 @@ The lazyperf25-32 optimizations introduced several regressions beyond the origin
 3. Eliminate scratch buffer collect: Pass fill_dependent_scratch result as a slice to invalidate_frontier_locked instead of materializing a Vec. Fixes effect_flushing.
 
 4. Benchmark parking_lot vs std::sync in isolation: If spinning regresses moderate-contention cases, consider parking_lot fair_mutex or reverting the main state mutex to std::sync.
-<!-- agent:boundary:05c217ca -->
+❯ Add recommendation #next-steps into the backlog.
+
+### Re: Backlog Recommendations — glm-5.1
+
+Added 4 regression mitigation items to the backlog in priority order.
+<!-- agent:boundary:cc4548bb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -264,6 +269,10 @@ The lazyperf25-32 optimizations introduced several regressions beyond the origin
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#lazyperf33] [recommended] Hybrid InvalidationPlan: Vec for 16 or fewer nodes, HashMap above threshold — fixes fan_out/256, memo_equality, chain-pattern regressions
+- [ ] [#lazyperf34] [recommended] Fix finish_batch O(n2) dedup: replace edge_insert loop with extend+sort-dedup or small HashSet — fixes batched_write_bursts, batch_storms
+- [ ] [#lazyperf35] [recommended] Eliminate scratch buffer collect allocation on effect path: pass fill_dependent_scratch result as slice to invalidate_frontier_locked — fixes effect_flushing
+- [ ] [#lazyperf36] [recommended] A/B benchmark parking_lot vs std::sync for moderate contention: evaluate fair_mutex or revert main state mutex — fixes same_slot_write_read, independent_slots
 <!-- /agent:backlog -->
 
 ## Review

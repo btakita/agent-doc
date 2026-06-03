@@ -22,7 +22,7 @@ queue_active: false
 
 <!-- agent:status patch=replace -->
 
-Codex review log pass completed; no reviewed item met the complete threshold.
+Queue contamination cleaned. Session committed.
 <!-- /agent:status -->
 
 ## Exchange
@@ -140,8 +140,7 @@ The `@ai-sdk/openai-compatible` package you installed is an SDK for building AI 
 <!-- agent:boundary:b55f6ecd -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
-- Can we have opencode use a `glm-5v-turbo` subagent from the `glm-5.1` main session to read the images?
+<!-- agent:queue -->
 <!-- /agent:queue -->
 ###
 <!--

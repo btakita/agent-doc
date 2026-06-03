@@ -100,7 +100,33 @@ New module `agent-doc-orchestration/src/admin.rs` (logic pure + **6 unit tests**
 **Commits:** submodule `31efa50c`, superproject `8a3179604`.
 
 **Phase boundary (gated `#ipc-admin-api`):** Phase 2 (mutating verbs `rebind`, `stop --halt-queue --terminate`) and Phase 3 (FFI + editor menu) remain — the stop verb must compose with the queue loop (durable `queue_active:false` + supervisor quiesce so the stop sticks without respawn) and needs live process/tmux verification, so I've gated rather than queued them autonomously. Say the word to take Phase 2 next.
-<!-- agent:boundary:b4299b67 -->
+
+### Re: execute the busy-queue dispatch deadlock plan + review-item confusion — opus-4-8
+
+> **Queue prompt:**
+>
+> I removed "Do not implement from" plan-jb-run-agent-doc-busy-queue-dispatch-deadlock.md. Go ahead and execute the plan if needed. Ensure any associated items are completed. I'm confused by the amount and length of the review items. #spec-test-build-install-commit-push
+
+
+**The plan's deterministic scope is already executed and shipped — nothing new to implement.** Commit `b384a4ab` ("fix(route): defer inactive queue heads on busy actors") implemented fix-direction bullets (a) and (b):
+
+- **(a) Activate the inactive head, don't silently keep-alive.** The busy `FocusOnly` path now calls `activate_existing_route_queue_head` (`route.rs:4151`): an explicit `Run Agent Doc` against a busy authoritative actor that finds a runnable `agent:queue auto` head while `queue_active:false` promotes it to `queue_active:true`, syncs the snapshot, skips the long ready-wait, and logs `route_dispatch_only_busy_existing_queue_deferred`. The supervisor idle-queue watch drains it once the pane goes idle. No more silent `keep_alive` + `queue_continuation_required=false` no-op.
+- **(b) Deferred-queued operator feedback.** It emits `[route] ... activated existing agent:queue auto head {:?} ... for idle drain instead of injecting a duplicate trigger`, so a busy-pane run no longer reads as a silent hang. The no-inject-into-active-turn invariant is preserved.
+
+Docs were aligned in the same commit (`README.md`, `SPEC.md`, `specs/08-session-routing.md`, `specs/supervisor.md`). `cargo test -p agent-doc-orchestration route::` → **140 passed, 104 ignored**. Both binaries are rebuilt + installed (HEAD includes `b384a4ab`).
+
+**Associated items (already tracked correctly):**
+- `#jbstalldrain` — the deterministic core, `[/]` gated (implemented + tested + shipped).
+- `#jb-busy-queue-deadlock-live-verify` — `[/]` gated on the live two-session Codex repro (real `monsterrodholders.md` pane mid-turn). This is the only remaining facet; it's correctly deferred because it needs a live busy pane I can't reproduce deterministically. Editor-side notification work is contingent on whether the existing route feedback proves visible enough during that live repro.
+
+So `#spec-test-build-install-commit-push` is satisfied: spec ✓ test ✓ build ✓ install ✓ commit (`b384a4ab`) ✓ — pushing the accumulated branch now.
+
+#### On the review-item volume (your confusion)
+
+The 58 gated items are **not 58 open bugs**. Breaking them down: ~35 are implemented/partially-implemented work **parked on live operator verification** (the `[/]` = "code-complete + tested, gated on live-verify" convention), and 44 carry `[recommended]` — i.e. feature ideas awaiting prioritization, not regressions. Only a handful describe genuinely unimplemented behavior. The length is because each one records *what shipped* + *what live-verify remains* so nothing silently regresses.
+
+If the volume is the problem rather than the content, I can (your call — I won't do this unilaterally): (1) **reap** the items whose live-verify you've since confirmed into `agent:done`; (2) **compact** the review section so each item is a one-line title + id with detail moved to its plan file; or (3) **split** the `[recommended]` feature ideas into `agent:icebox` so `agent:review` holds only gated-implemented work. Tell me which and I'll do it.
+<!-- agent:boundary:b4b225ed -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -116,7 +142,7 @@ preset #spec-test-build-install-commit-push
 - ~The lazily-rs.md session created a plan to fix the bug. It had to with the Codex Close hook having scope spillage. Please review the Codex session history to see where the plan file is. Run the plan file.~
 - ~When I navigate to tsift.md, the focus goes into the stash. The tmux pane does not go into the agent-doc tmux window.~
 - ~do [#ipc-admin-api]~
-- I removed "Do not implement from" plan-jb-run-agent-doc-busy-queue-dispatch-deadlock.md. Go ahead and execute the plan if needed. Ensure any associated items are completed. I'm confused by the amount and length of the review items. #spec-test-build-install-commit-push
+- ~I removed "Do not implement from" plan-jb-run-agent-doc-busy-queue-dispatch-deadlock.md. Go ahead and execute the plan if needed. Ensure any associated items are completed. I'm confused by the amount and length of the review items. #spec-test-build-install-commit-push~
 ---
 JB `Run Agent Doc` error. Given that monsterrodholders.md was running agent-doc-bugs2.md before, is it possible that it is blocking on the wrong Session state?
 ```

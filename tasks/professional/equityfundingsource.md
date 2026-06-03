@@ -143,7 +143,37 @@ Implemented read-only-from-TMO (the MVP from the item) and shipped to `equityfun
 **Verified:** `bun run check` green — 229 tests pass, app + worker build clean.
 
 Next in queue: **xcvg** (borrower message email round-trip). Heads-up that it's gated on the Resend EFS sending domain (f4rq) and Google Workspace SMTP (m6ch) — actual email send/receive can't fully ship until those creds exist, so I'll build what's possible and gate the rest.
-<!-- agent:boundary:73bbd357 -->
+
+### Re: Stripe + TMO payments — can we do both? — opus-4-8
+
+Yes, technically — and they're complementary, not exclusive. TMO stays the servicing/ledger source of truth; Stripe becomes the online collection rail. This is exactly the "ACH/Stripe collection" path I deferred in the e245 MVP.
+
+Flow:
+
+1. Borrower pays online via Stripe (ACH or card) from `make-payment`.
+2. Stripe fires a `payment_intent.succeeded` (or `charge.succeeded`) webhook → the EFS Worker verifies the signature, records the receipt in a new EFS D1 table (e.g. `loan_payment_transactions`), and marks the matching `loan_payments` schedule row paid (read-only views update immediately).
+3. EFS pushes the payment to TMO so TMO's ledger reflects it.
+
+**"If a Stripe payment is made, can we update TMO?"** — that's step 3, and it's the open question. The TMO endpoints we have documented (`docs/TMO/`) cover loan/application writes, investor `AddLoanFunding`, and schedule/funding reads — I don't see a borrower-payment/receipt **write** endpoint. So:
+
+- If ABS/TMO exposes a "record payment/receipt" API → real-time Stripe→TMO posting under the same staff-reviewed/gated writeback pattern as the rest (the dzmm / k2xg TMO-writeback gate).
+- If it doesn't → EFS records the payment in D1 and shows it immediately read-only; the TMO ledger update falls back to batch/manual reconciliation until a payment-write API is confirmed.
+
+Caveats worth flagging before building: Stripe ACH for loan repayment carries KYC / processing-agreement requirements, and reconciliation (partial payments, NSF reversals, processor fees) needs explicit handling. I'd confirm with ABS/TMO whether a borrower-payment write endpoint exists first — added to the backlog.
+
+### Re: xcvg (message email round-trip) — gated, need a call — opus-4-8
+
+`xcvg` is still queued but gated on creds I don't have: the Resend EFS sending domain (f4rq, not yet verified) and ideally Google Workspace SMTP (m6ch, awaiting Google admin creds). I can't fully ship send/receive without a verified sending domain + inbound routing (Resend inbound or Cloudflare Email Routing → Worker).
+
+Two options — your call:
+
+- **(a) Scaffold now, gate the send:** build the D1 admin-owner assignment for borrower-portal threads + notification triggers (borrower-sends → admin notified; admin-replies → borrower notified) wired to the existing chat, with actual email send/receive behind a feature flag until the domain is verified. Spec + tests + commit.
+- **(b) Defer** `xcvg` until f4rq (and optionally m6ch) land.
+
+I held rather than auto-implementing a gated feature.
+
+*(Recovery note: the earlier e245 finalize hit a queue-consume divergence from a live edit; e245 is fully committed — code `e2abc2b`, response in HEAD — and I cleared the stuck queue line. Also: the exchange is getting large; say the word and I can `agent-doc compact` it.)*
+<!-- agent:boundary:bc6257f2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -156,6 +186,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#cm3e] [recommended] Borrower online payment collection (Stripe) + TMO sync: add ACH/card payment in the borrower portal make-payment section; on Stripe payment_intent.succeeded webhook, verify signature, record the receipt in a new EFS D1 loan_payment_transactions table, reconcile the matching loan_payments schedule row, and push the payment to TMO. GATE: confirm ABS/TMO exposes a borrower-payment/receipt WRITE endpoint (current docs/TMO cover loan/application writes, investor AddLoanFunding, and schedule/funding reads only) — ties into the TMO-writeback gate (dzmm/k2xg). Deferred non-MVP collection path from e245; handle KYC, partial payments, NSF reversals, fees.
 - [ ] [#xcvg] [recommended] Borrower message email round-trip: add an admin owner for borrower-portal secure messages, email notification when a borrower sends a message, inbound email reply that appends into the D1 chat, and borrower email when an admin replies. Builds on existing chat_sessions/chat_messages. Gated on Resend EFS sending domain (f4rq) + Google Workspace SMTP (m6ch/p40t).
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
 - [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document intelligence/search, borrower/broker/investor/admin portals, and tenant-ready resale packaging.

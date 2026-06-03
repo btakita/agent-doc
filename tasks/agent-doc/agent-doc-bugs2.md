@@ -39,7 +39,31 @@ Compacted content:
 ### Re: OpenCode GLM-5.1 Vision — glm-5.1
 
 Vision support depends on the model provider endpoint, not the OpenCode harness. OpenCode passes image attachments through to the model API; whether GLM-5.1 accepts multimodal inputs is a provider/API capability question. This session (running as GLM-5.1) has no image-vision tools available — the `Read` tool can decode images, but that is tool-mediated, not native model vision. The queue item text is truncated in the document (cuts off mid-sentence at "OpenCode G"), so I cannot see the full configuration request. Please re-enter the complete queue item if further action is needed.
-<!-- agent:boundary:8c519168 -->
+
+### Re: JB Run Agent Doc Stall — glm-5.1
+
+Ops log confirms the stall: multiple `route_dispatch_only_busy_actor_not_ready` and `route_dispatch_only_busy_existing_queue_deferred` events for agent-doc-bugs2.md pane %70 (generation 224, harness=opencode, actor_state=busy). The JB Run Agent Doc click routed as `dispatch_only`, hit a busy authoritative actor, and deferred. The queue accumulated items that only drained when you manually invoked in the OpenCode session. This is the same class as review item #opencode-jb-stall — the false-active-turn / bottom-12-lines busy-cue fix needs live-verification. The route path correctly deferred rather than injecting into an active turn, but the operator experience (stall with no feedback) matches the open bug.
+
+No new code change this cycle — the fix is already implemented, awaiting live verification per Path A (#jkvs).
+
+#### Re: monsterrodholders.md Recursion Recovery — glm-5.1
+
+The monsterrodholders.md file currently shows no recursion error text — it appears the Codex session already processed and cleared that state. The file's frontmatter has `agent: codex` with `queue_active: true`. Recovery from the owned-pane self-invocation state has three options:
+
+1. **Self-heal (existing):** The owned-pane preflight emits `owned_pane_self_invocation` structured result (landed submodule 407b0825) which guides an in-pane response cycle. This is the designed self-heal path.
+2. **Manual recovery:** `agent-doc session-clear <FILE>` then `agent-doc route <FILE>` to provision a fresh pane.
+3. **Planned:** Review item #ec9k proposes a single `agent-doc recover-ownership <FILE>` command that atomically does the clear+repair+route flow.
+
+The monsterrodholders doc's current session state should be checked with `agent-doc session-check src/boost-client/tasks/monsterrodholders.md` to confirm the Codex pane is clean.
+
+#### Re: GLM-5.1 Vision — glm-5.1
+
+Addressed in the prior cycle: vision depends on the model provider endpoint. This session (GLM-5.1) has no native image vision. The `Read` tool can decode images at file paths, but that is tool-mediated, not model-native multimodal. No agent-loop configuration change can enable native vision — that requires a vision-capable model endpoint.
+
+#### Re: Screenshots — glm-5.1
+
+Cannot evaluate screenshots without native image vision. Review item #img-review covers this exact gap. Recommended path: run this queue item in a Claude or GPT session with vision enabled to diagnose #t9xf stdout bleed and TUI corruption from img_16/17/18.png.
+<!-- agent:boundary:bbae15b5 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->

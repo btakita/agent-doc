@@ -35,14 +35,16 @@ Codex review log pass completed; no reviewed item met the complete threshold.
 Compacted content:
 - Archived 3 response topic(s): backlog attribute edit + next steps; queue items codex-403-429-fallback, codex-network-access-opencode-guard, 7az7; fix three preflight warnings
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:70e4ad29 -->
+<!-- agent:boundary:fce75c67 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - [#backlog-queue-sync-no-populate]
 - The Codex Capacity Proof incorrectly runs in OpenCode. See monsterrodholders.md opencode session + agent-doc logs. ![img_11.png](img_11.png)
 - The logs still bleed over the OpenCode UI. ![img_12.png](img_12.png)
-- The OpenCode Prompts still cannot be navigated with the arrow keys or Tab key. Enter does work. ![img_13.png](img_13.png)
+- The OpenCode Prompts still cannot be navigated with the arrow keys or Tab key. Enter does work. ![img_13.png](img_13.
+.png)
+- The queue did not clear when all items were complete in an opencode session.
 <!-- /agent:queue -->
 ###
 <!--

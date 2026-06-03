@@ -37,7 +37,22 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 Compacted content:
 - Archived 14 response topic(s): TMO BorrowerView links; Should these replace our portal for the demo?; Can we replicate these workflows in our portal?; 11 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:e22b874f -->
+
+### Re: apply4 P2 — personal + addresses + e-sign — done — opus-4-8
+
+> **Queue prompt:**
+>
+> [#f3b2]
+
+
+P2 shipped (commit `a2b68f8`, pushed). `bun run check` green — 246 tests.
+
+- **Migration 0037**: `application_personal` (SSN stored as a **masked token only**, never raw — security-tier-0), `application_addresses` (current/former/mailing), `application_signatures` (ESIGN/UETA `esign_consent` + `declaration_version` + IP/UA audit trail).
+- **Section repo + API**: `GET …/sections` (resume), `PUT …/personal`, `PUT …/addresses`, `POST …/sign` (consent-gated; captures `cf-connecting-ip`/`x-forwarded-for` + `user-agent`), all ownership-checked.
+- **Wizard UI**: 3 steps (Personal → Addresses → Review & e-sign) with save-per-step and resume from saved sections.
+
+Continuing the queue to P3 (`#2eaf` — employment & income).
+<!-- agent:boundary:e883f93d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +61,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 
 <!-- agent:queue preset="#spec-test-commit-push" auto -->
 - ~[#0ag4]~
-- [#f3b2]
+- ~[#f3b2]~
 - [#2eaf]
 - [#1tk7]
 - [#az2w]
@@ -56,7 +71,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#f3b2] apply4 full application P2 — personal info + 2yr address history + ESIGN/UETA e-sign + audit trail. Plan: src/equityfundingsource-dev/prds/apply4-full-application-build-plan.md
 - [ ] [#2eaf] apply4 full application P3 — employment & income (current/additional/former + gross monthly income breakdown + other-source income). Plan: src/equityfundingsource-dev/prds/apply4-full-application-build-plan.md
 - [ ] [#1tk7] apply4 full application P4 — assets/liabilities + Real Estate Owned schedule (with per-property mortgages). Plan: src/equityfundingsource-dev/prds/apply4-full-application-build-plan.md
 - [ ] [#az2w] apply4 full application P5 — subject property/loan + Declarations A–M + submit (draft → submitted). Plan: src/equityfundingsource-dev/prds/apply4-full-application-build-plan.md

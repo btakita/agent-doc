@@ -31,80 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260603-182739.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260603-191758.md`*
 
 Compacted content:
-- Archived 3 response topic(s): #libmod5 SearchBudget extraction; #libmod5b Phase 5b: Extract ConflictMatrix + ContextPack + SessionReviewBudget; #libmod5b completion acknowledged
+- Archived 3 response topic(s): #opencode-read; #opencode-grep; #codex-read
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
-### Re: #opencode-read — opencode
-
-> **Queue prompt:**
->
-> do [#opencode-read]
-
-
-Implemented `tsift-source-read` as a new OpenCode command shortcut that provides AST-aware source code reading via `tsift --envelope source-read`.
-
-**Changes:**
-- `src/tsift/packages/tsift-index/src/init.rs`: Added `tsift-source-read` to `OPENCODE_COMMANDS` array with instruction body directing agents to prefer `tsift --envelope source-read` over the raw Read tool for source code files
-- `src/tsift/packages/opencode-tsift/commands/tsift-source-read.md`: Created matching npm package command file
-- `src/tsift/packages/opencode-tsift/test/install.test.js`: Updated expected command count from 10 to 11
-
-**Verification:**
-- `cargo build` succeeds
-- All 4 `opencode` tests pass including npm parity test
-- `make check` passes (build, test, lint, opencode-plugin-test)
-- `tsift init --opencode` installs `tsift-source-read.md` into `.opencode/commands/`
-- `tsift --envelope source-read` returns bounded source window with AST symbol metadata, line previews, and expansion commands
-
-### Re: #opencode-grep — opencode
-
-> **Queue prompt:**
->
-> do [#opencode-grep]
-
-
-Implemented `tsift-search` as a new OpenCode command shortcut that provides AST-aware content search via `tsift --envelope search`.
-
-**Changes:**
-- `src/tsift/packages/tsift-index/src/init.rs`: Added `tsift-search` to `OPENCODE_COMMANDS` array, directing agents to prefer `tsift --envelope search` over grep/rg for content search in indexed projects
-- `src/tsift/packages/opencode-tsift/commands/tsift-search.md`: Created matching npm package command file
-- `src/tsift/packages/opencode-tsift/test/install.test.js`: Updated expected command count from 11 to 12
-
-**Verification:**
-- `cargo build` succeeds
-- All 4 `opencode` tests pass including npm parity test
-- `make check` passes
-- `tsift init --opencode` installs `tsift-search.md` into `.opencode/commands/`
-- `tsift --envelope search` returns ranked hits with symbol families, file previews, AST-aware scoring, and scale guards
-
-### Re: #codex-read — opencode
-
-> **Queue prompt:**
->
-> do [#codex-read]
-
-
-Added `source-read` and `symbol-read` as first-class commands in the tsift code-navigation instructions that all harnesses (Codex, OpenCode, Claude Code) consume via AGENTS.md/CLAUDE.md.
-
-**Changes:**
-- `src/tsift/packages/tsift-index/src/init.rs`: Updated `versioned_section()` to list `tsift --envelope source-read` and `tsift --envelope symbol-read` as preferred alternatives to cat/head for source code reading, before the existing search and explain entries
-- Ran `tsift init` to update AGENTS.md in the agent-loop project with the new instructions
-
-**How Codex adopts the AST API:**
-- The `tsift init --codex` hook already rewrites shell-based file reads (cat/head/tail/sed) to `tsift --envelope source-read` automatically via `tsift rewrite --run`
-- The updated code-navigation instructions now explicitly tell Codex agents to prefer `tsift --envelope source-read` over raw file reads for source code
-- Combined with the rewrite hook, Codex agents get AST-aware reading both implicitly (via hook rewrites) and explicitly (via instruction guidance)
-
-**Verification:**
-- `cargo build` succeeds
-- All 41 `tsift-index` tests pass
-- `make check` passes
-- `tsift init` updates AGENTS.md with the new `source-read` and `symbol-read` entries
-
-**Queue drained.** All three queue items completed: `#opencode-read`, `#opencode-grep`, `#codex-read`.
-<!-- agent:boundary:3569c4d2 -->
+<!-- agent:boundary:b3625eee -->
 <!-- /agent:exchange -->
 ###
 <!--

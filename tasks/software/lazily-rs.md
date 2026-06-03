@@ -204,7 +204,7 @@ Yes — consolidation would likely **hurt** performance under contention. The cu
 4. **SPEC confirms** (line 298): *"Keep one context-level graph synchronization primitive until benchmark instrumentation shows a finer-grained design improves the relevant workload."* The per-slot granularity is the *finer-grained* design; the SPEC wants evidence before committing to it, not removing it.
 
 **Recommendation:** Keep #r0jv deferred or close it. The ~400 bytes per-slot sync overhead is negligible at realistic scale (<400KB for 1000 slots). If profiling ever shows per-slot lock contention dominating, the safer path is switching `std::sync` → `parking_lot` (same structure, lower overhead) rather than merging locks.
-<!-- agent:boundary:f8e21f1a -->
+<!-- agent:boundary:860134a5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -225,7 +225,6 @@ Yes — consolidation would likely **hurt** performance under contention. The cu
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#r0jv] #lazyperf21 Consolidate ThreadSafeSlotFastPath synchronization primitives — currently 4 mutexes + 2 Condvars + 3 atomics per slot (~400+ bytes overhead); restructure to 1-2 locks + atomics
 - [ ] [#r54f] #lazyperf24 [recommended] Benchmark SmallVec vs Vec for dependency edges — measure cache-line impact on fan-out benchmarks before committing to SmallVec
 <!-- /agent:backlog -->
 
@@ -237,6 +236,7 @@ Yes — consolidation would likely **hurt** performance under contention. The cu
 ## Icebox
 
 <!-- agent:icebox -->
+- [ ] [#r0jv] #lazyperf21 Consolidate ThreadSafeSlotFastPath synchronization primitives — currently 4 mutexes + 2 Condvars + 3 atomics per slot (~400+ bytes overhead); restructure to 1-2 locks + atomics
 <!-- /agent:icebox -->
 
 ## Completed / Reaped

@@ -72,7 +72,27 @@ Verification:
 - GitHub Actions `btakita/lazily-rs` CI run `26859281017` passed, including the Loom leg.
 
 `cargo install --path .` is not applicable because `lazily-rs` is a library crate with no binaries. There is no `Makefile` in `src/lazily-rs`; the root `make check` target does not cover this submodule. Root `gh run list --workflow CI --limit 1` reported no workflow named `CI`.
-<!-- agent:boundary:9ab5326c -->
+
+### Re: Add Makefile — gpt-5
+
+> **Queue prompt:**
+>
+> Add Makefile
+
+
+Added a `Makefile` to `src/lazily-rs` and wired the local `make check` entrypoint to the CI-equivalent suite: fmt, clippy, build, default tests, Tokio tests, Loom tests, and benchmark-result checks. I also added focused targets for `test-tokio`, `test-loom`, `benchmark-check`, `benchmark-update`, and `instrumentation-profile`.
+
+Updated `README.md` and `AGENTS.md` to point contributors at the Makefile workflow. While validating the new target, `make check` exposed a default-feature warning for the instrumentation-only `dirty_marks` local in `src/thread_safe.rs`; I scoped that binding behind the instrumentation cfg so the suite is warning-clean.
+
+Commits pushed:
+- `src/lazily-rs` `c917401` (`chore: add make check workflow`)
+- parent `agent-loop` submodule pointer `2b90a832d` (`chore: update lazily-rs make workflow`)
+
+Verification:
+- `make check` passed locally in `src/lazily-rs`.
+- GitHub Actions `btakita/lazily-rs` CI run `26859494917` passed, including fmt, clippy, build, default tests, Tokio tests, and Loom tests.
+- Root `gh run list --workflow CI --limit 1` still reports no workflow named `CI`.
+<!-- agent:boundary:25ed0e25 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -85,7 +105,8 @@ Verification:
 - ~[#lazyperf13]~
 - ~[#lazyperf14]~
 - ~[#lazyperf15]~
-- Add Makefile
+- ~Add Makefile~
+- do [#lazyperf12]
 - Update benchmarks
 <!-- /agent:queue -->
 
@@ -111,3 +132,4 @@ Verification:
 
 <!-- completed work archived in tasks/software/lazily-rs.done.md -->
 <!-- /agent:done -->
+

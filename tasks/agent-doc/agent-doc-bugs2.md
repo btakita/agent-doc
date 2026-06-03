@@ -30,66 +30,21 @@ Queue contamination cleaned. Session committed.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260603-180615.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260603-182139.md`*
 
 Compacted content:
-- Archived 9 response topic(s): OpenCode GLM-5.1 Vision; JB Run Agent Doc Stall; monsterrodholders.md Recursion Recovery; 6 more
+- Archived 4 response topic(s): lint-gate fixes #rbwg #gf85 #0wan; vision + screenshots; next-steps; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: lint-gate fixes #rbwg #gf85 #0wan — glm-5.1
-
-Updated the tagpath submodule pointer from `cf678a9` to `eed1c7f` (commit `5a28e2708`, pushed). The multi-line code span fix resolves all three lint-gate false positives:
-
-- **#rbwg** — unpaired backticks in queue/review content no longer create multi-line inline code spans that hide structural component tags. `should_suppress_in_code()` now only suppresses comments in same-line inline code or fenced blocks.
-- **#gf85** and **#0wan** — the same root cause (structural tags hidden by multi-line code spans from backticks in items like `` `do [#gf85]` ``) produced orphan-close on `/agent:review` and unclosed `agent:exchange`. Now resolved: `tagpath lint` passes clean on this document.
-
-Binary rebuilt and reinstalled with the updated tagpath. `make check` passes (pre-existing `describe_image.rs` test compilation errors are unrelated).
-
-### Re: vision + screenshots — glm-5.1
-
-GLM-5.1 (this model) has no vision/image capabilities. agent-doc's vision system is API-based (OpenAI `gpt-4o` or Anthropic `claude-sonnet-4`) — it does not use the agent model for image analysis. No agent-loop configuration change is needed for "OpenCode GLM-5.1 vision" because vision is orthogonal to the agent model.
-
-I cannot evaluate the screenshots (`img_16.png`, `img_17.png`, `img_18.png`) referenced in this session. This would require a vision-capable agent session or manual review.
-
-### Re: next-steps — glm-5.1
-
-> **Queue prompt:**
->
-> Is vision currently working with OpenCode using GLM-5.1? If no, please configure agent-loop vision to work with OpenCode GLM-5.1.
-
-
-Top backlog priority after this cycle:
-1. **#4h81** — Codex Capacity Proof incorrectly runs in OpenCode harness (live bug)
-2. **#t9xf** — stdout bleed over OpenCode UI (needs reproduction)
-3. **#0ada** — queue not clearing in OpenCode sessions
-4. **#7fmb** — OpenCode TUI prompt navigation broken
-
-### Re: screenshots + next-steps — glm-5.1
-
-**Screenshots:** Cannot evaluate `img_16.png`–`img_18.png` — GLM-5.1 has no vision capability. These require a vision-capable session (OpenAI/Anthropic API provider) or manual review. The screenshots relate to #t9xf (stdout bleed) and #7fmb (TUI navigation). Item #img-review in review tracks this block.
-
-**Backlog priority order (top first):**
-
-| # | ID | Description |
-|---|------|-------------|
-| 1 | **#4h81** | Codex Capacity Proof incorrectly runs in OpenCode harness |
-| 2 | **#t9xf** | stderr logs bleed over OpenCode UI |
-| 3 | **#0ada** | Queue not clearing when all items complete in OpenCode |
-| 4 | **#7fmb** | OpenCode TUI prompt list navigation broken (arrow/Tab) |
-
-Top of backlog: **#4h81**
-
-These four are the highest-priority actionable items — all OpenCode-specific live bugs with no external blockers. The remaining 50 review items are gated on live-verify sessions (Paths A/B/C) or external dependencies.
-<!-- agent:boundary:4a177420 -->
+<!-- agent:boundary:13d03286 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - ~Is vision currently working with OpenCode using GLM-5.1? If no, please configure agent-loop vision to work with OpenCode GLM-5.1.~
 - ~complete #ec9k~
 - Please evaluate recent screenshots and add #next-steps for the related tasks.
-- do [#gf85]
-- do [#0wan]
-- do [#rbwg]
+- ~do [#gf85]~
+- ~do [#0wan]~
+- ~do [#rbwg]~
 <!-- /agent:queue -->
 ###
 <!--

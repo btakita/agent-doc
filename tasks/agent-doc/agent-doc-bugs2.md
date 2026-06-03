@@ -189,7 +189,26 @@ So `#spec-test-build-install-commit-push`: no new code this cycle (root cause is
 **To clear a stuck doc when you hit this:** do what the error says — delete the contaminating line from `agent:queue` (keep only user prompts, `do [#id]`, `preset`/`dispatch`, or backlog-derived entries) and re-run `finalize`. This document's queue is currently clean (the paste was a historical log, not live state).
 
 **`#spec-test-build-install-commit-push`:** no new code this cycle — the detection + prevention is already shipped, tested, committed, and pushed. The remaining facet is the **live JetBrains replay** on a fresh malformed-compact/repair state (gated in `#jb-run-agent-doc-response-queue-contamination`); I didn't add a source-prevention compact/repair guard speculatively because the original malformed-compact state is gone and I can't build a faithful regression fixture without it. The session-check backstop covers the class regardless.
-<!-- agent:boundary:51a78932 -->
+
+### Re: #next-steps — dashboard over the actor admin APIs — opus-4-8
+
+> **Queue prompt:**
+>
+> Add #next-steps to create a dashboard that uses the actor admin apis to see the current runtime instances. See [#ipc-admin-api].
+
+
+**Follow-up items for the backlog:** the dashboard work is already captured as `#admin-fleet-dashboard`, and its hard dependency just changed state — `#ipc-admin-api` **Phase 1 (read surfaces) shipped this session** (`agent-doc admin list --json` + `admin detect --json`, submodule `31efa50c`). So `#admin-fleet-dashboard` is **now actionable**: the dashboard is a pure view that polls those JSON feeds (rows from `list`, highlight flags from `detect`). I updated the item to record the satisfied dependency and reconcile the **duplicate id** — the plan file is `plan-actor-runtime-dashboard.md` under id `#actor-runtime-dashboard`, but the canonical queued id is `#admin-fleet-dashboard`; they are the same feature. Only the optional `stop`/`rebind` row keybinds still wait on `#ipc-admin-api` Phase 2 (mutating verbs).
+
+**Backlog priority order (confirmed correct — bug before feature):**
+1. `#route-reaps-idle-fresh-start` — `#agent-doc-bug` (user-facing: "I cannot start lazily-rs.md, killed immediately"). Genuine regression → top priority.
+2. `#admin-fleet-dashboard` — `[recommended]` feature, now unblocked.
+
+This matches the queued order (`do [#route-reaps-idle-fresh-start]` then `do [#admin-fleet-dashboard]`), so no reorder needed.
+
+**Top of the backlog:** `#route-reaps-idle-fresh-start`
+
+No new follow-up items needed — the next two queue heads (`do [#route-reaps-idle-fresh-start]`, `do [#admin-fleet-dashboard]`) already cover the actionable work, and both have plans (`plan-route-reaps-idle-fresh-start.md`, `plan-actor-runtime-dashboard.md`).
+<!-- agent:boundary:ac1a5bab -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -206,34 +225,8 @@ preset #spec-test-build-install-commit-push
 - ~When I navigate to tsift.md, the focus goes into the stash. The tmux pane does not go into the agent-doc tmux window.~
 - ~do [#ipc-admin-api]~
 - ~I removed "Do not implement from" plan-jb-run-agent-doc-busy-queue-dispatch-deadlock.md. Go ahead and execute the plan if needed. Ensure any associated items are completed. I'm confused by the amount and length of the review items. #spec-test-build-install-commit-push~
-~~~done
-JB `Run Agent Doc` error. Given that monsterrodholders.md was running agent-doc-bugs2.md before, is it possible that it is blocking on the wrong Session state?
-```
-[route] target tmux session: 0
-Error: authoritative actor generation 255 for tasks/monsterrodholders.md owns pane %61 but dispatch-only route will not inject a new trigger because the authoritative actor is busy did not return to a dispatch-ready prompt in the current generation after waiting 60s. Wait for the active turn to finish before rerouting this document.
-```
-#spec-test-build-install-commit-push
-~~~
-JB `Compact Exchange` error the first attempt. The 2nd attempt worked.
-```
-agent-doc command failed (exit 1): [agent-doc] Tagged pre-compact state as agent-doc/agent-doc-bugs2/pre-compact-24 [compact] CRDT state compacted: 91901 → 91901 bytes Error: visible editor buffer for tasks/agent-doc/agent-doc-bugs2.md differs from the expected disk state; save or discard the editor buffer, then retry
-```
-#spec-test-build-install-commit-push
-~~~done
-JB error
-```
-[route] target tmux session: 0
-[preflight] review: 55 item(s), 55 gated
-[repair] closed stale empty preflight_started cycle cycle-1780431002764 for tasks/agent-doc/agent-doc-bugs2.md after 96s without a capture
-[commit] detected post-commit local drift for tasks/agent-doc/agent-doc-bugs2.md — HEAD already contains the committed response; leaving later local working-tree edits uncommitted
-[commit] staged snapshot already matches HEAD for tasks/agent-doc/agent-doc-bugs2.md — closing cycle as already committed
-[perf] commit total: 23ms
-Error: authoritative actor generation 221 for tasks/agent-doc/agent-doc-bugs2.md owns pane %70 but route could not drain the active closeout before dispatch: [session-check] INTERRUPTED: agent:queue contains assistant response prose copied from a `### Re:` body, not a user prompt or `do [#id]` directive: "There are too many items being accumulated into review. The tasks are not being ". Remove the contaminating line(s) from `agent:queue` (only user prompts, `do [#id]`, `preset`/`dispatch`, or backlog-derived entries are valid queue sources) and re-run finalize (see #jb-run-agent-doc-response-queue-contamination).
-```
-#spec-test-build-install-commit-push
-~~~
 - ~do [#manual-queue-head-loss]~
-- Add #next-steps to create a dashboard that uses the actor admin apis to see the current runtime instances. See [#ipc-admin-api].
+- ~Add #next-steps to create a dashboard that uses the actor admin apis to see the current runtime instances. See [#ipc-admin-api].~
 - do [#route-reaps-idle-fresh-start]
 - do [#admin-fleet-dashboard]
 - ~do [#actor-runtime-dashboard]~
@@ -250,7 +243,7 @@ Please review the agent-doc, claude, codex logs. What are #next-steps to fix bug
 
 <!-- agent:backlog priority queue=append -->
 - [ ] [#route-reaps-idle-fresh-start] #agent-doc-bug 2026-06-02: route reaps a fresh codex start whose first dispatched cycle is a no-op (empty/halted queue, no_changes), so a document with no pending work can't be started — user symptom 'I cannot start lazily-rs.md, killed immediately'. The codex starts + consumes the trigger, preflight returns no_changes (valid idle), but route treats 'no document cycle acknowledged' as a failed start and reaps the pane. Fix: a ready+trigger-consumed fresh start is successful even with a no-op first cycle; only reap genuine never-ready/never-consumed misses. Aggravated by gpt-5.5 xhigh slow cold start. Plan: tasks/agent-doc/plan-route-reaps-idle-fresh-start.md.
-- [ ] [#admin-fleet-dashboard] [recommended] #agent-doc-bug feature 2026-06-02: create a runtime dashboard that consumes the #ipc-admin-api surfaces (agent-doc admin list --json and agent-doc admin detect --json) to show current agent-doc runtime instances, document ownership, competing/cross-document actors, queue/supervisor state, and operator actions. Depends on #ipc-admin-api.
+- [ ] [#admin-fleet-dashboard] [recommended] #agent-doc-bug feature 2026-06-02: runtime dashboard consuming the #ipc-admin-api READ surfaces (agent-doc admin list --json + admin detect --json) to show the live actor fleet — document ownership, competing/cross-document + orphaned-dead-pane actors, generation/state, supervisor pid — with problematic rows highlighted from detect. Read-surface dependency SHIPPED 2026-06-02 (admin list/detect Phase 1, submodule 31efa50c) so this is now ACTIONABLE via the JSON feeds. Optional stop/rebind row keybinds depend on #ipc-admin-api Phase 2 (mutating verbs, still gated). Same feature as plan id #actor-runtime-dashboard (canonical queue id is #admin-fleet-dashboard). Plan: tasks/agent-doc/plan-actor-runtime-dashboard.md.
 <!-- /agent:backlog -->
 
 ## Review

@@ -108,7 +108,31 @@ Backlog items added for:
 - OpenCode: replace grep with tsift search for content search
 - Codex: adopt tsift AST API for source reading
 - Remaining lib.rs modularization phases
-<!-- agent:boundary:06dc3e2d -->
+
+### Re: Module Extraction Phase 2 — Rewrite + Community Detection — glm-5.1
+
+Extracted two modules from `packages/tsift-cli/src/lib.rs` (43,447 → 41,723 lines, -1,724 net):
+
+**New modules:**
+- `rewrite.rs` (~1,068 lines): `OutputCap`, `execute_rewritten_command`, `effective_rewrite_run_command`, `apply_rewrite_output_format`, `rewrite_command` (pub), `no_rewrite_message`, all `rewrite_*` helpers, `FileReadWindow`, `FileReadTarget`, file detection/capping logic, shell quoting utilities
+- `community_detection.rs` (~694 lines): `CommunityDetectionReport`, `detect_communities_cached`, `file_communities_from_callers`, `annotate_community_members_with_context`, `resolve_tagpath_handle_for_callee_edge`, community cache machinery, `graph_effectiveness_ready/blocked`, tagpath readiness
+
+**Visibility changes in lib.rs:**
+- `shell_split` → `pub(crate)` (shared with rewrite module)
+- `relativize_pathbuf` → `pub(crate)` (shared with rewrite module)
+- `content_hash` → `pub(crate)` (shared with community detection)
+- `hash_bytes_hex` → `pub(crate)` (shared with community detection)
+- `GraphEffectivenessReadiness` → `pub(crate)` fields (shared with community detection)
+
+**Verification:** All 335 workspace tests pass. `tsift --envelope workflow search --json` confirmed working post-install.
+
+**Remaining Phase 2 (~2,000 lines):**
+- Dispatch Trace + Dependency DAG: Heavy dependencies on conflict matrix types require making `ConflictMatrixReport`, `ConflictMatrixCandidate`, `ConflictMatrixWorkerFeedback`, `ConflictMatrixSemanticRef`, `ConflictMatrixSharedPreparationSummary` `pub(crate)` first.
+
+### Re: #next-steps Backlog Review — glm-5.1
+
+Backlog is in priority order. Top item: **#libmod4** (Phase 4: Extract Convex + Graph DB core). Updated priority analysis: Phases 4 and 5 should be extracted first (largest impact), followed by remaining Phase 2 (Dispatch Trace + Dependency DAG), then Phase 3.
+<!-- agent:boundary:703d20f2 -->
 <!-- /agent:exchange -->
 ###
 <!--

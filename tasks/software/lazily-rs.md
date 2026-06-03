@@ -180,7 +180,31 @@ Audited the auto-queue trigger chain (idle-queue-watch `start.rs:1476-1565`, aut
 **Bug transferred to `tasks/agent-doc/agent-doc-bugs2.md` as [#7az7]:**
 
 - [ ] [#7az7] #clear-auto-queue-stall #agent-doc-bug 2026-06-03: JB "Clear Session Context" → session clear sends `/new` → idle-queue-watch/auto-trigger re-injects `agent-doc <FILE>` into cleared session that has no agent-doc context → stall. Plan: `tasks/agent-doc/plan-post-clear-auto-queue-suppress.md`
-<!-- agent:boundary:47045601 -->
+❯ Would [#r0jv] have a negative performance impact?
+
+### Re: Would #r0jv have a negative performance impact? — glm-5.1
+
+Yes — consolidation would likely **hurt** performance under contention. The current 4-lock design on `ThreadSafeSlotFastPath` (thread_safe.rs:233-244) deliberately separates contention domains:
+
+| Lock | Access pattern | Contention domain |
+|------|---------------|-------------------|
+| `value: RwLock` | Many concurrent readers via `read_fresh()` | Read-mostly, uncontended |
+| `dependencies: Mutex` | Snapshot during compute, called **before** state lock (line 1572) | Read-during-compute |
+| `recompute: Mutex + Condvar` | Exclusive recomputation + waiter parking | Write-only, potentially long-held |
+| `dependents: Mutex` | Edge registration, sidecar invalidation | Write-during-edge-reg |
+
+**Why merging hurts:**
+
+1. **Serialized reads** — Merging `value` (RwLock) into a single mutex eliminates concurrent `read_fresh()` calls. Under read-heavy workloads, this is a throughput regression.
+
+2. **Lock ordering deadlock** — `dependencies_snapshot()` is called *before* taking the state lock (line 1572). The recompute mutex is held during `wait_for_recompute` with Condvar parking. Merging these creates a cycle: a thread holding the merged lock for snapshot blocks Condvar waiters, and vice versa.
+
+3. **Invalidation stalls** — Merging `dependents` into recompute means invalidation-sidecar reads block during any in-progress recomputation, increasing p99 latency for downstream graph updates.
+
+4. **SPEC confirms** (line 298): *"Keep one context-level graph synchronization primitive until benchmark instrumentation shows a finer-grained design improves the relevant workload."* The per-slot granularity is the *finer-grained* design; the SPEC wants evidence before committing to it, not removing it.
+
+**Recommendation:** Keep #r0jv deferred or close it. The ~400 bytes per-slot sync overhead is negligible at realistic scale (<400KB for 1000 slots). If profiling ever shows per-slot lock contention dominating, the safer path is switching `std::sync` → `parking_lot` (same structure, lower overhead) rather than merging locks.
+<!-- agent:boundary:f8e21f1a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -188,7 +212,7 @@ Audited the auto-queue trigger chain (idle-queue-watch `start.rs:1476-1565`, aut
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 - ~[#zfam]~
 - ~[#f5jz]~
 - ~[#rvjd]~

@@ -75,7 +75,40 @@ Added `ranked_neighborhood_comparison` diagnostic field to the neighborhood CLI 
 - Latency (ranked: 1,272ms vs unranked BFS: 112ms)
 
 The ranked traversal pruned 3,027 of 3,228 discovered nodes (94%), demonstrating aggressive budget control. However, it's ~11x slower due to per-frontier-node `outgoing_edges()` + `node()` calls vs the batched CTE approach. The comparison is diagnostic-only — promotion requires the community-search quality gate to pass. Gate remains `held_default_order_unchanged`.
-<!-- agent:boundary:f9b65126 -->
+
+### Re: Module Extraction from tsift-cli/lib.rs — glm-5.1
+
+Extracted two modules from `packages/tsift-cli/src/lib.rs` (44,152 → 43,447 lines, -705 net):
+
+**New modules:**
+- `workflow.rs` (~150 lines): `WorkflowRecipe`, `WorkflowStep`, `search_workflow_recipe`, `cmd_workflow`
+- `token_savings.rs` (~570 lines): `TokenSavingsReport`, `TokenSavingsFixture`, all envelope/report types, `cmd_token_savings`
+
+**Pattern established:**
+1. Move structs + functions to new module file
+2. Make items `pub(crate)` for cross-module access
+3. Add `mod new_module;` to lib.rs
+4. Re-export types via `#[cfg(test)] use new_module::{...}` for test compatibility
+5. Update call sites in `run()` to `module::fn_name()`
+
+**Verification:** All 1,135 workspace tests pass. `tsift --envelope workflow search --json` confirmed working post-install.
+
+**Remaining phases (~41,700 lines):**
+- Phase 2: Rewrite (~1,400 lines), Community Detection (~450), Dependency DAG (~700), Dispatch Trace (~350)
+- Phase 3: Semantic Edit (~4,000), Traversal/Exploration (~1,300)
+- Phase 4: Convex (~3,000), Graph DB core (~5,000+)
+- Phase 5: Context Pack (~1,700), Conflict Matrix (~2,500), Search Budget (~800), Session Review (~500)
+
+Queue items `do [#rankdefault]`, `do [#gfrontierhot]`, `do [#greadiness]` were auto-struck as already resolved. Queue items for OpenCode/Codex tsift integration are captured in backlog.
+
+### Re: #next-steps OpenCode/Codex tsift Integration — glm-5.1
+
+Backlog items added for:
+- OpenCode: replace Read tool with tsift AST API for source reading
+- OpenCode: replace grep with tsift search for content search
+- Codex: adopt tsift AST API for source reading
+- Remaining lib.rs modularization phases
+<!-- agent:boundary:fabc2427 -->
 <!-- /agent:exchange -->
 ###
 <!--

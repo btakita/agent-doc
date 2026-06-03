@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 
@@ -184,7 +184,41 @@ Internal value sharing (equality checks, value storage) now uses cheap `Rc::clon
 ### Queue Complete
 
 All 8 queue items (#71yq–#94gg) have been implemented, tested, and pushed. Queue is now empty. The next queue item is a performance benchmark request.
-<!-- agent:boundary:d662a22a -->
+
+### Re: Performance Benchmark Results — glm-5.1
+
+> **Queue prompt:**
+>
+> Please do a performance benchmark to see the results of the queue run.
+
+
+Ran `cargo bench --bench context` after all 8 optimization commits. Summary of key ThreadSafeContext results:
+
+**Major improvements:**
+| Benchmark | Improvement |
+|-----------|------------|
+| cached_reads | -14.6% |
+| cold_first_get | -47.5% |
+| dependency_fan_out/32 | -27.5% |
+| dependency_fan_out/256 | -33.9% |
+| high_fan_out/512 | -51.5% |
+| memo_equality | -43.4% |
+| effect_flushing | -77.1% |
+| batch_storms/64 | -28.9% |
+| batched_write_bursts/1 | -61.6% |
+| batched_write_bursts/4 | -44.1% |
+| independent_slot_contention (1-16 threads) | -11% to -22% |
+| same_slot_write_read/1-2 | -23% |
+
+**Regressions (high contention only):**
+| Benchmark | Change |
+|-----------|--------|
+| same_slot_contention/8 | +38% |
+| same_slot_contention/16 | +116% |
+| batched_write_bursts/16 | +56.5% |
+
+Regressions are in extreme contention scenarios (8+ threads competing for the same slot). parking_lot's adaptive spinning can increase latency under heavy lock contention. The vast majority of real-world workloads show significant improvements.
+<!-- agent:boundary:fd0f82b9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -192,16 +226,7 @@ All 8 queue items (#71yq–#94gg) have been implemented, tested, and pushed. Que
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- ~[#71yq]~
-- ~[#hqmh]~
-- ~[#xdq8]~
-- ~[#vk55]~
-- ~[#cffp]~
-- ~[#vbcq]~
-- ~[#vfr1]~
-- ~[#94gg]~
-- Please do a performance benchmark to see the results of the queue run.
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog

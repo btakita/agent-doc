@@ -37,7 +37,45 @@ EFS workers.dev production: `/apply` public prequalification + D1-backed `applic
 Compacted content:
 - Archived 4 response topic(s): [#2z8r] custom addresses; use recommendation [#2z8r]; use recommendation [#2z8r]; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:3c5c9ba3 -->
+❯ Please review the TMO provided links.
+❯ - https://www.borrowersviewcentral.com/portal/applynew?id=EFSI
+❯ - https://www.borrowersviewcentral.com/portal/apply4?id=EFSI
+
+❯ Should these replace our borrower onboarding/portal for the demo?
+
+Can we replicate the behavior of these workflows with the onboarding/portal?
+
+### Re: TMO BorrowerView links — what they are — opus-4-8
+
+Both are **The Mortgage Office "BorrowerView Central"** hosted intake forms, served from TMO's `borrowersviewcentral.com` and branded with the EFSI logo (`Logos\EFSI_Small.gif`). Important: submissions land in **The Mortgage Office's** system, not in our D1.
+
+They are two different application templates:
+
+- **`applynew` — short business-purpose / private-money app.** Referring-broker block, then borrower(s) (Primary / Co-Borrower / Guarantor / Co-Signer, SSN, DOB, marital status), loan amount + use of funds, property(ies) with liens/encumbrances (Commercial, Land, SFR, Est. Market Value, ARV), and a **"Declaration of Non-Owner Occupancy & Business Use of Proceeds"** + typed-initials e-signature. This is the non-owner-occupied, business-purpose flow — explicitly *not* a consumer loan (exempt from TILA / SAFE Act / HPA). It mirrors EFS's hard-money model.
+- **`apply4` — full consumer URLA / 1003.** Personal info + citizenship + credit type, 2-year address history, employment/self-employment + gross-monthly-income breakdown, other-source income, assets & liabilities, subject property + occupancy, Real Estate Owned schedule, Declarations A–M (bankruptcy, foreclosure, judgments, lawsuits), and an owner-occupied "household purpose" declaration + typed-initials e-signature. This is the standard residential 1003, owner-occupied flow.
+
+### Re: Should these replace our portal for the demo? — opus-4-8
+
+**No — keep the EFS-built `/apply` as the demo front door.**
+
+- Our `/apply` is a lightweight public **prequalification** that writes leads into our own D1 `application_leads` table with an admin review pipeline. That EFS-owned data + admin workflow is the whole demo thesis — and the foundation for the OCR / document-intelligence and TMO-replacement roadmap (backlog 0e1p, 7fx4, 7a4d).
+- The BorrowerView forms are **TMO-hosted**: submissions go into The Mortgage Office, not EFS. Demoing them puts TMO's own product on screen and undercuts the "EFS-owned platform that can eventually replace TMO" story we're selling.
+- Their real value is as a **reference spec**: canonical field set, section structure, declarations, and legal / e-sign language for the full intake we eventually build. Mine them; don't front them.
+
+Nuance: if the demo must show a *full* application (beyond prequal) before our own exists, we can link out to the TMO form as the "official application" step *after* prequalification — but the EFS portal stays the entry point and the data owner.
+
+### Re: Can we replicate these workflows in our portal? — opus-4-8
+
+**Yes — the form / data-capture side is low-risk; the gating work is the TMO writeback, already tracked.**
+
+- **`applynew` (business-purpose)** is close to what we already have. Extend `application_leads` with `borrowers[]` (+ type), loan use, `properties[]` with `liens[]`, and the business-use declaration + e-sign. Small build.
+- **`apply4` (consumer URLA)** is a much larger form (employment/income, assets/liabilities, REO, declarations A–M) but fully standard — the Fannie/Freddie 1003. Replicable, bigger effort.
+- **E-signature:** they only "type initials." To make ours defensible, add an ESIGN/UETA consent checkbox + audit trail (timestamp, IP) — a small improvement over theirs.
+- **Status-check-by-email** maps onto our existing Borrower Login (already behind Cloudflare Access).
+- **The real constraint is the integration, not the UI.** BorrowerView writes straight into TMO's LOS. If our form captures into D1, we still need the writeback/sync into The Mortgage Office — exactly what's pending on TMO's webhook/API answer (backlog dzmm, k2xg) and the field-extraction to TMO create/update flow (7a4d). Replicating the *form* is easy; replicating the *integration* depends on TMO's outbound support, still unconfirmed.
+
+**Bottom line for the demo:** mirror **`applynew`** (matches EFS's hard-money business and our current schema), keep `/apply` prequal as the front door, and treat the consumer `apply4` 1003 as a later phase gated on the TMO writeback decision.
+<!-- agent:boundary:1c1cf9de -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -50,6 +88,8 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#7tan] [recommended] Model the two TMO BorrowerView forms as the spec for an EFS-owned full application: extend /apply + application_leads to mirror applynew (business-purpose: borrowers+type, loan use, properties+liens, business-use declaration, typed-initials e-sign + ESIGN/UETA consent & audit trail) for the demo; treat apply4 (consumer URLA/1003: employment/income, assets/liabilities, REO, declarations A-M) as a later phase. Form capture is low-risk; gated on TMO writeback (dzmm / k2xg / 7a4d).
+- [ ] [#88qv] [recommended] Model the two TMO BorrowerView forms as the spec for an EFS-owned full application: extend /apply + application_leads to mirror applynew (business-purpose: borrowers+type, loan use, properties+liens, business-use declaration, typed-initials e-sign + ESIGN/UETA consent & audit trail) for the demo; treat apply4 (consumer URLA/1003: employment/income, assets/liabilities, REO, declarations A-M) as a later phase. Form capture is low-risk; gated on TMO writeback (#dzmm / #k2xg / #7a4d).
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
 - [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document intelligence/search, borrower/broker/investor/admin portals, and tenant-ready resale packaging.
 - [ ] [#f4rq] Verify an EFS-owned sending domain in Resend, then switch APPLICATION_LEAD_NOTIFICATION_FROM and APPLICATION_LEAD_NOTIFICATION_TO from testing-mode values to EFS production addresses.

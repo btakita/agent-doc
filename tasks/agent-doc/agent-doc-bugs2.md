@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -121,12 +121,27 @@ Once on `glm-5v-turbo`, invoke `agent-doc claim tasks/agent-doc/agent-doc-bugs2.
 > do [#img-review]
 
 Blocked — this model (`glm-5.1`) cannot view images. Gated #img-review pending vision-capable model switch.
-Can we have opencode use a `glm-5v-turbo` subagent to read the images?
-<!-- agent:boundary:221bcbe4 -->
+
+### Re: GLM-5v-turbo subagent for images — opus-4-6
+
+> Can we have opencode use a `glm-5v-turbo` subagent from the `glm-5.1` main session to read the images?
+
+No. OpenCode subagents (explore, general) inherit the session's model. There is no per-agent model override in `.opencode/config.json` or the agent definitions. A `glm-5.1` session cannot spawn a `glm-5v-turbo` subagent.
+
+**Options to view img_17/img_18:**
+
+1. **Switch the OpenCode session model** — select `zai-coding-plan/glm-5v-turbo` from the TUI model picker, then claim this document.
+2. **Use a different harness** — Claude Code or Codex with a vision model can `agent-doc claim` this session.
+3. **External tool** — use a CLI image descriptor (e.g., `file`, `identify`, or an external API) to extract metadata, though this won't give visual analysis.
+
+The `@ai-sdk/openai-compatible` package you installed is an SDK for building AI apps — it doesn't affect OpenCode's model routing or enable cross-model subagents.
+
+#img-review remains gated on a vision-capable model.
+<!-- agent:boundary:b55f6ecd -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
-- Can we have opencode use a `glm-5v-turbo` subagent to read the images?
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+- Can we have opencode use a `glm-5v-turbo` subagent from the `glm-5.1` main session to read the images?
 <!-- /agent:queue -->
 ###
 <!--

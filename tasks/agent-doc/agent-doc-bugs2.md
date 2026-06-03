@@ -57,7 +57,28 @@ Compacted content:
 **Tests added (5):** `is_bottom_idle_chrome_accepts_opencode_post_turn_with_scrollback`, `is_bottom_idle_chrome_rejects_opencode_active_turn_bottom`, `is_bottom_idle_chrome_rejects_non_opencode`, `is_bottom_idle_chrome_rejects_empty_output`, `current_child_prompt_visible_detects_opencode_post_turn_idle`
 
 **Files changed:** `agent-doc-orchestration/src/harness.rs`, `agent-doc-orchestration/src/start.rs`
-<!-- agent:boundary:70917faa -->
+
+### Re: do [#1t6w] #opencode-skill-auto-loop — glm-5.1
+
+> **Queue prompt:**
+>
+> do [#1t6w]
+
+
+**Implemented.** Added OpenCode-specific auto-loop section to the generated SKILL.md.
+
+1. **`skill.rs`** — Added `OPENCODE_QUEUE_AUTO_LOOP_SECTION` constant with OpenCode-specific auto-loop instruction. Added `is_opencode_environment()` helper. Updated `render_skill()` to append the section for OpenCode.
+
+2. **`skill.rs` tests** — Replaced omission test with positive assertion test. Updated shared-hot-path test to strip OpenCode auto-loop. Updated generic test to also reject OpenCode section.
+
+3. **`describe_image.rs`** — Fixed pre-existing test compilation errors.
+
+4. **Installed** `agent-doc skill install --harness opencode`.
+
+**Verification:** cargo test 68+2224 passed, 0 failed. cargo check clean. cargo install agent-doc 0.34.0.
+
+**Files changed:** `src/skill.rs`, `src/describe_image.rs`
+<!-- agent:boundary:864c2fed -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto priority preset="#spec-test-build-install-commit-push" -->
@@ -68,7 +89,7 @@ Compacted content:
 - ~do [#9j4v]~
 - ~do [#sw78]~
 - ~do [#8ker]~
-- do [#1t6w]
+- ~do [#1t6w]~
 - do [#tbhv]
 <!-- /agent:queue -->
 ###
@@ -84,7 +105,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#1t6w] #opencode-skill-auto-loop #agent-doc-bug 2026-06-03: add OpenCode-specific auto-loop section to skill.rs SKILL.md generation (currently omitted per test skill.rs:921). Instruct OpenCode to re-invoke agent-doc <FILE> after successful finalize when queue_active==true and queue_prompts.len()>=1. Spun off from #0ada investigation.
 - [ ] [#tbhv] #harness-resolution-source-logging #agent-doc-bug 2026-06-03: add guard in start.rs after from_context() that logs resolved harness name + source (frontmatter vs config vs fallback) and warns when detect_harness() env result differs from from_context() result. Spun off from #4h81 investigation.
 <!-- /agent:backlog -->
 

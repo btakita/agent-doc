@@ -92,7 +92,22 @@ P4 shipped (commit `678cd59`, pushed). `bun run check` green — 253 tests.
 - **Wizard**: new "Assets & property" step (add-more assets, liabilities, and REO properties with creditor/balance) with save/resume.
 
 Continuing the queue to P5 (`#az2w` — subject property + Declarations A–M + submit). Prod stays at P1–P3 until the queued re-deploy.
-<!-- agent:boundary:ae3c78b3 -->
+
+### Re: apply4 P5 — subject property + declarations + submit — done — opus-4-8
+
+> **Queue prompt:**
+>
+> [#az2w]
+
+
+P5 shipped (commit `a91d791`, pushed). `bun run check` green — 256 tests. **This completes the borrower-facing apply4 wizard (P1–P5).**
+
+- **Migration 0040**: `application_subject_property` (loan amount/purpose/occupancy/value/units/flags), `application_declarations` (JSON answers map for A–M).
+- **Repo + routes**: subject-property + declarations upsert/read (in `…/sections`); `POST …/submit` transitions draft→submitted, **gated on a recorded e-signature**, idempotent (only promotes a draft).
+- **Wizard**: Property & declarations step (loan/property fields + A–M yes/no) and a Submit action after e-sign, with a submitted-state confirmation.
+
+The borrower can now complete and submit the full URLA end-to-end. Continuing to the final phase P6 (`#k9p5` — admin review of the full application + gated TMO writeback). Prod stays at P1–P3 until the queued re-deploy.
+<!-- agent:boundary:cdd71071 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -104,7 +119,7 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 - ~[#f3b2]~
 - ~[#2eaf]. deploy to production~
 - ~[#1tk7]~
-- [#az2w]
+- ~[#az2w]~
 - [#k9p5]
 <!-- /agent:queue -->
 
@@ -112,7 +127,6 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 
 <!-- agent:backlog -->
 - [ ] [#zr5z] [recommended] Re-deploy equityfundingsource to production after P4–P6 land so the full apply4 wizard (incl. final submit) is live; prod is currently at P1–P3 (worker 85fa9cfc). Run cf:d1:migrate:remote then deploy:worker, smoke-test.
-- [ ] [#az2w] apply4 full application P5 — subject property/loan + Declarations A–M + submit (draft → submitted). Plan: src/equityfundingsource-dev/prds/apply4-full-application-build-plan.md
 - [ ] [#k9p5] apply4 full application P6 — admin review of the full application + TMO writeback mapping (gated on TMO custom-field key map: dzmm/k2xg/7a4d). Plan: src/equityfundingsource-dev/prds/apply4-full-application-build-plan.md
 - [ ] [#xt4d] Inventory TMO usage once access is restored: screenshots, exports, required fields, statuses, document flows, notifications, reports, integrations, and workflows EFS actually uses.
 - [ ] [#0e1p] Draft phased TMO replacement roadmap after the demo: EFS-first MVP, TMO sync/cutover plan, document intelligence/search, borrower/broker/investor/admin portals, and tenant-ready resale packaging.

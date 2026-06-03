@@ -41,11 +41,35 @@ Compacted content:
 Acknowledged — updated the queue item to specify that the JB `Run Agent Doc` stall is a **Codex** session symptom, consistent with the existing backlog cluster around Codex-owned pane behavior (#opencode-jb-stall, #codex-owned-pane-prompt-miss, #codex-owned-pane-auto-queue-stuck).
 
 The queue remains inactive (`queue_active: false`). The `inactive_queue_residue` warning is expected — the item is parked for a future active-queue cycle. No action needed this turn.
-<!-- agent:boundary:edd3f7d9 -->
+
+### Re: JB Run Agent Doc Codex stall — opencode
+
+> **Queue prompt:**
+>
+> JB `Run Agent Doc` Codex stalled with `Ran agent-doc again for tasks/monsterrodholders.md. No changes were detected since the last run.` message in the console.
+
+
+Fix shipped: extended classify_no_change_cycle_state in run.rs to detect committed no-response bookkeeping-only cycles. The operator now sees a typed diagnostic instead of Nothing changed. Commit 41f11a4c, binary installed. 3 regression tests, make check green.
+
+Route 60s busy timeout is a separate surface: the Codex pane is idle but supervisor/lease projects busy. The route should reconcile stale busy projection before timing out. This needs its own plan and spec cycle.
+<!-- agent:boundary:c9e993d6 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" auto -->
-- JB `Run Agent Doc` Codex stalled with `Ran agent-doc again for tasks/monsterrodholders.md. No changes were detected since the last run.` message in the console.
+- ~JB `Run Agent Doc` Codex stalled with `Ran agent-doc again for tasks/monsterrodholders.md. No changes were detected since the last run.` message in the console.~
+---
+JB `Run Agent Doc` on monsterrodholders.md stalled again. The codex session was idle. We need a way to have a robust recovery so it runs. When I manually ran `agent-doc .../monsterrodholders.md`, it ran...so we should just send the command to tmux in this case. I don't care if you think it's correct...it's not correct behavior. Some instrumentation is missing.
+```
+[sync] found alive agent-doc child (pid 271965) in pane %88 for tasks/monsterrodholders/mrh-project.md
+[sync] found alive agent-doc child (pid 2639030) in pane %82 for tasks/monsterrodholders.md
+resync: stash pane %66 is unregistered but still hosts live supervisor 4602f467-ef2a-4094-a750-5eb533368988 — skipping kill
+[sync] found alive agent-doc child (pid 271965) in pane %88 for tasks/monsterrodholders/mrh-project.md
+[sync] found alive agent-doc child (pid 2639030) in pane %82 for tasks/monsterrodholders.md
+resync: stash pane %79 is unregistered but still hosts live supervisor 1ef5f0e7-0687-4f35-b9bc-2b9c330d5688 — skipping kill
+[route] target tmux session: 0
+Error: authoritative actor generation 276 for tasks/monsterrodholders.md owns pane %82 but dispatch-only route will not inject a new trigger because the authoritative actor is busy did not return to a dispatch-ready prompt in the current generation after waiting 60s. Wait for the active turn to finish before rerouting this document.
+```
+---
 <!-- /agent:queue -->
 ###
 <!--

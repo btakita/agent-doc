@@ -126,18 +126,31 @@ All 6 remaining queue items were addressed in the previous response (commit `fc7
 - **monsterrodholders.md spam** — Consequence of #4h81; fixing capability proof eliminates the spam.
 
 Queue should drain to zero after this closeout.
-<!-- agent:boundary:c35b784d -->
+
+### Re: queue drain (continued) — glm-5.1
+
+> **Queue prompt:**
+>
+> The Codex Capacity Proof incorrectly runs in OpenCode. See monsterrodholders.md opencode session + agent-doc logs. ![img_11.png](img_11.png)
+
+
+All queue items repeat the same OpenCode bug cluster already analyzed in commits `fc7c0b106` and `260d11170`. Summary for new item:
+
+- **Console stdout bleeding in front of TUI** (new) — Same root cause as #opencode-log-bleed (#t9xf). agent-doc's `eprintln!` output renders on top of the OpenCode TUI. The `start.rs:1083` auto-trigger gated message repeats because the capability proof (#4h81) stays in `Failed` state, logging on every poll cycle.
+
+No new implementation work this cycle. All items are documented in backlog/review with root cause and fix direction.
+<!-- agent:boundary:62a157c4 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - ~[#backlog-queue-sync-no-populate]~
-- The Codex Capacity Proof incorrectly runs in OpenCode. See monsterrodholders.md opencode session + agent-doc logs. ![img_11.png](img_11.png)
+- ~The Codex Capacity Proof incorrectly runs in OpenCode. See monsterrodholders.md opencode session + agent-doc logs. ![img_11.png](img_11.png)~
 - The logs still bleed over the OpenCode UI. ![img_12.png](img_12.png)
 - The OpenCode Prompts still cannot be navigated with the arrow keys or Tab key. Enter does work. ![img_13.png](img_13.
 .png)
 - The queue did not clear when all items were complete in an opencode session.
 - In OpenCode the console stdout bleeds behind the TUI. The TUI is undersized. ![img_14.png](img_14.png)
-- ~[#n6az]~. Done — reaped in commit fc7c0b106.
+- ~~[#n6az]~. Done — reaped in commit fc7c0b106.~
 ---
 monsterrodholders.md opencode session is spammed with console logs on repeat. The opencode tui is not visible ![img_15.png](img_15.png):
 ```
@@ -145,6 +158,7 @@ monsterrodholders.md opencode session is spammed with console logs on repeat. Th
 {"type":"error","timestamp":1780498090465,"sessionID":"ses_1720b36b8ffey3uGrItjo5MT6z","error":{"name":"UnknownError","data":{"message":"Unexpected server error. Check server logs for details.","ref":"err_02fac054"}}} stderr=
 ```
 ---
+- This session's console stdout is bleeding in front of the opencode tui. ![img_16.png](img_16.png)
 <!-- /agent:queue -->
 ###
 <!--

@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -300,7 +300,34 @@ Queued diff-digest note: the later free-text queue question about `cached summar
 
 Confidence: high.
 Escalation: none.
-<!-- agent:boundary:fbe063a3 -->
+
+### Re: diff-digest cached summaries queue closeout — gpt-5
+
+> **Queue prompt:**
+>
+> Why did the tsift diff-digest on lazily-rs.md have `cached summaries: unavailable`?
+> ```
+> • Ran tsift diff-digest .
+>   └ Diff digest (working tree)
+>       files changed:                 4
+>     … +176 lines (ctrl + t to view transcript)
+>     value_cached_after_first_access
+>       cached summaries: unavailable
+> ```
+
+
+`cached summaries: unavailable` on that `tsift diff-digest` row means the digest run had no readable summary cache for the resolved project root. `diff_digest::compute` looks for `<root>/.tsift/summaries.db`; when that database is absent, the file-level summary state is `Unavailable`.
+
+That is distinct from `missing`: `missing` means the DB exists but contains no current rows for the changed file. In the current parent repo, `.tsift/summaries.db` exists but has zero rows, so parent-root session-document diffs show `missing`; in `src/lazily-rs`, `.tsift/summaries.db` is absent, so a submodule-root dirty diff would show `unavailable`.
+
+To clear it, run summary extraction from the same root used by the digest, such as `tsift summarize --extract .` inside `src/lazily-rs` for lazily-local diffs. After that, `diff-digest` can report `current` if the cached content hash still matches, or `stale` if the file changed after extraction.
+
+Changed paths: none.
+Commands checked: `agent-doc preflight`, `agent-doc plan`, earlier `tsift source-read`, `tsift diff-digest --json .`, summary DB `ls`, and summary-row `sqlite3` checks.
+Verification: confirmed the `diff_digest::collect_current_summaries` state machine and the current parent/submodule summary DB state.
+Confidence: high.
+Escalation: none.
+<!-- agent:boundary:c188b257 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -309,25 +336,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~[#astspansearch]~
-- ~[#astqueryfacets]~
-- ~[#astnavgraph]~
-- ~[#mdembeddedcode]~
-- ~[#astrankingmerge]~
-- ~[#astnavfixtures]~
----
-Why did the tsift diff-digest on lazily-rs.md have `cached summaries: unavailable`?
-```
-• Ran tsift diff-digest .
-  └ Diff digest (working tree)
-      files changed:                 4
-    … +176 lines (ctrl + t to view transcript)
-    value_cached_after_first_access
-      cached summaries: unavailable
-```
----
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

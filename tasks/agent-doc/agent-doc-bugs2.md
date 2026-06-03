@@ -55,7 +55,30 @@ Plan updated. The response:
 > do [#lr-actor-10]
 
 **Closeout:** durable deliverable = the cross-document-safety constraint now in `plans/lazily-rs-integration.md` Phase 10 (uncommitted, with the prior plan edits — say "commit it" to land them as one non-session change). `#lr-actor-10` implementation is the toolchain actor's (final lr phase); I can't build/finalize from this gated pane. Session-doc response uncommitted.
-<!-- agent:boundary:ec6c6553 -->
+
+### Re: do #xdoc-route-sweep-commits-sibling-docs — root cause located; plan is implementation-ready — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#xdoc-route-sweep-commits-sibling-docs]
+
+
+This is **the** root cause of the whole contamination saga — and the plan (`plan-xdoc-route-sweep-commits-sibling-docs.md`) is already thoroughly root-caused (3 facets, implementation sketch, tests, acceptance). It needs no edit. I located the exact code so the toolchain actor goes straight to it:
+
+**The owner-agnostic sweep is `preflight.rs` Step 2d — "Cross-document sweep (Fix 5)" (~line 1965):** it commits *every other tracked doc in the project*, with two guards today —
+- skip if the doc has unresponded user content (`preflight.rs:2004`, "[preflight] sweep: skipping … unresponded user content"),
+- skip if committed <5s ago (`preflight.rs:2038`, freshness gate).
+
+**Missing: the authoritative-owner guard.** Neither guard checks whether the swept sibling is owned by a *different live pane/session*. So when the lazily-rs `%73` actor ran preflight, Step 2d swept and committed `bugs2.md` (owned by `%70`) — exactly the ops.log `commit_staging file=.../agent-doc-bugs2.md` evidence. That's the precise insertion point: before `commit_staging` of each swept sibling, gate on `is_authoritative_owner(current session/pane, doc)`; skip + `ops_log("foreign_owned_sweep_skip …")` for foreign-owned drift. The same gate goes on the route-owned reap path (the other `commit_staging` caller in the ops.log).
+
+**Tests:** sibling tests already exist at `preflight.rs:10085` (`preflight_sweep_commits_other_tracked_docs`) and `:10180` (`…skips_doc_with_unresponded_user_content`) — add a `preflight_sweep_skips_foreign_owned_doc` (two docs, panes `%70`/`%73`; actor A's sweep must leave B dirty + log the skip) and a same-owner no-regression case. That's it — the plan's test section already specifies these.
+
+**Priority note:** this should land **before** the other queued items. It's the source of the competing-authorship / stale-baseline / concurrent-owner stalls that have degraded this whole session (and it's why a raw `kill` doesn't stick — the `queue_active:true` loop respawns, per the plan's respawn note). Fixing it stops the contamination at the source rather than mitigating downstream (`#jb-tsift-pane-sync` handled the focus/exec-context facet; this handles the commit-authorship facet).
+
+**Can't implement here** (binary gated). Toolchain actor's job; the entry point above is exact.
+Pinned it. This is the root-cause item and its plan is already complete and implementation-ready — no plan edit needed. The exact code is located.
+**Closeout:** audit + exact-location pin (no plan edit — the plan was already complete). The fix is a focused authoritative-owner gate at `preflight.rs:1965` Step 2d + the route-owned reap path + one new test. This is the highest-priority queued item — it's the root cause of the operational instability. Can't build/finalize from this gated pane; prior plan edits still uncommitted and offered.
+<!-- agent:boundary:85917c50 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto -->
@@ -64,7 +87,7 @@ preset #spec-test-build-install-commit-push
 - ~do [#lr-head-8]~
 - ~do [#lr-wire-9]~
 - ~do [#lr-actor-10]~
-- do [#xdoc-route-sweep-commits-sibling-docs]
+- ~do [#xdoc-route-sweep-commits-sibling-docs]~
 - do [#ipc-admin-api]
 - do [#run-gated-review-items]
 - I removed "Do not implement from" plan-jb-run-agent-doc-busy-queue-dispatch-deadlock.md. Go ahead and execute the plan if needed. Ensure any associated items are completed. I'm confused by the amount and length of the review items. #spec-test-build-install-commit-push

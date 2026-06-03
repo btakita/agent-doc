@@ -289,3 +289,4 @@
 - 2026-06-02 [#astnavgraph] Project AST navigation edges into graph-db: contains, parent/child, previous/next sibling, enclosing module/section, call/import/route, and Markdown section/block containment edges with stable handles.
 - 2026-06-02 [#mdembeddedcode] Treat Markdown fenced code blocks as embedded language islands: parse supported fence languages, link fence AST nodes to extracted symbols, and let search navigate from prose section to embedded code and back.
 - 2026-06-02 [#astrankingmerge] Merge symbol, span, lexical, summary, and graph-neighborhood evidence into one AST-aware ranking path so file-level lexical matches do not drown out precise span hits.
+- 2026-06-02 [#astnavfixtures] Add multilingual AST navigation fixtures and perf gates covering Rust/Python/TS/JS/Kotlin/Zig/Bash plus Markdown headings, lists, fenced code, stable handles, ranking recall, and expand-command validity.

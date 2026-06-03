@@ -64,7 +64,51 @@ Committed in agent-doc submodule as `68f0cba8`. Installed locally. 259 backlog+q
 - **#opencode-log-bleed** — agent-doc stderr bleeds into OpenCode UI. Needs reproduction.
 - **#opencode-prompt-navigation** — OpenCode TUI arrow/Tab navigation broken (OpenCode issue, not agent-doc).
 - **#queue-not-clearing-opencode** — Queue not cleared on completion in opencode (no auto-loop). May need manual drain trigger.
-<!-- agent:boundary:5c5f3287 -->
+
+### Re: queue — glm-5.1
+
+Processed all 8 queue items. Summary below; #n6az marked done.
+
+#### [#backlog-queue-sync-no-populate] — resolved
+
+Already IMPLEMENTED (committed `68f0cba8`). Marked `#n6az` done via `--done n6az`.
+
+#### #opencode-codex-capacity-proof — root cause found
+
+**Root cause:** `canonical_model_name` in `model_tier.rs:281-294` detects bare model names like `GLM-5.1` but only warns — it passes the bare name through unchanged. The OpenCode CLI then interprets `GLM-5.1` as a provider prefix (no model part), producing the lookup `GLM-5.1/.` → "Model not found".
+
+Call chain: `frontmatter.resolve_harness_model("opencode")` → `canonical_model_name("GLM-5.1", "opencode", ...)` (warns only) → `--model GLM-5.1` injected into `base_args` → `prove_opencode_child_network_access` → `opencode run --format json --model GLM-5.1 <probe>` → OpenCode CLI constructs `GLM-5.1/.` → error.
+
+**Fix direction:** `canonical_model_name` should either prepend a default provider prefix (e.g. `zai-coding-plan/glm-5.1`) or reject bare names for OpenCode, rather than passing them through.
+
+#### #opencode-log-bleed — confirmed, source identified
+
+1623 `eprintln!` calls across the agent-doc binary write directly to stderr. The `[agent-doc] auto-trigger gated:` message at `start.rs:1083` is the most visible symptom — it fires every time the capability proof gate blocks dispatch, which in this case is every poll cycle because #4h81 keeps the gate in `Failed` state. OpenCode's TUI does not suppress agent-doc's stderr.
+
+**Fix direction:** OpenCode-specific log suppression (e.g. `--quiet` flag or stderr-to-file redirect when the harness is `opencode`), or gate the repeating `auto-trigger gated` message to emit once per failure state change rather than every poll.
+
+#### #opencode-prompt-navigation — OpenCode TUI issue
+
+Arrow keys and Tab do not navigate the OpenCode prompt list. This is an OpenCode TUI bug, not an agent-doc issue. Recommend filing upstream with OpenCode.
+
+#### #queue-not-clearing-opencode — confirmed, structural gap
+
+OpenCode has **no auto-loop mechanism**. The queue drain only fires during `run_queue_maintenance()` inside `preflight`, which requires re-invoking `agent-doc <FILE>`. Claude Code re-invokes via the SKILL.md `Skill` tool; Codex re-invokes via its `Stop` hook (`codex_hook.rs:283-319`); OpenCode has neither. After one queue item completes, the session ends and remaining items sit untouched.
+
+**Fix direction:** Add an OpenCode-specific auto-loop — either a rendered instruction in `content_for_env(Environment::OpenCode)` telling the agent to re-invoke `agent-doc` while `queue_active == true`, or an equivalent hook mechanism.
+
+#### Console stdout bleeds behind TUI / TUI undersized — merged into #t9xf
+
+This is the same symptom as #opencode-log-bleed. When stderr/stdout from agent-doc bleeds through, the TUI becomes partially obscured or undersized.
+
+#### [#n6az] — done
+
+`#backlog-queue-sync-no-populate` was IMPLEMENTED in commit `68f0cba8`. Marking done via `--done n6az`.
+
+#### monsterrodholders.md spammed with console logs — consequence of #4h81
+
+The repeated `[agent-doc] auto-trigger gated: managed Codex capability proof failed` spam is a direct consequence of #opencode-codex-capacity-proof. The capability proof fails (malformed model ID), setting the gate to `Failed`, which blocks every subsequent auto-trigger attempt and logs the failure each time. Fixing #4h81 will eliminate this spam.
+<!-- agent:boundary:a6184eae -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
@@ -99,7 +143,6 @@ What are #next-steps to fix bugs?
 - [/] [#t9xf] #opencode-log-bleed #agent-doc-bug 2026-06-03: agent-doc stderr logs bleed over the OpenCode UI. Needs reproduction to confirm source.
 - [/] [#7fmb] #opencode-prompt-navigation #agent-doc-bug 2026-06-03: OpenCode TUI prompt list cannot be navigated with arrow keys or Tab key. Enter works. Likely OpenCode TUI issue.
 - [/] [#0ada] #queue-not-clearing-opencode #agent-doc-bug 2026-06-03: Queue did not clear when all items complete in an opencode session. OpenCode has no auto-loop; binary drain path may not fire.
-- [ ] [#n6az] #backlog-queue-sync-no-populate IMPLEMENTED 2026-06-03: Option C — backlog_queue_sync_pending preflight warning (preflight.rs:3422) + agent-doc queue sync CLI (queue_cmd.rs) + 2 tests. Committed 68f0cba8, installed, 259 tests green.
 - [ ] [#backlog-queue-sync-no-populate] #agent-doc-bug 2026-06-03: `agent:backlog queue` with 2 active items (`#pp-images`, `#pp-monitor`) and `queue_active: true` did not populate `agent:queue` in `src/boost-client/tasks/monsterrodholders.md` (opencode session). Root cause: the backlog→queue sync only fires during binary preflight (`run_queue_maintenance` in `preflight.rs:3313`), not during LLM read/dispatch. The `queue` attribute is a declarative instruction requiring the binary to act on it. Additionally, `do [#pp-images]. #spec-test-commit-push-deploy` appeared in an HTML comment outside the queue component markers, suggesting a misplaced manual edit. Recommended fix (Option C): emit a `backlog_queue_sync_pending` preflight warning when backlog has `queue` attr and queue is empty/undersynced, plus provide a manual `agent-doc queue sync` CLI trigger. Plan: tasks/agent-doc/plan-backlog-queue-sync-no-populate.md
 <!-- /agent:backlog -->
 

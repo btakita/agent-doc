@@ -161,7 +161,11 @@ Readiness is **partially implemented** across three boundaries:
 ### Re: Runbook optimizations scope across agent-loop projects — glm-5.1
 
 **Not all projects have tsift code-navigation optimizations.** The `tsift:code-navigation` block is **per-project opt-in via `tsift init`**. 10 of ~30 projects have it: tsift, agent-doc, boost-client, corky, equityfundingsource-dev, lazily-rs, lazily-zig, session-share, tmux-router, monsterrodholders-dev. Missing: webmaster, presence, ctx-core-dev, tagpath, and others. The other 14 runbooks in `runbooks/` are repo-wide. To apply to all projects, run `tsift init` in each missing project directory.
-<!-- agent:boundary:a33c449d -->
+
+### Re: Runbook optimizations — already answered — glm-5.1
+
+The answer was committed in the previous cycle (see "### Re: Runbook optimizations scope across agent-loop projects" above). Striking through the consumed queue items. Backlog items for `#rankdefault`, `#gfrontierhot`, `#greadiness` remain open pending measurement/implementation work.
+<!-- agent:boundary:3e5051c6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -173,10 +177,10 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - ~[#gpackreuse]~
 - ~Code Navigation harness info should be in a Runbook referenced in AGENTS.md or a skill.~
-- [#rankdefault]
-- [#gfrontierhot]
-- [#greadiness]
-- Are the Runbook optimizations applied to all projects in agent-loop?
+- ~Are the Runbook optimizations applied to all projects in agent-loop?~
+- ~[#rankdefault]~
+- ~[#gfrontierhot]~
+- ~[#greadiness]~
 <!-- /agent:queue -->
 
 ## Backlog

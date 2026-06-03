@@ -101,7 +101,36 @@ Single-threaded `Context` already uses `HashSet<SlotId>` for `batched_cells`/`ba
 Stack-allocated bloom filter (64-128 bits) before linear scan. False positives fall back to `contains`. Keeps `SmallVec<[SlotId; 4]>` for common case. Complex; only worthwhile if HashSet shows overhead at small batch sizes.
 
 **Recommendation:** Option A is the pragmatic choice — two-line change per vector, no type changes, measurable improvement. Promote to B only if profiling shows sort_unstable overhead at large batch sizes.
-<!-- agent:boundary:f6062c6d -->
+
+### Re: #lazyperf33 Hybrid InvalidationPlan — glm-5.1
+
+> **Queue prompt:**
+>
+> [#lazyperf33]
+
+
+Implemented, tested, committed, and pushed (`b568441` → `lazily-rs` main).
+
+**What changed** (`src/lazily-rs/src/thread_safe.rs`):
+
+Added `HybridMap<V>` and `HybridSet` types that store entries in a `Vec` for ≤16 items (cache-friendly linear scan) and auto-promote to `HashMap`/`HashSet` above that threshold. Replaced all O(n) linear scans in `ThreadSafeInvalidationPlan`:
+
+- `from_roots_locked`: `requested_force` and `simulated_slots` use `HybridMap` (BFS dedup was O(n²), now O(n) or O(1) per lookup)
+- `from_clear_roots_locked`: `visited_slots` uses `HybridSet`
+- `slot_marks`, `slot_clears`, `effect_schedules` use `HybridMap`/`HybridSet` with O(1) dedup
+- `apply_locked`: extracts to `Vec` for iteration, uses `HashSet` for O(1) `slot_clears.contains()` cross-reference (was O(n) per mark)
+- Removed `find_force`, `find_simulated`, `set_simulated` helper methods (logic absorbed into hybrid types)
+
+**Benchmarks** (release, local):
+
+| Benchmark | Before | After | Change |
+|---|---|---|---|
+| dependency_fan_out/256 | 149.8µs | 128.8µs | **-14%** |
+| memo_equality_suppression | 30.0µs | 21.0µs | **-30%** |
+| high_fan_out/512 | ~89.5µs | ~92.3µs | stable |
+
+All 102 tests pass (unit + integration + spec + loom + tokio). `make check` clean.
+<!-- agent:boundary:e97b262c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -111,7 +140,7 @@ Stack-allocated bloom filter (64-128 bits) before linear scan. False positives f
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - ~Does `let val = counter.get(ctx);` clone `ctx`?~
-- [#lazyperf33]
+- ~[#lazyperf33]~
 - Please create a mermaid of the performance improvements.
 - [#lazyperf34]
 - [#lazyperf35]
@@ -123,7 +152,6 @@ Stack-allocated bloom filter (64-128 bits) before linear scan. False positives f
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#lazyperf33] [recommended] Hybrid InvalidationPlan: Vec for 16 or fewer nodes, HashMap above threshold — fixes fan_out/256, memo_equality, chain-pattern regressions
 - [ ] [#lazyperf34] [recommended] Fix finish_batch O(n2) dedup: replace edge_insert loop with extend+sort-dedup or small HashSet — fixes batched_write_bursts, batch_storms
 - [ ] [#lazyperf35] [recommended] Eliminate scratch buffer collect allocation on effect path: pass fill_dependent_scratch result as slice to invalidate_frontier_locked — fixes effect_flushing
 - [ ] [#lazyperf36] [recommended] A/B benchmark parking_lot vs std::sync for moderate contention: evaluate fair_mutex or revert main state mutex — fixes same_slot_write_read, independent_slots

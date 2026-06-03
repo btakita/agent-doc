@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -41,10 +41,10 @@ Compacted content:
 Acknowledged — updated the queue item to specify that the JB `Run Agent Doc` stall is a **Codex** session symptom, consistent with the existing backlog cluster around Codex-owned pane behavior (#opencode-jb-stall, #codex-owned-pane-prompt-miss, #codex-owned-pane-auto-queue-stuck).
 
 The queue remains inactive (`queue_active: false`). The `inactive_queue_residue` warning is expected — the item is parked for a future active-queue cycle. No action needed this turn.
-<!-- agent:boundary:76ae7a0a -->
+<!-- agent:boundary:edd3f7d9 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" auto -->
 - JB `Run Agent Doc` Codex stalled with `Ran agent-doc again for tasks/monsterrodholders.md. No changes were detected since the last run.` message in the console.
 <!-- /agent:queue -->
 ###

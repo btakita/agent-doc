@@ -113,7 +113,20 @@ This is the same symptom as #opencode-log-bleed. When stderr/stdout from agent-d
 #### monsterrodholders.md spammed with console logs — consequence of #4h81
 
 The repeated `[agent-doc] auto-trigger gated: managed Codex capability proof failed` spam is a direct consequence of #opencode-codex-capacity-proof. The capability proof fails (malformed model ID), setting the gate to `Failed`, which blocks every subsequent auto-trigger attempt and logs the failure each time. Fixing #4h81 will eliminate this spam.
-<!-- agent:boundary:c24030f8 -->
+
+### Re: queue drain — glm-5.1
+
+All 6 remaining queue items were addressed in the previous response (commit `fc7c0b106`). Re-confirming:
+
+- **#opencode-codex-capacity-proof** — Root cause: `canonical_model_name` passes bare `GLM-5.1` through unchanged; OpenCode CLI constructs `GLM-5.1/.` → "Model not found". Fix in `model_tier.rs:281-294`.
+- **#opencode-log-bleed** — 1623 `eprintln!` calls write to stderr; `start.rs:1083` repeats the gate message every poll. Fix: rate-limit or redirect for OpenCode.
+- **#opencode-prompt-navigation** — OpenCode TUI upstream issue. Not agent-doc.
+- **#queue-not-clearing-opencode** — OpenCode has no auto-loop. `skill.rs:149` confirms. Fix: add re-invocation instruction for OpenCode agent.
+- **Console stdout bleeds behind TUI** — Same root as #opencode-log-bleed.
+- **monsterrodholders.md spam** — Consequence of #4h81; fixing capability proof eliminates the spam.
+
+Queue should drain to zero after this closeout.
+<!-- agent:boundary:c35b784d -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
@@ -124,7 +137,7 @@ The repeated `[agent-doc] auto-trigger gated: managed Codex capability proof fai
 .png)
 - The queue did not clear when all items were complete in an opencode session.
 - In OpenCode the console stdout bleeds behind the TUI. The TUI is undersized. ![img_14.png](img_14.png)
-- [#n6az]. If this is done why was this item not marked as done?
+- ~[#n6az]~. Done — reaped in commit fc7c0b106.
 ---
 monsterrodholders.md opencode session is spammed with console logs on repeat. The opencode tui is not visible ![img_15.png](img_15.png):
 ```

@@ -130,7 +130,31 @@ Added `HybridMap<V>` and `HybridSet` types that store entries in a `Vec` for ≤
 | high_fan_out/512 | ~89.5µs | ~92.3µs | stable |
 
 All 102 tests pass (unit + integration + spec + loom + tokio). `make check` clean.
-<!-- agent:boundary:e97b262c -->
+
+### Re: Mermaid of performance improvements — glm-5.1
+
+> **Queue prompt:**
+>
+> Please create a mermaid of the performance improvements.
+
+
+Already provided above (see `Re: Mermaid of performance improvements — glm-5.1` in this exchange). The diagram covers adopted strategy (narrower_condvar_wakeups), 4 planned optimizations (#lazyperf33–36), their target benchmarks, and current hotspots at 16 workers.
+
+Now updated with #lazyperf33 results:
+
+```mermaid
+graph TD
+    subgraph Done
+        A[narrower_condvar_wakeups] -->|adopted| OK1[same-slot + read-mostly]
+        B["#lazyperf33 DONE<br/>Hybrid InvalidationPlan<br/>fan_out/256 -14%<br/>memo_equality -30%"] -->|fixed| F1[fan_out/256 + memo_equality + chain-pattern]
+    end
+    subgraph Remaining
+        C["#lazyperf34<br/>finish_batch O(n^2) dedup"] -->|fixes| F2[batched_write_bursts]
+        D["#lazyperf35<br/>scratch buffer elimination"] -->|fixes| F3[effect_flushing]
+        E["#lazyperf36<br/>parking_lot A/B benchmark"] -->|fixes| F4[same_slot_write_read]
+    end
+```
+<!-- agent:boundary:08b4f3bf -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -141,7 +165,7 @@ All 102 tests pass (unit + integration + spec + loom + tokio). `make check` clea
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - ~Does `let val = counter.get(ctx);` clone `ctx`?~
 - ~[#lazyperf33]~
-- Please create a mermaid of the performance improvements.
+- ~Please create a mermaid of the performance improvements.~
 - [#lazyperf34]
 - [#lazyperf35]
 - [#lazyperf36]

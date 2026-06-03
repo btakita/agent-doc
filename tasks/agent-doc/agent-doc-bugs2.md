@@ -15,14 +15,14 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
 
-Codex review log pass completed; no reviewed item met the complete threshold.
+Queue contamination cleaned. Session committed.
 <!-- /agent:status -->
 
 ## Exchange
@@ -137,11 +137,11 @@ No. OpenCode subagents (explore, general) inherit the session's model. There is 
 The `@ai-sdk/openai-compatible` package you installed is an SDK for building AI apps — it doesn't affect OpenCode's model routing or enable cross-model subagents.
 
 #img-review remains gated on a vision-capable model.
-<!-- agent:boundary:5ec69884 -->
+<!-- agent:boundary:a6057086 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
-- Can we have opencode use a `glm-5v-turbo` subagent from the `glm-5.1` main session to read the images?
+<!-- agent:queue auto -->
+- Can we have a binary that reads images with a descriptor that can be invoked as a toolcall?
 <!-- /agent:queue -->
 ###
 <!--

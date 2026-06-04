@@ -29,83 +29,12 @@ Analyzed JB Run Agent Doc stall — route.rs busy guard stale projection (not JB
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260604-201301.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260604-214204.md`*
 
 Compacted content:
-- Archived 7 response topic(s): Reentrant finalize pipeline for crash recovery; Frontmatter step tracker and queue items; #kvw4 reentrant-finalize implementation; 4 more
+- Archived 5 response topic(s): Frontmatter pipeline fields & reentrant phases; #finalize-owned-pane-response-patchback remaining work; #reentrant-phase5-integration & #finalize-owned-pane-response-patchback; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: Frontmatter pipeline fields & reentrant phases — glm-5.1 (HEAD)
-
-**Frontmatter fields question:** `step`, `run_id`, `turn_id`, `queue_task_id` were not appearing in frontmatter because Phase 5 wiring was incomplete — the `PipelineStep` struct and `update_pipeline_step` function were never connected to the pipeline. I've taken a different approach: these fields now live in `CycleState` (`.agent-doc/state/cycles/<hash>.json`) rather than frontmatter. Writing to frontmatter during pipeline execution causes document hash drift that breaks baseline comparison in closeout. The cycle state JSON is the authoritative source; frontmatter visibility can be added later at a safe point (e.g., by preflight before hash capture).
-
-**Queue item results:**
-
-| Item | Status | Detail |
-|------|--------|--------|
-| #reentrant-phase2 | **Already complete** | Durable capture ledger in `capture.rs` (1200 lines). `repair::run()` at repair.rs:1355 already checks pending + capture before abandoning. |
-| #reentrant-phase3 | **Already complete** | `CycleState.active_free_text_queue_heads` tracks consumed queue text. `cycle_state.rs:154`. |
-| #reentrant-phase4 | **Already complete** | Unified repair flow in `repair::run()` handles all crash windows. `repair.rs` 3565 lines. |
-| #reentrant-phase5-integration | **Implemented** (partial) | Added `queue_task_id`/`turn_id` to `CycleState` + `start_preflight_with_task()`. Frontmatter write deferred. Commit: `2ec22e06`. |
-| #finalize-owned-pane-response-patchback | **Deferred** | ~80% implemented. Missing: proactive final-gate block (plan item 3) + 2 test scenarios. Infrastructure exists: `owned_pane_self_invocation`, `CloseoutRecoveryState::MissingResponseBody`, session-check backstop. |
-
-**Phase 5 changes** (`agent-doc-orchestration/src/cycle_state.rs`):
-- `CycleState.queue_task_id: Option<String>` — backlog ID (e.g. `#reentrant-phase2`)
-- `CycleState.turn_id: Option<String>` — derived from backlog ID or auto-generated
-- `start_preflight_with_task(file, snapshot, content, queue_task_id, turn_id)` — new function
-- `start_preflight()` unchanged (passes `None` for both)
-- 2 new unit tests passing, all 29 cycle_state tests green, codex hook integration green
-
-**Installed:** `cargo install --path src/agent-doc` (v0.34.0, release build).
-
-#### Re: #finalize-owned-pane-response-patchback remaining work — glm-5.1 (HEAD)
-
-> **Queue prompt:**
->
-> I don't see `step`, `run_id`, `turn_id`, `queue_task_id` in the frontmatter.
-
-
-Plan: `tasks/agent-doc/plan-finalize-owned-pane-response-patchback.md`. Already implemented:
-- `owned_pane_self_invocation` detection (`run.rs:920-1054`)
-- Early fail-closed guards (`run.rs:402-474`)
-- Session-check backstop (`session_check.rs:1435-1466`)
-- `CloseoutRecoveryState` all 11 variants including `MissingResponseBody`
-- Diagnostics and recovery commands (`run.rs:1070-1100`)
-- Integration tests for owned-pane self-invocation
-
-Remaining:
-1. **Plan item 3** — proactive final-gate block: `codex_final_gate` should verify response body was captured after same-pane recursive refusal + manual fallback, not just catch abandoned cycles after the fact
-2. **Test scenarios** — "same-pane recursive refusal + manual final answer fails closed until response body is written" and "re-running recovery when response is already visible is a no-op"
-
-### Re: #reentrant-phase5-integration & #finalize-owned-pane-response-patchback — glm-5.1 (HEAD)
-
-#### Re: Phase 5 integration — glm-5.1 (HEAD)
-
-Implemented and committed (`2ec22e06`). Changes in `agent-doc-orchestration/src/cycle_state.rs`:
-
-- `CycleState.queue_task_id: Option<String>` — backlog ID (e.g. `#reentrant-phase2`)
-- `CycleState.turn_id: Option<String>` — derived from backlog ID or auto-generated
-- `start_preflight_with_task(file, snapshot, content, queue_task_id, turn_id)` — new entry point
-- `start_preflight()` unchanged (delegates with `None`)
-- 2 unit tests: `start_preflight_with_task_stores_queue_task_id_and_turn_id`, `start_preflight_without_task_has_none_ids`
-
-Frontmatter `agent_doc_pipeline` write deferred: writing to frontmatter during pipeline execution causes document hash drift that breaks baseline comparison in closeout. Cycle state JSON is the authoritative source. The `PipelineStep` struct and `update_pipeline_step`/`clear_pipeline_step` functions can be wired later at a safe point (e.g., by preflight before hash capture).
-
-#### Re: #finalize-owned-pane-response-patchback — glm-5.1 (HEAD)
-
-Implemented proactive final-gate block (`07b87b02`). Changes in `agent-doc-orchestration/src/session_check.rs`:
-
-Added to `run_with_options()` (after queue continuation check): when `codex_final_gate` is active and the latest cycle is `Abandoned` with `last_event` starting `"recursive_direct_invocation_blocked"` AND no `capture_id` or `response_sha256`, exit with code 2. This prevents a Codex final chat answer from bypassing binary-owned closeout after a same-pane recursive refusal.
-
-Test: `codex_final_gate_blocks_on_recursive_invocation_without_captured_response` — verifies the installed binary exits 2 for the abandoned-recursive-invocation-without-response shape, and that `inspect()` returns `Ok` without the final gate.
-
-**Remaining for full plan completion:**
-- Plan item 4/5: "re-running recovery when response is already visible is a no-op" test scenario
-- These are low-risk edge cases; the core gate is in place
-
-**Verification:** 31 cycle_state tests + 156 session_check tests + 3 codex hook integration tests all green. Installed v0.34.0 (release build).
-<!-- agent:boundary:6d01959a -->
-<!-- agent:boundary:1ccc4c38 -->
+<!-- agent:boundary:e4599e8a -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->

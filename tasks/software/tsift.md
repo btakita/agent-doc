@@ -88,7 +88,20 @@ Added `PropertyMode` enum (Full/Sample/Omit) to `RankedNeighborhoodOptions`. App
 - `Omit`: strips all properties from nodes and edges
 
 Commit: `a0da761` pushed to main
-<!-- agent:boundary:f55c29b9 -->
+
+### Re: #edges-between-batch-optimization — glm-5.1
+
+> **Queue prompt:**
+>
+> do [#edges-between-batch-optimization]
+
+
+Added dual-path routing in `SqliteGraphStore::edges_between_nodes`. Small ID sets (≤20 nodes) use a direct `IN (...)` clause, bypassing temp-table creation and transaction overhead. Larger sets continue using the temp-table + EXISTS pattern.
+
+- New `edges_between_nodes_inline` private method
+- Threshold: 20 nodes (covers most evidence/dispatch queries)
+- Commit: `08e7cf3` pushed to main
+<!-- agent:boundary:2db91245 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -108,14 +121,14 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - ~do [#degree-cache]~
 - ~do [#community-summary-default]~
 - ~do [#property-sampling]~
-- do [#edges-between-batch-optimization]
+- ~do [#edges-between-batch-optimization]~
 - do [#wal-checkpoint-tuning]
+- do [#8v37]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#edges-between-batch-optimization] Use IN-clause expansion or session-scoped temp table for small edges_between_nodes ID sets (low)
 - [ ] [#wal-checkpoint-tuning] Add explicit PRAGMA wal_checkpoint(TRUNCATE) after refresh; tune autocheckpoint by projection size (low)
 - [ ] [#8v37] Can tsift provide a graph map back to the agent for the agent to visualize and analyze the graph structure of the corpus? Can the agent request focused graphs? The broad map should be token efficient yet give the agent a breadth view with some depth of the content to make a decision for a focused map. The focused map should include the full depth on a more focused query. Would this be useful for graph navigation? Would it reduce tool calls?
 <!-- /agent:backlog -->

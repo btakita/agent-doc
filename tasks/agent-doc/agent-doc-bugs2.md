@@ -33,20 +33,47 @@ Queue contamination cleaned. Session committed. Codex stale-busy bottom-idle fix
 
 Compacted content:
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:3065e93d -->
+
+### Re: #jb-stale-busy-idle-footer + #clear-stops-running-process — glm-5.1
+
+**Root cause:** `dispatch_blocker_reason()` for OpenCode checks the last 12 reversed lines for `"esc to interrupt"`. When a completed turn's `Working (Ns - esc to interrupt)` banner remains in scrollback within those 12 lines while the actual pane bottom shows idle chrome (ctrl+p footer, context %, cwd/version), the busy guard falsely classifies the pane as `opencode_active_turn`, blocking `session clear` and dispatch.
+
+**Fix:** Added `bottom_idle_chrome_suffix_present()` private method to `HarnessConfig` — same logic as `is_bottom_idle_chrome()` but without the `has_busy_cue()` guard. Called in `dispatch_blocker_reason()` for both OpenCode and Claude: when `opencode_active_turn_busy()` / `claude_active_turn_busy()` returns true but the bottom lines form a contiguous idle chrome suffix (min 4 for OpenCode, min 2 for Claude), override the busy classification to `None`.
+
+**Files changed:**
+- `agent-doc-orchestration/src/harness.rs`: added `bottom_idle_chrome_suffix_present()`, added idle-footer override in both OpenCode and Claude branches of `dispatch_blocker_reason()`, added 5 regression tests
+
+**Tests:** 5 new tests, all 12 existing `dispatch_blocker_reason` tests still pass, `make check` green, binary installed.
+
+**Remaining queue assessment:**
+- `#adoc-queue-ipc-buffer` — gated on IPC capture session (#6cmx); root cause #2 already shipped but no clean consume->halt log proof
+- `#codex-network-access-opencode` — implementable next cycle; needs frontmatter guard to warn/ignore `codex_network_access` when agent != codex
+<!-- agent:boundary:bfb42cce -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue -->
-- #clear-stops-running-process
+<!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
+- ~#clear-stops-running-process~
 - #jb-stale-busy-idle
-- #prompt-duplicated-while-typing
+- ~#prompt-duplicated-while-typing~
 - #adoc-queue-ipc-buffer
-- #lr-queue-patchback-miss
-- #queue-auto-no-continue
-- #codex-403-429-fallback
+- ~#lr-queue-patchback-miss~
+- ~#queue-auto-no-continue~
+- ~#codex-403-429-fallback~
 - #codex-network-access-opencode
-- #cancel-orphans-preflight-cycle
-- #backlog-priority-attribute
+- ~#cancel-orphans-preflight-cycle~
+- ~#backlog-priority-attribute~
+- do [#3hwr]
+- do [#vypc]
+- do [#gyma]
+- do [#5qhn]
+- do [#0mgb]
+- do [#30h3]
+- do [#k5ne]
+- do [#7gy5]
+- do [#sxjj]
+- do [#cd98]
+- the console stdout bleeds behind opencode tui ![img_19.png](img_19.png)
+- lazily-rs.md tmux window crashed and auto-restarted
 <!-- /agent:queue -->
 ###
 <!--
@@ -61,16 +88,14 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-1. [ ] [#3hwr] #clear-stops-running-process — detect idle-composer footer pattern in busy guard; reclassify as idle/repairable
-2. [ ] [#vypc] #jb-stale-busy-idle-footer — treat ctrl+p context-% footer as idle repair evidence
-3. [ ] [#gyma] #prompt-duplicated-while-typing — idempotent retry convergence on IPC already_applied; dedup prompt text in normalize_user_prompts
-4. [ ] [#5qhn] #adoc-queue-ipc-buffer-divergence — consume->halt cycle with no recurring agent:queue diff
-5. [ ] [#0mgb] #lr-queue-patchback-miss — record seen free-text queue heads; require committed response proof
-6. [ ] [#30h3] #queue-auto-no-continue — auto-continue through non-fatal session-check outcomes
-7. [ ] [#k5ne] #codex-403-429-fallback — add 403→429 transport rejection detection and diagnostic
-8. [ ] [#7gy5] #codex-network-access-opencode-guard — guard codex_network_access for non-codex agents
-9. [ ] [#sxjj] #cancel-orphans-preflight-cycle — JB cancel abandons orphaned preflight_started cycle
-10. [ ] [#cd98] #backlog-priority-attribute — add priority attribute to backlog items
+1. [ ] [#gyma] #prompt-duplicated-while-typing — idempotent retry convergence on IPC already_applied; dedup prompt text in normalize_user_prompts
+2. [ ] [#5qhn] #adoc-queue-ipc-buffer-divergence — consume->halt cycle with no recurring agent:queue diff (stays open: gated on IPC capture session #6cmx)
+3. [ ] [#0mgb] #lr-queue-patchback-miss — record seen free-text queue heads; require committed response proof
+4. [ ] [#30h3] #queue-auto-no-continue — auto-continue through non-fatal session-check outcomes
+5. [ ] [#k5ne] #codex-403-429-fallback — add 403→429 transport rejection detection and diagnostic
+6. [ ] [#7gy5] #codex-network-access-opencode-guard — guard codex_network_access for non-codex agents (stays open: implementable next cycle)
+7. [ ] [#sxjj] #cancel-orphans-preflight-cycle — JB cancel abandons orphaned preflight_started cycle
+8. [ ] [#cd98] #backlog-priority-attribute — add priority attribute to backlog items
 <!-- /agent:backlog -->
 
 ## Review
@@ -122,7 +147,6 @@ What are #next-steps to fix bugs?
 - [/] [#finalize-retry-ipc-response-duplication] [recommended] Multi-retry finalize + live IPC duplicates the response and prefixes its body lines with the user-prompt marker. Live repro 2026-05-29 on agent-doc-bugs2.md: a closeout needing several finalize/write retries (lint-gate / session-check / live_prompt_drift re-runs) with the IDE IPC listener active and concurrent editing left a duplicated response block plus agent body lines wrongly prefixed (uncommitted; HEAD stayed clean; manual git checkout repaired). Fix direction: idempotent retry convergence on IPC already_applied, never prefix agent response body as a prompt, and repair/session-check auto-dedup. Relates to #prompt-duplicated-while-typing, #duplicate-response-after-commit, #ipc-dup-tracking-double-merge (plugin 0.2.138 not yet installed during repro). Plan: tasks/agent-doc/plan-finalize-retry-ipc-response-duplication.md.
 - [/] [#ipc-dup-tracking-double-merge] PromptPoller double-tracking fix (plugin 0.2.138, submodule 32fb0b98 / superproject d585a33de): addFile keyed trackedFiles by project-relative path while handlePollResults keyed by "$cwd:$file", double-tracking the same VirtualFile (live: corky.md, brandon-cinquegrana.md, agent-doc-bugs2.md; trackedFiles=13 vs ffiTracked=9). Two divergent baselines -> mergeOrReload ran twice per change = full-document duplication path. Fixed by keying both via trackingKey(VirtualFile.path); convergence test + AGENTS.md invariant. GATED on live verify: install signed 0.2.138, restart, confirm no recurring duplication (corky.md). Exact setText payload uncaptured (JB debug logging was OFF). Relates to #ipcfullprompt-recur2, #adoc-queue-ipc-buffer-divergence, #prompt-duplicated-while-typing.
 - [/] [#jb-load-tmux-window-verify] [recommended] Live-verify the new JB Load Tmux Window action (plugin 0.2.136): install the signed zip, confirm it autostarts/loads the tmux pane for a focused doc whose pane is not up (e.g. corky.md). If the autostart sync genuinely fails to spawn the pane in that case (vs. by-design passive open), capture the route/sync logs as a separate autostart bug.
-- [/] [#jb-stale-busy-idle-footer] LOG REVIEW 2026-06-03 confirms issue: the tsift.md clear logs classify pane %62 as opencode_active_turn while the captured footer tail is idle-composer style ctrl+p commands with context percentages. This is log-backed evidence for stale-busy/idle-footer handling; keep open until route.rs/session_actor_cmd.rs treats that footer as idle repair evidence.
 - [/] [#adoc-queue-ipc-buffer-divergence] Root cause #2 IMPLEMENTED (submodule c483080a; pointer 4703f9788), but LOG REVIEW 2026-06-03 denies live completion: ops.log still shows ipc_snapshot_adoption_blocked reason=live_prompt_drift_after_preflight for agent-doc-bugs2.md and recurring queue_diff_active_prompt_differs. No clean consume->halt cycle with no recurring agent:queue diff was found. Keep open. Plan: tasks/agent-doc/plan-queue-ipc-drift.md.
 - [/] [#cancel-orphans-preflight-cycle] Canceling a run then invoking Run Agent Doc fails closed because the explicit cancel does not abandon the orphaned preflight_started cycle (route waits for staleness). Distinct from the stale-busy actor/lease items: this is per-document cycle_state left open by cancel. Plan: tasks/agent-doc/plan-cancel-orphans-preflight-cycle.md (recommend Option A — JB cancel emits a signal that abandons the no-capture preflight_started cycle). Reported 2026-05-29.
 - [/] [#prompt-duplicated-while-typing] [/] [#prompt-duplicated-while-typing] User prompt duplication prevention remains partially fixed. LOG REVIEW 2026-06-03 partial: logs show live_prompt_drift_after_preflight blocks and IPC proof insufficiency, so the guard catches some drift, but no fresh typing-during-cycle reverify log proves no duplicate prompt insertion. Keep open. Plan: tasks/agent-doc/plan-prompt-duplicated-while-typing.md.

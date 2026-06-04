@@ -4679,6 +4679,8 @@ mod tests {
             required_backlog_targets: Vec::new(),
             required_explicit_backlog_item_count: 0,
             required_plan_reference_count: 0,
+            queue_task_id: None,
+            turn_id: None,
             pending_done_ids: Vec::new(),
             pending_kept_open_ids: Vec::new(),
             reaped_pending_ids: Vec::new(),

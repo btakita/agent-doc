@@ -90,6 +90,10 @@ pub struct CycleState {
     pub required_explicit_backlog_item_count: usize,
     #[serde(default, skip_serializing_if = "is_zero")]
     pub required_plan_reference_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_task_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_id: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_done_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -224,6 +228,21 @@ pub fn start_preflight(
     snapshot_content: Option<&str>,
     file_content: Option<&str>,
 ) -> Result<CycleState> {
+    start_preflight_with_task(file, snapshot_content, file_content, None, None)
+}
+
+/// (#reentrant-finalize Phase 5) Start preflight with optional queue task
+/// identifiers. `queue_task_id` is the backlog ID (e.g. `#reentrant-phase2`).
+/// `turn_id` is derived from the backlog ID or auto-generated. Both are stored
+/// in cycle state so crash recovery can correlate the pipeline step with the
+/// original task.
+pub fn start_preflight_with_task(
+    file: &Path,
+    snapshot_content: Option<&str>,
+    file_content: Option<&str>,
+    queue_task_id: Option<&str>,
+    turn_id: Option<&str>,
+) -> Result<CycleState> {
     let now = now_secs();
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let state = CycleState {
@@ -244,6 +263,8 @@ pub fn start_preflight(
         required_backlog_targets: Vec::new(),
         required_explicit_backlog_item_count: 0,
         required_plan_reference_count: 0,
+        queue_task_id: queue_task_id.map(|s| s.to_string()),
+        turn_id: turn_id.map(|s| s.to_string()),
         pending_done_ids: Vec::new(),
         pending_kept_open_ids: Vec::new(),
         reaped_pending_ids: Vec::new(),
@@ -886,6 +907,8 @@ fn synthetic_state_with_id(
         required_backlog_targets: Vec::new(),
         required_explicit_backlog_item_count: 0,
         required_plan_reference_count: 0,
+        queue_task_id: None,
+        turn_id: None,
         pending_done_ids: Vec::new(),
         pending_kept_open_ids: Vec::new(),
         reaped_pending_ids: Vec::new(),
@@ -1387,5 +1410,41 @@ mod tests {
             !dir.path().join(".agent-doc/logs").exists(),
             "plain documents without a session id should not create session logs"
         );
+    }
+
+    #[test]
+    fn start_preflight_with_task_stores_queue_task_id_and_turn_id() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+
+        let state = start_preflight_with_task(
+            &doc,
+            Some("snap"),
+            Some("body"),
+            Some("#reentrant-phase2"),
+            Some("#reentrant-phase2"),
+        )
+        .unwrap();
+        assert_eq!(
+            state.queue_task_id.as_deref(),
+            Some("#reentrant-phase2")
+        );
+        assert_eq!(state.turn_id.as_deref(), Some("#reentrant-phase2"));
+
+        let loaded = load(&doc).unwrap().expect("state should persist");
+        assert_eq!(loaded.queue_task_id, state.queue_task_id);
+        assert_eq!(loaded.turn_id, state.turn_id);
+    }
+
+    #[test]
+    fn start_preflight_without_task_has_none_ids() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+
+        let state = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        assert!(state.queue_task_id.is_none());
+        assert!(state.turn_id.is_none());
     }
 }

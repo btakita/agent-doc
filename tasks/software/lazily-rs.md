@@ -38,6 +38,16 @@ queue_active: true
 Compacted content:
 - Archived 3 response topic(s): asyncctx3 AsyncContext core - glm-5.1; #6z71 #asyncctx4 Async dependency tracking - glm-5.1; #cmt9 #asyncctx5 Cancellation - stale future abort, in-flight dedup - glm-5.1
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
+
+### Re: #eek4 #asyncctx6 Async effects - glm-5.1
+
+Implemented effect_async with cleanup and rerun support as b9999ba.
+4 new tests. All 144 pass. Committed as b9999ba, pushed.
+
+### Re: queue-drain #eek4 cleanup — glm-5.1
+
+Struck completed #eek4 (#asyncctx6) from queue, reaped from backlog. Queue continues with #r25x.
+<!-- agent:boundary:fe1b2942 -->
 <!-- /agent:exchange -->
 ###
 <!--

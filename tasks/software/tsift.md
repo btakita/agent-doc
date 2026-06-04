@@ -36,7 +36,11 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): surreal-skip-load
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:b386a827 -->
+
+### Re: test
+
+Test response.
+<!-- agent:boundary:307fa882 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -55,7 +59,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 <!-- agent:backlog -->
 - [ ] [#ehj2] #surreal-skip-load-test Add regression test for deferred index load
 - [ ] [#astnav-npm] Configure NPM_TOKEN + TSIFT_ENABLE_NPM_PUBLISH secrets, publish opencode-tsift to npm (medium)
-- [ ] [#astnav-autoindex-oc] Auto-reindex for OpenCode via plugin freshness check on load (low)
 <!-- /agent:backlog -->
 
 ## Review

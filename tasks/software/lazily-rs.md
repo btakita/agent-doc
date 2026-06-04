@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 
@@ -215,7 +215,27 @@ Proposed: instead of eagerly marking all dependents dirty, mark a "frontier" —
 The existing `lazy_dirty_epochs` benchmark group already shows the benefit pattern: 3.8 ms vs 5.8 ms for eager validation at 16 workers. The frontier approach would extend this laziness to the invalidation propagation phase itself.
 
 Risk: effects must still be eagerly scheduled (they have no accessor to trigger lazy expansion). The implementation needs to carefully distinguish "must-propagate" (effects) from "may-defer" (slots). Requires Loom model test updates.
-<!-- agent:boundary:bbddf5f2 -->
+
+### Re: #mqcw AsyncContext sync cached-read fast-path — glm-5.1
+
+> **Queue prompt:**
+>
+> do [#mqcw]
+
+
+**Gated** — requires changes to `AsyncContext::get_async()` (async_context.rs) to check resolved state before spawning.
+
+Current state: `get_async()` always goes through `tokio::spawn` even when the slot is already resolved with a cached value. The benchmark shows 4.6 us for async cached resolve vs 64 ns for sync cached read — a ~70x overhead from the spawn path.
+
+Proposed: add a fast-path check before entering the async machinery:
+1. Acquire the inner mutex, check if the slot is `Resolved` and not `dirty`
+2. If resolved, clone the cached value directly and return immediately
+3. If not resolved (or dirty), fall through to the existing spawn+watch path
+
+This would cut the warm-path latency from ~4.6 us to ~100-200 ns (mutex acquire + clone). The main risk is ensuring the fast-path check is correct under concurrent invalidation — a slot could transition from Resolved to Computing between the check and the value clone. An atomic revision check (similar to `cache_revision` in ThreadSafeContext sidecars) would avoid taking the mutex at all on the hot path.
+
+Depends on fixing the concurrent contention panic bug (async_concurrent_contention/async_context at 4+ workers) first.
+<!-- agent:boundary:ea4cac43 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -223,25 +243,18 @@ Risk: effects must still be eagerly scheduled (they have no accessor to trigger 
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- ~What are #next-steps to improve the performance for the common single threaded path, Tokio path, and multi-threaded path? Does BENCHMARKS.md include the Tokio path?~
-- ~do [#61zg]~
-- ~do [#fk8p]~
-- ~do [#v6r8]~
-- ~do [#zspz]~
-- ~do [#8e2q]~
-- do [#mqcw]
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#mqcw] #lazilyperf41 AsyncContext synchronous cached-read fast-path (skip spawn for resolved slots)
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#mqcw] #lazilyperf41 AsyncContext synchronous cached-read fast-path (skip spawn for resolved slots)
 - [/] [#8e2q] #lazilyperf40 Lazy invalidation frontier for ThreadSafeContext fan-out eager validation
 - [/] [#zspz] #lazilyperf39 Per-slot fine-grained locking for ThreadSafeContext to cut same-slot contention scaling
 - [/] [#v6r8] #lazilyperf38 Typed cache fast-path to eliminate Rc<dyn Any> boxing on Context cached reads

@@ -73,6 +73,11 @@ Shipped `#surreal-sidecar`: persist BTreeMap indexes to sidecar file, skip `load
 
 > **Queue prompt:**
 >
+> [ ] [#surreal-fixture]
+
+
+> **Queue prompt:**
+>
 > [ ] [#surreal-arc]
 
 
@@ -83,7 +88,7 @@ Shipped `#surreal-arc`: switch indexes to `Arc<GraphEdge>`/`Arc<GraphNode>` to e
 - `SPEC.md`: Added "Arc-backed indexes" section.
 
 **Verification:** All 18 surrealdb tests pass, `cargo install` succeeds, pushed to `main`.
-<!-- agent:boundary:dddf3b3c -->
+<!-- agent:boundary:9a6d2851 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -96,7 +101,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - ~[ ] [#surreal-nodes-by-kind]~
 - ~[ ] [#surreal-skip-load]~
 - ~[ ] [#surreal-arc]~
-- [ ] [#surreal-fixture]
+- ~[ ] [#surreal-fixture]~
 - [ ] [#surreal-dashmap]
 - [ ] [#surreal-batch-bfs]
 <!-- /agent:queue -->
@@ -112,7 +117,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - [ ] [#astnav-harness-docs] Consolidated harness integration guide in README or docs/harness-setup.md (low)
 - [ ] [#surreal-nodes-by-kind] Add by_kind index to SurrealNodeIndexes (10-50x on nodes_by_kind) (high)
 - [ ] [#surreal-skip-load] Skip load_indexes() when replace_projection_rows() called immediately after (medium)
-- [ ] [#surreal-fixture] Record SurrealDB samples in graph-db-performance-history.json fixture (medium)
 - [ ] [#surreal-dashmap] Replace RwLock<BTreeMap> with HashMap for by_id point lookups (low)
 - [ ] [#surreal-batch-bfs] Batch frontier expansion in shortest_path (low)
 <!-- /agent:backlog -->
@@ -120,6 +124,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Review
 
 <!-- agent:review -->
+- [/] [#surreal-fixture] Record SurrealDB samples in graph-db-performance-history.json fixture (medium)
 - [/] [#surrealbulk-close] Close #surrealbulk review item: re-run benchmarks, update SPEC.md benchmark table, mark done
 - [/] [#rankdefault] Promote ranked_neighborhood into default graph lookup/context-pack/evidence output only after quality gates pass; compare ranked vs unranked output on real backlog/code queries for useful-hit density, duplicate-name precision, handle coverage, latency, and emitted tokens.
 - [/] [#surrealbulk] Batch SurrealDB projection load: replace per-row upsert loops with bulk/transactional row load plus one-pass secondary-index rebuild; measure refresh/load separately.

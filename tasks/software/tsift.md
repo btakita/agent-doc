@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -97,6 +97,11 @@ Gated `#surreal-fixture`: requires running `tsift graph-db --json backend-eval -
 
 > **Queue prompt:**
 >
+> [ ] [#surreal-batch-bfs]
+
+
+> **Queue prompt:**
+>
 > [ ] [#surreal-dashmap]
 
 
@@ -107,7 +112,7 @@ Shipped `#surreal-dashmap`: replaced `BTreeMap` with `HashMap` for the primary `
 - `SPEC.md`: Updated Arc-backed indexes section noting HashMap.
 
 **Verification:** All 18 surrealdb tests pass, pushed to `main`.
-<!-- agent:boundary:6bd945ae -->
+<!-- agent:boundary:d3ac3443 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -116,18 +121,13 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- ~[ ] [#surreal-nodes-by-kind]~
-- ~[ ] [#surreal-skip-load]~
-- ~[ ] [#surreal-arc]~
-- ~[ ] [#surreal-fixture]~
-- ~[ ] [#surreal-dashmap]~
-- [ ] [#surreal-batch-bfs]
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#surreal-batch-bfs-gated] Batch frontier expansion in shortest_path - gated, requires cross-crate API design (low)
 - [ ] [#astnav-hooks] Ship tsift-rewrite.sh in-tree + expand PreToolUse equivalent for Codex/OpenCode (medium)
 - [ ] [#astnav-npm] Configure NPM_TOKEN + TSIFT_ENABLE_NPM_PUBLISH secrets, publish opencode-tsift to npm (medium)
 - [ ] [#astnav-commands] Expand OpenCode command set: /tsift-explain, /tsift-symbol-read, /tsift-graph (low)
@@ -136,12 +136,12 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - [ ] [#astnav-harness-docs] Consolidated harness integration guide in README or docs/harness-setup.md (low)
 - [ ] [#surreal-nodes-by-kind] Add by_kind index to SurrealNodeIndexes (10-50x on nodes_by_kind) (high)
 - [ ] [#surreal-skip-load] Skip load_indexes() when replace_projection_rows() called immediately after (medium)
-- [ ] [#surreal-batch-bfs] Batch frontier expansion in shortest_path (low)
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#surreal-batch-bfs] #surreal-batch-bfs-gated: Batch frontier expansion - gated (low)
 - [/] [#surreal-fixture] Record SurrealDB samples in graph-db-performance-history.json fixture (medium)
 - [/] [#surrealbulk-close] Close #surrealbulk review item: re-run benchmarks, update SPEC.md benchmark table, mark done
 - [/] [#rankdefault] Promote ranked_neighborhood into default graph lookup/context-pack/evidence output only after quality gates pass; compare ranked vs unranked output on real backlog/code queries for useful-hit density, duplicate-name precision, handle coverage, latency, and emitted tokens.

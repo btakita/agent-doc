@@ -119,7 +119,7 @@ SQLite hot reads are already excellent — sub-ms BFS (65µs), sub-ms incident e
 - **Evidence target resolution multi-strategy** — Already implements exact -> handle property -> ref_id -> label -> #normalized. Consider adding fuzzy/typo-tolerance for handle misses when the graph has symbols with similar names.
 
 Top of backlog: **`#sqlite-chunk`**
-<!-- agent:boundary:39038d0c -->
+<!-- agent:boundary:4b6f9b22 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -132,6 +132,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - ~What are #next-steps for lazily-rs help with performance?~
 - ~What are #next-steps to improve the sqlite graph performance + effectiveness?~
 - What are #next-steps for tsift to save tokens?
+- Are these lazily-rs tasks for the lazily-rs project or the tsift project to implement?
 <!-- /agent:queue -->
 
 ## Backlog

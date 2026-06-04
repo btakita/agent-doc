@@ -92,7 +92,33 @@ Took ownership (`agent: claude`). Evaluated the semantic framework you proposed.
 **Harness parity (your point 5):** the three continuation paths already gate on `queue_active`/`auto` — Claude Code `/loop`, the Codex Stop-hook (`active_auto_queue_prompt`), and the OpenCode auto-loop. This is mostly a read-path consolidation: they all read the unified `queue:` state, and preflight keeps emitting `queue_active`/`queue_trigger` derived from it. So `queue: start`/`go` starts and drains identically under Codex and Claude Code, matching OpenCode.
 
 Captured as plan `tasks/agent-doc/plan-queue-state-frontmatter-unification.md` (4 phases) and backlog `[#queue-state-unify]`. The separate "drive `agent:exchange` prompts into backlog then prepend their ids to the queue" prompt composes on top of this state model — kept as its own item, not folded in.
-<!-- agent:boundary:ed2ea5ff -->
+
+### Re: implemented #queue-state-unify (phase 1+2) — opus-4-8
+
+Implemented the unified queue control you selected. Committed, tested, isolation-verified.
+
+#### What landed (`src/agent-doc` `3f9b32d4`, superproject `568ff2fd8`)
+
+- **`QueueControl` enum** — `start`/`go` → active, `stop` → inactive. Lenient parse (case/whitespace-insensitive); an unknown value (typo) is ignored, never flips activation.
+- **`Frontmatter.queue` field + `normalize_queue_control()`** — folds a recognized `queue:` value onto the existing `queue_active` boolean in **both** parse paths. So every existing reader — preflight activation, Claude `/loop` continuation, Codex Stop-hook, OpenCode auto-loop — honors `queue: start|go|stop` through one read path, no per-harness wiring. The canonical key wins over a stale `queue_active:`.
+- `queue_active:` and the `auto` marker stay accepted as **deprecated input** (back-compat; this doc keeps working).
+- Spec updated (`specs/07-orchestration-commands.md`); 7 core + 2 orchestration tests.
+
+This satisfies your core ask — **`queue: start` / `queue: go` now activates the queue identically under Claude/Codex/OpenCode**, and `queue: stop` halts it.
+
+#### Verification
+
+Full orchestration lib suite in a clean-HEAD sibling worktree (with my files applied): **2257 passed / 2 failed**. The 2 failures (`route::tests::fresh_start_ack_outcome…`, `…rejects_codex_footer_without_prompt`) are **pre-existing route prompt-detection failures at HEAD** on this branch — they fail on clean HEAD without my change too, and sit in the concurrent session's `route.rs` area. Not introduced here.
+
+#### Boundaries (honest)
+
+- **Not built/installed live yet.** The working tree carries a concurrent session's uncommitted `route.rs`/`session_check.rs`; a `cargo install` would bundle that incomplete work. Live install is deferred until it lands — the code is committed + green for its own scope.
+- **Phases 3–4 remain** (`#queue-state-unify`): writer emitting `queue:` / drain → `queue: stop`, the `auto` → `queue: start` normalize-on-write migration, and harness-parity doc rewrites. The read path is the high-value slice and it's done.
+
+#### Your new queue item
+
+Captured *"Implement `run_id` + `step` frontmatter…for re-entrancy / pipeline state"* as backlog `[#fm-run-id-step]` (relates the reentrant-finalize-pipeline plan). It's a separate substantial feature — flagged, not folded into this turn.
+<!-- agent:boundary:79e43509 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
@@ -121,7 +147,8 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#queue-state-unify] Unify queue activation under one tri-state `queue: start|go|stop` frontmatter key — deprecate marker `auto` + `queue_active` (normalize-on-read), drain sets `queue: stop`, harness parity Claude/Codex/OpenCode. Plan: tasks/agent-doc/plan-queue-state-frontmatter-unification.md
+- [ ] [#fm-run-id-step] Implement `run_id` + `step` (and `turn_id`, `queue_task_id`) frontmatter fields surfacing live pipeline state for re-entrancy + observability. Relates tasks/agent-doc/plans/reentrant-finalize-pipeline.md.
+- [ ] [#queue-state-unify] Unify queue activation under one tri-state `queue: start|go|stop` frontmatter key (deprecate `auto` + `queue_active`). **Phase 1+2 DONE** (read normalization; src/agent-doc `3f9b32d4`). Remaining: phase 3 harness-parity doc rewrites, phase 4 writer emits `queue:`/drain→`queue: stop` + `auto`→`queue: start` migration + live build/install. Plan: tasks/agent-doc/plan-queue-state-frontmatter-unification.md
 <!-- /agent:backlog -->
 
 ## Review

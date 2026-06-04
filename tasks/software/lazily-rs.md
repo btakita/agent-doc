@@ -159,7 +159,27 @@ Each layer depends only on the layer below. Core `lazily` stays zero-dependency.
 #### Queue items
 
 `do #ipc1`, `do #ipc2`, `do #ipc3` are `[recommended]` design-phase items. They need design docs before spec/test/build. Removing from queue; keeping in backlog for design work. Ready to start design when you want.
-<!-- agent:boundary:e0afe30c -->
+
+### Re: Internet-friendly coordination — glm-5.1
+
+The above response covered serialization, IPC, distributed coordination, P2P models, discovery, and brokers. For **internet-friendly** coordination specifically:
+
+#### Internet-friendly approaches
+
+1. **WebRTC** — peer-to-peer with NAT traversal (STUN/TURN). Signal state changes propagate directly between browsers/nodes. Best for real-time collaborative apps.
+
+2. **WebSocket + relay** — lightweight server relays CRDT-merged signal deltas. Simple, works through firewalls. The relay is not a broker — it just forwards messages.
+
+3. **libp2p** — modular networking stack (used by IPFS). Built-in Kademlia DHT for discovery, gossipsub for broadcast, noise for encryption. Ideal for decentralized signal graphs across the open internet.
+
+4. **gRPC + tonic** — for controlled deployments where nodes know each other. Stream-based signal updates over HTTP/2.
+
+5. **MQTT/NATS** — pub/sub messaging. Signal changes publish to topics; subscribers receive deltas. NATS specifically has CRDT-friendly features (JetStream persist + replay).
+
+**Recommendation for internet use:** Start with `lazily-ipc` using a WebSocket relay (simplest path through firewalls). Layer `libp2p` in `lazily-distributed` for true P2P across NATs.
+
+The queue items `do #ipc1`, `do #ipc2`, `do #ipc3` are `[recommended]` design-phase items — not ready for spec/test/build preset. They stay in backlog.
+<!-- agent:boundary:7411b80e -->
 <!-- /agent:exchange -->
 ###
 <!--

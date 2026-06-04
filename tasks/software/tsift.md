@@ -36,7 +36,28 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 3 response topic(s): #wal-checkpoint-tuning; #8v37; #next-steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:639b68fe -->
+
+### Re: #cyba — glm-5.1
+
+Implemented `tsift graph-db map` — a two-tier graph overview command.
+
+**Changes:**
+- `packages/tsift-cli/src/cli.rs`: Added `Map` variant to `GraphDbQuery` with `--focus`, `--top-hubs`, `--community-limit`, `--focus-depth` options
+- `packages/tsift-cli/src/commands/infra.rs`: `cmd_graph_db_map()` composes `all_nodes`, `all_edges`, `incident_edges`, and `detect_communities` into overview (communities, top hubs, edge-kind histogram, module tree) + optional focus tier
+- `packages/tsift-cli/src/lib.rs`: `Map` match arm in `graph_db_report_from_store` redirects to dedicated command
+- `SPEC.md`: Documented map command in graph-db API section + CLI examples
+
+**Verification:**
+```
+tsift graph-db --path . --scope tsift --compact map
+# map n:4767 e:28427 com:20 hubs:10 mods:8 ek:12
+
+tsift graph-db --path . --scope tsift map --focus detect_communities
+# Focus: detect_communities [symbol] degree: 37 neighbors: 37
+```
+
+Commit: `e223156` pushed to main
+<!-- agent:boundary:81b2a781 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -51,7 +72,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#cyba] #graphdb-map-command Implement tsift graph-db --json map composing communities + ranked_neighborhood + status into two-tier (overview + opt-in focus) response (high)
 - [ ] [#hxgp] #graphdb-map-overview-tier Overview tier: community count, top-10 degree hubs, edge-kind histogram, module containment tree, target <500 tokens ultra-terse (medium)
 - [ ] [#9tg6] #graphdb-map-focus-tier Focus tier: --focus <symbol> flag reusing explain envelope for single-symbol deep-dive (medium)
 <!-- /agent:backlog -->
@@ -82,5 +102,6 @@ Could FalkorDB help with performance?
 ## Completed / Reaped
 
 <!-- agent:done archive=tasks/software/tsift.done.md -->
+
 <!-- completed work archived in tasks/software/tsift.done.md -->
 <!-- /agent:done -->

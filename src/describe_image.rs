@@ -144,11 +144,14 @@ fn mime_from_path(path: &Path) -> Result<&'static str> {
     }
 }
 
-fn resolve_provider(cli_provider: Option<&str>) -> Result<Provider> {
+fn resolve_provider(cli_provider: Option<&str>, config_provider: Option<&str>) -> Result<Provider> {
     if let Some(p) = cli_provider {
         return p.parse();
     }
     if let Ok(p) = std::env::var("AGENT_DOC_VISION_PROVIDER") {
+        return p.parse();
+    }
+    if let Some(p) = config_provider {
         return p.parse();
     }
     Ok(Provider::OpenAI)
@@ -171,12 +174,15 @@ fn shell_expand(value: &str) -> Result<String> {
     Ok(expanded.to_string())
 }
 
-fn resolve_api_key(provider: &Provider, cli_key: Option<&str>) -> Result<String> {
+fn resolve_api_key(provider: &Provider, cli_key: Option<&str>, config_key: Option<&str>) -> Result<String> {
     if let Some(k) = cli_key {
         return shell_expand(k);
     }
     if let Ok(k) = std::env::var("AGENT_DOC_VISION_API_KEY") {
         return Ok(k);
+    }
+    if let Some(k) = config_key {
+        return shell_expand(k);
     }
     let env_var = match provider {
         Provider::OpenAI => "OPENAI_API_KEY",
@@ -184,18 +190,21 @@ fn resolve_api_key(provider: &Provider, cli_key: Option<&str>) -> Result<String>
     };
     std::env::var(env_var).with_context(|| {
         format!(
-            "no API key found. Set --api-key, AGENT_DOC_VISION_API_KEY, or {}",
+            "no API key found. Set --api-key, AGENT_DOC_VISION_API_KEY, config.toml [vision] api_key, or {}",
             env_var
         )
     })
 }
 
-fn resolve_model(provider: &Provider, cli_model: Option<&str>) -> String {
+fn resolve_model(provider: &Provider, cli_model: Option<&str>, config_model: Option<&str>) -> String {
     if let Some(m) = cli_model {
         return m.to_string();
     }
     if let Ok(m) = std::env::var("AGENT_DOC_VISION_MODEL") {
         return m;
+    }
+    if let Some(m) = config_model {
+        return m.to_string();
     }
     match provider {
         Provider::OpenAI => DEFAULT_OPENAI_MODEL.to_string(),
@@ -315,13 +324,16 @@ pub fn describe_image_data(
 }
 
 pub fn resolve_vision_config(
-    provider: Option<&str>,
-    model: Option<&str>,
-    api_key: Option<&str>,
+    cli_provider: Option<&str>,
+    cli_model: Option<&str>,
+    cli_api_key: Option<&str>,
+    config_provider: Option<&str>,
+    config_model: Option<&str>,
+    config_api_key: Option<&str>,
 ) -> Result<(Provider, String, String)> {
-    let provider = resolve_provider(provider)?;
-    let api_key = resolve_api_key(&provider, api_key)?;
-    let model = resolve_model(&provider, model);
+    let provider = resolve_provider(cli_provider, config_provider)?;
+    let api_key = resolve_api_key(&provider, cli_api_key, config_api_key)?;
+    let model = resolve_model(&provider, cli_model, config_model);
     Ok((provider, api_key, model))
 }
 
@@ -391,7 +403,16 @@ pub fn run(
     api_key: Option<&str>,
     prompt: Option<&str>,
 ) -> Result<()> {
-    let (provider, api_key, model) = resolve_vision_config(provider, model, api_key)?;
+    let project_config = crate::project_config::load_project_for_doc(image);
+    let vision = &project_config.vision;
+    let (provider, api_key, model) = resolve_vision_config(
+        provider,
+        model,
+        api_key,
+        vision.provider.as_deref(),
+        vision.model.as_deref(),
+        vision.api_key.as_deref(),
+    )?;
     let prompt = prompt.unwrap_or(DEFAULT_PROMPT);
     let description = describe_image_data(image, &provider, &api_key, &model, prompt)?;
     println!("{}", description);
@@ -457,13 +478,13 @@ mod tests {
 
     #[test]
     fn resolve_model_default_openai() {
-        assert_eq!(resolve_model(&Provider::OpenAI, None), DEFAULT_OPENAI_MODEL);
+        assert_eq!(resolve_model(&Provider::OpenAI, None, None), DEFAULT_OPENAI_MODEL);
     }
 
     #[test]
     fn resolve_model_default_anthropic() {
         assert_eq!(
-            resolve_model(&Provider::Anthropic, None),
+            resolve_model(&Provider::Anthropic, None, None),
             DEFAULT_ANTHROPIC_MODEL
         );
     }
@@ -471,20 +492,20 @@ mod tests {
     #[test]
     fn resolve_model_cli_override() {
         assert_eq!(
-            resolve_model(&Provider::OpenAI, Some("gpt-4o-mini")),
+            resolve_model(&Provider::OpenAI, Some("gpt-4o-mini"), None),
             "gpt-4o-mini"
         );
     }
 
     #[test]
     fn resolve_provider_default() {
-        assert!(matches!(resolve_provider(None).unwrap(), Provider::OpenAI));
+        assert!(matches!(resolve_provider(None, None).unwrap(), Provider::OpenAI));
     }
 
     #[test]
     fn resolve_provider_cli() {
         assert!(matches!(
-            resolve_provider(Some("anthropic")).unwrap(),
+            resolve_provider(Some("anthropic"), None).unwrap(),
             Provider::Anthropic
         ));
     }
@@ -495,13 +516,13 @@ mod tests {
             std::env::remove_var("AGENT_DOC_VISION_API_KEY");
             std::env::remove_var("OPENAI_API_KEY");
         }
-        let err = resolve_api_key(&Provider::OpenAI, None).unwrap_err();
+        let err = resolve_api_key(&Provider::OpenAI, None, None).unwrap_err();
         assert!(err.to_string().contains("no API key found"));
     }
 
     #[test]
     fn resolve_api_key_cli() {
-        let key = resolve_api_key(&Provider::OpenAI, Some("test-key")).unwrap();
+        let key = resolve_api_key(&Provider::OpenAI, Some("test-key"), None).unwrap();
         assert_eq!(key, "test-key");
     }
 
@@ -617,7 +638,7 @@ mod tests {
             std::env::remove_var("AGENT_DOC_VISION_API_KEY");
             std::env::remove_var("OPENAI_API_KEY");
         }
-        let err = resolve_vision_config(None, None, None).unwrap_err();
+        let err = resolve_vision_config(None, None, None, None, None, None).unwrap_err();
         assert!(err.to_string().contains("no API key found"));
     }
 
@@ -653,9 +674,47 @@ mod tests {
     #[test]
     fn resolve_vision_config_with_key() {
         let (provider, api_key, model) =
-            resolve_vision_config(None, None, Some("test-key")).unwrap();
+            resolve_vision_config(None, None, Some("test-key"), None, None, None).unwrap();
         assert!(matches!(provider, Provider::OpenAI));
         assert_eq!(api_key, "test-key");
         assert_eq!(model, DEFAULT_OPENAI_MODEL);
+    }
+
+    #[test]
+    fn resolve_vision_config_config_fallback() {
+        unsafe {
+            std::env::remove_var("AGENT_DOC_VISION_PROVIDER");
+            std::env::remove_var("AGENT_DOC_VISION_API_KEY");
+            std::env::remove_var("AGENT_DOC_VISION_MODEL");
+            std::env::remove_var("OPENAI_API_KEY");
+        }
+        let (provider, api_key, model) = resolve_vision_config(
+            None,
+            None,
+            None,
+            Some("anthropic"),
+            Some("claude-sonnet-4-20250514"),
+            Some("config-key"),
+        )
+        .unwrap();
+        assert!(matches!(provider, Provider::Anthropic));
+        assert_eq!(api_key, "config-key");
+        assert_eq!(model, "claude-sonnet-4-20250514");
+    }
+
+    #[test]
+    fn resolve_vision_config_cli_overrides_config() {
+        let (provider, api_key, model) = resolve_vision_config(
+            Some("openai"),
+            Some("gpt-4o-mini"),
+            Some("cli-key"),
+            Some("anthropic"),
+            Some("claude-sonnet-4-20250514"),
+            Some("config-key"),
+        )
+        .unwrap();
+        assert!(matches!(provider, Provider::OpenAI));
+        assert_eq!(api_key, "cli-key");
+        assert_eq!(model, "gpt-4o-mini");
     }
 }

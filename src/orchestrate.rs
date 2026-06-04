@@ -1551,6 +1551,9 @@ fn build_image_description_block(file: &Path, doc: &str, agent_name: &str) -> Op
         vision.effective_provider(Some(agent_name)),
         vision.effective_model(Some(agent_name)),
         vision.effective_api_key(Some(agent_name)),
+        None,
+        None,
+        None,
     ) {
         Ok(config) => config,
         Err(err) => {

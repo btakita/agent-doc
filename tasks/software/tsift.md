@@ -83,7 +83,26 @@ For <1% change rates, this skips ~99% of rows before the expensive multi-row INS
 - 15/15 tests pass (2 test assertions updated for new phase timing format)
 - SPEC.md updated
 - Commit: `1145dfc` pushed to main
-<!-- agent:boundary:a49dc474 -->
+
+### Re: #terse-uniform — glm-5.1
+
+> **Queue prompt:**
+>
+> do [#terse-uniform]
+
+
+Converted three envelope report structs to use `TerseGraphNode`/`TerseGraphEdge`, stripping `provenance` and `freshness` at the Rust type level instead of relying on post-hoc JSON transforms.
+
+**Changed structs:** `GraphDbReport`, `GraphDbEvidenceReport`, `DispatchTraceReport` — all node/edge fields now use terse types.
+
+**Key changes:**
+- Re-exported `TerseGraphNode`/`TerseGraphEdge` through `tsift-sqlite`
+- Added reverse `From<Terse*>` impls in `tsift-core` for back-conversion where needed
+- Updated ~20 construction/assignment sites in `lib.rs` and `conflict_matrix.rs`
+- Pre-filtering skipped when `force_refresh_writes=true` (triggers need all rows staged)
+- 15/15 tsift-sqlite, 15/15 tsift-core, 34/35 conformance tests pass (1 pre-existing failure)
+- Commit: `115ee8b` pushed to main
+<!-- agent:boundary:d91944f0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -98,7 +117,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - ~do [#sqlite-doc-sync-safety]~
 - ~do [#sqlite-reentrant-guard]~
 - ~do [#refresh-skip-unchanged-staging]~
-- do [#terse-uniform]
+- ~do [#terse-uniform]~
 - do [#edge-index-references]
 - do [#degree-cache]
 - do [#community-summary-default]
@@ -110,7 +129,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#terse-uniform] Audit and enforce TerseGraphNode/TerseGraphEdge on all agent-facing envelope output paths — est 15-25% token reduction (high)
 - [ ] [#edge-index-references] Compress edge output with positional node index references instead of full ID strings — est 30-50% edge token reduction (medium)
 - [ ] [#degree-cache] Pre-compute and cache degree counts for DegreeWeighted ranked_neighborhood scoring (medium)
 - [ ] [#community-summary-default] Community-aware truncation summary in neighborhood output when max_nodes prunes results (medium)

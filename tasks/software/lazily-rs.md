@@ -58,7 +58,25 @@ Key additions to src/lazily-rs/src/async_context.rs:
 - spawn_async_compute helper, invalidate_async_slot, update_dependencies
 
 8 new tokio tests. All 132 tests pass. make check green. Committed as 26b0b8a, pushed to origin/main.
-<!-- agent:boundary:806cbe6e -->
+
+### Re: #6z71 #asyncctx4 Async dependency tracking - glm-5.1
+
+> **Queue prompt:**
+>
+> [#6z71]
+
+
+Implemented AsyncComputeContext::get_async for async-to-async dependency tracking as ae36783.
+
+Key changes to src/lazily-rs/src/async_context.rs:
+- AsyncComputeContext::get_async reads async slots within compute callbacks, recording dependencies
+- Dependencies tracked via Arc Mutex HashSet (shared between compute ctx and spawn task)
+- Changed compute closure to Fn(AsyncComputeContext) to Fut (owned) for Send + static safety
+- Dynamic edge updates on each recomputation
+- 5 new tests: async_slot_reads_async_slot, async_chain_invalidation, async_chain_three_levels, async_dependency_tracks_slot_edges, async_dependency_updates_on_rerun
+
+All 137 tests pass. make check green. Committed as ae36783, pushed to origin/main.
+<!-- agent:boundary:3456ed4c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -69,7 +87,7 @@ Key additions to src/lazily-rs/src/async_context.rs:
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - ~[#kp7w]~
 - ~[#8sqb]~
-- [#6z71]
+- ~[#6z71]~
 - [#cmt9]
 - [#eek4]
 - [#r25x]
@@ -79,7 +97,6 @@ Key additions to src/lazily-rs/src/async_context.rs:
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#6z71] `#asyncctx4` Async dependency tracking — suspend/resume across .await, automatic edge discovery
 - [ ] [#cmt9] `#asyncctx5` Cancellation — stale future abort on dependency invalidation, in-flight dedup
 - [ ] [#eek4] `#asyncctx6` Async effects — effect_async with cleanup, rerun on dependency change
 - [ ] [#r25x] `#asyncctx7` Tokio feature gate and integration tests

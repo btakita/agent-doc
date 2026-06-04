@@ -39,7 +39,7 @@ Compacted content:
 - Archived 9 response topic(s): Review evaluation; Typed cache fast-path implementation; Queue cleanup; 6 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
 
-### Re: Backpressure, offline peers, and state sync — glm-5.1
+### Re: Backpressure, offline peers, and state sync — glm-5.1 (HEAD)
 
 #### Backpressure handling
 
@@ -94,11 +94,11 @@ When a peer comes back online:
 
 The key insight: **lazily's existing lazy invalidation and dirty-tracking infrastructure already solves most of the backpressure and sync problem at the graph level**. The network layer just needs to map dirty sets → delta streams and vector clocks → gap detection.
 
-### Re: Queue bookkeeping — glm-5.1
+### Re: Queue bookkeeping — glm-5.1 (HEAD)
 
 Recovered from queue divergence. Backpressure response committed in prior cycle. Struck resolved items (#ipc1-#ipc3). Queue active — next item: WebRTC P2P broker question.
 
-### Re: WebRTC P2P — broker or brokerless? — glm-5.1
+### Re: WebRTC P2P — broker or brokerless? — glm-5.1 (HEAD)
 
 **Pure P2P is viable with WebRTC, no broker needed for data.** You do need a lightweight signaling server for connection establishment, but it never sees signal data.
 
@@ -152,7 +152,7 @@ Start with **full mesh + signaling server** for `lazily-distributed`:
 
 The signaling server can be embedded in `lazily-distributed` as a built-in module — it's just SDP/ICE forwarding, not data processing.
 
-### Re: Desktop-to-desktop (LAN), laptop-to-desktop (internet), remote user LAN, remote user internet — glm-5.1
+### Re: Desktop-to-desktop (LAN), laptop-to-desktop (internet), remote user LAN, remote user internet — glm-5.1 (HEAD)
 
 All four scenarios are the same WebRTC P2P architecture with different discovery and NAT traversal paths:
 
@@ -210,7 +210,119 @@ Combines scenarios 2 and 3 — NAT traversal + auth.
 | Other user-Desktop (internet) | Signaling server | Signaling server | STUN (+ TURN fallback) | Required (PIN/invite) |
 
 The code is the same in all cases — `lazily-distributed` runs the same WebRTC P2P path. Only discovery mechanism and auth requirements change per scenario.
-<!-- agent:boundary:d2ad8451 -->
+
+### Re: Free signaling servers & Cloudflare deployment — glm-5.1 (HEAD)
+
+#### Free / zero-cost signaling options
+
+1. **PeerJS server** — free hosted signaling at `0.peerjs.com`. Open-source, ~500 lines of JS. Self-hostable. Zero config for dev.
+
+2. **Embedded signaling in `lazily-distributed`** — ~200-line Rust WebSocket handler using `tokio-tungstenite`. Runs as part of the node binary. One peer acts as signaling host.
+
+3. **Cloudflare Worker or Fly.io free-tier** — generous free tiers covering personal/small-team signaling.
+
+#### Cloudflare is an excellent fit
+
+- **Free tier**: 100K requests/day, 10ms CPU. SDP/ICE messages are tiny, signaling only during connection setup. Hundreds of pairings/day free.
+- **Global edge**: low-latency worldwide.
+- **No server management**: `wrangler deploy`, done.
+
+Minimal Worker (~80 lines):
+
+```typescript
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    if (url.pathname === '/offer' || url.pathname === '/answer' || url.pathname === '/ice') {
+      const { from, to, payload } = await request.json();
+      await env.SIGNALS.put(`${to}:${Date.now()}`, JSON.stringify({ from, type: url.pathname.slice(1), payload }), { expirationTtl: 60 });
+      return new Response('ok');
+    }
+    if (url.pathname === '/poll') {
+      const peer = url.searchParams.get('peer');
+      const list = await env.SIGNALS.list({ prefix: `${peer}:` });
+      const messages = await Promise.all(list.keys.map(k => env.SIGNALS.get(k.name)));
+      return Response.json(messages);
+    }
+    return new Response('lazily-signal', { status: 200 });
+  }
+};
+```
+
+Cost: **$0/month** for typical usage. KV free tier: 100K reads/day, 1K writes/day. Full handshake = ~4 writes + ~4 reads.
+
+**Recommendation**: Start with embedded signaling (simplest), add Cloudflare Worker for internet-scale.
+
+### Re: Prescribed operations, sandboxing, and prompt injection defense — glm-5.1 (HEAD)
+
+#### Core principle: capability-based RPC, not arbitrary execution
+
+Remote peers send **typed RPC commands** from a fixed allowlist — never code or prompts.
+
+#### Prescribed operation model
+
+```rust
+enum RemoteOp {
+    BacklogAdd { doc: String, text: String },
+    BacklogList { doc: String },
+    ContextAppend { doc: String, section: String, content: String },
+    StateRead { signal_keys: Vec<String> },
+    StateSubscribe { signal_keys: Vec<String> },
+    ReviewAdd { doc: String, text: String },
+}
+```
+
+Each operation maps 1:1 to `agent-doc` CLI or `lazily` signal API. No escape hatch.
+
+#### Permission enforcement
+
+```toml
+[peers."user-alice"]
+allow = ["BacklogAdd", "BacklogList", "StateRead"]
+allow_docs = ["tasks/software/lazily-rs.md"]
+allow_signals = ["weather.*", "sensors.temperature"]
+deny_signals = ["secrets.*", "auth.*"]
+max_backlog_add_per_hour = 10
+```
+
+Allowlist checked **before** deserialization — unknown operation types rejected at network layer.
+
+#### Sandboxing layers
+
+1. **Network**: WebRTC delivers only typed `RemoteOp` enum. No shell, no eval.
+2. **Deserialization**: `serde` into `RemoteOp`. Unknown variants rejected.
+3. **Authorization**: per-peer allowlist vs operation type + target. Denied = error, no side effects.
+4. **Execution**: handler calls CLI/API directly. No shell, no string interpolation, no LLM prompt from remote input.
+5. **Rate limiting**: per-peer counters, configurable per operation type.
+
+#### Prompt injection defense
+
+**Remote input never enters an LLM prompt.** Injection prevented by construction:
+
+```
+Remote peer -> RemoteOp enum -> validated handler -> deterministic action
+```
+
+"Add to backlog: text" writes `text` as data. Your local agent reads it later with `source=remote:alice` — same trust boundary as local edits.
+
+Additional defenses:
+
+- **Content sanitization**: strip control chars, limit length, reject forged `<!-- agent:* -->` tags.
+- **Provenance tagging**: every mutation tagged `source=remote:alice`.
+- **Audit log**: peer ID, operation, target, timestamp.
+- **Approval mode**: `require_approval: true` queues for explicit local approval.
+
+#### What remote users CANNOT do
+
+Execute shell commands, invoke agents/LLMs, modify exchange content, access signals outside allowlist, inject structural markdown, trigger compilation/deployment.
+
+#### What remote users CAN do (with permissions)
+
+Add to backlog/review, read signals, subscribe to signal changes, append context, request state snapshots.
+
+Data-plane API only. Your desktop is the sole execution authority.
+<!-- agent:boundary:b1cbb0e8 -->
+<!-- agent:boundary:83679bc1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -218,19 +330,16 @@ The code is the same in all cases — `lazily-distributed` runs the same WebRTC 
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
-- How would backpressure be handled? What if the peer is offline or overwhelmed? Can we sync the current state once the peer is available?
-- Let's go with WebRTC to start. Do we need a broker server or can this be P2P?
-- How would coordination take place? Can a peer-to-peer model work? How would discovery work? Would we need a broker? Are there any internet-friendly ways with no or low cost to coordinate? Would piggybacking on WebRTC be a good approach or another protocol?
-- What about security? There should be a fine-grained permission model for remote users. Sometimes I am the remote user and I want access to my own data. If another user is the remote user, I want to be able to control what they can see and do. There should be sensible presets.
-- do [#ipc1]
-- do [#ipc2]
-- do [#ipc3]
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+- Are there any free and lightweight signaling servers or do I need a deployment? Can Cloudflare help if I need a deployment?
+- I don't want another user to execute arbitrary code or agents on my desktop. I want prescribed agent-doc operations such as adding to the backlog, adding context to an agent-doc, and requesting state. If we need a sandbox, do so. How can we guard against prompt injection?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
+- [ ] [#39c5] #sig1 [recommended] Implement RemoteOp enum + per-peer permission allowlist for lazily-distributed remote access
+- [ ] [#yxjw] #sig2 [recommended] Build Cloudflare Worker signaling server for internet-scale peer discovery
 <!-- /agent:backlog -->
 
 ## Review

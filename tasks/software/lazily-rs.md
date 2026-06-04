@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 
@@ -179,7 +179,9 @@ The above response covered serialization, IPC, distributed coordination, P2P mod
 **Recommendation for internet use:** Start with `lazily-ipc` using a WebSocket relay (simplest path through firewalls). Layer `libp2p` in `lazily-distributed` for true P2P across NATs.
 
 The queue items `do #ipc1`, `do #ipc2`, `do #ipc3` are `[recommended]` design-phase items — not ready for spec/test/build preset. They stay in backlog.
-<!-- agent:boundary:7411b80e -->
+❯ Can lazily-rs support serialization, transferring content between processes, and network communication? Would we need a DHT or another distributed consensus protocol for reliable coordination? Should the IPC and network coordination be a separate crate?
+Queue items `do #ipc1`, `do #ipc2`, `do #ipc3` are [recommended] design-phase items — no spec, no test plan, no implementation exists. The `#spec-test-build-install-commit-push` preset requires concrete spec + test changes. BLOCKER: design documents must be created before these items can enter a build queue. Response to the serialization/IPC/distributed question is above. Keeping items in backlog for future design work.
+<!-- agent:boundary:3f0c1510 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -187,15 +189,16 @@ The queue items `do #ipc1`, `do #ipc2`, `do #ipc3` are `[recommended]` design-ph
 
 ## Queue 
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+- do [#ipc1]
+- do [#ipc2]
+- do [#ipc3]
+- How would coordination take place? Can a peer-to-peer model work? How would discovery work? Would we need a broker? Are there any internet-friendly ways with no or low cost to coordinate? Would piggybacking on WebRTC be a good approach or another protocol?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#ipc1] [recommended] Design lazily-serde feature gate (trait bounds vs type-erased closures)
-- [ ] [#ipc2] [recommended] Design lazily-ipc snapshot + incremental update protocol
-- [ ] [#ipc3] [recommended] Investigate CRDT vs Raft trade-offs for lazily-distributed
 <!-- /agent:backlog -->
 
 ## Review

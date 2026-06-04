@@ -31,47 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260604-032757.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260604-034213.md`*
 
 Compacted content:
-- Archived 2 response topic(s): #astnav-autoindex-oc auto-reindex on plugin load; surrealdb vs sqlite benchmark results
+- Archived 2 response topic(s): BENCHMARKS.md created with benchmark results; #ehj2 deferred index load regression test
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
-### Re: BENCHMARKS.md created with benchmark results — glm-5.1
-
-> **Queue prompt:**
->
-> Please create a BENCHMARKS.md file. Add the sqlite vs surrealdb benchmark results
-
-
-Created `src/tsift/BENCHMARKS.md` with:
-
-- **SQLite vs SurrealDB (2026-06-02):** Aggregate workloads, refresh/load, and promotion verdict (hold). SurrealDB ~220x slower on real workload, 6.5x faster on full-projection refresh, competitive on full-projection total, and faster on synthetic high-degree and deep-chain.
-- **Multi-Backend Comparison (2026-05-24 fixture):** SQLite, DuckDB/DuckPGQ, FalkorDB, Kuzu, Ladybug totals for full-projection and real workloads from `fixtures/graph-db-performance-history.json`. Per-operation breakdown showing SQLite dominates hot reads (sub-ms) while candidates show faster refresh/projection load.
-- **Synthetic workloads:** Deep-chain and high-degree totals across all backends.
-- **Run command** for reproducing benchmarks.
-
-Verification: `make check` passes all 695 tests. Pre-existing `surrealdb_store_multi_process_reader_writer_lock` race condition unrelated to this change (markdown-only file).
-
-### Re: #ehj2 deferred index load regression test — glm-5.1
-
-> **Queue prompt:**
->
-> [#ehj2]
-
-
-Added `surrealdb_store_deferred_index_load_regression` test in `packages/tsift-surrealdb/src/lib.rs:2056`.
-
-The test verifies that `from_rows_file_backed()` correctly populates all hot-read indexes without calling `load_indexes()`:
-
-1. **Node indexes:** `graph_counts()`, `nodes_by_kind("symbol")`, `node()` lookups all return correct results
-2. **Edge indexes:** `edge()` by stable id, `outgoing_edges()` with kind filter, `incident_edges()` with kind filter
-3. **Path traversal:** `shortest_path()` resolves through the derived index
-4. **Row hash persistence:** `stored_row_hash()` is set, sidecar file exists
-5. **Reopen correctness:** `open()` reopens and all indexes remain valid via sidecar or fallback
-
-Verification: `cargo test -p tsift-surrealdb --lib` — 20/20 pass (pre-existing `multi_process_reader_writer_lock` race excluded).
-<!-- agent:boundary:9f858ad7 -->
+<!-- agent:boundary:2f86b4b0 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -57,7 +57,22 @@ Is BENCHMARK.md up to date? We should have a skill + runbook support for updatin
 Commits pushed:
 - `2d5c6a11f` (agent-loop) — skill + runbook + submodule ref
 - `0af921f` (lazily-rs) — AGENTS.md benchmark reference
-<!-- agent:boundary:b6b68935 -->
+❯ What are the performance differences from the previous queue run?
+<!-- append:202cd076 -->
+
+#### Re: performance differences — glm-5.1
+
+No new benchmarks were run during the previous queue cycle — `make benchmark-check` only verified that BENCHMARKS.md matched the existing Criterion output. The Criterion data on disk dates to June 1–2, before the `#lazyperf34`/`#lazyperf35` optimizations in commit `1fb4b5c`.
+
+**Unmeasured optimizations since last benchmark run:**
+
+| Commit | Change | Expected impact |
+|--------|--------|----------------|
+| `1fb4b5c` (#lazyperf34) | Replaced O(n²) per-insert edge dedup with push in batched paths; `finish_batch` already sorts+dedups at flush | Lower lock acquisition counts on `batched_write_bursts` profiles |
+| `1fb4b5c` (#lazyperf35) | Eliminated `into_iter().collect::<Vec<_>>()` in `flush_batched_invalidations` — batched collections are already `SmallVec` | Reduced allocs and lock hold time on batched/flush paths |
+
+**To capture the actual deltas:** run `make benchmark-update` (or `cargo bench --features instrumentation && python3 scripts/update-benchmark-results.py`) from `src/lazily-rs/`, then compare against the archived v0.6.0 numbers in BENCHMARKS.md.
+<!-- agent:boundary:3adea523 -->
 <!-- /agent:exchange -->
 ###
 <!--

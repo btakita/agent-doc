@@ -142,7 +142,29 @@ Verification:
 - `gh run list --workflow CI --limit 1` could not run because there is no workflow named `CI`; the available `Agent Doc` workflow's latest run was already failing (`26971161692`).
 
 Escalation: none.
-<!-- agent:boundary:c21e7cc1 -->
+❯ From the new transcript content, please add backlog items into monsterrodholders.md with priorities. Weight the recent conversations higher than older conversations. Note that some tasks have already been completed. With older conversations, make sure I did not miss anything.
+
+### Re: MRH backlog items from Ron transcripts — gpt-5
+
+Added prioritized backlog items to `src/boost-client/tasks/monsterrodholders.md` from the new Ron transcript batch.
+
+I weighted the newest conversations highest: the June 2-3 calls put shopper friction, Cloudflare/Turnstile, same-day revenue visibility, ShipStation/security routing, Merchant/Popular Products, and automated boat/species content ahead of older work. I also carried forward older but still relevant May items around shipping-price friction, abandoned-cart capture, support routing, and Kentucky tax/inventory/operator-access cleanup so they are not lost.
+
+I did not duplicate work that the MRH review history already records as completed or explicitly gated, including feed title/image changes, review-request dry-run work, HydroWeb create-paused setup, product-ratings threshold gating, and the latest Shopping label/cache checks. Those were collapsed into monitor, approval, or audit follow-ups where there is still live work.
+
+Changed paths expected:
+- `tasks/professional/ron-berkes.md`
+- `src/boost-client/tasks/monsterrodholders.md`
+
+Verification:
+- `tsift --envelope __digest-runner --kind test --path . --shell-command 'make check'` failed in existing `src/agent-doc` route tests: `route::tests::fresh_start_ack_outcome_keeps_idle_no_op_and_reaps_genuine_miss` and `route::tests::ready_prompt_candidate_rejects_codex_footer_without_prompt`.
+- `gh run list --workflow CI --limit 1` failed because there is no workflow named `CI`.
+- Available workflow check: `Agent Doc` exists; latest run `26971161692` is `completed/failure` from 2026-06-04T18:22:52Z.
+
+Confidence: medium-high. The backlog priorities are based on repeated transcript themes and the current MRH review history, with lower confidence only where transcript diarization was imperfect or the current MRH review already had a nearby gated item.
+
+Escalation: none.
+<!-- agent:boundary:c5694f8b -->
 <!-- /agent:exchange -->
 ###
 <!--

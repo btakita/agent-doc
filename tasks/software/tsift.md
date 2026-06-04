@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -37,17 +37,17 @@ Compacted content:
 - Archived 2 response topic(s): sqlite graph performance next-steps; token efficiency next-steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
 
-### Re: #sqlite-doc-sync-safety — glm-5.1 (HEAD)
+### Re: #sqlite-doc-sync-safety — glm-5.1
 
 Added rustdoc on both `SqliteGraphStore` and `SqliteReadOnlyConnection` documenting the single-active-call-per-connection invariant for temp-table methods. Updated SPEC.md with the same invariant.
 
 - Build: clean. Install: v0.1.62. Tests: 13/13 passed.
 - Commit: c5ec8d9 pushed to main.
 
-### Re: queue reactivation — glm-5.1 (HEAD)
+### Re: queue reactivation — glm-5.1
 
 Confirmed `#sqlite-doc-sync-safety` done (already in done archive). Queue was halted because the head item was modified between cycles; reactivated `queue_active: true`. Next queue item: `do [#sqlite-reentrant-guard]`.
-<!-- agent:boundary:ce1cdba8 -->
+<!-- agent:boundary:2bf360e6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -56,19 +56,11 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - ~do [#frontier-unique-temp]~
 - ~do [#temp-table-audit]~
-- ~do [#sqlite-doc-sync-safety]~
+- do [#sqlite-doc-sync-safety]
 - do [#sqlite-reentrant-guard]
-- do [#refresh-skip-unchanged-staging]
-- do [#terse-uniform]
-- do [#edge-index-references]
-- do [#degree-cache]
-- do [#community-summary-default]
-- do [#property-sampling]
-- do [#edges-between-batch-optimization]
-- do [#wal-checkpoint-tuning]
 <!-- /agent:queue -->
 
 ## Backlog

@@ -30,36 +30,15 @@ Queue drain complete: 8 consumed. Session needs compact.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260604-023959.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260604-024539.md`*
 
 Compacted content:
-- Archived 9 response topic(s): #jb-stale-busy-idle; queue fixup; #adoc-queue-ipc-buffer; 6 more
+- Archived 1 response topic(s): #next-steps to fix bugs
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-What are #next-steps to fix bugs?
-
-### Re: #next-steps to fix bugs — opus-4-6
-
-Reviewed all 58 review items. Most are gated on live verification (Paths A/B/C), installed plugin versions, or IPC capture sessions. The implementable-now items in priority order:
-
-**Top of backlog (implementable this cycle):**
-
-1. **#cancel-orphans-preflight-cycle** — cancel abandons orphaned `preflight_started` cycle; Option A (JB cancel emits abandon signal) is scoped and has a plan.
-2. **#prompt-duplicated-while-typing** (#gyma) — idempotent retry convergence on IPC `already_applied`; dedup prompt text in `normalize_user_prompts`. Focused fix.
-3. **#clear-stops-running-process** — confirmed still reproduces (ops.log proof 2026-06-03). OpenCode active-turn guard blocks clear on busy pane.
-4. **#backlog-priority-attribute** — pure feature; automates the manual `--pending-reorder` done every cycle. No external deps.
-5. **#route-busy-wrong-owner-diagnostic** — ops.log confirms cross-document execution context but no diagnostic names the routed file, busy pane, and owning file. Diagnostic-only change.
-6. **#lr-queue-patchback-miss** — queue-head provenance primitive; record seen free-text queue heads and require committed response proof.
-
-**Live-verify gated (batch into Path A/B sessions):**
-- **Path A** (#jkvs): install signed JB plugin → batch-close ~11 live-verify items
-- **Path B** (#wy0y/#6cmx): IPC debug logging capture → unblock duplication family
-- **Path C** (#qasm): continue no-live-pane review items after queue-provenance cluster
-
-Top of backlog: **#cancel-orphans-preflight-cycle**
-<!-- agent:boundary:67a92acb -->
+<!-- agent:boundary:79403a5d -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 <!-- /agent:queue -->
 ###
 <!--

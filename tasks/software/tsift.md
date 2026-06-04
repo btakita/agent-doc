@@ -89,7 +89,24 @@ Completed `#evidence-page`: cursor-based evidence pagination for incremental evi
 - 3 new unit tests: truncated pagination, within-budget no-truncation, invalid-cursor
 - All 665 tests pass (348+3 new in tsift-cli, plus all other suites)
 - Built + installed + pushed: `65bc129`
-<!-- agent:boundary:cd2a9f9c -->
+
+### Re: #packet-cache-evict — glm-5.1
+
+> **Queue prompt:**
+>
+> do [#packet-cache-evict]
+
+
+Completed `#packet-cache-evict`: TTL and size-based eviction for `.tsift/cycle-packet-cache/`.
+
+- `cycle_packet_cache_evict()` removes entries older than default 24h TTL (file mtime), then enforces 50MB max cache size by evicting oldest entries
+- `cycle_packet_cache_stats()` reports entry count and total bytes
+- `CyclePacketCacheEvictionReport` with scanned/evicted/remaining counts and bytes
+- Wired into `apply_status_fixes` — `tsift status` auto-fix now evicts stale cache entries
+- 5 new tests: stats, expired eviction, max-bytes enforcement, empty cache noop, entry counting
+- SPEC.md updated with cache eviction documentation
+- All tests pass; built + installed + pushed: `0016c08`
+<!-- agent:boundary:47020d35 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -103,7 +120,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - ~do [#source-body-cap]~
 - ~do [#diff-parse-cap]~
 - ~do [#evidence-page]~
-- do [#packet-cache-evict]
+- ~do [#packet-cache-evict]~
 - do [#terse-edge-codes]
 - do [#sqlite-chunk]
 - do [#sqlite-ranked-cte]
@@ -116,7 +133,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#packet-cache-evict] Add cycle packet cache eviction to tsift status --fix — no TTL/size/cleanup policy exists for .tsift/cycle-packet-cache/ (low)
 - [ ] [#terse-edge-codes] Map common edge kinds to short codes in ultra-terse — calls->c, defines->d, etc; strip provenance/freshness for further compression (low)
 - [ ] [#sqlite-chunk] Increase SQLITE_GRAPH_STAGING_CHUNK_ROWS from 50 to 200-500 and benchmark full-projection refresh — currently ~22s for ~952k rows with ~19k INSERT statements; larger chunks cut statement overhead 4-10x (high)
 - [ ] [#sqlite-ranked-cte] Push ranked_neighborhood into recursive CTE with scoring — eliminates N+1 outgoing_edges/node query loop, mirrors existing paged_neighborhood pattern (high)

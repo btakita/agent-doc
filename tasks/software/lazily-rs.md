@@ -39,7 +39,7 @@ Compacted content:
 - Archived 9 response topic(s): Review evaluation; Typed cache fast-path implementation; Queue cleanup; 6 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/c9ad2e57...
 
-### Re: Backpressure, offline peers, and state sync — glm-5.1 (HEAD)
+### Re: Backpressure, offline peers, and state sync — glm-5.1
 
 #### Backpressure handling
 
@@ -94,11 +94,11 @@ When a peer comes back online:
 
 The key insight: **lazily's existing lazy invalidation and dirty-tracking infrastructure already solves most of the backpressure and sync problem at the graph level**. The network layer just needs to map dirty sets → delta streams and vector clocks → gap detection.
 
-### Re: Queue bookkeeping — glm-5.1 (HEAD)
+### Re: Queue bookkeeping — glm-5.1
 
 Recovered from queue divergence. Backpressure response committed in prior cycle. Struck resolved items (#ipc1-#ipc3). Queue active — next item: WebRTC P2P broker question.
 
-### Re: WebRTC P2P — broker or brokerless? — glm-5.1 (HEAD)
+### Re: WebRTC P2P — broker or brokerless? — glm-5.1
 
 **Pure P2P is viable with WebRTC, no broker needed for data.** You do need a lightweight signaling server for connection establishment, but it never sees signal data.
 
@@ -152,7 +152,7 @@ Start with **full mesh + signaling server** for `lazily-distributed`:
 
 The signaling server can be embedded in `lazily-distributed` as a built-in module — it's just SDP/ICE forwarding, not data processing.
 
-### Re: Desktop-to-desktop (LAN), laptop-to-desktop (internet), remote user LAN, remote user internet — glm-5.1 (HEAD)
+### Re: Desktop-to-desktop (LAN), laptop-to-desktop (internet), remote user LAN, remote user internet — glm-5.1
 
 All four scenarios are the same WebRTC P2P architecture with different discovery and NAT traversal paths:
 
@@ -211,7 +211,7 @@ Combines scenarios 2 and 3 — NAT traversal + auth.
 
 The code is the same in all cases — `lazily-distributed` runs the same WebRTC P2P path. Only discovery mechanism and auth requirements change per scenario.
 
-### Re: Free signaling servers & Cloudflare deployment — glm-5.1 (HEAD)
+### Re: Free signaling servers & Cloudflare deployment — glm-5.1
 
 #### Free / zero-cost signaling options
 
@@ -253,7 +253,7 @@ Cost: **$0/month** for typical usage. KV free tier: 100K reads/day, 1K writes/da
 
 **Recommendation**: Start with embedded signaling (simplest), add Cloudflare Worker for internet-scale.
 
-### Re: Prescribed operations, sandboxing, and prompt injection defense — glm-5.1 (HEAD)
+### Re: Prescribed operations, sandboxing, and prompt injection defense — glm-5.1
 
 #### Core principle: capability-based RPC, not arbitrary execution
 
@@ -321,8 +321,7 @@ Execute shell commands, invoke agents/LLMs, modify exchange content, access sign
 Add to backlog/review, read signals, subscribe to signal changes, append context, request state snapshots.
 
 Data-plane API only. Your desktop is the sole execution authority.
-<!-- agent:boundary:b1cbb0e8 -->
-<!-- agent:boundary:83679bc1 -->
+<!-- agent:boundary:a7235676 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -345,9 +344,9 @@ Data-plane API only. Your desktop is the sole execution authority.
 ## Review
 
 <!-- agent:review -->
-- [/] [#ipc3] [recommended] Investigate CRDT vs Raft trade-offs for lazily-distributed
-- [/] [#ipc2] [recommended] Design lazily-ipc snapshot + incremental update protocol
 - [/] [#ipc1] [recommended] Design lazily-serde feature gate (trait bounds vs type-erased closures)
+- [/] [#ipc2] [recommended] Design lazily-ipc snapshot + incremental update protocol
+- [/] [#ipc3] [recommended] Investigate CRDT vs Raft trade-offs for lazily-distributed
 - [/] [#vd5v] Future: leverage typed cache for lock-free cached reads in ThreadSafeContext (#lazilyperf38)
 <!-- /agent:review -->
 

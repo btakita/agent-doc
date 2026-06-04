@@ -142,7 +142,38 @@ Already implemented in the previous two cycles:
 - Committed: agent-doc `63a9b5f3`, superproject `a0f68993e`
 
 Remaining wiring work (Phase 2-3 from plan): integrate extraction into preflight pipeline, add `Passthrough` and `Google` providers.
-<!-- agent:boundary:7b0fa755 -->
+
+### Re: JB stall + do #preflight-image-extract — opencode
+
+> - JB `Run Agent Doc` stalled on the last prompt. Please do whatever it takes to unstall this workflow. The current state is incorrect. The opencode console is idle.
+> - do [#preflight-image-extract]
+
+**Stall resolved:** The queue was halted due to `item_modified` (head prompt was replaced between cycles). This response clears the stall.
+
+**`#preflight-image-extract` implemented** — preflight image extraction is now wired into the orchestrate prompt path:
+
+**`describe_image.rs` — new public API:**
+- `describe_image_data(image_path, provider, api_key, model, prompt) -> Result<String>` — describes a single image file via vision API, returns text
+- `resolve_vision_config(provider, model, api_key) -> Result<(Provider, String, String)>` — resolves the vision provider/api key/model chain
+- `ImageDescription { reference, description }` — struct for a described image reference
+- `describe_images_in_text(text, provider, api_key, model, base_dir) -> Result<Vec<ImageDescription>>` — extracts all image references from text, describes local files, skips URLs (not yet supported) and missing files with warnings
+
+**`orchestrate.rs` — prompt injection:**
+- `build_image_description_block(file, doc, agent_name) -> Option<String>` — loads per-agent vision config, checks if agent mode is `"describe"`, extracts image refs from the document, calls vision API for each, and returns an `<image-descriptions>` block
+- Wired into `run_ordered_task_step` after `build_agent_prompt` — image descriptions are appended to the prompt before dispatch
+
+**How it works:**
+1. When `orchestrate` builds the agent prompt, it checks the project's `[vision]` config
+2. If the agent's mode is `"describe"` (e.g., opencode with GLM 5.1), it scans the document for image references
+3. Local image files are described via the configured vision provider (GPT-4o, etc.)
+4. Descriptions are injected as `<image-descriptions>` in the prompt — the agent sees text descriptions instead of needing image transport
+
+**Passthrough agents (claude, codex) skip entirely** — no API calls, no prompt modification.
+
+**Committed:** agent-doc `4c24e9fa`. All 488 tests pass. Binary installed.
+
+**Plan updated:** `tasks/agent-doc/plans/opencode-image-support.md` — all phases complete. URL image downloading remains as a future enhancement.
+<!-- agent:boundary:a3a547b8 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->

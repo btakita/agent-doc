@@ -103,7 +103,24 @@ model = "gpt-4o"
 - `.agent-doc/config.toml` — added `[vision.agents.opencode]` with `mode = "describe"`, fixed passage path
 
 **Installed binary:** `cargo install --path .` completed. 69 agent-doc tests pass (2 pre-existing failures in unrelated route tests confirmed on HEAD).
-<!-- agent:boundary:6043a481 -->
+
+### Re: verify config + make describe_image work — glm-5.1
+
+**Config verified** — `.agent-doc/config.toml` has `[vision.agents.opencode]` with `mode = "describe"`, `provider = "openai"`, `model = "gpt-4o"`, and the top-level `api_key` uses `$(passage show dreamable/claudescore/OPENAI_API_KEY)` which `shell_expand()` resolves correctly.
+
+**Crash investigation** — supervisor stderr shows `opencode exited cleanly` followed by auto-restart. This is the supervisor's normal restart behavior, not a tmux crash. The existing backlog items `#kdey`/`#ka9v`/`#xwad` track this transient crash pattern. No guard needs re-enabling — the supervisor restart path is working as designed.
+
+**describe_image end-to-end verified:**
+1. CLI: `agent-doc describe-image img_16.png --api-key '$(passage show dreamable/claudescore/OPENAI_API_KEY)'` successfully described the image via GPT-4o
+2. Orchestration path: `build_image_description_block()` loads project config → `vision.agent_mode("opencode")` returns `"describe"` → `resolve_vision_config()` → `shell_expand()` resolves passage key → `describe_images_in_text()` scans document for image refs → calls OpenAI vision API
+3. Config flow: `effective_api_key(Some("opencode"))` falls through from agent-level (no per-agent key) to top-level `api_key` which contains the passage command
+
+**Changes committed + pushed (submodule `69c9fef4`):**
+- `src/describe_image.rs` — `shell_expand()` function + 4 tests (plain, env var, command substitution, failure)
+- All 33 describe_image tests pass (29 existing + 4 new)
+- Binary rebuilt + installed (`v0.34.0`)
+- 2 pre-existing route test failures confirmed on HEAD (unrelated)
+<!-- agent:boundary:075cf144 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" -->

@@ -156,6 +156,32 @@ pub fn run_with_options(file: &Path, codex_final_gate: bool) -> Result<()> {
             } else {
                 println!("queue_continuation_required=false");
             }
+            // #finalize-owned-pane-response-patchback: proactive final-gate
+            // block. When a Codex same-pane recursive invocation was refused
+            // (abandoned cycle with last_event starting
+            // "recursive_direct_invocation_blocked") but no response body was
+            // captured, the agent may still produce a final chat answer that
+            // bypasses `agent-doc write` / `finalize`. Block the final answer
+            // so the operator must pipe the response through binary-owned
+            // closeout.
+            if codex_final_gate {
+                if let Some(cycle) = crate::cycle_state::load(file).ok().flatten() {
+                    if matches!(cycle.phase, crate::cycle_state::CyclePhase::Abandoned)
+                        && cycle
+                            .last_event
+                            .starts_with("recursive_direct_invocation_blocked")
+                        && cycle.capture_id.is_none()
+                        && cycle.response_sha256.is_none()
+                    {
+                        eprintln!(
+                            "[session-check] codex-final-gate: recursive direct invocation was blocked for {} with no captured response body — pipe the response through `agent-doc write --commit {}` before sending any final answer.",
+                            file.display(),
+                            file.display()
+                        );
+                        std::process::exit(2);
+                    }
+                }
+            }
             Ok(())
         }
         SessionCheckStatus::Interrupted(message) => {
@@ -9672,5 +9698,86 @@ Body\n\
             SessionCheckStatus::Ok(_) => {}
             other => panic!("expected ok status for status-only drift, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn codex_final_gate_blocks_on_recursive_invocation_without_captured_response() {
+        // #finalize-owned-pane-response-patchback: when a recursive direct
+        // invocation was blocked (abandoned cycle) and no response body was
+        // captured, codex_final_gate must exit 2 to prevent a final chat answer
+        // from bypassing binary-owned closeout.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/state/cycles")).unwrap();
+
+        for args in [
+            vec!["init"],
+            vec!["config", "user.email", "test@example.com"],
+            vec!["config", "user.name", "Test"],
+        ] {
+            Command::new("git")
+                .current_dir(root)
+                .args(&args)
+                .output()
+                .unwrap();
+        }
+
+        let doc = root.join("doc.md");
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nAnswered.\n",
+            "<!-- agent:boundary:committed -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "doc.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "committed", "--no-verify"])
+            .output()
+            .unwrap();
+
+        // Recursive guard abandoned the cycle with no captured response.
+        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::cycle_state::mark_abandoned(
+            &doc,
+            "recursive_direct_invocation_blocked recursive direct invocation would deadlock",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
+
+        // Without final gate: session-check passes.
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Ok(_) => {}
+            other => panic!("expected ok for abandoned cycle without final gate, got {other:?}"),
+        }
+
+        // With final gate: must exit 2 (captured via child process since
+        // run_with_options calls std::process::exit).
+        let bin = std::env::var("AGENT_DOC_TEST_BIN")
+            .unwrap_or_else(|_| "agent-doc".to_string());
+        let output = Command::new(&bin)
+            .current_dir(root)
+            .args(["session-check", "--codex-final-gate", doc.to_str().unwrap()])
+            .env("AGENT_DOC_TEST_BIN", &bin)
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "codex_final_gate should exit 2 for abandoned recursive invocation without captured response\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
     }
 }

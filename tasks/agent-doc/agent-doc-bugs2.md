@@ -52,7 +52,16 @@ Queue housekeeping: struck `#jb-stale-busy-idle` (already shipped per `e3b1af769
 
 
 Still gated on IPC capture session #6cmx (Path B). Review entry `#5qhn` confirms: "consume->halt cycle with no recurring agent:queue diff (stays open: gated on IPC capture session #6cmx)." Root cause #2 landed in submodule `c483080a` but LOG REVIEW 2026-06-03 found no clean consume->halt cycle. No new evidence since last review. Striking from queue; implementation blocked until #6cmx capture session runs.
-<!-- agent:boundary:41a9467d -->
+
+### Re: #codex-network-access-opencode — glm-5.1
+
+> **Queue prompt:**
+>
+> #codex-network-access-opencode
+
+
+Already implemented. The warning guard exists at `preflight.rs:1854-1870`: when `codex_network_access` is set in frontmatter and the active harness is not Codex, preflight emits a `codex_network_access_non_codex_harness` warning with diagnostic message and code. Test coverage at `preflight.rs:9822-9846` confirms the guard fires for `agent: opencode` + `codex_network_access: enabled`. Option (a) from the review (warn/ignore) is satisfied. Option (b) (suppress emission into session config) would be a stronger follow-up but is not required — the env var `CODEX_SANDBOX_NETWORK_DISABLED` is harmless for non-Codex agents. Striking from queue.
+<!-- agent:boundary:2af09ab2 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
@@ -63,7 +72,7 @@ Still gated on IPC capture session #6cmx (Path B). Review entry `#5qhn` confirms
 - ~#lr-queue-patchback-miss~
 - ~#queue-auto-no-continue~
 - ~#codex-403-429-fallback~
-- #codex-network-access-opencode
+- ~#codex-network-access-opencode~
 - ~#cancel-orphans-preflight-cycle~
 - ~#backlog-priority-attribute~
 - ~do [#3hwr]~

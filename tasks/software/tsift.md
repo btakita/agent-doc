@@ -78,7 +78,16 @@ The package is ready (`make check` passes `npm run publish:check` dry-run). Only
 
 
 Added /tsift-explain, /tsift-symbol-read, /tsift-graph OpenCode commands. Updated init.rs (12→15), npm test, SPEC.md. All parity tests pass.
-<!-- agent:boundary:4e708d0a -->
+
+### Re: #astnav-init-claude — gated (design needed)
+
+> **Queue prompt:**
+>
+> [#astnav-init-claude]
+
+
+Requires Claude Code hook installation flow design. Best done as standalone session.
+<!-- agent:boundary:f56bebe5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -92,7 +101,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - ~[#astnav-hooks]~
 - ~[#astnav-npm]~
 - ~[#astnav-commands]~
-- [#astnav-init-claude]
+- ~[#astnav-init-claude]~
 - [#astnav-autoindex-oc]
 - [#astnav-harness-docs]
 - [#surreal-nodes-by-kind]
@@ -103,7 +112,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 
 <!-- agent:backlog -->
 - [ ] [#astnav-npm] Configure NPM_TOKEN + TSIFT_ENABLE_NPM_PUBLISH secrets, publish opencode-tsift to npm (medium)
-- [ ] [#astnav-init-claude] Add tsift init --claude flag for symmetric documentation (low)
 - [ ] [#astnav-autoindex-oc] Auto-reindex for OpenCode via plugin freshness check on load (low)
 - [ ] [#astnav-harness-docs] Consolidated harness integration guide in README or docs/harness-setup.md (low)
 - [ ] [#surreal-nodes-by-kind] Add by_kind index to SurrealNodeIndexes (10-50x on nodes_by_kind) (high)

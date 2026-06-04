@@ -29,45 +29,24 @@ Queue contamination cleaned. Session committed. Codex stale-busy bottom-idle fix
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260604-010037.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260604-010425.md`*
 
 Compacted content:
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-Which review items are proven to be complete in the logs? Mark those complete.
-<!-- agent:boundary:6103cc17 -->
-
-### Next Steps to Fix Bugs
-
-**Implementable items by priority** (no live-verify gating):
-
-1. **Stale-busy/idle-footer cluster** (#clear-stops-running-process, #jb-stale-busy-idle-footer) — root cause of most route stalls. The `session_clear_live_busy_guard_blocked` with `tail="ctrl+p commands"` and `route_wait_for_ready_timeout_diagnostic bottom_idle_chrome=false` prove the pane is idle but classified as `opencode_active_turn`. Fix: detect the idle-composer footer pattern (ctrl+p, context %) in the busy guard and reclassify as idle/repairable.
-
-2. **IPC drift / prompt duplication cluster** (#prompt-duplicated-while-typing, #adoc-queue-ipc-buffer-divergence) — root cause of slow commits. `prompt_text_duplicated=true` logged at 1780533889 for this document. `visible_write_deferred_live_buffer_changed` at 1780502566 and 1780502664 show IPC drift causing write deferrals and retry loops. Fix: idempotent retry convergence on IPC already_applied; dedup prompt text in normalize_user_prompts.
-
-3. **Queue-provenance cluster** (#lr-queue-patchback-miss, #queue-auto-no-continue) — queue continuation fires (1780462610) but never auto-continues through session-check warning classes. Fix: record seen free-text queue heads and auto-continue through non-fatal session-check outcomes.
-
-4. **Network/transport** (#codex-403-429-fallback, #codex-network-access-opencode-guard) — small, safe wins. Add 403→429 detection diagnostic and guard codex-specific config for opencode.
-
-5. **Cancel/preflight hygiene** (#cancel-orphans-preflight-cycle) — `repair_preflight_stale_lock` fired 10+ times for this document alone, each blocking a new cycle. Fix: JB cancel emits a signal that abandons the orphaned preflight_started cycle.
-
-6. **Feature** (#backlog-priority-attribute) — add priority attribute to backlog items to automate manual --pending-reorder.
-
-### Slow Commit Root Cause
-
-The slow commit is caused by the **IPC drift + retry loop**. Evidence chain:
-
-1. `exchange_write_diagnostic prompt_text_duplicated=true` at 1780533889 — the response write duplicated prompt text (live #prompt-duplicated-while-typing evidence)
-2. `visible_write_deferred_live_buffer_changed` at 1780502566, 1780502664 — IPC socket content diverged from the write snapshot, deferring the write
-3. `session_check_interrupted` at 1780533889, 1780533987 — closeout session check failed, triggering additional closeout cycles
-4. `repair_preflight_stale_lock` × 10+ — stale cycles accumulating, each needing repair before the next cycle can start
-
-The feedback loop: IPC drift → write deferred → retry → more IPC drift → more retries → session_check fails → additional closeout cycle → more stale locks. Each cycle also risks `prompt_text_duplicated`, making the document grow and further slowing commits.
-
-**Top backlog item:** `#clear-stops-running-process` — stale busy guard is the highest-impact fix because it unblocks both the route stall and the cascade of retries.
-
+<!-- agent:boundary:fcde526c -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
+- #clear-stops-running-process
+- #jb-stale-busy-idle
+- #prompt-duplicated-while-typing
+- #adoc-queue-ipc-buffer
+- #lr-queue-patchback-miss
+- #queue-auto-no-continue
+- #codex-403-429-fallback
+- #codex-network-access-opencode
+- #cancel-orphans-preflight-cycle
+- #backlog-priority-attribute
 <!-- /agent:queue -->
 ###
 <!--

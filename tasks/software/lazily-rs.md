@@ -235,7 +235,39 @@ Proposed: add a fast-path check before entering the async machinery:
 This would cut the warm-path latency from ~4.6 us to ~100-200 ns (mutex acquire + clone). The main risk is ensuring the fast-path check is correct under concurrent invalidation — a slot could transition from Resolved to Computing between the check and the value clone. An atomic revision check (similar to `cache_revision` in ThreadSafeContext sidecars) would avoid taking the mutex at all on the hot path.
 
 Depends on fixing the concurrent contention panic bug (async_concurrent_contention/async_context at 4+ workers) first.
-<!-- agent:boundary:ea4cac43 -->
+❯ Make these changes. #spec-test-build-install-commit-push
+❯ > **Gated** — requires changes to `AsyncContext::get_async()` (async_context.rs) to check resolved state before spawning.
+
+### Re: #mqcw AsyncContext synchronous cached-read fast-path — glm-5.1
+
+Implemented the synchronous cached-read fast-path for `AsyncContext` (`async_context.rs:722`).
+
+**Changes:**
+
+1. **`AsyncContext::get()`** — new synchronous method returning `Option<T>`. Takes the inner mutex, checks if slot is `Resolved`, returns `Some(T>` immediately or `None` for any other state. Avoids all async overhead on warm paths.
+
+2. **`get_async()` refactored** — now calls `get()` first. If the slot is resolved, returns immediately without entering async machinery. Only unresolved/Error/Empty states fall through to the async spawn+watch path.
+
+3. **SPEC.md updated** — documented `get()` in the API surface table, added `get` to API bounds, added implementation note about synchronous fast-path.
+
+4. **Benchmark** — added `sync_get` case to `bench_async_cached_resolve` group. Expected: ~100-200ns vs 4.6us for `get_async` (~20-40x improvement on warm paths).
+
+5. **Tests** — 6 inline tests + 4 integration tests covering:
+   - `sync_get_returns_none_for_empty_slot`
+   - `sync_get_returns_some_after_resolve`
+   - `sync_get_returns_none_after_invalidation`
+   - `sync_get_avoids_spawn_overhead` (verifies compute count stays at 1)
+   - `sync_get_with_memo_returns_cached`
+   - `get_async_uses_sync_fast_path` (end-to-end verify no duplicate compute)
+   - `async_context_sync_get_returns_resolved_value`
+   - `async_context_sync_get_invalidated_returns_none`
+   - `async_context_sync_get_with_chain`
+   - `async_context_sync_get_across_tokio_tasks`
+
+All 42 async lib tests + 20 async integration tests + 101 spec compliance tests pass. `make check` clean.
+
+Commit: `5cc4ac5`. Pushed to `main`.
+<!-- agent:boundary:a7c374b2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -254,7 +286,7 @@ Depends on fixing the concurrent contention panic bug (async_concurrent_contenti
 ## Review
 
 <!-- agent:review -->
-- [/] [#mqcw] #lazilyperf41 AsyncContext synchronous cached-read fast-path (skip spawn for resolved slots)
+- [x] [#mqcw] #lazilyperf41 AsyncContext synchronous cached-read fast-path (skip spawn for resolved slots)
 - [/] [#8e2q] #lazilyperf40 Lazy invalidation frontier for ThreadSafeContext fan-out eager validation
 - [/] [#zspz] #lazilyperf39 Per-slot fine-grained locking for ThreadSafeContext to cut same-slot contention scaling
 - [/] [#v6r8] #lazilyperf38 Typed cache fast-path to eliminate Rc<dyn Any> boxing on Context cached reads

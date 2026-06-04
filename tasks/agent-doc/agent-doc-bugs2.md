@@ -43,14 +43,23 @@ queue fixup: struck #jb-stale-busy-idle
 ### Re: queue fixup — glm-5.1
 
 Queue housekeeping: struck `#jb-stale-busy-idle` (already shipped per `e3b1af769`/`cc72dbf68`), re-enabled `queue_active: true` after halt from inter-cycle head modification. Next head: `#adoc-queue-ipc-buffer`.
-<!-- agent:boundary:ca83c66d -->
+
+### Re: #adoc-queue-ipc-buffer — glm-5.1
+
+> **Queue prompt:**
+>
+> #adoc-queue-ipc-buffer
+
+
+Still gated on IPC capture session #6cmx (Path B). Review entry `#5qhn` confirms: "consume->halt cycle with no recurring agent:queue diff (stays open: gated on IPC capture session #6cmx)." Root cause #2 landed in submodule `c483080a` but LOG REVIEW 2026-06-03 found no clean consume->halt cycle. No new evidence since last review. Striking from queue; implementation blocked until #6cmx capture session runs.
+<!-- agent:boundary:41a9467d -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
 - ~#clear-stops-running-process~
 - ~#jb-stale-busy-idle~
 - ~#prompt-duplicated-while-typing~
-- #adoc-queue-ipc-buffer
+- ~#adoc-queue-ipc-buffer~
 - ~#lr-queue-patchback-miss~
 - ~#queue-auto-no-continue~
 - ~#codex-403-429-fallback~

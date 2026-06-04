@@ -132,7 +132,6 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - ~What are #next-steps for lazily-rs help with performance?~
 - ~What are #next-steps to improve the sqlite graph performance + effectiveness?~
 - What are #next-steps for tsift to save tokens?
-- Are these lazily-rs tasks for the lazily-rs project or the tsift project to implement?
 <!-- /agent:queue -->
 
 ## Backlog

@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -29,156 +29,15 @@ Analyzed JB Run Agent Doc stall — route.rs busy guard stale projection (not JB
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260604-152701.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260604-164855.md`*
 
 Compacted content:
-- Archived 8 response topic(s): Preflight recovery; Queue [#takv] #opencode-image-support; Queue [#xrm7] #jb-init-from-claim; 5 more
+- Archived 6 response topic(s): naked image path/URL detection + per-agent vision config; per-agent image extraction config; JB Run Agent Doc stall fix; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-### Re: naked image path/URL detection + per-agent vision config — opencode
-
-> **Queue prompt:**
->
-> [#preflight-image-extract]: Also detect naked image paths and URLs that are not formatted as a markdown image.
-
-
-Implemented both queue prompts:
-
-**1. Naked image path/URL detection** (`src/agent-doc/src/describe_image.rs`):
-- `extract_image_references(text) -> Vec<ImageRef>` detects three kinds:
-  - `ImageRefKind::Markdown` — `![alt](path)` syntax
-  - `ImageRefKind::Url` — `https://...png`, `http://...jpg` (with query string support)
-  - `ImageRefKind::NakedPath` — bare file paths ending in image extensions (e.g. `img_16.png`, `/tmp/opencode/img.png`)
-- Deduplicates across all three kinds
-- 8 new tests covering all detection modes + edge cases
-
-**2. Per-agent vision config** (`agent-doc-core/src/project_config.rs`):
-- `AgentVisionConfig` struct: `mode` (passthrough/describe), optional `provider`, `model`, `api_key`
-- `VisionConfig.agents: BTreeMap<String, AgentVisionConfig>` for per-agent overrides
-- Helper methods: `effective_provider()`, `effective_model()`, `effective_api_key()`, `agent_mode()`
-- Config example: Claude Code/Codex = passthrough, OpenCode = describe via GPT
-
-**3. Pre-existing fixes:**
-- Added `write_clear_cooldown`, `clear_cooldown_marker`, `clear_cooldown_active` to `queue_continuation.rs` (fixes compile errors in route.rs/start.rs/session_actor_cmd.rs)
-- Updated flowcore token budget 76 to 81 for session_check.rs
-
-**Plan updated:** `tasks/agent-doc/plans/opencode-image-support.md` Phase 4 (naked image detection) and Phase 5 (per-agent config)
-
-**Committed and pushed:** agent-doc `63a9b5f3`, superproject `a0f68993e`. All 31 new/existing tests pass. 2 pre-existing route test failures remain (unrelated).
-
-### Re: per-agent image extraction config — opencode
-
-> **Queue prompt:**
->
-> Add a per-agent configuration for image extraction. I will likely have a pass-through for Claude Code and Codex but that may change in the future. Opencode using GLM 5.1 needs the image description service. For the service, I want to use GPT from my current account to perform the description. Ideally this can be driven locally.
-
-
-This was implemented in the previous cycle. Here's how to configure it in `.agent-doc/config.toml`:
-
-```toml
-[vision]
-provider = "openai"
-
-[vision.agents.claude]
-mode = "passthrough"
-
-[vision.agents.codex]
-mode = "passthrough"
-
-[vision.agents.opencode]
-mode = "describe"
-provider = "openai"
-model = "gpt-4o"
-# api_key = "..."  # or use OPENAI_API_KEY env var
-```
-
-**How it works:**
-- `mode = "passthrough"`: Claude Code and Codex can handle images natively — image references pass through as-is.
-- `mode = "describe"`: OpenCode/GLM 5.1 lacks vision — `extract_image_references()` detects images in prompts, `describe_image::run()` calls GPT-4o (using your `OPENAI_API_KEY` env or explicit `api_key` in config) to generate text descriptions, which replace image references before route dispatch.
-
-**Driven locally:** GPT is called via `ureq` HTTP from the agent-doc binary itself — no external service or server needed. Just set `OPENAI_API_KEY` in your environment and the `describe_image` code uses it directly through the existing `resolve_api_key` chain.
-
-**Config resolution chain** (per `VisionConfig` helpers in `project_config.rs`):
-- Agent-specific override → top-level `[vision]` → env vars (`AGENT_DOC_VISION_*`, `OPENAI_API_KEY`) → defaults
-
-Queue drained — no remaining items.
-Is there a current gpt-5 vision model that is available? If yes, please configure opencode vision to use the latest vision model.
-
-### Re: JB Run Agent Doc stall fix — opencode
-
-**Root cause:** Stale controller lease projecting `busy` while the opencode console was idle. The queue also had a contaminated item (assistant-like prose duplicated into the queue, triggering the `#jb-run-agent-doc-response-queue-contamination` guard).
-
-**Fix applied:**
-1. `agent-doc session clear` — reset controller lease from `busy` to `operator_ready`
-2. Removed contaminated queue item from `agent:queue`
-
-### Re: GPT-5 vision model availability — opencode
-
-Yes. The latest OpenAI models with vision support:
-- **GPT-5.5** — flagship, $5/$30 per MTok, 1M context, vision enabled
-- **GPT-5.4** — $2.50/$15 per MTok, 1M context, vision enabled
-- **GPT-5.4 mini** — $0.75/$4.50 per MTok, 400K context, vision enabled
-
-To configure for opencode vision, update `.agent-doc/config.toml`:
-
-```toml
-[vision]
-provider = "openai"
-model = "gpt-5.5"
-
-[vision.agents.opencode]
-mode = "describe"
-provider = "openai"
-model = "gpt-5.5"
-```
-
-Or use `AGENT_DOC_VISION_MODEL=gpt-5.5` env var.
-
-### Re: #preflight-image-extract — opencode
-
-Already implemented in the previous two cycles:
-- `extract_image_references()` in `describe_image.rs` with naked path/URL detection
-- `AgentVisionConfig` in `project_config.rs` with per-agent mode (passthrough/describe)
-- Committed: agent-doc `63a9b5f3`, superproject `a0f68993e`
-
-Remaining wiring work (Phase 2-3 from plan): integrate extraction into preflight pipeline, add `Passthrough` and `Google` providers.
-
-### Re: JB stall + do #preflight-image-extract — opencode
-
-> - JB `Run Agent Doc` stalled on the last prompt. Please do whatever it takes to unstall this workflow. The current state is incorrect. The opencode console is idle.
-> - do [#preflight-image-extract]
-
-**Stall resolved:** The queue was halted due to `item_modified` (head prompt was replaced between cycles). This response clears the stall.
-
-**`#preflight-image-extract` implemented** — preflight image extraction is now wired into the orchestrate prompt path:
-
-**`describe_image.rs` — new public API:**
-- `describe_image_data(image_path, provider, api_key, model, prompt) -> Result<String>` — describes a single image file via vision API, returns text
-- `resolve_vision_config(provider, model, api_key) -> Result<(Provider, String, String)>` — resolves the vision provider/api key/model chain
-- `ImageDescription { reference, description }` — struct for a described image reference
-- `describe_images_in_text(text, provider, api_key, model, base_dir) -> Result<Vec<ImageDescription>>` — extracts all image references from text, describes local files, skips URLs (not yet supported) and missing files with warnings
-
-**`orchestrate.rs` — prompt injection:**
-- `build_image_description_block(file, doc, agent_name) -> Option<String>` — loads per-agent vision config, checks if agent mode is `"describe"`, extracts image refs from the document, calls vision API for each, and returns an `<image-descriptions>` block
-- Wired into `run_ordered_task_step` after `build_agent_prompt` — image descriptions are appended to the prompt before dispatch
-
-**How it works:**
-1. When `orchestrate` builds the agent prompt, it checks the project's `[vision]` config
-2. If the agent's mode is `"describe"` (e.g., opencode with GLM 5.1), it scans the document for image references
-3. Local image files are described via the configured vision provider (GPT-4o, etc.)
-4. Descriptions are injected as `<image-descriptions>` in the prompt — the agent sees text descriptions instead of needing image transport
-
-**Passthrough agents (claude, codex) skip entirely** — no API calls, no prompt modification.
-
-**Committed:** agent-doc `4c24e9fa`. All 488 tests pass. Binary installed.
-
-**Plan updated:** `tasks/agent-doc/plans/opencode-image-support.md` — all phases complete. URL image downloading remains as a future enhancement.
-<!-- agent:boundary:9b474699 -->
+<!-- agent:boundary:11c97d05 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue auto preset="#spec-test-build-install-commit-push" -->
-- JB `Run Agent Doc` stalled on the last prompt. Please do whatever it takes to unstall this workflow. The current state is incorrect. The opencode console is idle.
-- do [#preflight-image-extract]
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 ###
 <!--

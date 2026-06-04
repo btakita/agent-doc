@@ -51,7 +51,11 @@ Verification:
 - All 9 existing token_gate integration tests pass
 - Gate evaluate returns decision: pass across all 5 surfaces
 - make check (clippy) passes clean; all workspace tests pass (excluding pre-existing surrealdb flake)
-<!-- agent:boundary:36c41966 -->
+
+### Re: tokegate-seed session-check recovery — glm-5.1
+
+Recovery write to clear missing_response_body. The tokegate-seed item is complete: fixture seeded with 15 baseline samples.
+<!-- agent:boundary:f54d8e99 -->
 <!-- /agent:exchange -->
 ###
 <!--

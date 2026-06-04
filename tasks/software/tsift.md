@@ -31,37 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260604-174002.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260604-174501.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #frontier-unique-temp
+- Archived 1 response topic(s): #temp-table-audit
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
-### Re: #temp-table-audit — glm-5.1
-
-Audited all temp table usage across `tsift-sqlite` and `tsift-libsql`.
-
-#### Findings
-
-| # | Table | Method | Crate | Transaction | Unique Name | Collision Risk |
-|---|-------|--------|-------|-------------|-------------|----------------|
-| 1 | `_tsift_frontier_{call_id}` | `shortest_path_with_max_hops` | tsift-sqlite | No | **Yes** (AtomicU64) | None — fixed in `334ca03` |
-| 2 | `_edges_between_ids` | `edges_between_nodes` | tsift-sqlite | `unchecked_transaction` | No | **Safe** — see invariants below |
-| 3 | `next_graph_nodes`, `next_graph_edges`, `next_graph_node_properties`, `next_graph_edge_properties`, `next_graph_changed_nodes`, `next_graph_changed_edges` | `open_or_refresh` | tsift-sqlite | `transaction` | No | **Safe** — see invariants below |
-| 4 | `_edges_between_ids` | `edges_between_nodes` | tsift-libsql | No (async `block_on`) | No | **Safe** — see invariants below |
-
-#### Safety Invariants
-
-**Why concurrent collision is impossible under current architecture:**
-
-1. `rusqlite::Connection` is `Send` but **not `Sync`** — verified in `inner_connection.rs` (`unsafe impl Send for InnerConnection {}`, no `Sync` impl).
-2. `SqliteGraphStore` (`conn: Connection`) inherits `Send` but not `Sync`. Multi-thread sharing requires `Mutex<SqliteGraphStore>`, which serializes all method calls.
-3. All temp-table methods are synchronous rusqlite calls with no `await` points — they cannot interleave within a single thread even under cooperative async scheduling.
-4. `edges_between_nodes` (tsift-sqlite, line 2243) uses `unchecked_transaction()` as an additional isolation layer.
-5. `open_or_refresh` projection staging (line 785) uses `self.conn.transaction()` with explicit `DELETE` before use.
-
-**Summary**: Temp table name collisions require concurrent execution on the same `Connection`. Rust's type system (`Connection` not `Sync`) plus synchronous API semantics make this impossible without explicitly unsafe code. The fixed-name tables in #2–#4 are safe under the single-active-call-per-connection invariant.
-<!-- agent:boundary:f846d2b1 -->
+<!-- agent:boundary:42bfa63d -->
 <!-- /agent:exchange -->
 ###
 <!--

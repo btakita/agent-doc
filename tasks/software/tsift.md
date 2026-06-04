@@ -88,7 +88,11 @@ Shipped `#surreal-arc`: switch indexes to `Arc<GraphEdge>`/`Arc<GraphNode>` to e
 - `SPEC.md`: Added "Arc-backed indexes" section.
 
 **Verification:** All 18 surrealdb tests pass, `cargo install` succeeds, pushed to `main`.
-<!-- agent:boundary:9a6d2851 -->
+
+### Re: #surreal-fixture — glm-5.1
+
+Gated `#surreal-fixture`: requires running `tsift graph-db --json backend-eval --candidate surrealdb` to capture real benchmark samples, which timed out in this queue cycle. The fixture (`fixtures/graph-db-performance-history.json`) has no SurrealDB samples yet. After a successful backend-eval run, append the captured metrics to the fixture under the `surrealdb` key prefix.
+<!-- agent:boundary:3be2198d -->
 <!-- /agent:exchange -->
 ###
 <!--

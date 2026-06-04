@@ -35,7 +35,23 @@ Queue drain complete: 8 consumed. Session needs compact.
 Compacted content:
 - Archived 1 response topic(s): #next-steps to fix bugs
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:79403a5d -->
+
+### Re: do [#08mg] cancel-orphans-preflight-cycle — opus-4-6
+
+**Implemented Option A:** JB plugin `cancelForReplacement()` now calls `agent_doc_cancel_preflight_cycle` FFI after process destruction.
+
+**Changes:**
+- `TerminalUtil.kt`: `ProcessRouteHandle` and `RetryingRouteHandle` accept optional `absoluteFilePath`, call `AgentDocLib.get()?.agent_doc_cancel_preflight_cycle(path)` in `cancelForReplacement()` after killing the process
+- `sendToTerminal()`: passes `file.path` (absolute VirtualFile path) to `RetryingRouteHandle`
+- FFI result logged at warn level for diagnostics; failures are non-fatal (cancel still succeeds at process-kill level)
+
+**Verification:**
+- JB plugin tests: BUILD SUCCESSFUL (15 tasks)
+- Rust `cancel_preflight_cycle` tests: 4/4 passed
+- `make check`: pre-existing `flowcore_hot_path_guard_and_proof_tokens_are_budgeted` failure (unrelated, branch has uncommitted Rust changes to session_check.rs)
+
+**Live-verify needed:** install signed plugin → cancel a running route → verify next `Run Agent Doc` dispatches immediately instead of waiting 60s staleness window.
+<!-- agent:boundary:fcdce3ea -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
@@ -53,7 +69,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#08mg] #cancel-orphans-cancel-orphan — cancel emits abandon signal for orphaned preflight_started cycle. Plan: tasks/agent-doc/plan-cancel-orphans-preflight-cycle.md (Option A)
 - [ ] [#54pz] #dedup-prompt-normalize — idempotent retry convergence on IPC already_applied; dedup prompt text in normalize_user_prompts. Relates #gyma
 - [ ] [#engt] #clear-busy-pane-guard — clear command must stop/repair busy pane with active OpenCode turn. Confirmed reproducing #clear-stops-running-process
 - [ ] [#ba4b] #backlog-priority-auto — add priority attribute to agent:backlog/agent:queue for automatic ordering. Replaces manual --pending-reorder

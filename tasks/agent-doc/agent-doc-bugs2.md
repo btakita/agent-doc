@@ -152,16 +152,29 @@ Done. Built + installed both binaries; the feature works live.
 - **Live verify:** preflight now reports `queue_active: true`, `queue_trigger: auto`, zero warnings — `go` is recognized and activates the queue; the lint-gate no longer blocks it.
 
 Your `[#fm-run-id-step]` / `[#queue-state-unify]` heads are bare `[#id]` refs, not `do [#id]` — prefix with `do ` to have the queue drive them. `#queue-state-unify` gated (phases 1-3 live; phase 4 = writer emits canonical `queue:`). Not auto-driving the big features without an explicit `do`.
-<!-- agent:boundary:f54e50e6 -->
+
+### Re: queue reorder — opus-4-8
+
+Reorder registered: `[#queue-state-unify]` is now the head, then `[#tagpath-lint-queue-control]`, then `[#fm-run-id-step]`.
+
+These are still **bare `[#id]` refs, not `do [#id]` directives**, so the live queue treats them as references and won't execute them. To have the active queue actually drive a head, prefix it with `do ` — e.g. change `- [#queue-state-unify]` to `- do [#queue-state-unify]`. (That's the same `do` grammar as the rest of the queue; bare `[#id]` stays a pointer so reordering/prioritizing doesn't accidentally kick off work.)
+
+Status of the reordered heads:
+- `[#queue-state-unify]` — phases 1-3 shipped + live; **phase 4** remains and is the riskiest slice (switching the writer to emit canonical `queue:`/drain→`queue: stop` instead of `queue_active:`, which touches the spurious-drift + strip-queue-active invariants in `closeout.rs`/`git.rs`). I'll implement it on an explicit `do [#queue-state-unify]`, ideally on its own focused turn.
+- `[#tagpath-lint-queue-control]` — **done** (`src/tagpath 9289827`, installed); it can be struck/reaped.
+- `[#fm-run-id-step]` — not started; `do [#fm-run-id-step]` to drive.
+
+Tell me `do [#queue-state-unify]` (or any head) and I'll run it.
+<!-- agent:boundary:8db4d036 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-- [#fm-run-id-step]
 - [#queue-state-unify]
+- [#tagpath-lint-queue-control]
+- [#fm-run-id-step]
 - Fix test suite. The turn shouldn't end with a failing test suite...even with pre-existing failures.
 - When a queue item is complete, it should have a strikethrough `~[task-id]~`. This queue run did not update the state of the queue items.
 - We need to have agent-doc actively try to reduce review gated items. By splitting out actionable items in the backlog. The review items should have annotations on next steps that are token-efficient to parse so a quick pass can determine next actions. Also, there should be a token-efficient way to query gated review items to address them. The review items lists are getting too long on agent-doc-bugs2.md and mosterrodholders.md and have become unmanagable due to long running tasks. It would be great to simplify managing these review items and feed them back into the backlog pipeline.
-- do [#tagpath-lint-queue-control]
 <!-- /agent:queue -->
 ###
 <!--

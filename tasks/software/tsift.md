@@ -54,7 +54,22 @@ Already gated. Deferring to focused design session.
 
 
 Shipped `examples/hooks/tsift-rewrite.sh` in-tree. Updated SPEC.md with Claude Code hook config snippet and Codex/OpenCode harness-equivalent docs. Updated CLAUDE.md references. No new tests needed — 692 existing tests pass.
-<!-- agent:boundary:8439d93e -->
+
+### Re: #astnav-npm — gated (requires manual secrets config)
+
+> **Queue prompt:**
+>
+> [#astnav-npm]
+
+
+Cannot proceed without manual GitHub repo configuration:
+1. Create NPM access token at npmjs.com (granular or classic with publish scope)
+2. Add `NPM_TOKEN` as GitHub Actions secret in repo settings
+3. Set `TSIFT_ENABLE_NPM_PUBLISH=true` as GitHub Actions variable
+4. Then `npm publish --access public` from `packages/opencode-tsift/` or via CI
+
+The package is ready (`make check` passes `npm run publish:check` dry-run). Only the auth/infrastructure step remains.
+<!-- agent:boundary:65c19a47 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -66,7 +81,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 <!-- agent:queue preset="#spec-test-build-install-commit-push" auto -->
 - ~[#surreal-batch-bfs-gated]~
 - ~[#astnav-hooks]~
-- [#astnav-npm]
+- ~[#astnav-npm]~
 - [#astnav-commands]
 - [#astnav-init-claude]
 - [#astnav-autoindex-oc]

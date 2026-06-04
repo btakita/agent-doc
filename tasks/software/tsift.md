@@ -57,12 +57,17 @@ Implemented terse edge kind abbreviation in ultra-terse mode.
 
 ### Re: #sqlite-chunk — glm-5.1
 
+> **Queue prompt:**
+>
+> do [#sqlite-chunk]
+
+
 Increased `SQLITE_GRAPH_STAGING_CHUNK_ROWS` from 50 to 500 in `packages/tsift-sqlite/src/lib.rs`.
 
 **Rationale:** 500 rows × 9 edge params = 4500 SQLite variables, well under the 32766 limit in SQLite 3.53.1. This reduces INSERT statement count ~10x (from ~19k to ~1.9k for 952k rows), cutting per-statement overhead significantly.
 
 **Verification:** 13/13 tsift-sqlite tests pass. Updated the `sqlite_projection_refresh_handles_bulk_row_replacement` test assertion to match the new chunk size. Build + install succeeded. Committed + pushed as `2cc5177`.
-<!-- agent:boundary:0bd90ca8 -->
+<!-- agent:boundary:473d3805 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -78,7 +83,7 @@ What are #next-steps to promote SurrealDB to SQLite-equivalent substrate status?
 - ~do [#evidence-page]~
 - ~do [#packet-cache-evict]~
 - ~do [#terse-edge-codes]~
-- do [#sqlite-chunk]
+- ~do [#sqlite-chunk]~
 - do [#sqlite-ranked-cte]
 - do [#sqlite-conflict-par]
 - do [#sqlite-wal-tune]
